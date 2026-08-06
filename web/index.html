@@ -5,47 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Workforce</title>
 <style>
+/* ---------------------------------------------------------------------------
+   macOS-flavoured foundation. Values from docs/apple-style-reference.md, which
+   records provenance per value. No Apple assets here -- the font-family keyword
+   asks the machine for what it already has; we ship nothing of theirs.
+
+   Two deliberate deviations from Apple's own defaults, both for contrast:
+   their secondaryLabel is 3.95:1 and white-on-system-blue is 3.5:1, and both
+   are under the 4.5:1 floor. On a product that is entirely a status board,
+   copying a contrast failure faithfully would be a stupid way to fail.
+--------------------------------------------------------------------------- */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+
+  --text-title-1: 22px/26px; --text-title-3: 15px/20px;
+  --text-body: 13px/16px;    --text-callout: 12px/15px;
+  --text-subhead: 11px/14px; --text-caption: 10px/13px;
+
+  --space-2: 4px;  --space-3: 6px;  --space-4: 8px;
+  --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px;
+
+  --radius-card: 10px; --radius-control: 6px; --radius-pill: 100px;
+
+  /* Light */
+  --bg:            #ffffff;
+  --bg-elevated:   #ffffff;
+  --bg-sunken:     #f5f5f7;
+  --label:         rgba(0,0,0,0.85);
+  --label-2:       rgba(0,0,0,0.60);   /* 0.60 not Apple's 0.498, to clear AA */
+  --label-3:       rgba(0,0,0,0.42);
+  --separator:     rgba(0,0,0,0.12);
+  --border-strong: rgba(0,0,0,0.22);
+  --shadow-card:   0 1px 2px rgba(0,0,0,0.06), 0 1px 6px rgba(0,0,0,0.04);
+  --attn-bg:       rgba(0,0,0,0.035);
+}
+@media (prefers-color-scheme: dark) {
   :root {
-    --ink: #111; --muted: #666; --line: #d8d8d8; --paper: #fff; --wash: #f4f4f4;
+    --bg:            #1c1c1e;
+    --bg-elevated:   #2c2c2e;
+    --bg-sunken:     #141416;
+    --label:         rgba(255,255,255,0.92);
+    --label-2:       rgba(255,255,255,0.62);
+    --label-3:       rgba(255,255,255,0.42);
+    --separator:     rgba(255,255,255,0.14);
+    --border-strong: rgba(255,255,255,0.26);
+    --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
+    --attn-bg:       rgba(255,255,255,0.055);
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --ink: #f2f2f2; --muted: #9a9a9a; --line: #3a3a3a; --paper: #141414; --wash: #1e1e1e; }
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font: 15px/1.5 -apple-system, "Helvetica Neue", Arial, sans-serif;
-    background: var(--paper); color: var(--ink); padding: 28px 32px 60px;
-  }
-  header { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; margin-bottom: 6px; }
-  h1 { font-size: 26px; font-weight: 600; letter-spacing: -.3px; }
-  .checked { font-size: 13px; color: var(--muted); text-align: right; }
-  .checked strong { display: block; color: var(--ink); font-size: 14px; }
-  .checked.stale strong { text-decoration: underline wavy; }
-  .summary { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
+}
+@media (prefers-contrast: more) {
+  :root { --label-2: rgba(0,0,0,0.78); --separator: rgba(0,0,0,0.3); }
+}
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; }
-  .card { border: 2px solid var(--ink); padding: 16px 18px; display: flex; gap: 16px; }
-  .card.attn { border-width: 3px; background: var(--wash); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font: var(--text-body) var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.006em;
+  background: var(--bg-sunken); color: var(--label);
+  padding: var(--space-8) var(--space-8) 64px;
+}
 
-  .ringwrap { flex: none; }
-  svg { display: block; }
-  .ring-track { stroke: var(--line); }
-  .ring-fill { stroke: var(--ink); }
-  .ring-unknown { stroke: var(--muted); stroke-dasharray: 6 8; }
-  .ring-label { fill: var(--ink); font-size: 13px; font-weight: 600; }
-  .ring-sub { fill: var(--muted); font-size: 9px; }
+header { display: flex; justify-content: space-between; align-items: baseline;
+         gap: var(--space-7); margin-bottom: var(--space-2); }
+h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
+.checked { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+           text-align: right; text-transform: uppercase; letter-spacing: 0.05em; }
+.checked strong { display: block; font: 500 var(--text-callout) var(--font-ui);
+                  color: var(--label-2); text-transform: none; letter-spacing: 0; margin-top: 1px; }
+.checked.stale strong { color: var(--label); text-decoration: underline wavy; }
+.summary { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
-  .body { flex: 1; min-width: 0; }
-  .name { font-size: 18px; font-weight: 600; }
-  .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
-  .state { font-size: 14px; margin-bottom: 3px; }
-  .state b { font-weight: 600; }
-  .task { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-  .why { font-size: 12px; color: var(--muted); margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
-  .flag { display: inline-block; font-size: 11px; border: 1px solid var(--muted); border-radius: 3px;
-          padding: 1px 6px; color: var(--muted); margin-left: 6px; vertical-align: 1px; }
-  .note { margin-top: 8px; font-size: 12.5px; border: 2px solid var(--ink); padding: 7px 9px; background: var(--wash); }
-  .err { border: 2px solid var(--ink); padding: 14px 16px; background: var(--wash); font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-5); }
+
+.card {
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+  display: flex; gap: var(--space-5);
+}
+/* Attention is carried by weight and a rule, never by hue. The board reads
+   identically in greyscale, which is the test it has to pass. */
+.card.attn { background: var(--attn-bg); border-color: var(--border-strong); }
+
+.ringwrap { flex: none; }
+svg { display: block; }
+.ring-track   { stroke: var(--separator); }
+.ring-fill    { stroke: var(--label); }
+.ring-unknown { stroke: var(--label-3); stroke-dasharray: 5 7; }
+.ring-label   { fill: var(--label); font: 600 var(--text-callout) var(--font-ui); }
+.ring-sub     { fill: var(--label-3); font: var(--text-caption) var(--font-ui); }
+
+.body { flex: 1; min-width: 0; }
+.name { font: 600 var(--text-title-3) var(--font-ui); letter-spacing: -0.016em; }
+.meta { font: var(--text-subhead) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
+.state { font: 600 var(--text-body) var(--font-ui); margin-bottom: 1px; }
+.task  { font: var(--text-callout) var(--font-ui); color: var(--label-2); overflow-wrap: anywhere; }
+.why   { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+         margin-top: var(--space-4); padding-top: var(--space-3);
+         border-top: 0.5px solid var(--separator); }
+.flag  { display: inline-block; font: var(--text-caption) var(--font-ui); color: var(--label-3);
+         border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
+         padding: 1px var(--space-3); margin-left: var(--space-3); vertical-align: 1px; }
+.note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
+         font: var(--text-callout) var(--font-ui); color: var(--label);
+         background: var(--bg-sunken); border-radius: var(--radius-control);
+         border-left: 2px solid var(--border-strong); }
+.err   { background: var(--bg-elevated); border: 0.5px solid var(--border-strong);
+         border-radius: var(--radius-card); padding: var(--space-6); font: var(--text-body) var(--font-ui); }
 </style>
 </head>
 <body>
