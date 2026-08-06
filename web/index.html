@@ -96,8 +96,24 @@ svg { display: block; }
 .ring-track   { stroke: var(--separator); }
 .ring-fill    { stroke: var(--label); }
 .ring-unknown { stroke: var(--label-3); stroke-dasharray: 5 7; }
-.ring-label   { fill: var(--label); font: 600 var(--text-callout) var(--font-ui); }
-.ring-sub     { fill: var(--label-3); font: var(--text-caption) var(--font-ui); }
+.avatar-bg       { fill: var(--bg-sunken); stroke: var(--separator); stroke-width: 0.5; }
+.avatar-initials { fill: var(--label-2); font: 600 var(--text-body) var(--font-ui); letter-spacing: .02em; }
+.gaugewrap       { text-align: center; }
+.gauge-cap       { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+                   margin-top: var(--space-2); white-space: nowrap; font-style: italic; }
+
+/* Colour reinforces the arc, it never carries the value alone: the arc length
+   says the same thing, so the board still reads correctly in greyscale.
+   Opaque fills only -- a translucent arc lets the desktop behind it shift the
+   hue, which would change what the colour appears to mean. */
+.ring-fill.ok   { stroke: #2C8C5A; }
+.ring-fill.warn { stroke: #B87514; }
+.ring-fill.high { stroke: #C0392B; }
+@media (prefers-color-scheme: dark) {
+  .ring-fill.ok   { stroke: #4CB782; }
+  .ring-fill.warn { stroke: #E0A030; }
+  .ring-fill.high { stroke: #F0665A; }
+}
 
 .body { flex: 1; min-width: 0; }
 .name { font: 600 var(--text-title-3) var(--font-ui); letter-spacing: -0.016em; }
@@ -140,27 +156,50 @@ const STATE_COPY = {
   unknown:      { label: "Can't tell",    attn: true  },
 };
 
-function ring(ctx) {
-  const R = 34, C = 2 * Math.PI * R;
-  // An unknown ring is drawn dashed with a question mark, never as an empty
-  // one. An empty ring reads as "0% used", which reads as the healthiest agent
-  // on the board -- the exact failure this whole screen exists to avoid.
+function initials(name) {
+  const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
+  return parts.map((w) => w[0]).join('').toUpperCase() || '?';
+}
+
+/**
+ * Memory gauge. The avatar sits in the middle, so the number lives beneath it.
+ *
+ * Two things that must survive the number moving out of the centre:
+ *  - Unknown loses its home. A dashed track alone is a shape difference, and
+ *    shape alone is not a label, so the caption carries "memory unknown" in
+ *    words.
+ *  - The value must still exist for a screen reader. The arc is not readable,
+ *    so the accessible name spells it out as a sentence.
+ */
+function ring(a) {
+  const ctx = a.context;
+  const R = 30, C = 2 * Math.PI * R;
+  const av = `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
+              <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
+
   if (ctx.percent === null) {
-    const sub = ctx.tokens === null ? 'no reading' : (Math.round(ctx.tokens / 1000) + 'k');
-    return `<svg width="86" height="86" viewBox="0 0 86 86" role="img"
-              aria-label="Memory: ${ctx.tokens === null ? 'could not be read' : ctx.tokens + ' tokens, fullness unknown'}">
-      <circle class="ring-unknown" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"/>
-      <text class="ring-label" x="43" y="42" text-anchor="middle">?</text>
-      <text class="ring-sub" x="43" y="56" text-anchor="middle">${sub}</text>
-    </svg>`;
+    return `<div class="gaugewrap">
+      <svg width="72" height="72" viewBox="0 0 72 72" role="img"
+           aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
+        <circle class="ring-unknown" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"/>
+        ${av}
+      </svg>
+      <div class="gauge-cap unknown">memory unknown</div>
+    </div>`;
   }
+
   const dash = (ctx.percent / 100) * C;
-  return `<svg width="86" height="86" viewBox="0 0 86 86" role="img" aria-label="Memory ${ctx.percent}% full">
-    <circle class="ring-track" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"/>
-    <circle class="ring-fill" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"
-            stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 43 43)"/>
-    <text class="ring-label" x="43" y="48" text-anchor="middle">${ctx.percent}%</text>
-  </svg>`;
+  const near = ctx.percent >= 80;
+  const band = near ? 'high' : (ctx.percent >= 60 ? 'warn' : 'ok');
+  return `<div class="gaugewrap">
+    <svg width="72" height="72" viewBox="0 0 72 72" role="img"
+         aria-label="${esc(a.name)}. Memory: ${ctx.percent} percent used${near ? ', nearly full' : ''}.">
+      <circle class="ring-track" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"/>
+      <circle class="ring-fill ${band}" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"
+              stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 36 36)"/>
+      ${av}
+    </svg>
+  </div>`;
 }
 
 function esc(s) {
@@ -187,7 +226,7 @@ function card(a) {
         : '');
 
   return `<div class="card ${copy.attn ? 'attn' : ''}">
-    <div class="ringwrap">${ring(a.context)}</div>
+    <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
       <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
