@@ -200,33 +200,52 @@ function limitFor(model) {
   return null;
 }
 
+const REGISTRY_DIR = path.join(HOME, '.claude', 'agent-registry');
+
+/**
+ * Find the transcript belonging to an agent's CURRENT session.
+ *
+ * The obvious approach -- guess a project directory from the agent's name --
+ * silently reads the wrong file. Claude Code creates a project directory per
+ * working directory, agents move between directories, and one agent can
+ * therefore own transcripts in several places while another agent's directory
+ * looks like a plausible match for a name it does not own. That failure is the
+ * dangerous kind: it finds *a* transcript, so it looks like it worked, and
+ * reports confident numbers from the wrong session.
+ *
+ * The registry records each agent's live `session_id`, and a transcript is
+ * named for its session id. That is an exact identity, not a resemblance, so
+ * we resolve by it and search every project directory for the file.
+ */
+function sessionIdFor(sessionName) {
+  const file = path.join(REGISTRY_DIR, `${sessionName}-discord_0.0.json`);
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8')).session_id || null;
+  } catch {
+    return null;
+  }
+}
+
 function transcriptFor(agentName) {
+  const sessionId = sessionIdFor(agentName);
   let dirs;
   try {
     dirs = fs.readdirSync(PROJECTS_DIR);
   } catch {
     return null;
   }
-  const match = dirs.find((d) => d.endsWith(`-workers-${agentName}`)) ||
-                dirs.find((d) => d.includes(agentName));
-  if (!match) return null;
 
-  const dir = path.join(PROJECTS_DIR, match);
-  let files;
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
-  } catch {
-    return null;
+  if (sessionId) {
+    for (const d of dirs) {
+      const candidate = path.join(PROJECTS_DIR, d, `${sessionId}.jsonl`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
   }
-  if (!files.length) return null;
 
-  const newest = files
-    .map((f) => {
-      const p = path.join(dir, f);
-      return { p, mtime: fs.statSync(p).mtimeMs };
-    })
-    .sort((a, b) => b.mtime - a.mtime)[0];
-  return newest.p;
+  // No registry entry, or its session has gone. We deliberately do NOT fall
+  // back to guessing by name: a wrong transcript produces confident numbers
+  // about the wrong conversation, which is worse than no numbers at all.
+  return null;
 }
 
 /** Read the tail of a file without loading all of it. Transcripts reach 8MB+. */
