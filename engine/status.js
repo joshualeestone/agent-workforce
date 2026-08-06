@@ -19,7 +19,37 @@ const os = require('node:os');
 const path = require('node:path');
 
 const HOME = os.homedir();
-const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
+
+/**
+ * Claude Code config roots.
+ *
+ * There is usually one (`~/.claude`), but an agent launched with
+ * CLAUDE_CONFIG_DIR pointing elsewhere keeps its transcripts and its registry
+ * entry under that root instead. On this fleet the two agents billed to a
+ * second subscription run with `CLAUDE_CONFIG_DIR=~/.claude-account-b`, and a
+ * reader that only knows about `~/.claude` reports them as unreadable while
+ * their data sits in plain sight one directory over.
+ *
+ * So we discover roots rather than assuming one. The alternative -- parsing
+ * launch scripts for the variable -- couples us to how agents happen to be
+ * started on one machine.
+ */
+function configRoots() {
+  const roots = [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(HOME);
+  } catch { /* fall through to the default */ }
+  for (const name of entries) {
+    if (name !== '.claude' && !name.startsWith('.claude-')) continue;
+    const projects = path.join(HOME, name, 'projects');
+    if (fs.existsSync(projects)) roots.push(path.join(HOME, name));
+  }
+  if (!roots.length) roots.push(path.join(HOME, '.claude'));
+  // Primary root first, so the common case costs one lookup.
+  roots.sort((a) => (a.endsWith('/.claude') ? -1 : 1));
+  return roots;
+}
 
 // How the value was arrived at. The UI renders low-confidence values
 // differently, and never renders `none` as a real number.
@@ -200,7 +230,7 @@ function limitFor(model) {
   return null;
 }
 
-const REGISTRY_DIR = path.join(HOME, '.claude', 'agent-registry');
+
 
 /**
  * Find the transcript belonging to an agent's CURRENT session.
@@ -218,26 +248,30 @@ const REGISTRY_DIR = path.join(HOME, '.claude', 'agent-registry');
  * we resolve by it and search every project directory for the file.
  */
 function sessionIdFor(sessionName) {
-  const file = path.join(REGISTRY_DIR, `${sessionName}-discord_0.0.json`);
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')).session_id || null;
-  } catch {
-    return null;
+  for (const root of configRoots()) {
+    const file = path.join(root, 'agent-registry', `${sessionName}-discord_0.0.json`);
+    try {
+      const id = JSON.parse(fs.readFileSync(file, 'utf8')).session_id;
+      if (id) return id;
+    } catch { /* try the next root */ }
   }
+  return null;
 }
 
 function transcriptFor(agentName) {
   const sessionId = sessionIdFor(agentName);
-  let dirs;
-  try {
-    dirs = fs.readdirSync(PROJECTS_DIR);
-  } catch {
-    return null;
-  }
+  if (!sessionId) return null;
 
-  if (sessionId) {
+  for (const root of configRoots()) {
+    const projects = path.join(root, 'projects');
+    let dirs;
+    try {
+      dirs = fs.readdirSync(projects);
+    } catch {
+      continue;
+    }
     for (const d of dirs) {
-      const candidate = path.join(PROJECTS_DIR, d, `${sessionId}.jsonl`);
+      const candidate = path.join(projects, d, `${sessionId}.jsonl`);
       if (fs.existsSync(candidate)) return candidate;
     }
   }
