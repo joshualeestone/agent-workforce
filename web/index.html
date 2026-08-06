@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Workforce</title>
+<style>
+  :root {
+    --ink: #111; --muted: #666; --line: #d8d8d8; --paper: #fff; --wash: #f4f4f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #f2f2f2; --muted: #9a9a9a; --line: #3a3a3a; --paper: #141414; --wash: #1e1e1e; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.5 -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background: var(--paper); color: var(--ink); padding: 28px 32px 60px;
+  }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -.3px; }
+  .checked { font-size: 13px; color: var(--muted); text-align: right; }
+  .checked strong { display: block; color: var(--ink); font-size: 14px; }
+  .checked.stale strong { text-decoration: underline wavy; }
+  .summary { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; }
+  .card { border: 2px solid var(--ink); padding: 16px 18px; display: flex; gap: 16px; }
+  .card.attn { border-width: 3px; background: var(--wash); }
+
+  .ringwrap { flex: none; }
+  svg { display: block; }
+  .ring-track { stroke: var(--line); }
+  .ring-fill { stroke: var(--ink); }
+  .ring-unknown { stroke: var(--muted); stroke-dasharray: 6 8; }
+  .ring-label { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .ring-sub { fill: var(--muted); font-size: 9px; }
+
+  .body { flex: 1; min-width: 0; }
+  .name { font-size: 18px; font-weight: 600; }
+  .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
+  .state { font-size: 14px; margin-bottom: 3px; }
+  .state b { font-weight: 600; }
+  .task { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .why { font-size: 12px; color: var(--muted); margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+  .flag { display: inline-block; font-size: 11px; border: 1px solid var(--muted); border-radius: 3px;
+          padding: 1px 6px; color: var(--muted); margin-left: 6px; vertical-align: 1px; }
+  .note { margin-top: 8px; font-size: 12.5px; border: 2px solid var(--ink); padding: 7px 9px; background: var(--wash); }
+  .err { border: 2px solid var(--ink); padding: 14px 16px; background: var(--wash); font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Workforce</h1>
+  <div class="checked" id="checked"></div>
+</header>
+<div class="summary" id="summary">Loading…</div>
+<div class="grid" id="grid"></div>
+
+<script>
+'use strict';
+
+// Plain words, not internal vocabulary. "rate_limited" is not a thing a person
+// should ever have to read.
+const STATE_COPY = {
+  working:      { label: 'Working',       attn: false },
+  needs_you:    { label: 'Needs you',     attn: true  },
+  rate_limited: { label: 'Paused',        attn: true  },
+  idle:         { label: 'Idle',          attn: false },
+  stopped:      { label: 'Not running',   attn: true  },
+  unknown:      { label: "Can't tell",    attn: true  },
+};
+
+function ring(ctx) {
+  const R = 34, C = 2 * Math.PI * R;
+  // An unknown ring is drawn dashed with a question mark, never as an empty
+  // one. An empty ring reads as "0% used", which reads as the healthiest agent
+  // on the board -- the exact failure this whole screen exists to avoid.
+  if (ctx.percent === null) {
+    const sub = ctx.tokens === null ? 'no reading' : (Math.round(ctx.tokens / 1000) + 'k');
+    return `<svg width="86" height="86" viewBox="0 0 86 86" role="img"
+              aria-label="Memory: ${ctx.tokens === null ? 'could not be read' : ctx.tokens + ' tokens, fullness unknown'}">
+      <circle class="ring-unknown" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"/>
+      <text class="ring-label" x="43" y="42" text-anchor="middle">?</text>
+      <text class="ring-sub" x="43" y="56" text-anchor="middle">${sub}</text>
+    </svg>`;
+  }
+  const dash = (ctx.percent / 100) * C;
+  return `<svg width="86" height="86" viewBox="0 0 86 86" role="img" aria-label="Memory ${ctx.percent}% full">
+    <circle class="ring-track" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"/>
+    <circle class="ring-fill" cx="43" cy="43" r="${R}" fill="none" stroke-width="6"
+            stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 43 43)"/>
+    <text class="ring-label" x="43" y="48" text-anchor="middle">${ctx.percent}%</text>
+  </svg>`;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function card(a) {
+  const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
+  const scraped = a.stateConfidence === 'scraped'
+    ? '<span class="flag" title="Read off the terminal, so treat with care">read off screen</span>' : '';
+
+  const unknownNote = a.state === 'unknown'
+    ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
+    : '';
+
+  const fullnessNote = a.context.percent === null && a.context.tokens !== null
+    ? `<div class="note">We know it is using ${Math.round(a.context.tokens / 1000)}k, but not how much it can hold, so we will not guess how full it is.</div>`
+    : '';
+
+  return `<div class="card ${copy.attn ? 'attn' : ''}">
+    <div class="ringwrap">${ring(a.context)}</div>
+    <div class="body">
+      <div class="name">${esc(a.name)}</div>
+      <div class="meta">${esc(a.model || 'model unknown')}</div>
+      <div class="state"><b>${copy.label}</b>${scraped}</div>
+      <div class="task">${esc(a.task || 'no task showing')}</div>
+      ${unknownNote}${fullnessNote}
+      <div class="why">${esc(a.because)}</div>
+    </div>
+  </div>`;
+}
+
+async function tick() {
+  const checked = document.getElementById('checked');
+  try {
+    const res = await fetch('/api/status', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+
+    document.getElementById('grid').innerHTML = data.agents.map(card).join('');
+
+    const c = data.counts;
+    const bits = [`${c.total} agents`];
+    if (c.needsYou) bits.push(`${c.needsYou} need you`);
+    if (c.unknown) bits.push(`${c.unknown} we cannot read`);
+    if (c.unknownFullness) bits.push(`${c.unknownFullness} with unknown memory limits`);
+    document.getElementById('summary').textContent = bits.join(' · ');
+
+    // The freshness stamp is load-bearing. An ambient board gets trusted
+    // passively, and silence reads as "all fine". If this stops updating, the
+    // stamp goes stale visibly rather than the board freezing on a happy picture.
+    const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
+    checked.className = 'checked' + (age > 30 ? ' stale' : '');
+    checked.innerHTML = 'checked<strong>' + (age < 5 ? 'just now' : age + ' seconds ago') + '</strong>';
+  } catch (err) {
+    checked.className = 'checked stale';
+    checked.innerHTML = 'checked<strong>failed</strong>';
+    document.getElementById('grid').innerHTML =
+      '<div class="err"><b>We cannot read the agents right now.</b><br>' +
+      'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
+  }
+}
+
+tick();
+setInterval(tick, 5000);
+</script>
+</body>
+</html>

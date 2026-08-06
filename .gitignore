@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# This repo is PRIVATE NOW and PUBLIC LATER. Treat every commit as public.
+#
+# The ordinary secret risk (tokens, keys) is covered below, but the sharper
+# risk for this project is different: the status engine reads a LIVE fleet
+# doing real business work. Pane titles, transcripts and session state can
+# contain client names, financial work, email and calendar content.
+#
+# That is not credential-shaped, so a secrets scanner will not catch it.
+# Rules, in order of importance:
+#   1. Fixtures are SYNTHETIC or redacted. Never a captured slice of live state.
+#   2. Anything captured from the real fleet lives OUTSIDE this repo.
+#   3. Screenshots of live data go to Discord or the private vault, never here.
+#      Agent names plus task lines are already a business disclosure.
+# ---------------------------------------------------------------------------
+
+# Captured live state — never commit
+/captured/
+*.live.json
+*.capture.json
+*-live-*.png
+snapshot-*.json
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Local
+node_modules/
+.DS_Store
+*.log
