@@ -114,8 +114,8 @@ function card(a) {
   return `<div class="card ${copy.attn ? 'attn' : ''}">
     <div class="ringwrap">${ring(a.context)}</div>
     <div class="body">
-      <div class="name">${esc(a.name)}</div>
-      <div class="meta">${esc(a.model || 'model unknown')}</div>
+      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
+      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}

@@ -265,6 +265,40 @@ function readContext(agentName, model) {
   };
 }
 
+/**
+ * Model IDs as a person should read them.
+ *
+ * An explicit table, not a transform. A dash-to-space rule looks fine on
+ * `claude-opus-5` and then ships a visible bug on `claude-haiku-4-5`, which
+ * would render "Haiku 4 5" when the last two segments are a decimal. Version
+ * numbers are not word separators.
+ *
+ * We deliberately do not ask the Models API for display names, even though it
+ * has this exact field: that call needs an API key, and the rule the whole cost
+ * model rests on is that this platform never talks to the API directly. Not
+ * worth breaking for a label.
+ *
+ * An ID we do not recognise renders raw. New models ship often, and an
+ * unfamiliar accurate name beats a confident wrong one -- the same rule the
+ * status board follows.
+ */
+const MODEL_NAMES = {
+  'claude-opus-5': 'Claude Opus 5',
+  'claude-sonnet-5': 'Claude Sonnet 5',
+  'claude-fable-5': 'Claude Fable 5',
+  'claude-opus-4-8': 'Claude Opus 4.8',
+  'claude-haiku-4-5': 'Claude Haiku 4.5',
+};
+
+function modelDisplayName(id) {
+  if (!id) return null;
+  if (MODEL_NAMES[id]) return MODEL_NAMES[id];
+  // Dated IDs (…-20251001) are the same model with a snapshot suffix.
+  const undated = id.replace(/-\d{8}$/, '');
+  if (MODEL_NAMES[undated]) return MODEL_NAMES[undated];
+  return id;
+}
+
 function readModel(agentName) {
   const file = transcriptFor(agentName);
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
@@ -275,6 +309,66 @@ function readModel(agentName) {
   return { model: matches[matches.length - 1][1], confidence: CONFIDENCE.STRUCTURED };
 }
 
+/**
+ * Who the agent actually is, as opposed to what the machine calls it.
+ *
+ * `claudebot` is Splinter. `angel` is Angel Bridge. The tmux session name is an
+ * infrastructure identifier and showing it to a person is a small lie of
+ * omission -- it is the name of a process, not the name of a colleague.
+ *
+ * On this fleet the real name lives in the agent's own instruction file, which
+ * is fitting: that file is the source of truth for who the agent is, and it is
+ * the same file the agent-detail screen is built around. In the product proper
+ * this is just a field somebody typed when they created the agent.
+ *
+ * Where it cannot be derived we show the raw session name and say so, rather
+ * than inventing something friendlier.
+ */
+const WORKERS_DIR = path.join(HOME, 'work', 'workers');
+
+/**
+ * Explicit overrides for agents whose identity is not derivable.
+ *
+ * Convention holds for twelve of the thirteen here. The thirteenth predates the
+ * convention and is inconsistent at every layer: tmux says `claudebot-discord`,
+ * its launch script is `launch-discord-bot.sh`, its config dir is
+ * `channels/discord`, its launchd job is `com.claudebot.discord`, and the person
+ * using it calls it Splinter. Five identifiers, none of them "splinter".
+ *
+ * Deriving from any single layer produces a confident wrong answer -- the config
+ * dir would name it "discord". So exceptions are listed, not inferred. In the
+ * product proper this whole file collapses into a field somebody typed.
+ */
+const IDENTITY_OVERRIDES = {
+  claudebot: { displayName: 'Splinter', role: 'Project Manager' },
+};
+
+function readIdentity(sessionName) {
+  const override = IDENTITY_OVERRIDES[sessionName];
+  if (override) return { ...override, derived: true, source: 'override' };
+
+  const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8').slice(0, 4000);
+  } catch {
+    return { displayName: sessionName, role: null, derived: false };
+  }
+
+  const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
+  if (!m) return { displayName: sessionName, role: null, derived: false };
+
+  const displayName = m[1].trim();
+  let role = (m[3] || '')
+    .replace(/^(the|a|an)\s+/i, '')
+    .replace(/^Josh Stone's\s+/i, '')
+    .split(/\s+in the\s+|,/)[0]
+    .trim();
+  if (role.length > 60) role = role.slice(0, 60).trim();
+
+  return { displayName, role: role || null, derived: true };
+}
+
 function snapshot() {
   const panes = listPanes();
   const agents = panes.map((pane) => {
@@ -282,8 +376,12 @@ function snapshot() {
     const status = classify(pane, text);
     const { model } = readModel(pane.name);
     const context = readContext(pane.name, model);
+    const identity = readIdentity(pane.name);
     return {
-      name: pane.name,
+      name: identity.displayName,
+      sessionName: pane.name,
+      nameDerived: identity.derived,
+      role: identity.role,
       target: pane.target,
       task: taskLine(pane.title),
       state: status.state,
@@ -291,6 +389,7 @@ function snapshot() {
       because: status.because,
       context,
       model,
+      modelName: modelDisplayName(model),
     };
   });
 
@@ -312,7 +411,7 @@ function snapshot() {
   };
 }
 
-module.exports = { snapshot, classify, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');
