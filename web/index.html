@@ -109,13 +109,15 @@ function card(a) {
 
   const fullnessNote = a.context.percent === null && a.context.tokens !== null
     ? `<div class="note">We know it is using ${Math.round(a.context.tokens / 1000)}k, but not how much it can hold, so we will not guess how full it is.</div>`
-    : '';
+    : (a.context.percent !== null && a.context.percent >= 80
+        ? '<div class="note">Nearly full. It will soon forget the earlier part of this conversation, including anything it agreed to do.</div>'
+        : '');
 
   return `<div class="card ${copy.attn ? 'attn' : ''}">
     <div class="ringwrap">${ring(a.context)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
-      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
+      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}${a.context.ceilingAssumed ? '<span class="flag" title="We have not watched this model hit its limit, so the percentage uses an assumed one">assumed limit</span>' : ''}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}

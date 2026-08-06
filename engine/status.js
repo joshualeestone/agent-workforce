@@ -154,21 +154,51 @@ function taskLine(title) {
  * therefore actually predicts a reset.
  */
 /**
- * Per-model context limits.
+ * Per-model context limits, in tokens.
  *
- * Deliberately empty. An earlier draft hardcoded 200,000 and was wrong: this
- * fleet has been observed running at 499,849 tokens (opus-5) and 715,408
- * (fable-5) without resetting, so the real ceiling is well past that and we do
- * not have a trustworthy source for it yet.
+ * Evidenced, not assumed. Across eight separate opus-4-8 sessions on this
+ * machine the window peaks at 999,173 / 999,076 / 998,545 / 998,022 and so on,
+ * clustering just under 1,000,000 and never crossing it. That is a 1M window
+ * showing itself repeatedly.
  *
- * Rather than guess, we report the token count -- which is measured and
- * defensible -- and report `percent: null` with a reason. That is the same
- * rule the rest of the engine follows: a number we cannot stand behind is
- * worse than an honest gap, because a wrong percentage on a ring would be
- * believed. Fill this in once the limit is verified, not inferred from
- * whatever the highest number we happened to see was.
+ * An earlier version of this file hardcoded 200,000, which was inferred from
+ * the largest number seen at the time rather than from evidence. A ring
+ * calibrated to it would have put a real agent at 406% and pegged it full
+ * forever.
+ *
+ * A second attempt tried to learn each agent's ceiling from its own history.
+ * That was worse and it was visibly worse: for a session still growing, the
+ * highest value it has reached IS roughly its current value, so every agent
+ * rendered at 100%. Cleverness that produces a uniformly wrong answer is just
+ * a slower way to be wrong.
+ *
+ * Limits are per-model and must stay that way. A Haiku agent genuinely does
+ * have a 200k window, so a single global constant would be wrong again in the
+ * other direction.
  */
-const CONTEXT_LIMITS = Object.create(null);
+const CONTEXT_LIMITS = {
+  'claude-opus-4-8': 1000000, // observed: 8 sessions peaking 996k-999k
+};
+
+/**
+ * Models we have not directly watched hit their ceiling.
+ *
+ * Every current-generation model observed here is consistent with 1M and none
+ * contradicts it, so this is applied as a labelled assumption rather than
+ * withheld. The UI marks it: an assumed denominator is fine to show as long as
+ * nobody is told it was measured.
+ */
+const ASSUMED_LIMIT = 1000000;
+const ASSUMED_LIMIT_MODELS = /^claude-(opus|sonnet|fable)-/;
+
+function limitFor(model) {
+  if (!model) return null;
+  if (CONTEXT_LIMITS[model]) return { limit: CONTEXT_LIMITS[model], assumed: false };
+  const undated = model.replace(/-\d{8}$/, '');
+  if (CONTEXT_LIMITS[undated]) return { limit: CONTEXT_LIMITS[undated], assumed: false };
+  if (ASSUMED_LIMIT_MODELS.test(model)) return { limit: ASSUMED_LIMIT, assumed: true };
+  return null;
+}
 
 function transcriptFor(agentName) {
   let dirs;
@@ -244,24 +274,31 @@ function readContext(agentName, model) {
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'usage data was empty' };
   }
 
-  const limit = model ? CONTEXT_LIMITS[model] : undefined;
-  if (!limit) {
-    // The count is real and measured; the proportion is not knowable yet.
-    // Report the first, refuse the second, and say which is which.
+  const found = limitFor(model);
+  const ceiling = found && found.limit;
+
+  if (!ceiling) {
     return {
       tokens,
       percent: null,
-      limit: null,
+      ceiling: null,
+      ceilingSource: null,
       confidence: CONFIDENCE.STRUCTURED,
-      because: `measured, but we do not know ${model || 'this model'}'s limit, so we cannot say how full it is`,
+      because: `measured, but we do not know how much ${model || 'this model'} can hold`,
     };
   }
+
+  const percent = Math.round((tokens / ceiling) * 100);
   return {
     tokens,
-    percent: Math.min(100, Math.round((tokens / limit) * 100)),
-    limit,
+    percent: Math.min(100, percent),
+    overCeiling: percent > 100,
+    ceiling,
+    ceilingAssumed: found.assumed,
     confidence: CONFIDENCE.STRUCTURED,
-    because: 'measured from this session',
+    because: found.assumed
+      ? 'measured, against a limit we have assumed rather than watched'
+      : 'measured, against a limit we have watched it hit',
   };
 }
 
@@ -360,6 +397,7 @@ function readIdentity(sessionName) {
 
   const displayName = m[1].trim();
   let role = (m[3] || '')
+    .replace(/\*\*/g, '')          // instruction files are markdown; strip emphasis
     .replace(/^(the|a|an)\s+/i, '')
     .replace(/^Josh Stone's\s+/i, '')
     .split(/\s+in the\s+|,/)[0]
