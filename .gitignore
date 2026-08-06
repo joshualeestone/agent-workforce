@@ -21,6 +21,19 @@
 *-live-*.png
 snapshot-*.json
 
+# Apple assets — licence forbids redistribution, and this repo goes public.
+# The font-family keyword is fine; the files are not. Same for symbol exports.
+# Listed before anyone accidentally drops a design export in here.
+SF-Pro*.otf
+SF-Pro*.ttf
+SF-Compact*
+SF-Mono*
+SF*.woff
+SF*.woff2
+NewYork*.otf
+sf-symbols/
+*.sfsymbols
+
 # Secrets
 .env
 .env.*

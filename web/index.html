@@ -100,8 +100,11 @@ function esc(s) {
 
 function card(a) {
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  const scraped = a.stateConfidence === 'scraped'
-    ? '<span class="flag" title="Read off the terminal, so treat with care">read off screen</span>' : '';
+  // Provenance deliberately not shown here. It appeared on nearly every card,
+  // and a marker that is always present carries no information. The engine
+  // still tracks it, and it surfaces where it changes a decision: the dashed
+  // unknown ring, and the "we are not telling you it is fine" note.
+  const scraped = '';
 
   const unknownNote = a.state === 'unknown'
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
@@ -117,7 +120,7 @@ function card(a) {
     <div class="ringwrap">${ring(a.context)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
-      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}${a.context.ceilingAssumed ? '<span class="flag" title="We have not watched this model hit its limit, so the percentage uses an assumed one">assumed limit</span>' : ''}</div>
+      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}
