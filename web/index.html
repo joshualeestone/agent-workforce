@@ -67,7 +67,7 @@ body {
   padding: var(--space-8) var(--space-8) 64px;
 }
 
-header { display: flex; justify-content: space-between; align-items: baseline;
+header { max-width: 1320px; margin: 0 auto; display: flex; justify-content: space-between; align-items: baseline;
          gap: var(--space-7); margin-bottom: var(--space-2); }
 h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked { font: var(--text-caption) var(--font-ui); color: var(--label-3);
@@ -75,9 +75,16 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked strong { display: block; font: 500 var(--text-callout) var(--font-ui);
                   color: var(--label-2); text-transform: none; letter-spacing: 0; margin-top: 1px; }
 .checked.stale strong { color: var(--label); text-decoration: underline wavy; }
-.summary { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+.summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-5); }
+/* auto-FIT, not auto-fill: empty columns collapse, so two agents don't sit in
+   the top-left of a thirteen-agent lattice. Centred and width-capped so a small
+   workforce reads as deliberate rather than as a screen you failed to fill --
+   most people will have one or two, permanently, and that is the common case
+   rather than the empty state. */
+.grid { display: grid; gap: var(--space-5); justify-content: center;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
+        max-width: 1320px; margin: 0 auto; }
 
 .card {
   background: var(--bg-elevated);
@@ -245,7 +252,9 @@ async function tick() {
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
 
-    document.getElementById('grid').innerHTML = data.agents.map(card).join('');
+    const lim = new URLSearchParams(location.search).get('limit');
+    const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
+    document.getElementById('grid').innerHTML = shown.map(card).join('');
 
     const c = data.counts;
     const bits = [`${c.total} agents`];
