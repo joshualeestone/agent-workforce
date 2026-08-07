@@ -116,7 +116,16 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
        background: var(--bg); color: var(--label); cursor: pointer; }
 .btn:hover { background: var(--attn-bg); }
 .fmsg { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); min-height: 1em; }
-.card { cursor: pointer; }
+.card { cursor: pointer; position: relative; }
+/* The card was clickable with nothing to say so. An affordance you have to
+   discover is one most people never find -- Josh's original mock had this
+   pencil and dropping it was a regression, not a simplification. */
+.edit { position: absolute; top: var(--space-4); right: var(--space-4);
+        width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+        border: 0.5px solid var(--separator); background: var(--bg-elevated);
+        color: var(--label-2); font-size: 12px; line-height: 1;
+        display: flex; align-items: center; justify-content: center; }
+.edit:hover { background: var(--attn-bg); color: var(--label); border-color: var(--border-strong); }
 .tabs { max-width: 1320px; margin: 0 auto var(--space-6); display: flex; gap: var(--space-2); }
 .tab { font: var(--text-body) var(--font-ui); color: var(--label-2); background: none;
        border: 0.5px solid transparent; border-radius: var(--radius-control);
@@ -359,6 +368,7 @@ function card(a) {
         : '');
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
+    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">&#9998;</button>
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
