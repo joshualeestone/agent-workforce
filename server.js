@@ -1,10 +1,16 @@
 'use strict';
 
 /**
- * Phase 1: a local, read-only window onto the agents running on this machine.
+ * A local window onto the agents running on this machine.
  *
- * Binds to localhost only. It serves one page and one JSON endpoint, and it
- * never writes anything, sends input to an agent, or starts or stops one.
+ * Binds to localhost only, and it WRITES: it stores avatars and roles. It does
+ * not yet send input to an agent or start or stop one.
+ *
+ * This header used to say "read-only ... never writes anything", which stopped
+ * being true when the first write path shipped and stayed on the file for
+ * weeks. It is the first thing anyone reads when assessing what this server can
+ * do, and it contradicted the warning above `start()` at the bottom of the same
+ * file. See the ⚠️ block there for what protects it, and what does not.
  */
 
 const http = require('node:http');
@@ -70,16 +76,27 @@ const PORT = Number(process.env.PORT || 4317);
  * like.
  */
 const ROUTING_BASE = 'http://localhost';
+const ROUTING_HOST = new URL(ROUTING_BASE).host;
 
+/**
+ * Returns the request's path with any query string removed, or `null` when the
+ * target is not one we should route at all.
+ *
+ * `null` is distinct from `'/'` on purpose. `'/'` means "no route matched, show
+ * the page", which is right for an ordinary unknown path in a single-page app.
+ * A target we cannot place -- one carrying someone else's authority -- is not
+ * an unknown page, it is a request that was not for us, and answering it with
+ * the index at 200 is the same silent-success shape as the bug below.
+ */
 function pathOf(req) {
   const raw = req && req.url;
-  if (typeof raw !== 'string' || !raw.startsWith('/')) return '/';
+  if (typeof raw !== 'string' || !raw.startsWith('/')) return null;
 
   let parsed;
   try {
     parsed = new URL(raw, ROUTING_BASE);
   } catch {
-    return '/';
+    return null;
   }
 
   // Only route targets that resolved against our own base. A target carrying an
@@ -93,7 +110,7 @@ function pathOf(req) {
   // `evil.example` with pathname `/api/status`. Asserting on what the parser
   // actually produced is the only version that holds, because it tests the
   // property we care about rather than a spelling of it.
-  if (parsed.host !== new URL(ROUTING_BASE).host) return '/';
+  if (parsed.host !== ROUTING_HOST) return null;
 
   return parsed.pathname;
 }
@@ -122,6 +139,12 @@ function decodeSegment(segment) {
 
 const server = http.createServer((req, res) => {
   const pathname = pathOf(req);
+  if (pathname === null) {
+    // Not addressed to us. Saying so is better than handing back the index,
+    // which would look like a successful page load.
+    sendJson(res, 400, { error: 'that request was not addressed to this server' });
+    return;
+  }
 
   if (pathname === '/api/status') {
     let body;
@@ -219,7 +242,7 @@ const server = http.createServer((req, res) => {
   // through to the page would answer an API call with HTML at 200, which is the
   // same silent-success failure the query-string bug produced. Different way
   // in, identical signature, so it is closed here rather than route by route.
-  if (pathname.startsWith('/api/')) {
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
     sendJson(res, 404, { error: 'no such endpoint' });
     return;
   }
@@ -269,7 +292,15 @@ function start(port = PORT) {
     // event that exits with a raw stack trace. Returning a Promise implies the
     // caller can be told; this makes that true.
     const onError = (err) => { server.removeListener('listening', onListening); reject(err); };
-    const onListening = () => { server.removeListener('error', onError); resolve(server); };
+    const onListening = () => {
+      server.removeListener('error', onError);
+      // Keep a listener attached for the life of the process. Without one, an
+      // error after a successful bind is uncaught and exits with a raw stack.
+      server.on('error', (err) => {
+        process.stderr.write(`Agent Workforce server error: ${String(err && err.message)}\n`);
+      });
+      resolve(server);
+    };
     server.once('error', onError);
     server.once('listening', onListening);
     server.listen(port, '127.0.0.1');

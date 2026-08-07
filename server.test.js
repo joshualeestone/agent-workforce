@@ -143,29 +143,47 @@ test('a malformed name is refused on the write routes too, without crashing', as
 // The catch-all still works
 // ---------------------------------------------------------------------------
 
-test('an existing avatar is served with the cache-buster the detail page actually sends', async (t) => {
-  // The positive half of the bug. The 404 case pins the routing, but this is
-  // the request that was broken in the browser: an avatar that exists, asked
-  // for with `?t=<now>`. Skipped when no agent on this machine has one, so the
-  // suite does not depend on fleet state to pass.
-  const board = await req('/api/status');
-  if (!board.type.includes('application/json')) {
-    return t.skip('the status engine did not return a board on this machine');
-  }
-  const withAvatar = (JSON.parse(board.body).agents || []).find((a) => a.hasAvatar);
-  if (!withAvatar) {
-    // Reported as skipped rather than passed. A bare return here printed a tick
-    // for a test that asserted nothing, which is worse than no test.
-    return t.skip('no agent on this machine has an avatar');
-  }
+test('an existing avatar is served with the cache-buster the detail page actually sends', async () => {
+  // The positive half of the bug: an avatar that exists, asked for with
+  // `?t=<now>` -- the exact request the detail page makes, and the one that
+  // returned the HTML page before the fix.
+  //
+  // Uses a fixture rather than whatever the live fleet happens to have. An
+  // earlier version read the real board and skipped when no agent had an
+  // avatar, which meant the branch's own user-visible symptom went unexercised
+  // on any clean machine while the suite still reported green.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
 
-  const name = encodeURIComponent(withAvatar.sessionName);
-  const bare = await req(`/api/agent/${name}/avatar`);
-  const busted = await req(`/api/agent/${name}/avatar?t=${Date.now()}`);
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-avatar-'));
+  const fixture = nodePath.join(dir, 'fixture.png');
+  fs.writeFileSync(fixture, PNG);
 
-  assert.match(bare.type, /^image\//);
-  assert.match(busted.type, /^image\//, 'the cache-busted form returned the page instead of the image');
-  assert.equal(busted.body.length, bare.body.length);
+  const original = store.avatarPath;
+  store.avatarPath = () => fixture;
+  try {
+    const bare = await fetch(`${base}/api/agent/angel/avatar`);
+    const busted = await fetch(`${base}/api/agent/angel/avatar?t=${Date.now()}`);
+
+    assert.match(bare.headers.get('content-type') || '', /^image\/png/);
+    assert.match(busted.headers.get('content-type') || '', /^image\/png/,
+      'the cache-busted form returned the page instead of the image');
+
+    // Compare bytes. Decoding binary as UTF-8 and comparing lengths would let
+    // two different mojibake strings of equal length pass.
+    const a = Buffer.from(await bare.arrayBuffer());
+    const b = Buffer.from(await busted.arrayBuffer());
+    assert.deepEqual(b, a);
+    assert.deepEqual(b, PNG);
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a non-API path still serves the page, with or without a query string', async () => {
@@ -187,9 +205,9 @@ test('pathOf strips the query string and survives junk', () => {
   assert.equal(pathOf({ url: '/api/agent/angel/avatar?t=1&x=2' }), '/api/agent/angel/avatar');
   // A fragment never reaches a server, but not crashing on one is free.
   assert.equal(pathOf({ url: '/api/status#frag' }), '/api/status');
-  assert.equal(pathOf({ url: undefined }), '/');
-  assert.equal(pathOf({}), '/');
-  assert.equal(pathOf(null), '/');
+  assert.equal(pathOf({ url: undefined }), null);
+  assert.equal(pathOf({}), null);
+  assert.equal(pathOf(null), null);
 });
 
 test('pathOf does not let a query string smuggle in a different path', () => {
@@ -201,9 +219,11 @@ test('pathOf refuses targets carrying an authority rather than discarding the ho
   // `new URL('//evil.example/api/status', base)` yields pathname '/api/status'
   // with the host quietly dropped, which would route an off-origin-looking
   // target straight into the status handler.
-  assert.equal(pathOf({ url: '//evil.example/api/status' }), '/');
-  assert.equal(pathOf({ url: 'http://other.example/api/status' }), '/');
-  assert.equal(pathOf({ url: '//api/status' }), '/');
+  // null, not '/': an unplaceable target is a request that was not for us,
+  // which is a different answer from "unknown page, show the index".
+  assert.equal(pathOf({ url: '//evil.example/api/status' }), null);
+  assert.equal(pathOf({ url: 'http://other.example/api/status' }), null);
+  assert.equal(pathOf({ url: '//api/status' }), null);
 });
 
 test('pathOf is not fooled by a backslash, which the URL parser treats as a slash', () => {
@@ -213,9 +233,9 @@ test('pathOf is not fooled by a backslash, which the URL parser treats as a slas
   // to host `evil.example` and pathname `/api/status`, and the test written
   // alongside that guard passed anyway because it only tried the `//` spelling.
   // Kept as its own case because it is the one a syntactic check gets wrong.
-  assert.equal(pathOf({ url: '/\\evil.example/api/status' }), '/');
-  assert.equal(pathOf({ url: '/\\/evil.example/api/status' }), '/');
-  assert.equal(pathOf({ url: '\\\\evil.example/api/status' }), '/');
+  assert.equal(pathOf({ url: '/\\evil.example/api/status' }), null);
+  assert.equal(pathOf({ url: '/\\/evil.example/api/status' }), null);
+  assert.equal(pathOf({ url: '\\\\evil.example/api/status' }), null);
 });
 
 test('decodeSegment returns null on a malformed escape rather than throwing', () => {
@@ -223,7 +243,7 @@ test('decodeSegment returns null on a malformed escape rather than throwing', ()
   assert.equal(decodeSegment('casey%20jones'), 'casey jones');
   assert.equal(decodeSegment('%'), null);
   assert.equal(decodeSegment('%zz'), null);
-  assert.doesNotThrow(() => decodeSegment('%E0%A4%A'));
+  assert.equal(decodeSegment('%E0%A4%A'), null, 'a truncated escape is malformed');
 });
 
 // ---------------------------------------------------------------------------
@@ -253,4 +273,25 @@ test('an avatar that disappears mid-request answers 404, not an empty 200', asyn
 
   const alive = await req('/api/status');
   assert.match(alive.type, /application\/json/, 'server died on a vanished avatar file');
+});
+
+test('a target carrying someone else authority is refused, not answered with the page', async () => {
+  // Absolute-form is legal on the wire and Node passes it through verbatim, so
+  // a proxy in front of this port can send it. Answering it with the index at
+  // 200 is the same silent-success shape as the query-string bug: the caller
+  // asked for an API and got a web page that looks like success.
+  const res = await fetch(`${base}/api/status`, { headers: { 'x-probe': '1' } });
+  assert.equal(res.status, 200); // sanity: the normal path still works
+
+  const net = require('node:net');
+  const raw = await new Promise((resolve) => {
+    const sock = net.connect(server.address().port, '127.0.0.1', () => {
+      sock.write('GET http://evil.example/api/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+    });
+    let buf = '';
+    sock.on('data', (d) => { buf += d; });
+    sock.on('end', () => resolve(buf));
+  });
+  assert.match(raw, /^HTTP\/1\.1 400 /, 'absolute-form with a foreign host should be refused');
+  assert.ok(!raw.includes('<!doctype html>'), 'answered an API path with the page');
 });
