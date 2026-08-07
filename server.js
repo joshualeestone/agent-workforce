@@ -86,8 +86,8 @@ const server = http.createServer((req, res) => {
     const name = decodeURIComponent(avatarGet[1]);
     // Only agents that actually exist. The name is already sanitised against
     // path traversal, but without this you can still accumulate pictures for
-    // assistants nobody has — junk rather than a hole, and cheap to refuse.
-    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no assistant by that name' }); return; }
+    // agents nobody has — junk rather than a hole, and cheap to refuse.
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     if (req.method === 'DELETE') {
       try { sendJson(res, 200, { removed: store.removeAvatar(name) }); }
       catch (err) { sendJson(res, 400, { error: String(err.message) }); }
@@ -108,7 +108,7 @@ const server = http.createServer((req, res) => {
   const prof = req.url && req.url.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
     const name = decodeURIComponent(prof[1]);
-    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no assistant by that name' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     readBody(req)
       .then((buf) => {
         const patch = JSON.parse(buf.toString('utf8') || '{}');

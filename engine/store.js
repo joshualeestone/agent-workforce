@@ -5,7 +5,7 @@
  *
  * The rule from the storage split: **the user's project folder holds their
  * work and nothing of ours.** Everything the platform generates lives in app
- * data, keyed by agent. That is what makes it safe to point an assistant at a
+ * data, keyed by agent. That is what makes it safe to point an agent at a
  * folder someone already has — including one under version control — without
  * quietly adding our files to their repo.
  *

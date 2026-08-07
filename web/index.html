@@ -204,7 +204,7 @@ svg { display: block; }
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
 <section class="detail" id="panel-detail" hidden>
-  <button class="back" id="detail-back">&#8592; All assistants</button>
+  <button class="back" id="detail-back">&#8592; All agents</button>
   <div class="detail-head">
     <div class="detail-av">
       <img id="d-img" alt="" hidden>
@@ -219,7 +219,7 @@ svg { display: block; }
 
   <div class="field">
     <label class="flabel" for="d-file">Picture</label>
-    <div class="fhint">A face makes an assistant easy to pick out at a glance.</div>
+    <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
     <div class="frow">
       <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
       <button class="btn" id="d-remove" type="button">Remove</button>
@@ -239,15 +239,15 @@ svg { display: block; }
 </section>
 
 <section class="panel" id="panel-projects" hidden>
-  <h2>Talking to your assistants isn't built yet.</h2>
+  <h2>Talking to your agents isn't built yet.</h2>
   <p>This is where you'll give them work and read what they say back, the way you
      would message a person. Each project is a folder on your computer, and the
-     assistants you give access to it can work on what's inside.</p>
+     agents you give access to it can work on what's inside.</p>
   <p class="soon">Next thing being built.</p>
 </section>
 <section class="panel" id="panel-joint" hidden>
-  <h2>Working with other people's assistants isn't built yet.</h2>
-  <p>This is where you'll share a project with someone else, so their assistants
+  <h2>Working with other people's agents isn't built yet.</h2>
+  <p>This is where you'll share a project with someone else, so their agents
      and yours can work on the same thing. You'll be able to invite someone, or
      join a project you've been invited to.</p>
   <p>Everything else here runs on your computer and costs nothing. This one needs
@@ -259,9 +259,9 @@ svg { display: block; }
 <section class="panel" id="panel-settings" hidden>
   <h2>Settings aren't built yet.</h2>
   <p>There will be few of them on purpose. Most choices belong on the thing they
-     affect — what an assistant may do belongs on that assistant, not in a list
+     affect — what an agent may do belongs on that agent, not in a list
      of switches here.</p>
-  <p>What will live here: keeping your assistants running when the computer
+  <p>What will live here: keeping your agents running when the computer
      restarts, updates, your Claude account, and deleting your history.</p>
   <p class="soon">Coming later.</p>
 </section>
@@ -415,7 +415,7 @@ async function tick() {
 const PANELS = ['projects', 'joint', 'settings', 'detail'];
 function showTab(tab) {
   // 'detail' is a panel with no tab button of its own — it is reached by
-  // clicking an assistant, not from the tab bar. Bailing when no button
+  // clicking an agent, not from the tab bar. Bailing when no button
   // exists would silently do nothing, which is how the detail page failed
   // to open at all.
   const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
@@ -514,7 +514,7 @@ document.getElementById('d-save').addEventListener('click', async () => {
   } catch (err) { msg.textContent = err.message; }
 });
 
-// Deep-link straight to one assistant, so a page can be shared or bookmarked.
+// Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
 showTab(PARAMS.get('tab') || 'agents');

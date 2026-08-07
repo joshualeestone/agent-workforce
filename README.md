@@ -1,6 +1,6 @@
 # Agent Workforce (working name)
 
-A small team of assistants that runs on your own computer, under your own
+A small team of agents that runs on your own computer, under your own
 Claude subscription.
 
 ## Status: Phase 1
