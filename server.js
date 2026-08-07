@@ -96,8 +96,14 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
  */
 function pathOf(req) {
   const raw = req && req.url;
-  if (typeof raw !== 'string' || !raw.startsWith('/')) return null;
+  if (typeof raw !== 'string' || raw === '') return null;
 
+  // Parse first, judge after. An earlier version rejected anything not starting
+  // with '/', which threw out absolute-form (`GET http://host/path`) before the
+  // loopback check could see it -- and absolute-form is exactly what a proxy in
+  // front of this port sends, the deployment the warning above start() says is
+  // live on this machine. Origin-form and absolute-form both parse here; only
+  // the resolved host decides.
   let parsed;
   try {
     parsed = new URL(raw, ROUTING_BASE);
@@ -152,7 +158,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (pathname === '/api/status' && req.method === 'GET') {
+  if (pathname === '/api/status' && (req.method === 'GET' || req.method === 'HEAD')) {
     let body;
     try {
       body = JSON.stringify({ ...snapshot(), version });
@@ -169,7 +175,7 @@ const server = http.createServer((req, res) => {
 
   // --- avatar: read -------------------------------------------------------
   const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
-  if (avatarGet && req.method === 'GET') {
+  if (avatarGet && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(avatarGet[1]);
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
     let file = null;
@@ -194,7 +200,13 @@ const server = http.createServer((req, res) => {
     //    leaked 49 file descriptors, which walks to EMFILE on a server anyone
     //    can reach).
     fs.stat(file, (statErr, stat) => {
-      if (statErr || !stat.isFile()) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
+      if (statErr || !stat.isFile() || stat.size === 0) {
+        // Size matters as much as existence here. store.saveAvatar writes
+        // non-atomically, so an interrupted save leaves a zero-byte file that
+        // is a perfectly good file and a perfectly useless picture.
+        sendJson(res, 404, { error: 'no picture for that agent' });
+        return;
+      }
       const stream = fs.createReadStream(file);
       stream.once('readable', () => {
         res.writeHead(200, {
@@ -204,9 +216,9 @@ const server = http.createServer((req, res) => {
         });
         pipeline(stream, res, () => {
           // A failure after the header is committed cannot be reported as a
-          // status. Destroying the response aborts the chunked stream so the
-          // client sees a broken transfer rather than a clean, short body it
-          // would treat as the whole picture.
+          // status. Destroying the response cuts the connection, so a client
+          // that was promised `content-length` bytes sees a broken transfer
+          // rather than a clean short body it would treat as the whole picture.
           if (!res.writableEnded) res.destroy();
         });
       });
@@ -266,7 +278,12 @@ const server = http.createServer((req, res) => {
   // through to the page would answer an API call with HTML at 200, which is the
   // same silent-success failure the query-string bug produced. Different way
   // in, identical signature, so it is closed here rather than route by route.
-  if (pathname === '/api' || pathname.startsWith('/api/')) {
+  // Compared against the DECODED path. `/api%2fstatus` does not start with
+  // `/api/` as a string, so an un-decoded check let it through to the page --
+  // the invariant failing on the one spelling a syntactic check gets wrong,
+  // which is the same mistake pathOf documents for `//`.
+  const apiPath = decodeSegment(pathname) || pathname;
+  if (apiPath === '/api' || apiPath.startsWith('/api/')) {
     sendJson(res, 404, { error: 'no such endpoint' });
     return;
   }
@@ -286,8 +303,8 @@ const server = http.createServer((req, res) => {
 /**
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * It renames agents, sets roles and stores avatars, and restart is next. There
- * is no authentication of any kind.
+ * It sets roles and stores avatars, and restart is next. There is no
+ * authentication of any kind.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *
