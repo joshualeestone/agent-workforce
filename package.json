@@ -5,6 +5,6 @@
   "description": "A small team of assistants that runs on your own computer.",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test engine/*.test.js"
+    "test": "node --test engine/*.test.js server.test.js"
   }
 }
