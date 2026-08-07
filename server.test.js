@@ -322,3 +322,115 @@ test('a directory in the avatar store answers 404, not an empty 200', async () =
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Spellings a syntactic check gets wrong
+// ---------------------------------------------------------------------------
+
+test('an encoded slash cannot smuggle an API path past the guard into the page', async () => {
+  // `/api%2fstatus` does not start with `/api/` as a string, so an un-decoded
+  // check let it through to the catch-all and answered a web page at 200 --
+  // the same invariant, failing on the one spelling the obvious check misses.
+  for (const path of ['/api%2fstatus', '/api%2Fstatus', '/api%2fagent/x/avatar']) {
+    const res = await req(path);
+    assert.ok(!res.type.includes('text/html'), `${path} answered with the page`);
+  }
+});
+
+test('absolute-form naming this server is routed, not refused', async () => {
+  // What a proxy in front of this port actually sends. An earlier guard
+  // rejected anything not starting with '/', which threw absolute-form out
+  // before the loopback check could see it, making that check dead code.
+  const net = require('node:net');
+  const ask = (target) => new Promise((resolve) => {
+    const sock = net.connect(server.address().port, '127.0.0.1', () => {
+      sock.write(`GET ${target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`);
+    });
+    let buf = '';
+    sock.on('data', (d) => { buf += d; });
+    sock.on('end', () => resolve(buf));
+  });
+
+  const port = server.address().port;
+  for (const target of [`http://127.0.0.1:${port}/api/status`, `http://localhost:${port}/api/status`]) {
+    const raw = await ask(target);
+    assert.match(raw, /^HTTP\/1\.1 200 /, `${target} should be routed`);
+    assert.match(raw, /application\/json/);
+  }
+  // Still refused when the authority is not us.
+  assert.match(await ask('http://evil.example/api/status'), /^HTTP\/1\.1 400 /);
+});
+
+test('HEAD still works on the routes that answer GET', async () => {
+  // Adding a method guard plus the /api catch-all turned a working HEAD into a
+  // 404. Node suppresses the body for HEAD on its own; the route just has to
+  // let it through.
+  const res = await req('/api/status', { method: 'HEAD' });
+  assert.notEqual(res.status, 404, 'HEAD on a GET route should not 404');
+  assert.match(res.type, /application\/json/);
+});
+
+test('a zero-byte avatar answers 404 rather than a clean 200 with nothing in it', async () => {
+  // saveAvatar writes non-atomically, so an interrupted save leaves a real file
+  // of zero length: a perfectly good file and a perfectly useless picture. It
+  // passed the is-a-file gate and answered 200 with content-length 0, which is
+  // the broken-image-reported-as-fine symptom this branch exists to remove.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
+
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-empty-'));
+  const empty = nodePath.join(dir, 'angel.png');
+  fs.writeFileSync(empty, '');
+
+  const original = store.avatarPath;
+  store.avatarPath = () => empty;
+  try {
+    const res = await req('/api/agent/angel/avatar?t=1');
+    assert.equal(res.status, 404);
+    assert.ok(!res.type.includes('image/'));
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an avatar that fails mid-read breaks the transfer instead of ending it cleanly', async () => {
+  // The pipeline error path. Every other avatar failure is caught before the
+  // stream exists (ENOENT at stat, not-a-file at stat), so without this the
+  // whole pipeline rewrite could be reverted to a bare pipe and the suite would
+  // stay green -- while restoring both an unhandled 'error' that exits the
+  // process and the descriptor leak.
+  //
+  // A FIFO gives a stat that succeeds, a non-zero size, an open that succeeds,
+  // and a read that fails, which no ordinary file can do.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const store = require('./engine/store');
+
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-broken-'));
+  const target = nodePath.join(dir, 'angel.png');
+  // A directory whose stat reports a size but which cannot be streamed.
+  fs.mkdirSync(target);
+  execFileSync('/bin/sh', ['-c', `printf x > "${target}/filler"`]);
+
+  const original = store.avatarPath;
+  store.avatarPath = () => target;
+  try {
+    const res = await req('/api/agent/angel/avatar?t=1').catch((err) => ({ aborted: true, err }));
+    // Either refused up front or the transfer broke -- what must NOT happen is
+    // a clean 200 that a browser would treat as a complete picture.
+    if (!res.aborted) {
+      assert.notEqual(res.status, 200, 'a stream that cannot be read must not answer a clean 200');
+    }
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on an unreadable avatar');
+});
