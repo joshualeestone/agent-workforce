@@ -135,14 +135,25 @@ const server = http.createServer((req, res) => {
 });
 
 /**
- * ⚠️ Bound to localhost deliberately, and this is the only thing protecting it.
+ * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * This server has write endpoints — it renames agents, sets roles and stores
- * avatars, and restart is next. There is no authentication of any kind.
+ * It renames agents, sets roles and stores avatars, and restart is next. There
+ * is no authentication of any kind.
  *
- * Changing this to '0.0.0.0' is a one-line edit that looks harmless and would
- * expose all of that to everyone on the network. **Do not, until the auth work
- * ships.** Reachability and login arrive together or not at all.
+ * Two ways that protection is lost, and only the first is obvious:
+ *
+ *   1. Changing this to '0.0.0.0'. A one-line edit that looks harmless and
+ *      exposes every write endpoint to whatever network the machine is on.
+ *
+ *   2. A reverse proxy or tunnel pointed at this port. **Binding to localhost
+ *      is not sufficient on a machine running one.** Tailscale Funnel, for
+ *      instance, proxies `127.0.0.1` ports straight to the public internet —
+ *      it is already enabled on the mini this was built on, publishing three
+ *      localhost ports. Adding a route for this one would publish it too,
+ *      without touching a line of this file.
+ *
+ * So localhost is a *default*, not a guarantee. Reachability and login arrive
+ * together or not at all.
  */
 server.listen(PORT, '127.0.0.1', () => {
   process.stdout.write(`Agent Workforce on http://127.0.0.1:${PORT}\n`);
