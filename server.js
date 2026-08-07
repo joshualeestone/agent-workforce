@@ -6,11 +6,7 @@
  * Binds to localhost only, and it WRITES: it stores avatars and roles. It does
  * not yet send input to an agent or start or stop one.
  *
- * This header used to say "read-only ... never writes anything", which stopped
- * being true when the first write path shipped and stayed on the file for
- * weeks. It is the first thing anyone reads when assessing what this server can
- * do, and it contradicted the warning above `start()` at the bottom of the same
- * file. See the ⚠️ block there for what protects it, and what does not.
+ * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
 
 const http = require('node:http');
@@ -82,7 +78,7 @@ const ROUTING_BASE = 'http://localhost';
 // this process legitimately names a different one, and the earlier host-based
 // check got it exactly backwards -- routing `//localhost/x` (port 80, not us)
 // while refusing `//localhost:4317/x` (us).
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
  * Returns the request's path with any query string removed, or `null` when the
@@ -111,9 +107,15 @@ function pathOf(req) {
     return null;
   }
 
-  // Only route targets that resolved against our own base. A target carrying an
+  // Only route targets whose own authority is us. A target carrying an
   // authority -- `//host/path`, or an absolute `http://host/path` -- otherwise
   // has its host silently discarded and gets routed on the path alone.
+  //
+  // ⚠️ This inspects the request TARGET, not the `Host` header, so it is not an
+  // origin check and does not stop DNS rebinding: `GET /api/status` with
+  // `Host: evil.example` is still answered. That gap is real on an auth-free
+  // server and is tracked separately; do not read this guard as protection it
+  // does not provide.
   //
   // Checking the parsed host rather than the string shape is deliberate. The
   // obvious guard is `raw.startsWith('//')`, and it does not work: the URL
@@ -209,16 +211,18 @@ const server = http.createServer((req, res) => {
       }
       const stream = fs.createReadStream(file);
       stream.once('readable', () => {
-        res.writeHead(200, {
-          'content-type': type,
-          'content-length': stat.size,
-          'cache-control': 'no-store',
-        });
+        // Deliberately no content-length. It would have to come from the stat,
+        // while the bytes come from a separate read of the same file, and
+        // store.saveAvatar writes non-atomically -- so a stat that under-reports
+        // yields a clean 200 truncated to the declared length, with the surplus
+        // bytes landing on the wire afterwards and desyncing a keep-alive
+        // connection. Chunked costs a few bytes and cannot do that.
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
         pipeline(stream, res, () => {
           // A failure after the header is committed cannot be reported as a
-          // status. Destroying the response cuts the connection, so a client
-          // that was promised `content-length` bytes sees a broken transfer
-          // rather than a clean short body it would treat as the whole picture.
+          // status. Destroying the response cuts the connection mid-chunk, so
+          // the client sees a broken transfer rather than a clean short body it
+          // would treat as the whole picture.
           if (!res.writableEnded) res.destroy();
         });
       });
@@ -362,7 +366,7 @@ if (require.main === module) {
     // exactly what start()'s promise exists to replace, and leaving this
     // uncaught made the comment above it a lie.
     const detail = err && err.code === 'EADDRINUSE'
-      ? `port ${PORT} is already in use — is a board already running?`
+      ? `port ${PORT} is already in use. Is a board already running?`
       : String(err && err.message);
     process.stderr.write(`Agent Workforce could not start: ${detail}\n`);
     process.exit(1);
