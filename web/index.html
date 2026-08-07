@@ -85,6 +85,26 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    workforce reads as deliberate rather than as a screen you failed to fill --
    most people will have one or two, permanently, and that is the common case
    rather than the empty state. */
+/* The hidden attribute sets display:none from the UA stylesheet, which an
+   author rule like `display: grid` silently beats. Without this, hiding the
+   agents grid does nothing at all. */
+[hidden] { display: none !important; }
+.tabs { max-width: 1320px; margin: 0 auto var(--space-6); display: flex; gap: var(--space-2); }
+.tab { font: var(--text-body) var(--font-ui); color: var(--label-2); background: none;
+       border: 0.5px solid transparent; border-radius: var(--radius-control);
+       padding: var(--space-3) var(--space-5); cursor: pointer; letter-spacing: inherit; }
+.tab:hover { background: var(--attn-bg); }
+.tab.on { background: var(--bg-elevated); border-color: var(--separator);
+          color: var(--label); font-weight: 600; box-shadow: var(--shadow-card); }
+.panel { max-width: 720px; margin: 0 auto; background: var(--bg-elevated);
+         border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+         box-shadow: var(--shadow-card); padding: var(--space-8); }
+.panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
+.panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
+           line-height: 1.6; margin-bottom: var(--space-5); }
+.panel p:last-child { margin-bottom: 0; }
+.panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+               text-transform: uppercase; letter-spacing: .06em; }
 .grid { display: grid; gap: var(--space-5); justify-content: center;
         grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
         max-width: 1320px; margin: 0 auto; }
@@ -149,6 +169,39 @@ svg { display: block; }
   <h1>Agent Workforce</h1>
   <div class="checked" id="checked"></div>
 </header>
+<nav class="tabs" id="tabs" role="tablist">
+  <button class="tab on"  data-tab="agents"   role="tab" aria-selected="true">Agents</button>
+  <button class="tab"     data-tab="projects" role="tab" aria-selected="false">My Projects</button>
+  <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
+  <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
+</nav>
+<section class="panel" id="panel-projects" hidden>
+  <h2>Talking to your assistants isn't built yet.</h2>
+  <p>This is where you'll give them work and read what they say back, the way you
+     would message a person. Each project is a folder on your computer, and the
+     assistants you give access to it can work on what's inside.</p>
+  <p class="soon">Next thing being built.</p>
+</section>
+<section class="panel" id="panel-joint" hidden>
+  <h2>Working with other people's assistants isn't built yet.</h2>
+  <p>This is where you'll share a project with someone else, so their assistants
+     and yours can work on the same thing. You'll be able to invite someone, or
+     join a project you've been invited to.</p>
+  <p>Everything else here runs on your computer and costs nothing. This one needs
+     something in the middle to introduce two computers to each other, so
+     <b>it's the part we'd charge for</b>. Saying so now rather than after you've
+     put your work into it.</p>
+  <p class="soon">Coming later.</p>
+</section>
+<section class="panel" id="panel-settings" hidden>
+  <h2>Settings aren't built yet.</h2>
+  <p>There will be few of them on purpose. Most choices belong on the thing they
+     affect — what an assistant may do belongs on that assistant, not in a list
+     of switches here.</p>
+  <p>What will live here: keeping your assistants running when the computer
+     restarts, updates, your Claude account, and deleting your history.</p>
+  <p class="soon">Coming later.</p>
+</section>
 <div class="summary" id="summary">Loading…</div>
 <div class="build" id="build"></div>
 <div class="grid" id="grid"></div>
@@ -285,6 +338,33 @@ async function tick() {
       'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
   }
 }
+
+// A tab that does nothing reads as broken rather than as forthcoming, so each
+// unbuilt one says what it will be and why it isn't here yet.
+const PANELS = ['projects', 'joint', 'settings'];
+function showTab(tab) {
+  const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
+  if (!btn) return;
+  document.querySelectorAll('.tab').forEach((t) => {
+    const on = t === btn;
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  const agents = tab === 'agents';
+  document.getElementById('grid').hidden = !agents;
+  document.getElementById('summary').hidden = !agents;
+  document.getElementById('build').hidden = !agents;
+  PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
+}
+
+document.getElementById('tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (btn) showTab(btn.dataset.tab);
+});
+
+// Deep-linkable, so a tab can be shared or bookmarked rather than only reached
+// by clicking. Also the only way to screenshot a panel headlessly.
+showTab(new URLSearchParams(location.search).get('tab') || 'agents');
 
 tick();
 setInterval(tick, 5000);
