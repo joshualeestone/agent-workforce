@@ -69,23 +69,33 @@ const PORT = Number(process.env.PORT || 4317);
  * runs, which is the only sane rule. Callers are free to append whatever they
  * like.
  */
+const ROUTING_BASE = 'http://localhost';
+
 function pathOf(req) {
   const raw = req && req.url;
-  // Only origin-form targets (`/path`) are routed. A target carrying an
-  // authority -- `//host/path`, or an absolute `http://host/path` -- is left to
-  // the catch-all rather than parsed, because the parser would happily discard
-  // the host and route `//evil.example/api/status` straight into the status
-  // handler. Nothing here reads the host, so that is harmless today; routing on
-  // a name we then ignore is the kind of thing that stops being harmless
-  // quietly.
-  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//')) return '/';
+  if (typeof raw !== 'string' || !raw.startsWith('/')) return '/';
+
+  let parsed;
   try {
-    // The base is required by the parser and, given the guard above, never
-    // contributes anything to the result.
-    return new URL(raw, 'http://localhost').pathname;
+    parsed = new URL(raw, ROUTING_BASE);
   } catch {
     return '/';
   }
+
+  // Only route targets that resolved against our own base. A target carrying an
+  // authority -- `//host/path`, or an absolute `http://host/path` -- otherwise
+  // has its host silently discarded and gets routed on the path alone.
+  //
+  // Checking the parsed host rather than the string shape is deliberate. The
+  // obvious guard is `raw.startsWith('//')`, and it does not work: the URL
+  // parser treats a backslash as a slash for http, so `/\evil.example/api/status`
+  // is authority-form while passing any startsWith check, and resolves to host
+  // `evil.example` with pathname `/api/status`. Asserting on what the parser
+  // actually produced is the only version that holds, because it tests the
+  // property we care about rather than a spelling of it.
+  if (parsed.host !== 'localhost') return '/';
+
+  return parsed.pathname;
 }
 
 /**
@@ -138,8 +148,21 @@ const server = http.createServer((req, res) => {
     if (!file) { res.writeHead(404); res.end(); return; }
     const ext = path.extname(file);
     const type = Object.keys(store.ALLOWED_IMAGES).find((k) => store.ALLOWED_IMAGES[k] === ext) || 'application/octet-stream';
+    // `pipe` does not forward the source's errors, so a read failure here is an
+    // unhandled 'error' event that takes the process down. The window is real:
+    // the file is located, then opened, and it can be removed in between --
+    // clearing an avatar does exactly that. Same crash shape as the malformed
+    // name above, and reached by the same cache-busted request the detail page
+    // sends after every upload.
+    const stream = fs.createReadStream(file);
+    stream.on('error', () => {
+      // Headers may already be on the wire; there is nothing useful to say at
+      // that point, so end the response rather than trying to rewrite it.
+      if (!res.headersSent) res.writeHead(404);
+      res.end();
+    });
     res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
-    fs.createReadStream(file).pipe(res);
+    stream.pipe(res);
     return;
   }
 
@@ -218,14 +241,23 @@ const server = http.createServer((req, res) => {
  *
  * So localhost is a *default*, not a guarantee. Reachability and login arrive
  * together or not at all.
- */
-/**
- * Bind and resolve once listening. Port 0 asks the OS for a free one, which is
- * how the tests get a port without colliding with a board someone is using.
+ *
+ * ---
+ *
+ * Binds and resolves once listening. Port 0 asks the OS for a free one, which
+ * is how the tests get a port without colliding with a board someone is using.
  */
 function start(port = PORT) {
-  return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve(server));
+  return new Promise((resolve, reject) => {
+    // Without this, a bind failure -- EADDRINUSE when a board is already
+    // running on 4317, which is the common case -- is an unhandled 'error'
+    // event that exits with a raw stack trace. Returning a Promise implies the
+    // caller can be told; this makes that true.
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', reject);
+      resolve(server);
+    });
   });
 }
 
