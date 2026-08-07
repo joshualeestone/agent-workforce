@@ -21,6 +21,7 @@ const { snapshot } = require('./engine/status');
 // that drifts.
 const { version } = require('./package.json');
 const store = require('./engine/store');
+const commitments = require('./engine/commitments');
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
 // server is still a way to fill someone's memory by accident.
@@ -163,7 +164,20 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/status' && (req.method === 'GET' || req.method === 'HEAD')) {
     let body;
     try {
-      body = JSON.stringify({ ...snapshot(), version });
+      const snap = snapshot();
+      // Attach what each agent says it is holding. Read here rather than in the
+      // status engine, which derives state from tmux and transcripts; this is a
+      // separate record that the agent wrote about itself.
+      //
+      // Every agent gets a commitment block, including ones that have never
+      // reported -- they come back `unknown`, and it is that value the restart
+      // confirmation needs. Omitting the field for silent agents would leave
+      // the caller unable to tell "nothing pending" from "never asked".
+      const agents = snap.agents.map((a) => ({
+        ...a,
+        commitments: commitments.read(a.sessionName),
+      }));
+      body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
@@ -296,11 +310,50 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // --- commitments: what an agent says it is holding -----------------------
+  //
+  // Matches on `pathname`, not `req.url`, and decodes with `decodeSegment`.
+  // This branch was written before the routing fix landed, so its original
+  // form used both of the things that fix removed -- a raw `req.url` match
+  // (broken by any query string) and a bare `decodeURIComponent` (a stray `%`
+  // exits the process). Rebasing it unchanged would have reintroduced both on
+  // a brand-new endpoint.
+  //
+  // Ordered BEFORE the /api/ fallthrough below, or that guard would answer
+  // this route with a 404 before it was ever reached.
+  const commits = pathname.match(/^\/api\/agent\/([^/]+)\/commitments$/);
+  if (commits && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(commits[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    sendJson(res, 200, commitments.read(name));
+    return;
+  }
+
+  if (commits && req.method === 'PUT') {
+    const name = decodeSegment(commits[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    readBody(req)
+      .then((buf) => {
+        const patch = JSON.parse(buf.toString('utf8') || '{}');
+        // A bare list is the whole payload: this is an assertion of everything
+        // the agent holds, not an addition to it. An append would make "I hold
+        // nothing" unsayable, which is the one thing this record exists for.
+        if (!Array.isArray(patch.commitments)) {
+          throw new Error('send a commitments list, even if it is empty');
+        }
+        sendJson(res, 200, commitments.report(name, patch.commitments));
+      })
+      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+    return;
+  }
+
   // Anything under /api/ that reached here matched no handler -- usually a
   // method the route does not implement, e.g. PATCH on an avatar. Falling
   // through to the page would answer an API call with HTML at 200, which is the
   // same silent-success failure the query-string bug produced. Different way
   // in, identical signature, so it is closed here rather than route by route.
+  //
   // Compared against the DECODED path. `/api%2fstatus` does not start with
   // `/api/` as a string, so an un-decoded check let it through to the page --
   // the invariant failing on the one spelling a syntactic check gets wrong,

@@ -72,14 +72,14 @@ confirmation dialog can be built against something honest.
 Follows `engine/store.js` exactly: same app-data root, same `safeKey` sanitising, same
 write-then-rename discipline. **No new dependencies** — the repo is at zero and stays there.
 
-- [ ] **3.1** New `engine/commitments.js`. Data at
+- [x] **3.1** New `engine/commitments.js`. Data at
       `~/Library/Application Support/AgentWorkforce/commitments/<agent>.json`.
-- [ ] **3.2** Reuse `store.safeKey()` for the filename. Agent names come from tmux session
+- [x] **3.2** Reuse `store.safeKey()` for the filename. Agent names come from tmux session
       names and are untrusted; this is already solved and must not be re-solved.
-- [ ] **3.3** Atomic write-then-rename, matching `store.writeProfile()`. **Up to 13 agents
+- [x] **3.3** Atomic write-then-rename, matching `store.writeProfile()`. **Up to 13 agents
       on this machine write concurrently**, and a half-written file that parses as an empty
       array is exactly the silent-loss bug this issue exists to fix.
-- [ ] **3.4** Record shape:
+- [x] **3.4** Record shape:
       ```json
       {
         "agent": "raph",
@@ -92,7 +92,7 @@ write-then-rename discipline. **No new dependencies** — the repo is at zero an
       ```
       `reportedAt` is the load-bearing field: it is what separates *asserted empty* from
       *absent*.
-- [ ] **3.5** A corrupt or unparseable file returns `unknown`. **It must not throw and must
+- [x] **3.5** A corrupt or unparseable file returns `unknown`. **It must not throw and must
       not fall back to empty.** Both failure modes end with the dialog saying "safe."
 
 ---
@@ -102,13 +102,13 @@ write-then-rename discipline. **No new dependencies** — the repo is at zero an
 A "nothing pending" from three hours ago is not evidence about now. The agent has been
 working since.
 
-- [ ] **4.1** `clear` decays to `unknown` past a staleness threshold, as one named
+- [x] **4.1** `clear` decays to `unknown` past a staleness threshold, as one named
       constant, not scattered literals.
-- [ ] **4.2** Default **30 minutes**, chosen to be short enough that a stale assertion
+- [x] **4.2** Default **30 minutes**, chosen to be short enough that a stale assertion
       cannot survive a work session and long enough not to make `unknown` the normal
       state. ⚠️ **This value is a judgement call, flagged for Josh** — it is the one number
       here I would expect to tune once real usage exists.
-- [ ] **4.3** Always surface `reportedAt` alongside the state, so the UI can show *when*
+- [x] **4.3** Always surface `reportedAt` alongside the state, so the UI can show *when*
       rather than implying freshness it does not have. Same discipline as the existing
       `confidence` field in `engine/status.js`.
 
@@ -116,26 +116,26 @@ working since.
 
 ## 5. API
 
-- [ ] **5.1** `read(agent)` → `{ state, commitments, reportedAt, because }`.
+- [x] **5.1** `read(agent)` → `{ state, commitments, reportedAt, because }`.
       **`because` carries why**, matching the existing `because` field on the status engine
       so the UI can explain itself rather than asserting.
-- [ ] **5.2** `report(agent, commitments)` — the full-state assertion. Replaces rather than
+- [x] **5.2** `report(agent, commitments)` — the full-state assertion. Replaces rather than
       appends, because an agent saying "here is what I hold" is the only way to express
       *nothing*. **An append-only API cannot represent `clear`**, which is the whole point.
-- [ ] **5.3** `add(agent, what)` and `resolve(agent, id)` as conveniences over 5.2 for the
+- [x] **5.3** `add(agent, what)` and `resolve(agent, id)` as conveniences over 5.2 for the
       common single-commitment cases.
-- [ ] **5.4** `readAll()` for the board.
+- [x] **5.4** `readAll()` for the board.
 
 ---
 
 ## 6. Server surface
 
-- [ ] **6.1** Enrich `/api/status` so each agent carries its commitment state. This is what
+- [x] **6.1** Enrich `/api/status` so each agent carries its commitment state. This is what
       #1 will read, and it means the board can show holdings with no second request.
-- [ ] **6.2** `PUT /api/agent/:name/commitments` for programmatic reporting, following the
+- [x] **6.2** `PUT /api/agent/:name/commitments` for programmatic reporting, following the
       existing profile-endpoint shape (`knownAgent` guard, capped body, field allowlist,
       verbatim-safe error text).
-- [ ] **6.3** ⚠️ **This adds another unauthenticated write endpoint.** The app still has no
+- [x] **6.3** ⚠️ **This adds another unauthenticated write endpoint.** The app still has no
       login and #10 is deferred, so this is contained only by the loopback bind. It is the
       same risk class as the existing profile and avatar writes, not a new one, but it is
       noted rather than discovered. **It must be covered by the default-deny gate when auth
@@ -147,16 +147,16 @@ working since.
 
 Match the existing pattern: `node --test engine/*.test.js`, no framework.
 
-- [ ] **7.1** Round trip: report, read back, states match.
-- [ ] **7.2** **Absent file returns `unknown`, NOT `clear`.** The single most important test
+- [x] **7.1** Round trip: report, read back, states match.
+- [x] **7.2** **Absent file returns `unknown`, NOT `clear`.** The single most important test
       in this branch. If this one regresses, the restart dialog starts lying.
-- [ ] **7.3** **Asserted-empty returns `clear`**, and is distinguishable from 7.2.
-- [ ] **7.4** **Corrupt/truncated JSON returns `unknown`**, does not throw, does not return
+- [x] **7.3** **Asserted-empty returns `clear`**, and is distinguishable from 7.2.
+- [x] **7.4** **Corrupt/truncated JSON returns `unknown`**, does not throw, does not return
       empty.
-- [ ] **7.5** `clear` past the staleness threshold returns `unknown`.
-- [ ] **7.6** Concurrent writes leave a valid file (write-then-rename holds).
-- [ ] **7.7** Path traversal in an agent name cannot escape the store.
-- [ ] **7.8** `npm test` green, still zero dependencies.
+- [x] **7.5** `clear` past the staleness threshold returns `unknown`.
+- [x] **7.6** Concurrent writes leave a valid file (write-then-rename holds).
+- [x] **7.7** Path traversal in an agent name cannot escape the store.
+- [x] **7.8** `npm test` green, still zero dependencies.
 
 **Verify the tests by breaking the code**, per the repo's existing practice
 (`d77d743 Add tests for the status engine, verified by reintroducing the bugs`). A test for
@@ -164,7 +164,7 @@ Match the existing pattern: `node --test engine/*.test.js`, no framework.
 
 ---
 
-## 8. Repo hygiene
+## 8. Repo hygiene — ⛔️ DESCOPED from this PR
 
 - [ ] **8.1** Run `/repo-setup`. This repo still has **no `CLAUDE.md`**, no
       `.claude/settings.json`, and no PR template. It was folded into the superseded auth
