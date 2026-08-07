@@ -14,6 +14,7 @@
  */
 
 const http = require('node:http');
+const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
 const { snapshot } = require('./engine/status');
@@ -76,7 +77,12 @@ const PORT = Number(process.env.PORT || 4317);
  * like.
  */
 const ROUTING_BASE = 'http://localhost';
-const ROUTING_HOST = new URL(ROUTING_BASE).host;
+// Loopback identities this server will answer to. Compared on HOSTNAME, not
+// host: the port is deliberately ignored, because a proxy or tunnel in front of
+// this process legitimately names a different one, and the earlier host-based
+// check got it exactly backwards -- routing `//localhost/x` (port 80, not us)
+// while refusing `//localhost:4317/x` (us).
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /**
  * Returns the request's path with any query string removed, or `null` when the
@@ -110,7 +116,7 @@ function pathOf(req) {
   // `evil.example` with pathname `/api/status`. Asserting on what the parser
   // actually produced is the only version that holds, because it tests the
   // property we care about rather than a spelling of it.
-  if (parsed.host !== ROUTING_HOST) return null;
+  if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
 
   return parsed.pathname;
 }
@@ -146,7 +152,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (pathname === '/api/status') {
+  if (pathname === '/api/status' && req.method === 'GET') {
     let body;
     try {
       body = JSON.stringify({ ...snapshot(), version });
@@ -165,31 +171,49 @@ const server = http.createServer((req, res) => {
   const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && req.method === 'GET') {
     const name = decodeSegment(avatarGet[1]);
-    if (name === null) { res.writeHead(404); res.end(); return; }
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
     let file = null;
     try { file = store.avatarPath(name); } catch { /* invalid name */ }
-    if (!file) { res.writeHead(404); res.end(); return; }
+    if (!file) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
     const ext = path.extname(file);
     const type = Object.keys(store.ALLOWED_IMAGES).find((k) => store.ALLOWED_IMAGES[k] === ext) || 'application/octet-stream';
-    // `pipe` does not forward the source's errors, so a read failure here would
-    // be an unhandled 'error' event that takes the process down. The window is
-    // real: the file is located, then opened, and it can be removed in between
-    // -- clearing an avatar does exactly that.
+    // Three things have to hold here, and each failed a different way before.
     //
-    // The status is deliberately withheld until the stream opens. Writing 200
-    // first and handling the error afterwards does stop the crash, but the
-    // headers are already committed by then, so a missing file answers 200 with
-    // an empty body: a success status for a picture that is not there, which
-    // renders as a broken image. That is the exact symptom this branch exists
-    // to remove, so it is worth the extra event.
-    const stream = fs.createReadStream(file);
-    stream.on('open', () => {
-      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
-      stream.pipe(res);
-    });
-    stream.on('error', () => {
-      if (!res.headersSent) res.writeHead(404);
-      res.end();
+    // 1. The status is withheld until we know the read will work. Writing 200
+    //    first and catching the error after commits the header, so a file that
+    //    is not there answers 200 with an empty body -- a picture reported as
+    //    fine, rendering as a broken image, which is the symptom this branch
+    //    exists to remove.
+    // 2. `open` succeeding is not enough: a directory opens fine and fails on
+    //    first read, past the header. So the entry is stat'd and must be a
+    //    regular file. `store.avatarPath` prefix-scans the directory and will
+    //    return any matching entry, including a directory.
+    // 3. `pipeline` rather than `pipe`, because `pipe` neither forwards the
+    //    source's errors (an unhandled 'error' event exits the process) nor
+    //    destroys the source when the client goes away (60 aborted requests
+    //    leaked 49 file descriptors, which walks to EMFILE on a server anyone
+    //    can reach).
+    fs.stat(file, (statErr, stat) => {
+      if (statErr || !stat.isFile()) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
+      const stream = fs.createReadStream(file);
+      stream.once('readable', () => {
+        res.writeHead(200, {
+          'content-type': type,
+          'content-length': stat.size,
+          'cache-control': 'no-store',
+        });
+        pipeline(stream, res, () => {
+          // A failure after the header is committed cannot be reported as a
+          // status. Destroying the response aborts the chunked stream so the
+          // client sees a broken transfer rather than a clean, short body it
+          // would treat as the whole picture.
+          if (!res.writableEnded) res.destroy();
+        });
+      });
+      stream.once('error', () => {
+        if (!res.headersSent) sendJson(res, 404, { error: 'that picture could not be read' });
+        else res.destroy();
+      });
     });
     return;
   }
