@@ -114,6 +114,25 @@ This is the one to copy. Open-source self-hosted app, free forever, with an opti
 
 ---
 
+### 1.9 ADDENDUM — the `plex.direct` trick, and exactly what it solves `[added after review]`
+
+Missed on the first pass and worth its own entry, because it changes the design for one case.
+
+**The mechanism.** A browser will not show a padlock for `https://192.168.1.7`, and no CA will issue a certificate for a private IP. Plex sidesteps this by **encoding the IP in the hostname**: `192-168-1-7.<hash>.plex.direct` resolves, in public DNS, to `192.168.1.7`. They hold a wildcard certificate for `*.<hash>.plex.direct`. **Real hostname, real certificate, private destination, zero setup by the user.**
+
+**⚠️ What it solves, precisely — and what it does not.** It solves the **certificate** problem for a connection that can already be made. It does **not** solve **reachability**: Plex's own direct path still depends on port forwarding or automatic port mapping, with the relay as fallback (§1.2).
+
+**So it is not "the relay becomes optional".** It is:
+
+| Case | With this trick |
+|---|---|
+| **Same network** (laptop in the next room, phone on home wifi) | **Fully solved, free, no relay.** Real HTTPS, so passkeys work |
+| **Remote** (airport, cellular) | **Unchanged** — still needs the relay |
+
+**Why this matters more than it first appears.** §0 established that a browser client makes a stable public hostname unavoidable, because **passkeys bind to a domain and HTTPS needs a real certificate**. This trick supplies exactly that for the local case. So the same-network path gets the *full* security model — real TLS, real passkeys — rather than a degraded one, and costs us nothing but a DNS zone we already need.
+
+Given the owner's always-on Mac is usually in their own house, **this is likely the majority of day-to-day use**, with the relay carrying the genuinely-remote minority. That materially improves the cost shape in §3.3.
+
 ## 2. Technical options, honestly
 
 ### 2.1 Port forwarding and automatic port mapping (UPnP / NAT-PMP / PCP)
