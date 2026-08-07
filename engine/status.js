@@ -17,6 +17,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const store = require('./store');
 
 const HOME = os.homedir();
 
@@ -460,6 +461,10 @@ function readIdentity(sessionName) {
   return { displayName, role: role || null, derived: true };
 }
 
+function safeAvatar(name) {
+  try { return store.avatarPath(name); } catch { return null; }
+}
+
 function snapshot() {
   const panes = listPanes();
   const agents = panes.map((pane) => {
@@ -481,6 +486,10 @@ function snapshot() {
       context,
       model,
       modelName: modelDisplayName(model),
+      // Things a person set, which the machine cannot derive. Role in
+      // particular: nothing on this machine records what an agent *is*.
+      hasAvatar: Boolean(safeAvatar(identity.displayName ? pane.name : pane.name)),
+      profile: store.readProfile(pane.name),
     };
   });
 

@@ -89,6 +89,34 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    author rule like `display: grid` silently beats. Without this, hiding the
    agents grid does nothing at all. */
 [hidden] { display: none !important; }
+.detail { max-width: 720px; margin: 0 auto; background: var(--bg-elevated);
+          border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+          box-shadow: var(--shadow-card); padding: var(--space-8); }
+.back { background: none; border: 0; color: var(--label-2); cursor: pointer;
+        font: var(--text-callout) var(--font-ui); padding: 0; margin-bottom: var(--space-6); }
+.back:hover { color: var(--label); }
+.detail-head { display: flex; gap: var(--space-6); align-items: center; margin-bottom: var(--space-8); }
+.detail-av { width: 72px; height: 72px; flex: none; border-radius: 50%; overflow: hidden;
+             background: var(--bg-sunken); border: 0.5px solid var(--separator);
+             display: flex; align-items: center; justify-content: center; }
+.detail-av img { width: 100%; height: 100%; object-fit: cover; }
+.detail-initials { font: 600 var(--text-title-3) var(--font-ui); color: var(--label-2); }
+.detail-name { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
+.detail-meta { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-top: 2px; }
+.detail-state { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); }
+.field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
+.flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
+.fhint { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
+.frow { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
+.frow input[type=text] { flex: 1; min-width: 220px; font: var(--text-body) var(--font-ui);
+                         padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+                         border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+.btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
+       border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
+       background: var(--bg); color: var(--label); cursor: pointer; }
+.btn:hover { background: var(--attn-bg); }
+.fmsg { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); min-height: 1em; }
+.card { cursor: pointer; }
 .tabs { max-width: 1320px; margin: 0 auto var(--space-6); display: flex; gap: var(--space-2); }
 .tab { font: var(--text-body) var(--font-ui); color: var(--label-2); background: none;
        border: 0.5px solid transparent; border-radius: var(--radius-control);
@@ -175,6 +203,41 @@ svg { display: block; }
   <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
+<section class="detail" id="panel-detail" hidden>
+  <button class="back" id="detail-back">&#8592; All assistants</button>
+  <div class="detail-head">
+    <div class="detail-av">
+      <img id="d-img" alt="" hidden>
+      <div id="d-initials" class="detail-initials"></div>
+    </div>
+    <div>
+      <div class="detail-name" id="d-name"></div>
+      <div class="detail-meta" id="d-meta"></div>
+      <div class="detail-state" id="d-state"></div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="flabel" for="d-file">Picture</label>
+    <div class="fhint">A face makes an assistant easy to pick out at a glance.</div>
+    <div class="frow">
+      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <button class="btn" id="d-remove" type="button">Remove</button>
+    </div>
+    <div class="fmsg" id="d-msg"></div>
+  </div>
+
+  <div class="field">
+    <label class="flabel" for="d-role">What they do</label>
+    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
+    <div class="frow">
+      <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
+      <button class="btn" id="d-save" type="button">Save</button>
+    </div>
+    <div class="fmsg" id="d-role-msg"></div>
+  </div>
+</section>
+
 <section class="panel" id="panel-projects" hidden>
   <h2>Talking to your assistants isn't built yet.</h2>
   <p>This is where you'll give them work and read what they say back, the way you
@@ -238,8 +301,14 @@ function initials(name) {
 function ring(a) {
   const ctx = a.context;
   const R = 30, C = 2 * Math.PI * R;
-  const av = `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
-              <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
+  const clip = 'clip-' + a.sessionName;
+  const av = a.hasAvatar
+    ? `<defs><clipPath id="${clip}"><circle cx="36" cy="36" r="23"/></clipPath></defs>
+       <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
+              x="13" y="13" width="46" height="46" preserveAspectRatio="xMidYMid slice"
+              clip-path="url(#${clip})"/>`
+    : `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
+       <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
 
   if (ctx.percent === null) {
     return `<div class="gaugewrap">
@@ -289,7 +358,7 @@ function card(a) {
         ? '<div class="note">Nearly full. It will soon forget the earlier part of this conversation, including anything it agreed to do.</div>'
         : '');
 
-  return `<div class="card ${copy.attn ? 'attn' : ''}">
+  return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
@@ -310,6 +379,8 @@ async function tick() {
     const data = await res.json();
 
     const lim = new URLSearchParams(location.search).get('limit');
+    LAST = data.agents;
+    if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
     document.getElementById('grid').innerHTML = shown.map(card).join('');
 
@@ -341,15 +412,19 @@ async function tick() {
 
 // A tab that does nothing reads as broken rather than as forthcoming, so each
 // unbuilt one says what it will be and why it isn't here yet.
-const PANELS = ['projects', 'joint', 'settings'];
+const PANELS = ['projects', 'joint', 'settings', 'detail'];
 function showTab(tab) {
+  // 'detail' is a panel with no tab button of its own — it is reached by
+  // clicking an assistant, not from the tab bar. Bailing when no button
+  // exists would silently do nothing, which is how the detail page failed
+  // to open at all.
   const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
-  if (!btn) return;
   document.querySelectorAll('.tab').forEach((t) => {
     const on = t === btn;
     t.classList.toggle('on', on);
     t.setAttribute('aria-selected', String(on));
   });
+  if (!btn && tab !== 'detail') return;
   const agents = tab === 'agents';
   document.getElementById('grid').hidden = !agents;
   document.getElementById('summary').hidden = !agents;
@@ -364,7 +439,85 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
-showTab(new URLSearchParams(location.search).get('tab') || 'agents');
+let LAST = [];
+let CURRENT = null;
+
+function openDetail(sessionName) {
+  const a = LAST.find((x) => x.sessionName === sessionName);
+  if (!a) return;
+  CURRENT = a;
+  document.getElementById('d-name').textContent = a.name;
+  document.getElementById('d-meta').textContent =
+    [a.profile && a.profile.role || a.role, a.modelName].filter(Boolean).join(' · ');
+  const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
+  document.getElementById('d-state').textContent =
+    copy.label + (a.task ? ' — ' + a.task : '');
+  document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
+  document.getElementById('d-initials').textContent = initials(a.name);
+
+  const img = document.getElementById('d-img');
+  if (a.hasAvatar) {
+    img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
+    img.hidden = false;
+    document.getElementById('d-initials').hidden = true;
+  } else {
+    img.hidden = true;
+    document.getElementById('d-initials').hidden = false;
+  }
+  document.getElementById('d-msg').textContent = '';
+  document.getElementById('d-role-msg').textContent = '';
+  showTab('detail');
+}
+
+document.getElementById('grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.card');
+  if (card) openDetail(card.dataset.agent);
+});
+document.getElementById('detail-back').addEventListener('click', () => showTab('agents'));
+
+document.getElementById('d-file').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f || !CURRENT) return;
+  const msg = document.getElementById('d-msg');
+  msg.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar',
+      { method: 'PUT', headers: { 'content-type': f.type }, body: f });
+    const out = await res.json();
+    // Say what to do, never surface an exception name.
+    if (!res.ok) throw new Error(out.error || 'that did not work');
+    msg.textContent = 'Saved.';
+    await tick();
+    openDetail(CURRENT.sessionName);
+  } catch (err) { msg.textContent = err.message; }
+});
+
+document.getElementById('d-remove').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar', { method: 'DELETE' });
+  document.getElementById('d-msg').textContent = 'Removed.';
+  await tick();
+  openDetail(CURRENT.sessionName);
+});
+
+document.getElementById('d-save').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const msg = document.getElementById('d-role-msg');
+  msg.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/profile',
+      { method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: document.getElementById('d-role').value.trim() }) });
+    if (!res.ok) throw new Error('that did not save');
+    msg.textContent = 'Saved.';
+    await tick();
+  } catch (err) { msg.textContent = err.message; }
+});
+
+// Deep-link straight to one assistant, so a page can be shared or bookmarked.
+const PARAMS = new URLSearchParams(location.search);
+const WANT_AGENT = PARAMS.get('agent');
+showTab(PARAMS.get('tab') || 'agents');
 
 tick();
 setInterval(tick, 5000);
