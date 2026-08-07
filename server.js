@@ -70,19 +70,50 @@ const PORT = Number(process.env.PORT || 4317);
  * like.
  */
 function pathOf(req) {
-  // The base is required by the URL parser and is otherwise unused; requests
-  // here always arrive as an origin-form path.
+  const raw = req && req.url;
+  // Only origin-form targets (`/path`) are routed. A target carrying an
+  // authority -- `//host/path`, or an absolute `http://host/path` -- is left to
+  // the catch-all rather than parsed, because the parser would happily discard
+  // the host and route `//evil.example/api/status` straight into the status
+  // handler. Nothing here reads the host, so that is harmless today; routing on
+  // a name we then ignore is the kind of thing that stops being harmless
+  // quietly.
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//')) return '/';
   try {
-    return new URL(req.url || '/', 'http://localhost').pathname;
+    // The base is required by the parser and, given the guard above, never
+    // contributes anything to the result.
+    return new URL(raw, 'http://localhost').pathname;
   } catch {
     return '/';
   }
 }
 
-const server = http.createServer((req, res) => {
-  const url = pathOf(req);
+/**
+ * Percent-decode one path segment, or null if it is malformed.
+ *
+ * `decodeURIComponent` throws on a stray `%`, and a throw inside the request
+ * handler is an uncaught exception that takes the process down. So a single
+ * unauthenticated `GET /api/agent/%/avatar` was enough to kill the board.
+ *
+ * This existed before routing moved to the pathname, but that move made it
+ * reachable from more requests: the anchored patterns previously stopped
+ * matching as soon as a query string was appended, so `/api/agent/%/avatar?t=1`
+ * fell harmlessly to the catch-all and only the bare form crashed. Widening
+ * which requests reach a decode is exactly the kind of second-order effect a
+ * routing change is prone to.
+ */
+function decodeSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
 
-  if (url === '/api/status') {
+const server = http.createServer((req, res) => {
+  const pathname = pathOf(req);
+
+  if (pathname === '/api/status') {
     let body;
     try {
       body = JSON.stringify({ ...snapshot(), version });
@@ -98,9 +129,10 @@ const server = http.createServer((req, res) => {
   }
 
   // --- avatar: read -------------------------------------------------------
-  const avatarGet = url.match(/^\/api\/agent\/([^/]+)\/avatar$/);
+  const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && req.method === 'GET') {
-    const name = decodeURIComponent(avatarGet[1]);
+    const name = decodeSegment(avatarGet[1]);
+    if (name === null) { res.writeHead(404); res.end(); return; }
     let file = null;
     try { file = store.avatarPath(name); } catch { /* invalid name */ }
     if (!file) { res.writeHead(404); res.end(); return; }
@@ -113,7 +145,8 @@ const server = http.createServer((req, res) => {
 
   // --- avatar: set or clear ----------------------------------------------
   if (avatarGet && (req.method === 'PUT' || req.method === 'DELETE')) {
-    const name = decodeURIComponent(avatarGet[1]);
+    const name = decodeSegment(avatarGet[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     // Only agents that actually exist. The name is already sanitised against
     // path traversal, but without this you can still accumulate pictures for
     // agents nobody has — junk rather than a hole, and cheap to refuse.
@@ -135,9 +168,10 @@ const server = http.createServer((req, res) => {
   }
 
   // --- profile: things the machine cannot derive (role, etc.) -------------
-  const prof = url.match(/^\/api\/agent\/([^/]+)\/profile$/);
+  const prof = pathname.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
-    const name = decodeURIComponent(prof[1]);
+    const name = decodeSegment(prof[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     readBody(req)
       .then((buf) => {
@@ -185,17 +219,30 @@ const server = http.createServer((req, res) => {
  * So localhost is a *default*, not a guarantee. Reachability and login arrive
  * together or not at all.
  */
-server.listen(PORT, '127.0.0.1', () => {
-  // PORT=0 asks the OS for a free port, which is how the tests get one without
-  // colliding with a board someone is actually using. Report the real port
-  // rather than the requested one, or the line would read "on port 0".
-  const actual = server.address().port;
-  process.stdout.write(`Agent Workforce on http://127.0.0.1:${actual}\n`);
-  process.stdout.write('Local only. It writes, and it has no login yet.\n');
-});
+/**
+ * Bind and resolve once listening. Port 0 asks the OS for a free one, which is
+ * how the tests get a port without colliding with a board someone is using.
+ */
+function start(port = PORT) {
+  return new Promise((resolve) => {
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
+}
+
+// Only boot when run directly. Requiring this module -- which the routing tests
+// do, so they can drive the real server -- must not bind a port as a side
+// effect of the import. Same guard as engine/status.js.
+if (require.main === module) {
+  start().then(() => {
+    // Report the port actually bound, not the one requested, or a `PORT=0` run
+    // would announce itself on port 0.
+    process.stdout.write(`Agent Workforce on http://127.0.0.1:${server.address().port}\n`);
+    process.stdout.write('Local only. It writes, and it has no login yet.\n');
+  });
+}
 
 // Exported so the routing tests can drive the real server rather than a
-// re-implementation of it. Testing a URL-parsing helper in isolation would not
-// have caught this bug, because the helper was never the broken part -- the
+// re-implementation of it. Testing the path helper in isolation would not have
+// caught the routing bug, because the helper was never the broken part -- the
 // routes reading `req.url` around it were.
-module.exports = { server, pathOf };
+module.exports = { server, start, pathOf, decodeSegment };
