@@ -134,6 +134,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
+/**
+ * ⚠️ Bound to localhost deliberately, and this is the only thing protecting it.
+ *
+ * This server has write endpoints — it renames agents, sets roles and stores
+ * avatars, and restart is next. There is no authentication of any kind.
+ *
+ * Changing this to '0.0.0.0' is a one-line edit that looks harmless and would
+ * expose all of that to everyone on the network. **Do not, until the auth work
+ * ships.** Reachability and login arrive together or not at all.
+ */
 server.listen(PORT, '127.0.0.1', () => {
-  process.stdout.write(`Agent Workforce (read-only) on http://127.0.0.1:${PORT}\n`);
+  process.stdout.write(`Agent Workforce on http://127.0.0.1:${PORT}\n`);
+  process.stdout.write('Local only. It writes, and it has no login yet.\n');
 });
