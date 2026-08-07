@@ -396,41 +396,74 @@ test('a zero-byte avatar answers 404 rather than a clean 200 with nothing in it'
   }
 });
 
-test('an avatar that fails mid-read breaks the transfer instead of ending it cleanly', async () => {
-  // The pipeline error path. Every other avatar failure is caught before the
-  // stream exists (ENOENT at stat, not-a-file at stat), so without this the
-  // whole pipeline rewrite could be reverted to a bare pipe and the suite would
-  // stay green -- while restoring both an unhandled 'error' that exits the
-  // process and the descriptor leak.
+test('an avatar that cannot be opened answers 404 rather than crashing', async () => {
+  // Reaches `stream.once('error')`: the file passes stat (a real, non-empty,
+  // regular file) and then fails to open because it is unreadable. Without the
+  // listener this is an unhandled 'error' event that exits the process.
   //
-  // A FIFO gives a stat that succeeds, a non-zero size, an open that succeeds,
-  // and a read that fails, which no ordinary file can do.
+  // ⚠️ What this does NOT cover is a read that fails AFTER the header is
+  // committed -- the `pipeline` callback's `res.destroy()`. Producing that
+  // portably needs a file whose open succeeds and whose read fails, which an
+  // ordinary filesystem will not give you. Saying so plainly beats a test that
+  // looks like it covers the path and does not; an earlier version of this test
+  // used a directory, which the stat gate rejects before the stream is ever
+  // created, so it asserted nothing while claiming to pin the whole rewrite.
   const os = require('node:os');
   const fs = require('node:fs');
   const nodePath = require('node:path');
-  const { execFileSync } = require('node:child_process');
   const store = require('./engine/store');
 
-  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-broken-'));
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-unreadable-'));
   const target = nodePath.join(dir, 'angel.png');
-  // A directory whose stat reports a size but which cannot be streamed.
-  fs.mkdirSync(target);
-  execFileSync('/bin/sh', ['-c', `printf x > "${target}/filler"`]);
+  fs.writeFileSync(target, Buffer.alloc(64, 1));
+  fs.chmodSync(target, 0o000);
 
   const original = store.avatarPath;
   store.avatarPath = () => target;
   try {
-    const res = await req('/api/agent/angel/avatar?t=1').catch((err) => ({ aborted: true, err }));
-    // Either refused up front or the transfer broke -- what must NOT happen is
-    // a clean 200 that a browser would treat as a complete picture.
-    if (!res.aborted) {
-      assert.notEqual(res.status, 200, 'a stream that cannot be read must not answer a clean 200');
+    const res = await req('/api/agent/angel/avatar?t=1');
+    // Root can read a 000 file, so skip the assertion rather than fail there.
+    if (process.getuid && process.getuid() !== 0) {
+      assert.equal(res.status, 404, 'an unreadable file must not answer 200');
+      assert.ok(!res.type.includes('image/'));
     }
   } finally {
     store.avatarPath = original;
+    fs.chmodSync(target, 0o600);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
   const alive = await req('/api/status');
   assert.match(alive.type, /application\/json/, 'server died on an unreadable avatar');
+});
+
+test('an avatar response carries no content-length, so a short read cannot desync the connection', async () => {
+  // content-length would have to come from the stat while the bytes come from a
+  // separate read. saveAvatar writes non-atomically, so a stat that
+  // under-reports gives a clean 200 truncated to the declared length AND puts
+  // the surplus bytes on the wire afterwards, which desyncs a keep-alive
+  // connection into the next response.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
+
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-nolen-'));
+  const fixture = nodePath.join(dir, 'angel.png');
+  fs.writeFileSync(fixture, PNG);
+
+  const original = store.avatarPath;
+  store.avatarPath = () => fixture;
+  try {
+    const res = await fetch(`${base}/api/agent/angel/avatar?t=1`);
+    assert.equal(res.headers.get('content-length'), null,
+      'a length taken from stat cannot be trusted to match the bytes actually read');
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), PNG);
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
