@@ -51,8 +51,38 @@ function sendJson(res, code, obj) {
 
 const PORT = Number(process.env.PORT || 4317);
 
+/**
+ * The path, with any query string removed.
+ *
+ * Routing used to match `req.url` directly, which includes the query string, so
+ * an anchored pattern stopped matching the moment a caller appended anything.
+ * The request then fell past every route to the catch-all and was answered with
+ * the HTML page, at status 200.
+ *
+ * That is how a working avatar looked broken for an afternoon: the detail page
+ * cache-busts with `?t=<now>` so a freshly uploaded picture appears immediately,
+ * and that query string was the exact reason the picture never appeared. The
+ * card grid, which requests the same avatar without one, showed it correctly --
+ * so it read as a bad image format rather than a bad route.
+ *
+ * Matching on the pathname makes a query string unable to change which handler
+ * runs, which is the only sane rule. Callers are free to append whatever they
+ * like.
+ */
+function pathOf(req) {
+  // The base is required by the URL parser and is otherwise unused; requests
+  // here always arrive as an origin-form path.
+  try {
+    return new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    return '/';
+  }
+}
+
 const server = http.createServer((req, res) => {
-  if (req.url === '/api/status') {
+  const url = pathOf(req);
+
+  if (url === '/api/status') {
     let body;
     try {
       body = JSON.stringify({ ...snapshot(), version });
@@ -68,7 +98,7 @@ const server = http.createServer((req, res) => {
   }
 
   // --- avatar: read -------------------------------------------------------
-  const avatarGet = req.url && req.url.match(/^\/api\/agent\/([^/]+)\/avatar$/);
+  const avatarGet = url.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && req.method === 'GET') {
     const name = decodeURIComponent(avatarGet[1]);
     let file = null;
@@ -105,7 +135,7 @@ const server = http.createServer((req, res) => {
   }
 
   // --- profile: things the machine cannot derive (role, etc.) -------------
-  const prof = req.url && req.url.match(/^\/api\/agent\/([^/]+)\/profile$/);
+  const prof = url.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
     const name = decodeURIComponent(prof[1]);
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
@@ -156,6 +186,16 @@ const server = http.createServer((req, res) => {
  * together or not at all.
  */
 server.listen(PORT, '127.0.0.1', () => {
-  process.stdout.write(`Agent Workforce on http://127.0.0.1:${PORT}\n`);
+  // PORT=0 asks the OS for a free port, which is how the tests get one without
+  // colliding with a board someone is actually using. Report the real port
+  // rather than the requested one, or the line would read "on port 0".
+  const actual = server.address().port;
+  process.stdout.write(`Agent Workforce on http://127.0.0.1:${actual}\n`);
   process.stdout.write('Local only. It writes, and it has no login yet.\n');
 });
+
+// Exported so the routing tests can drive the real server rather than a
+// re-implementation of it. Testing a URL-parsing helper in isolation would not
+// have caught this bug, because the helper was never the broken part -- the
+// routes reading `req.url` around it were.
+module.exports = { server, pathOf };
