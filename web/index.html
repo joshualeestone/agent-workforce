@@ -75,7 +75,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked strong { display: block; font: 500 var(--text-callout) var(--font-ui);
                   color: var(--label-2); text-transform: none; letter-spacing: 0; margin-top: 1px; }
 .checked.stale strong { color: var(--label); text-decoration: underline wavy; }
-.summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+.build { max-width: 1320px; margin: calc(var(--space-2) * -1) auto var(--space-7);
+          font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+  .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
+  .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
 /* auto-FIT, not auto-fill: empty columns collapse, so two agents don't sit in
    the top-left of a thirteen-agent lattice. Centred and width-capped so a small
@@ -147,6 +150,7 @@ svg { display: block; }
   <div class="checked" id="checked"></div>
 </header>
 <div class="summary" id="summary">Loading…</div>
+<div class="build" id="build"></div>
 <div class="grid" id="grid"></div>
 
 <script>
@@ -262,6 +266,10 @@ async function tick() {
     if (c.unknown) bits.push(`${c.unknown} we cannot read`);
     if (c.unknownFullness) bits.push(`${c.unknownFullness} with unknown memory limits`);
     document.getElementById('summary').textContent = bits.join(' · ');
+    // Says "early" out loud. For a product whose whole thesis is not
+    // overstating what it knows, admitting its own maturity is on-brand.
+    document.getElementById('build').innerHTML =
+      '<b>BETA</b> · version ' + esc(data.version || 'unknown') + ' · read-only, nothing here can change your agents';
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the

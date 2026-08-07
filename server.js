@@ -12,13 +12,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { snapshot } = require('./engine/status');
 
+// Single source of truth for the version. With no support function, "what
+// version are you on?" is the first question of every diagnosis, so the number
+// on screen has to be the number in the release rather than a hand-typed label
+// that drifts.
+const { version } = require('./package.json');
+
 const PORT = Number(process.env.PORT || 4317);
 
 const server = http.createServer((req, res) => {
   if (req.url === '/api/status') {
     let body;
     try {
-      body = JSON.stringify(snapshot());
+      body = JSON.stringify({ ...snapshot(), version });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
