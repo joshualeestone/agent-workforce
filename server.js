@@ -93,7 +93,7 @@ function pathOf(req) {
   // `evil.example` with pathname `/api/status`. Asserting on what the parser
   // actually produced is the only version that holds, because it tests the
   // property we care about rather than a spelling of it.
-  if (parsed.host !== 'localhost') return '/';
+  if (parsed.host !== new URL(ROUTING_BASE).host) return '/';
 
   return parsed.pathname;
 }
@@ -148,21 +148,26 @@ const server = http.createServer((req, res) => {
     if (!file) { res.writeHead(404); res.end(); return; }
     const ext = path.extname(file);
     const type = Object.keys(store.ALLOWED_IMAGES).find((k) => store.ALLOWED_IMAGES[k] === ext) || 'application/octet-stream';
-    // `pipe` does not forward the source's errors, so a read failure here is an
-    // unhandled 'error' event that takes the process down. The window is real:
-    // the file is located, then opened, and it can be removed in between --
-    // clearing an avatar does exactly that. Same crash shape as the malformed
-    // name above, and reached by the same cache-busted request the detail page
-    // sends after every upload.
+    // `pipe` does not forward the source's errors, so a read failure here would
+    // be an unhandled 'error' event that takes the process down. The window is
+    // real: the file is located, then opened, and it can be removed in between
+    // -- clearing an avatar does exactly that.
+    //
+    // The status is deliberately withheld until the stream opens. Writing 200
+    // first and handling the error afterwards does stop the crash, but the
+    // headers are already committed by then, so a missing file answers 200 with
+    // an empty body: a success status for a picture that is not there, which
+    // renders as a broken image. That is the exact symptom this branch exists
+    // to remove, so it is worth the extra event.
     const stream = fs.createReadStream(file);
+    stream.on('open', () => {
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+      stream.pipe(res);
+    });
     stream.on('error', () => {
-      // Headers may already be on the wire; there is nothing useful to say at
-      // that point, so end the response rather than trying to rewrite it.
       if (!res.headersSent) res.writeHead(404);
       res.end();
     });
-    res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
-    stream.pipe(res);
     return;
   }
 
@@ -206,6 +211,16 @@ const server = http.createServer((req, res) => {
         sendJson(res, 200, store.writeProfile(name, clean));
       })
       .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+    return;
+  }
+
+  // Anything under /api/ that reached here matched no handler -- usually a
+  // method the route does not implement, e.g. PATCH on an avatar. Falling
+  // through to the page would answer an API call with HTML at 200, which is the
+  // same silent-success failure the query-string bug produced. Different way
+  // in, identical signature, so it is closed here rather than route by route.
+  if (pathname.startsWith('/api/')) {
+    sendJson(res, 404, { error: 'no such endpoint' });
     return;
   }
 
@@ -253,11 +268,11 @@ function start(port = PORT) {
     // running on 4317, which is the common case -- is an unhandled 'error'
     // event that exits with a raw stack trace. Returning a Promise implies the
     // caller can be told; this makes that true.
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
-      server.removeListener('error', reject);
-      resolve(server);
-    });
+    const onError = (err) => { server.removeListener('listening', onListening); reject(err); };
+    const onListening = () => { server.removeListener('error', onError); resolve(server); };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, '127.0.0.1');
   });
 }
 
@@ -270,6 +285,15 @@ if (require.main === module) {
     // would announce itself on port 0.
     process.stdout.write(`Agent Workforce on http://127.0.0.1:${server.address().port}\n`);
     process.stdout.write('Local only. It writes, and it has no login yet.\n');
+  }).catch((err) => {
+    // Say what to do rather than name an exception. A raw EADDRINUSE stack is
+    // exactly what start()'s promise exists to replace, and leaving this
+    // uncaught made the comment above it a lie.
+    const detail = err && err.code === 'EADDRINUSE'
+      ? `port ${PORT} is already in use — is a board already running?`
+      : String(err && err.message);
+    process.stderr.write(`Agent Workforce could not start: ${detail}\n`);
+    process.exit(1);
   });
 }
 

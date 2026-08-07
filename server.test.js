@@ -39,7 +39,12 @@ test.before(async () => {
   await start(0); // 0 = let the OS pick, so tests never collide with a real board
   base = `http://127.0.0.1:${server.address().port}`;
 });
-test.after(() => server.close());
+test.after(() => {
+  // fetch keeps sockets warm, and close() waits for them. Without this the
+  // suite can hang on a slower dispatcher even though every test has passed.
+  server.closeAllConnections();
+  server.close();
+});
 
 async function req(path, options) {
   const res = await fetch(base + path, options);
@@ -62,12 +67,28 @@ test('a query string does not change which handler answers', async () => {
     'the same path should get the same answer with or without a query string');
 });
 
-test('an API route never answers with HTML', async () => {
+test('an API route never answers with HTML, whatever the query string or method', async () => {
   // The shape of the failure matters more than any single route: the caller
   // asked for data and got a web page, with a success status attached.
-  for (const path of ['/api/status', '/api/status?t=1', '/api/status?a=b&c=d']) {
-    const res = await req(path);
-    assert.ok(!res.type.includes('text/html'), `${path} answered with the page`);
+  //
+  // A query string was one way to fall through to the page. An unhandled
+  // METHOD is another with the identical signature -- PATCH on an avatar
+  // matched no guard and returned the index at 200 -- so both axes are pinned
+  // here. An earlier version of this test only tried query strings and passed
+  // while the method axis was wide open.
+  const cases = [
+    ['/api/status', undefined],
+    ['/api/status?t=1', undefined],
+    ['/api/status?a=b&c=d', undefined],
+    ['/api/agent/angel/avatar', { method: 'PATCH' }],
+    ['/api/agent/angel/profile', { method: 'POST' }],
+    ['/api/agent/angel/profile?t=1', { method: 'GET' }],
+    ['/api/nonsense', undefined],
+  ];
+  for (const [path, options] of cases) {
+    const res = await req(path, options);
+    assert.ok(!res.type.includes('text/html'),
+      `${options ? options.method + ' ' : ''}${path} answered with the page`);
   }
 });
 
@@ -122,15 +143,21 @@ test('a malformed name is refused on the write routes too, without crashing', as
 // The catch-all still works
 // ---------------------------------------------------------------------------
 
-test('an existing avatar is served with the cache-buster the detail page actually sends', async () => {
+test('an existing avatar is served with the cache-buster the detail page actually sends', async (t) => {
   // The positive half of the bug. The 404 case pins the routing, but this is
   // the request that was broken in the browser: an avatar that exists, asked
   // for with `?t=<now>`. Skipped when no agent on this machine has one, so the
   // suite does not depend on fleet state to pass.
   const board = await req('/api/status');
-  if (!board.type.includes('application/json')) return;
+  if (!board.type.includes('application/json')) {
+    return t.skip('the status engine did not return a board on this machine');
+  }
   const withAvatar = (JSON.parse(board.body).agents || []).find((a) => a.hasAvatar);
-  if (!withAvatar) return;
+  if (!withAvatar) {
+    // Reported as skipped rather than passed. A bare return here printed a tick
+    // for a test that asserted nothing, which is worse than no test.
+    return t.skip('no agent on this machine has an avatar');
+  }
 
   const name = encodeURIComponent(withAvatar.sessionName);
   const bare = await req(`/api/agent/${name}/avatar`);
@@ -197,4 +224,33 @@ test('decodeSegment returns null on a malformed escape rather than throwing', ()
   assert.equal(decodeSegment('%'), null);
   assert.equal(decodeSegment('%zz'), null);
   assert.doesNotThrow(() => decodeSegment('%E0%A4%A'));
+});
+
+// ---------------------------------------------------------------------------
+// A file that vanishes between being found and being opened
+// ---------------------------------------------------------------------------
+
+test('an avatar that disappears mid-request answers 404, not an empty 200', async () => {
+  // Two failures live here. The first is a crash: `pipe` does not forward the
+  // source's errors, so an unhandled 'error' event killed the process.
+  //
+  // The second is subtler and was introduced by the obvious fix. Writing the
+  // 200 header first and catching the error afterwards stops the crash, but the
+  // headers are already committed, so the caller gets a success status and an
+  // empty body -- a picture that is not there, reported as fine, rendering as a
+  // broken image. That is the exact symptom this branch exists to remove, so
+  // "it no longer crashes" is not the bar.
+  const store = require('./engine/store');
+  const original = store.avatarPath;
+  store.avatarPath = () => '/tmp/definitely-not-a-real-avatar-' + Date.now() + '.png';
+  try {
+    const res = await req('/api/agent/angel/avatar?t=1');
+    assert.equal(res.status, 404, 'a missing file must not answer 200');
+    assert.equal(res.body.length, 0);
+  } finally {
+    store.avatarPath = original;
+  }
+
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on a vanished avatar file');
 });
