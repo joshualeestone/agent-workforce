@@ -122,6 +122,25 @@ test('a malformed name is refused on the write routes too, without crashing', as
 // The catch-all still works
 // ---------------------------------------------------------------------------
 
+test('an existing avatar is served with the cache-buster the detail page actually sends', async () => {
+  // The positive half of the bug. The 404 case pins the routing, but this is
+  // the request that was broken in the browser: an avatar that exists, asked
+  // for with `?t=<now>`. Skipped when no agent on this machine has one, so the
+  // suite does not depend on fleet state to pass.
+  const board = await req('/api/status');
+  if (!board.type.includes('application/json')) return;
+  const withAvatar = (JSON.parse(board.body).agents || []).find((a) => a.hasAvatar);
+  if (!withAvatar) return;
+
+  const name = encodeURIComponent(withAvatar.sessionName);
+  const bare = await req(`/api/agent/${name}/avatar`);
+  const busted = await req(`/api/agent/${name}/avatar?t=${Date.now()}`);
+
+  assert.match(bare.type, /^image\//);
+  assert.match(busted.type, /^image\//, 'the cache-busted form returned the page instead of the image');
+  assert.equal(busted.body.length, bare.body.length);
+});
+
 test('a non-API path still serves the page, with or without a query string', async () => {
   // `?limit=2` is what the board itself uses to test small fleets.
   for (const path of ['/', '/anything', '/?limit=2']) {
@@ -158,6 +177,18 @@ test('pathOf refuses targets carrying an authority rather than discarding the ho
   assert.equal(pathOf({ url: '//evil.example/api/status' }), '/');
   assert.equal(pathOf({ url: 'http://other.example/api/status' }), '/');
   assert.equal(pathOf({ url: '//api/status' }), '/');
+});
+
+test('pathOf is not fooled by a backslash, which the URL parser treats as a slash', () => {
+  // The first version of the guard was `raw.startsWith('//')`, and these got
+  // past it: the parser normalises `\` to `/` for http, so each of these is
+  // authority-form while looking like an ordinary absolute path. Each resolved
+  // to host `evil.example` and pathname `/api/status`, and the test written
+  // alongside that guard passed anyway because it only tried the `//` spelling.
+  // Kept as its own case because it is the one a syntactic check gets wrong.
+  assert.equal(pathOf({ url: '/\\evil.example/api/status' }), '/');
+  assert.equal(pathOf({ url: '/\\/evil.example/api/status' }), '/');
+  assert.equal(pathOf({ url: '\\\\evil.example/api/status' }), '/');
 });
 
 test('decodeSegment returns null on a malformed escape rather than throwing', () => {
