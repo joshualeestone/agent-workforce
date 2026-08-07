@@ -266,7 +266,7 @@ test('an avatar that disappears mid-request answers 404, not an empty 200', asyn
   try {
     const res = await req('/api/agent/angel/avatar?t=1');
     assert.equal(res.status, 404, 'a missing file must not answer 200');
-    assert.equal(res.body.length, 0);
+    assert.match(res.type, /application\/json/, 'API errors carry a readable message, not an empty body');
   } finally {
     store.avatarPath = original;
   }
@@ -275,7 +275,7 @@ test('an avatar that disappears mid-request answers 404, not an empty 200', asyn
   assert.match(alive.type, /application\/json/, 'server died on a vanished avatar file');
 });
 
-test('a target carrying someone else authority is refused, not answered with the page', async () => {
+test('a target carrying a foreign authority is refused, not answered with the page', async () => {
   // Absolute-form is legal on the wire and Node passes it through verbatim, so
   // a proxy in front of this port can send it. Answering it with the index at
   // 200 is the same silent-success shape as the query-string bug: the caller
@@ -294,4 +294,31 @@ test('a target carrying someone else authority is refused, not answered with the
   });
   assert.match(raw, /^HTTP\/1\.1 400 /, 'absolute-form with a foreign host should be refused');
   assert.ok(!raw.includes('<!doctype html>'), 'answered an API path with the page');
+});
+
+test('a directory in the avatar store answers 404, not an empty 200', async () => {
+  // `open` succeeding is not proof the read will. A directory opens fine and
+  // fails on the first read, which lands after the 200 header is committed --
+  // so the caller gets a success status and a zero-byte picture, the exact
+  // broken-image symptom this branch removes. store.avatarPath prefix-scans the
+  // directory and returns any matching entry, directories included.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
+
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-notafile-'));
+  const asDir = nodePath.join(dir, 'angel.png');
+  fs.mkdirSync(asDir);
+
+  const original = store.avatarPath;
+  store.avatarPath = () => asDir;
+  try {
+    const res = await req('/api/agent/angel/avatar?t=1');
+    assert.equal(res.status, 404, 'a directory must not be served as a picture');
+    assert.ok(!res.type.includes('image/'), 'answered with an image content-type for a directory');
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
