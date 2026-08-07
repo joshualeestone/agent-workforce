@@ -467,3 +467,87 @@ test('an avatar response carries no content-length, so a short read cannot desyn
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('cancelled avatar requests do not kill the server', async () => {
+  // The scenario the pipeline choice was justified by, and the one that had no
+  // test: it turned out `pipeline` THROWS synchronously on an already-destroyed
+  // destination, and since the call sits inside a 'readable' handler that throw
+  // was an uncaught exception that exited the process.
+  //
+  // This is ordinary use. A browser cancels in-flight <img> loads as a matter
+  // of course, and the detail page re-sets img.src with a fresh ?t= on every
+  // render, so a person clicking between agents produces exactly this.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
+
+  // A payload big enough that the response cannot complete before the abort.
+  const big = Buffer.alloc(3 * 1024 * 1024, 7);
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-abort-'));
+  const fixture = nodePath.join(dir, 'angel.png');
+  fs.writeFileSync(fixture, big);
+
+  // Catch the throw directly. Asserting only "the server still answers" is not
+  // enough here: under the test runner these surface as uncaughtException
+  // events that the runner absorbs, so the process survives the suite while the
+  // same code would exit a real `node server.js`. Counting them is what makes
+  // this test fail on the bug instead of merely printing errors beside a tick.
+  const uncaught = [];
+  const onUncaught = (err) => uncaught.push(err);
+  process.on('uncaughtException', onUncaught);
+
+  const original = store.avatarPath;
+  store.avatarPath = () => fixture;
+  try {
+    for (let i = 0; i < 120; i++) {
+      const ac = new AbortController();
+      const p = fetch(`${base}/api/agent/angel/avatar?t=${i}`, { signal: ac.signal })
+        .then((r) => r.arrayBuffer())
+        .catch(() => {}); // aborts reject; that is the point
+      // Cancel immediately, so some land before the header and some mid-body.
+      setTimeout(() => ac.abort(), i % 3);
+      await p.catch(() => {});
+    }
+    // Let any deferred throw land before we judge.
+    await new Promise((r) => setTimeout(r, 400));
+  } finally {
+    store.avatarPath = original;
+    process.removeListener('uncaughtException', onUncaught);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(uncaught.map((e) => e.code), [],
+    `cancelled requests threw: ${uncaught.map((e) => e.code).join(', ')} -- in a real process each of these exits the board`);
+
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on cancelled avatar requests');
+});
+
+test('HEAD on an avatar runs the whole stat and stream path without a body', async () => {
+  // The avatar route is the one whose HEAD path exercises the stat, stream and
+  // pipeline machinery this branch rewrote; /api/status alone does not.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const store = require('./engine/store');
+
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-head-'));
+  const fixture = nodePath.join(dir, 'angel.png');
+  fs.writeFileSync(fixture, PNG);
+
+  const original = store.avatarPath;
+  store.avatarPath = () => fixture;
+  try {
+    const res = await req('/api/agent/angel/avatar?t=1', { method: 'HEAD' });
+    assert.equal(res.status, 200);
+    assert.match(res.type, /^image\/png/);
+    assert.equal(res.body.length, 0, 'HEAD must not carry a body');
+  } finally {
+    store.avatarPath = original;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -211,6 +211,17 @@ const server = http.createServer((req, res) => {
       }
       const stream = fs.createReadStream(file);
       stream.once('readable', () => {
+        // The client may already be gone. Deferring the header to 'readable'
+        // is what stops an empty 200, but it opens a window in which `res` can
+        // be destroyed before we get here -- and `pipeline` THROWS
+        // synchronously on a destroyed destination, which from inside this
+        // handler is an uncaught exception that exits the process.
+        //
+        // This is ordinary use, not an attack: a browser cancels in-flight
+        // <img> loads routinely, and the detail page re-sets img.src with a
+        // fresh ?t= on every render. Cancelled avatar requests killed the
+        // board.
+        if (res.destroyed || res.writableEnded) { stream.destroy(); return; }
         // Deliberately no content-length. It would have to come from the stat,
         // while the bytes come from a separate read of the same file, and
         // store.saveAvatar writes non-atomically -- so a stat that under-reports
@@ -218,13 +229,21 @@ const server = http.createServer((req, res) => {
         // bytes landing on the wire afterwards and desyncing a keep-alive
         // connection. Chunked costs a few bytes and cannot do that.
         res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
-        pipeline(stream, res, () => {
+        // Belt and braces: the check above closes the window we know about, and
+        // a throw here would still be fatal, so it is caught rather than
+        // trusted not to happen.
+        try {
+          pipeline(stream, res, () => {
           // A failure after the header is committed cannot be reported as a
           // status. Destroying the response cuts the connection mid-chunk, so
           // the client sees a broken transfer rather than a clean short body it
           // would treat as the whole picture.
+            if (!res.writableEnded) res.destroy();
+          });
+        } catch {
+          stream.destroy();
           if (!res.writableEnded) res.destroy();
-        });
+        }
       });
       stream.once('error', () => {
         if (!res.headersSent) sendJson(res, 404, { error: 'that picture could not be read' });
