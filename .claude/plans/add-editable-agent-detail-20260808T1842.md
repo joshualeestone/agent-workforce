@@ -194,9 +194,9 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | size half of the read guard | fails |
 | `lstat` to `stat` on the FILE (symlink) | fails |
 | `lstat` to `stat` on the DIRECTORY (symlink) | fails |
-| `dirEscapes` on the READ path | fails |
-| `dirEscapes` in `staleness` | fails |
+| `dirEscapes` in `inspect` (read and staleness share it) | fails |
 | `dirEscapes` on the WRITE path | fails |
+| The linked-folder check in `status.readIdentity` | fails |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -346,6 +346,22 @@ decided whether to offer an editor by regex-matching this module's English
 prose, so rewording one sentence would have silently removed the ability to
 write a first instruction file. The engine now answers that as a field.
 
+Iteration 9 found no blockers. Its useful finding was a FOURTH reader of the
+workers root: `status.readIdentity` still followed a linked worker folder, so
+the board rendered a name and role parsed out of a file outside the root and
+presented it as that agent's identity, while the instructions route for the same
+agent correctly refused. Three paths had been closed and the one in the other
+module had not, which is the same shape as everything else this loop has found.
+
+It also caught two rows of this table describing what is now a single call site
+after the `inspect` restructure, which overstated independent coverage in the
+document written to catch exactly that. They are now one row.
+
+And it caught a mistake of mine: a `sed` I ran to return 409 on a conflict was
+too broad and pasted conflict-detection onto three routes that cannot produce
+one, implying a behaviour those routes do not have. Reverted to the single
+writer that throws it.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Five rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
@@ -355,4 +371,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**172 tests, zero dependencies.**
+**173 tests, zero dependencies.**

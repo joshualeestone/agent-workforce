@@ -802,6 +802,34 @@ test('a staleness answer for such a name is a real verdict, not unknown', () => 
   assert.ok(got.startedAt, 'a real verdict must say when the session started');
 });
 
+test('the status engine does not read an identity through a linked worker folder', () => {
+  // ⚠️ The FOURTH reader of the workers root, and the last one to be closed.
+  // `instructions.js` refuses a linked worker folder on all three of its paths;
+  // `readIdentity` did not, so the board rendered a name and role parsed from a
+  // file outside the root and presented it as that agent's identity, while the
+  // instructions route for the same agent correctly refused.
+  const status = require('./status');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-idlink-'));
+  fs.writeFileSync(path.join(outside, 'CLAUDE.md'),
+    'You are **Outside**, the file outside the root that must not be served.\n');
+  const link = path.join(ROOT, 'idlinkagent');
+  try {
+    fs.symlinkSync(outside, link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    const id = status.readIdentity('idlinkagent');
+    assert.equal(id.derived, false, 'an identity was derived through a directory symlink');
+    assert.notEqual(id.displayName, 'Outside', 'content from outside the root was served as a name');
+    assert.equal(id.role, null);
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('the status engine resolves worker files under the SAME root as this module', () => {
   // ⚠️ Pins the one thing keeping `node --test` off the live CLAUDE.md files
   // that real agents boot from. `status.js` used to carry its own hardcoded

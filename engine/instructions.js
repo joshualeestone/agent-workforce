@@ -232,9 +232,13 @@ function inspect(agent) {
 
   const dir = path.dirname(file);
   if (!fs.existsSync(dir)) {
-    // No folder at all is not the same as no file: there is nowhere to save to,
-    // and the screen needs to know the difference before offering an editor.
-    return { file, ok: false, noDir: true, because: 'this agent has no folder on this computer yet' };
+    // No folder at all is not the same as no file. Both are `ok: false`, but
+    // only the missing FILE is something this screen can create, and that
+    // difference is carried by `missing` below, which `read` turns into
+    // `editable`. Deliberately NOT a separate flag: an earlier version set a
+    // `noDir` nobody read, with a comment crediting it for behaviour that came
+    // from somewhere else entirely.
+    return { file, ok: false, because: 'this agent has no folder on this computer yet' };
   }
 
   let stat;

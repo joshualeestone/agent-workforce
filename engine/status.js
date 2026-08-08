@@ -457,7 +457,29 @@ function readIdentity(sessionName) {
   const override = IDENTITY_OVERRIDES[sessionName];
   if (override) return { ...override, derived: true, source: 'override' };
 
-  const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
+  const dir = path.join(WORKERS_DIR, sessionName);
+  const file = path.join(dir, 'CLAUDE.md');
+
+  // ⚠️ The worker directory must be a real directory, never a link.
+  //
+  // `engine/instructions.js` refuses a linked worker folder on all three of its
+  // paths, and this was the FOURTH reader of the same root and did not. With
+  // `<ROOT>/leo` linked elsewhere, the board rendered a name and role parsed out
+  // of a file outside the workers root, presented as that agent's identity,
+  // while the instructions route for the same agent correctly refused. Two
+  // surfaces disagreeing about one agent, again.
+  //
+  // Checked here rather than imported, because `instructions.js` already
+  // requires this module and the reverse would be a cycle. Kept deliberately
+  // identical in behaviour to `dirEscapes` there.
+  try {
+    if (!fs.lstatSync(dir).isDirectory()) {
+      return { displayName: sessionName, role: null, derived: false };
+    }
+  } catch {
+    return { displayName: sessionName, role: null, derived: false };
+  }
+
   let text;
   try {
     text = fs.readFileSync(file, 'utf8').slice(0, 4000);

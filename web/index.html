@@ -307,7 +307,7 @@ svg { display: block; }
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
     <textarea id="d-instr" rows="14" spellcheck="true"></textarea>
     <div class="frow instr-foot">
-      <div class="fpath">Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
+      <div class="fpath" id="d-instr-foot">Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
       <button class="btn" id="d-instr-save" type="button">Save</button>
     </div>
     <!-- Announced: this is the only channel for every outcome of the most
@@ -704,7 +704,11 @@ async function loadInstructions(sessionName) {
     // made after this load.
     INSTR_VERSION = data.version || null;
     INSTR_READY = true;
-    pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
+    // Only name the file when it is one this screen can actually save to.
+    // Otherwise the footer said "a real file you can also edit by hand" about
+    // a path the panel had just refused, or about an agent with no folder.
+    pathEl.textContent = data.editable ? (data.path || '').replace(/^\/Users\/[^/]+/, '~') : '';
+    document.getElementById('d-instr-foot').hidden = !data.editable;
 
     // Any message left over from the in-flight window (a Save clicked before
     // this load landed) is about a state that no longer holds.
@@ -814,9 +818,14 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   btn.disabled = true;
   msg.textContent = 'Saving…';
   try {
+    // ⚠️ The fetch's own rejection is caught HERE and replaced. Downstream,
+    // every throw carries a message the server wrote on purpose, so the catch
+    // can pass those through verbatim. `err.message || fallback` could not tell
+    // the two apart, because "Failed to fetch" is perfectly truthy.
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, version: INSTR_VERSION }) });
+        body: JSON.stringify({ text, version: INSTR_VERSION }) })
+      .catch(() => { throw new Error('That did not save. The board may have stopped.'); });
     const data = await res.json();
     if (!CURRENT || CURRENT.sessionName !== forAgent) return; // another agent is open now
     if (!res.ok) throw new Error(data.error || 'that did not work');
@@ -828,6 +837,8 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     await tick();
   } catch (err) {
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    // Safe to show verbatim: the only throws that reach here are the server's
+    // own curated messages, plus the one substituted at the fetch above.
     msg.textContent = err.message;
   } finally {
     // Only for the agent this save was for. Otherwise a save started on A
