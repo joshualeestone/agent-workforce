@@ -78,9 +78,12 @@ test.after(() => {
   // suite can hang on a slower dispatcher even though every test has passed.
   server.closeAllConnections();
   server.close();
-  // Every run otherwise leaks one temp directory holding commitment records
-  // under real agent names.
+  // Every run otherwise leaks a temp directory: SANDBOX holds commitment
+  // records under real agent names, WORKERS holds the instruction files the
+  // route tests write. Both, not just the first: WORKERS was added later and
+  // the cleanup was not extended with it.
   fs.rmSync(SANDBOX, { recursive: true, force: true });
+  fs.rmSync(WORKERS, { recursive: true, force: true });
 });
 
 /**
@@ -868,6 +871,31 @@ test('a successful PUT rewrites the file and answers with the new stale state', 
 
   const back = await req(`/api/agent/${name}/instructions`);
   assert.equal(JSON.parse(back.body).text, text, 'a re-read did not see the write');
+});
+
+test('the route refuses a save that would overwrite an edit made since the read', async (t) => {
+  const name = await anyAgent(t);
+  if (!name) return;
+  const dir = nodePath.join(WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = nodePath.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(file, 'The version the editor was shown when the panel opened.');
+
+  const opened = JSON.parse((await req(`/api/agent/${name}/instructions`)).body);
+  assert.ok(opened.editedAt, 'GET must say which version it served');
+
+  // Someone edits the file while the panel sits open.
+  const outside = 'AN EDIT MADE OUTSIDE THE APP THAT MUST NOT BE LOST';
+  fs.writeFileSync(file, outside);
+  fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+
+  const res = await req(`/api/agent/${name}/instructions`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'a'.repeat(40), editedAt: opened.editedAt }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(JSON.parse(res.body).error, /changed since you opened them/);
+  assert.equal(fs.readFileSync(file, 'utf8'), outside, 'the outside edit was destroyed');
 });
 
 test('an unparseable body is refused with a readable message, not an exception name', async (t) => {

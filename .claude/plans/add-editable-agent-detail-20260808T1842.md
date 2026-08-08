@@ -203,6 +203,9 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Temp write flag `wx` to default (symlink) | fails |
 | `staleness` `lstat` to `stat` (symlink) | fails (2 tests) |
 | Malformed-JSON message guard | fails |
+| File-mode preservation across the rename | fails |
+| Changed-since-read refusal (engine) | fails (2 tests) |
+| Route forwarding `editedAt` | fails |
 | Containment assertion in `fileFor` | **green, declared untested in code and test** |
 | `iso()` NaN guard | **green, declared untested in code** |
 
@@ -217,6 +220,24 @@ one question drift and one cannot. That is the same root cause as the original
 finding, one level down, which is why the fix is structural rather than another
 condition.
 
+Iteration 3 found no blockers, and its most useful findings were two comments of
+mine that asserted something false. Both claimed the unusable-mtime guard
+prevented an agent being shown as `current` when we could not date its file.
+`compare` tests `!editedAt` first and both NaN and the epoch are falsy, so both
+already reached `unknown` by another route: the guard buys an accurate reason
+and no bogus 1970 timestamp, and nothing more. The claims are corrected in place
+rather than deleted, because a guard documented as preventing a failure it
+cannot prevent is the same defect as a test that pins nothing, and quietly
+removing the sentence would leave the next reader to rediscover it.
+
+It also found that a save widened the file's permissions (0600 became 0644,
+verified) and that a save was an unconditional overwrite: the file is read once
+when the panel opens, so an agent rewriting its own instructions, or the
+operator editing by hand, was destroyed without warning by a panel that had been
+sitting open. The read now carries `editedAt` and a save that would clobber a
+newer version is refused, because two versions cannot be merged and picking the
+one in the textarea is picking silently.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
@@ -225,4 +246,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**159 tests, zero dependencies.**
+**163 tests, zero dependencies.**

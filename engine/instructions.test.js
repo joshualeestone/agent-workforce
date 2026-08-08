@@ -335,6 +335,50 @@ test('a file that exists but cannot be opened is never silently replaced', () =>
   }
 });
 
+test('the original file permissions survive a save', () => {
+  // A fresh temp file is created at 0666 minus the umask and the rename carries
+  // that mode onto the target, so a file deliberately locked to 0600 came out
+  // 0644 after one save. Widening the permissions of the most sensitive file
+  // this product writes, as a side effect of an unrelated edit, is not
+  // something anyone would be told about.
+  const file = makeAgent('modetest');
+  fs.chmodSync(file, 0o600);
+  instructions.write('modetest', 'New instructions for the permissions test agent.');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600,
+    'the save widened the file permissions');
+});
+
+test('a save is refused when the file changed after it was read', () => {
+  // The file is read once, when the panel opens. An agent rewriting its own
+  // instructions, or the operator editing by hand, is invisible to a panel that
+  // has been sitting open, and an unconditional save destroys that work with no
+  // warning. We cannot merge two versions, so refusing is the only honest
+  // answer.
+  const file = makeAgent('conflicttest');
+  const opened = instructions.read('conflicttest');
+  assert.ok(opened.editedAt, 'the read must say which version it showed');
+
+  // Someone else edits it after the panel opened.
+  fs.writeFileSync(file, 'AN EDIT MADE OUTSIDE THIS EDITOR THAT MUST SURVIVE');
+  fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+
+  assert.throws(() => instructions.write('conflicttest', REAL, opened.editedAt),
+    /changed since you opened them/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'AN EDIT MADE OUTSIDE THIS EDITOR THAT MUST SURVIVE',
+    'the outside edit was overwritten anyway');
+
+  // And the current version saves cleanly.
+  const fresh = instructions.read('conflicttest');
+  instructions.write('conflicttest', REAL, fresh.editedAt);
+  assert.equal(fs.readFileSync(file, 'utf8'), REAL);
+});
+
+test('a write with no expected version still works, for scripts and first saves', () => {
+  makeAgent('noexpecttest');
+  instructions.write('noexpecttest', 'Saved without claiming which version was open.');
+  assert.match(fs.readFileSync(path.join(ROOT, 'noexpecttest', 'CLAUDE.md'), 'utf8'), /without claiming/);
+});
+
 test('a planted temp file cannot redirect the write out of the root', () => {
   // The third symlink route, and the one that bypasses every other guard
   // because it is not the path any of them look at. The temp name is
@@ -484,13 +528,18 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
   // hand back, and NaN, which has to be injected because no real file carries
   // one. Both must reach the SAME refusal.
   //
-  // ⚠️ This asserts the `because`, not just the state, and that is the whole
-  // point. Every path through this function returns `unknown` for these inputs
-  // one way or another, so a test that only checked the state would stay green
-  // against the guard being deleted: NaN is falsy, so it falls through to a
-  // later branch and still reads `unknown`, while an epoch mtime sails past and
-  // gets compared as a real date in 1970, which resolves to `current`. The
-  // reason string is the only observable that tells the two apart.
+  // ⚠️ This asserts the `because` and the absent `editedAt`, not just the
+  // state, and that is the whole point. BOTH inputs already reach `unknown`
+  // without this guard, by a different route: `compare` tests `!editedAt`
+  // first, and NaN and 0 are both falsy. So a test that only checked the state
+  // would stay green against the guard being deleted. What the guard actually
+  // buys is an accurate reason and no bogus `editedAt: 1970-01-01` on the wire,
+  // and those are the only observables that tell the two paths apart.
+  //
+  // An earlier version of this comment said an epoch mtime would otherwise
+  // resolve to `current`. That was wrong, and it is corrected here rather than
+  // quietly deleted, because a test whose stated rationale is false is how a
+  // future reader concludes the guard is more load-bearing than it is.
   const epochFile = makeAgent('epochtime');
   fs.utimesSync(epochFile, new Date(0), new Date(0));
   makeAgent('nantime');

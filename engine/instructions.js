@@ -205,11 +205,17 @@ function staleness(agent) {
     return { state: STALENESS.UNKNOWN, because: 'it has no instruction file yet' };
   }
 
-  // An mtime can arrive as NaN, and on some filesystems as the epoch. Both have
-  // to stop here rather than be reported: NaN would otherwise be handed to
-  // `toISOString`, and an epoch mtime compared against a real session start
-  // reads as "edited in 1970", which resolves to `current` and tells someone
-  // their agent is running on what they are looking at when we have no idea.
+  // An mtime can arrive as NaN, and on some filesystems as the epoch. Both stop
+  // here so the answer says which kind of not-knowing it is, and so we do not
+  // report `editedAt: 1970-01-01` as though it were a real edit time.
+  //
+  // ⚠️ What this does NOT do, corrected after a reviewer checked it: neither
+  // value would otherwise resolve to `current`. `compare` tests `!editedAt`
+  // first and both NaN and 0 are falsy, so both already land on `unknown` by a
+  // different route. An earlier version of this comment claimed the guard
+  // prevented an agent being shown as running on instructions we could not
+  // date. It does not, and a guard documented as preventing a failure it cannot
+  // prevent is the same defect as a test that pins nothing.
   if (!Number.isFinite(editedAt) || editedAt <= 0) {
     return {
       state: STALENESS.UNKNOWN,
@@ -313,7 +319,16 @@ function read(agent) {
     };
   }
 
-  return { exists: true, path: file, text, staleness: staleness(agent) };
+  // `editedAt` rides on the read so the editor can hand it back on save and we
+  // can tell whether the file moved underneath it. Taken from the same `stat`
+  // the guards above used, so it describes the file that was actually read.
+  return {
+    exists: true,
+    path: file,
+    text,
+    editedAt: iso(stat.mtime.getTime()),
+    staleness: staleness(agent),
+  };
 }
 
 /**
@@ -321,8 +336,11 @@ function read(agent) {
  *
  * Refuses rather than creates: an agent with no worker directory is not an
  * agent this app knows about, and writing one into existence invents it.
+ *
+ * `expectedEditedAt` is the `editedAt` the caller was last shown. When given,
+ * a file that has changed since is refused rather than overwritten.
  */
-function write(agent, text) {
+function write(agent, text, expectedEditedAt) {
   const file = fileFor(agent);
   if (!file) throw new Error('that is not a name we can look up');
 
@@ -363,10 +381,26 @@ function write(agent, text) {
   // `read` returned "no instruction file yet" for that, the guard saw a
   // perfectly ordinary regular file, and the save destroyed it. Two derivations
   // of one question drift; one cannot.
-  let existing = true;
-  try { fs.lstatSync(file); } catch { existing = false; }
-  if (existing && !read(agent).exists) {
+  let before = null;
+  try { before = fs.lstatSync(file); } catch { before = null; }
+  const shown = before ? read(agent) : null;
+  if (before && !shown.exists) {
     throw new Error('there is already a file there that this editor cannot safely replace, open it by hand');
+  }
+
+  // ⚠️ Refuse to overwrite an edit that happened while this editor was open.
+  //
+  // The file is read once, when the panel opens, and nothing re-reads it after
+  // that. So an agent rewriting its own instructions, or the operator editing
+  // the file by hand, is invisible to a panel that has been sitting open, and
+  // an unconditional save destroys that work with no warning. Refusing is the
+  // only honest answer: we cannot merge two versions, and picking the one that
+  // happens to be in the textarea is picking silently.
+  //
+  // Skipped when the caller passes nothing, so a script or a first write is not
+  // forced to invent a timestamp it never saw.
+  if (expectedEditedAt && shown && shown.editedAt && shown.editedAt !== expectedEditedAt) {
+    throw new Error('these instructions changed since you opened them, reload before saving so you do not overwrite that edit');
   }
 
   // Write-then-rename. A half-written CLAUDE.md is an agent that boots with
@@ -385,6 +419,15 @@ function write(agent, text) {
     // directory, and unlike those two it bypasses every guard above because it
     // is not the path any of them check. `wx` fails rather than follows.
     fs.writeFileSync(tmp, body, { flag: 'wx' });
+    // ⚠️ Carry the original file's permissions across. A fresh temp file is
+    // created at 0666 minus the umask, and the rename carries THAT mode onto
+    // the target, so a CLAUDE.md the operator had deliberately locked to 0600
+    // came out world-readable after one save. Widening the permissions of the
+    // most sensitive file this product writes, as a side effect of an unrelated
+    // edit, is not something anyone would be told about.
+    if (before) {
+      try { fs.chmodSync(tmp, before.mode & 0o7777); } catch { /* best effort */ }
+    }
     fs.renameSync(tmp, file);
   } catch {
     // Any failure between the write and the rename otherwise leaves the temp

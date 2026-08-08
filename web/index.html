@@ -648,6 +648,9 @@ document.getElementById('grid').addEventListener('click', (e) => {
  */
 let INSTR_LOAD = 0;
 
+/** The `editedAt` of the version currently in the textarea, or null. */
+let INSTR_EDITED_AT = null;
+
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
   const box = document.getElementById('d-instr');
@@ -666,6 +669,9 @@ async function loadInstructions(sessionName) {
     if (!res.ok) throw new Error(data.error || 'that did not work');
 
     box.value = data.text || '';
+    // Remember which version this is, so Save can refuse to clobber an edit
+    // made after this load.
+    INSTR_EDITED_AT = data.editedAt || null;
     pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
     if (!data.exists) {
       msg.textContent = 'There is no instruction file for this one yet.';
@@ -732,11 +738,13 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   msg.textContent = 'Saving…';
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
-      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+      { method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, editedAt: INSTR_EDITED_AT }) });
     const data = await res.json();
     if (!CURRENT || CURRENT.sessionName !== forAgent) return; // another agent is open now
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
+    INSTR_EDITED_AT = data.editedAt || null;
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);

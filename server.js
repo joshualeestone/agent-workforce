@@ -433,7 +433,10 @@ const server = http.createServer((req, res) => {
         if (typeof patch.text !== 'string') {
           throw new Error('send the instructions as text');
         }
-        sendJson(res, 200, instructions.write(name, patch.text));
+        // `editedAt` is what the editor was last shown. Passing it through lets
+        // the engine refuse a save that would overwrite an edit made since,
+        // rather than silently picking the version in the textarea.
+        sendJson(res, 200, instructions.write(name, patch.text, patch.editedAt));
       })
       // The message reaches the person verbatim, so it says what to do rather
       // than naming an exception.

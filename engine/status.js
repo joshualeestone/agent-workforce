@@ -424,7 +424,15 @@ function readModel(agentName) {
  * `readIdentity` pointed at the operator's live `~/work/workers`. A test suite
  * that believed it was sandboxed was still reading real agents' files, and the
  * sandbox comment in server.test.js said so in good faith while being wrong.
- * One root, one variable.
+ *
+ * ⚠️ The ROOT is now shared. The per-agent SEGMENT still is not: `readIdentity`
+ * below joins the verbatim `sessionName`, while `instructions.fileFor` joins
+ * `safeKey(sessionName)`. For any agent whose session name is not already its
+ * own sanitised form, those two resolve to different directories, so the board
+ * can show a derived name and role read from one file while staleness reports
+ * "no instruction file yet" from another. It fails safe in both directions and
+ * no agent on this machine hits it. Saying "one root, one variable" and
+ * stopping there would imply the divergence is fully closed, and it is not.
  */
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
