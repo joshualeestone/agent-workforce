@@ -648,11 +648,20 @@ document.getElementById('grid').addEventListener('click', (e) => {
  */
 let INSTR_LOAD = 0;
 
-/** The `editedAt` of the version currently in the textarea, or null. */
-let INSTR_EDITED_AT = null;
+/**
+ * The `version` of what is in the textarea. A hash, not a timestamp.
+ *
+ * ⚠️ null while a load is in flight, because `loadInstructions` clears the box
+ * synchronously and only learns the version when its answer lands. Save must
+ * therefore refuse to run mid-load rather than post a token it did not receive
+ * for the text it is showing.
+ */
+let INSTR_VERSION = null;
+let INSTR_LOADED = 0;
 
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
+  INSTR_VERSION = null;
   const box = document.getElementById('d-instr');
   const pathEl = document.getElementById('d-instr-path');
   const msg = document.getElementById('d-instr-msg');
@@ -671,7 +680,8 @@ async function loadInstructions(sessionName) {
     box.value = data.text || '';
     // Remember which version this is, so Save can refuse to clobber an edit
     // made after this load.
-    INSTR_EDITED_AT = data.editedAt || null;
+    INSTR_VERSION = data.version || null;
+    INSTR_LOADED = mine;
     pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
     if (!data.exists) {
       msg.textContent = 'There is no instruction file for this one yet.';
@@ -735,16 +745,23 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   // something untrue about a different one, which is the failure this state
   // exists to prevent.
   const forAgent = CURRENT.sessionName;
+  if (INSTR_LOADED !== INSTR_LOAD) {
+    // A load is still in flight, so the box is empty and the version we hold is
+    // for whatever was open before. Saving now would post the previous agent's
+    // token against this agent's file.
+    msg.textContent = 'Still loading these instructions, try again in a moment.';
+    return;
+  }
   msg.textContent = 'Saving…';
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, editedAt: INSTR_EDITED_AT }) });
+        body: JSON.stringify({ text, version: INSTR_VERSION }) });
     const data = await res.json();
     if (!CURRENT || CURRENT.sessionName !== forAgent) return; // another agent is open now
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
-    INSTR_EDITED_AT = data.editedAt || null;
+    INSTR_VERSION = data.version || null;
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);

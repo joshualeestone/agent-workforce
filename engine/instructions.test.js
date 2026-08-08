@@ -356,21 +356,48 @@ test('a save is refused when the file changed after it was read', () => {
   // answer.
   const file = makeAgent('conflicttest');
   const opened = instructions.read('conflicttest');
-  assert.ok(opened.editedAt, 'the read must say which version it showed');
+  assert.ok(opened.version, 'the read must say which version it showed');
 
-  // Someone else edits it after the panel opened.
+  // Someone else edits it after the panel opened. The mtime is deliberately put
+  // BACK to what it was, because the guard must not depend on a timestamp: an
+  // rsync, a git checkout or a coarse-granularity volume all leave mtime alone
+  // while the bytes change, and the first version of this guard compared mtimes
+  // and was defeated by exactly this.
+  const before = fs.statSync(file).mtime;
   fs.writeFileSync(file, 'AN EDIT MADE OUTSIDE THIS EDITOR THAT MUST SURVIVE');
-  fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  fs.utimesSync(file, before, before);
 
-  assert.throws(() => instructions.write('conflicttest', REAL, opened.editedAt),
+  assert.throws(() => instructions.write('conflicttest', REAL, opened.version),
     /changed since you opened them/);
   assert.equal(fs.readFileSync(file, 'utf8'), 'AN EDIT MADE OUTSIDE THIS EDITOR THAT MUST SURVIVE',
     'the outside edit was overwritten anyway');
 
   // And the current version saves cleanly.
   const fresh = instructions.read('conflicttest');
-  instructions.write('conflicttest', REAL, fresh.editedAt);
+  instructions.write('conflicttest', REAL, fresh.version);
   assert.equal(fs.readFileSync(file, 'utf8'), REAL);
+});
+
+test('a file created while the panel was open is not silently replaced', () => {
+  // ⚠️ The case the mtime-based version could not express at all. The panel
+  // said "there is no instruction file for this one yet", so it had no
+  // timestamp to send, so the guard skipped itself, and a CLAUDE.md the agent
+  // wrote in the meantime was destroyed with no warning. `absent` is a real
+  // version, so "there was none and now there is" compares unequal like any
+  // other change.
+  fs.mkdirSync(path.join(ROOT, 'createtest'), { recursive: true });
+  const opened = instructions.read('createtest');
+  assert.equal(opened.exists, false);
+  assert.equal(opened.version, instructions.ABSENT, 'an absent file still needs a version');
+
+  const file = path.join(ROOT, 'createtest', 'CLAUDE.md');
+  fs.writeFileSync(file, 'THE AGENT WROTE ITS OWN INSTRUCTIONS WHILE THE PANEL SAT OPEN');
+
+  assert.throws(() => instructions.write('createtest', REAL, opened.version),
+    /changed since you opened them/);
+  assert.equal(fs.readFileSync(file, 'utf8'),
+    'THE AGENT WROTE ITS OWN INSTRUCTIONS WHILE THE PANEL SAT OPEN',
+    'a file created after the read was overwritten anyway');
 });
 
 test('a write with no expected version still works, for scripts and first saves', () => {

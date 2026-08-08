@@ -27,6 +27,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const store = require('./store');
 const { transcriptFor } = require('./status');
 
@@ -264,6 +265,34 @@ function compare(editedAt, startedAt) {
 }
 
 /**
+ * Which version of the file the editor was shown.
+ *
+ * ⚠️ A hash of the BYTES, deliberately not the mtime. The first version of the
+ * changed-since-read guard compared mtimes, and that was wrong twice over:
+ *
+ *   1. **It had nothing to compare on the create path.** A file that did not
+ *      exist when the panel opened has no mtime, so a save carried no version,
+ *      the guard skipped itself, and a CLAUDE.md the agent wrote in the
+ *      meantime was destroyed without warning. That is the exact failure the
+ *      guard was added to prevent, still live for the one case where the panel
+ *      says "there is no instruction file for this one yet".
+ *   2. **An mtime is not a version.** Anything that restores timestamps
+ *      (`rsync --times`, `git checkout`, a Time Machine restore) changes the
+ *      bytes while leaving the mtime alone, and a volume with one-second
+ *      granularity loses the distinction on its own.
+ *
+ * A hash has neither problem, and `absent` is a real version rather than the
+ * absence of one, so "there was no file and now there is" compares unequal like
+ * any other change. `sha256` from the standard library: no dependency.
+ */
+const ABSENT = 'absent';
+
+function versionOf(exists, text) {
+  if (!exists) return ABSENT;
+  return `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
+}
+
+/**
  * Is this something the read path is willing to show as the instruction file?
  *
  * A regular file, within the ceiling. Shared by `read` and `write` so the two
@@ -285,14 +314,14 @@ function isShowable(stat) {
 function read(agent) {
   const file = fileFor(agent);
   if (!file) {
-    return { exists: false, path: null, text: '', staleness: staleness(agent) };
+    return { exists: false, path: null, text: '', version: ABSENT, staleness: staleness(agent) };
   }
 
   let stat;
   try {
     stat = fs.lstatSync(file);
   } catch {
-    return { exists: false, path: file, text: '', staleness: staleness(agent) };
+    return { exists: false, path: file, text: '', version: ABSENT, staleness: staleness(agent) };
   }
 
   // Regular files only, and `lstat` so a symlink cannot point the read out of
@@ -303,6 +332,7 @@ function read(agent) {
       exists: false,
       path: file,
       text: '',
+      version: ABSENT,
       staleness: { state: STALENESS.UNKNOWN, because: 'its instruction file is not one we can read' },
     };
   }
@@ -315,6 +345,7 @@ function read(agent) {
       exists: false,
       path: file,
       text: '',
+      version: ABSENT,
       staleness: { state: STALENESS.UNKNOWN, because: 'its instruction file could not be read' },
     };
   }
@@ -326,6 +357,7 @@ function read(agent) {
     exists: true,
     path: file,
     text,
+    version: versionOf(true, text),
     editedAt: iso(stat.mtime.getTime()),
     staleness: staleness(agent),
   };
@@ -337,10 +369,12 @@ function read(agent) {
  * Refuses rather than creates: an agent with no worker directory is not an
  * agent this app knows about, and writing one into existence invents it.
  *
- * `expectedEditedAt` is the `editedAt` the caller was last shown. When given,
- * a file that has changed since is refused rather than overwritten.
+ * `expectedVersion` is the `version` the caller was last shown. When given, a
+ * file whose contents differ from that version is refused rather than
+ * overwritten. `absent` is a version like any other, so "there was no file when
+ * I opened this and there is one now" is a conflict, not a free pass.
  */
-function write(agent, text, expectedEditedAt) {
+function write(agent, text, expectedVersion) {
   const file = fileFor(agent);
   if (!file) throw new Error('that is not a name we can look up');
 
@@ -397,10 +431,15 @@ function write(agent, text, expectedEditedAt) {
   // only honest answer: we cannot merge two versions, and picking the one that
   // happens to be in the textarea is picking silently.
   //
-  // Skipped when the caller passes nothing, so a script or a first write is not
-  // forced to invent a timestamp it never saw.
-  if (expectedEditedAt && shown && shown.editedAt && shown.editedAt !== expectedEditedAt) {
-    throw new Error('these instructions changed since you opened them, reload before saving so you do not overwrite that edit');
+  // Compared against a HASH of the current bytes rather than a timestamp, and
+  // `absent` counts, so the create path is covered too. Skipped only when the
+  // caller supplies no version at all, which is a script or a deliberate
+  // unconditional write, never the editor.
+  if (expectedVersion) {
+    const now = shown ? shown.version : ABSENT;
+    if (now !== expectedVersion) {
+      throw new Error('these instructions changed since you opened them, reload before saving so you do not overwrite that edit');
+    }
   }
 
   // Write-then-rename. A half-written CLAUDE.md is an agent that boots with
@@ -441,6 +480,6 @@ function write(agent, text, expectedEditedAt) {
 }
 
 module.exports = {
-  ROOT, FILENAME, MAX_BYTES, MIN_CHARS, STALENESS,
-  fileFor, registryKey, sessionStartedAt, staleness, compare, read, write,
+  ROOT, FILENAME, MAX_BYTES, MIN_CHARS, STALENESS, ABSENT,
+  fileFor, registryKey, sessionStartedAt, staleness, compare, versionOf, read, write,
 };

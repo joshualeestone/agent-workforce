@@ -873,6 +873,45 @@ test('a successful PUT rewrites the file and answers with the new stale state', 
   assert.equal(JSON.parse(back.body).text, text, 'a re-read did not see the write');
 });
 
+test('both modules resolve worker files under the SAME sandboxed root', async (t) => {
+  // ⚠️ Pins the one thing standing between `node --test` and the live CLAUDE.md
+  // files that real agents boot from. `status.js` used to carry its own
+  // hardcoded `~/work/workers`, so this suite read the operator's real agents
+  // while believing it was sandboxed. Nothing pinned the fix, so reverting that
+  // one line silently restored the regression with the whole suite green.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const plain = decodeURIComponent(name);
+
+  if (plain === 'claudebot') {
+    t.skip('this agent has a hardcoded identity override, so readIdentity never reads its file');
+    return;
+  }
+
+  const dir = nodePath.join(WORKERS, plain);
+  fs.mkdirSync(dir, { recursive: true });
+  // Shaped to match what readIdentity actually parses (`You are **Name**, role`)
+  // rather than to any text that merely contains a marker.
+  const marker = 'Sandbox Marker Agent';
+  fs.writeFileSync(nodePath.join(dir, 'CLAUDE.md'),
+    `# ${plain}\n\nYou are **${marker}**, the sandbox fixture worker.\n`);
+
+  // The instruction route reads through instructions.js...
+  const got = JSON.parse((await req(`/api/agent/${name}/instructions`)).body);
+  assert.match(got.text, /Sandbox Marker Agent/, 'instructions.js read outside the sandbox');
+  assert.ok(got.path.startsWith(WORKERS),
+    `instructions.js resolved outside the sandbox: ${got.path}`);
+
+  // ...and the status payload reads through status.js readIdentity. If the two
+  // disagree about the root, this file is invisible to one of them, which is
+  // exactly the state the suite shipped in.
+  const board = JSON.parse((await req('/api/status')).body);
+  const mine = (board.agents || []).find((a) => a.sessionName === plain);
+  assert.ok(mine, 'the agent vanished from the board');
+  assert.equal(mine.name, marker,
+    'status.js did not read the sandboxed file, so it is resolving a different root');
+});
+
 test('the route refuses a save that would overwrite an edit made since the read', async (t) => {
   const name = await anyAgent(t);
   if (!name) return;
@@ -882,16 +921,18 @@ test('the route refuses a save that would overwrite an edit made since the read'
   fs.writeFileSync(file, 'The version the editor was shown when the panel opened.');
 
   const opened = JSON.parse((await req(`/api/agent/${name}/instructions`)).body);
-  assert.ok(opened.editedAt, 'GET must say which version it served');
+  assert.ok(opened.version, 'GET must say which version it served');
 
-  // Someone edits the file while the panel sits open.
+  // Someone edits the file while the panel sits open, and the mtime is put back
+  // so the guard cannot pass by comparing timestamps.
+  const before = fs.statSync(file).mtime;
   const outside = 'AN EDIT MADE OUTSIDE THE APP THAT MUST NOT BE LOST';
   fs.writeFileSync(file, outside);
-  fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  fs.utimesSync(file, before, before);
 
   const res = await req(`/api/agent/${name}/instructions`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text: 'a'.repeat(40), editedAt: opened.editedAt }),
+    body: JSON.stringify({ text: 'a'.repeat(40), version: opened.version }),
   });
   assert.equal(res.status, 400);
   assert.match(JSON.parse(res.body).error, /changed since you opened them/);
@@ -918,15 +959,23 @@ test('GET refuses an unknown agent rather than reporting a path for it', async (
   assert.equal(JSON.parse(res.body).path, undefined, 'a refusal must not hand back a filesystem path');
 });
 
-test('the status payload carries staleness but NOT the instruction text', async () => {
+test('the status payload carries staleness but NOT the instruction text', async (t) => {
   // The board polls this every five seconds for every agent, and the real files
   // run to several kilobytes each. Carrying them here would put roughly 90KB on
   // the wire per poll to render a badge.
   const res = await req('/api/status');
-  if (!res.type.includes('application/json')) return;
+  if (!res.type.includes('application/json')) {
+    t.skip('the status engine did not return a board on this machine');
+    return;
+  }
   const body = JSON.parse(res.body);
   const agents = body.agents || [];
-  if (!agents.length) return;
+  if (!agents.length) {
+    // A bare return here prints a tick for a test that asserted nothing, which
+    // is the failure `anyAgent` exists to avoid. Say it out loud instead.
+    t.skip('no live agents on this machine, so there is no payload to inspect');
+    return;
+  }
 
   for (const a of agents) {
     assert.ok(a.instructions, `${a.sessionName} has no instructions block`);

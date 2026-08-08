@@ -205,7 +205,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Malformed-JSON message guard | fails |
 | File-mode preservation across the rename | fails |
 | Changed-since-read refusal (engine) | fails (2 tests) |
-| Route forwarding `editedAt` | fails |
+| Route forwarding the version | fails |
+| `absent` as a real version (the create path) | fails |
+| Version token back to an mtime | fails (2 tests) |
+| `status.js` back to its own hardcoded workers root | fails |
 | Containment assertion in `fileFor` | **green, declared untested in code and test** |
 | `iso()` NaN guard | **green, declared untested in code** |
 
@@ -238,6 +241,24 @@ sitting open. The read now carries `editedAt` and a save that would clobber a
 newer version is refused, because two versions cannot be merged and picking the
 one in the textarea is picking silently.
 
+Iteration 4 was aimed specifically at the newest guard, on the theory that the
+last thing added is the least reviewed, and that was right. The changed-since-
+read refusal compared MTIMES, and it was wrong twice. It had nothing to compare
+on the create path, so a panel showing "there is no instruction file for this
+one yet" sent no version, the guard skipped itself, and a CLAUDE.md the agent
+wrote in the meantime was destroyed with no warning: the exact failure the guard
+was added for, still live in the one case the guard could not express. And an
+mtime is not a version at all, since anything that restores timestamps (rsync,
+git checkout, a Time Machine restore) changes the bytes and leaves the mtime
+alone. The token is now a sha256 of the contents, with `absent` as a real
+version rather than the absence of one, which closes both in the same change.
+That is the third time in this loop the answer was to stop deriving the same
+fact two ways.
+
+Iteration 4 also found that the shared workers root, the ONE thing keeping the
+test suite off twelve live agents' instruction files, was pinned by nothing:
+reverting it left the suite green. It is now pinned by a named test.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
@@ -246,4 +267,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**163 tests, zero dependencies.**
+**165 tests, zero dependencies.**
