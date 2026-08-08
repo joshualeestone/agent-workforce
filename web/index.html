@@ -706,21 +706,27 @@ async function loadInstructions(sessionName) {
     INSTR_READY = true;
     pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
 
+    // Any message left over from the in-flight window (a Save clicked before
+    // this load landed) is about a state that no longer holds.
+    msg.textContent = '';
+
     // ⚠️ `exists: false` does NOT mean there is no file. The read path also
     // refuses a file that IS there but cannot be shown: not UTF-8, over the
-    // size ceiling, unopenable, or a symlink. Saying "there is no instruction
-    // file for this one yet" in those cases is the screen asserting something
-    // untrue, and it contradicts Save, which refuses with "there is already a
-    // file there". The engine returns the real reason, so use it, and where the
-    // file cannot be edited, do not offer an editor that cannot save.
+    // size ceiling, unopenable, a symlink, or an agent with no folder at all.
+    // Saying "there is no instruction file for this one yet" in those cases is
+    // the screen asserting something untrue, and it contradicts Save.
+    //
+    // ⚠️ Keyed on `editable`, a structured field, NOT on the wording of the
+    // reason. An earlier version regex-matched the engine's English, so
+    // rewording one sentence there would have silently removed the ability to
+    // write a first instruction file. That is the same two-derivations problem
+    // the engine was restructured to remove, moved into the browser.
     if (!data.exists) {
-      const why = (data.staleness && data.staleness.because) || '';
-      const noFileAtAll = !why || /no instruction file/.test(why);
-      if (noFileAtAll) {
+      if (data.editable) {
         msg.textContent = 'There is no instruction file for this one yet.';
       } else {
-        msg.textContent = 'There is a file here, but it cannot be edited from this screen. '
-          + 'Open it by hand instead.';
+        msg.textContent = 'This cannot be edited from this screen: '
+          + (data.because || 'we cannot read it') + '.';
         INSTR_READY = false;
         box.disabled = true;
         saveBtn.disabled = true;
@@ -734,7 +740,10 @@ async function loadInstructions(sessionName) {
     // Save stays refused: we have no version, and saving without one would be
     // an unguarded overwrite of a file we could not read.
     INSTR_VERSION = null;
-    msg.textContent = err.message;
+    // Never the raw exception. A failed fetch surfaces "Failed to fetch"
+    // verbatim, which is the one place on this surface a person is most likely
+    // to see an exception name, and every other refusal here says what to do.
+    msg.textContent = 'These instructions could not be loaded. The board may have stopped.';
   }
 }
 

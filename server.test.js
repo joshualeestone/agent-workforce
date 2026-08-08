@@ -934,7 +934,9 @@ test('the route refuses a save that would overwrite an edit made since the read'
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text: 'a'.repeat(40), version: opened.version }),
   });
-  assert.equal(res.status, 400);
+  // 409, not 400: this is a conflict, not a malformed request, and a
+  // non-browser client keys on the difference to offer a reload over a retry.
+  assert.equal(res.status, 409, res.body);
   assert.match(JSON.parse(res.body).error, /changed since you opened them/);
   assert.equal(fs.readFileSync(file, 'utf8'), outside, 'the outside edit was destroyed');
 });

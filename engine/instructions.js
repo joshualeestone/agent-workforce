@@ -203,6 +203,79 @@ function iso(ms) {
 }
 
 /**
+ * Everything the FILE itself can tell us, decided exactly once.
+ *
+ * ⚠️ This exists because the same question was being answered in three places
+ * and they drifted. `read` refused a file for four separate reasons (a linked
+ * worker folder, not a regular file or over the ceiling, unopenable, not valid
+ * UTF-8); `staleness` checked only the second of those. So an agent whose
+ * instruction file the app had decided it could not read at all still got a
+ * confident verdict on its card, and with a back-dated file that verdict was
+ * `current`: a positive claim of health, plus a disclosed timestamp, about a
+ * file we cannot read. Measured, not theorised.
+ *
+ * The rule this codebase is built on is that something we cannot assess must
+ * not render as fine, and a second derivation of "can we read this" is how that
+ * rule got broken while every individual guard looked right.
+ *
+ * `ok: false` always carries a `because` that is safe to show a person.
+ */
+function inspect(agent) {
+  const file = fileFor(agent);
+  if (!file) return { file: null, ok: false, because: 'that is not a name we can look up' };
+
+  // The worker directory, before the file inside it. `fileFor` only asserts on
+  // the final component, so a linked directory escaped it entirely.
+  if (dirEscapes(file)) {
+    return { file, ok: false, because: 'its worker folder is a link, so we do not read through it' };
+  }
+
+  const dir = path.dirname(file);
+  if (!fs.existsSync(dir)) {
+    // No folder at all is not the same as no file: there is nowhere to save to,
+    // and the screen needs to know the difference before offering an editor.
+    return { file, ok: false, noDir: true, because: 'this agent has no folder on this computer yet' };
+  }
+
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch {
+    return { file, ok: false, missing: true, because: 'it has no instruction file yet' };
+  }
+
+  // Regular files only, and `lstat` so a symlink cannot point the read out of
+  // the worker directory. Reading a FIFO here would block forever inside the
+  // request handler, which is a wedge with no crash to notice.
+  if (!isShowable(stat)) {
+    return { file, stat, ok: false, because: 'its instruction file is not one we can read' };
+  }
+
+  let buf;
+  try {
+    buf = fs.readFileSync(file);
+  } catch {
+    return { file, stat, ok: false, because: 'its instruction file could not be read' };
+  }
+
+  // ⚠️ Refuse anything that would not survive being handed back. The editor
+  // round-trips through a UTF-8 string, so a file containing invalid bytes came
+  // back with every one replaced by U+FFFD: opening it and pressing Save
+  // rewrote it lossily and reported "Saved." Measured at 50 bytes in, 52 out.
+  const text = buf.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(buf)) {
+    return {
+      file,
+      stat,
+      ok: false,
+      because: 'its instruction file is not UTF-8 text, so editing it here would corrupt it',
+    };
+  }
+
+  return { file, stat, buf, text, ok: true };
+}
+
+/**
  * Is this agent running on instructions that have since been edited?
  *
  * Three states, and `unknown` is the default for anything not positively
@@ -212,34 +285,15 @@ function iso(ms) {
  * ⚠️ Never throws, and that is load-bearing rather than incidental: the status
  * route calls this once per agent, so a single throw answers 500 for the entire
  * board. There is a test named for it.
+ *
+ * `seen` lets a caller that has already inspected the file pass it in, so `read`
+ * does not do the work twice.
  */
-function staleness(agent) {
-  const file = fileFor(agent);
-  if (!file) {
-    return { state: STALENESS.UNKNOWN, because: 'that is not a name we can look up' };
-  }
+function staleness(agent, seen) {
+  const file = seen || inspect(agent);
+  if (!file.ok) return { state: STALENESS.UNKNOWN, because: file.because };
 
-  if (dirEscapes(file)) {
-    return { state: STALENESS.UNKNOWN, because: 'its worker folder is a link, so we do not read through it' };
-  }
-
-  let editedAt;
-  try {
-    // ⚠️ `lstat` and `isShowable`, matching the read path exactly. With a plain
-    // `stat` this followed a symlink, so the CARD rendered a confident "running
-    // on older instructions" from the mtime of a file outside the workers root
-    // while the DETAIL page for the same agent said it could not read anything.
-    // Two surfaces contradicting each other about one agent is worse than
-    // either answer alone, and the confident one was reporting a timestamp from
-    // a file we had already decided not to trust.
-    const stat = fs.lstatSync(file);
-    if (!isShowable(stat)) {
-      return { state: STALENESS.UNKNOWN, because: 'its instruction file is not one we can read' };
-    }
-    editedAt = stat.mtime.getTime();
-  } catch {
-    return { state: STALENESS.UNKNOWN, because: 'it has no instruction file yet' };
-  }
+  const editedAt = file.stat.mtime.getTime();
 
   // An mtime can arrive as NaN, and on some filesystems as the epoch. Both stop
   // here so the answer says which kind of not-knowing it is, and so we do not
@@ -357,97 +411,48 @@ function isShowable(stat) {
  * this is reached from the single-agent GET and from `write`. Both have to hold
  * the guarantee, because a throw from either answers 500 rather than showing
  * one agent as unreadable.
+ *
+ * Every refusal comes from `inspect`, so this and `staleness` cannot disagree
+ * about whether a file can be read. They did, and the card claimed an agent was
+ * `current` while the panel said it could not read the file at all.
  */
 function read(agent) {
-  const file = fileFor(agent);
-  if (!file) {
-    return { exists: false, path: null, text: '', version: ABSENT, staleness: staleness(agent) };
-  }
+  const seen = inspect(agent);
 
-  // The worker directory itself, before the file inside it. `fileFor` only
-  // asserts on the final component, so without this a linked directory led the
-  // read out of the root entirely.
-  if (dirEscapes(file)) {
+  if (!seen.ok) {
     return {
       exists: false,
-      path: file,
+      // ⚠️ `editable` is a STRUCTURED answer to "can this be saved", because the
+      // screen was deciding it by regex-matching this module's English prose.
+      // Rewording a sentence would silently have removed the ability to write a
+      // first instruction file, which is the same two-derivations-of-one-fact
+      // problem as the blocker above, moved into the browser.
+      //
+      // NOT pinned by a test, and declared rather than implied: the whole value
+      // of the structured field is robustness to FUTURE rewording, and swapping
+      // it back to a regex over `because` produces identical answers for every
+      // case that exists today, so no mutation can tell them apart. What a test
+      // can catch is a reword breaking it, and that test would have to do the
+      // rewording. Listed green in the plan's table for the same reason.
+      editable: seen.missing === true,
+      path: seen.file,
       text: '',
       version: ABSENT,
-      staleness: { state: STALENESS.UNKNOWN, because: 'its worker folder is a link, so we do not read through it' },
-    };
-  }
-
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch {
-    return { exists: false, path: file, text: '', version: ABSENT, staleness: staleness(agent) };
-  }
-
-  // Regular files only, and `lstat` so a symlink cannot point the read out of
-  // the worker directory. Reading a FIFO here would block forever inside the
-  // request handler, which is a wedge with no crash to notice.
-  if (!isShowable(stat)) {
-    return {
-      exists: false,
-      path: file,
-      text: '',
-      version: ABSENT,
-      staleness: { state: STALENESS.UNKNOWN, because: 'its instruction file is not one we can read' },
-    };
-  }
-
-  let buf;
-  try {
-    buf = fs.readFileSync(file);
-  } catch {
-    return {
-      exists: false,
-      path: file,
-      text: '',
-      version: ABSENT,
-      staleness: { state: STALENESS.UNKNOWN, because: 'its instruction file could not be read' },
-    };
-  }
-
-  // `editedAt` rides on the read so the editor can hand it back on save and we
-  // can tell whether the file moved underneath it. Taken from the same `stat`
-  // the guards above used, so it describes the file that was actually read.
-  // ⚠️ Refuse to SHOW anything that would not survive being handed back.
-  //
-  // The editor round-trips through a UTF-8 string, so a file containing bytes
-  // that are not valid UTF-8 comes back with every one of them replaced by
-  // U+FFFD. Opening such a file and pressing Save rewrote it, silently and
-  // lossily: measured at 50 bytes in, 52 bytes out, contents changed, with the
-  // person told only "Saved."
-  //
-  // Refusing here rather than in `write` is deliberate and is the whole reason
-  // the two paths were unified: `write` already refuses to replace anything
-  // `read` would not show, so one refusal covers both, and there is no way for
-  // the screen and the save to disagree about what the file is.
-  const text = buf.toString('utf8');
-  if (!Buffer.from(text, 'utf8').equals(buf)) {
-    return {
-      exists: false,
-      path: file,
-      text: '',
-      version: ABSENT,
-      staleness: {
-        state: STALENESS.UNKNOWN,
-        because: 'its instruction file is not UTF-8 text, so editing it here would corrupt it',
-      },
+      because: seen.because,
+      staleness: staleness(agent, seen),
     };
   }
 
   return {
     exists: true,
-    path: file,
-    text,
-    version: versionOf(true, buf),
-    // `editedAt` is reported for display. The changed-since-read guard keys on
-    // `version` above, NOT on this: an mtime is not a version.
-    editedAt: iso(stat.mtime.getTime()),
-    staleness: staleness(agent),
+    editable: true,
+    path: seen.file,
+    text: seen.text,
+    version: versionOf(true, seen.buf),
+    // `editedAt` is reported for display only. The changed-since-read guard
+    // keys on `version` above, NOT on this: an mtime is not a version.
+    editedAt: iso(seen.stat.mtime.getTime()),
+    staleness: staleness(agent, seen),
   };
 }
 

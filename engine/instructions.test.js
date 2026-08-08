@@ -629,6 +629,68 @@ test('a symlinked instruction file is not followed out of the workers root', () 
   }
 });
 
+test('the card and the panel never disagree about whether a file can be read', () => {
+  // ⚠️ The blocker this pins, measured before the fix: `staleness` re-derived
+  // "can we show this file" as the size-and-type check ALONE, while `read`
+  // applied four refusals. So an unreadable file got a confident verdict on the
+  // card, and with a back-dated mtime that verdict was `current`: a positive
+  // claim of health, and a disclosed timestamp, about a file the app had
+  // already decided it could not read. The rule this codebase runs on is that
+  // something we cannot assess must not render as fine, and a third derivation
+  // of one question is how that rule got broken with every guard looking right.
+  const cases = [];
+
+  // Not UTF-8, and back-dated so a naive comparison would answer `current`.
+  fs.mkdirSync(path.join(ROOT, 'agreelatin'), { recursive: true });
+  const latin = path.join(ROOT, 'agreelatin', 'CLAUDE.md');
+  fs.writeFileSync(latin, Buffer.from('You are Ren\xE9, the accounts agent.\n', 'latin1'));
+  fs.utimesSync(latin, new Date('2020-01-01'), new Date('2020-01-01'));
+  makeSession('agreelatin', 'sess-agree-latin');
+  cases.push('agreelatin');
+
+  // Over the ceiling, also back-dated.
+  const big = makeAgent('agreebig', 'x'.repeat(instructions.MAX_BYTES + 1));
+  fs.utimesSync(big, new Date('2020-01-01'), new Date('2020-01-01'));
+  makeSession('agreebig', 'sess-agree-big');
+  cases.push('agreebig');
+
+  // A directory where the file should be.
+  fs.mkdirSync(path.join(ROOT, 'agreedir', 'CLAUDE.md'), { recursive: true });
+  makeSession('agreedir', 'sess-agree-dir');
+  cases.push('agreedir');
+
+  for (const name of cases) {
+    const card = instructions.staleness(name);
+    const panel = instructions.read(name).staleness;
+    assert.equal(card.state, panel.state, `${name}: the two surfaces disagree`);
+    assert.equal(card.because, panel.because, `${name}: different reasons`);
+    assert.equal(card.state, instructions.STALENESS.UNKNOWN,
+      `${name}: a file we cannot read must never get a confident verdict`);
+    assert.equal(card.editedAt, undefined,
+      `${name}: disclosed the mtime of a file it refused to read`);
+  }
+});
+
+test('read says whether a save is possible as a field, not as prose', () => {
+  // The screen used to decide this by regex-matching the reason string, so
+  // rewording one sentence here would have silently removed the ability to
+  // write a first instruction file.
+  makeAgent('editableyes');
+  assert.equal(instructions.read('editableyes').editable, true);
+
+  fs.mkdirSync(path.join(ROOT, 'editablenofile'), { recursive: true });
+  assert.equal(instructions.read('editablenofile').editable, true,
+    'no file yet is editable: that is how a first one gets written');
+
+  assert.equal(instructions.read('editablenofolder').editable, false,
+    'an agent with no folder has nowhere to save to');
+
+  fs.mkdirSync(path.join(ROOT, 'editablelatin'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, 'editablelatin', 'CLAUDE.md'),
+    Buffer.from('You are Ren\xE9 here.\n', 'latin1'));
+  assert.equal(instructions.read('editablelatin').editable, false);
+});
+
 test('staleness never throws, whatever is at the path', () => {
   // The status route calls THIS, not read(), once per agent. One throw here
   // answers 500 for the entire board over a single agent's odd file. The

@@ -197,6 +197,9 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `dirEscapes` on the READ path | fails |
 | `dirEscapes` in `staleness` | fails |
 | `dirEscapes` on the WRITE path | fails |
+| `staleness` re-deriving showability itself | fails (3 tests) |
+| Conflict answering 409 rather than 400 | fails |
+| `editable` derived from prose instead of structure | **green, declared untested in code** |
 | Create the worker directory instead of refusing | fails |
 | Refuse-to-clobber a file the read path hid | fails (3 tests) |
 | `registryKey` back to `safeKey` at the call site | fails (2 tests) |
@@ -324,8 +327,27 @@ corrected: the module docstring said every path was asserted inside the root,
 and the temp-file comment listed the worker directory among the routes already
 closed. Both were true of `write` alone.
 
+Iteration 8 found the worst defect of the whole loop, and it is the same shape
+as the previous three. `staleness` re-derived "can we read this file" as the
+size-and-type check alone, while `read` applied four refusals. So a file the app
+had already decided it could not read still got a confident verdict on its card,
+and with a back-dated mtime that verdict was **`current`**: a positive claim of
+health, plus a disclosed timestamp, about a file we cannot read at all. That is
+the one rule this codebase is built on, broken on the surface it was written
+for, with every individual guard looking correct.
+
+The fix is structural rather than another condition: one `inspect` decides
+everything the file can tell us, and both `read` and `staleness` are built on
+it, so they cannot disagree. Four separate times this loop the answer has been
+to stop deriving the same fact twice, and this is the fourth.
+
+It also caught the same anti-pattern having escaped into the browser: the panel
+decided whether to offer an editor by regex-matching this module's English
+prose, so rewording one sentence would have silently removed the ability to
+write a first instruction file. The engine now answers that as a field.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Four rows are green and every one of them says
+suite, not by reading the code. Five rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
 test that only ever planted a directory, and `registryKey` had a unit test that
@@ -333,4 +355,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**170 tests, zero dependencies.**
+**172 tests, zero dependencies.**

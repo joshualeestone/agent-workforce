@@ -322,7 +322,12 @@ const server = http.createServer((req, res) => {
       })
       // The message is shown to the person verbatim, so it has to say what to
       // do rather than name an exception.
-      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+      .catch((err) => {
+        // A conflict is not a malformed request. 409 is what a non-browser
+        // client would key on to offer a reload rather than a retry.
+        const conflict = /changed since you opened them/.test(err.message);
+        sendJson(res, conflict ? 409 : 400, { error: String(err.message) });
+      });
     return;
   }
 
@@ -341,7 +346,12 @@ const server = http.createServer((req, res) => {
         if (typeof patch.role === 'string') clean.role = patch.role.slice(0, 80);
         sendJson(res, 200, store.writeProfile(name, clean));
       })
-      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+      .catch((err) => {
+        // A conflict is not a malformed request. 409 is what a non-browser
+        // client would key on to offer a reload rather than a retry.
+        const conflict = /changed since you opened them/.test(err.message);
+        sendJson(res, conflict ? 409 : 400, { error: String(err.message) });
+      });
     return;
   }
 
@@ -393,7 +403,12 @@ const server = http.createServer((req, res) => {
         // three-state vocabulary.
         sendJson(res, 200, commitments.read(name));
       })
-      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+      .catch((err) => {
+        // A conflict is not a malformed request. 409 is what a non-browser
+        // client would key on to offer a reload rather than a retry.
+        const conflict = /changed since you opened them/.test(err.message);
+        sendJson(res, conflict ? 409 : 400, { error: String(err.message) });
+      });
     return;
   }
 
@@ -446,7 +461,12 @@ const server = http.createServer((req, res) => {
       })
       // The message reaches the person verbatim, so it says what to do rather
       // than naming an exception.
-      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+      .catch((err) => {
+        // A conflict is not a malformed request. 409 is what a non-browser
+        // client would key on to offer a reload rather than a retry.
+        const conflict = /changed since you opened them/.test(err.message);
+        sendJson(res, conflict ? 409 : 400, { error: String(err.message) });
+      });
     return;
   }
 
