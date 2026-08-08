@@ -660,7 +660,7 @@ test('PUT refuses a payload that is not a list', async (t) => {
   }
 });
 
-test('the status payload carries the STORE value for each agent, not a placeholder', async () => {
+test('the status payload carries the STORE value for each agent, not a placeholder', async (t) => {
   // The worst possible regression here is the board telling the restart dialog
   // that every agent is `clear`. An earlier version of this test only checked
   // that a block existed with one of three state strings and a truthy reason,
@@ -669,15 +669,16 @@ test('the status payload carries the STORE value for each agent, not a placehold
   //
   // This stubs the store so the expected value is known, and asserts the
   // payload carries it per agent.
+  // NOTE: the roster cannot be stubbed from here. server.js destructures
+  // snapshot() at import, so reassigning the export has no effect -- an earlier
+  // version of this test did exactly that and carried a comment claiming it
+  // pinned behaviour on an agentless machine. It did not; the stub was inert
+  // and the test still ran against live tmux. The store CAN be stubbed, which
+  // is what actually matters here, and the roster dependency is handled by the
+  // same visible skip the sibling tests use.
+  if (!(await anyAgent(t))) return;
+
   const commitments = require('./engine/commitments');
-  const status = require('./engine/status');
-  const realSnapshot = status.snapshot;
-  // Stub the roster too, so this pins behaviour on a machine with no agents
-  // rather than hard-failing there.
-  status.snapshot = () => ({
-    agents: [{ sessionName: 'alpha' }, { sessionName: 'beta' }],
-    counts: {}, checkedAt: new Date().toISOString(),
-  });
   const real = commitments.read;
   const seen = [];
   commitments.read = (agent) => {
@@ -701,7 +702,6 @@ test('the status payload carries the STORE value for each agent, not a placehold
       'read() must be called once per agent, with that agent sessionName');
   } finally {
     commitments.read = real;
-    status.snapshot = realSnapshot;
   }
 });
 
@@ -731,4 +731,31 @@ test('PUT answers in the same three-state vocabulary as GET', async (t) => {
   const body = JSON.parse(put.body);
   assert.equal(body.state, 'clear', 'an asserted empty must come back as clear, not a bare list');
   assert.ok(body.because, 'the answer must carry its reason');
+});
+
+test('GET reflects what was actually stored, not a fixed answer', async (t) => {
+  // The GET route was pinned only in the safe direction: a hardcoded
+  // {state:'unknown'} left every server test green, so a regression that read
+  // the wrong name would render every agent "cannot tell" undetected. Nothing
+  // did a write-then-read round trip.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  const put = await req(`/api/agent/${name}/commitments`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commitments: [{ what: 'a round-tripped commitment' }] }),
+  });
+  assert.equal(put.status, 200);
+
+  const got = await req(`/api/agent/${name}/commitments?t=${Date.now()}`);
+  const body = JSON.parse(got.body);
+  assert.equal(body.state, 'holding', 'GET did not reflect the write');
+  assert.deepEqual(body.commitments.map((x) => x.what), ['a round-tripped commitment']);
+
+  // And back to clear, so both transitions are covered.
+  await req(`/api/agent/${name}/commitments`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commitments: [] }),
+  });
+  assert.equal(JSON.parse((await req(`/api/agent/${name}/commitments`)).body).state, 'clear');
 });

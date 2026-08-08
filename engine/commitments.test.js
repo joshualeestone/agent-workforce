@@ -491,7 +491,14 @@ test('a record that is not a regular file is refused rather than opened', () => 
   // readFileSync on a FIFO blocks FOREVER, and read() runs synchronously per
   // agent inside the request handler, so one named pipe in the store wedges the
   // whole server with no crash to notice.
-  const { execFileSync } = require('node:child_process');
+  //
+  // Run in a CHILD with a wall-clock kill. Done in-process, removing the guard
+  // does not fail this test, it hangs it: the synchronous read never yields, so
+  // --test-timeout cannot fire and CI gets an indefinite stall instead of a
+  // diagnostic. A test whose failure mode is "the run never ends" is worse than
+  // no test.
+  const { execFileSync, execFileSync: run } = require('node:child_process');
+  const nodePath = require('node:path');
   fs.mkdirSync(c.DIR, { recursive: true });
   const fifo = c.recordPath('fifobot');
   try {
@@ -499,12 +506,51 @@ test('a record that is not a regular file is refused rather than opened', () => 
   } catch {
     return; // mkfifo unavailable; nothing to assert
   }
+
   try {
-    const got = c.read('fifobot');
+    const out = run(process.execPath, ['-e', `
+      const c = require(${JSON.stringify(nodePath.resolve(__dirname, 'commitments.js'))});
+      const got = c.read('fifobot');
+      process.stdout.write(JSON.stringify({ state: got.state, because: got.because }));
+    `], { env: { ...process.env, AGENT_WORKFORCE_DATA: TMP }, timeout: 5000, encoding: 'utf8' });
+
+    const got = JSON.parse(out);
     assert.equal(got.state, c.STATE.UNKNOWN);
     assert.match(got.because, /not a file we can read/);
+  } catch (err) {
+    // A timeout here IS the bug: the guard is gone and the read blocked.
+    assert.fail(`reading a FIFO did not return promptly: ${err.code || err.message}`);
   } finally {
     fs.rmSync(fifo, { force: true });
+  }
+});
+
+test('a symlinked record cannot point the read outside the store', () => {
+  // lstat rather than stat, so a link is seen as a link. Documented but
+  // unpinned: swapping lstatSync for statSync left the whole suite green.
+  const os = require('node:os');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-link-'));
+  const target = path.join(outside, 'target.json');
+  fs.writeFileSync(target, JSON.stringify({
+    name: 'linkbot', reportedAt: new Date().toISOString(),
+    commitments: [{ id: 'l', what: 'REACHED THROUGH A SYMLINK' }],
+  }));
+  fs.mkdirSync(c.DIR, { recursive: true });
+  const link = c.recordPath('linkbot');
+  fs.rmSync(link, { force: true });
+  try {
+    fs.symlinkSync(target, link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    const got = c.read('linkbot');
+    assert.equal(got.state, c.STATE.UNKNOWN, 'a symlink was followed out of the store');
+    assert.ok(!JSON.stringify(got).includes('REACHED THROUGH A SYMLINK'));
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -728,4 +774,44 @@ test('a future-dated record is not laundered fresh by add or resolve either', ()
   c.resolve('aheadbot', 'a');
   assert.equal(c.read('aheadbot').state, c.STATE.UNKNOWN,
     'resolve must not re-publish a future-dated record as current');
+});
+
+test('an enormous record is refused before it is read, not after it is parsed', () => {
+  // The entry cap counts commitments and only applies after the whole file is
+  // parsed, which is far too late: a 200MB record measured 232ms per read,
+  // 1.1GB resident and a 209MB status payload, synchronously inside the request
+  // handler on a board that polls continuously. Same failure class as the FIFO.
+  fs.mkdirSync(c.DIR, { recursive: true });
+  const huge = { name: 'hugefile', reportedAt: new Date().toISOString(), commitments: [{ id: 'a', what: 'x' }] };
+  // Pad past the byte ceiling while staying valid JSON and under the entry cap.
+  huge.padding = 'p'.repeat(c.MAX_RECORD_BYTES + 1024);
+  fs.writeFileSync(c.recordPath('hugefile'), JSON.stringify(huge));
+
+  const got = c.read('hugefile');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.match(got.because, /larger than we can read/);
+});
+
+test('every field is capped on the way OUT, not just what', () => {
+  // The read path capped only `what` and re-served id, createdAt, source and
+  // any extra key verbatim: 135KB from one hand-edited commitment on every
+  // poll. That is the createdAt bug the write path records as fixed, reached
+  // through the one door all the surrounding guards exist to defend.
+  fs.writeFileSync(c.recordPath('fatfields'), JSON.stringify({
+    name: 'fatfields', reportedAt: new Date().toISOString(),
+    commitments: [{
+      what: 'w'.repeat(5000), id: 'i'.repeat(5000),
+      source: 's'.repeat(5000), createdAt: 'c'.repeat(5000),
+      junk: 'j'.repeat(50000),
+    }],
+  }));
+  const got = c.read('fatfields');
+  assert.equal(got.state, c.STATE.HOLDING);
+  const only = got.commitments[0];
+  assert.ok(only.what.length <= 300, `what ${only.what.length}`);
+  assert.ok(only.id.length <= 80, `id ${only.id.length}`);
+  assert.ok(only.source.length <= 40, `source ${only.source.length}`);
+  assert.ok(only.createdAt.length <= 40, `createdAt ${only.createdAt.length}`);
+  assert.equal(only.junk, undefined, 'unknown keys must not be re-served');
+  assert.ok(JSON.stringify(got).length < 2000, `payload was ${JSON.stringify(got).length} bytes`);
 });
