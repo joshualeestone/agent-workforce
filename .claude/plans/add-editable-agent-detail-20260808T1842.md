@@ -210,4 +210,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**156 tests, zero dependencies.**
+**155 tests, zero dependencies.**
