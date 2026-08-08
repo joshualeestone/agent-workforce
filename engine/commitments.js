@@ -217,7 +217,9 @@ function parseRecord(agent) {
     return {
       ok: false,
       absent: false,
-      because: `that record belongs to ${parsed.name}, not this agent`,
+      // Capped: the name comes from a file, and this string is echoed into
+      // every /api/status response.
+      because: `that record belongs to ${String(parsed.name).slice(0, 60)}, not this agent`,
     };
   }
 
@@ -290,15 +292,20 @@ function report(agent, commitments) {
     throw new Error(`an agent cannot hold more than ${MAX_COMMITMENTS} commitments`);
   }
 
-  const clean = commitments.map((c) => {
+  return writeRecord(key, agent, sanitise(commitments), new Date().toISOString());
+}
+
+/** Coerce and cap every field of every commitment. */
+function sanitise(commitments) {
+  return commitments.map((c) => {
     const what = String((c && c.what) || '').trim();
     if (!what) throw new Error('every commitment needs a description');
-    // Every field is coerced and capped. An uncoerced `createdAt` was stored
-    // and re-served verbatim on every /api/status poll.
-    // Capped AND validated. It was previously the one field passing through
-    // whole, so a 25,000-character value rode along in every /api/status poll
-    // on the board's continuous-read path -- while the comment above claimed
-    // every field was capped.
+    // Every field is coerced AND capped. `createdAt` was once the exception,
+    // passing through whole, so a 25,000-character value rode along in every
+    // /api/status poll on the board's continuous-read path. The cap comes
+    // first: `Date.parse` accepts arbitrarily long strings through its legacy
+    // parenthesised-comment syntax, so validating without capping would not
+    // have stopped it.
     const supplied = c && typeof c.createdAt === 'string' ? c.createdAt.slice(0, 40) : null;
     const createdAt = supplied && !Number.isNaN(Date.parse(supplied))
       ? supplied
@@ -310,19 +317,26 @@ function report(agent, commitments) {
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
   });
+}
 
+/**
+ * Write a record with an explicit assertion time.
+ *
+ * Separated from `report()` because **the timestamp is a claim about when the
+ * agent last told us its whole state**, and a derived change is not that claim.
+ * `add()` and `resolve()` used to route through `report()`, which stamped
+ * `now`, so mutating a 31-minute-stale record re-published it as current: a
+ * no-op `resolve()` on a stale record turned "we cannot tell" into a confident
+ * answer. That is the exact failure this module exists to prevent, reached
+ * through the module's own convenience API.
+ */
+function writeRecord(key, rawName, clean, reportedAt) {
   ensure(DIR);
   // `name` is the RAW agent name, `agent` the sanitised key. Both are stored so
   // a read can tell whether this record actually belongs to the agent being
   // asked about: safeKey STRIPS rather than rejects, so `worker.2` and `worker2`
-  // collapse to one key. Without this check, one agent's "I hold nothing" is
-  // served as `clear` for a different agent that has never reported.
-  const next = {
-    agent: key,
-    name: String(agent),
-    reportedAt: new Date().toISOString(),
-    commitments: clean,
-  };
+  // collapse to one key.
+  const next = { agent: key, name: String(rawName), reportedAt, commitments: clean };
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
   // machine, and a half-written file that parses as an empty array is exactly
@@ -333,7 +347,7 @@ function report(agent, commitments) {
   try {
     fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
     fs.renameSync(tmp, dest);
-  } catch (err) {
+  } catch {
     // Any failure between the write and the rename otherwise leaves the temp
     // file behind forever, accumulating one per failed attempt.
     try { fs.rmSync(tmp, { force: true }); } catch { /* nothing more to do */ }
@@ -343,6 +357,11 @@ function report(agent, commitments) {
     throw new Error('that could not be saved');
   }
   return next;
+}
+
+/** True when a parsed record is too old, or dated too far ahead, to vouch for. */
+function isStale(rec) {
+  return rec.ageMs > STALE_AFTER_MS || rec.ageMs < -FUTURE_TOLERANCE_MS;
 }
 
 /**
@@ -369,6 +388,14 @@ function add(agent, what) {
     }
     return report(agent, [{ what }]);
   }
+
+  // A stale base keeps its original timestamp. The agent has told us about ONE
+  // new thing; it has not re-asserted everything else, so the record must go on
+  // reading `unknown` until it does. Re-stamping here would launder "we cannot
+  // tell" into "nothing else pending", which is the whole failure mode.
+  if (isStale(rec)) {
+    return writeRecord(store.safeKey(agent), agent, sanitise([...rec.commitments, { what }]), rec.reportedAt);
+  }
   return report(agent, [...rec.commitments, { what }]);
 }
 
@@ -378,8 +405,17 @@ function resolve(agent, id) {
   if (!rec.ok) {
     throw new Error(`cannot resolve a commitment for a record we cannot read: ${rec.because}`);
   }
-  // A stale record resolves fine: it parsed, so the list is known.
-  return report(agent, rec.commitments.filter((c) => c.id !== id));
+  const remaining = rec.commitments.filter((c) => c.id !== id);
+
+  // Same rule as `add()`. What parsed is the list **as of `reportedAt`**, and
+  // nothing is known about what the agent took on since, so a stale record
+  // keeps its original timestamp and goes on reading `unknown`. The comment
+  // that used to sit here said "a stale record resolves fine: it parsed, so the
+  // list is known", which is what made the laundering read as intentional.
+  if (isStale(rec)) {
+    return writeRecord(store.safeKey(agent), agent, sanitise(remaining), rec.reportedAt);
+  }
+  return report(agent, remaining);
 }
 
 /**
