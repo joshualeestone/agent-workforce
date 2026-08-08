@@ -55,6 +55,15 @@ const STATE = {
  */
 const STALE_AFTER_MS = 30 * 60 * 1000;
 
+/**
+ * Ceiling on how many commitments one agent may hold.
+ *
+ * Without it a single local PUT can write hundreds of thousands of entries,
+ * which then serialise into every /api/status poll. A person cannot act on a
+ * list that long anyway, and the restart dialog has to render it.
+ */
+const MAX_COMMITMENTS = 200;
+
 function ensure(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -64,8 +73,85 @@ function recordPath(agent) {
   return path.join(DIR, store.safeKey(agent) + '.json');
 }
 
-function unknown(because) {
-  return { state: STATE.UNKNOWN, commitments: [], reportedAt: null, because };
+// ⚠️ Residual risk inherited from store.safeKey(): it STRIPS unsafe characters
+// rather than rejecting, so `worker.2` and `worker2` collapse to one key and
+// share a record. For avatars a collision costs a picture. Here it costs the
+// answer the restart dialog depends on -- one agent can be rendered `clear` on
+// the strength of a different agent's assertion. Recorded rather than fixed,
+// because changing the key derivation would orphan every existing avatar and
+// profile too; it wants solving once, across all three stores.
+
+function unknown(because, extra) {
+  return { state: STATE.UNKNOWN, commitments: [], reportedAt: null, because, ...extra };
+}
+
+/**
+ * How far a `reportedAt` may sit in the future before we stop believing it.
+ *
+ * A timestamp ahead of now is not a fresh assertion, it is an unreadable one.
+ * The staleness check used to be one-sided, so a future date produced a
+ * negative age, sailed under the ceiling, and read as `clear` **forever** --
+ * the exact "empty list treated as safe" failure this file exists to prevent.
+ * It is not exotic: `reportedAt` comes from the local clock, so an NTP
+ * correction, a machine that booted fast, or a record copied from a machine
+ * ahead all produce one. A small tolerance absorbs ordinary jitter; beyond it
+ * we say we cannot tell.
+ */
+const FUTURE_TOLERANCE_MS = 60 * 1000;
+
+/**
+ * Read and validate one record, separating "could not read it" from "read it
+ * fine, but it is old".
+ *
+ * Those are different answers and collapsing them destroyed data: `add()` used
+ * to treat every `unknown` as "nothing to preserve", so an agent holding three
+ * real commitments whose record had merely aged past the window lost all three
+ * on the next `add()`, and then read `clear`. A genuinely-holding agent became
+ * "nothing in flight" through two ordinary calls.
+ *
+ * Returns `{ ok: false, because }` when the record cannot be trusted as data at
+ * all, or `{ ok: true, commitments, reportedAt, ageMs }` when it parsed.
+ */
+function parseRecord(agent) {
+  let key;
+  try {
+    key = store.safeKey(agent);
+  } catch {
+    return { ok: false, because: 'that is not a name we can look up' };
+  }
+
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(DIR, key + '.json'), 'utf8');
+  } catch {
+    return { ok: false, because: 'this agent has never reported what it is holding' };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, because: 'its record could not be read' };
+  }
+
+  // `JSON.parse` happily returns null, a number, or an array, and reaching for
+  // `.reportedAt` on null throws -- which, from inside the request handler,
+  // exits the process. A single file containing `null` was enough.
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, because: 'its record is not in a shape we understand' };
+  }
+
+  const reportedAt = typeof parsed.reportedAt === 'string' ? parsed.reportedAt : null;
+  const at = reportedAt ? Date.parse(reportedAt) : NaN;
+  if (!reportedAt || Number.isNaN(at)) {
+    return { ok: false, because: 'its record does not say when it was written' };
+  }
+
+  if (!Array.isArray(parsed.commitments)) {
+    return { ok: false, because: 'its record is not in a shape we understand' };
+  }
+
+  return { ok: true, commitments: parsed.commitments, reportedAt, ageMs: Date.now() - at };
 }
 
 /**
@@ -76,55 +162,35 @@ function unknown(because) {
  * to proceed" on the strength of a file it could not read.
  */
 function read(agent) {
-  let key;
-  try {
-    key = store.safeKey(agent);
-  } catch {
-    return unknown('that is not a name we can look up');
+  const rec = parseRecord(agent);
+  if (!rec.ok) return unknown(rec.because);
+
+  if (rec.ageMs < -FUTURE_TOLERANCE_MS) {
+    return {
+      ...unknown('its record is dated in the future, so we cannot tell when it was true'),
+      reportedAt: rec.reportedAt,
+      commitments: rec.commitments,
+    };
   }
 
-  let raw;
-  try {
-    raw = fs.readFileSync(path.join(DIR, key + '.json'), 'utf8');
-  } catch {
-    // No file at all. This agent has never told us anything, which is not the
-    // same as having nothing to tell.
-    return unknown('this agent has never reported what it is holding');
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    // A truncated or corrupt file. Falling back to empty here would turn a
-    // storage fault into a confident "nothing to lose".
-    return unknown('its record could not be read');
-  }
-
-  const reportedAt = typeof parsed.reportedAt === 'string' ? parsed.reportedAt : null;
-  const at = reportedAt ? Date.parse(reportedAt) : NaN;
-  if (!reportedAt || Number.isNaN(at)) {
-    return unknown('its record does not say when it was written');
-  }
-
-  const ageMs = Date.now() - at;
-  if (ageMs > STALE_AFTER_MS) {
-    // Deliberately decays rather than persisting. The agent has been running
-    // since it last spoke, so the old answer is not about now.
-    const mins = Math.round(ageMs / 60000);
-    return { ...unknown(`it last reported ${mins} minutes ago, too long to still be true`), reportedAt };
-  }
-
-  const commitments = Array.isArray(parsed.commitments) ? parsed.commitments : null;
-  if (!commitments) {
-    return unknown('its record is not in a shape we understand');
+  if (rec.ageMs > STALE_AFTER_MS) {
+    // Decays rather than persisting: the agent has been running since it last
+    // spoke, so the old answer is not about now. The list still comes back --
+    // "these three were pending 40 minutes ago" is far more useful at 3am than
+    // an empty array, as long as the state says we cannot vouch for it.
+    const mins = Math.round(rec.ageMs / 60000);
+    return {
+      ...unknown(`it last reported ${mins} minutes ago, too long to still be true`),
+      reportedAt: rec.reportedAt,
+      commitments: rec.commitments,
+    };
   }
 
   return {
-    state: commitments.length ? STATE.HOLDING : STATE.CLEAR,
-    commitments,
-    reportedAt,
-    because: commitments.length
+    state: rec.commitments.length ? STATE.HOLDING : STATE.CLEAR,
+    commitments: rec.commitments,
+    reportedAt: rec.reportedAt,
+    because: rec.commitments.length
       ? 'it reported these itself'
       : 'it reported that it is holding nothing',
   };
@@ -140,14 +206,20 @@ function read(agent) {
 function report(agent, commitments) {
   const key = store.safeKey(agent);
   if (!Array.isArray(commitments)) throw new Error('commitments must be a list');
+  if (commitments.length > MAX_COMMITMENTS) {
+    throw new Error(`an agent cannot hold more than ${MAX_COMMITMENTS} commitments`);
+  }
 
   const clean = commitments.map((c) => {
     const what = String((c && c.what) || '').trim();
     if (!what) throw new Error('every commitment needs a description');
+    // Every field is coerced and capped. An uncoerced `createdAt` was stored
+    // and re-served verbatim on every /api/status poll.
+    const createdAt = c && typeof c.createdAt === 'string' ? c.createdAt : new Date().toISOString();
     return {
-      id: String((c && c.id) || crypto.randomUUID()),
+      id: String((c && c.id) || crypto.randomUUID()).slice(0, 80),
       what: what.slice(0, 300),
-      createdAt: (c && c.createdAt) || new Date().toISOString(),
+      createdAt,
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
   });
@@ -157,7 +229,8 @@ function report(agent, commitments) {
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
   // machine, and a half-written file that parses as an empty array is exactly
-  // the silent loss this store exists to prevent.
+  // the silent loss this store exists to prevent. The temp name carries the pid
+  // so two processes cannot collide on it.
   const dest = path.join(DIR, key + '.json');
   const tmp = `${dest}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
@@ -165,25 +238,55 @@ function report(agent, commitments) {
   return next;
 }
 
-/** Convenience: record one more thing, keeping what is already there. */
+/**
+ * Convenience: record one more thing, keeping what is already there.
+ *
+ * Refuses when the record could not be read, rather than starting a fresh list.
+ * Starting fresh is what destroyed data: an unreadable record is not an empty
+ * one, and overwriting it converts "I cannot tell" into a confident answer.
+ *
+ * A *stale* record is different and is carried forward: it parsed, so the list
+ * is known, it is only the freshness that lapsed. Adding to it is exactly right
+ * and re-stamps it as current.
+ */
 function add(agent, what) {
-  const current = read(agent);
-  // Starting from `unknown` would silently discard commitments we simply could
-  // not read, so only extend a list we actually managed to load.
-  const base = current.state === STATE.UNKNOWN ? [] : current.commitments;
-  return report(agent, [...base, { what }]);
+  const rec = parseRecord(agent);
+  if (!rec.ok) {
+    // Only a never-reported agent may start a list here. Anything else means we
+    // are looking at a record we could not read, and writing over it loses
+    // whatever it held.
+    if (rec.because !== 'this agent has never reported what it is holding') {
+      throw new Error(`cannot add to a record we cannot read: ${rec.because}`);
+    }
+    return report(agent, [{ what }]);
+  }
+  return report(agent, [...rec.commitments, { what }]);
 }
 
 /** Convenience: mark one done. */
 function resolve(agent, id) {
-  const current = read(agent);
-  if (current.state === STATE.UNKNOWN) {
-    throw new Error('cannot resolve a commitment for an agent whose record we cannot read');
+  const rec = parseRecord(agent);
+  if (!rec.ok) {
+    throw new Error(`cannot resolve a commitment for a record we cannot read: ${rec.because}`);
   }
-  return report(agent, current.commitments.filter((c) => c.id !== id));
+  // A stale record resolves fine: it parsed, so the list is known.
+  return report(agent, rec.commitments.filter((c) => c.id !== id));
 }
 
-/** Every agent we hold a record for, keyed by agent. */
+/**
+ * Every agent we hold a RECORD for, keyed by agent.
+ *
+ * ⚠️ This is not a roster and must not be used as one. An agent that has never
+ * reported has no file, so it is simply absent from the result -- and a caller
+ * iterating this sees no holdings, which is indistinguishable from every agent
+ * asserting clear. That is the precise failure the rest of this file exists to
+ * prevent, so the board does NOT use this: `/api/status` maps over the roster
+ * from the status engine and calls `read()` per agent, which yields an explicit
+ * `unknown` for the silent ones.
+ *
+ * Use this only when you want "what records exist", never "what is everyone
+ * holding".
+ */
 function readAll() {
   const out = {};
   let files = [];
@@ -200,4 +303,4 @@ function readAll() {
   return out;
 }
 
-module.exports = { DIR, STATE, STALE_AFTER_MS, read, report, add, resolve, readAll, recordPath };
+module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, read, report, add, resolve, readAll, recordPath };

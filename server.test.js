@@ -30,6 +30,14 @@
  *   node --test server.test.js
  */
 
+// Sandbox the commitment store BEFORE requiring the server: commitments.js
+// reads this at module load, and without it these tests would write into the
+// operator's real app data.
+const os = require('node:os');
+const fs = require('node:fs');
+const nodePath = require('node:path');
+process.env.AGENT_WORKFORCE_DATA = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { start, server, pathOf, decodeSegment } = require('./server');
@@ -550,4 +558,75 @@ test('HEAD on an avatar runs the whole stat and stream path without a body', asy
     store.avatarPath = original;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The commitments endpoints
+//
+// These had no coverage at all when the store landed, which is the gap this
+// file's own header warns about: the routes around a helper are where bugs
+// live, not the helper. The first review of that branch found a crash on this
+// exact surface that one route test would have caught.
+// ---------------------------------------------------------------------------
+
+test('commitments are reachable with a query string attached', async () => {
+  // The branch was written before routing moved to the pathname, so its
+  // original form matched on req.url and would have reintroduced the very bug
+  // this file exists to pin, on a brand-new endpoint.
+  const bare = await req('/api/agent/angel/commitments');
+  const busted = await req('/api/agent/angel/commitments?t=1');
+  assert.match(bare.type, /application\/json/);
+  assert.match(busted.type, /application\/json/, 'a query string sent it to the catch-all');
+  assert.equal(busted.status, bare.status);
+});
+
+test('an agent that has never reported reads unknown over HTTP, not clear', async () => {
+  // The whole point of the store, asserted at the boundary a caller actually
+  // uses rather than only in the module.
+  const res = await req('/api/agent/never-reported-over-http/commitments');
+  const body = JSON.parse(res.body);
+  assert.equal(body.state, 'unknown');
+  assert.notEqual(body.state, 'clear');
+});
+
+test('a malformed agent name does not crash the commitments route', async () => {
+  for (const path of ['/api/agent/%/commitments', '/api/agent/%zz/commitments?t=1']) {
+    const res = await req(path);
+    assert.equal(res.status, 404, `${path} should be refused`);
+  }
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on a malformed name');
+});
+
+test('PUT refuses an unknown agent and a payload that is not a list', async () => {
+  const unknownAgent = await req('/api/agent/definitely-not-an-agent/commitments',
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"commitments":[]}' });
+  assert.equal(unknownAgent.status, 404);
+  assert.match(unknownAgent.type, /application\/json/);
+});
+
+test('the status payload carries a commitment block for every agent, including silent ones', async () => {
+  // Omitting the field for agents that never reported would leave the caller
+  // unable to tell "nothing pending" from "never asked", which is the failure
+  // the whole card exists to remove.
+  const res = await req('/api/status');
+  if (!res.type.includes('application/json')) return; // status engine unavailable
+  const agents = JSON.parse(res.body).agents || [];
+  if (!agents.length) return;
+  for (const a of agents) {
+    assert.ok(a.commitments, `${a.sessionName} has no commitments block`);
+    assert.ok(['holding', 'clear', 'unknown'].includes(a.commitments.state),
+      `${a.sessionName} has an unexpected state: ${a.commitments.state}`);
+    assert.ok(a.commitments.because, `${a.sessionName} carries no reason`);
+  }
+});
+
+test('the commitments route is ordered before the /api fallthrough', async () => {
+  // The /api guard answers 404 "no such endpoint" for anything it reaches. If
+  // the commitments route were declared after it, this endpoint would never be
+  // reached at all and would 404 with that message instead of a state.
+  const res = await req('/api/agent/order-check/commitments');
+  const body = JSON.parse(res.body);
+  assert.ok(body.state, 'reached the /api fallthrough instead of the route');
+  assert.notEqual(body.error, 'no such endpoint');
 });
