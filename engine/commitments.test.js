@@ -637,3 +637,95 @@ test('a write that fails AFTER the temp file exists cleans it up', () => {
 function ensure_dir() {
   fs.mkdirSync(c.DIR, { recursive: true });
 }
+
+test('traversal is refused by the code that actually reads and writes, not just by a helper', () => {
+  // Two earlier versions of this test proved nothing. The first asserted only
+  // on recordPath(), which NO production path called. The second went through
+  // read() but used attack strings that did not actually resolve to anything,
+  // so it passed against a deliberately vulnerable build.
+  //
+  // This one computes the traversal RELATIVE TO THE STORE and plants a real
+  // file at the target, so the attack either reaches it or does not.
+  const os = require('node:os');
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-outside-'));
+  const secretName = 'secret';
+
+  fs.mkdirSync(c.DIR, { recursive: true });
+  // e.g. '../../aw-outside-XXXX/secret' -- a name that, used unsanitised, lands
+  // exactly on the planted file.
+  const escape = path.join(path.relative(c.DIR, outsideDir), secretName);
+
+  // The planted record's `name` is the ATTACK STRING, not a plain name. That
+  // matters: an earlier version planted `name: 'secret'`, so the stored-name
+  // guard rejected the record and the test passed even against a build with no
+  // path sanitising at all. It was passing for the wrong reason, and could not
+  // tell the two guards apart. With the name matching, only the path derivation
+  // can stop this.
+  fs.writeFileSync(path.join(outsideDir, `${secretName}.json`), JSON.stringify({
+    name: escape, reportedAt: new Date().toISOString(),
+    commitments: [{ id: 's', what: 'SECRET FROM OUTSIDE THE STORE' }],
+  }));
+
+  try {
+    // Sanity: the attack string really does point at the secret when joined raw.
+    const wouldReach = path.join(c.DIR, `${escape}.json`);
+    assert.ok(fs.existsSync(wouldReach), 'fixture is wrong: the traversal target does not exist');
+
+    const got = c.read(escape);
+    assert.notEqual(got.state, c.STATE.HOLDING, 'traversal reached a record outside the store');
+    assert.ok(!JSON.stringify(got).includes('SECRET FROM OUTSIDE'),
+      'traversal returned content from outside the store');
+
+    // And the write path must not land outside DIR either.
+    const before = fs.readdirSync(outsideDir).sort();
+    try { c.report(escape, [{ what: 'should not land here' }]); } catch { /* refused is fine */ }
+    assert.deepEqual(fs.readdirSync(outsideDir).sort(), before,
+      'a write escaped the store directory');
+  } finally {
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('a stale add cannot grow a record past the cap', () => {
+  // The cap lived only in report(), and the stale branch of add() calls the
+  // writer directly. Because that branch deliberately preserves the old
+  // timestamp, the record STAYS stale, so every later add takes the same
+  // uncapped path: a 200-entry record grew to 250 in fifty calls.
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('growbot'), JSON.stringify({
+    name: 'growbot', reportedAt: stale,
+    commitments: Array.from({ length: c.MAX_COMMITMENTS }, (_, i) => ({ id: `i${i}`, what: `thing ${i}` })),
+  }));
+  assert.throws(() => c.add('growbot', 'one too many'), /cannot hold more than/);
+  assert.equal(c.read('growbot').commitments.length, c.MAX_COMMITMENTS);
+});
+
+test('a hand-written record beyond the cap is refused rather than served', () => {
+  // Caps were write-side only, and read() feeds straight into every status
+  // poll: 5,000 entries measured 12.6 MB per agent, serialised synchronously
+  // inside the request handler.
+  fs.writeFileSync(c.recordPath('hugebot'), JSON.stringify({
+    name: 'hugebot', reportedAt: new Date().toISOString(),
+    commitments: Array.from({ length: c.MAX_COMMITMENTS + 50 }, (_, i) => ({ id: `i${i}`, what: `x${i}` })),
+  }));
+  assert.equal(c.read('hugebot').state, c.STATE.UNKNOWN);
+});
+
+test('a future-dated record is not laundered fresh by add or resolve either', () => {
+  // The future half of isStale() was unpinned: mutating it away left the suite
+  // green. Every laundering scenario was tested against a STALE record and none
+  // against a future-dated one, even though both reach the same branch.
+  const ahead = new Date(Date.now() + 6 * 3600 * 1000).toISOString();
+  fs.writeFileSync(c.recordPath('aheadbot'), JSON.stringify({
+    name: 'aheadbot', reportedAt: ahead, commitments: [{ id: 'a', what: 'pending' }],
+  }));
+  assert.equal(c.read('aheadbot').state, c.STATE.UNKNOWN, 'precondition');
+
+  c.add('aheadbot', 'another');
+  assert.equal(c.read('aheadbot').state, c.STATE.UNKNOWN,
+    'add must not re-publish a future-dated record as current');
+
+  c.resolve('aheadbot', 'a');
+  assert.equal(c.read('aheadbot').state, c.STATE.UNKNOWN,
+    'resolve must not re-publish a future-dated record as current');
+});

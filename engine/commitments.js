@@ -126,7 +126,7 @@ function parseRecord(agent) {
     return { ok: false, absent: false, because: 'that is not a name we can look up' };
   }
 
-  const file = path.join(DIR, key + '.json');
+  const file = recordPath(agent);
 
   // Must be a regular file before we open it. `readFileSync` on a FIFO blocks
   // FOREVER, and read() runs synchronously per agent inside the request
@@ -223,7 +223,23 @@ function parseRecord(agent) {
     };
   }
 
-  return { ok: true, commitments: parsed.commitments, reportedAt, ageMs: Date.now() - at };
+  // Capped on the way OUT as well as in. The write path bounds what it stores,
+  // but a record can be hand-edited, and read() feeds straight into every
+  // /api/status poll -- 5,000 entries measured at 12.6 MB per agent, serialised
+  // synchronously inside the request handler.
+  if (parsed.commitments.length > MAX_COMMITMENTS) {
+    return { ok: false, absent: false, because: 'its record lists more than we can show' };
+  }
+
+  return {
+    ok: true,
+    commitments: parsed.commitments.map((cm) => ({
+      ...cm,
+      what: String(cm.what).slice(0, 300),
+    })),
+    reportedAt: reportedAt.slice(0, 40),
+    ageMs: Date.now() - at,
+  };
 }
 
 /**
@@ -331,7 +347,14 @@ function sanitise(commitments) {
  * through the module's own convenience API.
  */
 function writeRecord(key, rawName, clean, reportedAt) {
-  ensure(DIR);
+  // Capped HERE rather than only in report(). add() and resolve() call this
+  // directly on a stale record, and because that branch deliberately preserves
+  // the old timestamp the record stays stale, so every later add() takes the
+  // same branch. The cap was defeated through the module's own convenience API.
+  if (clean.length > MAX_COMMITMENTS) {
+    throw new Error(`an agent cannot hold more than ${MAX_COMMITMENTS} commitments`);
+  }
+
   // `name` is the RAW agent name, `agent` the sanitised key. Both are stored so
   // a read can tell whether this record actually belongs to the agent being
   // asked about: safeKey STRIPS rather than rejects, so `worker.2` and `worker2`
@@ -342,9 +365,17 @@ function writeRecord(key, rawName, clean, reportedAt) {
   // machine, and a half-written file that parses as an empty array is exactly
   // the silent loss this store exists to prevent. The temp name carries the pid
   // so two processes cannot collide on it.
-  const dest = path.join(DIR, key + '.json');
+  // Derived by the same function the read path uses. These were three
+  // separate `path.join` calls, so the traversal test could pass against
+  // recordPath() while the code that actually reads and writes used something
+  // else. One derivation, one place to get it wrong.
+  const dest = recordPath(rawName);
   const tmp = `${dest}.${process.pid}.tmp`;
   try {
+    // Inside the try: mkdir has its own errno, and it carries the absolute
+    // store path. Leaving it outside meant the comment below about never
+    // surfacing a raw errno was false for the most likely failure of the two.
+    ensure(DIR);
     fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
     fs.renameSync(tmp, dest);
   } catch {

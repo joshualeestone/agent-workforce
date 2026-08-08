@@ -64,6 +64,29 @@ test.after(() => {
   fs.rmSync(SANDBOX, { recursive: true, force: true });
 });
 
+/**
+ * An agent name the write routes will accept, or null with a VISIBLE skip.
+ *
+ * `knownAgent()` guards the write routes and `server.js` destructures
+ * `snapshot()` at import, so the roster cannot be stubbed from here. That makes
+ * these two tests dependent on live tmux state, which is worth saying out loud
+ * rather than papering over: a silent early return prints a tick for a test
+ * that asserted nothing, and a hard failure makes the suite unrunnable on CI.
+ */
+async function anyAgent(t) {
+  const board = await req('/api/status');
+  if (!board.type.includes('application/json')) {
+    t.skip('the status engine did not return a board on this machine');
+    return null;
+  }
+  const agents = JSON.parse(board.body).agents || [];
+  if (!agents.length) {
+    t.skip('no live agents on this machine, so the write routes cannot be exercised');
+    return null;
+  }
+  return encodeURIComponent(agents[0].sessionName);
+}
+
 async function req(path, options) {
   const res = await fetch(base + path, options);
   return { status: res.status, type: res.headers.get('content-type') || '', body: await res.text() };
@@ -615,14 +638,19 @@ test('PUT refuses an unknown agent', async () => {
   assert.match(res.type, /application\/json/);
 });
 
-test('PUT refuses a payload that is not a list', async () => {
+test('PUT refuses a payload that is not a list', async (t) => {
   // Previously bundled into the test above, which made one request and never
   // exercised this half: deleting the Array.isArray guard left the suite green.
-  const board = await req('/api/status');
-  if (!board.type.includes('application/json')) return;
-  const agents = JSON.parse(board.body).agents || [];
-  assert.ok(agents.length > 0, 'no agents on the board, cannot verify the guard');
-  const name = encodeURIComponent(agents[0].sessionName);
+  //
+  // Needs a real agent, because knownAgent() guards the route and server.js
+  // destructures snapshot() at import, so it cannot be stubbed from here.
+  //
+  // A VISIBLE skip when the roster is empty, not a bare return. An earlier
+  // version returned silently and printed a tick for a test that asserted
+  // nothing; a later one hard-failed, which makes the suite unrunnable on any
+  // machine without live agents. Skipping says which of the two happened.
+  const name = await anyAgent(t);
+  if (!name) return;
 
   for (const body of ['{}', '{"commitments":"nope"}', '{"commitments":{"what":"x"}}', '{"commitments":null}']) {
     const res = await req(`/api/agent/${name}/commitments`,
@@ -642,6 +670,14 @@ test('the status payload carries the STORE value for each agent, not a placehold
   // This stubs the store so the expected value is known, and asserts the
   // payload carries it per agent.
   const commitments = require('./engine/commitments');
+  const status = require('./engine/status');
+  const realSnapshot = status.snapshot;
+  // Stub the roster too, so this pins behaviour on a machine with no agents
+  // rather than hard-failing there.
+  status.snapshot = () => ({
+    agents: [{ sessionName: 'alpha' }, { sessionName: 'beta' }],
+    counts: {}, checkedAt: new Date().toISOString(),
+  });
   const real = commitments.read;
   const seen = [];
   commitments.read = (agent) => {
@@ -665,6 +701,7 @@ test('the status payload carries the STORE value for each agent, not a placehold
       'read() must be called once per agent, with that agent sessionName');
   } finally {
     commitments.read = real;
+    status.snapshot = realSnapshot;
   }
 });
 
@@ -678,15 +715,12 @@ test('the commitments route is ordered before the /api fallthrough', async () =>
   assert.notEqual(body.error, 'no such endpoint');
 });
 
-test('PUT answers in the same three-state vocabulary as GET', async () => {
+test('PUT answers in the same three-state vocabulary as GET', async (t) => {
   // PUT used to return report()'s raw record, which has no state and no
   // because. A client asserting "I hold nothing" got back a bare empty list:
   // the exact shape the store exists to keep out of callers' hands.
-  const board = await req('/api/status');
-  if (!board.type.includes('application/json')) return;
-  const agents = JSON.parse(board.body).agents || [];
-  if (!agents.length) return;
-  const name = encodeURIComponent(agents[0].sessionName);
+  const name = await anyAgent(t);
+  if (!name) return;
 
   const put = await req(`/api/agent/${name}/commitments`, {
     method: 'PUT',
