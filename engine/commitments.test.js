@@ -59,7 +59,7 @@ test('an agent that asserted nothing pending is clear, and distinguishable from 
 });
 
 test('a corrupt record is unknown, and does not throw or fall back to empty', () => {
-  c.report('corrupted', [{ what: 'something real', id: 'gen1', createdAt: new Date().toISOString() }]);
+  c.report('corrupted', [{ what: 'something real', id: 'gen1', createdAt: new Date().toISOString(), source: 'agent' }]);
   fs.writeFileSync(c.recordPath('corrupted'), '{"commitments": [{"what": "trunca');
 
   let got;
@@ -79,7 +79,7 @@ test('a record whose commitments are not a list is unknown rather than coerced',
   fs.writeFileSync(c.recordPath('wrong-shape'), JSON.stringify({
     name: 'wrong-shape',
     reportedAt: new Date().toISOString(),
-    commitments: { what: 'not a list', id: 'gen2', createdAt: new Date().toISOString() },
+    commitments: { what: 'not a list', id: 'gen2', createdAt: new Date().toISOString(), source: 'agent' },
   }));
   assert.equal(c.read('wrong-shape').state, c.STATE.UNKNOWN);
 });
@@ -122,8 +122,8 @@ test('a report from just inside the window is still believed', () => {
 
 test('commitments survive a write and read back intact', () => {
   c.report('raph', [
-    { what: 'verify the 14:00 sweep settled', id: 'gen3', createdAt: new Date().toISOString() },
-    { what: 'reply to Leo about PR #80', id: 'gen4', createdAt: new Date().toISOString() },
+    { what: 'verify the 14:00 sweep settled', id: 'gen3', createdAt: new Date().toISOString(), source: 'agent' },
+    { what: 'reply to Leo about PR #80', id: 'gen4', createdAt: new Date().toISOString(), source: 'agent' },
   ]);
   const got = c.read('raph');
   assert.equal(got.state, c.STATE.HOLDING);
@@ -135,21 +135,21 @@ test('commitments survive a write and read back intact', () => {
 test('report replaces rather than appends, so an agent can say it holds nothing', () => {
   // An append-only store cannot express "nothing", which is the sentence this
   // store most needs to be able to record.
-  c.report('emptied', [{ what: 'a thing', id: 'gen5', createdAt: new Date().toISOString() }]);
+  c.report('emptied', [{ what: 'a thing', id: 'gen5', createdAt: new Date().toISOString(), source: 'agent' }]);
   assert.equal(c.read('emptied').state, c.STATE.HOLDING);
   c.report('emptied', []);
   assert.equal(c.read('emptied').state, c.STATE.CLEAR);
 });
 
 test('add extends the existing list', () => {
-  c.report('adder', [{ what: 'first', id: 'gen6', createdAt: new Date().toISOString() }]);
+  c.report('adder', [{ what: 'first', id: 'gen6', createdAt: new Date().toISOString(), source: 'agent' }]);
   c.add('adder', 'second');
   assert.deepEqual(c.read('adder').commitments.map((x) => x.what), ['first', 'second']);
 });
 
 
 test('resolve removes one and refuses when the record cannot be read', () => {
-  c.report('resolver', [{ what: 'keep me', id: 'gen7', createdAt: new Date().toISOString() }, { what: 'remove me', id: 'gen8', createdAt: new Date().toISOString() }]);
+  c.report('resolver', [{ what: 'keep me', id: 'gen7', createdAt: new Date().toISOString(), source: 'agent' }, { what: 'remove me', id: 'gen8', createdAt: new Date().toISOString(), source: 'agent' }]);
   const target = c.read('resolver').commitments.find((x) => x.what === 'remove me');
   c.resolve('resolver', target.id);
   assert.deepEqual(c.read('resolver').commitments.map((x) => x.what), ['keep me']);
@@ -158,12 +158,12 @@ test('resolve removes one and refuses when the record cannot be read', () => {
 });
 
 test('a commitment with no description is refused rather than stored blank', () => {
-  assert.throws(() => c.report('blank', [{ what: '   ', id: 'gen9', createdAt: new Date().toISOString() }]), /needs a description/);
+  assert.throws(() => c.report('blank', [{ what: '   ', id: 'gen9', createdAt: new Date().toISOString(), source: 'agent' }]), /needs a description/);
   assert.throws(() => c.report('blank', [{}]), /needs a description/);
 });
 
 test('readAll returns every agent we hold a record for', () => {
-  c.report('one-of-many', [{ what: 'x', id: 'gen10', createdAt: new Date().toISOString() }]);
+  c.report('one-of-many', [{ what: 'x', id: 'gen10', createdAt: new Date().toISOString(), source: 'agent' }]);
   const all = c.readAll();
   assert.ok(all['one-of-many']);
   assert.equal(all['one-of-many'].state, c.STATE.HOLDING);
@@ -250,7 +250,7 @@ test('add() on a STALE record keeps what was already there', () => {
   fs.writeFileSync(c.recordPath('stalebot'), JSON.stringify({
     name: 'stalebot',
     reportedAt: stale,
-    commitments: [{ id: 'a', what: 'verify the sweep', createdAt: new Date().toISOString() }, { id: 'b', what: 'reply to Leo', createdAt: new Date().toISOString() }],
+    commitments: [{ id: 'a', what: 'verify the sweep', createdAt: new Date().toISOString(), source: 'agent' }, { id: 'b', what: 'reply to Leo', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   assert.equal(c.read('stalebot').state, c.STATE.UNKNOWN, 'precondition: it reads as stale');
 
@@ -276,7 +276,7 @@ test('a no-op resolve on a stale record does not turn unknown into a confident a
   // data was simply re-stamped as fresh.
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('ghost'), JSON.stringify({
-    name: 'ghost', reportedAt: stale, commitments: [{ id: 'x', what: 'still pending', createdAt: new Date().toISOString() }],
+    name: 'ghost', reportedAt: stale, commitments: [{ id: 'x', what: 'still pending', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   assert.equal(c.read('ghost').state, c.STATE.UNKNOWN, 'precondition');
 
@@ -292,7 +292,7 @@ test('resolving the LAST commitment on a stale record does not produce clear', (
   // pending" unless the timestamp is preserved.
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('emptying'), JSON.stringify({
-    name: 'emptying', reportedAt: stale, commitments: [{ id: 'only', what: 'the last one', createdAt: new Date().toISOString() }],
+    name: 'emptying', reportedAt: stale, commitments: [{ id: 'only', what: 'the last one', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   c.resolve('emptying', 'only');
 
@@ -304,7 +304,7 @@ test('resolving the LAST commitment on a stale record does not produce clear', (
 
 test('add and resolve on a FRESH record do refresh it, which is the whole point', () => {
   // The preserve-the-timestamp rule must not accidentally freeze fresh records.
-  c.report('freshbot', [{ id: 'one', what: 'first', createdAt: new Date().toISOString() }]);
+  c.report('freshbot', [{ id: 'one', what: 'first', createdAt: new Date().toISOString(), source: 'agent' }]);
   c.add('freshbot', 'second');
   assert.equal(c.read('freshbot').state, c.STATE.HOLDING);
   c.resolve('freshbot', 'one');
@@ -319,7 +319,7 @@ test('a stale read still returns the list it managed to read', () => {
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('stalelist'), JSON.stringify({
     name: 'stalelist',
-    reportedAt: stale, commitments: [{ id: 'x', what: 'something real', createdAt: new Date().toISOString() }],
+    reportedAt: stale, commitments: [{ id: 'x', what: 'something real', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   const got = c.read('stalelist');
   assert.equal(got.state, c.STATE.UNKNOWN);
@@ -342,7 +342,7 @@ test('resolve() works on a stale record but refuses an unreadable one', () => {
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('staleresolve'), JSON.stringify({
     name: 'staleresolve',
-    reportedAt: stale, commitments: [{ id: 'keep', what: 'keep me', createdAt: new Date().toISOString() }, { id: 'drop', what: 'drop me', createdAt: new Date().toISOString() }],
+    reportedAt: stale, commitments: [{ id: 'keep', what: 'keep me', createdAt: new Date().toISOString(), source: 'agent' }, { id: 'drop', what: 'drop me', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   c.resolve('staleresolve', 'drop');
   assert.deepEqual(c.read('staleresolve').commitments.map((x) => x.what), ['keep me']);
@@ -434,7 +434,7 @@ test('an unreadable record is NOT treated as a missing one by add()', () => {
   // to one that was never written, and add() overwrote it. Two real
   // commitments were destroyed by a chmod.
   if (process.getuid && process.getuid() === 0) return; // root reads anything
-  c.report('permbot', [{ what: 'first real thing', id: 'gen11', createdAt: new Date().toISOString() }, { what: 'second real thing', id: 'gen12', createdAt: new Date().toISOString() }]);
+  c.report('permbot', [{ what: 'first real thing', id: 'gen11', createdAt: new Date().toISOString(), source: 'agent' }, { what: 'second real thing', id: 'gen12', createdAt: new Date().toISOString(), source: 'agent' }]);
   fs.chmodSync(c.recordPath('permbot'), 0o000);
   try {
     assert.throws(() => c.add('permbot', 'a new thing'),
@@ -454,7 +454,7 @@ test('an aliased spelling of an agent name is refused, not written under it', ()
   // later read, by which point the real record was already overwritten and the
   // writer had been told it succeeded. Detection after destruction is not a
   // guard, so the write is refused instead.
-  c.report('realagent', [{ what: 'something genuinely pending', id: 'gen13', createdAt: new Date().toISOString() }]);
+  c.report('realagent', [{ what: 'something genuinely pending', id: 'gen13', createdAt: new Date().toISOString(), source: 'agent' }]);
 
   for (const alias of ['REALAGENT', 'realagent.', 'real agent']) {
     assert.throws(() => c.report(alias, []), /exact name/, `${alias} should be refused`);
@@ -536,7 +536,7 @@ test('a symlinked record cannot point the read outside the store', () => {
   const target = path.join(outside, 'target.json');
   fs.writeFileSync(target, JSON.stringify({
     name: 'linkbot', reportedAt: new Date().toISOString(),
-    commitments: [{ id: 'l', what: 'REACHED THROUGH A SYMLINK', createdAt: new Date().toISOString() }],
+    commitments: [{ id: 'l', what: 'REACHED THROUGH A SYMLINK', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   fs.mkdirSync(c.DIR, { recursive: true });
   const link = c.recordPath('linkbot');
@@ -562,7 +562,7 @@ test('a record listing something unreadable is unknown, and resolve does not thr
   // null element made resolve() throw on .id from inside a request handler.
   fs.writeFileSync(c.recordPath('badlist'), JSON.stringify({
     name: 'badlist', reportedAt: new Date().toISOString(),
-    commitments: [null, 42, { what: 'a real one', id: 'gen14', createdAt: new Date().toISOString() }],
+    commitments: [null, 42, { what: 'a real one', id: 'gen14', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   const got = c.read('badlist');
   assert.equal(got.state, c.STATE.UNKNOWN);
@@ -573,13 +573,13 @@ test('a failed write leaves no temp file behind', () => {
   // Any failure between the write and the rename otherwise leaks one temp file
   // per attempt, forever.
   const before = fs.existsSync(c.DIR) ? fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp')) : [];
-  assert.throws(() => c.report('tmpbot', [{ what: '', id: 'gen15', createdAt: new Date().toISOString() }]), /needs a description/);
+  assert.throws(() => c.report('tmpbot', [{ what: '', id: 'gen15', createdAt: new Date().toISOString(), source: 'agent' }]), /needs a description/);
   const after = fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp'));
   assert.deepEqual(after, before, `temp files left behind: ${after.join(', ')}`);
 });
 
 test('createdAt is capped and validated, not passed through whole', () => {
-  c.report('longdate', [{ what: 'x', createdAt: 'z'.repeat(25000), id: 'gen16' }]);
+  c.report('longdate', [{ what: 'x', createdAt: 'z'.repeat(25000), id: 'gen16', source: 'agent' }]);
   const got = c.read('longdate').commitments[0];
   assert.ok(got.createdAt.length <= 40, `createdAt was ${got.createdAt.length} chars`);
   assert.ok(!Number.isNaN(Date.parse(got.createdAt)), 'an unparseable date should be replaced, not stored');
@@ -594,7 +594,7 @@ test('readAll does not let a __proto__ record mutate its result', () => {
   fs.mkdirSync(c.DIR, { recursive: true });
   fs.writeFileSync(raw, JSON.stringify({
     name: '__proto__',
-    reportedAt: new Date().toISOString(), commitments: [{ id: 'p', what: 'polluting', createdAt: new Date().toISOString() }],
+    reportedAt: new Date().toISOString(), commitments: [{ id: 'p', what: 'polluting', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   try {
     const all = c.readAll();
@@ -675,7 +675,7 @@ test('a write that fails AFTER the temp file exists cleans it up', () => {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest);
   try {
-    assert.throws(() => c.report('renamefail', [{ what: 'something', id: 'gen17', createdAt: new Date().toISOString() }]), /could not be saved/);
+    assert.throws(() => c.report('renamefail', [{ what: 'something', id: 'gen17', createdAt: new Date().toISOString(), source: 'agent' }]), /could not be saved/);
     const strays = fs.readdirSync(c.DIR).filter((f) => f.startsWith('renamefail') && f.includes('.tmp'));
     assert.deepEqual(strays, [], `temp file left behind: ${strays.join(', ')}`);
   } finally {
@@ -712,7 +712,7 @@ test('traversal is refused by the code that actually reads and writes, not just 
   // can stop this.
   fs.writeFileSync(path.join(outsideDir, `${secretName}.json`), JSON.stringify({
     name: escape, reportedAt: new Date().toISOString(),
-    commitments: [{ id: 's', what: 'SECRET FROM OUTSIDE THE STORE', createdAt: new Date().toISOString() }],
+    commitments: [{ id: 's', what: 'SECRET FROM OUTSIDE THE STORE', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
 
   try {
@@ -727,7 +727,7 @@ test('traversal is refused by the code that actually reads and writes, not just 
 
     // And the write path must not land outside DIR either.
     const before = fs.readdirSync(outsideDir).sort();
-    try { c.report(escape, [{ what: 'should not land here', id: 'gen18', createdAt: new Date().toISOString() }]); } catch { /* refused is fine */ }
+    try { c.report(escape, [{ what: 'should not land here', id: 'gen18', createdAt: new Date().toISOString(), source: 'agent' }]); } catch { /* refused is fine */ }
     assert.deepEqual(fs.readdirSync(outsideDir).sort(), before,
       'a write escaped the store directory');
   } finally {
@@ -743,7 +743,7 @@ test('a stale add cannot grow a record past the cap', () => {
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('growbot'), JSON.stringify({
     name: 'growbot', reportedAt: stale,
-    commitments: Array.from({ length: c.MAX_COMMITMENTS }, (_, i) => ({ id: `i${i}`, what: `thing ${i}`, createdAt: new Date().toISOString() })),
+    commitments: Array.from({ length: c.MAX_COMMITMENTS }, (_, i) => ({ id: `i${i}`, what: `thing ${i}`, createdAt: new Date().toISOString(), source: 'agent' })),
   }));
   assert.throws(() => c.add('growbot', 'one too many'), /cannot hold more than/);
   assert.equal(c.read('growbot').commitments.length, c.MAX_COMMITMENTS);
@@ -755,7 +755,7 @@ test('a hand-written record beyond the cap is refused rather than served', () =>
   // inside the request handler.
   fs.writeFileSync(c.recordPath('hugebot'), JSON.stringify({
     name: 'hugebot', reportedAt: new Date().toISOString(),
-    commitments: Array.from({ length: c.MAX_COMMITMENTS + 50 }, (_, i) => ({ id: `i${i}`, what: `x${i}`, createdAt: new Date().toISOString() })),
+    commitments: Array.from({ length: c.MAX_COMMITMENTS + 50 }, (_, i) => ({ id: `i${i}`, what: `x${i}`, createdAt: new Date().toISOString(), source: 'agent' })),
   }));
   assert.equal(c.read('hugebot').state, c.STATE.UNKNOWN);
 });
@@ -766,7 +766,7 @@ test('a future-dated record is not laundered fresh by add or resolve either', ()
   // against a future-dated one, even though both reach the same branch.
   const ahead = new Date(Date.now() + 6 * 3600 * 1000).toISOString();
   fs.writeFileSync(c.recordPath('aheadbot'), JSON.stringify({
-    name: 'aheadbot', reportedAt: ahead, commitments: [{ id: 'a', what: 'pending', createdAt: new Date().toISOString() }],
+    name: 'aheadbot', reportedAt: ahead, commitments: [{ id: 'a', what: 'pending', createdAt: new Date().toISOString(), source: 'agent' }],
   }));
   assert.equal(c.read('aheadbot').state, c.STATE.UNKNOWN, 'precondition');
 
@@ -785,7 +785,7 @@ test('an enormous record is refused before it is read, not after it is parsed', 
   // 1.1GB resident and a 209MB status payload, synchronously inside the request
   // handler on a board that polls continuously. Same failure class as the FIFO.
   fs.mkdirSync(c.DIR, { recursive: true });
-  const huge = { name: 'hugefile', reportedAt: new Date().toISOString(), commitments: [{ id: 'a', what: 'x', createdAt: new Date().toISOString() }] };
+  const huge = { name: 'hugefile', reportedAt: new Date().toISOString(), commitments: [{ id: 'a', what: 'x', createdAt: new Date().toISOString(), source: 'agent' }] };
   // Pad past the byte ceiling while staying valid JSON and under the entry cap.
   huge.padding = 'p'.repeat(c.MAX_RECORD_BYTES + 1024);
   fs.writeFileSync(c.recordPath('hugefile'), JSON.stringify(huge));
@@ -847,8 +847,8 @@ test('read() never throws, whatever the record contains', () => {
     JSON.stringify({ name: 'shapes', reportedAt: 'nope', commitments: [] }),
     JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: 'no' }),
     JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [null] }),
-    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: '', id: 'gen19', createdAt: new Date().toISOString() }] }),
-    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: 0, id: 'gen20', createdAt: new Date().toISOString() }] }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: '', id: 'gen19', createdAt: new Date().toISOString(), source: 'agent' }] }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: 0, id: 'gen20', createdAt: new Date().toISOString(), source: 'agent' }] }),
     JSON.stringify({ name: 'shapes', reportedAt: null, commitments: [] }),
     // An object-valued `name`. String() throws on this (non-callable toString
     // and valueOf), and the throw sat OUTSIDE every try, so one such record
@@ -885,7 +885,7 @@ test('the read path caps fields but never invents them', () => {
   const stamp = new Date().toISOString();
   fs.writeFileSync(c.recordPath('noinvent'), JSON.stringify({
     name: 'noinvent', reportedAt: stamp,
-    commitments: [{ what: 'no id on this one', createdAt: stamp }],
+    commitments: [{ what: 'no id on this one', createdAt: stamp, source: 'agent' }],
   }));
   assert.equal(c.read('noinvent').state, c.STATE.UNKNOWN,
     'a record missing an id must be refused, not repaired');
@@ -893,7 +893,7 @@ test('the read path caps fields but never invents them', () => {
   // With a real id it reads fine, and the id is stable across reads.
   fs.writeFileSync(c.recordPath('stableid'), JSON.stringify({
     name: 'stableid', reportedAt: stamp,
-    commitments: [{ id: 'fixed-id', what: 'has an id', createdAt: stamp }],
+    commitments: [{ id: 'fixed-id', what: 'has an id', createdAt: stamp, source: 'agent' }],
   }));
   const first = c.read('stableid').commitments[0];
   const second = c.read('stableid').commitments[0];
@@ -902,23 +902,21 @@ test('the read path caps fields but never invents them', () => {
   assert.equal(first.createdAt, stamp, 'createdAt must not be replaced with now');
 });
 
-test('the blank-what guard and the throw-guard are pinned separately', () => {
-  // These two masked each other: the blank-description test was satisfied by
-  // either alone, and both produced the same `because`, so no assertion could
-  // tell them apart. These two fixtures each reach exactly one of them.
+test('the blank-what and bad-type clauses of the usability check are pinned separately', () => {
+  // Two clauses of the same predicate, each reached by exactly one fixture.
+  // They previously masked each other: one test satisfied by either guard
+  // alone, both producing the same message, so no assertion could tell them
+  // apart. (The name of this test used to say "throw-guard", which stopped
+  // being accurate when the type check landed and made the catch redundant.)
   const stamp = new Date().toISOString();
 
   // Reaches the usability check only: a blank `what` never gets to the coercion.
   fs.writeFileSync(c.recordPath('onlyblank'), JSON.stringify({
-    name: 'onlyblank', reportedAt: stamp, commitments: [{ id: 'a', what: '  ', createdAt: stamp }],
+    name: 'onlyblank', reportedAt: stamp, commitments: [{ id: 'a', what: '  ', createdAt: stamp, source: 'agent' }],
   }));
   assert.equal(c.read('onlyblank').state, c.STATE.UNKNOWN);
 
-  // An object-valued id. This is now caught by the usability check (which
-  // type-checks id), not by the catch inside capForDisplay -- so this pins the
-  // TYPE CHECK, and the catch below it is untested defence-in-depth. Worth
-  // stating: an earlier comment claimed the catch was the sole guard here, and
-  // that stopped being true the moment the type check landed.
+  // An object-valued id, caught by the usability check's type test.
   fs.writeFileSync(c.recordPath('onlythrow'), JSON.stringify({
     name: 'onlythrow', reportedAt: stamp,
     commitments: [{ id: { toString: 'x', valueOf: 'y' }, what: 'a real one', createdAt: stamp }],
@@ -926,4 +924,77 @@ test('the blank-what guard and the throw-guard are pinned separately', () => {
   let got;
   assert.doesNotThrow(() => { got = c.read('onlythrow'); });
   assert.equal(got.state, c.STATE.UNKNOWN);
+});
+
+test('an unparseable createdAt is served verbatim, not replaced with now', () => {
+  // The one input where the read-path capper and the write-path sanitiser
+  // genuinely differ, and it was untested: sanitise() replaces an unparseable
+  // createdAt with the current time, so the board would show "created just now"
+  // for a commitment of unknown age. Without this fixture, swapping the read
+  // path back to sanitise() left the whole suite green.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('oddstamp'), JSON.stringify({
+    name: 'oddstamp', reportedAt: stamp,
+    commitments: [{ id: 'a', what: 'real', createdAt: 'not-a-date-at-all', source: 'agent' }],
+  }));
+  const got = c.read('oddstamp');
+  assert.equal(got.state, c.STATE.HOLDING);
+  assert.equal(got.commitments[0].createdAt, 'not-a-date-at-all',
+    'the read path must not invent a creation time it cannot know');
+});
+
+test('a record missing source is refused rather than given one', () => {
+  // report() always writes source, so a record without it was not written by
+  // us. Defaulting it to 'agent' asserted a provenance the record never stated,
+  // in a module that refuses to default id, createdAt or name for exactly that
+  // reason.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('nosource'), JSON.stringify({
+    name: 'nosource', reportedAt: stamp,
+    commitments: [{ id: 'a', what: 'real', createdAt: stamp }],
+  }));
+  assert.equal(c.read('nosource').state, c.STATE.UNKNOWN);
+});
+
+test('a description that is only padding is not served as blank', () => {
+  // The guard tested the TRIMMED value while the display sliced the RAW one, so
+  // 300 spaces followed by real text passed the non-blank check and came back
+  // as an empty string. Worse, add() and resolve() on that agent then threw
+  // "every commitment needs a description" forever, so the record could not be
+  // corrected through the module's own API.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('padded'), JSON.stringify({
+    name: 'padded', reportedAt: stamp,
+    commitments: [{ id: 'a', what: ' '.repeat(300) + 'the real text', createdAt: stamp, source: 'agent' }],
+  }));
+  const got = c.read('padded');
+  assert.equal(got.state, c.STATE.HOLDING);
+  assert.equal(got.commitments[0].what.trim(), 'the real text',
+    'padding must be trimmed before the cap, not sliced into blankness');
+
+  // And the record stays usable through the module's own API.
+  assert.doesNotThrow(() => c.add('padded', 'another'));
+});
+
+test('an empty-string id is refused, so resolve cannot remove two things at once', () => {
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('emptyid'), JSON.stringify({
+    name: 'emptyid', reportedAt: stamp,
+    commitments: [{ id: '', what: 'one', createdAt: stamp, source: 'agent' },
+                  { id: '', what: 'two', createdAt: stamp, source: 'agent' }],
+  }));
+  assert.equal(c.read('emptyid').state, c.STATE.UNKNOWN);
+});
+
+test('a huge foreign name in the mismatch message is capped', () => {
+  // `because` is echoed into every status response, and the name comes from a
+  // file: a 400KB name sits under the byte ceiling and would ride along on
+  // every five-second poll.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('bigname'), JSON.stringify({
+    name: 'z'.repeat(400 * 1024), reportedAt: stamp, commitments: [],
+  }));
+  const got = c.read('bigname');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.ok(got.because.length < 200, `because was ${got.because.length} bytes`);
 });
