@@ -325,7 +325,15 @@ const server = http.createServer((req, res) => {
   if (commits && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(commits[1]);
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
-    sendJson(res, 200, commitments.read(name));
+    // Guarded on its own merit. Every other engine call in this file is inside
+    // a try or a promise catch; this one was handed straight to the socket, so
+    // any future throw from the store would exit the process rather than answer
+    // an error. read() is documented never to throw, and it did once.
+    try {
+      sendJson(res, 200, commitments.read(name));
+    } catch {
+      sendJson(res, 500, { error: 'that agent record could not be read' });
+    }
     return;
   }
 
