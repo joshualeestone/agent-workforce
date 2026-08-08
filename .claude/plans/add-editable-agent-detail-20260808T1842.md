@@ -102,9 +102,9 @@ The card is explicit, and it is about a mental model rather than a feature:
 ## 6. Name, role, model
 
 - [x] **6.1** **Role** already works. Keep it.
-- [x] **6.2** **Name** — the status engine carries `name` and `nameDerived`, so a display name that overrides the derived one goes in the existing profile store. It does **not** rename the tmux session.
-- [x] **6.3** ⚠️ **Name is used as a store key elsewhere.** `#18` is open precisely because `safeKey` collisions and non-canonical names break the write routes. A display-name override must **not** become a second identity: `sessionName` stays the key everywhere.
-- [x] **6.4** **Model, shown read-only**, with the wireframe's own honest line: *"Changing this restarts Angel. You will be shown what it is working on before anything is lost."* The dropdown lands with #1, because the sentence is only true once the restart control and the commitment store are both there. **#2 merged today, so half of that is now real.**
+- [ ] **6.2** ⛔️ **NOT BUILT.** **Name** — the status engine carries `name` and `nameDerived`, so a display name that overrides the derived one goes in the existing profile store. It does **not** rename the tmux session.
+- [ ] **6.3** ⛔️ **N/A, 6.2 not built.** ⚠️ **Name is used as a store key elsewhere.** `#18` is open precisely because `safeKey` collisions and non-canonical names break the write routes. A display-name override must **not** become a second identity: `sessionName` stays the key everywhere.
+- [ ] **6.4** ⛔️ **NOT BUILT.** **Model, shown read-only**, with the wireframe's own honest line: *"Changing this restarts Angel. You will be shown what it is working on before anything is lost."* The dropdown lands with #1, because the sentence is only true once the restart control and the commitment store are both there. **#2 merged today, so half of that is now real.**
 
 ---
 
@@ -142,6 +142,27 @@ Neither blocks starting; both change the finished screen.
 2. **Whether the instruction editor ships behind anything.** It writes the file a live agent boots from. It is safe on loopback, and it is the single most powerful thing on this page. If he would rather it land after #10 rather than before, that is a reasonable call and the rest of the card still ships without it.
 
 ---
+
+## ⛔️ Ticked in error, then corrected
+
+The checkboxes above were first ticked with a blanket find-and-replace, which
+marked **6.2 (name editing)** and **6.4 (the model note)** as done when neither
+was built. Corrected before the checkpoint. Recording it because a plan that
+claims work it did not do is the same failure this branch's sibling spent eleven
+review rounds removing from comments, and a bulk edit is exactly how it happens.
+
+**Not built, and deferred deliberately:**
+
+- **6.2 / 6.3 Name editing.** The display name is derived by the status engine
+  and `sessionName` is the key for the avatar, profile and commitment stores. A
+  display-name override is a small feature with a sharp edge (#18 is open
+  precisely because non-canonical names break the write routes), and it does not
+  belong in the same PR as the instruction editor.
+- **6.4 The model note.** Model already shows in the meta line. The honest
+  sentence the wireframe carries -- *"Changing this restarts Angel. You will be
+  shown what it is working on before anything is lost."* -- is only true once
+  the restart control exists, which is #1. Adding the dropdown now would promise
+  something the page cannot do.
 
 ## Execution record, 2026-08-08
 
