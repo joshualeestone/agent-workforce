@@ -232,7 +232,7 @@ function parseRecord(agent) {
     && typeof c.what === 'string' && c.what.trim() !== ''
     && typeof c.id === 'string' && c.id !== ''
     && typeof c.createdAt === 'string'
-    && (c.source === undefined || typeof c.source === 'string')
+    && typeof c.source === 'string'
   ));
   if (!usable) {
     return { ok: false, absent: false, because: 'its record lists something we cannot read' };
@@ -443,10 +443,13 @@ function writeRecord(key, rawName, clean, reportedAt) {
 }
 
 /**
- * Cap a stored record's fields for display. Caps only; never invents.
+ * Cap a stored record's fields for display. Caps and trims; never invents.
  *
- * Distinct from `sanitise()`, which fills in a missing id or timestamp because
- * the write path legitimately can. Returns null rather than raising, so a
+ * Distinct from `sanitise()`, which fills in a missing id, timestamp or source
+ * because the write path legitimately can. Nothing is defaulted here: the
+ * `usable` check above requires every field a record we wrote always carries,
+ * so a record missing one was not written by us and is refused rather than
+ * repaired. Returns null rather than raising, so a
  * record it cannot handle becomes `unknown` instead of an uncaught exception in
  * the request handler.
  */
@@ -454,9 +457,14 @@ function capForDisplay(commitments) {
   try {
     return commitments.map((c) => ({
       id: String(c.id).slice(0, 80),
-      what: String(c.what).slice(0, 300),
+      // Trim BEFORE slicing, matching sanitise(). Slicing the raw value meant
+      // a `what` of 300 spaces then real text passed the non-blank guard and
+      // was served as a blank string -- a guard validated against a different
+      // value than the one served, which is the shape of half the bugs in this
+      // branch's history.
+      what: String(c.what).trim().slice(0, 300),
       createdAt: String(c.createdAt).slice(0, 40),
-      source: c.source === undefined ? 'agent' : String(c.source).slice(0, 40),
+      source: String(c.source).slice(0, 40),
     }));
   } catch {
     return null;
