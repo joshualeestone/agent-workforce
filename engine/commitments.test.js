@@ -196,3 +196,171 @@ test('concurrent writes leave a valid file rather than a truncated one', () => {
   assert.equal(got.state, c.STATE.HOLDING);
   assert.equal(got.commitments[0].what, 'commitment 39');
 });
+
+// ---------------------------------------------------------------------------
+// Ways the store used to hand back an answer it had not earned
+// ---------------------------------------------------------------------------
+
+test('a record that parses to null is unknown, and does not throw', () => {
+  // `JSON.parse('null')` succeeds and returns null, and reaching for
+  // `.reportedAt` on it throws. From inside the HTTP handler that is an
+  // uncaught exception that exits the process, so one file containing `null`
+  // took down every caller. Same shape as the stray-% crash on the routes.
+  fs.writeFileSync(c.recordPath('nullbot'), 'null');
+  let got;
+  assert.doesNotThrow(() => { got = c.read('nullbot'); });
+  assert.equal(got.state, c.STATE.UNKNOWN);
+});
+
+test('a record that parses to a non-object is unknown, and does not throw', () => {
+  for (const [name, body] of [['numbot', '42'], ['strbot', '"hello"'], ['arrbot', '[]']]) {
+    fs.writeFileSync(c.recordPath(name), body);
+    let got;
+    assert.doesNotThrow(() => { got = c.read(name); }, `${body} threw`);
+    assert.equal(got.state, c.STATE.UNKNOWN, `${body} should be unknown`);
+  }
+});
+
+test('a future-dated report is unknown, not clear forever', () => {
+  // The staleness check was one-sided, so a timestamp ahead of now produced a
+  // negative age, sailed under the ceiling, and read as `clear` permanently.
+  // reportedAt comes from the local clock, so an NTP correction or a machine
+  // that booted fast produces one. A future timestamp is not a fresh
+  // assertion, it is an unreadable one.
+  fs.writeFileSync(c.recordPath('futurebot'), JSON.stringify({
+    reportedAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+    commitments: [],
+  }));
+  const got = c.read('futurebot');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.match(got.because, /dated in the future/);
+});
+
+test('small clock jitter into the future is still believed', () => {
+  // A tolerance, or every machine with a slightly fast clock reads unknown.
+  fs.writeFileSync(c.recordPath('jitterbot'), JSON.stringify({
+    reportedAt: new Date(Date.now() + 5000).toISOString(),
+    commitments: [],
+  }));
+  assert.equal(c.read('jitterbot').state, c.STATE.CLEAR);
+});
+
+// ---------------------------------------------------------------------------
+// The data-loss path: stale is not the same as unreadable
+// ---------------------------------------------------------------------------
+
+test('add() on a STALE record keeps what was already there', () => {
+  // The one that destroyed data. `add()` treated every unknown as "nothing to
+  // preserve", so an agent holding three real commitments whose record had
+  // merely aged past the window lost all three on the next add, and then read
+  // `clear`. A genuinely-holding agent became "nothing in flight" through two
+  // ordinary calls, which is the exact lie this store exists to prevent.
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('stalebot'), JSON.stringify({
+    reportedAt: stale,
+    commitments: [{ id: 'a', what: 'verify the sweep' }, { id: 'b', what: 'reply to Leo' }],
+  }));
+  assert.equal(c.read('stalebot').state, c.STATE.UNKNOWN, 'precondition: it reads as stale');
+
+  c.add('stalebot', 'one new thing');
+
+  const after = c.read('stalebot');
+  assert.equal(after.state, c.STATE.HOLDING);
+  assert.deepEqual(after.commitments.map((x) => x.what),
+    ['verify the sweep', 'reply to Leo', 'one new thing'],
+    'the two it was already holding must survive');
+});
+
+test('a stale read still returns the list it managed to read', () => {
+  // "These three were pending 40 minutes ago" is far more useful at 3am than an
+  // empty array, as long as the state says we cannot vouch for it.
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('stalelist'), JSON.stringify({
+    reportedAt: stale, commitments: [{ id: 'x', what: 'something real' }],
+  }));
+  const got = c.read('stalelist');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.deepEqual(got.commitments.map((x) => x.what), ['something real']);
+});
+
+test('add() REFUSES on a record it could not read, rather than starting fresh', () => {
+  // An unreadable record is not an empty one. Overwriting it converts "I cannot
+  // tell" into a confident answer and loses whatever it held.
+  fs.writeFileSync(c.recordPath('corruptadd'), '{"commitments": [{"what": "trunca');
+  assert.throws(() => c.add('corruptadd', 'new thing'), /cannot add to a record we cannot read/);
+});
+
+test('add() on a never-reported agent starts a list, which is the one safe case', () => {
+  const got = c.add('brandnew', 'first thing');
+  assert.equal(got.commitments.length, 1);
+});
+
+test('resolve() works on a stale record but refuses an unreadable one', () => {
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('staleresolve'), JSON.stringify({
+    reportedAt: stale, commitments: [{ id: 'keep', what: 'keep me' }, { id: 'drop', what: 'drop me' }],
+  }));
+  c.resolve('staleresolve', 'drop');
+  assert.deepEqual(c.read('staleresolve').commitments.map((x) => x.what), ['keep me']);
+
+  fs.writeFileSync(c.recordPath('corruptresolve'), 'null');
+  assert.throws(() => c.resolve('corruptresolve', 'any'), /cannot resolve/);
+});
+
+// ---------------------------------------------------------------------------
+// Bounds and coercion
+// ---------------------------------------------------------------------------
+
+test('an absurd number of commitments is refused', () => {
+  // Without a cap one local PUT writes hundreds of thousands of entries that
+  // then serialise into every /api/status poll.
+  const many = Array.from({ length: c.MAX_COMMITMENTS + 1 }, (_, i) => ({ what: `thing ${i}` }));
+  assert.throws(() => c.report('floodbot', many), /cannot hold more than/);
+  assert.doesNotThrow(() => c.report('floodbot', many.slice(0, c.MAX_COMMITMENTS)));
+});
+
+test('every stored field is coerced, including createdAt', () => {
+  // createdAt was the one field passing through uncoerced, so an object in the
+  // PUT body was stored and re-served verbatim on every status poll.
+  c.report('coerce', [{ what: 'x', createdAt: { nested: 'object' }, id: { bad: 1 }, source: 12345 }]);
+  const got = c.read('coerce').commitments[0];
+  assert.equal(typeof got.createdAt, 'string');
+  assert.equal(typeof got.id, 'string');
+  assert.equal(typeof got.source, 'string');
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency, for real
+// ---------------------------------------------------------------------------
+
+test('genuinely concurrent writers from separate processes leave a valid file', async () => {
+  // The previous version of this test was a sequential for-loop in one process:
+  // it exercised no concurrency at all and would have passed against a bare
+  // writeFileSync with the rename removed. Thirteen agents write on this
+  // machine, and the whole point of write-then-rename is what happens when two
+  // of them land at once.
+  const { execFile } = require('node:child_process');
+  const nodePath = require('node:path');
+  const modulePath = nodePath.resolve(__dirname, 'commitments.js');
+
+  const writer = (n) => new Promise((resolve) => {
+    execFile(process.execPath, ['-e', `
+      process.env.AGENT_WORKFORCE_DATA = ${JSON.stringify(TMP)};
+      const c = require(${JSON.stringify(modulePath)});
+      for (let i = 0; i < 25; i++) c.report('racer', [{ what: 'writer ${n} item ' + i }]);
+    `], { env: { ...process.env, AGENT_WORKFORCE_DATA: TMP } }, () => resolve());
+  });
+
+  await Promise.all([writer(1), writer(2), writer(3), writer(4)]);
+
+  // The file must be parseable and complete. A torn write shows up here as a
+  // JSON error or an empty list, which is the silent loss this guards against.
+  const got = c.read('racer');
+  assert.notEqual(got.state, c.STATE.UNKNOWN, `record was unreadable after concurrent writes: ${got.because}`);
+  assert.equal(got.commitments.length, 1);
+  assert.match(got.commitments[0].what, /^writer [1-4] item \d+$/);
+
+  // And no temp files left behind.
+  const strays = fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp'));
+  assert.deepEqual(strays, [], `temp files left behind: ${strays.join(', ')}`);
+});
