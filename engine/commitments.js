@@ -73,13 +73,15 @@ const MAX_COMMITMENTS = 200;
 /**
  * Ceiling on the size of one record file, checked before it is opened.
  *
- * Set well above what `report()` can emit at its own caps, with the worst case
- * MEASURED rather than estimated: 200 commitments whose every character
- * serialises to six JSON bytes (a control character or a lone surrogate) write
- * 406,708 bytes. The earlier 512KB ceiling happened to clear that, but only by
- * 20 percent, and the comment justifying it reasoned from "200 x 300 characters
- * is well under 100KB" -- an estimate four times too small, which would have
- * been wrong had any cap moved.
+ * Set above the measured worst case `report()` can emit at its own caps:
+ * **525,708 bytes**, from 200 commitments with every field maxed and filled
+ * with characters that serialise to six JSON bytes.
+ *
+ * That number has been wrong twice. The first justification reasoned from
+ * "200 x 300 characters is well under 100KB", four times too small. The second
+ * measured only `what` and reported 406,708, concluding the old 512KB ceiling
+ * cleared it -- it did not, and a record report() wrote successfully was then
+ * refused by read() as too large.
  *
  * The failure it guards against is worth naming: a record that report() writes
  * successfully and read() then refuses as too large leaves add() and resolve()
@@ -541,10 +543,15 @@ function add(agent, what) {
   // new thing; it has not re-asserted everything else, so the record must go on
   // reading `unknown` until it does. Re-stamping here would launder "we cannot
   // tell" into "nothing else pending", which is the whole failure mode.
+  // Already-stored commitments are passed through as they are; only the NEW one
+  // is sanitised. Re-running sanitise() over the existing list rewrote an
+  // unparseable createdAt to `now`, silently reversing the read path's
+  // never-invent rule through the convenience API.
+  const next = [...rec.commitments, ...sanitise([{ what }])];
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, sanitise([...rec.commitments, { what }]), rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt);
   }
-  return report(agent, [...rec.commitments, { what }]);
+  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString());
 }
 
 /** Convenience: mark one done. */
@@ -560,10 +567,11 @@ function resolve(agent, id) {
   // keeps its original timestamp and goes on reading `unknown`. The comment
   // that used to sit here said "a stale record resolves fine: it parsed, so the
   // list is known", which is what made the laundering read as intentional.
+  // Same rule: what is already stored is preserved verbatim.
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, sanitise(remaining), rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt);
   }
-  return report(agent, remaining);
+  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString());
 }
 
 /**

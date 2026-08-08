@@ -759,3 +759,19 @@ test('GET reflects what was actually stored, not a fixed answer', async (t) => {
   });
   assert.equal(JSON.parse((await req(`/api/agent/${name}/commitments`)).body).state, 'clear');
 });
+
+test('a null PUT body is refused with a readable message, not an exception name', async (t) => {
+  // Previously answered 400 with the raw JS text "Cannot read properties of
+  // null (reading 'commitments')", which names an exception rather than saying
+  // what to do. The house rule for this catch is stated in server.js itself.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  const res = await req(`/api/agent/${name}/commitments`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: 'null',
+  });
+  assert.equal(res.status, 400);
+  const { error } = JSON.parse(res.body);
+  assert.match(error, /commitments list/, `unhelpful message: ${error}`);
+  assert.ok(!/Cannot read properties/.test(error), 'surfaced a raw exception message');
+});
