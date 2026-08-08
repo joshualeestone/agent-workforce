@@ -64,6 +64,13 @@ function dirEscapes(file) {
 /**
  * Read a worker file, or say why not. Never throws, and never blocks.
  *
+ * Pass `root` and the path is asserted to be inside it. Every caller should:
+ * the parameter is optional only so this function stays usable for a bare path
+ * in a test, never because containment is discretionary.
+ *
+ * "Never blocks" is a real claim, and holding it took more than a type check:
+ * see the open-then-fstat note below for why lstat-then-read is not enough.
+ *
  * Returns `{ ok: true, stat, buf }`, or `{ ok: false, because, missing? }`.
  * `because` is always safe to show a person: no absolute path, no errno.
  *
@@ -81,36 +88,98 @@ function dirEscapes(file) {
  * `lstat`, not `stat`, throughout: `stat` follows a link and reports on its
  * target, which is the thing being guarded against.
  */
-function readWorkerFile(file) {
+function readWorkerFile(file, root) {
+  // Not reachable from either caller today (`inspect` returns before calling
+  // when `fileFor` is null, and `readIdentity` always passes a joined path), and
+  // kept as a total function rather than a partial one: this is the module every
+  // reader of the workers directory now goes through, so it should answer any
+  // input rather than assume its callers stay careful.
   if (!file) return { ok: false, because: 'that is not a name we can look up' };
 
+  // ⚠️ Containment, asserted HERE rather than left to each caller.
+  //
+  // Extracting the file checks into this module did NOT close containment for
+  // its second caller, and the module docstring read as though it had.
+  // `instructions.fileFor` sanitises the name and asserts `startsWith(ROOT)`;
+  // `status.readIdentity` joins the tmux session name verbatim and did neither,
+  // so `readIdentity('../victim')` returned a name and role parsed out of a file
+  // outside the root while the instructions route for the same name refused.
+  // Measured. Latent rather than live, because tmux will not accept a session
+  // name containing a dot, but a guard that depends on tmux's naming rules is
+  // not a guard.
+  if (root && !path.resolve(file).startsWith(path.resolve(root) + path.sep)) {
+    return { ok: false, because: 'that file is not inside the workers folder' };
+  }
+
   if (dirEscapes(file)) {
-    return { ok: false, because: 'its worker folder is a link, so we do not read through it' };
+    // Says which it actually is. A plain file where the worker folder should be
+    // is not a link, and naming the wrong cause on a surface whose whole point
+    // is that the stated reason is the real one is its own small lie.
+    let what = 'is not a folder';
+    try {
+      what = fs.lstatSync(path.dirname(file)).isSymbolicLink()
+        ? 'is a link, so we do not read through it'
+        : 'is not a folder';
+    } catch { /* keep the general wording */ }
+    return { ok: false, because: `its worker folder ${what}` };
   }
 
   if (!fs.existsSync(path.dirname(file))) {
     return { ok: false, because: 'this agent has no folder on this computer yet' };
   }
 
-  let stat;
+  // ⚠️ Open FIRST, then ask the descriptor what it is, then read from that same
+  // descriptor. Never lstat-a-path-then-read-that-path.
+  //
+  // The obvious shape is `lstatSync(file)` followed by `readFileSync(file)`,
+  // and it is check-then-use across two separate resolutions of one name. Swap
+  // the file for a fifo between them and the read blocks forever anyway, which
+  // is the precise failure the check exists to prevent. Measured: a probe that
+  // swapped the path inside that window never returned and had to be killed.
+  //
+  // `O_NONBLOCK` is what makes opening a fifo return instead of waiting for a
+  // writer, and `fstat` on the resulting descriptor describes the object we
+  // actually hold rather than whatever the name points at by the time we look
+  // again. `O_SYMLINK`-free open would follow a link, so the link is refused by
+  // the `lstat` below BEFORE we open anything.
+  //
+  // ⚠️ The type check is pinned by a named test. The RACE WINDOW is not, and
+  // that is declared rather than implied: reverting this to lstat-then-read
+  // leaves every deterministic test green, because provoking the window needs
+  // the path swapped between two synchronous calls, and a test that could do
+  // that reliably would be testing its own scheduling rather than this code.
+  // Same treatment as the file-mode window and the `fileFor` containment
+  // assertion, which are also real and also unpinned.
+  let linkStat;
   try {
-    stat = fs.lstatSync(file);
+    linkStat = fs.lstatSync(file);
   } catch {
     return { ok: false, missing: true, because: 'it has no instruction file yet' };
   }
-
-  if (!stat.isFile() || stat.size > MAX_BYTES) {
-    return { ok: false, stat, because: 'its instruction file is not one we can read' };
+  if (!linkStat.isFile()) {
+    return { ok: false, stat: linkStat, because: 'its instruction file is not one we can read' };
   }
 
-  let buf;
+  let fd;
   try {
-    buf = fs.readFileSync(file);
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch {
-    return { ok: false, stat, because: 'its instruction file could not be read' };
+    return { ok: false, stat: linkStat, because: 'its instruction file could not be read' };
   }
 
-  return { ok: true, stat, buf };
+  try {
+    const stat = fs.fstatSync(fd);
+    // Re-asked of the DESCRIPTOR, so a swap between the lstat above and this
+    // point cannot get us reading something else.
+    if (!stat.isFile() || stat.size > MAX_BYTES) {
+      return { ok: false, stat, because: 'its instruction file is not one we can read' };
+    }
+    return { ok: true, stat, buf: fs.readFileSync(fd) };
+  } catch {
+    return { ok: false, stat: linkStat, because: 'its instruction file could not be read' };
+  } finally {
+    try { fs.closeSync(fd); } catch { /* already gone */ }
+  }
 }
 
 module.exports = { MAX_BYTES, dirEscapes, readWorkerFile };

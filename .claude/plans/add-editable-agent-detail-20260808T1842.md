@@ -200,6 +200,8 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `readIdentity` bypassing the shared reader | fails |
 | is-a-file / size check in `workerfile` | fails (6 tests) |
 | Panel re-syncing staleness from the poll | **green, no browser test harness** |
+| Containment assertion in `workerfile` | fails |
+| Open-then-fstat instead of lstat-then-read | **green, the RACE WINDOW is untestable** |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -392,8 +394,32 @@ direction is a cross-agent WRITE (reproduced with two colliding names), and a
 `sed` of mine had pasted conflict-detection onto three routes that cannot
 produce one.
 
+Iteration 11 found no blockers and three things worth having. The shared reader
+introduced in iteration 10 was itself check-then-use: it `lstat`ed the path and
+then `readFileSync`ed the same PATH, so swapping the file for a fifo between
+those two calls blocked forever anyway, which is the exact failure the check
+exists to prevent. It now opens the file with `O_NONBLOCK`, asks the DESCRIPTOR
+what it is, and reads from that same descriptor, so check and use are one object
+rather than one name used twice.
+
+Extracting the reader also did NOT close containment for its second caller, and
+the module's own docstring read as though it had: `readIdentity` joins the tmux
+session name verbatim, so `readIdentity('../victim')` returned a name and role
+parsed out of a file outside the root. Containment is now asserted inside the
+shared reader, which is where the docstring already claimed it lived.
+
+And `isShowable` had become dead code carrying an inverted claim, describing
+itself as shared by `read` and `write` "so the two cannot disagree" when the
+iteration-2 fix was to STOP using that parallel predicate. Deleted rather than
+left for a future author to wire back in.
+
+While fixing this I deleted six tests by accident, using a text replacement
+whose end anchor was further down the file than I thought. The suite dropped
+from 175 to 169 and I restored them verbatim from the last commit. Worth
+recording because the count is the only reason I noticed.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Five rows are green and every one of them says
+suite, not by reading the code. Seven rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
 test that only ever planted a directory, and `registryKey` had a unit test that
@@ -401,4 +427,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**175 tests, zero dependencies.**
+**176 tests, zero dependencies.**

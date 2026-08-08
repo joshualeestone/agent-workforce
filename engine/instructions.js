@@ -204,7 +204,7 @@ function inspect(agent) {
   // Every filesystem-level refusal comes from the shared reader, so this module
   // and `status.readIdentity` cannot disagree about what is safe to read. They
   // did, twice: the directory check landed here first, then the file check.
-  const got = workerfile.readWorkerFile(file);
+  const got = workerfile.readWorkerFile(file, ROOT);
   if (!got.ok) return { file, stat: got.stat, ok: false, missing: got.missing, because: got.because };
 
   // ⚠️ Refuse anything that would not survive being handed back. The editor
@@ -344,17 +344,6 @@ const ABSENT = 'absent';
 function versionOf(exists, buf) {
   if (!exists) return ABSENT;
   return `sha256:${crypto.createHash('sha256').update(buf).digest('hex')}`;
-}
-
-/**
- * Is this something the read path is willing to show as the instruction file?
- *
- * A regular file, within the ceiling. Shared by `read` and `write` so the two
- * cannot disagree about what counts, which is what let a save destroy a file
- * the editor had just refused to display.
- */
-function isShowable(stat) {
-  return stat.isFile() && stat.size <= MAX_BYTES;
 }
 
 /**

@@ -488,7 +488,7 @@ function readIdentity(sessionName) {
   // kept going wrong. `engine/workerfile.js` sits below both modules on purpose:
   // `instructions.js` already requires this one, so anything shared has to live
   // underneath or the require becomes a cycle.
-  const got = readWorkerFile(file);
+  const got = readWorkerFile(file, WORKERS_DIR);
   if (!got.ok) return { displayName: sessionName, role: null, derived: false };
   const text = got.buf.toString('utf8').slice(0, 4000);
 

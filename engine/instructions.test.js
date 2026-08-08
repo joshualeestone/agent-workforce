@@ -727,26 +727,28 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
   // future reader concludes the guard is more load-bearing than it is.
   const epochFile = makeAgent('epochtime');
   fs.utimesSync(epochFile, new Date(0), new Date(0));
-  makeAgent('nantime');
+
+  // A body of a length nothing else in this suite uses, so the injection below
+  // can identify this file from a file DESCRIPTOR, which carries no path.
+  const NAN_BODY = 'n'.repeat(4242);
+  makeAgent('nantime', NAN_BODY);
   makeSession('nantime', 'sess-nan');
 
-  // Patches `lstatSync`, which is what staleness calls. It used to call
-  // `statSync`, and a version of this test that patches the wrong one passes
-  // while pinning nothing.
-  const real = fs.lstatSync;
-  fs.lstatSync = (p, ...rest) => {
-    const s = real(p, ...rest);
-    // Only the FILE, and only its mtime. An earlier version matched any path
-    // containing the agent name, so it also intercepted the stat of the worker
-    // DIRECTORY and returned an object with no isDirectory method, which made
-    // this test fail for a reason that had nothing to do with mtimes.
-    if (String(p).endsWith(`nantime/${instructions.FILENAME}`)) {
-      return Object.create(Object.getPrototypeOf(s), {
-        ...Object.getOwnPropertyDescriptors(s),
+  // ⚠️ Patches `fstatSync`, which is what the shared reader actually asks for
+  // the mtime. It used to patch `lstatSync`, and when the reader moved to
+  // opening the file and asking the DESCRIPTOR (so a swapped path could not
+  // change what we read), this injection silently stopped reaching the value
+  // under test. A test that injects into the wrong call pins nothing.
+  const real = fs.fstatSync;
+  fs.fstatSync = (fd, ...rest) => {
+    const st = real(fd, ...rest);
+    if (st.size === NAN_BODY.length) {
+      return Object.create(Object.getPrototypeOf(st), {
+        ...Object.getOwnPropertyDescriptors(st),
         mtime: { value: new Date(NaN), enumerable: true },
       });
     }
-    return s;
+    return st;
   };
   try {
     for (const name of ['epochtime', 'nantime']) {
@@ -757,7 +759,7 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
       assert.equal(got.editedAt, undefined, `${name} reported a time it cannot know`);
     }
   } finally {
-    fs.lstatSync = real;
+    fs.fstatSync = real;
   }
 });
 
@@ -933,6 +935,36 @@ test('the status engine resolves worker files under the SAME root as this module
   assert.equal(id.displayName, 'Root Fixture',
     'status.js did not read the sandboxed file, so it resolves a different root');
   assert.equal(id.derived, true);
+});
+
+test('the shared reader refuses a path outside the workers root', () => {
+  // ⚠️ Extracting the file checks into `workerfile` did NOT close containment
+  // for its second caller, and the module read as though it had.
+  // `instructions.fileFor` sanitises the name and asserts it is under the root;
+  // `status.readIdentity` joins the tmux session name verbatim and did neither.
+  // Measured before the fix: `readIdentity('../victim')` returned a name and
+  // role parsed out of a file outside the root, while the instructions route
+  // for the same name refused.
+  const status = require('./status');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-escape-'));
+  fs.writeFileSync(path.join(outside, 'CLAUDE.md'),
+    'You are **Outside Victim**, the file outside the workers root.\n');
+  const escape = path.join(path.relative(ROOT, outside));
+  try {
+    // Sanity: the fixture really is reachable by a naive join.
+    assert.ok(fs.existsSync(path.join(ROOT, escape, 'CLAUDE.md')),
+      'fixture is wrong: the escape target does not exist');
+
+    const workerfile = require('./workerfile');
+    assert.equal(workerfile.readWorkerFile(path.join(ROOT, escape, 'CLAUDE.md'), ROOT).ok, false,
+      'the shared reader read a file outside the root it was given');
+
+    const id = status.readIdentity(escape);
+    assert.equal(id.derived, false, 'an identity was derived from outside the workers root');
+    assert.notEqual(id.displayName, 'Outside Victim');
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('the registry name is validated, not rewritten', () => {
