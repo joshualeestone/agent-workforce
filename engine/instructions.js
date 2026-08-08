@@ -32,7 +32,12 @@ const store = require('./store');
 const { transcriptFor } = require('./status');
 
 /**
- * Where worker instruction files live. Every path is asserted to be inside it.
+ * Where worker instruction files live.
+ *
+ * Containment is asserted on the name (`fileFor`), on the worker directory
+ * (`dirEscapes`) and on the file itself (`lstat` in `read`), because each one
+ * alone leaves a route out: the assertion in `fileFor` only ever sees the final
+ * component, so a linked DIRECTORY escaped it for a while.
  *
  * `AGENT_WORKFORCE_WORKERS` relocates it, which is what lets the tests exercise
  * the real read and write paths against a temp directory instead of an actual
@@ -88,6 +93,32 @@ function fileFor(agent) {
   // Declared as untested rather than left to look like coverage.
   if (!file.startsWith(ROOT + path.sep)) return null;
   return file;
+}
+
+/**
+ * Does the worker DIRECTORY lead out of the root?
+ *
+ * ⚠️ `fileFor`'s containment assertion, and the `lstat` in `read`, both only
+ * ever look at the FINAL component. A symlinked worker directory therefore led
+ * a read straight out of ROOT: with `<ROOT>/angel` linked elsewhere, `read`
+ * returned `exists: true` and the contents of a file outside the root, under a
+ * `path` the content had not come from, and `staleness` disclosed that file's
+ * mtime. `write` already refused, so the two surfaces disagreed: the editor
+ * served a foreign file as editable and Save answered "there is no agent by
+ * that name to write to".
+ *
+ * Shared by all three paths so they cannot drift apart again. A directory that
+ * does not exist is not an escape, it is simply an agent with no files yet, and
+ * the callers already handle that.
+ */
+function dirEscapes(file) {
+  let stat;
+  try {
+    stat = fs.lstatSync(path.dirname(file));
+  } catch {
+    return false; // no directory at all; not an escape
+  }
+  return !stat.isDirectory();
 }
 
 /**
@@ -186,6 +217,10 @@ function staleness(agent) {
   const file = fileFor(agent);
   if (!file) {
     return { state: STALENESS.UNKNOWN, because: 'that is not a name we can look up' };
+  }
+
+  if (dirEscapes(file)) {
+    return { state: STALENESS.UNKNOWN, because: 'its worker folder is a link, so we do not read through it' };
   }
 
   let editedAt;
@@ -329,6 +364,19 @@ function read(agent) {
     return { exists: false, path: null, text: '', version: ABSENT, staleness: staleness(agent) };
   }
 
+  // The worker directory itself, before the file inside it. `fileFor` only
+  // asserts on the final component, so without this a linked directory led the
+  // read out of the root entirely.
+  if (dirEscapes(file)) {
+    return {
+      exists: false,
+      path: file,
+      text: '',
+      version: ABSENT,
+      staleness: { state: STALENESS.UNKNOWN, because: 'its worker folder is a link, so we do not read through it' },
+    };
+  }
+
   let stat;
   try {
     stat = fs.lstatSync(file);
@@ -428,12 +476,12 @@ function write(agent, text, expectedVersion) {
     throw new Error('that is larger than an instruction file should be');
   }
 
-  const dir = path.dirname(file);
+  // The same directory check the read path uses, through the same helper, so
+  // the two cannot drift apart. They already had: the write refused a linked
+  // worker directory while the read followed it.
+  if (dirEscapes(file)) throw new Error('there is no agent by that name to write to');
   try {
-    // `lstat`, so a symlinked worker directory cannot land the write outside
-    // ROOT. `stat` follows the link, and the assertion in `fileFor` only ever
-    // sees the name, never where it points.
-    if (!fs.lstatSync(dir).isDirectory()) throw new Error('not a directory');
+    if (!fs.statSync(path.dirname(file)).isDirectory()) throw new Error('not a directory');
   } catch {
     throw new Error('there is no agent by that name to write to');
   }

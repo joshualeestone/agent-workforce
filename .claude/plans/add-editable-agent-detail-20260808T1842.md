@@ -94,7 +94,7 @@ The card is explicit, and it is about a mental model rather than a feature:
 
 > The wireframe shows instructions as **one editable box**, which asserts *everything here is yours to change*. The moment a company policy layer exists that is false.
 
-- [x] **5.10** **Label the box with where its contents come from**, as "Your instructions", with the real path shown beneath, as the wireframe already does. That is cheap, honest today, and makes a second read-only "Company policy" block **additive rather than a redesign**.
+- [~] **5.10** **Label the box with where its contents come from.** PARTIAL, and corrected after a reviewer checked the shipped text against this box. The label reads "What they should focus on", which names the purpose rather than the provenance; the provenance survives only in the hint ("Your words") and the "Saved to <path>" footer. That is weaker than this box claimed, and it makes the later read-only "Company policy" block slightly less obviously additive than the rationale assumed. That is cheap, honest today, and makes a second read-only "Company policy" block **additive rather than a redesign**.
 - [x] **5.11** ⚠️ **Do not build a layer system.** There is one layer. Building an unused abstraction is the speculative-scaffolding failure Josh has already ruled against once this week. The label is the whole mitigation.
 
 ---
@@ -194,6 +194,9 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | size half of the read guard | fails |
 | `lstat` to `stat` on the FILE (symlink) | fails |
 | `lstat` to `stat` on the DIRECTORY (symlink) | fails |
+| `dirEscapes` on the READ path | fails |
+| `dirEscapes` in `staleness` | fails |
+| `dirEscapes` on the WRITE path | fails |
 | Create the worker directory instead of refusing | fails |
 | Refuse-to-clobber a file the read path hid | fails (3 tests) |
 | `registryKey` back to `safeKey` at the call site | fails (2 tests) |
@@ -306,6 +309,21 @@ rendered blank. `node --check` passed, the test suite passed, and the bug was
 plainly visible in the picture. Worth recording as the reason the UI states get
 screenshotted rather than reasoned about.
 
+Iteration 7 found the containment escape that six previous passes missed:
+`fileFor` asserts on the name, and `read` used `lstat` on the FILE, but nothing
+checked the worker DIRECTORY on the read side. A symlinked `<ROOT>/<agent>`
+therefore made `read` return `exists: true` with the contents of a file outside
+the root, under a path that content had not come from, while `staleness`
+disclosed that file's mtime. The write path had been guarded and tested; the
+test was named for the directory and asserted only on `write`, so the read side
+looked covered and was not. One shared `dirEscapes` now serves all three paths,
+and each of the three is pinned separately.
+
+Two comments claimed more than the code delivered as a result, and both are
+corrected: the module docstring said every path was asserted inside the root,
+and the temp-file comment listed the worker directory among the routes already
+closed. Both were true of `write` alone.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Four rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
@@ -315,4 +333,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**169 tests, zero dependencies.**
+**170 tests, zero dependencies.**

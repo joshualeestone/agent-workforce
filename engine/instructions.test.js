@@ -529,6 +529,38 @@ test('staleness refuses a symlinked file rather than reporting its mtime', () =>
   }
 });
 
+test('a symlinked worker directory is not READ through either', () => {
+  // ⚠️ The write side of this was guarded and tested; the read side was not,
+  // and nothing noticed because the test below is named for the directory and
+  // only ever asserted on `write`. Measured before the fix: `read` returned
+  // `exists: true` with the contents of a file OUTSIDE the root, under a `path`
+  // that content had not come from, and `staleness` disclosed that file's
+  // mtime. The editor served a foreign file as editable while Save answered
+  // "there is no agent by that name to write to", so the two surfaces
+  // disagreed about the same agent.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-dirread-'));
+  fs.writeFileSync(path.join(outside, 'CLAUDE.md'), 'CONTENTS FROM OUTSIDE THE WORKERS ROOT');
+  const link = path.join(ROOT, 'dirreadagent');
+  makeSession('dirreadagent', 'sess-dirread');
+  try {
+    fs.symlinkSync(outside, link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    const got = instructions.read('dirreadagent');
+    assert.equal(got.exists, false, 'a read followed a directory symlink out of the root');
+    assert.ok(!got.text.includes('OUTSIDE THE WORKERS ROOT'), 'foreign contents were served');
+    assert.equal(got.staleness.state, instructions.STALENESS.UNKNOWN);
+    assert.equal(instructions.staleness('dirreadagent').editedAt, undefined,
+      'the mtime of a file outside the root was disclosed');
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('a symlinked worker directory cannot land a write outside the root', () => {
   // The containment assertion in fileFor only ever sees the NAME, never where
   // it points, so if the directory check follows links the write lands wherever
@@ -642,8 +674,15 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
   const real = fs.lstatSync;
   fs.lstatSync = (p, ...rest) => {
     const s = real(p, ...rest);
-    if (String(p).includes('nantime')) {
-      return { ...s, isFile: () => true, size: s.size, mtime: new Date(NaN) };
+    // Only the FILE, and only its mtime. An earlier version matched any path
+    // containing the agent name, so it also intercepted the stat of the worker
+    // DIRECTORY and returned an object with no isDirectory method, which made
+    // this test fail for a reason that had nothing to do with mtimes.
+    if (String(p).endsWith(`nantime/${instructions.FILENAME}`)) {
+      return Object.create(Object.getPrototypeOf(s), {
+        ...Object.getOwnPropertyDescriptors(s),
+        mtime: { value: new Date(NaN), enumerable: true },
+      });
     }
     return s;
   };
