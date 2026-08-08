@@ -81,8 +81,8 @@ function recordPath(agent) {
 // because changing the key derivation would orphan every existing avatar and
 // profile too; it wants solving once, across all three stores.
 
-function unknown(because, extra) {
-  return { state: STATE.UNKNOWN, commitments: [], reportedAt: null, because, ...extra };
+function unknown(because) {
+  return { state: STATE.UNKNOWN, commitments: [], reportedAt: null, because };
 }
 
 /**
@@ -117,38 +117,64 @@ function parseRecord(agent) {
   try {
     key = store.safeKey(agent);
   } catch {
-    return { ok: false, because: 'that is not a name we can look up' };
+    return { ok: false, absent: false, because: 'that is not a name we can look up' };
   }
 
   let raw;
   try {
     raw = fs.readFileSync(path.join(DIR, key + '.json'), 'utf8');
-  } catch {
-    return { ok: false, because: 'this agent has never reported what it is holding' };
+  } catch (err) {
+    // ENOENT is the only read failure that means "there is nothing here". Every
+    // other one -- EACCES, EISDIR, EMFILE, ENAMETOOLONG -- means a record may
+    // well exist and we simply could not open it.
+    //
+    // These used to share one message, and `add()` decided whether to preserve
+    // the existing list by MATCHING THAT PROSE. So an unreadable record looked
+    // identical to a missing one and `add()` overwrote it: an agent holding two
+    // real commitments behind a permissions error lost both. `absent` is a
+    // field, not a sentence, precisely so a caller cannot get this wrong again.
+    const absent = err && err.code === 'ENOENT';
+    return {
+      ok: false,
+      absent,
+      because: absent
+        ? 'this agent has never reported what it is holding'
+        : 'its record exists but could not be opened',
+    };
   }
 
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { ok: false, because: 'its record could not be read' };
+    return { ok: false, absent: false, because: 'its record could not be read' };
   }
 
   // `JSON.parse` happily returns null, a number, or an array, and reaching for
   // `.reportedAt` on null throws -- which, from inside the request handler,
   // exits the process. A single file containing `null` was enough.
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, because: 'its record is not in a shape we understand' };
+    return { ok: false, absent: false, because: 'its record is not in a shape we understand' };
   }
 
   const reportedAt = typeof parsed.reportedAt === 'string' ? parsed.reportedAt : null;
   const at = reportedAt ? Date.parse(reportedAt) : NaN;
   if (!reportedAt || Number.isNaN(at)) {
-    return { ok: false, because: 'its record does not say when it was written' };
+    return { ok: false, absent: false, because: 'its record does not say when it was written' };
   }
 
   if (!Array.isArray(parsed.commitments)) {
-    return { ok: false, because: 'its record is not in a shape we understand' };
+    return { ok: false, absent: false, because: 'its record is not in a shape we understand' };
+  }
+
+  // Guard the key collision described above. Records written before this field
+  // existed have no `name`, and are accepted rather than invalidated.
+  if (typeof parsed.name === 'string' && parsed.name !== String(agent)) {
+    return {
+      ok: false,
+      absent: false,
+      because: `that record belongs to ${parsed.name}, not this agent`,
+    };
   }
 
   return { ok: true, commitments: parsed.commitments, reportedAt, ageMs: Date.now() - at };
@@ -215,7 +241,14 @@ function report(agent, commitments) {
     if (!what) throw new Error('every commitment needs a description');
     // Every field is coerced and capped. An uncoerced `createdAt` was stored
     // and re-served verbatim on every /api/status poll.
-    const createdAt = c && typeof c.createdAt === 'string' ? c.createdAt : new Date().toISOString();
+    // Capped AND validated. It was previously the one field passing through
+    // whole, so a 25,000-character value rode along in every /api/status poll
+    // on the board's continuous-read path -- while the comment above claimed
+    // every field was capped.
+    const supplied = c && typeof c.createdAt === 'string' ? c.createdAt.slice(0, 40) : null;
+    const createdAt = supplied && !Number.isNaN(Date.parse(supplied))
+      ? supplied
+      : new Date().toISOString();
     return {
       id: String((c && c.id) || crypto.randomUUID()).slice(0, 80),
       what: what.slice(0, 300),
@@ -225,7 +258,17 @@ function report(agent, commitments) {
   });
 
   ensure(DIR);
-  const next = { agent: key, reportedAt: new Date().toISOString(), commitments: clean };
+  // `name` is the RAW agent name, `agent` the sanitised key. Both are stored so
+  // a read can tell whether this record actually belongs to the agent being
+  // asked about: safeKey STRIPS rather than rejects, so `worker.2` and `worker2`
+  // collapse to one key. Without this check, one agent's "I hold nothing" is
+  // served as `clear` for a different agent that has never reported.
+  const next = {
+    agent: key,
+    name: String(agent),
+    reportedAt: new Date().toISOString(),
+    commitments: clean,
+  };
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
   // machine, and a half-written file that parses as an empty array is exactly
@@ -252,10 +295,12 @@ function report(agent, commitments) {
 function add(agent, what) {
   const rec = parseRecord(agent);
   if (!rec.ok) {
-    // Only a never-reported agent may start a list here. Anything else means we
-    // are looking at a record we could not read, and writing over it loses
-    // whatever it held.
-    if (rec.because !== 'this agent has never reported what it is holding') {
+    // Only a genuinely absent record may start a list. Anything else means a
+    // record may exist that we could not read, and writing over it loses
+    // whatever it held. Branching on `absent` rather than on the message text
+    // is deliberate: the prose version of this guard silently matched every
+    // read error and destroyed data.
+    if (!rec.absent) {
       throw new Error(`cannot add to a record we cannot read: ${rec.because}`);
     }
     return report(agent, [{ what }]);
@@ -288,7 +333,9 @@ function resolve(agent, id) {
  * holding".
  */
 function readAll() {
-  const out = {};
+  // Null-prototype: a record file named `__proto__.json` would otherwise
+  // mutate the returned object instead of appearing as a key.
+  const out = Object.create(null);
   let files = [];
   try {
     files = fs.readdirSync(DIR);

@@ -630,3 +630,24 @@ test('the commitments route is ordered before the /api fallthrough', async () =>
   assert.ok(body.state, 'reached the /api fallthrough instead of the route');
   assert.notEqual(body.error, 'no such endpoint');
 });
+
+test('PUT answers in the same three-state vocabulary as GET', async () => {
+  // PUT used to return report()'s raw record, which has no state and no
+  // because. A client asserting "I hold nothing" got back a bare empty list:
+  // the exact shape the store exists to keep out of callers' hands.
+  const board = await req('/api/status');
+  if (!board.type.includes('application/json')) return;
+  const agents = JSON.parse(board.body).agents || [];
+  if (!agents.length) return;
+  const name = encodeURIComponent(agents[0].sessionName);
+
+  const put = await req(`/api/agent/${name}/commitments`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commitments: [] }),
+  });
+  assert.equal(put.status, 200);
+  const body = JSON.parse(put.body);
+  assert.equal(body.state, 'clear', 'an asserted empty must come back as clear, not a bare list');
+  assert.ok(body.because, 'the answer must carry its reason');
+});

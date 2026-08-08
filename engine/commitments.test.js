@@ -144,12 +144,6 @@ test('add extends the existing list', () => {
   assert.deepEqual(c.read('adder').commitments.map((x) => x.what), ['first', 'second']);
 });
 
-test('add on an unreadable record starts fresh rather than silently dropping what it could not read', () => {
-  // Extending an `unknown` would quietly discard real commitments. Starting a
-  // new list is the honest option, and the old file is unreadable anyway.
-  const got = c.add('never-seen-before', 'a new one');
-  assert.equal(got.commitments.length, 1);
-});
 
 test('resolve removes one and refuses when the record cannot be read', () => {
   c.report('resolver', [{ what: 'keep me' }, { what: 'remove me' }]);
@@ -188,14 +182,6 @@ test('a name that sanitises to nothing is unknown rather than reading the store 
   assert.equal(c.read('...').state, c.STATE.UNKNOWN);
 });
 
-test('concurrent writes leave a valid file rather than a truncated one', () => {
-  // Thirteen agents write on this machine. A half-written file that parses as
-  // an empty array is the silent loss this store exists to prevent.
-  for (let i = 0; i < 40; i++) c.report('busy', [{ what: `commitment ${i}` }]);
-  const got = c.read('busy');
-  assert.equal(got.state, c.STATE.HOLDING);
-  assert.equal(got.commitments[0].what, 'commitment 39');
-});
 
 // ---------------------------------------------------------------------------
 // Ways the store used to hand back an answer it had not earned
@@ -333,34 +319,113 @@ test('every stored field is coerced, including createdAt', () => {
 // Concurrency, for real
 // ---------------------------------------------------------------------------
 
-test('genuinely concurrent writers from separate processes leave a valid file', async () => {
-  // The previous version of this test was a sequential for-loop in one process:
-  // it exercised no concurrency at all and would have passed against a bare
-  // writeFileSync with the rename removed. Thirteen agents write on this
-  // machine, and the whole point of write-then-rename is what happens when two
-  // of them land at once.
+test('a reader never observes a torn record while writers are racing', async () => {
+  // Atomicity is the reason report() writes to a temp file and renames. Proving
+  // it needs a READER running while the writers race: writers alone cannot show
+  // it, because the last write always lands intact and that is all a
+  // read-afterwards sees. Two earlier versions of this test missed for exactly
+  // that reason, one of which was a sequential loop with no concurrency at all.
+  //
+  // Records are ~150KB so a bare writeFileSync genuinely tears mid-write.
   const { execFile } = require('node:child_process');
   const nodePath = require('node:path');
   const modulePath = nodePath.resolve(__dirname, 'commitments.js');
 
   const writer = (n) => new Promise((resolve) => {
     execFile(process.execPath, ['-e', `
-      process.env.AGENT_WORKFORCE_DATA = ${JSON.stringify(TMP)};
       const c = require(${JSON.stringify(modulePath)});
-      for (let i = 0; i < 25; i++) c.report('racer', [{ what: 'writer ${n} item ' + i }]);
+      const bulk = Array.from({ length: 150 }, (_, k) =>
+        ({ what: 'writer ${n} item ' + k + ' ' + 'x'.repeat(900) }));
+      for (let i = 0; i < 60; i++) c.report('racer', bulk);
     `], { env: { ...process.env, AGENT_WORKFORCE_DATA: TMP } }, () => resolve());
   });
 
+  let torn = 0, reads = 0;
+  let racing = true;
+  const reader = (async () => {
+    while (racing) {
+      const got = c.read('racer');
+      reads++;
+      // A record that exists but reads back unknown, or reads back short, is a
+      // torn write observed in flight. With rename it is impossible: the reader
+      // sees either the old file or the new one, never a partial one.
+      if (got.state === c.STATE.UNKNOWN && !/never reported/.test(got.because)) torn++;
+      else if (got.state !== c.STATE.UNKNOWN && got.commitments.length !== 150) torn++;
+      await new Promise((r) => setImmediate(r));
+    }
+  })();
+
   await Promise.all([writer(1), writer(2), writer(3), writer(4)]);
+  racing = false;
+  await reader;
 
-  // The file must be parseable and complete. A torn write shows up here as a
-  // JSON error or an empty list, which is the silent loss this guards against.
+  assert.ok(reads > 50, `reader only sampled ${reads} times, too few to conclude anything`);
+  assert.equal(torn, 0, `reader observed ${torn} torn records out of ${reads} reads`);
+
   const got = c.read('racer');
-  assert.notEqual(got.state, c.STATE.UNKNOWN, `record was unreadable after concurrent writes: ${got.because}`);
-  assert.equal(got.commitments.length, 1);
-  assert.match(got.commitments[0].what, /^writer [1-4] item \d+$/);
+  assert.notEqual(got.state, c.STATE.UNKNOWN, `record unreadable after the race: ${got.because}`);
+  assert.equal(got.commitments.length, 150);
 
-  // And no temp files left behind.
   const strays = fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp'));
   assert.deepEqual(strays, [], `temp files left behind: ${strays.join(', ')}`);
+});
+
+test('an unreadable record is NOT treated as a missing one by add()', () => {
+  // The guard used to be a string comparison against a message that every read
+  // failure produced, so a record behind a permissions error looked identical
+  // to one that was never written, and add() overwrote it. Two real
+  // commitments were destroyed by a chmod.
+  if (process.getuid && process.getuid() === 0) return; // root reads anything
+  c.report('permbot', [{ what: 'first real thing' }, { what: 'second real thing' }]);
+  fs.chmodSync(c.recordPath('permbot'), 0o000);
+  try {
+    assert.throws(() => c.add('permbot', 'a new thing'),
+      /cannot add to a record we cannot read/,
+      'an unreadable record must not be overwritten');
+  } finally {
+    fs.chmodSync(c.recordPath('permbot'), 0o600);
+  }
+  assert.deepEqual(c.read('permbot').commitments.map((x) => x.what),
+    ['first real thing', 'second real thing'], 'both must survive');
+});
+
+test('a key collision cannot let one agent answer for another', () => {
+  // safeKey STRIPS rather than rejects, so `worker.2` and `worker2` share a
+  // record. Without a guard, `worker.2` asserting "I hold nothing" is served as
+  // `clear` for `worker2`, which has never reported. That is the one state the
+  // restart dialog is allowed to treat as safe.
+  c.report('worker.2', []);
+  assert.equal(c.read('worker.2').state, c.STATE.CLEAR, 'the agent that wrote it reads its own record');
+
+  const other = c.read('worker2');
+  assert.equal(other.state, c.STATE.UNKNOWN, 'a colliding agent must not inherit the assertion');
+  assert.match(other.because, /belongs to worker\.2/);
+});
+
+test('createdAt is capped and validated, not passed through whole', () => {
+  c.report('longdate', [{ what: 'x', createdAt: 'z'.repeat(25000) }]);
+  const got = c.read('longdate').commitments[0];
+  assert.ok(got.createdAt.length <= 40, `createdAt was ${got.createdAt.length} chars`);
+  assert.ok(!Number.isNaN(Date.parse(got.createdAt)), 'an unparseable date should be replaced, not stored');
+});
+
+test('readAll does not let a __proto__ record mutate its result', () => {
+  // Written with the literal filename, bypassing recordPath: safeKey would
+  // sanitise `__proto__` down to `proto`, so going through the normal API
+  // cannot produce this file. Anything that can drop a file into the store
+  // directory can.
+  const raw = path.join(c.DIR, '__proto__.json');
+  fs.mkdirSync(c.DIR, { recursive: true });
+  fs.writeFileSync(raw, JSON.stringify({
+    reportedAt: new Date().toISOString(), commitments: [{ id: 'p', what: 'polluting' }],
+  }));
+  try {
+    const all = c.readAll();
+    // On a plain {} this key vanishes into the prototype instead of appearing.
+    assert.ok(Object.prototype.hasOwnProperty.call(all, '__proto__'),
+      '__proto__ record should be an own key, not a prototype mutation');
+    assert.equal({}.commitments, undefined, 'nothing should have reached Object.prototype');
+  } finally {
+    fs.rmSync(raw, { force: true });
+  }
 });
