@@ -39,8 +39,10 @@
   --border-strong: rgba(0,0,0,0.22);
   --shadow-card:   0 1px 2px rgba(0,0,0,0.06), 0 1px 6px rgba(0,0,0,0.04);
   --attn-bg:       rgba(0,0,0,0.035);
-  /* Amber, for "this is not wrong but you should know". Ink is #7a5200 on the
-     tinted background, which clears AA comfortably. */
+  /* Amber, for "this is not wrong but you should know". The tinted box carries
+     its text in --label rather than --warn-ink, because a whole paragraph of
+     amber reads as an error; --warn-ink is for the card glyph, where it sits on
+     the card background rather than on the tint. */
   --warn-bg:       rgba(176,116,0,0.10);
   --warn-border:   rgba(176,116,0,0.38);
   --warn-ink:      #7a5200;
@@ -232,6 +234,16 @@ svg { display: block; }
   margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
 }
 .card-stale svg { width: 13px; height: 13px; }
+
+/* Present to a screen reader, absent to the eye. Used where a finding is
+   carried by a glyph, which on its own says nothing to anyone not looking at
+   it. `clip-path` rather than `display:none`, which would remove it from the
+   accessibility tree along with everything else. */
+.vh {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 
 /* Icons: Lucide (ISC), subset and inlined as SVG. No font file, no network
    request, no dependency, and identical on every machine.
@@ -442,7 +454,11 @@ function esc(s) {
 function staleBadge(a) {
   const s = a.instructions;
   if (!s || s.state !== 'stale') return '';
-  return `<span class="card-stale" title="Its instructions were edited after it started. Only a restart re-reads them.">${icon('alert')}</span>`;
+  // The glyph is decorative and the `title` only appears on hover, so the text
+  // is carried in a visually-hidden span. Without it the whole finding is
+  // invisible to a screen reader and unreachable without a mouse.
+  return `<span class="card-stale" title="Its instructions were edited after it started. Only a restart re-reads them."`
+    + `><span class="vh">Running on older instructions. Only a restart re-reads them.</span>${icon('alert')}</span>`;
 }
 
 function card(a) {
@@ -548,6 +564,39 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 let LAST = [];
 let CURRENT = null;
 
+/**
+ * Just the picture.
+ *
+ * Split out of openDetail so that changing an avatar does not have to re-run
+ * the whole panel. It used to, and re-running it blanks the instruction
+ * textarea and refetches from disk, so typing new instructions and then
+ * swapping the picture threw the typing away with no prompt.
+ */
+function renderAvatar(a) {
+  const img = document.getElementById('d-img');
+  const ini = document.getElementById('d-initials');
+  if (a && a.hasAvatar) {
+    img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
+    img.hidden = false;
+    ini.hidden = true;
+  } else {
+    img.hidden = true;
+    ini.hidden = false;
+  }
+}
+
+/**
+ * Refresh the open agent's picture from the latest poll, keeping everything
+ * else on the panel, including anything typed and not yet saved.
+ */
+function refreshAvatar() {
+  if (!CURRENT) return;
+  const a = LAST.find((x) => x.sessionName === CURRENT.sessionName);
+  if (!a) return;
+  CURRENT = a;
+  renderAvatar(a);
+}
+
 function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
@@ -561,15 +610,7 @@ function openDetail(sessionName) {
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
-  const img = document.getElementById('d-img');
-  if (a.hasAvatar) {
-    img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
-    img.hidden = false;
-    document.getElementById('d-initials').hidden = true;
-  } else {
-    img.hidden = true;
-    document.getElementById('d-initials').hidden = false;
-  }
+  renderAvatar(a);
   document.getElementById('d-msg').textContent = '';
   document.getElementById('d-role-msg').textContent = '';
   loadInstructions(a.sessionName);
@@ -588,7 +629,20 @@ document.getElementById('grid').addEventListener('click', (e) => {
  * kilobytes each. Putting them on the poll would mean ~90KB on the wire, every
  * five seconds, to render a badge nobody is looking at.
  */
+/**
+ * Which load is the current one.
+ *
+ * ⚠️ Load-bearing, not bookkeeping. Two fetches are in flight the moment
+ * someone opens one agent and then another before the first answers, and
+ * without this the slower answer wins and drops agent A's instructions into the
+ * box while agent B is open. Save reads the box and posts it to CURRENT, so the
+ * next click writes A's instructions into B's CLAUDE.md. A stale answer is
+ * discarded rather than rendered.
+ */
+let INSTR_LOAD = 0;
+
 async function loadInstructions(sessionName) {
+  const mine = ++INSTR_LOAD;
   const box = document.getElementById('d-instr');
   const pathEl = document.getElementById('d-instr-path');
   const msg = document.getElementById('d-instr-msg');
@@ -601,6 +655,7 @@ async function loadInstructions(sessionName) {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/instructions?t=' + Date.now(),
       { cache: 'no-store' });
     const data = await res.json();
+    if (mine !== INSTR_LOAD) return; // a newer agent is open; this answer is for the old one
     if (!res.ok) throw new Error(data.error || 'that did not work');
 
     box.value = data.text || '';
@@ -610,6 +665,7 @@ async function loadInstructions(sessionName) {
     }
     renderStale(data.staleness);
   } catch (err) {
+    if (mine !== INSTR_LOAD) return;
     msg.textContent = err.message;
   }
 }
@@ -687,7 +743,9 @@ document.getElementById('d-file').addEventListener('change', async (e) => {
     if (!res.ok) throw new Error(out.error || 'that did not work');
     msg.textContent = 'Saved.';
     await tick();
-    openDetail(CURRENT.sessionName);
+    // Only the picture. openDetail would re-run the whole panel and throw away
+    // anything typed into the instruction box but not yet saved.
+    refreshAvatar();
   } catch (err) { msg.textContent = err.message; }
 });
 
@@ -696,7 +754,7 @@ document.getElementById('d-remove').addEventListener('click', async () => {
   await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar', { method: 'DELETE' });
   document.getElementById('d-msg').textContent = 'Removed.';
   await tick();
-  openDetail(CURRENT.sessionName);
+  refreshAvatar();
 });
 
 document.getElementById('d-save').addEventListener('click', async () => {

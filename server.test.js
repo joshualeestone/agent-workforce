@@ -30,20 +30,32 @@
  *   node --test server.test.js
  */
 
-// Sandbox the commitment store BEFORE requiring the server: commitments.js
-// reads this at module load.
+// Sandbox the real stores BEFORE requiring the server: both modules read their
+// root at module load.
 //
-// ⚠️ This is a PARTIAL sandbox. `AGENT_WORKFORCE_DATA` moves the commitment
-// store only; avatars and profiles still resolve through `store.ROOT`, which is
-// the operator's real app data. That is why no test in this file sends a PUT or
-// DELETE to an avatar or profile route, and why any test that does must sandbox
-// `store.ROOT` first. A reviewer once deleted a real avatar by assuming this
-// variable covered everything.
+// ⚠️ There are THREE real roots behind this server, and these two variables
+// cover two of them.
+//
+//   1. `AGENT_WORKFORCE_DATA`  -> the commitment store. Sandboxed here.
+//   2. `AGENT_WORKFORCE_WORKERS` -> the instruction files, `~/work/workers/
+//      <agent>/CLAUDE.md`. Sandboxed here. These are the LIVE files that 13
+//      working agents boot from, so a stray PUT does not corrupt test data, it
+//      changes how a real agent behaves the next time it starts. The route
+//      tests below deliberately drive PUT with a real agent's name, and before
+//      this line the only thing standing between them and those files was the
+//      handler's `typeof text !== 'string'` check. One test with a valid string
+//      would have rewritten a colleague's instructions.
+//   3. `store.ROOT` -> avatars and profiles. NOT sandboxed, no variable for it.
+//      That is why no test here sends a PUT or DELETE to an avatar or profile
+//      route, and why any test that does must sandbox it first. A reviewer once
+//      deleted a real avatar by assuming one variable covered everything.
 const os = require('node:os');
 const fs = require('node:fs');
 const nodePath = require('node:path');
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
+const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
+process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -814,6 +826,47 @@ test('PUT refuses an unknown agent and a body that is not text', async (t) => {
     assert.equal(res.status, 400, `${body} should be refused`);
     assert.match(JSON.parse(res.body).error, /as text/);
   }
+});
+
+test('a successful PUT rewrites the file and answers with the new stale state', async (t) => {
+  // The riskiest path on the surface, and it was covered at the engine level
+  // only: every route test above asserts a REFUSAL, so nothing drove this to a
+  // 200 and checked that the bytes on disk actually changed. Safe to write now
+  // only because AGENT_WORKFORCE_WORKERS is sandboxed at the top of this file.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  // A worker directory inside the SANDBOX, named for a real agent so the
+  // handler's knownAgent guard passes. Nothing under ~/work/workers is touched.
+  const dir = nodePath.join(WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = nodePath.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(file, 'The instructions this agent had before the test ran.');
+
+  const text = 'These are the instructions the route was asked to save for this agent.';
+  const res = await req(`/api/agent/${name}/instructions`,
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+
+  assert.equal(res.status, 200, res.body);
+  assert.equal(fs.readFileSync(file, 'utf8'), text, 'the file on disk did not change');
+
+  const body = JSON.parse(res.body);
+  assert.equal(body.text, text, 'the answer must reflect what was stored, not what was sent');
+  assert.equal(body.exists, true);
+  // A save makes the file newer than the session, which is exactly when the
+  // agent stops running on what the box now shows. It must not answer
+  // `current`, because that is the untrue claim the whole state exists to stop.
+  assert.notEqual(body.staleness.state, 'current',
+    'a just-saved file cannot be what a running agent already booted from');
+
+  const back = await req(`/api/agent/${name}/instructions`);
+  assert.equal(JSON.parse(back.body).text, text, 'a re-read did not see the write');
+});
+
+test('GET refuses an unknown agent rather than reporting a path for it', async () => {
+  const res = await req('/api/agent/definitely-not-an-agent/instructions');
+  assert.equal(res.status, 404);
+  assert.equal(JSON.parse(res.body).path, undefined, 'a refusal must not hand back a filesystem path');
 });
 
 test('the status payload carries staleness but NOT the instruction text', async () => {

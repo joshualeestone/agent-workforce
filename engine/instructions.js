@@ -90,6 +90,32 @@ function fileFor(agent) {
 }
 
 /**
+ * The name as the session REGISTRY knows it.
+ *
+ * Deliberately not `safeKey`, and the difference matters. `safeKey` exists to
+ * make a name safe to use as a path segment under a directory we own, and it
+ * does that by TRANSFORMING: lowercasing, then dropping every character outside
+ * `[a-z0-9_-]`. The registry is not a path we own. It is an identity lookup
+ * keyed on the tmux session name verbatim (`status.js` builds
+ * `<name>-discord_0.0.json` straight from it), so transforming the name asks
+ * for a file that does not exist, `sessionStartedAt` returns null, and
+ * staleness reads `unknown` forever for any agent whose session name carries a
+ * capital, a dot or a space. Fail-safe, and silently wrong.
+ *
+ * So this VALIDATES instead of transforming: anything that could walk out of
+ * the registry directory is refused outright, and everything else passes
+ * through byte for byte. Two derivations of "the name" is the shape that hides
+ * bugs, so the reason they differ is written down rather than left to be
+ * rediscovered.
+ */
+function registryKey(agent) {
+  const name = String(agent == null ? '' : agent);
+  if (!name || name === '.' || name === '..') return null;
+  if (/[/\\\0]/.test(name) || name.includes('..')) return null;
+  return name;
+}
+
+/**
  * When this agent's current session started.
  *
  * Taken from the transcript file's birth time, which was checked against the
@@ -101,9 +127,12 @@ function fileFor(agent) {
  * "cannot tell" rather than "not stale".
  */
 function sessionStartedAt(agent) {
+  const name = registryKey(agent);
+  if (!name) return null;
+
   let file;
   try {
-    file = transcriptFor(store.safeKey(agent));
+    file = transcriptFor(name);
   } catch {
     return null;
   }
@@ -123,11 +152,34 @@ function sessionStartedAt(agent) {
 }
 
 /**
+ * A timestamp as an ISO string, or null if it is not one we can render.
+ *
+ * `new Date(NaN).toISOString()` throws a RangeError, and `staleness` runs once
+ * per agent inside the status handler, so one throw answers 500 for the whole
+ * board.
+ *
+ * Belt to the caller's braces, and NOT load-bearing today: `staleness` refuses
+ * an unusable `editedAt` before it gets here, and `sessionStartedAt` only ever
+ * returns null or a positive number, so no NaN can currently reach this and
+ * replacing the body with a bare `toISOString()` leaves the suite green.
+ * Declared as untested rather than left to look like coverage, the same as the
+ * containment assertion in `fileFor`.
+ */
+function iso(ms) {
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
  * Is this agent running on instructions that have since been edited?
  *
  * Three states, and `unknown` is the default for anything not positively
  * established. The rule this codebase is built on applies here as much as
  * anywhere: **an agent we cannot assess must not render as fine.**
+ *
+ * ⚠️ Never throws, and that is load-bearing rather than incidental: the status
+ * route calls this once per agent, so a single throw answers 500 for the entire
+ * board. There is a test named for it.
  */
 function staleness(agent) {
   const file = fileFor(agent);
@@ -135,26 +187,38 @@ function staleness(agent) {
     return { state: STALENESS.UNKNOWN, because: 'that is not a name we can look up' };
   }
 
-  let editedAt = null;
+  let editedAt;
   try {
     editedAt = fs.statSync(file).mtime.getTime();
   } catch {
     return { state: STALENESS.UNKNOWN, because: 'it has no instruction file yet' };
   }
 
+  // An mtime can arrive as NaN, and on some filesystems as the epoch. Both have
+  // to stop here rather than be reported: NaN would otherwise be handed to
+  // `toISOString`, and an epoch mtime compared against a real session start
+  // reads as "edited in 1970", which resolves to `current` and tells someone
+  // their agent is running on what they are looking at when we have no idea.
+  if (!Number.isFinite(editedAt) || editedAt <= 0) {
+    return {
+      state: STALENESS.UNKNOWN,
+      because: 'we cannot tell when its instruction file was last edited',
+    };
+  }
+
   const startedAt = sessionStartedAt(agent);
   if (!startedAt) {
     return {
       state: STALENESS.UNKNOWN,
-      editedAt: new Date(editedAt).toISOString(),
+      editedAt: iso(editedAt),
       because: 'we cannot tell when this agent last started',
     };
   }
 
   return {
     ...compare(editedAt, startedAt),
-    editedAt: new Date(editedAt).toISOString(),
-    startedAt: new Date(startedAt).toISOString(),
+    editedAt: iso(editedAt),
+    startedAt: iso(startedAt),
   };
 }
 
@@ -183,10 +247,21 @@ function compare(editedAt, startedAt) {
 }
 
 /**
+ * Is this something the read path is willing to show as the instruction file?
+ *
+ * A regular file, within the ceiling. Shared by `read` and `write` so the two
+ * cannot disagree about what counts, which is what let a save destroy a file
+ * the editor had just refused to display.
+ */
+function isShowable(stat) {
+  return stat.isFile() && stat.size <= MAX_BYTES;
+}
+
+/**
  * Read an agent's instructions.
  *
- * Never throws. This is called per agent from the status route, so a throw here
- * would answer 500 for the whole board.
+ * Never throws. This and `staleness` are both called per agent from the status
+ * route, so a throw in either answers 500 for the whole board.
  */
 function read(agent) {
   const file = fileFor(agent);
@@ -204,7 +279,7 @@ function read(agent) {
   // Regular files only, and `lstat` so a symlink cannot point the read out of
   // the worker directory. Reading a FIFO here would block forever inside the
   // request handler, which is a wedge with no crash to notice.
-  if (!stat.isFile() || stat.size > MAX_BYTES) {
+  if (!isShowable(stat)) {
     return {
       exists: false,
       path: file,
@@ -250,14 +325,36 @@ function write(agent, text) {
 
   const dir = path.dirname(file);
   try {
-    if (!fs.statSync(dir).isDirectory()) throw new Error('not a directory');
+    // `lstat`, so a symlinked worker directory cannot land the write outside
+    // ROOT. `stat` follows the link, and the assertion in `fileFor` only ever
+    // sees the name, never where it points.
+    if (!fs.lstatSync(dir).isDirectory()) throw new Error('not a directory');
   } catch {
     throw new Error('there is no agent by that name to write to');
   }
 
+  // ⚠️ Refuse to replace anything the READ path would not have shown.
+  //
+  // Without this the two paths disagree about what the instruction file is, and
+  // the disagreement destroys data silently: a file `read` rejects (a symlink,
+  // or one over the ceiling) comes back as `{ exists: false, text: '' }`, the
+  // editor renders an empty box captioned "there is no instruction file for
+  // this one yet", and the first Save overwrites the real file with whatever
+  // was typed into that box. The screen has to be describing the same file that
+  // Save replaces, or it is inviting the person to destroy one they were told
+  // was not there.
+  let existing;
+  try { existing = fs.lstatSync(file); } catch { existing = null; }
+  if (existing && !isShowable(existing)) {
+    throw new Error('there is already a file there that this editor cannot safely replace, open it by hand');
+  }
+
   // Write-then-rename. A half-written CLAUDE.md is an agent that boots with
   // truncated instructions, which is worse than one that boots with the old
-  // ones. The temp name carries the pid so two writers cannot collide.
+  // ones. The temp name carries the pid so a second PROCESS writing the same
+  // agent cannot land on the same temp path. Two concurrent writes inside THIS
+  // process share the name, and are serialised only because these calls are
+  // synchronous, which is worth knowing before either one grows an await.
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tmp, body);
@@ -273,4 +370,7 @@ function write(agent, text) {
   return read(agent);
 }
 
-module.exports = { ROOT, MAX_BYTES, MIN_CHARS, STALENESS, fileFor, sessionStartedAt, staleness, compare, read, write };
+module.exports = {
+  ROOT, FILENAME, MAX_BYTES, MIN_CHARS, STALENESS,
+  fileFor, registryKey, sessionStartedAt, staleness, compare, read, write,
+};

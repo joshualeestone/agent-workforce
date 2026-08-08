@@ -380,6 +380,12 @@ const server = http.createServer((req, res) => {
   if (instr && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(instr[1]);
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    // Guarded the same way PUT is. Without this, GET answers 200 for any name
+    // at all and hands back the absolute path it would have used, which turns
+    // the route into a "does ~/work/workers/<x> exist" oracle for names that
+    // are not agents. There is no reason for the read and the write to disagree
+    // about which names exist.
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
       sendJson(res, 200, instructions.read(name));
     } catch {
@@ -438,9 +444,8 @@ const server = http.createServer((req, res) => {
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
  * It sets roles, stores avatars, records the commitments the restart
- * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM, and restart
- * is next. There is no authentication of
- * any kind.
+ * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. Restart is
+ * next. There is no authentication of any kind.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *

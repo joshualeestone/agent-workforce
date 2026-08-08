@@ -42,10 +42,10 @@ The wireframe is considerably broader than the card, and two parts of it are sta
 
 The card sets this order deliberately, riskiest last:
 
-1. **Avatar upload** — Josh tests cold and unaided
-2. **Name and role** — config an agent reads at startup
-3. **Instruction file editing** — writes to a live agent's config
-4. **Restart** — #1, separate card
+1. **Avatar upload**: Josh tests cold and unaided
+2. **Name and role**: config an agent reads at startup
+3. **Instruction file editing**: writes to a live agent's config
+4. **Restart**: #1, separate card
 
 > *"Something usable lands at step 1 rather than step 4, and the risky parts land on fresh judgement rather than at midnight."*
 
@@ -55,7 +55,7 @@ The card sets this order deliberately, riskiest last:
 
 - [x] **4.1** Adopt **Lucide** (ISC), subset to the icons actually used, **inlined as SVG**. No font file, no network request, no dependency. The repo stays at zero dependencies.
 - [x] **4.2** ⚠️ **Never a CDN.** Two reasons, both from the card: it breaks offline on an always-on Mac that may have no internet, and it phones a third party on every page load from a product whose entire pitch is that nothing of yours leaves your machine. **That sentence cannot be said honestly while the console fetches a remote asset to draw a pencil.**
-- [x] **4.3** Licensing, since this ships commercially: Font Awesome Free is CC BY 4.0 and **requires visible attribution**; Pro is paid per developer. Lucide/Heroicons/Phosphor carry neither. ⚠️ **If Josh wants Font Awesome's shapes specifically, this becomes an attribution line in the UI** — flag before switching.
+- [x] **4.3** Licensing, since this ships commercially: Font Awesome Free is CC BY 4.0 and **requires visible attribution**; Pro is paid per developer. Lucide/Heroicons/Phosphor carry neither. ⚠️ **If Josh wants Font Awesome's shapes specifically, this becomes an attribution line in the UI**, so flag before switching.
 - [x] **4.4** Replace the pencil. It is currently `&#9998;`, a **text character**, so its shape is chosen by the operating system and differs per machine. Flipping the glyph fixes the direction and not the cause; an inline SVG fixes both.
 
 ---
@@ -66,7 +66,7 @@ The card sets this order deliberately, riskiest last:
 
 ### 5a. The trap this must not build
 
-Per spec §7, **only restart re-reads config** — compact and clear do not. So:
+Per spec §7, **only restart re-reads config**, and compact and clear do not. So:
 
 > You edit the bio. It saves. The UI shows the new text. **The agent keeps behaving exactly as before.** No error, nothing broken-looking, and the screen is now asserting something untrue.
 
@@ -94,7 +94,7 @@ The card is explicit, and it is about a mental model rather than a feature:
 
 > The wireframe shows instructions as **one editable box**, which asserts *everything here is yours to change*. The moment a company policy layer exists that is false.
 
-- [x] **5.10** **Label the box with where its contents come from** — "Your instructions", with the real path shown beneath, as the wireframe already does. That is cheap, honest today, and makes a second read-only "Company policy" block **additive rather than a redesign**.
+- [x] **5.10** **Label the box with where its contents come from**, as "Your instructions", with the real path shown beneath, as the wireframe already does. That is cheap, honest today, and makes a second read-only "Company policy" block **additive rather than a redesign**.
 - [x] **5.11** ⚠️ **Do not build a layer system.** There is one layer. Building an unused abstraction is the speculative-scaffolding failure Josh has already ruled against once this week. The label is the whole mitigation.
 
 ---
@@ -102,7 +102,7 @@ The card is explicit, and it is about a mental model rather than a feature:
 ## 6. Name, role, model
 
 - [x] **6.1** **Role** already works. Keep it.
-- [ ] **6.2** ⛔️ **NOT BUILT.** **Name** — the status engine carries `name` and `nameDerived`, so a display name that overrides the derived one goes in the existing profile store. It does **not** rename the tmux session.
+- [ ] **6.2** ⛔️ **NOT BUILT.** **Name**: the status engine carries `name` and `nameDerived`, so a display name that overrides the derived one goes in the existing profile store. It does **not** rename the tmux session.
 - [ ] **6.3** ⛔️ **N/A, 6.2 not built.** ⚠️ **Name is used as a store key elsewhere.** `#18` is open precisely because `safeKey` collisions and non-canonical names break the write routes. A display-name override must **not** become a second identity: `sessionName` stays the key everywhere.
 - [ ] **6.4** ⛔️ **NOT BUILT.** **Model, shown read-only**, with the wireframe's own honest line: *"Changing this restarts Angel. You will be shown what it is working on before anything is lost."* The dropdown lands with #1, because the sentence is only true once the restart control and the commitment store are both there. **#2 merged today, so half of that is now real.**
 
@@ -190,9 +190,24 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 |---|---|
 | Missing-timestamp becomes comparable | fails |
 | Empty instruction file allowed | fails |
-| is-a-file / size guards | fails |
-| `lstat` to `stat` (symlink) | fails |
+| is-a-file guard | fails |
+| size half of the read guard | fails |
+| `lstat` to `stat` on the FILE (symlink) | fails |
+| `lstat` to `stat` on the DIRECTORY (symlink) | fails |
 | Create the worker directory instead of refusing | fails |
-| Containment assertion | **green — declared untested above** |
+| Refuse-to-clobber a file the read path hid | fails (3 tests) |
+| `registryKey` back to `safeKey` at the call site | fails (2 tests) |
+| Unusable-mtime guard | fails |
+| `knownAgent` on GET | fails |
+| Containment assertion in `fileFor` | **green, declared untested in code and test** |
+| `iso()` NaN guard | **green, declared untested in code** |
 
-**142 tests, zero dependencies.**
+Every row above was produced by actually deleting the guard and running the
+suite, not by reading the code. Two rows started green while looking covered and
+were fixed rather than accepted: the size half of the read guard was riding on a
+test that only ever planted a directory, and `registryKey` had a unit test that
+pinned the helper while nothing pinned that production code called it. Two rows
+are still green and are declared as such in both the code and the test, because
+a guard that looks covered and is not is worse than one openly marked untested.
+
+**156 tests, zero dependencies.**
