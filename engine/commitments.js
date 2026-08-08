@@ -220,10 +220,20 @@ function parseRecord(agent) {
   // what it writes, but a record can be edited by hand, and an element of
   // `null` made resolve() throw on `.id` from inside the request handler. A
   // record we cannot fully understand is one we cannot vouch for.
-  const usable = parsed.commitments.every(
-    (c) => c && typeof c === 'object' && !Array.isArray(c)
-      && typeof c.what === 'string' && c.what.trim() !== '',
-  );
+  // Read-side validation REFUSES; it does not repair. The write path may
+  // supply a missing id or timestamp, because the agent is asserting its state
+  // right then. On the read path there is nothing to derive them from, and
+  // minting a UUID per read meant `resolve()` with an id the caller had just
+  // read back removed nothing and still reported success. In a module whose
+  // thesis is "never invent a confident answer", fabricating an identifier is
+  // the same class of lie as an empty list.
+  const usable = parsed.commitments.every((c) => (
+    c && typeof c === 'object' && !Array.isArray(c)
+    && typeof c.what === 'string' && c.what.trim() !== ''
+    && typeof c.id === 'string' && c.id !== ''
+    && typeof c.createdAt === 'string'
+    && (c.source === undefined || typeof c.source === 'string')
+  ));
   if (!usable) {
     return { ok: false, absent: false, because: 'its record lists something we cannot read' };
   }
@@ -236,9 +246,14 @@ function parseRecord(agent) {
     return {
       ok: false,
       absent: false,
-      // Capped: the name comes from a file, and this string is echoed into
-      // every /api/status response.
-      because: `that record belongs to ${String(parsed.name).slice(0, 60)}, not this agent`,
+      // No String() coercion. The value comes from a file, and String() THROWS
+      // on an object with non-callable toString/valueOf -- from inside read(),
+      // which runs once per agent on /api/status, so one such record answered
+      // 500 for the entire board. Capped too: this is echoed into every
+      // response.
+      because: typeof parsed.name === 'string'
+        ? `that record belongs to ${parsed.name.slice(0, 60)}, not this agent`
+        : 'that record does not say whose it is',
     };
   }
 
@@ -250,7 +265,7 @@ function parseRecord(agent) {
     return { ok: false, absent: false, because: 'its record lists more than we can show' };
   }
 
-  const clean = safeSanitise(parsed.commitments);
+  const clean = capForDisplay(parsed.commitments);
   if (!clean) {
     return { ok: false, absent: false, because: 'its record lists something we cannot read' };
   }
@@ -262,8 +277,13 @@ function parseRecord(agent) {
     // extra key verbatim, which is the exact createdAt bug the write path
     // records as fixed, still reachable through a hand-edited record.
     //
-    // `usable` above already rejects everything sanitise() would throw on. The
-    // try is here anyway because read() must NEVER throw: it is called
+    // `usable` above now type-checks every field this coerces, so nothing it
+    // admits should be able to throw here. The catch is deliberate
+    // defence-in-depth and is NOT currently load-bearing: removing it leaves
+    // the suite green, which is worth saying rather than implying coverage that
+    // is not there.
+    //
+    // It stays because read() must NEVER throw. It is called
     // synchronously inside the request handler, once per agent, so a throw
     // exits the process on a GET and 500s the whole board on /api/status. This
     // exact combination shipped for one round -- a whitespace-only `what`
@@ -423,14 +443,21 @@ function writeRecord(key, rawName, clean, reportedAt) {
 }
 
 /**
- * `sanitise()` for the read path, which must never throw.
+ * Cap a stored record's fields for display. Caps only; never invents.
  *
- * Returns null rather than raising, so a record we cannot normalise becomes
- * `unknown` instead of an uncaught exception in the request handler.
+ * Distinct from `sanitise()`, which fills in a missing id or timestamp because
+ * the write path legitimately can. Returns null rather than raising, so a
+ * record it cannot handle becomes `unknown` instead of an uncaught exception in
+ * the request handler.
  */
-function safeSanitise(commitments) {
+function capForDisplay(commitments) {
   try {
-    return sanitise(commitments);
+    return commitments.map((c) => ({
+      id: String(c.id).slice(0, 80),
+      what: String(c.what).slice(0, 300),
+      createdAt: String(c.createdAt).slice(0, 40),
+      source: c.source === undefined ? 'agent' : String(c.source).slice(0, 40),
+    }));
   } catch {
     return null;
   }
