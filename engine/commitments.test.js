@@ -860,8 +860,7 @@ test('read() never throws, whatever the record contains', () => {
     JSON.stringify({ name: { toString: 'x', valueOf: 'y' }, reportedAt: new Date().toISOString(), commitments: [] }),
     JSON.stringify({ name: 42, reportedAt: new Date().toISOString(), commitments: [] }),
     JSON.stringify({ name: ['shapes'], reportedAt: new Date().toISOString(), commitments: [] }),
-    // An object-valued `id` passes the usability check (its `what` is a fine
-    // string) and throws inside the coercion, so the catch is its sole guard.
+    // An object-valued id, refused by the usability check's type test.
     JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(),
       commitments: [{ what: 'real', createdAt: new Date().toISOString(), id: { toString: 'x', valueOf: 'y' } }] }),
   ];
@@ -980,10 +979,12 @@ test('a description that is only padding is not served as blank', () => {
 
 test('an empty-string id is refused, so resolve cannot remove two things at once', () => {
   const stamp = new Date().toISOString();
+  // ONE commitment, deliberately. With two, idsAreUnique() refuses the record
+  // and the non-empty clause never decides anything: deleting it left the suite
+  // green while a single-commitment record with an empty id read as holding.
   fs.writeFileSync(c.recordPath('emptyid'), JSON.stringify({
     name: 'emptyid', reportedAt: stamp,
-    commitments: [{ id: '', what: 'one', createdAt: stamp, source: 'agent' },
-                  { id: '', what: 'two', createdAt: stamp, source: 'agent' }],
+    commitments: [{ id: '', what: 'one', createdAt: stamp, source: 'agent' }],
   }));
   assert.equal(c.read('emptyid').state, c.STATE.UNKNOWN);
 });
@@ -1048,13 +1049,18 @@ test('report() at its own caps writes a record its own reader accepts', () => {
   // its own reader leaves add() and resolve() throwing from then on, so the
   // agent cannot correct it through the module's own API.
   //
-  // Measured worst case is 406,708 bytes (200 commitments whose every character
-  // serialises to six JSON bytes). The ceiling that shipped before this was
-  // 512KB, which cleared it by only 20 percent while its comment reasoned from
-  // an estimate four times too small.
-  const nasty = String.fromCharCode(1).repeat(300);
+  // The fixture maxes EVERY field, not just `what`. An earlier version maxed
+  // only `what`, measured 406,708 bytes, and on that basis I concluded the old
+  // 512KB ceiling was fine and dismissed the finding. It was not fine: with
+  // every field maxed the true figure is 525,708 bytes, which the old ceiling
+  // did NOT clear. A weaker reproduction is how a real finding gets waved off.
+  const six = String.fromCharCode(1); // serialises as \u0001, six bytes
   const many = Array.from({ length: c.MAX_COMMITMENTS }, (_, i) => ({
-    id: String(i).padStart(80, '0'), what: nasty, source: 'x'.repeat(40),
+    // Unique prefix so ids stay distinct, then padded with six-byte characters.
+    id: String(i).padStart(4, '0') + six.repeat(76),
+    what: six.repeat(300),
+    source: six.repeat(40),
+    createdAt: '2026-01-01 ' + '('.repeat(14) + ')'.repeat(14),
   }));
   c.report('bigreal', many);
 
@@ -1065,5 +1071,28 @@ test('report() at its own caps writes a record its own reader accepts', () => {
   const got = c.read('bigreal');
   assert.equal(got.state, c.STATE.HOLDING, `own reader refused own write: ${got.because}`);
   assert.equal(got.commitments.length, c.MAX_COMMITMENTS);
-  assert.doesNotThrow(() => c.resolve('bigreal', String(0).padStart(80, '0')));
+  assert.doesNotThrow(() => c.resolve('bigreal', got.commitments[0].id));
+});
+
+test('add and resolve preserve stored fields rather than re-sanitising them', () => {
+  // read() deliberately serves an unparseable createdAt verbatim, because it
+  // cannot know the real one. add() and resolve() re-ran the WRITE-path
+  // sanitiser over the already-stored list, which rewrote it to `now` -- so the
+  // never-invent rule held on the read path and was reversed by the convenience
+  // API one call later.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('preserve'), JSON.stringify({
+    name: 'preserve', reportedAt: stamp,
+    commitments: [{ id: 'a', what: 'existing', createdAt: 'not-a-date-at-all', source: 'agent' }],
+  }));
+
+  c.add('preserve', 'a new one');
+  const after = c.read('preserve');
+  assert.equal(after.commitments[0].createdAt, 'not-a-date-at-all',
+    'add() rewrote a stored timestamp it could not know');
+  assert.equal(after.commitments.length, 2);
+
+  c.resolve('preserve', 'nonexistent');
+  assert.equal(c.read('preserve').commitments[0].createdAt, 'not-a-date-at-all',
+    'resolve() rewrote a stored timestamp it could not know');
 });

@@ -3,8 +3,9 @@
 /**
  * A local window onto the agents running on this machine.
  *
- * Binds to localhost only, and it WRITES: it stores avatars and roles. It does
- * not yet send input to an agent or start or stop one.
+ * Binds to localhost only, and it WRITES: it stores avatars, roles, and the
+ * commitments each agent says it is holding. It does not yet send input to an
+ * agent or start or stop one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -343,7 +344,7 @@ const server = http.createServer((req, res) => {
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     readBody(req)
       .then((buf) => {
-        const patch = JSON.parse(buf.toString('utf8') || '{}');
+        const patch = JSON.parse(buf.toString('utf8') || '{}') || {};
         // A bare list is the whole payload: this is an assertion of everything
         // the agent holds, not an addition to it. An append would make "I hold
         // nothing" unsayable, which is the one thing this record exists for.
@@ -393,8 +394,9 @@ const server = http.createServer((req, res) => {
 /**
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * It sets roles and stores avatars, and restart is next. There is no
- * authentication of any kind.
+ * It sets roles, stores avatars, and records the commitments the restart
+ * confirmation will read, and restart is next. There is no authentication of
+ * any kind.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *
