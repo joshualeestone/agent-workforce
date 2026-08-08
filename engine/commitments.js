@@ -70,6 +70,14 @@ const STALE_AFTER_MS = 30 * 60 * 1000;
  */
 const MAX_COMMITMENTS = 200;
 
+/**
+ * Ceiling on the size of one record file, checked before it is opened.
+ *
+ * Generous next to what report() can produce (200 commitments of 300 characters
+ * is well under 100KB), so it only ever catches a file we did not write.
+ */
+const MAX_RECORD_BYTES = 512 * 1024;
+
 function ensure(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -119,9 +127,10 @@ const FUTURE_TOLERANCE_MS = 60 * 1000;
  * all, or `{ ok: true, commitments, reportedAt, ageMs }` when it parsed.
  */
 function parseRecord(agent) {
-  let key;
+  // The result is unused; this is a validity check, and safeKey throws on a
+  // name that sanitises to nothing.
   try {
-    key = store.safeKey(agent);
+    store.safeKey(agent);
   } catch {
     return { ok: false, absent: false, because: 'that is not a name we can look up' };
   }
@@ -149,6 +158,15 @@ function parseRecord(agent) {
   }
   if (!stat.isFile()) {
     return { ok: false, absent: false, because: 'its record is not a file we can read' };
+  }
+
+  // Size is checked BEFORE the read, from the stat we already have. The entry
+  // cap counts commitments and only applies after the file is parsed, which is
+  // far too late: a 200 MB record measured 232ms per read, 1.1 GB resident, and
+  // a 209 MB status payload, serialised synchronously inside the request
+  // handler on a board that polls continuously. Same shape as the FIFO above.
+  if (stat.size > MAX_RECORD_BYTES) {
+    return { ok: false, absent: false, because: 'its record is far larger than we can read' };
   }
 
   let raw;
@@ -233,11 +251,12 @@ function parseRecord(agent) {
 
   return {
     ok: true,
-    commitments: parsed.commitments.map((cm) => ({
-      ...cm,
-      what: String(cm.what).slice(0, 300),
-    })),
-    reportedAt: reportedAt.slice(0, 40),
+    // Sanitised on the way OUT with the same function used on the way in.
+    // Capping only `what` here re-served `id`, `createdAt`, `source` and any
+    // extra key verbatim, which is the exact createdAt bug the write path
+    // records as fixed, still reachable through a hand-edited record.
+    commitments: sanitise(parsed.commitments),
+    reportedAt,
     ageMs: Date.now() - at,
   };
 }
@@ -481,4 +500,4 @@ function readAll() {
   return out;
 }
 
-module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, read, report, add, resolve, readAll, recordPath };
+module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath };
