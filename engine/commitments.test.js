@@ -257,10 +257,60 @@ test('add() on a STALE record keeps what was already there', () => {
   c.add('stalebot', 'one new thing');
 
   const after = c.read('stalebot');
-  assert.equal(after.state, c.STATE.HOLDING);
   assert.deepEqual(after.commitments.map((x) => x.what),
     ['verify the sweep', 'reply to Leo', 'one new thing'],
     'the two it was already holding must survive');
+
+  // And it must STILL read unknown. The agent told us about one new thing; it
+  // has not re-asserted everything else. Re-dating the record here would
+  // launder "we cannot tell" into a confident answer, which is the failure the
+  // whole module exists to prevent -- reached through its own convenience API.
+  assert.equal(after.state, c.STATE.UNKNOWN,
+    'a derived change must not re-publish a stale record as current');
+});
+
+test('a no-op resolve on a stale record does not turn unknown into a confident answer', () => {
+  // The sharpest version of it: resolving an id that is not even present
+  // changes nothing, and used to come back `clear` on a record we had just
+  // refused to vouch for. The agent never asserted its current state; the old
+  // data was simply re-stamped as fresh.
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('ghost'), JSON.stringify({
+    name: 'ghost', reportedAt: stale, commitments: [{ id: 'x', what: 'still pending' }],
+  }));
+  assert.equal(c.read('ghost').state, c.STATE.UNKNOWN, 'precondition');
+
+  c.resolve('ghost', 'no-such-id');
+
+  const after = c.read('ghost');
+  assert.equal(after.state, c.STATE.UNKNOWN, 'a no-op resolve must not refresh the assertion');
+  assert.deepEqual(after.commitments.map((x) => x.what), ['still pending']);
+});
+
+test('resolving the LAST commitment on a stale record does not produce clear', () => {
+  // The dangerous direction: emptying a stale list looks exactly like "nothing
+  // pending" unless the timestamp is preserved.
+  const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
+  fs.writeFileSync(c.recordPath('emptying'), JSON.stringify({
+    name: 'emptying', reportedAt: stale, commitments: [{ id: 'only', what: 'the last one' }],
+  }));
+  c.resolve('emptying', 'only');
+
+  const after = c.read('emptying');
+  assert.equal(after.commitments.length, 0);
+  assert.equal(after.state, c.STATE.UNKNOWN,
+    'an emptied stale list must not read as clear');
+});
+
+test('add and resolve on a FRESH record do refresh it, which is the whole point', () => {
+  // The preserve-the-timestamp rule must not accidentally freeze fresh records.
+  c.report('freshbot', [{ id: 'one', what: 'first' }]);
+  c.add('freshbot', 'second');
+  assert.equal(c.read('freshbot').state, c.STATE.HOLDING);
+  c.resolve('freshbot', 'one');
+  const after = c.read('freshbot');
+  assert.equal(after.state, c.STATE.HOLDING);
+  assert.deepEqual(after.commitments.map((x) => x.what), ['second']);
 });
 
 test('a stale read still returns the list it managed to read', () => {
@@ -507,3 +557,83 @@ test('readAll does not let a __proto__ record mutate its result', () => {
     fs.rmSync(raw, { force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Guards that were load-bearing but unpinned
+// ---------------------------------------------------------------------------
+
+test('a record with an unparseable timestamp is unknown, not clear', () => {
+  // The earlier version of this test omitted `name`, so the record was rejected
+  // by the name guard first and the timestamp check was never reached: setting
+  // that check to `if (false)` left the whole suite green while a record with
+  // `reportedAt: 'not-a-date'` read as clear.
+  for (const bad of ['not-a-date', '', 'yesterday', '2026-13-45T99:99:99Z']) {
+    fs.writeFileSync(c.recordPath('badstamp'), JSON.stringify({
+      name: 'badstamp', reportedAt: bad, commitments: [],
+    }));
+    const got = c.read('badstamp');
+    assert.equal(got.state, c.STATE.UNKNOWN, `reportedAt=${JSON.stringify(bad)} should be unknown`);
+  }
+});
+
+test('a record with a non-string timestamp is unknown', () => {
+  for (const bad of [12345, null, { at: 'now' }, ['2026-01-01']]) {
+    fs.writeFileSync(c.recordPath('typestamp'), JSON.stringify({
+      name: 'typestamp', reportedAt: bad, commitments: [],
+    }));
+    assert.equal(c.read('typestamp').state, c.STATE.UNKNOWN,
+      `reportedAt=${JSON.stringify(bad)} should be unknown`);
+  }
+});
+
+test('the staleness window is thirty minutes, not whatever the constant happens to say', () => {
+  // Every other test derives its offset from the exported constant, so widening
+  // STALE_AFTER_MS to 30 DAYS passed the entire suite. The plan calls this "the
+  // one number I would expect to tune", which makes an unguarded edit likely,
+  // and a stale `clear` surviving 30 days is a false "safe to restart".
+  assert.equal(c.STALE_AFTER_MS, 30 * 60 * 1000, 'staleness window changed; was that deliberate?');
+  assert.equal(c.FUTURE_TOLERANCE_MS, 60 * 1000, 'future tolerance changed; was that deliberate?');
+});
+
+test('field caps are enforced at their stated lengths', () => {
+  // The caps were load-bearing but unpinned: removing the createdAt slice left
+  // the suite green, because the fixture was rejected by Date.parse rather than
+  // by the cap. Date.parse accepts arbitrarily long strings through its legacy
+  // parenthesised-comment syntax, so the cap has to come first.
+  const longButParseable = '2026-01-01 ' + '('.repeat(2000) + ')'.repeat(2000);
+  assert.ok(!Number.isNaN(Date.parse(longButParseable)), 'fixture must actually parse as a date');
+
+  c.report('caps', [{
+    what: 'w'.repeat(5000),
+    id: 'i'.repeat(5000),
+    source: 's'.repeat(5000),
+    createdAt: longButParseable,
+  }]);
+  const got = c.read('caps').commitments[0];
+  assert.ok(got.what.length <= 300, `what was ${got.what.length}`);
+  assert.ok(got.id.length <= 80, `id was ${got.id.length}`);
+  assert.ok(got.source.length <= 40, `source was ${got.source.length}`);
+  assert.ok(got.createdAt.length <= 40, `createdAt was ${got.createdAt.length}`);
+});
+
+test('a write that fails AFTER the temp file exists cleans it up', () => {
+  // The earlier version of this test threw inside sanitise(), before any temp
+  // file was written, so it never reached the cleanup path it was named for:
+  // deleting the rmSync left the suite green. Making the destination a
+  // directory fails the rename instead, which is after the temp write.
+  ensure_dir();
+  const dest = c.recordPath('renamefail');
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest);
+  try {
+    assert.throws(() => c.report('renamefail', [{ what: 'something' }]), /could not be saved/);
+    const strays = fs.readdirSync(c.DIR).filter((f) => f.startsWith('renamefail') && f.includes('.tmp'));
+    assert.deepEqual(strays, [], `temp file left behind: ${strays.join(', ')}`);
+  } finally {
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+function ensure_dir() {
+  fs.mkdirSync(c.DIR, { recursive: true });
+}

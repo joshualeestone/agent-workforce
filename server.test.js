@@ -31,12 +31,19 @@
  */
 
 // Sandbox the commitment store BEFORE requiring the server: commitments.js
-// reads this at module load, and without it these tests would write into the
-// operator's real app data.
+// reads this at module load.
+//
+// ⚠️ This is a PARTIAL sandbox. `AGENT_WORKFORCE_DATA` moves the commitment
+// store only; avatars and profiles still resolve through `store.ROOT`, which is
+// the operator's real app data. That is why no test in this file sends a PUT or
+// DELETE to an avatar or profile route, and why any test that does must sandbox
+// `store.ROOT` first. A reviewer once deleted a real avatar by assuming this
+// variable covered everything.
 const os = require('node:os');
 const fs = require('node:fs');
 const nodePath = require('node:path');
-process.env.AGENT_WORKFORCE_DATA = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
+const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
+process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -52,6 +59,9 @@ test.after(() => {
   // suite can hang on a slower dispatcher even though every test has passed.
   server.closeAllConnections();
   server.close();
+  // Every run otherwise leaks one temp directory holding commitment records
+  // under real agent names.
+  fs.rmSync(SANDBOX, { recursive: true, force: true });
 });
 
 async function req(path, options) {
