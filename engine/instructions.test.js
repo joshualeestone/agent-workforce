@@ -802,6 +802,89 @@ test('a staleness answer for such a name is a real verdict, not unknown', () => 
   assert.ok(got.startedAt, 'a real verdict must say when the session started');
 });
 
+test('every reader of the workers directory refuses the same files', () => {
+  // ⚠️ The sixth instance of one defect, and the reason `engine/workerfile.js`
+  // exists. `readIdentity` was given the DIRECTORY check and still had no FILE
+  // check, so it followed a symlinked CLAUDE.md and served a name parsed out of
+  // a file outside the root, while the instructions route for the same agent
+  // refused. Both are measured below rather than reasoned about.
+  const status = require('./status');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-bothread-'));
+  fs.writeFileSync(path.join(outside, 'private.md'),
+    'You are **Outside Secret**, the private note that is not in the workers root.\n');
+  fs.mkdirSync(path.join(ROOT, 'bothagent'), { recursive: true });
+  const link = path.join(ROOT, 'bothagent', 'CLAUDE.md');
+  try {
+    fs.symlinkSync(path.join(outside, 'private.md'), link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    assert.equal(instructions.read('bothagent').exists, false);
+    const id = status.readIdentity('bothagent');
+    assert.equal(id.derived, false, 'readIdentity followed a symlinked instruction file');
+    assert.notEqual(id.displayName, 'Outside Secret',
+      'a name was parsed out of a file outside the workers root');
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a non-regular instruction file cannot wedge the board', () => {
+  // ⚠️ A fifo makes `readFileSync` block forever inside a synchronous request
+  // handler. `readIdentity` had no is-a-file check, so `snapshot()` never
+  // returned, and because `knownAgent` also calls `snapshot()`, EVERY route on
+  // the server hung with it and nothing crashed to say why.
+  //
+  // This test would hang rather than fail if the guard were removed, which is
+  // worth knowing: a hang in the suite IS the failure signal here.
+  const status = require('./status');
+  const dir = path.join(ROOT, 'fifoagent');
+  fs.mkdirSync(dir, { recursive: true });
+  const fifo = path.join(dir, 'CLAUDE.md');
+  try {
+    require('node:child_process').execFileSync('mkfifo', [fifo]);
+  } catch {
+    return; // mkfifo unavailable
+  }
+  try {
+    // ⚠️ Run in a CHILD PROCESS with a timeout, deliberately.
+    //
+    // Every in-process version of this test hangs instead of failing when the
+    // guard is removed, because `readFileSync` on a fifo never returns and
+    // there is no way to interrupt a synchronous call. Verified by mutation
+    // twice: removing the check in `readIdentity`, and removing it in the
+    // shared reader, both wedged the suite rather than reddening it.
+    //
+    // A hung suite reads as broken infrastructure, not as a caught bug, so the
+    // signal was worse than useless on the one guard whose absence takes down
+    // every route on the server. A timeout turns it back into a real failure
+    // with a message that says what happened.
+    const probe = `
+      process.env.AGENT_WORKFORCE_WORKERS = ${JSON.stringify(ROOT)};
+      const i = require(${JSON.stringify(require.resolve('./instructions'))});
+      const s = require(${JSON.stringify(require.resolve('./status'))});
+      if (i.read('fifoagent').exists) throw new Error('read served a fifo');
+      if (s.readIdentity('fifoagent').derived) throw new Error('readIdentity read a fifo');
+      console.log('ok');
+    `;
+    let out;
+    try {
+      out = require('node:child_process')
+        .execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 5000 });
+    } catch (err) {
+      assert.fail(err.killed
+        ? 'reading a fifo BLOCKED: the is-a-file guard is gone and this would wedge every route'
+        : `the fifo probe failed: ${err.stderr || err.message}`);
+    }
+    assert.match(out, /ok/);
+  } finally {
+    fs.rmSync(fifo, { force: true });
+  }
+});
+
 test('the status engine does not read an identity through a linked worker folder', () => {
   // ⚠️ The FOURTH reader of the workers root, and the last one to be closed.
   // `instructions.js` refuses a linked worker folder on all three of its paths;

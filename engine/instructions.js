@@ -30,6 +30,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const store = require('./store');
 const { transcriptFor } = require('./status');
+const workerfile = require('./workerfile');
 
 /**
  * Where worker instruction files live.
@@ -48,12 +49,12 @@ const ROOT = process.env.AGENT_WORKFORCE_WORKERS || path.join(os.homedir(), 'wor
 const FILENAME = 'CLAUDE.md';
 
 /**
- * Ceiling on an instruction file we will write.
+ * Ceiling on an instruction file we will read or write.
  *
- * Generous next to a real one (the largest on this machine is ~7KB), so it only
- * ever catches a paste that was never meant to be an instruction file.
+ * Shared with `workerfile`, which enforces it on the read side for every reader
+ * of the workers directory, not just this one.
  */
-const MAX_BYTES = 256 * 1024;
+const MAX_BYTES = workerfile.MAX_BYTES;
 
 /**
  * Floor, because an EMPTY instruction file is an agent with no idea what it is
@@ -95,31 +96,7 @@ function fileFor(agent) {
   return file;
 }
 
-/**
- * Does the worker DIRECTORY lead out of the root?
- *
- * ⚠️ `fileFor`'s containment assertion, and the `lstat` in `read`, both only
- * ever look at the FINAL component. A symlinked worker directory therefore led
- * a read straight out of ROOT: with `<ROOT>/angel` linked elsewhere, `read`
- * returned `exists: true` and the contents of a file outside the root, under a
- * `path` the content had not come from, and `staleness` disclosed that file's
- * mtime. `write` already refused, so the two surfaces disagreed: the editor
- * served a foreign file as editable and Save answered "there is no agent by
- * that name to write to".
- *
- * Shared by all three paths so they cannot drift apart again. A directory that
- * does not exist is not an escape, it is simply an agent with no files yet, and
- * the callers already handle that.
- */
-function dirEscapes(file) {
-  let stat;
-  try {
-    stat = fs.lstatSync(path.dirname(file));
-  } catch {
-    return false; // no directory at all; not an escape
-  }
-  return !stat.isDirectory();
-}
+const { dirEscapes } = workerfile;
 
 /**
  * The name as the session REGISTRY knows it.
@@ -224,59 +201,31 @@ function inspect(agent) {
   const file = fileFor(agent);
   if (!file) return { file: null, ok: false, because: 'that is not a name we can look up' };
 
-  // The worker directory, before the file inside it. `fileFor` only asserts on
-  // the final component, so a linked directory escaped it entirely.
-  if (dirEscapes(file)) {
-    return { file, ok: false, because: 'its worker folder is a link, so we do not read through it' };
-  }
-
-  const dir = path.dirname(file);
-  if (!fs.existsSync(dir)) {
-    // No folder at all is not the same as no file. Both are `ok: false`, but
-    // only the missing FILE is something this screen can create, and that
-    // difference is carried by `missing` below, which `read` turns into
-    // `editable`. Deliberately NOT a separate flag: an earlier version set a
-    // `noDir` nobody read, with a comment crediting it for behaviour that came
-    // from somewhere else entirely.
-    return { file, ok: false, because: 'this agent has no folder on this computer yet' };
-  }
-
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch {
-    return { file, ok: false, missing: true, because: 'it has no instruction file yet' };
-  }
-
-  // Regular files only, and `lstat` so a symlink cannot point the read out of
-  // the worker directory. Reading a FIFO here would block forever inside the
-  // request handler, which is a wedge with no crash to notice.
-  if (!isShowable(stat)) {
-    return { file, stat, ok: false, because: 'its instruction file is not one we can read' };
-  }
-
-  let buf;
-  try {
-    buf = fs.readFileSync(file);
-  } catch {
-    return { file, stat, ok: false, because: 'its instruction file could not be read' };
-  }
+  // Every filesystem-level refusal comes from the shared reader, so this module
+  // and `status.readIdentity` cannot disagree about what is safe to read. They
+  // did, twice: the directory check landed here first, then the file check.
+  const got = workerfile.readWorkerFile(file);
+  if (!got.ok) return { file, stat: got.stat, ok: false, missing: got.missing, because: got.because };
 
   // ⚠️ Refuse anything that would not survive being handed back. The editor
   // round-trips through a UTF-8 string, so a file containing invalid bytes came
   // back with every one replaced by U+FFFD: opening it and pressing Save
   // rewrote it lossily and reported "Saved." Measured at 50 bytes in, 52 out.
-  const text = buf.toString('utf8');
-  if (!Buffer.from(text, 'utf8').equals(buf)) {
+  //
+  // This one is specific to editing, so it stays here rather than in the shared
+  // reader: `readIdentity` only parses a name out of the first few kilobytes
+  // and has no reason to refuse a file it can read perfectly well.
+  const text = got.buf.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(got.buf)) {
     return {
       file,
-      stat,
+      stat: got.stat,
       ok: false,
       because: 'its instruction file is not UTF-8 text, so editing it here would corrupt it',
     };
   }
 
-  return { file, stat, buf, text, ok: true };
+  return { file, stat: got.stat, buf: got.buf, text, ok: true };
 }
 
 /**

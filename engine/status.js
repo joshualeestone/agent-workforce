@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const store = require('./store');
+const { readWorkerFile } = require('./workerfile');
 
 const HOME = os.homedir();
 
@@ -430,9 +431,22 @@ function readModel(agentName) {
  * `safeKey(sessionName)`. For any agent whose session name is not already its
  * own sanitised form, those two resolve to different directories, so the board
  * can show a derived name and role read from one file while staleness reports
- * "no instruction file yet" from another. It fails safe in both directions and
- * no agent on this machine hits it. Saying "one root, one variable" and
- * stopping there would imply the divergence is fully closed, and it is not.
+ * on another.
+ *
+ * ⚠️ An earlier version of this said "it fails safe in both directions". That
+ * is false, and the correction matters because the unsafe direction is a
+ * CROSS-AGENT WRITE. Measured with two agents whose names collide under
+ * `safeKey` (`mybot` and `my.bot`), each with its own worker directory:
+ * `readIdentity('my.bot')` read `my.bot`'s file, while `fileFor('my.bot')`
+ * resolved to `mybot`'s, `read` returned `mybot`'s text and `staleness`
+ * returned a confident `current` computed from it. `knownAgent` compares
+ * `sessionName === safeKey(name)`, so `PUT /api/agent/my.bot/instructions`
+ * passes the gate and rewrites `mybot`'s boot file.
+ *
+ * There are no such collisions on this machine, checked rather than assumed,
+ * and `server.js` states the same risk accurately at `knownAgent`. The real fix
+ * is one identity per agent instead of a name sanitised in one place and taken
+ * verbatim in another, which reaches the avatar and profile stores too.
  */
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
@@ -457,35 +471,26 @@ function readIdentity(sessionName) {
   const override = IDENTITY_OVERRIDES[sessionName];
   if (override) return { ...override, derived: true, source: 'override' };
 
-  const dir = path.join(WORKERS_DIR, sessionName);
-  const file = path.join(dir, 'CLAUDE.md');
+  const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
 
-  // ⚠️ The worker directory must be a real directory, never a link.
+  // ⚠️ Through the SHARED reader, not a local `readFileSync`.
   //
-  // `engine/instructions.js` refuses a linked worker folder on all three of its
-  // paths, and this was the FOURTH reader of the same root and did not. With
-  // `<ROOT>/leo` linked elsewhere, the board rendered a name and role parsed out
-  // of a file outside the workers root, presented as that agent's identity,
-  // while the instructions route for the same agent correctly refused. Two
-  // surfaces disagreeing about one agent, again.
+  // This was the sixth instance of one defect on this branch: a second reader
+  // of the workers directory with fewer guards than the first. It followed a
+  // symlinked worker folder, then, once that was fixed, still followed a
+  // symlinked CLAUDE.md and served a name parsed out of a file outside the
+  // root, while the instructions route for the same agent correctly refused.
+  // It also blocked FOREVER on a fifo, and because `knownAgent` calls
+  // `snapshot()`, that wedged every route on the server with no crash to say
+  // why. Both measured, not theorised.
   //
-  // Checked here rather than imported, because `instructions.js` already
-  // requires this module and the reverse would be a cycle. Kept deliberately
-  // identical in behaviour to `dirEscapes` there.
-  try {
-    if (!fs.lstatSync(dir).isDirectory()) {
-      return { displayName: sessionName, role: null, derived: false };
-    }
-  } catch {
-    return { displayName: sessionName, role: null, derived: false };
-  }
-
-  let text;
-  try {
-    text = fs.readFileSync(file, 'utf8').slice(0, 4000);
-  } catch {
-    return { displayName: sessionName, role: null, derived: false };
-  }
+  // The guards are no longer duplicated here, because duplicating them is what
+  // kept going wrong. `engine/workerfile.js` sits below both modules on purpose:
+  // `instructions.js` already requires this one, so anything shared has to live
+  // underneath or the require becomes a cycle.
+  const got = readWorkerFile(file);
+  if (!got.ok) return { displayName: sessionName, role: null, derived: false };
+  const text = got.buf.toString('utf8').slice(0, 4000);
 
   const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
   if (!m) return { displayName: sessionName, role: null, derived: false };

@@ -197,6 +197,9 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `dirEscapes` in `inspect` (read and staleness share it) | fails |
 | `dirEscapes` on the WRITE path | fails |
 | The linked-folder check in `status.readIdentity` | fails |
+| `readIdentity` bypassing the shared reader | fails |
+| is-a-file / size check in `workerfile` | fails (6 tests) |
+| Panel re-syncing staleness from the poll | **green, no browser test harness** |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -362,6 +365,33 @@ too broad and pasted conflict-detection onto three routes that cannot produce
 one, implying a behaviour those routes do not have. Reverted to the single
 writer that throws it.
 
+Iteration 10 was told to assume a sixth instance of the recurring defect existed
+and go looking. It found one, and it was in the fix from iteration 9: I had
+given `readIdentity` the DIRECTORY check and left it with no FILE check. So it
+still followed a symlinked CLAUDE.md and served a name parsed out of a file
+outside the workers root, and worse, it blocked FOREVER on a fifo. Because
+`knownAgent` also calls `snapshot()`, that wedged every route on the server with
+nothing crashing to say why. Both measured.
+
+So the fix this time is not another guard. `engine/workerfile.js` now answers
+"can we safely read this worker file" once, and both `instructions.js` and
+`status.js` import it. Six instances of one defect on one branch is not six
+oversights, it is one missing abstraction, and a seventh now requires editing
+that file rather than forgetting to.
+
+The fifo guard also produced the loop's one genuinely awkward test. Removing it
+made the suite HANG rather than fail, in-process and in every variant, because a
+synchronous read of a fifo cannot be interrupted. A hung suite reads as broken
+infrastructure rather than as a caught bug, which is the worst possible signal
+for the one guard whose absence takes down the whole server, so the probe runs
+in a child process with a timeout and fails with a message that says so.
+
+Two more of my own false claims were corrected: `status.js` said the
+name-derivation divergence "fails safe in both directions" when the unsafe
+direction is a cross-agent WRITE (reproduced with two colliding names), and a
+`sed` of mine had pasted conflict-detection onto three routes that cannot
+produce one.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Five rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
@@ -371,4 +401,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**173 tests, zero dependencies.**
+**175 tests, zero dependencies.**

@@ -509,6 +509,24 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
+
+    // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
+    //
+    // The card badge is repainted from this poll; the panel's note was rendered
+    // once, when the panel opened, and never again. So the two surfaces
+    // disagreed about the same agent along the product's primary flow: the
+    // panel says "Restart to apply", you restart, the card clears within five
+    // seconds, and the panel keeps telling you to restart. The inverse too, an
+    // edit made elsewhere raises the card glyph while the panel shows nothing.
+    //
+    // This poll already carries fresh `instructions` for every agent, so it is
+    // one call. Same fact, one source: the shape this whole branch is about.
+    if (CURRENT) {
+      const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
+      // Not while a load is in flight or the file is one we refused: the note
+      // then belongs to the load, not to the poll.
+      if (fresh && INSTR_READY) renderStale(fresh.instructions);
+    }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
     document.getElementById('grid').innerHTML = shown.map(card).join('');
 
@@ -690,6 +708,9 @@ async function loadInstructions(sessionName) {
   // left both of these disabled.
   box.disabled = false;
   saveBtn.disabled = false;
+  // Reset too, or a failed load inherits the previous agent's footer and reads
+  // "Saved to  · a real file you can also edit by hand" with no path at all.
+  document.getElementById('d-instr-foot').hidden = false;
   renderStale(null);
 
   try {
@@ -744,6 +765,12 @@ async function loadInstructions(sessionName) {
     // Save stays refused: we have no version, and saving without one would be
     // an unguarded overwrite of a file we could not read.
     INSTR_VERSION = null;
+    // A failed load must look like the other cannot-edit states, not like an
+    // editable one: the top of this function re-enabled both controls, and
+    // leaving them enabled offers a Save that INSTR_READY will always refuse.
+    box.disabled = true;
+    saveBtn.disabled = true;
+    document.getElementById('d-instr-foot').hidden = true;
     // Never the raw exception. A failed fetch surfaces "Failed to fetch"
     // verbatim, which is the one place on this surface a person is most likely
     // to see an exception name, and every other refusal here says what to do.
