@@ -281,6 +281,31 @@ is renamed to say which one it is. A guard table that overstates what is pinned
 is the same defect as a test that pins nothing, in the one document written to
 catch it.
 
+Iteration 6 found no blockers and two things worth having. The panel said
+"There is no instruction file for this one yet" for four cases where the file is
+very much there and was deliberately refused (not UTF-8, over the ceiling,
+unopenable, a symlink), so the screen said no file existed while Save said one
+existed and could not be replaced. Two surfaces contradicting each other about
+the same file, which is the failure this whole feature is written against. The
+panel now uses the reason the engine already returns, and where the file cannot
+be edited it disables the box and the button rather than offering an action that
+will be refused.
+
+It also caught a second false claim in the `knownAgent` comment: it said that
+declining to widen the gate avoided accepting two names that sanitise to the
+same directory. The gate compares on `safeKey` already, so `an.gel`, `ANGEL` and
+`ang!el` all pass and all resolve to `angel`. Checked against the live roster
+rather than reasoned about. The real latent risk is two DIFFERENT agents
+colliding under `safeKey`, there are none today, and the comment now says that
+instead.
+
+While fixing this I introduced a regression and caught it only by looking at a
+screenshot: a reference to `box` before its declaration threw out of
+`loadInstructions`, and because `openDetail` does not await it the panel simply
+rendered blank. `node --check` passed, the test suite passed, and the bug was
+plainly visible in the picture. Worth recording as the reason the UI states get
+screenshotted rather than reasoned about.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Four rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and

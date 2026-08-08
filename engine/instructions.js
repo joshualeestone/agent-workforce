@@ -488,6 +488,14 @@ function write(agent, text, expectedVersion) {
   // agent cannot land on the same temp path. Two concurrent writes inside THIS
   // process share the name, and are serialised only because these calls are
   // synchronous, which is worth knowing before either one grows an await.
+  //
+  // ⚠️ The version check above is NOT a lock, and across processes it is not
+  // even atomic: two servers, or a server and a script, can both read the same
+  // version, both pass, and both rename, and the later one silently discards
+  // the earlier edit. In-process that cannot happen because `write` is
+  // synchronous end to end. Between processes it can, and closing it needs a
+  // lock file rather than a comment. Stated so the guarantee is not read as
+  // stronger than it is.
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     // ⚠️ `wx`, not the default `w`. The temp name is predictable, and the
@@ -507,7 +515,10 @@ function write(agent, text, expectedVersion) {
     // contents of that file world-readable on disk for the window between the
     // write and the rename, which for the most sensitive file this product
     // writes is most of the point. `mode` at create can only be narrowed by the
-    // umask, never widened, so there is no window.
+    // umask, never widened, so there is no window. Masked to 0o777: the
+    // permission bits only, deliberately not setuid/setgid/sticky, which have
+    // no business on an instruction file and which an earlier 0o7777 carried
+    // across without saying so.
     //
     // ⚠️ The WINDOW is not pinned by a test, only the final mode is. Catching a
     // mode that exists between two synchronous calls needs a probe inside the
@@ -515,7 +526,7 @@ function write(agent, text, expectedVersion) {
     // implementation rather than the property. Said out loud rather than left
     // to look covered: moving this back to a post-hoc chmod leaves the suite
     // green.
-    const mode = before ? (before.mode & 0o7777) : 0o644;
+    const mode = before ? (before.mode & 0o777) : 0o644;
     fs.writeFileSync(tmp, body, { flag: 'wx', mode });
     // And restore exactly, because the umask may have narrowed it. A failure
     // here is a real failure, not a best effort: silently handing back

@@ -53,15 +53,21 @@ function readBody(req) {
  * verdict for it. The card would show "running on older instructions" and
  * clicking through would 404.
  *
- * Widening this to also accept the verbatim name was considered and NOT done,
- * because it makes the gate accept two distinct session names that sanitise to
- * the same directory, and the write would then land on the wrong agent's
- * instruction file. A 404 is a visible, harmless failure; writing one agent's
- * instructions into another's is neither. The real fix is a single identity for
- * an agent rather than a name that is sanitised in one place and verbatim in
- * another, and that is a change to the avatar and profile stores too.
+ * ⚠️ And a correction to what an earlier version of this comment claimed. It
+ * said that NOT widening the gate avoided accepting two names that sanitise to
+ * the same directory. That was wrong: the gate compares against `safeKey(name)`
+ * and `fileFor` resolves through `safeKey` too, so it ALREADY accepts every
+ * spelling that sanitises to a live agent. Verified against the live roster:
+ * `an.gel`, `ANGEL`, `a n g e l` and `ang!el` all pass and all resolve to
+ * `angel/CLAUDE.md`. That is harmless while it is the same agent.
  *
- * Every agent on this machine is lowercase, so nothing hits this today.
+ * The real latent risk, stated accurately: if two agents ever exist whose names
+ * sanitise to the SAME key (sessions `mybot` and `my.bot`), the gate cannot
+ * tell them apart and both read and write one file. Nothing detects that today.
+ * There are currently no such collisions and no agent whose name differs from
+ * its own sanitised form, both checked rather than assumed. The real fix is one
+ * identity per agent instead of a name that is sanitised in one place and
+ * verbatim in another, which is a change to the avatar and profile stores too.
  */
 function knownAgent(name) {
   try {

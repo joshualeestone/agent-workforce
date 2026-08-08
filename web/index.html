@@ -125,6 +125,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
 .btn:hover { background: var(--attn-bg); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled:hover { background: var(--bg); }
 .fmsg { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); min-height: 1em; }
 .card { cursor: pointer; position: relative; }
 /* The card was clickable with nothing to say so. An affordance you have to
@@ -657,17 +659,33 @@ let INSTR_LOAD = 0;
  * for the text it is showing.
  */
 let INSTR_VERSION = null;
-let INSTR_LOADED = 0;
+
+/**
+ * Whether the box currently holds a version we actually received.
+ *
+ * ⚠️ Save must refuse unless this is true, and NOT merely fall back to sending
+ * no version. A missing version skips the changed-since-read guard entirely, so
+ * "the load failed, save anyway" would be an unguarded overwrite of a file we
+ * never managed to read: the worst possible response to not knowing what is
+ * there.
+ */
+let INSTR_READY = false;
 
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
   INSTR_VERSION = null;
+  INSTR_READY = false;
   const box = document.getElementById('d-instr');
+  const saveBtn = document.getElementById('d-instr-save');
   const pathEl = document.getElementById('d-instr-path');
   const msg = document.getElementById('d-instr-msg');
   box.value = '';
   msg.textContent = '';
   pathEl.textContent = '';
+  // Re-enabled on every load: a previous agent whose file could not be edited
+  // left both of these disabled.
+  box.disabled = false;
+  saveBtn.disabled = false;
   renderStale(null);
 
   try {
@@ -681,14 +699,37 @@ async function loadInstructions(sessionName) {
     // Remember which version this is, so Save can refuse to clobber an edit
     // made after this load.
     INSTR_VERSION = data.version || null;
-    INSTR_LOADED = mine;
+    INSTR_READY = true;
     pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
+
+    // ⚠️ `exists: false` does NOT mean there is no file. The read path also
+    // refuses a file that IS there but cannot be shown: not UTF-8, over the
+    // size ceiling, unopenable, or a symlink. Saying "there is no instruction
+    // file for this one yet" in those cases is the screen asserting something
+    // untrue, and it contradicts Save, which refuses with "there is already a
+    // file there". The engine returns the real reason, so use it, and where the
+    // file cannot be edited, do not offer an editor that cannot save.
     if (!data.exists) {
-      msg.textContent = 'There is no instruction file for this one yet.';
+      const why = (data.staleness && data.staleness.because) || '';
+      const noFileAtAll = !why || /no instruction file/.test(why);
+      if (noFileAtAll) {
+        msg.textContent = 'There is no instruction file for this one yet.';
+      } else {
+        msg.textContent = 'There is a file here, but it cannot be edited from this screen. '
+          + 'Open it by hand instead.';
+        INSTR_READY = false;
+        box.disabled = true;
+        saveBtn.disabled = true;
+      }
     }
     renderStale(data.staleness);
   } catch (err) {
     if (mine !== INSTR_LOAD) return;
+    // The load is finished and broken, which is a different state from "still
+    // in flight" and gets a different sentence. It leaves INSTR_READY false, so
+    // Save stays refused: we have no version, and saving without one would be
+    // an unguarded overwrite of a file we could not read.
+    INSTR_VERSION = null;
     msg.textContent = err.message;
   }
 }
@@ -745,11 +786,12 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   // something untrue about a different one, which is the failure this state
   // exists to prevent.
   const forAgent = CURRENT.sessionName;
-  if (INSTR_LOADED !== INSTR_LOAD) {
-    // A load is still in flight, so the box is empty and the version we hold is
-    // for whatever was open before. Saving now would post the previous agent's
-    // token against this agent's file.
-    msg.textContent = 'Still loading these instructions, try again in a moment.';
+  if (!INSTR_READY) {
+    // Either a load is still in flight (the box is empty and any version we
+    // hold belongs to the agent that was open before) or the load failed. In
+    // both cases we do not know what is in the file, and saving would either
+    // post the wrong agent's token or skip the guard entirely.
+    msg.textContent = 'These instructions have not loaded, so saving is off.';
     return;
   }
   // Disabled for the duration, because a double-click sends two saves carrying
@@ -785,11 +827,16 @@ document.getElementById('d-file').addEventListener('change', async (e) => {
   const f = e.target.files && e.target.files[0];
   if (!f || !CURRENT) return;
   const msg = document.getElementById('d-msg');
+  // Same capture-and-recheck as the instruction save. Without it, uploading a
+  // picture for A and switching to B before it lands reports "Saved." on B's
+  // panel, about a file B has nothing to do with.
+  const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar',
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/avatar',
       { method: 'PUT', headers: { 'content-type': f.type }, body: f });
     const out = await res.json();
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     // Say what to do, never surface an exception name.
     if (!res.ok) throw new Error(out.error || 'that did not work');
     msg.textContent = 'Saved.';
@@ -802,7 +849,9 @@ document.getElementById('d-file').addEventListener('change', async (e) => {
 
 document.getElementById('d-remove').addEventListener('click', async () => {
   if (!CURRENT) return;
-  await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar', { method: 'DELETE' });
+  const forAgent = CURRENT.sessionName;
+  await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/avatar', { method: 'DELETE' });
+  if (!CURRENT || CURRENT.sessionName !== forAgent) return;
   document.getElementById('d-msg').textContent = 'Removed.';
   await tick();
   refreshAvatar();
