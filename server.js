@@ -3,8 +3,9 @@
 /**
  * A local window onto the agents running on this machine.
  *
- * Binds to localhost only, and it WRITES: it stores avatars, roles, and the
- * commitments each agent says it is holding. It does not yet send input to an
+ * Binds to localhost only, and it WRITES: it stores avatars, roles, the
+ * commitments each agent says it is holding, and the instruction file each
+ * agent reads at startup. It does not yet send input to an
  * agent or start or stop one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
@@ -23,6 +24,7 @@ const { snapshot } = require('./engine/status');
 const { version } = require('./package.json');
 const store = require('./engine/store');
 const commitments = require('./engine/commitments');
+const instructions = require('./engine/instructions');
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
 // server is still a way to fill someone's memory by accident.
@@ -177,6 +179,12 @@ const server = http.createServer((req, res) => {
       const agents = snap.agents.map((a) => ({
         ...a,
         commitments: commitments.read(a.sessionName),
+        // Staleness only, NOT the instruction text. The board polls this every
+        // five seconds for every agent, and the real files run to several
+        // kilobytes each -- carrying them here would put ~90KB on the wire per
+        // poll to render a badge. The text is fetched once, by the detail page,
+        // when someone actually opens it.
+        instructions: instructions.staleness(a.sessionName),
       }));
       body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {
@@ -363,6 +371,41 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // --- instructions: the file an agent reads to know what it is for --------
+  //
+  // ⚠️ The most powerful write in the product. It changes how a live agent
+  // behaves the next time it starts, which is why engine/instructions.js guards
+  // it harder than anything else here.
+  const instr = pathname.match(/^\/api\/agent\/([^/]+)\/instructions$/);
+  if (instr && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(instr[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    try {
+      sendJson(res, 200, instructions.read(name));
+    } catch {
+      sendJson(res, 500, { error: 'those instructions could not be read' });
+    }
+    return;
+  }
+
+  if (instr && req.method === 'PUT') {
+    const name = decodeSegment(instr[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    readBody(req)
+      .then((buf) => {
+        const patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        if (typeof patch.text !== 'string') {
+          throw new Error('send the instructions as text');
+        }
+        sendJson(res, 200, instructions.write(name, patch.text));
+      })
+      // The message reaches the person verbatim, so it says what to do rather
+      // than naming an exception.
+      .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+    return;
+  }
+
   // Anything under /api/ that reached here matched no handler -- usually a
   // method the route does not implement, e.g. PATCH on an avatar. Falling
   // through to the page would answer an API call with HTML at 200, which is the
@@ -394,8 +437,9 @@ const server = http.createServer((req, res) => {
 /**
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * It sets roles, stores avatars, and records the commitments the restart
- * confirmation will read, and restart is next. There is no authentication of
+ * It sets roles, stores avatars, records the commitments the restart
+ * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM, and restart
+ * is next. There is no authentication of
  * any kind.
  *
  * Two ways that protection is lost, and only the first is obvious:

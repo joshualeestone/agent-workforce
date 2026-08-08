@@ -39,6 +39,11 @@
   --border-strong: rgba(0,0,0,0.22);
   --shadow-card:   0 1px 2px rgba(0,0,0,0.06), 0 1px 6px rgba(0,0,0,0.04);
   --attn-bg:       rgba(0,0,0,0.035);
+  /* Amber, for "this is not wrong but you should know". Ink is #7a5200 on the
+     tinted background, which clears AA comfortably. */
+  --warn-bg:       rgba(176,116,0,0.10);
+  --warn-border:   rgba(176,116,0,0.38);
+  --warn-ink:      #7a5200;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -52,6 +57,9 @@
     --border-strong: rgba(255,255,255,0.26);
     --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
     --attn-bg:       rgba(255,255,255,0.055);
+    --warn-bg:       rgba(255,190,60,0.12);
+    --warn-border:   rgba(255,190,60,0.32);
+    --warn-ink:      #ffca55;
   }
 }
 @media (prefers-contrast: more) {
@@ -199,6 +207,39 @@ svg { display: block; }
          border-left: 2px solid var(--border-strong); }
 .err   { background: var(--bg-elevated); border: 0.5px solid var(--border-strong);
          border-radius: var(--radius-card); padding: var(--space-6); font: var(--text-body) var(--font-ui); }
+
+/* The instruction editor. It is the biggest control on the page because it is
+   the most important: the only place an agent's purpose is written down. */
+#d-instr {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 220px;
+  font: var(--text-body) var(--font-ui); line-height: 1.5;
+  padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
+}
+.instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
+.fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+
+/* Running on older instructions. A STATE, not a toast: it survives a reload,
+   and it is still right when the file was edited outside this app entirely. */
+.stale-note {
+  margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-control); border: 0.5px solid var(--warn-border);
+  background: var(--warn-bg); color: var(--label);
+  font: var(--text-callout) var(--font-ui); line-height: 1.45;
+}
+.card-stale {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
+}
+.card-stale svg { width: 13px; height: 13px; }
+
+/* Icons: Lucide (ISC), subset and inlined as SVG. No font file, no network
+   request, no dependency, and identical on every machine.
+   A local-first product must not fetch a remote asset to draw a pencil, and it
+   has to keep working on a machine with no internet at all. */
+.icon { width: 16px; height: 16px; display: block; stroke: currentColor;
+        fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.edit .icon { width: 15px; height: 15px; }
 </style>
 </head>
 <body>
@@ -244,6 +285,18 @@ svg { display: block; }
       <button class="btn" id="d-save" type="button">Save</button>
     </div>
     <div class="fmsg" id="d-role-msg"></div>
+  </div>
+
+  <div class="field">
+    <label class="flabel" for="d-instr">What they should focus on</label>
+    <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
+    <div id="d-instr-stale" class="stale-note" hidden></div>
+    <textarea id="d-instr" rows="14" spellcheck="true"></textarea>
+    <div class="frow instr-foot">
+      <div class="fpath">Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
+      <button class="btn" id="d-instr-save" type="button">Save</button>
+    </div>
+    <div class="fmsg" id="d-instr-msg"></div>
   </div>
 </section>
 
@@ -291,6 +344,35 @@ const STATE_COPY = {
   stopped:      { label: 'Not running',   attn: true  },
   unknown:      { label: "Can't tell",    attn: true  },
 };
+
+/**
+ * Lucide icons (ISC), subset to what this page actually uses and inlined.
+ *
+ * Not a CDN link and not a font file. Two reasons, and both are about what this
+ * product claims to be:
+ *   1. It runs on an always-on Mac that may have no internet. A remote icon
+ *      sheet means every icon silently vanishes.
+ *   2. Its whole pitch is that nothing of yours leaves your machine. That
+ *      sentence cannot be said honestly while the console fetches a third-party
+ *      asset on every page load to draw a pencil.
+ *
+ * ISC also carries no attribution requirement, unlike Font Awesome Free's
+ * CC BY 4.0, which would put a credit line in a product we intend to sell.
+ */
+const ICONS = {
+  // Mirrored horizontally so it points the other way, which is what Josh asked
+  // for. The old control was the text character U+270E, whose exact shape is
+  // chosen by the operating system and differs per machine -- flipping a glyph
+  // would have fixed the direction and not the cause.
+  pencil: '<g transform="translate(24 0) scale(-1 1)"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+};
+
+function icon(name, extraClass) {
+  const body = ICONS[name];
+  if (!body) return '';
+  return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
+}
 
 function initials(name) {
   const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
@@ -349,6 +431,20 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+/**
+ * The card's "running on older instructions" mark.
+ *
+ * Shown only for a POSITIVE stale finding. `unknown` deliberately shows nothing
+ * here: the card has no room to explain, and a warning glyph that might mean
+ * "we cannot tell" would be read as "something is wrong". The detail page,
+ * which has the room, says which it is.
+ */
+function staleBadge(a) {
+  const s = a.instructions;
+  if (!s || s.state !== 'stale') return '';
+  return `<span class="card-stale" title="Its instructions were edited after it started. Only a restart re-reads them.">${icon('alert')}</span>`;
+}
+
 function card(a) {
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   // Provenance deliberately not shown here. It appeared on nearly every card,
@@ -368,10 +464,10 @@ function card(a) {
         : '');
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
-    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">&#9998;</button>
+    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
-      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
+      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
       <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
@@ -476,6 +572,7 @@ function openDetail(sessionName) {
   }
   document.getElementById('d-msg').textContent = '';
   document.getElementById('d-role-msg').textContent = '';
+  loadInstructions(a.sessionName);
   showTab('detail');
 }
 
@@ -483,6 +580,98 @@ document.getElementById('grid').addEventListener('click', (e) => {
   const card = e.target.closest('.card');
   if (card) openDetail(card.dataset.agent);
 });
+/**
+ * Fetch the instruction file for the open agent.
+ *
+ * Fetched HERE rather than carried on /api/status, because the board polls that
+ * every five seconds for every agent and the real files run to several
+ * kilobytes each. Putting them on the poll would mean ~90KB on the wire, every
+ * five seconds, to render a badge nobody is looking at.
+ */
+async function loadInstructions(sessionName) {
+  const box = document.getElementById('d-instr');
+  const pathEl = document.getElementById('d-instr-path');
+  const msg = document.getElementById('d-instr-msg');
+  box.value = '';
+  msg.textContent = '';
+  pathEl.textContent = '';
+  renderStale(null);
+
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/instructions?t=' + Date.now(),
+      { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'that did not work');
+
+    box.value = data.text || '';
+    pathEl.textContent = (data.path || '').replace(/^\/Users\/[^/]+/, '~');
+    if (!data.exists) {
+      msg.textContent = 'There is no instruction file for this one yet.';
+    }
+    renderStale(data.staleness);
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+}
+
+/**
+ * Say, in the editor itself, whether the agent is actually running on what is
+ * in the box.
+ *
+ * This is the trap the card exists to avoid: the file is read ONCE at session
+ * start, so editing it changes nothing until a restart. A screen that saves the
+ * text and shows it back is asserting something untrue.
+ *
+ * It is a STATE rather than a save-time message on purpose. A toast disappears
+ * the moment you navigate away, and says nothing at all when the file was
+ * edited outside this app. This is derived every time the page opens, so it is
+ * right in both cases.
+ */
+function renderStale(s) {
+  const el = document.getElementById('d-instr-stale');
+  if (!s || s.state === 'current') { el.hidden = true; el.textContent = ''; return; }
+
+  const when = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
+  };
+
+  if (s.state === 'stale') {
+    const edited = when(s.editedAt);
+    const started = when(s.startedAt);
+    el.innerHTML = '<b>Running on older instructions.</b> '
+      + (edited && started
+        ? `Edited ${esc(edited)}, running since ${esc(started)}. `
+        : '')
+      + 'Restart to apply.';
+    el.hidden = false;
+    return;
+  }
+
+  // unknown. Say which kind of not-knowing it is, rather than implying fine.
+  el.innerHTML = `<b>We cannot tell whether this is what it is running on.</b> ${esc(s.because || '')}`;
+  el.hidden = false;
+}
+
+document.getElementById('d-instr-save').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const msg = document.getElementById('d-instr-msg');
+  const text = document.getElementById('d-instr').value;
+  msg.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/instructions',
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'that did not work');
+    msg.textContent = 'Saved.';
+    // Re-derive rather than assume: saving makes the file newer than the
+    // session, so this is exactly when the stale state becomes true.
+    renderStale(data.staleness);
+    await tick();
+  } catch (err) { msg.textContent = err.message; }
+});
+
 document.getElementById('detail-back').addEventListener('click', () => showTab('agents'));
 
 document.getElementById('d-file').addEventListener('change', async (e) => {

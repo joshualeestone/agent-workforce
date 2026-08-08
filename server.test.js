@@ -775,3 +775,65 @@ test('a null PUT body is refused with a readable message, not an exception name'
   assert.match(error, /commitments list/, `unhelpful message: ${error}`);
   assert.ok(!/Cannot read properties/.test(error), 'surfaced a raw exception message');
 });
+
+// ---------------------------------------------------------------------------
+// The instructions route: the most powerful write on the surface
+// ---------------------------------------------------------------------------
+
+test('instructions are reachable with a query string attached', async () => {
+  // The detail page cache-busts this fetch, which is the exact shape that
+  // returned the HTML page before routing moved to the pathname.
+  const bare = await req('/api/agent/angel/instructions');
+  const busted = await req('/api/agent/angel/instructions?t=1');
+  assert.match(bare.type, /application\/json/);
+  assert.match(busted.type, /application\/json/, 'a query string sent it to the catch-all');
+  assert.equal(busted.status, bare.status);
+});
+
+test('a malformed agent name does not crash the instructions route', async () => {
+  for (const path of ['/api/agent/%/instructions', '/api/agent/%zz/instructions?t=1']) {
+    const res = await req(path);
+    assert.equal(res.status, 404, `${path} should be refused`);
+  }
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on a malformed name');
+});
+
+test('PUT refuses an unknown agent and a body that is not text', async (t) => {
+  const unknown = await req('/api/agent/definitely-not-an-agent/instructions', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'a'.repeat(50) }),
+  });
+  assert.equal(unknown.status, 404);
+
+  const name = await anyAgent(t);
+  if (!name) return;
+  for (const body of ['{}', '{"text":123}', '{"text":null}', 'null']) {
+    const res = await req(`/api/agent/${name}/instructions`,
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 400, `${body} should be refused`);
+    assert.match(JSON.parse(res.body).error, /as text/);
+  }
+});
+
+test('the status payload carries staleness but NOT the instruction text', async () => {
+  // The board polls this every five seconds for every agent, and the real files
+  // run to several kilobytes each. Carrying them here would put roughly 90KB on
+  // the wire per poll to render a badge.
+  const res = await req('/api/status');
+  if (!res.type.includes('application/json')) return;
+  const body = JSON.parse(res.body);
+  const agents = body.agents || [];
+  if (!agents.length) return;
+
+  for (const a of agents) {
+    assert.ok(a.instructions, `${a.sessionName} has no instructions block`);
+    assert.ok(['current', 'stale', 'unknown'].includes(a.instructions.state),
+      `${a.sessionName} has an unexpected state: ${a.instructions.state}`);
+    assert.equal(a.instructions.text, undefined,
+      'the instruction TEXT must not ride on the status poll');
+  }
+
+  assert.ok(JSON.stringify(body).length < 200 * 1024,
+    `status payload is ${JSON.stringify(body).length} bytes; the text is probably riding along`);
+});

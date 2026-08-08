@@ -511,7 +511,13 @@ function snapshot() {
   };
 }
 
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, STATE, CONFIDENCE, CONTEXT_LIMITS };
+// `transcriptFor` is exported for the instructions module, which needs a
+// session start time. It resolves by session id rather than by guessing a
+// directory from the agent's name, for the reason its own comment gives: a
+// guess finds *a* transcript every time, so it looks like it worked while
+// reporting from the wrong session. One derivation, shared, rather than a
+// second copy that can drift.
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');
