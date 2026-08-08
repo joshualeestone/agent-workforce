@@ -752,6 +752,11 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     msg.textContent = 'Still loading these instructions, try again in a moment.';
     return;
   }
+  // Disabled for the duration, because a double-click sends two saves carrying
+  // the SAME version: the first succeeds, the second is refused as a conflict,
+  // and the message blames an edit nobody else made.
+  const btn = document.getElementById('d-instr-save');
+  btn.disabled = true;
   msg.textContent = 'Saving…';
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
@@ -769,6 +774,8 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   } catch (err) {
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
   }
 });
 

@@ -284,12 +284,24 @@ function compare(editedAt, startedAt) {
  * A hash has neither problem, and `absent` is a real version rather than the
  * absence of one, so "there was no file and now there is" compares unequal like
  * any other change. `sha256` from the standard library: no dependency.
+ *
+ * ⚠️ Hashes the raw BYTES, not the decoded string. Decoding first maps every
+ * invalid byte to U+FFFD, so two genuinely different files hashed the SAME:
+ * `You are Ren\xE9` and `You are Ren\xFF` produced one hash, and a save against
+ * the first overwrote the second. Measured before the fix.
+ *
+ * NOT load-bearing today, and declared rather than implied: `read` now refuses
+ * to show any file that does not round-trip through UTF-8, so everything that
+ * reaches here is byte-identical to its own decoding and hashing the string
+ * instead leaves the suite green. It stays because the two guards protect
+ * against different mistakes, and the one that is currently redundant is the
+ * one that would matter if the other were ever relaxed.
  */
 const ABSENT = 'absent';
 
-function versionOf(exists, text) {
+function versionOf(exists, buf) {
   if (!exists) return ABSENT;
-  return `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
+  return `sha256:${crypto.createHash('sha256').update(buf).digest('hex')}`;
 }
 
 /**
@@ -337,9 +349,9 @@ function read(agent) {
     };
   }
 
-  let text;
+  let buf;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    buf = fs.readFileSync(file);
   } catch {
     return {
       exists: false,
@@ -353,11 +365,39 @@ function read(agent) {
   // `editedAt` rides on the read so the editor can hand it back on save and we
   // can tell whether the file moved underneath it. Taken from the same `stat`
   // the guards above used, so it describes the file that was actually read.
+  // ⚠️ Refuse to SHOW anything that would not survive being handed back.
+  //
+  // The editor round-trips through a UTF-8 string, so a file containing bytes
+  // that are not valid UTF-8 comes back with every one of them replaced by
+  // U+FFFD. Opening such a file and pressing Save rewrote it, silently and
+  // lossily: measured at 50 bytes in, 52 bytes out, contents changed, with the
+  // person told only "Saved."
+  //
+  // Refusing here rather than in `write` is deliberate and is the whole reason
+  // the two paths were unified: `write` already refuses to replace anything
+  // `read` would not show, so one refusal covers both, and there is no way for
+  // the screen and the save to disagree about what the file is.
+  const text = buf.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(buf)) {
+    return {
+      exists: false,
+      path: file,
+      text: '',
+      version: ABSENT,
+      staleness: {
+        state: STALENESS.UNKNOWN,
+        because: 'its instruction file is not UTF-8 text, so editing it here would corrupt it',
+      },
+    };
+  }
+
   return {
     exists: true,
     path: file,
     text,
-    version: versionOf(true, text),
+    version: versionOf(true, buf),
+    // `editedAt` is reported for display. The changed-since-read guard keys on
+    // `version` above, NOT on this: an mtime is not a version.
     editedAt: iso(stat.mtime.getTime()),
     staleness: staleness(agent),
   };
@@ -457,16 +497,30 @@ function write(agent, text, expectedVersion) {
     // powerful write in the product, after the file itself and the worker
     // directory, and unlike those two it bypasses every guard above because it
     // is not the path any of them check. `wx` fails rather than follows.
-    fs.writeFileSync(tmp, body, { flag: 'wx' });
-    // ⚠️ Carry the original file's permissions across. A fresh temp file is
-    // created at 0666 minus the umask, and the rename carries THAT mode onto
-    // the target, so a CLAUDE.md the operator had deliberately locked to 0600
-    // came out world-readable after one save. Widening the permissions of the
-    // most sensitive file this product writes, as a side effect of an unrelated
-    // edit, is not something anyone would be told about.
-    if (before) {
-      try { fs.chmodSync(tmp, before.mode & 0o7777); } catch { /* best effort */ }
-    }
+    // ⚠️ Carry the original file's permissions across, and set them AT CREATE
+    // rather than afterwards.
+    //
+    // A fresh temp file is created at 0666 minus the umask, and the rename
+    // carries that mode onto the target, so a CLAUDE.md the operator had
+    // deliberately locked to 0600 came out world-readable after one save.
+    // Chmod-ing after the write fixed the final mode but left the complete new
+    // contents of that file world-readable on disk for the window between the
+    // write and the rename, which for the most sensitive file this product
+    // writes is most of the point. `mode` at create can only be narrowed by the
+    // umask, never widened, so there is no window.
+    //
+    // ⚠️ The WINDOW is not pinned by a test, only the final mode is. Catching a
+    // mode that exists between two synchronous calls needs a probe inside the
+    // write, and a test that reached in that far would be pinning the
+    // implementation rather than the property. Said out loud rather than left
+    // to look covered: moving this back to a post-hoc chmod leaves the suite
+    // green.
+    const mode = before ? (before.mode & 0o7777) : 0o644;
+    fs.writeFileSync(tmp, body, { flag: 'wx', mode });
+    // And restore exactly, because the umask may have narrowed it. A failure
+    // here is a real failure, not a best effort: silently handing back
+    // permissions other than the ones the file had is the bug above.
+    if (before) fs.chmodSync(tmp, mode);
     fs.renameSync(tmp, file);
   } catch {
     // Any failure between the write and the rename otherwise leaves the temp

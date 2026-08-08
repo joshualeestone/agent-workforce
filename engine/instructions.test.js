@@ -400,6 +400,70 @@ test('a file created while the panel was open is not silently replaced', () => {
     'a file created after the read was overwritten anyway');
 });
 
+test('a file that is not UTF-8 is neither shown nor rewritten', () => {
+  // ⚠️ Two bugs in one, both measured before the fix.
+  //
+  // The editor round-trips through a UTF-8 string, so every byte that is not
+  // valid UTF-8 came back as U+FFFD. Opening such a file and pressing Save
+  // rewrote it lossily and reported "Saved.": 50 bytes in, 52 bytes out.
+  //
+  // And because the version token hashed the DECODED string, every invalid byte
+  // collapsed to the same replacement character, so two genuinely different
+  // files hashed identically and the changed-since-read guard waved the save
+  // through. A hash of a lossy decoding is not a hash of the file.
+  const dir = path.join(ROOT, 'latin1');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'CLAUDE.md');
+  const original = Buffer.from('You are Ren\xE9, the agent who handles the accounts.\n', 'latin1');
+  fs.writeFileSync(file, original);
+
+  const got = instructions.read('latin1');
+  assert.equal(got.exists, false, 'a file we cannot round-trip must not be shown as editable');
+  assert.equal(got.text, '');
+  assert.match(got.staleness.because, /not UTF-8/);
+
+  assert.throws(() => instructions.write('latin1', REAL), /cannot safely replace/);
+  assert.ok(fs.readFileSync(file).equals(original), 'the file was rewritten anyway');
+});
+
+test('two files differing only in an invalid byte do not share a version', () => {
+  // The hash must be over the bytes. Decoded, both of these are the same string
+  // of replacement characters.
+  const mk = (name, byte) => {
+    fs.mkdirSync(path.join(ROOT, name), { recursive: true });
+    const f = path.join(ROOT, name, 'CLAUDE.md');
+    fs.writeFileSync(f, Buffer.concat([Buffer.from('You are '), Buffer.from([byte]), Buffer.from(' here.\n')]));
+    return f;
+  };
+  const a = mk('bytea', 0xE9);
+  const b = mk('byteb', 0xFF);
+  assert.notEqual(
+    require('node:crypto').createHash('sha256').update(fs.readFileSync(a)).digest('hex'),
+    require('node:crypto').createHash('sha256').update(fs.readFileSync(b)).digest('hex'),
+    'fixture is wrong: these should differ');
+  // Both are refused by the read path, so neither can be clobbered through it.
+  assert.equal(instructions.read('bytea').exists, false);
+  assert.equal(instructions.read('byteb').exists, false);
+});
+
+test('a file DELETED while the panel was open is not silently recreated over', () => {
+  // The other side of the create case, and the one the `absent` fallback in
+  // `write` actually serves. The test above it exercises the opposite
+  // direction (nothing, then something) and reaches `write` with the file
+  // present, so it never touches this branch at all. Without this, mutating
+  // that fallback in either direction left the suite green while the plan's
+  // guard table claimed it was covered.
+  const file = makeAgent('deletetest', 'The version the panel was showing before it went away.');
+  const opened = instructions.read('deletetest');
+  assert.ok(opened.exists);
+
+  fs.rmSync(file);
+
+  assert.throws(() => instructions.write('deletetest', REAL, opened.version),
+    /changed since you opened them/);
+  assert.ok(!fs.existsSync(file), 'a refused save must not recreate the file');
+});
+
 test('a write with no expected version still works, for scripts and first saves', () => {
   makeAgent('noexpecttest');
   instructions.write('noexpecttest', 'Saved without claiming which version was open.');
@@ -635,6 +699,28 @@ test('a staleness answer for such a name is a real verdict, not unknown', () => 
   assert.notEqual(got.state, instructions.STALENESS.UNKNOWN,
     'a resolvable session still read as unknown, so the lookup key was rewritten');
   assert.ok(got.startedAt, 'a real verdict must say when the session started');
+});
+
+test('the status engine resolves worker files under the SAME root as this module', () => {
+  // ⚠️ Pins the one thing keeping `node --test` off the live CLAUDE.md files
+  // that real agents boot from. `status.js` used to carry its own hardcoded
+  // `~/work/workers`, so a suite that believed it was sandboxed was reading the
+  // operator's real agents, and reverting that one line left everything green.
+  //
+  // Deliberately here rather than in the route tests: those need a live tmux
+  // fleet and skip without one, and node:test reports a skip as a pass. A guard
+  // this load-bearing cannot be pinned by a test that evaporates on any machine
+  // without agents running, which is every CI runner.
+  const status = require('./status');
+  const name = 'rootfixture';
+  fs.mkdirSync(path.join(ROOT, name), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, name, 'CLAUDE.md'),
+    `You are **Root Fixture**, the sandbox check worker.\n`);
+
+  const id = status.readIdentity(name);
+  assert.equal(id.displayName, 'Root Fixture',
+    'status.js did not read the sandboxed file, so it resolves a different root');
+  assert.equal(id.derived, true);
 });
 
 test('the registry name is validated, not rewritten', () => {

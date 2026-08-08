@@ -206,11 +206,15 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | File-mode preservation across the rename | fails |
 | Changed-since-read refusal (engine) | fails (2 tests) |
 | Route forwarding the version | fails |
-| `absent` as a real version (the create path) | fails |
+| `absent` as a real version (the DELETE path) | fails |
+| Refusing to show a non-UTF-8 file | fails (2 tests) |
+| `status.js` root, pinned WITHOUT a live fleet | fails |
 | Version token back to an mtime | fails (2 tests) |
 | `status.js` back to its own hardcoded workers root | fails |
 | Containment assertion in `fileFor` | **green, declared untested in code and test** |
 | `iso()` NaN guard | **green, declared untested in code** |
+| Hashing bytes rather than the decoded string | **green, declared untested in code** |
+| The mode WINDOW (final mode is pinned) | **green, declared untested in code** |
 
 Iteration 2 of the challenge loop found that the refuse-to-clobber guard, added
 in iteration 1, did not do what its own comment claimed. It compared against a
@@ -259,12 +263,31 @@ Iteration 4 also found that the shared workers root, the ONE thing keeping the
 test suite off twelve live agents' instruction files, was pinned by nothing:
 reverting it left the suite green. It is now pinned by a named test.
 
+Iteration 5 found the version token was hashing the DECODED string rather than
+the bytes. Every invalid byte decodes to the same replacement character, so two
+genuinely different files hashed identically and the changed-since-read guard
+waved the save through, and separately an open-then-save of any non-UTF-8 file
+rewrote it lossily while reporting "Saved." Measured: 50 bytes in, 52 out,
+contents changed. The fix refuses to SHOW a file that would not survive being
+handed back, which the existing refuse-to-replace-what-read-hid guard then
+extends to the write for free. That is the fourth time in this loop the answer
+was to make one path ask the other rather than re-derive the same fact.
+
+It also caught the plan overstating itself: the `absent`-as-a-version row
+claimed coverage the tests did not have, because the create-path test reaches
+`write` with the file already present and never touches that branch. The branch
+it actually serves is the DELETE path, which now has its own test, and the row
+is renamed to say which one it is. A guard table that overstates what is pinned
+is the same defect as a test that pins nothing, in the one document written to
+catch it.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Two rows started green while looking covered and
+suite, not by reading the code. Four rows are green and every one of them says
+so in the code itself. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
 test that only ever planted a directory, and `registryKey` had a unit test that
 pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**165 tests, zero dependencies.**
+**169 tests, zero dependencies.**
