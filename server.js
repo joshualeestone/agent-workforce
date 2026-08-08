@@ -448,9 +448,12 @@ const server = http.createServer((req, res) => {
       // than naming an exception.
       .catch((err) => {
         // A conflict is not a malformed request. 409 is what a non-browser
-        // client would key on to offer a reload rather than a retry.
-        const conflict = /changed since you opened them/.test(err.message);
-        sendJson(res, conflict ? 409 : 400, { error: String(err.message) });
+        // client keys on to offer a reload rather than a retry.
+        //
+        // Keyed on `err.code`, not on the wording: this used to regex-match the
+        // engine's English, so rewording one sentence silently downgraded the
+        // status to 400.
+        sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
       });
     return;
   }

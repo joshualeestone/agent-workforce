@@ -426,9 +426,17 @@ test('a file that is not UTF-8 is neither shown nor rewritten', () => {
   assert.ok(fs.readFileSync(file).equals(original), 'the file was rewritten anyway');
 });
 
-test('two files differing only in an invalid byte do not share a version', () => {
-  // The hash must be over the bytes. Decoded, both of these are the same string
-  // of replacement characters.
+test('two files differing only in an invalid byte are both refused', () => {
+  // ⚠️ Renamed. This was called "do not share a version" and its comment said
+  // "the hash must be over the bytes", but it never calls `versionOf`: it
+  // computes two sha256s itself, which is a tautology, and then asserts the
+  // refusal. Changing `versionOf` to hash the decoded string leaves it green.
+  //
+  // The hashing guard genuinely CANNOT be tested through the real path, because
+  // the round-trip refusal means no file with invalid bytes ever reaches
+  // `versionOf`. That is declared at the function itself and in the plan's
+  // table. What this test actually pins is the refusal, so it is now named for
+  // that.
   const mk = (name, byte) => {
     fs.mkdirSync(path.join(ROOT, name), { recursive: true });
     const f = path.join(ROOT, name, 'CLAUDE.md');
@@ -854,11 +862,18 @@ test('a non-regular instruction file cannot wedge the board', () => {
   try {
     // ⚠️ Run in a CHILD PROCESS with a timeout, deliberately.
     //
-    // Every in-process version of this test hangs instead of failing when the
-    // guard is removed, because `readFileSync` on a fifo never returns and
-    // there is no way to interrupt a synchronous call. Verified by mutation
-    // twice: removing the check in `readIdentity`, and removing it in the
-    // shared reader, both wedged the suite rather than reddening it.
+    // The reader now opens with `O_NONBLOCK`, so removing the type checks alone
+    // makes this FAIL in milliseconds rather than hang: the fifo reads as EOF.
+    // The hang returns only if the reader is ALSO reverted to
+    // `readFileSync(path)`, measured at just over five seconds and reported
+    // correctly by this timeout.
+    //
+    // The harness stays. The hang is what happens on the code shape this branch
+    // shipped for two iterations, a synchronous read of a fifo cannot be
+    // interrupted in-process, and a hung suite reads as broken infrastructure
+    // rather than as a caught bug on the one guard whose absence takes down
+    // every route. An earlier version of this comment said the removal "would
+    // hang" flatly, which stopped being true when the reader changed.
     //
     // A hung suite reads as broken infrastructure, not as a caught bug, so the
     // signal was worse than useless on the one guard whose absence takes down
@@ -937,6 +952,29 @@ test('the status engine resolves worker files under the SAME root as this module
   assert.equal(id.derived, true);
 });
 
+test('a file we cannot get at is not reported as a file that is not there', () => {
+  // ⚠️ Any `lstat` failure used to mean "no instruction file yet", and that
+  // answer becomes `editable: true` upstream. So an unsearchable worker folder
+  // (mode 000) holding real instructions was reported as "there is no
+  // instruction file for this one yet", with an enabled empty editor offered
+  // over the top of it: a positive false claim about the most sensitive file in
+  // the product, from the one error that is not ENOENT.
+  const dir = path.join(ROOT, 'lockedagent');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'REAL INSTRUCTIONS INSIDE AN UNSEARCHABLE FOLDER');
+  fs.chmodSync(dir, 0o000);
+  try {
+    const got = instructions.read('lockedagent');
+    if (got.editable && got.exists) return; // running as root, the guard is not observable
+    assert.equal(got.exists, false);
+    assert.equal(got.editable, false, 'offered an editor for a file it could not even look at');
+    assert.doesNotMatch(got.because, /no instruction file/,
+      'claimed there is no file when it simply could not look');
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+});
+
 test('the shared reader refuses a path outside the workers root', () => {
   // ⚠️ Extracting the file checks into `workerfile` did NOT close containment
   // for its second caller, and the module read as though it had.
@@ -958,6 +996,12 @@ test('the shared reader refuses a path outside the workers root', () => {
     const workerfile = require('./workerfile');
     assert.equal(workerfile.readWorkerFile(path.join(ROOT, escape, 'CLAUDE.md'), ROOT).ok, false,
       'the shared reader read a file outside the root it was given');
+
+    // And the root is not optional. It was, justified as convenience for a
+    // test, in the one module whose whole purpose is that a guard cannot be
+    // forgotten. An optional containment check is one a future caller omits.
+    assert.throws(() => workerfile.readWorkerFile(path.join(ROOT, 'x', 'CLAUDE.md')),
+      /needs the root/, 'containment can be skipped by omitting an argument');
 
     const id = status.readIdentity(escape);
     assert.equal(id.derived, false, 'an identity was derived from outside the workers root');

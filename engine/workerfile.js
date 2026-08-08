@@ -64,9 +64,10 @@ function dirEscapes(file) {
 /**
  * Read a worker file, or say why not. Never throws, and never blocks.
  *
- * Pass `root` and the path is asserted to be inside it. Every caller should:
- * the parameter is optional only so this function stays usable for a bare path
- * in a test, never because containment is discretionary.
+ * `root` is REQUIRED. It was optional, justified as "usable for a bare path in
+ * a test", and that was the wrong call in the one module whose entire purpose
+ * is that a guard cannot be forgotten: an optional containment check is a
+ * containment check some future caller omits. No test wanted it either.
  *
  * "Never blocks" is a real claim, and holding it took more than a type check:
  * see the open-then-fstat note below for why lstat-then-read is not enough.
@@ -107,7 +108,8 @@ function readWorkerFile(file, root) {
   // Measured. Latent rather than live, because tmux will not accept a session
   // name containing a dot, but a guard that depends on tmux's naming rules is
   // not a guard.
-  if (root && !path.resolve(file).startsWith(path.resolve(root) + path.sep)) {
+  if (!root) throw new Error('readWorkerFile needs the root it must stay inside');
+  if (!path.resolve(file).startsWith(path.resolve(root) + path.sep)) {
     return { ok: false, because: 'that file is not inside the workers folder' };
   }
 
@@ -144,17 +146,34 @@ function readWorkerFile(file, root) {
   // the `lstat` below BEFORE we open anything.
   //
   // ⚠️ The type check is pinned by a named test. The RACE WINDOW is not, and
-  // that is declared rather than implied: reverting this to lstat-then-read
-  // leaves every deterministic test green, because provoking the window needs
-  // the path swapped between two synchronous calls, and a test that could do
-  // that reliably would be testing its own scheduling rather than this code.
-  // Same treatment as the file-mode window and the `fileFor` containment
-  // assertion, which are also real and also unpinned.
+  // that is declared rather than implied: provoking it needs the path swapped
+  // between two synchronous calls, and a test that could do that reliably would
+  // be testing its own scheduling rather than this code. Same treatment as the
+  // file-mode window and the `fileFor` containment assertion.
+  //
+  // An earlier version of this note said reverting to lstat-then-read "leaves
+  // every deterministic test green". That is false and was measured so: the
+  // revert reddens `an mtime we cannot use is unknown`, because that test
+  // injects into `fs.fstatSync` and the revert stops calling it. The failure is
+  // incidental rather than a test of the window, but the sentence was wrong,
+  // and a comment overstating what is UNTESTED is the same defect as one
+  // overstating what is tested.
   let linkStat;
   try {
     linkStat = fs.lstatSync(file);
-  } catch {
-    return { ok: false, missing: true, because: 'it has no instruction file yet' };
+  } catch (err) {
+    // ⚠️ ENOENT only. Every other failure means the file may well be there and
+    // we simply could not look, which is a different answer.
+    //
+    // This mattered: `missing` becomes `editable` upstream, so an unsearchable
+    // worker directory (mode 000) holding real instructions was reported as
+    // "there is no instruction file for this one yet" with an enabled, empty
+    // editor offered over the top of it. A positive false claim about the most
+    // sensitive file in the product, from the one branch that is not ENOENT.
+    if (err && err.code === 'ENOENT') {
+      return { ok: false, missing: true, because: 'it has no instruction file yet' };
+    }
+    return { ok: false, because: 'we cannot get at its instruction file to read it' };
   }
   if (!linkStat.isFile()) {
     return { ok: false, stat: linkStat, because: 'its instruction file is not one we can read' };

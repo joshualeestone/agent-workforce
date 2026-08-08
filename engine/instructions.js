@@ -473,7 +473,13 @@ function write(agent, text, expectedVersion) {
   if (expectedVersion) {
     const now = shown ? shown.version : ABSENT;
     if (now !== expectedVersion) {
-      throw new Error('these instructions changed since you opened them, reload before saving so you do not overwrite that edit');
+        // A structured code alongside the sentence, so the route does not have to
+      // regex-match English to pick a status. Deriving one fact two ways is the
+      // defect this branch spent eleven iterations removing, and doing it to
+      // choose between 400 and 409 is the same shape at smaller stakes.
+      const err = new Error('these instructions changed since you opened them, reload before saving so you do not overwrite that edit');
+      err.code = 'CONFLICT';
+      throw err;
     }
   }
 

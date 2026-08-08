@@ -201,7 +201,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | is-a-file / size check in `workerfile` | fails (6 tests) |
 | Panel re-syncing staleness from the poll | **green, no browser test harness** |
 | Containment assertion in `workerfile` | fails |
-| Open-then-fstat instead of lstat-then-read | **green, the RACE WINDOW is untestable** |
+| Open-then-fstat instead of lstat-then-read | fails, but incidentally (see below) |
+| ENOENT distinguished from every other lstat failure | fails |
+| `root` required by the shared reader | fails |
+| `CONFLICT` code instead of matching prose for the 409 | fails |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -418,6 +421,27 @@ whose end anchor was further down the file than I thought. The suite dropped
 from 175 to 169 and I restored them verbatim from the last commit. Worth
 recording because the count is the only reason I noticed.
 
+Iteration 12 found no blockers. Its two substantive findings were both cases of
+an answer being more confident than the evidence: any `lstat` failure was
+reported as "there is no instruction file yet", which becomes `editable: true`
+upstream, so an unsearchable worker folder holding real instructions got an
+enabled empty editor offered over the top of it. Only ENOENT means absent now.
+And containment was an OPTIONAL argument in the one module written so that a
+guard cannot be forgotten, which is a contradiction in terms; it is required.
+
+It also caught two comments of MINE that were measurably false, both about what
+is untested. One claimed reverting the open-then-fstat read "leaves every
+deterministic test green" (it reddens one, incidentally, via the fstat
+injection). The other said removing the fifo type check "would hang" the suite,
+which stopped being true the moment the reader started opening with O_NONBLOCK.
+Both are corrected in place. A comment that overstates what is UNTESTED is the
+same defect as one that overstates what is tested, and after eleven iterations
+of hunting the second kind it was worth noticing I had produced the first.
+
+The row above is marked "incidentally" for exactly that reason: the revert does
+redden a test, but not one that tests the race window, and the window itself
+remains unpinned.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Seven rows are green and every one of them says
 so in the code itself. Two rows started green while looking covered and
@@ -427,4 +451,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**176 tests, zero dependencies.**
+**177 tests, zero dependencies.**
