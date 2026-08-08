@@ -315,7 +315,7 @@ test('a file the read path refuses to show cannot be silently overwritten', () =
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused-to-show file was overwritten anyway');
 });
 
-test('a file that exists but cannot be opened is never silently replaced', () => {
+test('a file that exists but cannot be opened is never silently replaced', (t) => {
   // ⚠️ The one the first version of this guard missed. It checked a PARALLEL
   // predicate (regular file, within the ceiling) instead of asking `read`, so a
   // file that is perfectly ordinary but unopenable (mode 000, a bad mount, a
@@ -326,7 +326,10 @@ test('a file that exists but cannot be opened is never silently replaced', () =>
   const file = makeAgent('unreadable', 'INSTRUCTIONS THAT MUST SURVIVE A REFUSED SAVE');
   fs.chmodSync(file, 0o000);
   try {
-    if (instructions.read('unreadable').exists) return; // running as root, guard not observable
+    if (instructions.read('unreadable').exists) {
+      t.skip('running as root, so an unreadable file is still readable');
+      return;
+    }
     assert.throws(() => instructions.write('unreadable', REAL), /cannot safely replace/);
     fs.chmodSync(file, 0o644);
     assert.equal(fs.readFileSync(file, 'utf8'), 'INSTRUCTIONS THAT MUST SURVIVE A REFUSED SAVE');
@@ -478,7 +481,7 @@ test('a write with no expected version still works, for scripts and first saves'
   assert.match(fs.readFileSync(path.join(ROOT, 'noexpecttest', 'CLAUDE.md'), 'utf8'), /without claiming/);
 });
 
-test('a planted temp file cannot redirect the write out of the root', () => {
+test('a planted temp file cannot redirect the write out of the root', (t) => {
   // The third symlink route, and the one that bypasses every other guard
   // because it is not the path any of them look at. The temp name is
   // predictable (`CLAUDE.md.<pid>.tmp`), and the default write flag follows a
@@ -492,7 +495,12 @@ test('a planted temp file cannot redirect the write out of the root', () => {
     fs.symlinkSync(target, tmp);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     // Refusing is the correct outcome; silently succeeding into `target` is not.
@@ -505,7 +513,7 @@ test('a planted temp file cannot redirect the write out of the root', () => {
   }
 });
 
-test('staleness refuses a symlinked file rather than reporting its mtime', () => {
+test('staleness refuses a symlinked file rather than reporting its mtime', (t) => {
   // `staleness` is what the CARD renders, and it used to `stat` where `read`
   // used `lstat`. The card showed a confident "running on older instructions"
   // derived from a file outside the workers root, and disclosed that file's
@@ -523,7 +531,12 @@ test('staleness refuses a symlinked file rather than reporting its mtime', () =>
     fs.symlinkSync(target, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     const got = instructions.staleness('stlinkagent');
@@ -537,7 +550,7 @@ test('staleness refuses a symlinked file rather than reporting its mtime', () =>
   }
 });
 
-test('a symlinked worker directory is not READ through either', () => {
+test('a symlinked worker directory is not READ through either', (t) => {
   // ⚠️ The write side of this was guarded and tested; the read side was not,
   // and nothing noticed because the test below is named for the directory and
   // only ever asserted on `write`. Measured before the fix: `read` returned
@@ -554,7 +567,12 @@ test('a symlinked worker directory is not READ through either', () => {
     fs.symlinkSync(outside, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     const got = instructions.read('dirreadagent');
@@ -569,7 +587,7 @@ test('a symlinked worker directory is not READ through either', () => {
   }
 });
 
-test('a symlinked worker directory cannot land a write outside the root', () => {
+test('a symlinked worker directory cannot land a write outside the root', (t) => {
   // The containment assertion in fileFor only ever sees the NAME, never where
   // it points, so if the directory check follows links the write lands wherever
   // the link goes. `lstat`, not `stat`.
@@ -580,7 +598,12 @@ test('a symlinked worker directory cannot land a write outside the root', () => 
     fs.symlinkSync(outside, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     assert.throws(() => instructions.write('dirlinkagent', REAL), /no agent by that name/);
@@ -592,7 +615,7 @@ test('a symlinked worker directory cannot land a write outside the root', () => 
   }
 });
 
-test('a symlinked instruction file cannot be overwritten through the link', () => {
+test('a symlinked instruction file cannot be overwritten through the link', (t) => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-wlink-'));
   const target = path.join(outside, 'target.md');
   fs.writeFileSync(target, 'THE FILE THE LINK POINTS AT');
@@ -602,7 +625,12 @@ test('a symlinked instruction file cannot be overwritten through the link', () =
     fs.symlinkSync(target, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     assert.throws(() => instructions.write('wlinkagent', REAL), /cannot safely replace/);
@@ -614,7 +642,7 @@ test('a symlinked instruction file cannot be overwritten through the link', () =
   }
 });
 
-test('a symlinked instruction file is not followed out of the workers root', () => {
+test('a symlinked instruction file is not followed out of the workers root', (t) => {
   // lstat rather than stat, so a link is seen as a link.
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-link-'));
   const target = path.join(outside, 'target.md');
@@ -625,7 +653,12 @@ test('a symlinked instruction file is not followed out of the workers root', () 
     fs.symlinkSync(target, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     const got = instructions.read('linkagent');
@@ -812,7 +845,7 @@ test('a staleness answer for such a name is a real verdict, not unknown', () => 
   assert.ok(got.startedAt, 'a real verdict must say when the session started');
 });
 
-test('every reader of the workers directory refuses the same files', () => {
+test('every reader of the workers directory refuses the same files', (t) => {
   // ⚠️ The sixth instance of one defect, and the reason `engine/workerfile.js`
   // exists. `readIdentity` was given the DIRECTORY check and still had no FILE
   // check, so it followed a symlinked CLAUDE.md and served a name parsed out of
@@ -828,7 +861,12 @@ test('every reader of the workers directory refuses the same files', () => {
     fs.symlinkSync(path.join(outside, 'private.md'), link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     assert.equal(instructions.read('bothagent').exists, false);
@@ -842,7 +880,7 @@ test('every reader of the workers directory refuses the same files', () => {
   }
 });
 
-test('a non-regular instruction file cannot wedge the board', () => {
+test('a non-regular instruction file cannot wedge the board', (t) => {
   // ⚠️ A fifo makes `readFileSync` block forever inside a synchronous request
   // handler. `readIdentity` had no is-a-file check, so `snapshot()` never
   // returned, and because `knownAgent` also calls `snapshot()`, EVERY route on
@@ -857,7 +895,8 @@ test('a non-regular instruction file cannot wedge the board', () => {
   try {
     require('node:child_process').execFileSync('mkfifo', [fifo]);
   } catch {
-    return; // mkfifo unavailable
+    t.skip('mkfifo is unavailable on this machine');
+    return;
   }
   try {
     // ⚠️ Run in a CHILD PROCESS with a timeout, deliberately.
@@ -902,7 +941,7 @@ test('a non-regular instruction file cannot wedge the board', () => {
   }
 });
 
-test('the status engine does not read an identity through a linked worker folder', () => {
+test('the status engine does not read an identity through a linked worker folder', (t) => {
   // ⚠️ The FOURTH reader of the workers root, and the last one to be closed.
   // `instructions.js` refuses a linked worker folder on all three of its paths;
   // `readIdentity` did not, so the board rendered a name and role parsed from a
@@ -917,7 +956,12 @@ test('the status engine does not read an identity through a linked worker folder
     fs.symlinkSync(outside, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    // Visible, not silent: a bare return prints a tick for a test that asserted
+    // nothing, which is the exact anti-pattern `anyAgent` in server.test.js was
+    // written to avoid, and it is what would go quiet on a filesystem with no
+    // symlink support.
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
   }
   try {
     const id = status.readIdentity('idlinkagent');
@@ -952,7 +996,7 @@ test('the status engine resolves worker files under the SAME root as this module
   assert.equal(id.derived, true);
 });
 
-test('a file we cannot get at is not reported as a file that is not there', () => {
+test('a file we cannot get at is not reported as a file that is not there', (t) => {
   // ⚠️ Any `lstat` failure used to mean "no instruction file yet", and that
   // answer becomes `editable: true` upstream. So an unsearchable worker folder
   // (mode 000) holding real instructions was reported as "there is no
@@ -965,7 +1009,10 @@ test('a file we cannot get at is not reported as a file that is not there', () =
   fs.chmodSync(dir, 0o000);
   try {
     const got = instructions.read('lockedagent');
-    if (got.editable && got.exists) return; // running as root, the guard is not observable
+    if (got.editable && got.exists) {
+      t.skip('running as root, so an unsearchable directory is still readable');
+      return;
+    }
     assert.equal(got.exists, false);
     assert.equal(got.editable, false, 'offered an editor for a file it could not even look at');
     assert.doesNotMatch(got.because, /no instruction file/,

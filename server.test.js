@@ -848,7 +848,7 @@ test('a successful PUT rewrites the file and answers with the new stale state', 
 
   // A worker directory inside the SANDBOX, named for a real agent so the
   // handler's knownAgent guard passes. Nothing under ~/work/workers is touched.
-  const dir = nodePath.join(WORKERS, name);
+  const dir = nodePath.join(WORKERS, decodeURIComponent(name));
   fs.mkdirSync(dir, { recursive: true });
   const file = nodePath.join(dir, 'CLAUDE.md');
   fs.writeFileSync(file, 'The instructions this agent had before the test ran.');
@@ -915,7 +915,7 @@ test('both modules resolve worker files under the SAME sandboxed root', async (t
 test('the route refuses a save that would overwrite an edit made since the read', async (t) => {
   const name = await anyAgent(t);
   if (!name) return;
-  const dir = nodePath.join(WORKERS, name);
+  const dir = nodePath.join(WORKERS, decodeURIComponent(name));
   fs.mkdirSync(dir, { recursive: true });
   const file = nodePath.join(dir, 'CLAUDE.md');
   fs.writeFileSync(file, 'The version the editor was shown when the panel opened.');

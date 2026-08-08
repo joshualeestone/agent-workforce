@@ -205,11 +205,12 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | ENOENT distinguished from every other lstat failure | fails |
 | `root` required by the shared reader | fails |
 | `CONFLICT` code instead of matching prose for the 409 | fails |
+| Save carrying the load generation, not just the agent | **green, no browser test harness** |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
 | Create the worker directory instead of refusing | fails |
-| Refuse-to-clobber a file the read path hid | fails (3 tests) |
+| Refuse-to-clobber a file the read path hid | fails (5 tests) |
 | `registryKey` back to `safeKey` at the call site | fails (2 tests) |
 | Unusable-mtime guard | fails |
 | `knownAgent` on GET | fails |
@@ -218,7 +219,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `staleness` `lstat` to `stat` (symlink) | fails (2 tests) |
 | Malformed-JSON message guard | fails |
 | File-mode preservation across the rename | fails |
-| Changed-since-read refusal (engine) | fails (2 tests) |
+| Changed-since-read refusal (engine) | fails (4 tests) |
 | Route forwarding the version | fails |
 | `absent` as a real version (the DELETE path) | fails |
 | Refusing to show a non-UTF-8 file | fails (2 tests) |
@@ -441,6 +442,24 @@ of hunting the second kind it was worth noticing I had produced the first.
 The row above is marked "incidentally" for exactly that reason: the revert does
 redden a test, but not one that tests the race window, and the window itself
 remains unpinned.
+
+Iteration 13 found no blockers and one real data-loss path, in the browser
+where nothing tests anything. The save handler rechecked only the AGENT NAME
+after its await, which cannot tell "a different agent is open" from "this agent
+was reopened". Reproduced end to end: type new text, hit Save, go back and
+reopen the same agent before the write answers. The reload restores the old text
+and the old version token, then the save's answer lands and replaces the token
+with the hash of the NEW text now on disk. The box is now showing text its
+version does not describe, so the next ordinary save passes the changed-since-
+read guard, reports "Saved.", and wipes the text that had just been saved. No
+conflict, no warning. The load path had solved this with a monotonic token; the
+save path was never given one, and now carries it.
+
+It also caught two rows of this table UNDERSTATING their own coverage, which is
+the safe direction but still wrong, and nine tests that bailed with a bare
+return when symlinks or mkfifo are unavailable, printing a tick for a test that
+asserted nothing. Those are the one thing that would have gone quiet on a
+filesystem without symlink support, and they now skip visibly.
 
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Seven rows are green and every one of them says

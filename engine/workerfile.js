@@ -62,7 +62,13 @@ function dirEscapes(file) {
 }
 
 /**
- * Read a worker file, or say why not. Never throws, and never blocks.
+ * Read a worker file, or say why not.
+ *
+ * Never blocks, and never throws ABOUT A FILE: any file it is asked about gets
+ * an answer rather than an exception, because the callers run inside a request
+ * handler and a throw there answers 500 for the whole board. A missing `root`
+ * is the one exception and is not about a file at all: it is a programming
+ * error at the call site, and failing loudly is the point.
  *
  * `root` is REQUIRED. It was optional, justified as "usable for a bare path in
  * a test", and that was the wrong call in the one module whose entire purpose

@@ -814,7 +814,13 @@ function renderStale(s) {
   }
 
   // unknown. Say which kind of not-knowing it is, rather than implying fine.
-  el.innerHTML = `<b>We cannot tell whether this is what it is running on.</b> ${esc(s.because || '')}`;
+  // Sentence-cased and terminated here rather than in the engine: the reasons
+  // are written as clause fragments so they can also be read as "... because
+  // <reason>", and rendering one straight after a full stop produced "running
+  // on. its instruction file is not UTF-8 text".
+  const why = String(s.because || '');
+  const sentence = why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}${/[.!?]$/.test(why) ? '' : '.'}` : '';
+  el.innerHTML = `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`;
   el.hidden = false;
 }
 
@@ -830,6 +836,21 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   // something untrue about a different one, which is the failure this state
   // exists to prevent.
   const forAgent = CURRENT.sessionName;
+  // ⚠️ The LOAD GENERATION this save belongs to, not just the agent.
+  //
+  // Checking the agent name alone cannot tell "someone opened a different
+  // agent" from "someone reopened THIS one", and the second case is a silent
+  // data-loss path. Measured: type new text, hit Save, go back and reopen the
+  // same agent before the write answers. The reload restores the OLD text and
+  // the old version, then the save's answer lands and overwrites
+  // `INSTR_VERSION` with the hash of the NEW text now on disk. The box then
+  // shows text that its version token does not describe, so the next ordinary
+  // save passes the changed-since-read guard, reports "Saved.", and wipes the
+  // text that was successfully saved a moment earlier. No conflict, no warning.
+  //
+  // `loadInstructions` already solved exactly this with a monotonic token; the
+  // save path was simply never given one.
+  const forLoad = INSTR_LOAD;
   if (!INSTR_READY) {
     // Either a load is still in flight (the box is empty and any version we
     // hold belongs to the agent that was open before) or the load failed. In
@@ -854,7 +875,8 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
         body: JSON.stringify({ text, version: INSTR_VERSION }) })
       .catch(() => { throw new Error('That did not save. The board may have stopped.'); });
     const data = await res.json();
-    if (!CURRENT || CURRENT.sessionName !== forAgent) return; // another agent is open now
+    // A different agent, OR the same agent reloaded since this save began.
+    if (!CURRENT || CURRENT.sessionName !== forAgent || INSTR_LOAD !== forLoad) return;
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
     INSTR_VERSION = data.version || null;
@@ -863,16 +885,18 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     renderStale(data.staleness);
     await tick();
   } catch (err) {
-    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    if (!CURRENT || CURRENT.sessionName !== forAgent || INSTR_LOAD !== forLoad) return;
     // Safe to show verbatim: the only throws that reach here are the server's
     // own curated messages, plus the one substituted at the fetch above.
     msg.textContent = err.message;
   } finally {
-    // Only for the agent this save was for. Otherwise a save started on A
-    // re-enables a Save button that B's load deliberately disabled because B's
-    // file cannot be edited, putting back the offer-an-action-that-will-fail
-    // state the disable exists to remove.
-    if (CURRENT && CURRENT.sessionName === forAgent) btn.disabled = false;
+    // Only for the agent and the load this save was for. Otherwise a save
+    // started on A re-enables a Save button that B's load deliberately disabled
+    // because B's file cannot be edited, putting back the
+    // offer-an-action-that-will-fail state the disable exists to remove.
+    if (CURRENT && CURRENT.sessionName === forAgent && INSTR_LOAD === forLoad) {
+      btn.disabled = false;
+    }
   }
 });
 
