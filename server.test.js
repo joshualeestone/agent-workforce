@@ -598,26 +598,63 @@ test('a malformed agent name does not crash the commitments route', async () => 
   assert.match(alive.type, /application\/json/, 'server died on a malformed name');
 });
 
-test('PUT refuses an unknown agent and a payload that is not a list', async () => {
-  const unknownAgent = await req('/api/agent/definitely-not-an-agent/commitments',
+test('PUT refuses an unknown agent', async () => {
+  const res = await req('/api/agent/definitely-not-an-agent/commitments',
     { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"commitments":[]}' });
-  assert.equal(unknownAgent.status, 404);
-  assert.match(unknownAgent.type, /application\/json/);
+  assert.equal(res.status, 404);
+  assert.match(res.type, /application\/json/);
 });
 
-test('the status payload carries a commitment block for every agent, including silent ones', async () => {
-  // Omitting the field for agents that never reported would leave the caller
-  // unable to tell "nothing pending" from "never asked", which is the failure
-  // the whole card exists to remove.
-  const res = await req('/api/status');
-  if (!res.type.includes('application/json')) return; // status engine unavailable
-  const agents = JSON.parse(res.body).agents || [];
-  if (!agents.length) return;
-  for (const a of agents) {
-    assert.ok(a.commitments, `${a.sessionName} has no commitments block`);
-    assert.ok(['holding', 'clear', 'unknown'].includes(a.commitments.state),
-      `${a.sessionName} has an unexpected state: ${a.commitments.state}`);
-    assert.ok(a.commitments.because, `${a.sessionName} carries no reason`);
+test('PUT refuses a payload that is not a list', async () => {
+  // Previously bundled into the test above, which made one request and never
+  // exercised this half: deleting the Array.isArray guard left the suite green.
+  const board = await req('/api/status');
+  if (!board.type.includes('application/json')) return;
+  const agents = JSON.parse(board.body).agents || [];
+  assert.ok(agents.length > 0, 'no agents on the board, cannot verify the guard');
+  const name = encodeURIComponent(agents[0].sessionName);
+
+  for (const body of ['{}', '{"commitments":"nope"}', '{"commitments":{"what":"x"}}', '{"commitments":null}']) {
+    const res = await req(`/api/agent/${name}/commitments`,
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 400, `${body} should be refused`);
+    assert.match(JSON.parse(res.body).error, /commitments list/);
+  }
+});
+
+test('the status payload carries the STORE value for each agent, not a placeholder', async () => {
+  // The worst possible regression here is the board telling the restart dialog
+  // that every agent is `clear`. An earlier version of this test only checked
+  // that a block existed with one of three state strings and a truthy reason,
+  // which a hardcoded {state:'clear'} satisfies perfectly. It also returned
+  // early on any machine without tmux, so it asserted nothing on CI.
+  //
+  // This stubs the store so the expected value is known, and asserts the
+  // payload carries it per agent.
+  const commitments = require('./engine/commitments');
+  const real = commitments.read;
+  const seen = [];
+  commitments.read = (agent) => {
+    seen.push(agent);
+    return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${agent}` }],
+             reportedAt: '2026-01-01T00:00:00.000Z', because: 'stubbed for this test' };
+  };
+  try {
+    const res = await req('/api/status');
+    assert.match(res.type, /application\/json/);
+    const agents = JSON.parse(res.body).agents || [];
+    assert.ok(agents.length > 0, 'no agents on the board, cannot verify enrichment');
+
+    for (const a of agents) {
+      assert.equal(a.commitments.state, 'holding', `${a.sessionName} did not carry the store value`);
+      assert.equal(a.commitments.because, 'stubbed for this test');
+      assert.deepEqual(a.commitments.commitments.map((x) => x.what), [`pending for ${a.sessionName}`],
+        'the block must be this agent value, not a shared placeholder');
+    }
+    assert.deepEqual(seen.sort(), agents.map((a) => a.sessionName).sort(),
+      'read() must be called once per agent, with that agent sessionName');
+  } finally {
+    commitments.read = real;
   }
 });
 

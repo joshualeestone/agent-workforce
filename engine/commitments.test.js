@@ -77,6 +77,7 @@ test('a record with no timestamp is unknown -- an assertion with no "when" is no
 test('a record whose commitments are not a list is unknown rather than coerced', () => {
   c.report('wrong-shape', []);
   fs.writeFileSync(c.recordPath('wrong-shape'), JSON.stringify({
+    name: 'wrong-shape',
     reportedAt: new Date().toISOString(),
     commitments: { what: 'not a list' },
   }));
@@ -93,6 +94,7 @@ test('clear decays to unknown once it is stale', () => {
   c.report('went-quiet', []);
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('went-quiet'), JSON.stringify({
+    name: 'went-quiet',
     reportedAt: stale, commitments: [],
   }));
 
@@ -108,6 +110,7 @@ test('a report from just inside the window is still believed', () => {
   c.report('recent', []);
   const fresh = new Date(Date.now() - (c.STALE_AFTER_MS - 60000)).toISOString();
   fs.writeFileSync(c.recordPath('recent'), JSON.stringify({
+    name: 'recent',
     reportedAt: fresh, commitments: [],
   }));
   assert.equal(c.read('recent').state, c.STATE.CLEAR);
@@ -214,6 +217,7 @@ test('a future-dated report is unknown, not clear forever', () => {
   // that booted fast produces one. A future timestamp is not a fresh
   // assertion, it is an unreadable one.
   fs.writeFileSync(c.recordPath('futurebot'), JSON.stringify({
+    name: 'futurebot',
     reportedAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
     commitments: [],
   }));
@@ -225,6 +229,7 @@ test('a future-dated report is unknown, not clear forever', () => {
 test('small clock jitter into the future is still believed', () => {
   // A tolerance, or every machine with a slightly fast clock reads unknown.
   fs.writeFileSync(c.recordPath('jitterbot'), JSON.stringify({
+    name: 'jitterbot',
     reportedAt: new Date(Date.now() + 5000).toISOString(),
     commitments: [],
   }));
@@ -243,6 +248,7 @@ test('add() on a STALE record keeps what was already there', () => {
   // ordinary calls, which is the exact lie this store exists to prevent.
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('stalebot'), JSON.stringify({
+    name: 'stalebot',
     reportedAt: stale,
     commitments: [{ id: 'a', what: 'verify the sweep' }, { id: 'b', what: 'reply to Leo' }],
   }));
@@ -262,6 +268,7 @@ test('a stale read still returns the list it managed to read', () => {
   // empty array, as long as the state says we cannot vouch for it.
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('stalelist'), JSON.stringify({
+    name: 'stalelist',
     reportedAt: stale, commitments: [{ id: 'x', what: 'something real' }],
   }));
   const got = c.read('stalelist');
@@ -284,6 +291,7 @@ test('add() on a never-reported agent starts a list, which is the one safe case'
 test('resolve() works on a stale record but refuses an unreadable one', () => {
   const stale = new Date(Date.now() - c.STALE_AFTER_MS - 60000).toISOString();
   fs.writeFileSync(c.recordPath('staleresolve'), JSON.stringify({
+    name: 'staleresolve',
     reportedAt: stale, commitments: [{ id: 'keep', what: 'keep me' }, { id: 'drop', what: 'drop me' }],
   }));
   c.resolve('staleresolve', 'drop');
@@ -389,17 +397,86 @@ test('an unreadable record is NOT treated as a missing one by add()', () => {
     ['first real thing', 'second real thing'], 'both must survive');
 });
 
-test('a key collision cannot let one agent answer for another', () => {
-  // safeKey STRIPS rather than rejects, so `worker.2` and `worker2` share a
-  // record. Without a guard, `worker.2` asserting "I hold nothing" is served as
-  // `clear` for `worker2`, which has never reported. That is the one state the
-  // restart dialog is allowed to treat as safe.
-  c.report('worker.2', []);
-  assert.equal(c.read('worker.2').state, c.STATE.CLEAR, 'the agent that wrote it reads its own record');
+test('an aliased spelling of an agent name is refused, not written under it', () => {
+  // The dangerous version of this: safeKey strips rather than rejects, so
+  // `ANGEL`, `angel.` and `angel` all sanitise to one key and a write under any
+  // of them landed in the same file. An earlier fix only DETECTED that on a
+  // later read, by which point the real record was already overwritten and the
+  // writer had been told it succeeded. Detection after destruction is not a
+  // guard, so the write is refused instead.
+  c.report('realagent', [{ what: 'something genuinely pending' }]);
 
-  const other = c.read('worker2');
-  assert.equal(other.state, c.STATE.UNKNOWN, 'a colliding agent must not inherit the assertion');
-  assert.match(other.because, /belongs to worker\.2/);
+  for (const alias of ['REALAGENT', 'realagent.', 'real agent']) {
+    assert.throws(() => c.report(alias, []), /exact name/, `${alias} should be refused`);
+  }
+
+  // The real record is untouched, and still holding.
+  const got = c.read('realagent');
+  assert.equal(got.state, c.STATE.HOLDING);
+  assert.deepEqual(got.commitments.map((x) => x.what), ['something genuinely pending']);
+});
+
+test('a record whose stored name does not match is not served for the wrong agent', () => {
+  // Belt to the door's braces: even if a record appears in the store under a
+  // key that is not its own name, it must not answer for the agent asking.
+  fs.writeFileSync(c.recordPath('impostor'), JSON.stringify({
+    name: 'someone-else', reportedAt: new Date().toISOString(), commitments: [],
+  }));
+  const got = c.read('impostor');
+  assert.equal(got.state, c.STATE.UNKNOWN, 'must not inherit another agent assertion');
+  assert.match(got.because, /belongs to someone-else/);
+});
+
+test('a record with no stored name at all is refused rather than trusted', () => {
+  // This module has never shipped a version that omitted the field, so a record
+  // missing it was not written by us. An earlier carve-out accepted those and
+  // reopened the hole the guard closes.
+  fs.writeFileSync(c.recordPath('nameless'), JSON.stringify({
+    reportedAt: new Date().toISOString(), commitments: [],
+  }));
+  assert.equal(c.read('nameless').state, c.STATE.UNKNOWN);
+});
+
+test('a record that is not a regular file is refused rather than opened', () => {
+  // readFileSync on a FIFO blocks FOREVER, and read() runs synchronously per
+  // agent inside the request handler, so one named pipe in the store wedges the
+  // whole server with no crash to notice.
+  const { execFileSync } = require('node:child_process');
+  fs.mkdirSync(c.DIR, { recursive: true });
+  const fifo = c.recordPath('fifobot');
+  try {
+    execFileSync('/usr/bin/mkfifo', [fifo]);
+  } catch {
+    return; // mkfifo unavailable; nothing to assert
+  }
+  try {
+    const got = c.read('fifobot');
+    assert.equal(got.state, c.STATE.UNKNOWN);
+    assert.match(got.because, /not a file we can read/);
+  } finally {
+    fs.rmSync(fifo, { force: true });
+  }
+});
+
+test('a record listing something unreadable is unknown, and resolve does not throw', () => {
+  // report() sanitises what it writes, but a record can be edited by hand. A
+  // null element made resolve() throw on .id from inside a request handler.
+  fs.writeFileSync(c.recordPath('badlist'), JSON.stringify({
+    name: 'badlist', reportedAt: new Date().toISOString(),
+    commitments: [null, 42, { what: 'a real one' }],
+  }));
+  const got = c.read('badlist');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.throws(() => c.resolve('badlist', 'anything'), /cannot resolve/);
+});
+
+test('a failed write leaves no temp file behind', () => {
+  // Any failure between the write and the rename otherwise leaks one temp file
+  // per attempt, forever.
+  const before = fs.existsSync(c.DIR) ? fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp')) : [];
+  assert.throws(() => c.report('tmpbot', [{ what: '' }]), /needs a description/);
+  const after = fs.readdirSync(c.DIR).filter((f) => f.includes('.tmp'));
+  assert.deepEqual(after, before, `temp files left behind: ${after.join(', ')}`);
 });
 
 test('createdAt is capped and validated, not passed through whole', () => {
@@ -417,6 +494,7 @@ test('readAll does not let a __proto__ record mutate its result', () => {
   const raw = path.join(c.DIR, '__proto__.json');
   fs.mkdirSync(c.DIR, { recursive: true });
   fs.writeFileSync(raw, JSON.stringify({
+    name: '__proto__',
     reportedAt: new Date().toISOString(), commitments: [{ id: 'p', what: 'polluting' }],
   }));
   try {
