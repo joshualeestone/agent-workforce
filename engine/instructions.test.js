@@ -178,7 +178,7 @@ test('an empty or near-empty body is refused, not saved', () => {
   const file = makeAgent('emptytest');
   const before = fs.readFileSync(file, 'utf8');
   for (const body of ['', '   ', '\n\n', 'too short']) {
-    assert.throws(() => instructions.write('emptytest', body), /cannot be empty/,
+    assert.throws(() => instructions.write('emptytest', body), /at least 20 characters/,
       `${JSON.stringify(body)} should be refused`);
   }
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'the original must survive a refused write');
@@ -315,6 +315,85 @@ test('a file the read path refuses to show cannot be silently overwritten', () =
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused-to-show file was overwritten anyway');
 });
 
+test('a file that exists but cannot be opened is never silently replaced', () => {
+  // ⚠️ The one the first version of this guard missed. It checked a PARALLEL
+  // predicate (regular file, within the ceiling) instead of asking `read`, so a
+  // file that is perfectly ordinary but unopenable (mode 000, a bad mount, a
+  // permissions change) passed the guard while `read` reported "no instruction
+  // file yet". The editor showed an empty box and the first Save destroyed a
+  // real agent's instructions. Reproduced before the fix: read().exists false,
+  // write() succeeded, file replaced.
+  const file = makeAgent('unreadable', 'INSTRUCTIONS THAT MUST SURVIVE A REFUSED SAVE');
+  fs.chmodSync(file, 0o000);
+  try {
+    if (instructions.read('unreadable').exists) return; // running as root, guard not observable
+    assert.throws(() => instructions.write('unreadable', REAL), /cannot safely replace/);
+    fs.chmodSync(file, 0o644);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'INSTRUCTIONS THAT MUST SURVIVE A REFUSED SAVE');
+  } finally {
+    try { fs.chmodSync(file, 0o644); } catch { /* already restored */ }
+  }
+});
+
+test('a planted temp file cannot redirect the write out of the root', () => {
+  // The third symlink route, and the one that bypasses every other guard
+  // because it is not the path any of them look at. The temp name is
+  // predictable (`CLAUDE.md.<pid>.tmp`), and the default write flag follows a
+  // symlink, so a link planted there sends the body to its target.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-tmplink-'));
+  const target = path.join(outside, 'elsewhere.md');
+  fs.writeFileSync(target, 'A FILE THE WRITE MUST NOT REACH');
+  makeAgent('tmplinkagent');
+  const tmp = path.join(ROOT, 'tmplinkagent', `CLAUDE.md.${process.pid}.tmp`);
+  try {
+    fs.symlinkSync(target, tmp);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    // Refusing is the correct outcome; silently succeeding into `target` is not.
+    try { instructions.write('tmplinkagent', REAL); } catch { /* refused is fine */ }
+    assert.equal(fs.readFileSync(target, 'utf8'), 'A FILE THE WRITE MUST NOT REACH',
+      'the write followed a planted temp symlink out of the workers root');
+  } finally {
+    fs.rmSync(tmp, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('staleness refuses a symlinked file rather than reporting its mtime', () => {
+  // `staleness` is what the CARD renders, and it used to `stat` where `read`
+  // used `lstat`. The card showed a confident "running on older instructions"
+  // derived from a file outside the workers root, and disclosed that file's
+  // mtime, while the detail page for the same agent said it could not read
+  // anything. Two surfaces contradicting each other about one agent is worse
+  // than either answer alone.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-stlink-'));
+  const target = path.join(outside, 'target.md');
+  fs.writeFileSync(target, 'OUTSIDE THE ROOT');
+  fs.utimesSync(target, new Date('2030-01-01'), new Date('2030-01-01'));
+  fs.mkdirSync(path.join(ROOT, 'stlinkagent'), { recursive: true });
+  const link = path.join(ROOT, 'stlinkagent', 'CLAUDE.md');
+  makeSession('stlinkagent', 'sess-stlink');
+  try {
+    fs.symlinkSync(target, link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    return; // symlinks unavailable
+  }
+  try {
+    const got = instructions.staleness('stlinkagent');
+    assert.equal(got.state, instructions.STALENESS.UNKNOWN, 'a symlink produced a confident verdict');
+    assert.equal(got.editedAt, undefined, 'the mtime of a file outside the root was disclosed');
+    // And the two surfaces must agree.
+    assert.equal(instructions.read('stlinkagent').staleness.state, got.state);
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('a symlinked worker directory cannot land a write outside the root', () => {
   // The containment assertion in fileFor only ever sees the NAME, never where
   // it points, so if the directory check follows links the write lands wherever
@@ -417,10 +496,15 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
   makeAgent('nantime');
   makeSession('nantime', 'sess-nan');
 
-  const real = fs.statSync;
-  fs.statSync = (p, ...rest) => {
+  // Patches `lstatSync`, which is what staleness calls. It used to call
+  // `statSync`, and a version of this test that patches the wrong one passes
+  // while pinning nothing.
+  const real = fs.lstatSync;
+  fs.lstatSync = (p, ...rest) => {
     const s = real(p, ...rest);
-    if (String(p).includes('nantime')) return { ...s, isFile: () => true, mtime: new Date(NaN) };
+    if (String(p).includes('nantime')) {
+      return { ...s, isFile: () => true, size: s.size, mtime: new Date(NaN) };
+    }
     return s;
   };
   try {
@@ -432,7 +516,7 @@ test('an mtime we cannot use is unknown, and says so for the right reason', () =
       assert.equal(got.editedAt, undefined, `${name} reported a time it cannot know`);
     }
   } finally {
-    fs.statSync = real;
+    fs.lstatSync = real;
   }
 });
 

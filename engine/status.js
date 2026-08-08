@@ -415,7 +415,18 @@ function readModel(agentName) {
  * Where it cannot be derived we show the raw session name and say so, rather
  * than inventing something friendlier.
  */
-const WORKERS_DIR = path.join(HOME, 'work', 'workers');
+/**
+ * Where worker directories live.
+ *
+ * ⚠️ Honours `AGENT_WORKFORCE_WORKERS` because `engine/instructions.js` does,
+ * and these two must be the SAME root. They were not: this one was hardcoded,
+ * so relocating the variable moved the instruction READ and WRITE while leaving
+ * `readIdentity` pointed at the operator's live `~/work/workers`. A test suite
+ * that believed it was sandboxed was still reading real agents' files, and the
+ * sandbox comment in server.test.js said so in good faith while being wrong.
+ * One root, one variable.
+ */
+const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
 /**
  * Explicit overrides for agents whose identity is not derivable.

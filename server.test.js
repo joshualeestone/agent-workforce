@@ -38,13 +38,20 @@
 //
 //   1. `AGENT_WORKFORCE_DATA`  -> the commitment store. Sandboxed here.
 //   2. `AGENT_WORKFORCE_WORKERS` -> the instruction files, `~/work/workers/
-//      <agent>/CLAUDE.md`. Sandboxed here. These are the LIVE files that 13
+//      <agent>/CLAUDE.md`. Sandboxed here. These are the LIVE files that the
 //      working agents boot from, so a stray PUT does not corrupt test data, it
 //      changes how a real agent behaves the next time it starts. The route
 //      tests below deliberately drive PUT with a real agent's name, and before
 //      this line the only thing standing between them and those files was the
 //      handler's `typeof text !== 'string'` check. One test with a valid string
 //      would have rewritten a colleague's instructions.
+//
+//      ⚠️ This variable only covered the instruction read and write when it was
+//      first added. `status.js` had its own hardcoded copy of the same path for
+//      `readIdentity`, so `snapshot()` kept reading the real files while this
+//      comment said they were sandboxed. Reads only, nothing was corrupted, but
+//      the comment was the thing a future author would trust before deciding a
+//      write was safe. Both modules now read this one variable.
 //   3. `store.ROOT` -> avatars and profiles. NOT sandboxed, no variable for it.
 //      That is why no test here sends a PUT or DELETE to an avatar or profile
 //      route, and why any test that does must sandbox it first. A reviewer once
@@ -861,6 +868,20 @@ test('a successful PUT rewrites the file and answers with the new stale state', 
 
   const back = await req(`/api/agent/${name}/instructions`);
   assert.equal(JSON.parse(back.body).text, text, 'a re-read did not see the write');
+});
+
+test('an unparseable body is refused with a readable message, not an exception name', async (t) => {
+  const name = await anyAgent(t);
+  if (!name) return;
+  for (const body of ['{', 'not json at all', '{"text":']) {
+    const res = await req(`/api/agent/${name}/instructions`,
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 400, `${body} should be refused`);
+    const { error } = JSON.parse(res.body);
+    assert.doesNotMatch(error, /SyntaxError|Unexpected token|JSON at position/,
+      `the message named an exception instead of saying what to send: ${error}`);
+    assert.match(error, /as JSON/);
+  }
 });
 
 test('GET refuses an unknown agent rather than reporting a path for it', async () => {

@@ -302,7 +302,7 @@ svg { display: block; }
   <div class="field">
     <label class="flabel" for="d-instr">What they should focus on</label>
     <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
-    <div id="d-instr-stale" class="stale-note" hidden></div>
+    <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
     <textarea id="d-instr" rows="14" spellcheck="true"></textarea>
     <div class="frow instr-foot">
       <div class="fpath">Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
@@ -514,8 +514,15 @@ async function tick() {
     document.getElementById('summary').textContent = bits.join(' · ');
     // Says "early" out loud. For a product whose whole thesis is not
     // overstating what it knows, admitting its own maturity is on-brand.
+    //
+    // ⚠️ It used to say "read-only, nothing here can change your agents", and
+    // that stopped being true the moment this screen could edit the file an
+    // agent boots from. A banner asserting something false about safety is the
+    // worst possible instance of the trap this whole codebase is written
+    // against, so it now says which way the writing goes.
     document.getElementById('build').innerHTML =
-      '<b>BETA</b> · version ' + esc(data.version || 'unknown') + ' · read-only, nothing here can change your agents';
+      '<b>BETA</b> · version ' + esc(data.version || 'unknown')
+      + ' · editing an agent here changes the real file it starts from';
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
@@ -714,18 +721,30 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
   if (!CURRENT) return;
   const msg = document.getElementById('d-instr-msg');
   const text = document.getElementById('d-instr').value;
+  // Which agent this save is FOR. The panel can be showing a different one by
+  // the time the answer lands, and the load path guards against exactly this
+  // while the save path did not: open A, hit Save, go back, open B, and A's
+  // response painted "Running on older instructions. Edited <A's time>" into
+  // B's panel. The write went to the right agent; the screen then said
+  // something untrue about a different one, which is the failure this state
+  // exists to prevent.
+  const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/instructions',
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
     const data = await res.json();
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return; // another agent is open now
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);
     await tick();
-  } catch (err) { msg.textContent = err.message; }
+  } catch (err) {
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    msg.textContent = err.message;
+  }
 });
 
 document.getElementById('detail-back').addEventListener('click', () => showTab('agents'));

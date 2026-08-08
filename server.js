@@ -43,6 +43,26 @@ function readBody(req) {
   });
 }
 
+/**
+ * Is this a name the board actually knows?
+ *
+ * ⚠️ Known limitation, written down rather than left to be discovered. This
+ * compares against `safeKey(name)`, so an agent whose tmux session name is not
+ * already its own sanitised form (a capital, a dot, a space) is rejected by
+ * every route here, even though the status poll publishes a real staleness
+ * verdict for it. The card would show "running on older instructions" and
+ * clicking through would 404.
+ *
+ * Widening this to also accept the verbatim name was considered and NOT done,
+ * because it makes the gate accept two distinct session names that sanitise to
+ * the same directory, and the write would then land on the wrong agent's
+ * instruction file. A 404 is a visible, harmless failure; writing one agent's
+ * instructions into another's is neither. The real fix is a single identity for
+ * an agent rather than a name that is sanitised in one place and verbatim in
+ * another, and that is a change to the avatar and profile stores too.
+ *
+ * Every agent on this machine is lowercase, so nothing hits this today.
+ */
 function knownAgent(name) {
   try {
     return snapshot().agents.some((a) => a.sessionName === store.safeKey(name));
@@ -400,7 +420,16 @@ const server = http.createServer((req, res) => {
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     readBody(req)
       .then((buf) => {
-        const patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        let patch;
+        try {
+          patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          // A raw SyntaxError here reads "Unexpected token } in JSON at
+          // position 4", which is an exception name and an offset rather than
+          // anything a person can act on. Every other refusal on this route
+          // says what to send instead, and unparseable input was the one hole.
+          throw new Error('send the instructions as JSON, like {"text": "..."}');
+        }
         if (typeof patch.text !== 'string') {
           throw new Error('send the instructions as text');
         }

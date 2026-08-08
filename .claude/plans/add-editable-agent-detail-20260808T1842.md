@@ -199,8 +199,23 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `registryKey` back to `safeKey` at the call site | fails (2 tests) |
 | Unusable-mtime guard | fails |
 | `knownAgent` on GET | fails |
+| Refuse-to-clobber an UNREADABLE file (asks `read`) | fails |
+| Temp write flag `wx` to default (symlink) | fails |
+| `staleness` `lstat` to `stat` (symlink) | fails (2 tests) |
+| Malformed-JSON message guard | fails |
 | Containment assertion in `fileFor` | **green, declared untested in code and test** |
 | `iso()` NaN guard | **green, declared untested in code** |
+
+Iteration 2 of the challenge loop found that the refuse-to-clobber guard, added
+in iteration 1, did not do what its own comment claimed. It compared against a
+PARALLEL predicate (regular file, within the ceiling) rather than asking `read`,
+so a file that exists and is perfectly ordinary but cannot be opened (mode 000,
+a bad mount) passed the guard while `read` reported "no instruction file yet".
+Reproduced end to end before fixing: the editor showed an empty box and the save
+destroyed the file. The guard now asks `read` itself, because two derivations of
+one question drift and one cannot. That is the same root cause as the original
+finding, one level down, which is why the fix is structural rather than another
+condition.
 
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Two rows started green while looking covered and
@@ -210,4 +225,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**155 tests, zero dependencies.**
+**159 tests, zero dependencies.**

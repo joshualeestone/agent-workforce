@@ -5,8 +5,13 @@ Claude subscription.
 
 ## Status: Phase 1
 
-Read-only. It shows you what the agents on this machine are doing. It cannot
-start, stop, message or change any of them yet.
+It shows you what the agents on this machine are doing, and it can now change
+some of what they are: their picture, what you call their job, and the
+instruction file each one reads when it starts. It cannot start, stop or
+message any of them yet.
+
+⚠️ That instruction file is the real thing an agent boots from, not a copy, so
+editing it here changes how that agent behaves the next time it starts.
 
     node server.js      # then open http://127.0.0.1:4317
 

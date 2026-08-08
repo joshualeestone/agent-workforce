@@ -189,7 +189,18 @@ function staleness(agent) {
 
   let editedAt;
   try {
-    editedAt = fs.statSync(file).mtime.getTime();
+    // ⚠️ `lstat` and `isShowable`, matching the read path exactly. With a plain
+    // `stat` this followed a symlink, so the CARD rendered a confident "running
+    // on older instructions" from the mtime of a file outside the workers root
+    // while the DETAIL page for the same agent said it could not read anything.
+    // Two surfaces contradicting each other about one agent is worse than
+    // either answer alone, and the confident one was reporting a timestamp from
+    // a file we had already decided not to trust.
+    const stat = fs.lstatSync(file);
+    if (!isShowable(stat)) {
+      return { state: STALENESS.UNKNOWN, because: 'its instruction file is not one we can read' };
+    }
+    editedAt = stat.mtime.getTime();
   } catch {
     return { state: STALENESS.UNKNOWN, because: 'it has no instruction file yet' };
   }
@@ -260,8 +271,10 @@ function isShowable(stat) {
 /**
  * Read an agent's instructions.
  *
- * Never throws. This and `staleness` are both called per agent from the status
- * route, so a throw in either answers 500 for the whole board.
+ * Never throws. `staleness` is what the status route calls once per agent, and
+ * this is reached from the single-agent GET and from `write`. Both have to hold
+ * the guarantee, because a throw from either answers 500 rather than showing
+ * one agent as unreadable.
  */
 function read(agent) {
   const file = fileFor(agent);
@@ -317,7 +330,7 @@ function write(agent, text) {
   if (body.trim().length < MIN_CHARS) {
     // An empty instruction file is an agent with no idea what it is for, and it
     // is a far worse outcome than an edit that did not take.
-    throw new Error('instructions cannot be empty, say what this agent is for');
+    throw new Error(`instructions cannot be this short, say what this agent is for in at least ${MIN_CHARS} characters`);
   }
   if (Buffer.byteLength(body, 'utf8') > MAX_BYTES) {
     throw new Error('that is larger than an instruction file should be');
@@ -336,16 +349,23 @@ function write(agent, text) {
   // ⚠️ Refuse to replace anything the READ path would not have shown.
   //
   // Without this the two paths disagree about what the instruction file is, and
-  // the disagreement destroys data silently: a file `read` rejects (a symlink,
-  // or one over the ceiling) comes back as `{ exists: false, text: '' }`, the
-  // editor renders an empty box captioned "there is no instruction file for
-  // this one yet", and the first Save overwrites the real file with whatever
-  // was typed into that box. The screen has to be describing the same file that
-  // Save replaces, or it is inviting the person to destroy one they were told
-  // was not there.
-  let existing;
-  try { existing = fs.lstatSync(file); } catch { existing = null; }
-  if (existing && !isShowable(existing)) {
+  // the disagreement destroys data silently: a file `read` rejects comes back
+  // as `{ exists: false, text: '' }`, the editor renders an empty box captioned
+  // "there is no instruction file for this one yet", and the first Save
+  // overwrites the real file with whatever was typed into that box. The screen
+  // has to be describing the same file that Save replaces, or it is inviting
+  // someone to destroy a file they were told was not there.
+  //
+  // ⚠️ And it asks `read` ITSELF rather than re-deriving the condition. A
+  // parallel predicate here was the bug: it checked `isShowable` alone, which
+  // covers a symlink and an oversized file but NOT a file that exists and
+  // simply cannot be opened (mode 000, a bad mount, a permissions change).
+  // `read` returned "no instruction file yet" for that, the guard saw a
+  // perfectly ordinary regular file, and the save destroyed it. Two derivations
+  // of one question drift; one cannot.
+  let existing = true;
+  try { fs.lstatSync(file); } catch { existing = false; }
+  if (existing && !read(agent).exists) {
     throw new Error('there is already a file there that this editor cannot safely replace, open it by hand');
   }
 
@@ -357,7 +377,14 @@ function write(agent, text) {
   // synchronous, which is worth knowing before either one grows an await.
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    fs.writeFileSync(tmp, body);
+    // ⚠️ `wx`, not the default `w`. The temp name is predictable, and the
+    // default flag FOLLOWS a symlink, so planting a link at
+    // `<agent>/CLAUDE.md.<pid>.tmp` pointing anywhere on disk turns this write
+    // into a write to that target. It is the third symlink route into the most
+    // powerful write in the product, after the file itself and the worker
+    // directory, and unlike those two it bypasses every guard above because it
+    // is not the path any of them check. `wx` fails rather than follows.
+    fs.writeFileSync(tmp, body, { flag: 'wx' });
     fs.renameSync(tmp, file);
   } catch {
     // Any failure between the write and the rename otherwise leaves the temp
