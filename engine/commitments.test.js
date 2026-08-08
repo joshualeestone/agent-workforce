@@ -487,7 +487,7 @@ test('a record with no stored name at all is refused rather than trusted', () =>
   assert.equal(c.read('nameless').state, c.STATE.UNKNOWN);
 });
 
-test('a record that is not a regular file is refused rather than opened', () => {
+test('a record that is not a regular file is refused rather than opened', (t) => {
   // readFileSync on a FIFO blocks FOREVER, and read() runs synchronously per
   // agent inside the request handler, so one named pipe in the store wedges the
   // whole server with no crash to notice.
@@ -497,14 +497,15 @@ test('a record that is not a regular file is refused rather than opened', () => 
   // --test-timeout cannot fire and CI gets an indefinite stall instead of a
   // diagnostic. A test whose failure mode is "the run never ends" is worse than
   // no test.
-  const { execFileSync, execFileSync: run } = require('node:child_process');
+  const { execFileSync: run } = require('node:child_process');
   const nodePath = require('node:path');
   fs.mkdirSync(c.DIR, { recursive: true });
   const fifo = c.recordPath('fifobot');
   try {
-    execFileSync('/usr/bin/mkfifo', [fifo]);
+    run('/usr/bin/mkfifo', [fifo]);
   } catch {
-    return; // mkfifo unavailable; nothing to assert
+    // Visible skip, not a silent tick for a property never exercised.
+    return t.skip('mkfifo unavailable on this machine');
   }
 
   try {
@@ -525,7 +526,7 @@ test('a record that is not a regular file is refused rather than opened', () => 
   }
 });
 
-test('a symlinked record cannot point the read outside the store', () => {
+test('a symlinked record cannot point the read outside the store', (t) => {
   // lstat rather than stat, so a link is seen as a link. This test is what
   // pins it: swapping lstatSync for statSync fails here. (An earlier version of
   // this comment said the guard was unpinned, which was true when written and
@@ -545,7 +546,7 @@ test('a symlinked record cannot point the read outside the store', () => {
     fs.symlinkSync(target, link);
   } catch {
     fs.rmSync(outside, { recursive: true, force: true });
-    return; // symlinks unavailable
+    return t.skip('symlinks unavailable on this machine');
   }
   try {
     const got = c.read('linkbot');
@@ -586,10 +587,11 @@ test('createdAt is capped and validated, not passed through whole', () => {
 });
 
 test('readAll does not let a __proto__ record mutate its result', () => {
-  // Written with the literal filename, bypassing recordPath: safeKey would
-  // sanitise `__proto__` down to `proto`, so going through the normal API
-  // cannot produce this file. Anything that can drop a file into the store
-  // directory can.
+  // safeKey strips [^a-z0-9_-] and therefore PRESERVES underscores, so
+  // `__proto__` survives it intact and report('__proto__', ...) writes this
+  // file through the ordinary public API. An earlier comment claimed the
+  // opposite, that only something dropping a file into the store could produce
+  // it, which understated how easily it arises.
   const raw = path.join(c.DIR, '__proto__.json');
   fs.mkdirSync(c.DIR, { recursive: true });
   fs.writeFileSync(raw, JSON.stringify({
@@ -997,4 +999,71 @@ test('a huge foreign name in the mismatch message is capped', () => {
   const got = c.read('bigname');
   assert.equal(got.state, c.STATE.UNKNOWN);
   assert.ok(got.because.length < 200, `because was ${got.because.length} bytes`);
+});
+
+test('two commitments cannot share an id, because resolve removes by id', () => {
+  // The bug this closes: report two things under one id, resolve the one that
+  // finished, and the record comes back CLEAR with real work outstanding. Two
+  // ordinary API calls, no error anywhere, and the restart dialog is told it is
+  // safe to proceed. A confident false answer is the one thing this module
+  // exists to prevent.
+  assert.throws(() => c.report('leo', [
+    { id: 'reply', what: 'reply to Josh about the DNS record' },
+    { id: 'reply', what: 'reply to Splinter about the rollup' },
+  ]), /its own id/, 'a duplicate id must be refused at the door');
+});
+
+test('a hand-written record with duplicate ids is refused rather than served', () => {
+  // The door covers what we write; a record can still be edited by hand, and
+  // serving one whose resolve() would remove two things is the same lie.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('dupfile'), JSON.stringify({
+    name: 'dupfile', reportedAt: stamp,
+    commitments: [
+      { id: 'same', what: 'one', createdAt: stamp, source: 'agent' },
+      { id: 'same', what: 'two', createdAt: stamp, source: 'agent' },
+    ],
+  }));
+  const got = c.read('dupfile');
+  assert.equal(got.state, c.STATE.UNKNOWN);
+  assert.match(got.because, /two things under one id/);
+});
+
+test('a record missing createdAt is refused rather than served an invented one', () => {
+  // The sibling clauses (id, source) were each pinned; this one was not. With
+  // it removed, a commitment with no createdAt reads as holding and is served
+  // the string "undefined", an invented value in the one module whose thesis is
+  // that it never invents.
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(c.recordPath('nostamp'), JSON.stringify({
+    name: 'nostamp', reportedAt: stamp,
+    commitments: [{ id: 'a', what: 'real', source: 'agent' }],
+  }));
+  assert.equal(c.read('nostamp').state, c.STATE.UNKNOWN);
+});
+
+test('report() at its own caps writes a record its own reader accepts', () => {
+  // Pins the RELATIONSHIP, not a number: whatever report() can write at its own
+  // caps, read() must accept. A record written successfully and then refused by
+  // its own reader leaves add() and resolve() throwing from then on, so the
+  // agent cannot correct it through the module's own API.
+  //
+  // Measured worst case is 406,708 bytes (200 commitments whose every character
+  // serialises to six JSON bytes). The ceiling that shipped before this was
+  // 512KB, which cleared it by only 20 percent while its comment reasoned from
+  // an estimate four times too small.
+  const nasty = String.fromCharCode(1).repeat(300);
+  const many = Array.from({ length: c.MAX_COMMITMENTS }, (_, i) => ({
+    id: String(i).padStart(80, '0'), what: nasty, source: 'x'.repeat(40),
+  }));
+  c.report('bigreal', many);
+
+  const written = fs.statSync(c.recordPath('bigreal')).size;
+  assert.ok(written < c.MAX_RECORD_BYTES,
+    `report() wrote ${written} bytes, over its own ${c.MAX_RECORD_BYTES} ceiling`);
+
+  const got = c.read('bigreal');
+  assert.equal(got.state, c.STATE.HOLDING, `own reader refused own write: ${got.because}`);
+  assert.equal(got.commitments.length, c.MAX_COMMITMENTS);
+  assert.doesNotThrow(() => c.resolve('bigreal', String(0).padStart(80, '0')));
 });
