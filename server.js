@@ -342,7 +342,13 @@ const server = http.createServer((req, res) => {
         if (!Array.isArray(patch.commitments)) {
           throw new Error('send a commitments list, even if it is empty');
         }
-        sendJson(res, 200, commitments.report(name, patch.commitments));
+        commitments.report(name, patch.commitments);
+        // Answer with the READ shape, not the raw record. The raw record has no
+        // state and no `because`, so a client that asserted "I hold nothing"
+        // got back a bare empty list -- exactly the shape this module exists to
+        // keep out of callers' hands. Both verbs now speak the same
+        // three-state vocabulary.
+        sendJson(res, 200, commitments.read(name));
       })
       .catch((err) => sendJson(res, 400, { error: String(err.message) }));
     return;
