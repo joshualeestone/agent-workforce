@@ -33,6 +33,12 @@ const store = require('./store');
  * the real app data of whoever is running them. Read once at load, so a test
  * sets it before requiring this module.
  */
+// ⚠️ This moves the COMMITMENT store only. `store.ROOT` still governs avatars
+// and profiles, so a test or local server that sets this is only partly
+// sandboxed. That is a trap in a variable named for the whole data directory,
+// and it is why the tests here also avoid the avatar and profile write routes
+// entirely. Moving the override onto `store.ROOT` so all three travel together
+// is tracked separately.
 const BASE = process.env.AGENT_WORKFORCE_DATA || store.ROOT;
 const DIR = path.join(BASE, 'commitments');
 
@@ -73,13 +79,13 @@ function recordPath(agent) {
   return path.join(DIR, store.safeKey(agent) + '.json');
 }
 
-// ⚠️ Residual risk inherited from store.safeKey(): it STRIPS unsafe characters
-// rather than rejecting, so `worker.2` and `worker2` collapse to one key and
-// share a record. For avatars a collision costs a picture. Here it costs the
-// answer the restart dialog depends on -- one agent can be rendered `clear` on
-// the strength of a different agent's assertion. Recorded rather than fixed,
-// because changing the key derivation would orphan every existing avatar and
-// profile too; it wants solving once, across all three stores.
+// ⚠️ store.safeKey() STRIPS unsafe characters rather than rejecting, so
+// `worker.2` and `worker2` collapse to one key. For avatars a collision costs a
+// picture; here it would cost the answer the restart dialog depends on, so it
+// is guarded twice: report() refuses a name that is not already its own key,
+// and read() refuses a record whose stored name does not match. The underlying
+// key derivation is shared with avatars and profiles and still wants solving
+// once across all three.
 
 function unknown(because) {
   return { state: STATE.UNKNOWN, commitments: [], reportedAt: null, because };
@@ -120,9 +126,34 @@ function parseRecord(agent) {
     return { ok: false, absent: false, because: 'that is not a name we can look up' };
   }
 
+  const file = path.join(DIR, key + '.json');
+
+  // Must be a regular file before we open it. `readFileSync` on a FIFO blocks
+  // FOREVER, and read() runs synchronously per agent inside the request
+  // handler, so a single named pipe in the store wedges the entire server with
+  // no crash and nothing to notice. The avatar route learned this same lesson
+  // against a directory; the fix belongs here too. `lstat` rather than `stat`
+  // so a symlink cannot point the read outside the store.
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (err) {
+    const absent = err && err.code === 'ENOENT';
+    return {
+      ok: false,
+      absent,
+      because: absent
+        ? 'this agent has never reported what it is holding'
+        : 'its record could not be examined',
+    };
+  }
+  if (!stat.isFile()) {
+    return { ok: false, absent: false, because: 'its record is not a file we can read' };
+  }
+
   let raw;
   try {
-    raw = fs.readFileSync(path.join(DIR, key + '.json'), 'utf8');
+    raw = fs.readFileSync(file, 'utf8');
   } catch (err) {
     // ENOENT is the only read failure that means "there is nothing here". Every
     // other one -- EACCES, EISDIR, EMFILE, ENAMETOOLONG -- means a record may
@@ -167,9 +198,22 @@ function parseRecord(agent) {
     return { ok: false, absent: false, because: 'its record is not in a shape we understand' };
   }
 
-  // Guard the key collision described above. Records written before this field
-  // existed have no `name`, and are accepted rather than invalidated.
-  if (typeof parsed.name === 'string' && parsed.name !== String(agent)) {
+  // Elements are validated on the way OUT as well as in. report() sanitises
+  // what it writes, but a record can be edited by hand, and an element of
+  // `null` made resolve() throw on `.id` from inside the request handler. A
+  // record we cannot fully understand is one we cannot vouch for.
+  const usable = parsed.commitments.every(
+    (c) => c && typeof c === 'object' && !Array.isArray(c) && typeof c.what === 'string',
+  );
+  if (!usable) {
+    return { ok: false, absent: false, because: 'its record lists something we cannot read' };
+  }
+
+  // Guard the key collision described above. A record with no `name` is refused
+  // rather than trusted: this module has never shipped a version that omitted
+  // it, so a record missing it was not written by us, and the carve-out that
+  // used to accept those reopened the exact hole this closes.
+  if (parsed.name !== String(agent)) {
     return {
       ok: false,
       absent: false,
@@ -231,6 +275,16 @@ function read(agent) {
  */
 function report(agent, commitments) {
   const key = store.safeKey(agent);
+  // The supplied name must already BE the key. safeKey strips rather than
+  // rejects, so `ANGEL`, `angel.` and `angel` all sanitise to `angel` -- and a
+  // write under any of those spellings landed in the same file. The previous
+  // version detected that on a later read, by which point the real record had
+  // already been overwritten and the writer told it succeeded. Refusing an
+  // aliased spelling is the only version that protects the data rather than
+  // reporting on its loss afterwards.
+  if (String(agent) !== key) {
+    throw new Error(`report under the agent's exact name: "${key}", not "${agent}"`);
+  }
   if (!Array.isArray(commitments)) throw new Error('commitments must be a list');
   if (commitments.length > MAX_COMMITMENTS) {
     throw new Error(`an agent cannot hold more than ${MAX_COMMITMENTS} commitments`);
@@ -276,8 +330,18 @@ function report(agent, commitments) {
   // so two processes cannot collide on it.
   const dest = path.join(DIR, key + '.json');
   const tmp = `${dest}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
-  fs.renameSync(tmp, dest);
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
+    fs.renameSync(tmp, dest);
+  } catch (err) {
+    // Any failure between the write and the rename otherwise leaves the temp
+    // file behind forever, accumulating one per failed attempt.
+    try { fs.rmSync(tmp, { force: true }); } catch { /* nothing more to do */ }
+    // Never surface the raw errno: it carries the absolute store path, and the
+    // house rule for this catch is to say what to do rather than name an
+    // exception.
+    throw new Error('that could not be saved');
+  }
   return next;
 }
 
