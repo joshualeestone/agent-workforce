@@ -815,3 +815,44 @@ test('every field is capped on the way OUT, not just what', () => {
   assert.equal(only.junk, undefined, 'unknown keys must not be re-served');
   assert.ok(JSON.stringify(got).length < 2000, `payload was ${JSON.stringify(got).length} bytes`);
 });
+
+test('a blank description in a hand-edited record is unknown, and does NOT throw', () => {
+  // The usability check accepted any string `what`, but sanitise() throws on an
+  // empty or whitespace-only one. Sanitising on the way out made that throw
+  // reachable from read(), which runs synchronously inside the request handler:
+  // one such record exited the process on a GET and 500'd the WHOLE BOARD on
+  // /api/status, because every agent's block is read on the same request.
+  //
+  // read() must never throw. That is the property; this pins it.
+  for (const [name, what] of [['blankws', '   '], ['blankempty', ''], ['blanktab', '\t\n']]) {
+    fs.writeFileSync(c.recordPath(name), JSON.stringify({
+      name, reportedAt: new Date().toISOString(), commitments: [{ id: 'x', what }],
+    }));
+    let got;
+    assert.doesNotThrow(() => { got = c.read(name); }, `what=${JSON.stringify(what)} threw`);
+    assert.equal(got.state, c.STATE.UNKNOWN);
+  }
+});
+
+test('read() never throws, whatever the record contains', () => {
+  // A blanket property test, because this is the one function whose throwing
+  // takes the process down. Every shape that has ever broken it, plus a few
+  // more, asserted in one place so a future edit has to trip over it.
+  const shapes = [
+    'null', '42', '"text"', '[]', '{}', 'not json at all', '',
+    JSON.stringify({ name: 'x' }),
+    JSON.stringify({ name: 'shapes', reportedAt: 'nope', commitments: [] }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: 'no' }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [null] }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: '' }] }),
+    JSON.stringify({ name: 'shapes', reportedAt: new Date().toISOString(), commitments: [{ what: 0 }] }),
+    JSON.stringify({ name: 'shapes', reportedAt: null, commitments: [] }),
+  ];
+  for (const body of shapes) {
+    fs.writeFileSync(c.recordPath('shapes'), body);
+    let got;
+    assert.doesNotThrow(() => { got = c.read('shapes'); }, `threw on ${body.slice(0, 60)}`);
+    assert.ok(got && typeof got.state === 'string', `no usable answer for ${body.slice(0, 60)}`);
+    assert.notEqual(got.state, c.STATE.CLEAR, `${body.slice(0, 60)} must not read as clear`);
+  }
+});

@@ -221,7 +221,8 @@ function parseRecord(agent) {
   // `null` made resolve() throw on `.id` from inside the request handler. A
   // record we cannot fully understand is one we cannot vouch for.
   const usable = parsed.commitments.every(
-    (c) => c && typeof c === 'object' && !Array.isArray(c) && typeof c.what === 'string',
+    (c) => c && typeof c === 'object' && !Array.isArray(c)
+      && typeof c.what === 'string' && c.what.trim() !== '',
   );
   if (!usable) {
     return { ok: false, absent: false, because: 'its record lists something we cannot read' };
@@ -249,13 +250,25 @@ function parseRecord(agent) {
     return { ok: false, absent: false, because: 'its record lists more than we can show' };
   }
 
+  const clean = safeSanitise(parsed.commitments);
+  if (!clean) {
+    return { ok: false, absent: false, because: 'its record lists something we cannot read' };
+  }
+
   return {
     ok: true,
     // Sanitised on the way OUT with the same function used on the way in.
     // Capping only `what` here re-served `id`, `createdAt`, `source` and any
     // extra key verbatim, which is the exact createdAt bug the write path
     // records as fixed, still reachable through a hand-edited record.
-    commitments: sanitise(parsed.commitments),
+    //
+    // `usable` above already rejects everything sanitise() would throw on. The
+    // try is here anyway because read() must NEVER throw: it is called
+    // synchronously inside the request handler, once per agent, so a throw
+    // exits the process on a GET and 500s the whole board on /api/status. This
+    // exact combination shipped for one round -- a whitespace-only `what`
+    // passed the usability check and then threw inside sanitise.
+    commitments: clean,
     reportedAt,
     ageMs: Date.now() - at,
   };
@@ -407,6 +420,20 @@ function writeRecord(key, rawName, clean, reportedAt) {
     throw new Error('that could not be saved');
   }
   return next;
+}
+
+/**
+ * `sanitise()` for the read path, which must never throw.
+ *
+ * Returns null rather than raising, so a record we cannot normalise becomes
+ * `unknown` instead of an uncaught exception in the request handler.
+ */
+function safeSanitise(commitments) {
+  try {
+    return sanitise(commitments);
+  } catch {
+    return null;
+  }
 }
 
 /** True when a parsed record is too old, or dated too far ahead, to vouch for. */
