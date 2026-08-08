@@ -73,10 +73,21 @@ const MAX_COMMITMENTS = 200;
 /**
  * Ceiling on the size of one record file, checked before it is opened.
  *
- * Generous next to what report() can produce (200 commitments of 300 characters
- * is well under 100KB), so it only ever catches a file we did not write.
+ * Set well above what `report()` can emit at its own caps, with the worst case
+ * MEASURED rather than estimated: 200 commitments whose every character
+ * serialises to six JSON bytes (a control character or a lone surrogate) write
+ * 406,708 bytes. The earlier 512KB ceiling happened to clear that, but only by
+ * 20 percent, and the comment justifying it reasoned from "200 x 300 characters
+ * is well under 100KB" -- an estimate four times too small, which would have
+ * been wrong had any cap moved.
+ *
+ * The failure it guards against is worth naming: a record that report() writes
+ * successfully and read() then refuses as too large leaves add() and resolve()
+ * throwing from then on, so the agent cannot correct it through the module's
+ * own API. `report() at its own caps writes a record its own reader accepts`
+ * pins the relationship rather than the number.
  */
-const MAX_RECORD_BYTES = 512 * 1024;
+const MAX_RECORD_BYTES = 1024 * 1024;
 
 function ensure(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -266,6 +277,9 @@ function parseRecord(agent) {
   }
 
   const clean = capForDisplay(parsed.commitments);
+  if (clean && !idsAreUnique(clean)) {
+    return { ok: false, absent: false, because: 'its record lists two things under one id' };
+  }
   if (!clean) {
     return { ok: false, absent: false, because: 'its record lists something we cannot read' };
   }
@@ -360,7 +374,11 @@ function report(agent, commitments) {
     throw new Error(`an agent cannot hold more than ${MAX_COMMITMENTS} commitments`);
   }
 
-  return writeRecord(key, agent, sanitise(commitments), new Date().toISOString());
+  const clean = sanitise(commitments);
+  if (!idsAreUnique(clean)) {
+    throw new Error('every commitment needs its own id');
+  }
+  return writeRecord(key, agent, clean, new Date().toISOString());
 }
 
 /** Coerce and cap every field of every commitment. */
@@ -385,6 +403,24 @@ function sanitise(commitments) {
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
   });
+}
+
+/**
+ * True when every id in a list is distinct.
+ *
+ * `resolve()` removes by id, so a duplicate makes it remove more than the
+ * caller asked for. Reported two commitments under one id, resolved the one
+ * that finished, and the record came back `clear` with real work outstanding:
+ * a confident false answer from two ordinary calls, which is the failure this
+ * module exists to prevent.
+ */
+function idsAreUnique(commitments) {
+  const seen = new Set();
+  for (const c of commitments) {
+    if (seen.has(c.id)) return false;
+    seen.add(c.id);
+  }
+  return true;
 }
 
 /**
