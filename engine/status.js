@@ -285,6 +285,12 @@ function listPanes() {
  * show a session it cannot read rather than hiding it — but it will be an entry
  * that `isAgentPane` refuses, which is the honest answer for it.
  */
+/** `<window>.<pane>` as a sortable number pair. */
+function paneOrder(id) {
+  const [w, p] = String(id || '').split('.');
+  return (Number(w) || 0) * 10000 + (Number(p) || 0);
+}
+
 function onePanePerSession(panes) {
   const bySession = new Map();
   for (const pane of panes) {
@@ -295,8 +301,17 @@ function onePanePerSession(panes) {
     const heldIsAgent = isAgentSession(held);
     const paneIsAgent = isAgentSession(pane);
     // Prefer a real agent pane; between two of a kind, the lower pane index.
+    //
+    // ⚠️ NUMERIC, not lexicographic. `String('0.10') < String('0.2')` is true,
+    // so a session with ten panes picked `0.10` over `0.2` while the comment
+    // promised the lower index. The pane this chooses becomes the card's
+    // `target`, which is where `/clear` and `/compact` keystrokes are SENT — so
+    // a string compare here is a targeting decision for destructive input,
+    // getting it wrong in exactly the way ("the operator could click the card
+    // for one pane and have the keystrokes go to the other") this function was
+    // added to prevent.
     if ((paneIsAgent && !heldIsAgent)
-      || (paneIsAgent === heldIsAgent && String(pane.pane) < String(held.pane))) {
+      || (paneIsAgent === heldIsAgent && paneOrder(pane.pane) < paneOrder(held.pane))) {
       bySession.set(key, pane);
     }
   }

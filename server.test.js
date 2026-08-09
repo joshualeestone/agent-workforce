@@ -199,7 +199,15 @@ async function anyAgent(t) {
   return encodeURIComponent(actionable.sessionName);
 }
 
-/** An agent the action routes will REFUSE, for the tests where that is the point. */
+/**
+ * An agent the action routes will REFUSE, for the tests where that is the point.
+ *
+ * ⚠️ Actually called. The first version of this helper was defined, credited in
+ * `anyAgent`'s comment with enforcing the file's discipline, and never used —
+ * while the tests that needed it each re-derived it inline with their own,
+ * narrower predicate. A helper that a comment says enforces a rule it does not
+ * enforce is worse than no helper: it reads as covered.
+ */
 async function refusingAgent() {
   const board = JSON.parse((await req('/api/status')).body);
   const found = (board.agents || []).find((a) => a.state !== 'idle' && a.state !== 'working');
@@ -1430,13 +1438,7 @@ test('an agent waiting on a question is never typed into', async (t) => {
   // `stopped` and `needs_you` all exercise the same line. Any of them proves
   // the route consults the decision, and at least one is almost always present
   // on a real board.
-  const board = JSON.parse((await req('/api/status')).body);
-  const REFUSED_STATES = ['needs_you', 'rate_limited', 'unknown', 'stopped'];
-  const waiting = (board.agents || []).find((a) => REFUSED_STATES.includes(a.state));
-  if (!waiting) {
-    t.skip('every agent on this board is idle or working, so no refusing state exists to drive');
-    return;
-  }
+  const waiting = await refusingAgent();
   // ⚠️ The token must be the REAL one, taken from the payload. The first
   // version of this sent a made-up `unknown:`, so the changed-since-shown check
   // threw CONFLICT before `mayTypeInto` ever ran, and the assertion below read
@@ -1536,6 +1538,35 @@ test('dry-run cannot be switched off while the real runner is installed', () => 
   assert.throws(() => lifecycle.setDryRun(false), /refusing to leave dry-run/);
   // Still armed afterwards.
   assert.equal(lifecycle.compact('nobody', 'nobody-discord:0.0').outcome, 'dry-run');
+});
+
+test('restoring the real runner re-arms dry-run', () => {
+  // ⚠️ The guard whose own comment says "a guard that depends on everyone
+  // remembering the order is not a guard" — and it had no test, so deleting the
+  // one line it consists of left all 250 green.
+  //
+  // It exists because `setDryRun` refuses only in ONE direction: it will not
+  // leave dry-run while the real runner is installed, but nothing stopped
+  // `setDryRun(false)` followed by `setRunner(null)`, which re-arms
+  // `execFileSync` with the fleet-wide protection off, on a machine running
+  // thirteen agents. The only test doing this happens to order its `finally`
+  // correctly, which is exactly the reliance the guard was written to remove.
+  const lifecycle = require('./engine/lifecycle');
+  try {
+    lifecycle.setRunner(() => '');
+    lifecycle.setDryRun(false);
+    assert.equal(lifecycle.DRY_RUN, false, 'dry-run did not come off at all');
+
+    // The dangerous order, the one no test was doing.
+    lifecycle.setRunner(null);
+    assert.equal(lifecycle.DRY_RUN, true,
+      'the real runner was restored with dry-run still off');
+
+    // And it is really armed, not just reporting so.
+    assert.equal(lifecycle.compact('nobody', 'nobody-discord:0.0').outcome, 'dry-run');
+  } finally {
+    lifecycle.setRunner(null);
+  }
 });
 
 test('the browser fallback descriptions match the engine word for word', async () => {
@@ -1771,15 +1802,35 @@ test('an unexpected failure never puts an errno or a path on screen', () => {
   assert.doesNotMatch(errorAnswer({ code: 'ENOENT', message: '/Users/example/secret' }).error, /Users/);
 });
 
+test('a session with ten panes still targets the lowest, not the lexicographic first', () => {
+  // ⚠️ `String('0.10') < String('0.2')` is true. The pane this picks becomes
+  // the card's `target`, which is where `/clear` and `/compact` keystrokes are
+  // sent — so a string compare here is a targeting decision for destructive
+  // input. Restoring the lexicographic compare fails this.
+  const status = require('./engine/status');
+  const lines = [];
+  for (let i = 0; i < 12; i += 1) lines.push(`zeta-discord\t0.${i}\t2.1.212\t0\tIdle`);
+  const roster = status.onePanePerSession(status.parsePanes(lines.join('\n')));
+  assert.equal(roster.length, 1);
+  assert.equal(roster[0].target, 'zeta-discord:0.0');
+
+  // And across windows, not just panes.
+  const across = status.onePanePerSession(status.parsePanes([
+    'zeta-discord\t10.0\t2.1.212\t0\tIdle',
+    'zeta-discord\t9.0\t2.1.212\t0\tIdle',
+  ].join('\n')));
+  assert.equal(across[0].target, 'zeta-discord:9.0');
+});
+
 test('the status payload says which actions would be refused', async () => {
   // ⚠️ Pins the `may` block, which had NO test: deleting it from /api/status
   // left 247 green, and the browser then reads `may.ok === false` as false for
   // all three and re-enables every option — the "offer an action that cannot
   // work" state the block exists to remove.
   const board = JSON.parse((await req('/api/status')).body);
-  const asking = (board.agents || []).find((a) => a.state === 'needs_you');
+  const asking = await refusingAgent();
   const ready = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
-  assert.ok(asking && ready, 'the synthetic roster no longer covers both cases');
+  assert.ok(ready, 'the synthetic roster has no actionable agent');
 
   for (const action of ['compact', 'clear', 'restart']) {
     assert.ok(ready.may && ready.may[action], `no verdict for ${action} on a ready agent`);
@@ -1873,15 +1924,34 @@ test('the screenshot fixture roster is a shape the product actually produces', (
 
   assert.ok(fixture.AGENTS.length >= 3, 'the fixture no longer covers enough states');
 
+  // ⚠️ Per-agent, not "every agent must be actionable". The blanket form
+  // forbade the roster from containing a REFUSING agent — which meant the
+  // refused-option UI, the newest thing on the most dangerous screen, was the
+  // one state the fixture was structurally unable to render, and so had no
+  // screenshot. An assertion that makes a state unphotographable is worse than
+  // the drift it was guarding against.
+  //
+  // What still has to hold is that each agent's verdicts follow from its own
+  // state, so the fixture cannot depict a permission the product would not
+  // grant.
   for (const agent of fixture.AGENTS) {
+    const actionable = agent.state === 'idle' || agent.state === 'working';
     for (const action of ['compact', 'clear', 'restart']) {
       const verdict = lifecycle.mayTypeInto(action, agent);
-      assert.equal(verdict.ok, true,
-        `the fixture's ${agent.sessionName} would be refused ${action} `
-        + `("${verdict.because}"), so every screenshot of it is of a state the `
-        + 'product does not produce');
+      const expected = action === 'restart' ? true : actionable;
+      assert.equal(verdict.ok, expected,
+        `the fixture's ${agent.sessionName} (${agent.state}) got ${verdict.ok} for `
+        + `${action} but the product gives ${expected}, so a screenshot of it `
+        + 'shows a state the product does not produce');
     }
   }
+
+  // And at least one of each, so both the offered and refused renderings can be
+  // photographed at all.
+  assert.ok(fixture.AGENTS.some((a) => a.state === 'idle' || a.state === 'working'),
+    'no fixture agent is actionable');
+  assert.ok(fixture.AGENTS.some((a) => a.state !== 'idle' && a.state !== 'working'),
+    'no fixture agent is refused, so the refused UI cannot be screenshotted');
 
   // ⚠️ And the states the SCREENSHOTS are supposed to demonstrate are all
   // present. Plan item 5.4 asks for every dialog state; a roster that quietly
@@ -1947,6 +2017,15 @@ test('every await in the destructive handler is followed by a still-my-dialog ch
   assert.ok(checks >= awaits,
     `${awaits} awaits but only ${checks} still-my-dialog checks: at least one `
     + 'continuation can repaint a dialog that now belongs to another agent');
+
+  // ⚠️ The CATCH block specifically, because counting is positional-blind and
+  // missed a real hole: two rejection paths throw before the first in-try
+  // check, and the catch wrote its message into whatever dialog was open.
+  const catchAt = handler.indexOf('} catch (err) {');
+  assert.notEqual(catchAt, -1, 'the catch block has been restructured');
+  const firstStatement = handler.slice(catchAt + '} catch (err) {'.length).trim();
+  assert.ok(firstStatement.startsWith('if (!stillMine()) return;'),
+    'the catch block writes to the dialog before checking it is still ours');
 
   // And the epoch is bumped where a new decision begins, so reopening the
   // dialog for the SAME agent also invalidates an in-flight response.

@@ -1618,7 +1618,9 @@ function renderFresh(a) {
   // added to describe correctly.
   let losesAll;
   if (h.state === 'holding' && n) {
-    losesAll = `: all ${n} item${n === 1 ? '' : 's'} above.`;
+    // "all 1 item above" is what the naive plural gives, and it reads as a
+    // machine talking. One item does not need the word "all".
+    losesAll = n === 1 ? ': the one item above.' : `: all ${n} items above.`;
   } else if (h.state === 'clear') {
     losesAll = ', and it reported that is nothing.';
   } else {
@@ -1668,6 +1670,10 @@ function openFresh(sessionName, returnTo) {
 
 function closeFresh() {
   document.getElementById('fresh-scrim').hidden = true;
+  // Escaping out of an in-flight action left this true until the first
+  // dialog's `finally` ran, which suppressed the live refresh for whatever
+  // dialog was opened next.
+  FRESH_BUSY = false;
   FRESH_FOR = null;
   FRESH_TOKEN = null;
   // ⚠️ Re-find the button rather than holding the ELEMENT. `tick` replaces the
@@ -1903,6 +1909,18 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       FRESH_TOKEN = null;
     }
   } catch (err) {
+    // ⚠️ Before writing anything. Two rejection paths throw BEFORE the first
+    // `stillMine()` inside the try: the fetch's own `.catch` (board stopped,
+    // request aborted) and a non-JSON body. `msg` was captured at click time,
+    // so without this the sentence "That did not go through. The board may have
+    // stopped." lands in whatever dialog is open now, about a different agent.
+    // Not destructive, since the POST target and token are captured before any
+    // await, but it is the same class the epoch guard exists for.
+    //
+    // (The first attempt at this fix went into `tick()`'s catch instead, where
+    // `stillMine` is not even in scope. Caught by the test below, which is the
+    // only reason it is not still there.)
+    if (!stillMine()) return;
     msg.textContent = err.message;
     // ⚠️ Keyed on a CODE, not on the wording.
     //

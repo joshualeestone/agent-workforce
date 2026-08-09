@@ -187,6 +187,41 @@ const AGENTS = [
       editable: false,
     },
   },
+  {
+    sessionName: 'edda',
+    name: 'Edda',
+    nameDerived: true,
+    role: 'contracts',
+    modelName: 'Claude Opus 5',
+    // ⚠️ The one state the fixture could not previously render. The refused
+    // option UI — greyed card, "Not available: …", disabled button — is the
+    // newest thing on the most dangerous screen in the product, and it had no
+    // screenshot because the roster was all-healthy by construction.
+    state: 'needs_you',
+    stateConfidence: 'scraped',
+    because: 'the pane is showing a question',
+    task: 'Waiting on you',
+    isAgentPane: true,
+    isAgentSession: true,
+    isFleetSession: true,
+    hasAvatar: false,
+    target: 'edda-discord:0.0',
+    context: { tokens: 300000, percent: 30, confidence: 'structured', because: 'read from the transcript' },
+    commitments: {
+      state: 'holding',
+      because: 'it reported these itself',
+      reportedAt: NOW,
+      token: 'holding:fixture222222222222222222222222',
+      commitments: [
+        { id: 'e1', what: 'Read the amended terms before Friday', createdAt: NOW, source: 'agent' },
+      ],
+    },
+    instructions: {
+      state: 'current',
+      because: 'this agent started after the file was last edited',
+      version: 'sha256:fixture',
+    },
+  },
 ];
 
 function serve(req, res) {

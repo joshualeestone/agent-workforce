@@ -225,24 +225,35 @@ every time. Compact and Clear work; Restart does not.
     set -e
     BOT="$1"
     [ -z "$BOT" ] && { echo "usage: restart-bot.sh <agent>"; exit 1; }
+    # ⚠️ Absolute, for the same reason step 9's plist sets PATH: this runs from
+    # launchd and from the board, neither of which inherits your shell's PATH.
+    # A bare `tmux` here fails, the script takes the "did not come back" branch,
+    # and the board tombstones the commitments of an agent that returned
+    # perfectly healthy.
+    TMUX_BIN="${TMUX_BIN:-/opt/homebrew/bin/tmux}"
+    [ -x "$TMUX_BIN" ] || TMUX_BIN="$(command -v tmux)" 
     PLIST="$HOME/Library/LaunchAgents/com.$BOT.discord.plist"
-    [ -f "$PLIST" ] && echo "Error: No launchd service found for '$BOT'" >/dev/null
     if [ ! -f "$PLIST" ]; then echo "Error: No launchd service found for '$BOT'"; exit 1; fi
     launchctl stop "com.$BOT.discord" 2>/dev/null || true
     launchctl start "com.$BOT.discord"
     sleep 8
-    if tmux has-session -t "$BOT-discord" 2>/dev/null; then
+    if $TMUX_BIN has-session -t "$BOT-discord" 2>/dev/null; then
       echo "OK: $BOT-discord tmux session is running"
     else
       echo "Error: $BOT-discord did not come back"; exit 1
     fi
-    if tmux capture-pane -p -t "$BOT-discord" -S -50 | grep -q "bypass permissions"; then
+    if $TMUX_BIN capture-pane -p -t "$BOT-discord" -S -50 | grep -q "bypass permissions"; then
       echo "OK: bypass permissions is ON"
     else
       echo "WARN: bypass permissions not confirmed yet"
     fi
     SH
     chmod +x ~/.claude/bin/restart-bot.sh
+
+⚠️ **This is a minimal reconstruction, not a copy of the fleet's script.** The
+one on this machine differs (different sleep pattern, and it warns rather than
+failing when the session does not return). What matters is the contract below,
+not the implementation.
 
 ⚠️ The two `OK:` lines are not decoration. The board parses for **both** before
 it will report a restart as done, precisely so it cannot tell you an agent came

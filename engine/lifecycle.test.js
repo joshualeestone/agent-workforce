@@ -293,12 +293,19 @@ test('the cost of each action is stated by the engine, not by the screen', () =>
   assert.match(lifecycle.ACTIONS.restart.what, /re-reads its instructions/);
 });
 
-test('the real restart script exists and is executable', () => {
+test('the real restart script exists and is executable', (t) => {
   // ⚠️ Asserts only that the blessed path is present. It is never RUN: this
   // machine has thirteen live agents and a test that restarts one is worse
   // than no test at all.
   const real = path.join(os.homedir(), '.claude', 'bin', 'restart-bot.sh');
-  if (!fs.existsSync(real)) return; // not a fleet machine
+  if (!fs.existsSync(real)) {
+    // ⚠️ Say it out loud. A bare `return` here printed a green tick for a test
+    // that asserted nothing, which is the failure mode this suite has already
+    // been caught by: a skip that looks like a pass tells you the opposite of
+    // what happened.
+    t.skip('no restart script on this machine, so there is nothing to check');
+    return;
+  }
   const mode = fs.statSync(real).mode & 0o111;
   assert.notEqual(mode, 0, 'the restart script is not executable');
 });
