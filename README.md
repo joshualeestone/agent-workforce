@@ -7,8 +7,15 @@ Claude subscription.
 
 It shows you what the agents on this machine are doing, and it can now change
 some of what they are: their picture, what you call their job, and the
-instruction file each one reads when it starts. It cannot start, stop or
-message any of them yet.
+instruction file each one reads when it starts. It can also give an agent a
+fresh start: compact, clear, or restart. It cannot message one yet.
+
+⚠️ Clearing or restarting an agent destroys its conversation, and with it every
+commitment that conversation was carrying. Nothing backs that up and nothing
+undoes it. So the fresh-start dialog lists what the agent said it was holding
+**before** you choose, and when it cannot vouch for that list it says so
+instead of showing you an empty one. An empty list reads as "nothing to lose",
+which is the one wrong answer here.
 
 ⚠️ That instruction file is the real thing an agent boots from, not a copy, so
 editing it here changes how that agent behaves the next time it starts. The

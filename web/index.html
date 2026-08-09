@@ -220,6 +220,24 @@ svg { display: block; }
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
   border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
 }
+/* ⚠️ A refused editor must LOOK refused. The box is `disabled` in every
+   cannot-show state, but a disabled textarea renders identically to an editable
+   one in this stylesheet, so the screen that had just said "this cannot be
+   edited" still presented a large, inviting, apparently-typeable box directly
+   underneath. Someone clicks in, types, and nothing happens, with no
+   explanation attached to the thing that ignored them.
+
+   `not-allowed` rather than `default` on the cursor: the pointer is the only
+   feedback available to someone who tries it before reading the sentence. */
+/* ⚠️ `--label-2` (0.60), NOT `--label-3` (0.42). WCAG exempts disabled controls
+   from the contrast rule, and this box is exactly the case where taking that
+   exemption is wrong: a disabled editor can still be holding the operator's
+   instruction text, and greying it to 0.42 puts that text at 2.98:1 on the
+   sunken background — unreadable, on the screen whose entire job is showing you
+   what an agent boots from. 0.60 measures 5.1:1 and still reads as inactive. */
+#d-instr:disabled {
+  background: var(--bg-sunken); color: var(--label-2); cursor: not-allowed; resize: none;
+}
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 
@@ -231,6 +249,11 @@ svg { display: block; }
   background: var(--warn-bg); color: var(--label);
   font: var(--text-callout) var(--font-ui); line-height: 1.45;
 }
+/* The fresh-start button under the staleness note. It reads as part of that
+   note, so it sits tight under it and keeps its distance from the editor below
+   — otherwise it looks like a control belonging to the textarea it is touching,
+   which is the one thing it must not be mistaken for. */
+#d-instr-fresh { margin: calc(-1 * var(--space-3)) 0 var(--space-4); }
 .card-stale {
   display: inline-flex; align-items: center; gap: 4px;
   margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
@@ -369,6 +392,12 @@ svg { display: block; }
     <label class="flabel" for="d-instr">What they should focus on</label>
     <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
+    <!-- ⚠️ OUTSIDE the live region above, deliberately. That region is
+         `aria-live="polite"` and re-announces on mutation, so a control living
+         inside it would be re-read on every poll that touched the text. It is
+         also hidden independently: the button belongs to `stale`, and the
+         `unknown` state must not offer a fix for a problem it cannot confirm. -->
+    <button class="btn" id="d-instr-fresh" type="button" hidden></button>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
          never calls that function at all and renders a permanently enabled,
@@ -699,8 +728,14 @@ async function tick() {
     // passively, and silence reads as "all fine". If this stops updating, the
     // stamp goes stale visibly rather than the board freezing on a happy picture.
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
-    checked.className = 'checked' + (age > 30 ? ' stale' : '');
-    checked.innerHTML = 'checked<strong>' + (age < 5 ? 'just now' : age + ' seconds ago') + '</strong>';
+    // ⚠️ `!(age <= 30)`, not `age > 30`. An unparseable `checkedAt` makes `age`
+    // NaN, and every comparison against NaN is false — so the old form quietly
+    // took the NOT-stale branch and the board looked freshly checked at the one
+    // moment it could not say when it was checked. Written inverted so the
+    // unknown case falls to the flagged side, which is the rule this codebase
+    // is built on.
+    checked.className = 'checked' + (age <= 30 ? '' : ' stale');
+    checked.innerHTML = 'checked<strong>' + esc(ageText(age)) + '</strong>';
     // ⚠️ Says whether the poll actually succeeded. It swallowed its own failure
     // and returned nothing, so a caller that re-read `LAST` afterwards could
     // not tell fresh data from the data it already had, and the fresh-start
@@ -1010,6 +1045,44 @@ async function loadInstructions(sessionName) {
  * apply." re-announced every five seconds, forever. Measured with a
  * MutationObserver: three mutations in sixteen seconds for one distinct string.
  */
+/**
+ * The freshness stamp's wording, in units a person reads at a glance.
+ *
+ * ⚠️ This had no buckets at either end, and both ends are reachable.
+ *
+ * At the top: it printed raw seconds forever, so a page left open overnight,
+ * or a server whose clock is months off, said "17824112 seconds ago". That is
+ * the load-bearing stamp on a board whose whole argument is that silence must
+ * not read as "all fine" — and an unreadable number is a kind of silence.
+ *
+ * At the bottom: `age` is a difference between the BROWSER's clock and the
+ * SERVER's, and nothing makes those agree. A client running a few seconds
+ * behind produced "-4 seconds ago", which reads as a broken page rather than a
+ * fresh one. Clamped, because the honest reading of a small negative age is
+ * "as current as we can tell", not "the future".
+ */
+function ageText(age) {
+  if (!Number.isFinite(age)) return 'at an unknown time';
+  if (age < 5) return 'just now';
+  if (age < 60) return `${age} seconds ago`;
+  // ⚠️ Each cut-off is the NEXT unit's 1, not a comfortable-looking round
+  // number. The first version used 90/90/36, which reads fine and means every
+  // singular branch here is unreachable: 90 seconds rounds to "2 minutes ago",
+  // so "1 minute ago" can never print, and the same for the hour and the day.
+  // A pluralisation rule that cannot fire is not a rule, it is three dead
+  // branches that look like care. The test pins each singular.
+  if (age < 3600) {
+    const mins = Math.round(age / 60);
+    return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  }
+  if (age < 86400) {
+    const hours = Math.round(age / 3600);
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.round(age / 86400);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 function setLive(el, html) {
   if (el.innerHTML === html) return;
   el.innerHTML = html;
@@ -1017,6 +1090,10 @@ function setLive(el, html) {
 
 function renderStale(s) {
   const el = document.getElementById('d-instr-stale');
+  const btn = document.getElementById('d-instr-fresh');
+  // The button is hidden by default on every pass and re-shown only by the
+  // `stale` branch below, so no earlier state can leave it behind on screen.
+  if (!btn.hidden) btn.hidden = true;
   if (!s || s.state === 'current') {
     if (!el.hidden) { el.hidden = true; el.textContent = ''; }
     return;
@@ -1035,13 +1112,19 @@ function renderStale(s) {
       + (edited && started
         ? `Edited ${esc(edited)}, running since ${esc(started)}. `
         : '')
-      // ⚠️ Says what restarting MEANS and that this app cannot do it. The line
-      // used to read only "Restart to apply.", which is an instruction to
-      // perform an action the product does not offer and does not explain, on a
-      // screen aimed at someone who does not know what restarting an agent is.
-      // Naming it as a manual step is the honest version until the restart
-      // button exists.
-      + 'Restarting the agent is what applies them, and this app cannot do that yet.');
+      // ⚠️ Says what restarting MEANS, and puts the control that does it right
+      // here. THREE versions of this sentence have been wrong, each in the same
+      // way: it described an action the reader could not take from where they
+      // were standing. "Restart to apply." told someone who does not know what
+      // restarting an agent is to go and do it unaided. "This app cannot do
+      // that yet" became false the moment this card shipped. And the fix for
+      // THAT, "Fresh start, above", pointed at a button that is on the grid
+      // card, not on this panel — false in the same way, written while fixing
+      // the same defect. So the sentence no longer points anywhere: the button
+      // below is the referent.
+      + 'Restarting the agent is what applies them.');
+    btn.textContent = `Give ${CURRENT ? CURRENT.name : 'this agent'} a fresh start`;
+    btn.hidden = false;
     el.hidden = false;
     return;
   }
@@ -1407,7 +1490,12 @@ function openFresh(sessionName, returnTo) {
   if (!a) return;
   FRESH_FOR = a;
   FRESH_TOKEN = holdingToken(a.commitments);
-  // The agent NAME, not the button element: the grid is replaced on every poll.
+  // A SELECTOR, not the button element: the grid is replaced on every poll.
+  // It has to be a selector rather than the agent name because there are now
+  // two ways in — the grid card's ↺ and the staleness note's button on the
+  // detail panel — and the detail panel is not showing the grid, so resolving
+  // the name back to `.fresh[data-fresh=…]` would find nothing and focus would
+  // silently land on <body> for everyone who came in the second way.
   FRESH_RETURN = returnTo || null;
 
   const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
@@ -1437,8 +1525,23 @@ function closeFresh() {
   // from the document by the first poll and focus was silently never restored
   // for any dialog open longer than that.
   if (FRESH_RETURN) {
-    const live = document.querySelector(`.fresh[data-fresh="${CSS.escape(FRESH_RETURN)}"]`);
-    if (live) live.focus();
+    // Guarded: FRESH_RETURN is a selector now, and a malformed one throws out
+    // of `querySelector` rather than returning null. Failing to restore focus
+    // is a defect; throwing on the way out of a dialog leaves the scrim state
+    // half-torn-down, which is worse.
+    let live = null;
+    try { live = document.querySelector(FRESH_RETURN); } catch { live = null; }
+    // ⚠️ The trigger can legitimately be GONE by the time we close, and the
+    // commonest case is the one that matters: restart from the staleness note
+    // succeeds, the instructions stop being stale, `renderStale` hides the very
+    // button that opened this, and focus would land on <body>. So fall back to
+    // something real and in the same place rather than accepting that.
+    if (live && !live.hidden) {
+      live.focus();
+    } else {
+      const back = document.getElementById('detail-back');
+      if (back) back.focus();
+    }
   }
   FRESH_RETURN = null;
 }
@@ -1467,9 +1570,18 @@ document.getElementById('grid').addEventListener('click', (e) => {
   const fresh = e.target.closest('.fresh');
   if (fresh) {
     e.stopPropagation();   // do not also open the detail panel
-    openFresh(fresh.dataset.fresh, fresh.dataset.fresh);
+    openFresh(fresh.dataset.fresh, `.fresh[data-fresh="${CSS.escape(fresh.dataset.fresh)}"]`);
   }
 }, true);
+
+// The second way in: the staleness note on the detail panel. Reads CURRENT
+// rather than a captured name, because the panel can be showing a different
+// agent by the time this fires, and the whole dialog is about destroying the
+// right one's conversation.
+document.getElementById('d-instr-fresh').addEventListener('click', () => {
+  if (!CURRENT) return;
+  openFresh(CURRENT.sessionName, '#d-instr-fresh');
+});
 
 document.getElementById('fresh-cancel').addEventListener('click', closeFresh);
 document.getElementById('fresh-scrim').addEventListener('click', (e) => {

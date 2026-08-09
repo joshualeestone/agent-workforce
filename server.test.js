@@ -1365,6 +1365,93 @@ test('the browser fallback descriptions match the engine word for word', async (
   }
 });
 
+/**
+ * Pull a top-level `function <name>(...) { ... }` out of the page and return it
+ * as a callable.
+ *
+ * ⚠️ The page has no build step and no module system, so there is nothing to
+ * require. The alternative is a test that re-implements the function and then
+ * asserts its own copy is correct, which is the species of test that passes
+ * while the shipped code is broken. This evaluates the REAL text.
+ *
+ * It throws rather than returning null when the function cannot be found, so
+ * deleting or renaming `ageText` fails this file loudly instead of silently
+ * skipping the assertions that pin it.
+ */
+function pageFunction(name) {
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const start = page.indexOf(`function ${name}(`);
+  if (start === -1) throw new Error(`web/index.html no longer defines ${name}()`);
+
+  // Brace-match from the first `{` after the signature. Crude, and sufficient:
+  // these are small pure helpers with no braces inside string literals.
+  const open = page.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < page.length; i += 1) {
+    if (page[i] === '{') depth += 1;
+    else if (page[i] === '}') {
+      depth -= 1;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end === -1) throw new Error(`could not find the end of ${name}()`);
+  // eslint-disable-next-line no-new-func
+  return new Function(`${page.slice(start, end)}; return ${name};`)();
+}
+
+test('the freshness stamp stays readable at both ends of the range', () => {
+  const ageText = pageFunction('ageText');
+
+  // The ordinary case, unchanged.
+  assert.equal(ageText(0), 'just now');
+  assert.equal(ageText(4), 'just now');
+  assert.equal(ageText(20), '20 seconds ago');
+
+  // ⚠️ The top end. This printed raw seconds with no upper bucket, so a page
+  // left open, or a server clock months out, rendered "17824112 seconds ago" as
+  // the freshness stamp on a board whose argument is that a stale reading must
+  // be legible as stale. An unreadable number is not a legible warning.
+  assert.equal(ageText(17824112), '206 days ago');
+  assert.equal(ageText(300), '5 minutes ago');
+  assert.equal(ageText(7200), '2 hours ago');
+
+  // ⚠️ Every singular, because the first set of cut-offs (90s / 90min / 36h)
+  // made all three unreachable: 90 seconds rounds to "2 minutes", so "1 minute
+  // ago" could never print. Three dead branches that read as careful.
+  assert.equal(ageText(60), '1 minute ago');
+  assert.equal(ageText(3600), '1 hour ago');
+  assert.equal(ageText(86400), '1 day ago');
+
+  // ⚠️ The bottom end. `age` subtracts the SERVER's clock from the BROWSER's,
+  // and nothing makes those agree, so a client a few seconds behind produced
+  // "-4 seconds ago" — which reads as a broken page, not a fresh one.
+  assert.equal(ageText(-4), 'just now');
+  assert.equal(ageText(-9999), 'just now');
+
+  // An unparseable timestamp must say so rather than rendering "NaN seconds ago".
+  assert.equal(ageText(NaN), 'at an unknown time');
+});
+
+test('an unreadable check time is flagged stale, not silently treated as fresh', () => {
+  // ⚠️ Pins the direction of the comparison, not the wording. The stamp read
+  // `age > 30 ? ' stale' : ''`, and every comparison against NaN is false, so an
+  // unparseable `checkedAt` took the NOT-stale branch: the board looked freshly
+  // checked at the exact moment it could not say when it had been checked.
+  //
+  // Deleting the inverted form and restoring `age > 30` fails this test.
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const stamp = page.match(/checked\.className\s*=\s*'checked'\s*\+\s*\(([^)]*)\)/);
+  assert.ok(stamp, 'the freshness stamp no longer sets its own class');
+
+  // Evaluate the real expression against NaN and assert it lands on stale.
+  // eslint-disable-next-line no-new-func
+  const decide = new Function('age', `return (${stamp[1]});`);
+  assert.equal(decide(NaN), ' stale', 'an unknown age renders as freshly checked');
+  assert.equal(decide(5), '', 'a recent check is wrongly flagged stale');
+  assert.equal(decide(120), ' stale', 'an old check is not flagged');
+});
+
 test('the action descriptions are served from the engine', async () => {
   // So the dialog cannot describe an action differently from the code that
   // performs it. The instruction editor shipped that exact bug.

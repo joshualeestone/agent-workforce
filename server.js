@@ -5,8 +5,10 @@
  *
  * Binds to localhost only, and it WRITES: it stores avatars, roles, the
  * commitments each agent says it is holding, and the instruction file each
- * agent reads at startup. It does not yet send input to an
- * agent or start or stop one.
+ * agent reads at startup. It also compacts, clears and restarts them, which
+ * are the first operations here that touch a running process rather than a
+ * file, and the first that can destroy something no backup covers. See
+ * `engine/lifecycle.js`.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
