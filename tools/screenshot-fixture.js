@@ -60,6 +60,7 @@ const AGENTS = [
     task: 'Summarise the Q3 supplier quotes',
     isAgentPane: true,
     isAgentSession: true,
+    isFleetSession: true,
     hasAvatar: false,
     target: 'aria-discord:0.0',
     context: {
@@ -100,6 +101,7 @@ const AGENTS = [
     task: 'Reconciling the July statements',
     isAgentPane: true,
     isAgentSession: true,
+    isFleetSession: true,
     hasAvatar: false,
     target: 'bram-discord:0.0',
     context: {
@@ -130,6 +132,7 @@ const AGENTS = [
     task: 'Confirm the Thursday slot with the venue',
     isAgentPane: true,
     isAgentSession: true,
+    isFleetSession: true,
     hasAvatar: false,
     target: 'cleo-discord:0.0',
     context: { tokens: 60000, percent: 6, confidence: 'structured', because: 'read from the transcript' },
@@ -163,6 +166,7 @@ const AGENTS = [
     task: 'Waiting',
     isAgentPane: true,
     isAgentSession: true,
+    isFleetSession: true,
     hasAvatar: false,
     target: 'dov-discord:0.0',
     context: { tokens: null, percent: null, confidence: 'unknown', because: 'no transcript was found for it' },

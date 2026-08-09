@@ -1848,3 +1848,111 @@ test('the status payload carries staleness but NOT the instruction text', async 
   assert.ok(JSON.stringify(body).length < 200 * 1024,
     `status payload is ${JSON.stringify(body).length} bytes; the text is probably riding along`);
 });
+
+// ---------------------------------------------------------------------------
+// The screenshot fixture
+// ---------------------------------------------------------------------------
+
+test('the screenshot fixture roster is a shape the product actually produces', () => {
+  // ⚠️ The fixture roster is a HAND-WRITTEN copy of the snapshot shape, and
+  // nothing required it to stay in step with the engine — the whole file had
+  // zero test coverage.
+  //
+  // The cost, measured: splitting `isAgentSession` into three tiers added
+  // `isFleetSession`, which is what `mayTypeInto('restart', …)` reads. The
+  // fixture was not updated, so every committed screenshot of this branch's
+  // headline feature showed **Restart greyed out under a false refusal**, on
+  // the card whose entire subject is Restart. The fixture calls the real
+  // `mayTypeInto` specifically so it cannot claim the product allows something
+  // it does not — and it spent a release claiming the exact reverse.
+  //
+  // So this asserts the property rather than the field: every fixture agent
+  // must get the verdicts the product would really give it.
+  const lifecycle = require('./engine/lifecycle');
+  const fixture = require('./tools/screenshot-fixture');
+
+  assert.ok(fixture.AGENTS.length >= 3, 'the fixture no longer covers enough states');
+
+  for (const agent of fixture.AGENTS) {
+    for (const action of ['compact', 'clear', 'restart']) {
+      const verdict = lifecycle.mayTypeInto(action, agent);
+      assert.equal(verdict.ok, true,
+        `the fixture's ${agent.sessionName} would be refused ${action} `
+        + `("${verdict.because}"), so every screenshot of it is of a state the `
+        + 'product does not produce');
+    }
+  }
+
+  // ⚠️ And the states the SCREENSHOTS are supposed to demonstrate are all
+  // present. Plan item 5.4 asks for every dialog state; a roster that quietly
+  // lost one would satisfy the loop above while shipping a gap.
+  const states = new Set(fixture.AGENTS.map((a) => a.commitments.state));
+  for (const needed of ['holding', 'clear', 'unknown']) {
+    assert.ok(states.has(needed), `no fixture agent is in the ${needed} state`);
+  }
+});
+
+test('every await in the destructive handler is followed by a still-my-dialog check', () => {
+  // ⚠️ The most serious defect found on this branch, and the one the test
+  // suite cannot drive directly: it is browser async control flow, and there is
+  // no DOM here.
+  //
+  // The sequence: open the dialog for A, click Restart (the script sleeps about
+  // eight seconds), press Escape, open the dialog for B. A's response lands and
+  // reassigns `FRESH_FOR`/`FRESH_TOKEN` to A and repaints the options with A's
+  // data, while the heading still reads "Give B a fresh start" because only
+  // `openFresh` writes it. The next click destroys A's conversation from a
+  // dialog that names B. On the one screen whose thesis is that you saw the
+  // cost before you paid it.
+  //
+  // Every other async handler on this page re-checks after its awaits that the
+  // panel still belongs to the agent it started on. This one, the only one that
+  // destroys something, did not.
+  //
+  // So this pins the PROPERTY that regresses — an `await` whose continuation
+  // touches dialog state without re-checking — rather than the behaviour, which
+  // is honest about what it can and cannot reach. Plan item 5.3 asks for
+  // anything unpinnable to be declared; this is the closest to pinning it gets.
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  const start = page.indexOf("document.getElementById('fresh-options').addEventListener('click'");
+  assert.notEqual(start, -1, 'the fresh-start action handler has been renamed or removed');
+  const end = page.indexOf('\n});', start);
+  assert.notEqual(end, -1, 'could not find the end of the action handler');
+  // ⚠️ COMMENTS STRIPPED FIRST. The first version of this test matched the word
+  // "awaits" inside its own explanatory comment and failed against correct
+  // code. A source-level assertion that cannot tell code from prose is the
+  // brittle-test failure this file has already been burned by once.
+  const handler = page.slice(start, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+  // The guard exists and is defined before the first await.
+  assert.match(handler, /const stillMine = \(\) =>/, 'the stillMine guard is gone');
+  assert.ok(handler.indexOf('const stillMine') < handler.search(/\bawait\b/),
+    'the guard is defined after the first await, so the first continuation is unguarded');
+
+  // ⚠️ Counted, not merely present. One `stillMine()` somewhere would satisfy a
+  // naive check while three other continuations stayed open — which is exactly
+  // the shape of the original bug, where the 409 path was guarded and the
+  // success path was not.
+  const awaits = (handler.match(/\bawait\b/g) || []).length;
+  const checks = (handler.match(/stillMine\(\)/g) || []).length;
+  assert.ok(awaits >= 3, `expected several awaits in this handler, found ${awaits}`);
+  // ⚠️ `>= awaits`, not `>= awaits - 1`. The looser form was measured to let a
+  // guard be deleted without failing: five awaits, five checks, and removing
+  // one still satisfied `4 >= 4`. A threshold with slack in it is not a
+  // threshold, and this is the assertion that stands in for a behaviour test
+  // the suite cannot run.
+  assert.ok(checks >= awaits,
+    `${awaits} awaits but only ${checks} still-my-dialog checks: at least one `
+    + 'continuation can repaint a dialog that now belongs to another agent');
+
+  // And the epoch is bumped where a new decision begins, so reopening the
+  // dialog for the SAME agent also invalidates an in-flight response.
+  assert.match(page, /FRESH_EPOCH \+= 1;[\s\S]{0,400}?const forEpoch = FRESH_EPOCH;/,
+    'the action does not take an epoch, so it cannot tell one decision from the next');
+  const openFresh = page.slice(page.indexOf('function openFresh('));
+  assert.match(openFresh.slice(0, 600), /FRESH_EPOCH \+= 1;/,
+    'reopening the dialog does not invalidate an in-flight response');
+});
