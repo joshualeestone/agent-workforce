@@ -1528,6 +1528,63 @@ test('a destructive action tombstones what it destroyed', async (t) => {
   }
 });
 
+test('a NON-destructive action leaves the commitment record alone', () => {
+  // ⚠️ The other half of the tombstone guard, and it was unpinned: only the
+  // `true` case had a test. Replacing `invalidatesCommitments(action, result)`
+  // with `true` — so a COMPACT, a refusal, or a dry-run tombstones a live
+  // record — failed nothing. The one route test that reaches a 200 with
+  // compact asserts nothing about the record, and the next test to touch that
+  // agent reseeds it through `report()`, which clears the tombstone.
+  //
+  // Compact is the gentlest action and the visually primary button. Having it
+  // silently mark an agent's commitments as destroyed would turn the safest
+  // thing on the screen into the most damaging.
+  const lifecycle = require('./engine/lifecycle');
+
+  // Unit half: the decision itself.
+  const asked = { outcome: lifecycle.OUTCOME.ASKED, mayHaveLanded: true };
+  assert.equal(lifecycle.invalidatesCommitments('compact', asked), false,
+    'compact was treated as destroying the conversation');
+  assert.equal(lifecycle.invalidatesCommitments('clear', asked), true);
+});
+
+test('compact does not tombstone what the agent is holding', async (t) => {
+  // The CALL SITE half, driven through the real route with dry-run off and an
+  // injected runner, the same containment the clear test uses.
+  const lifecycle = require('./engine/lifecycle');
+  const commitments = require('./engine/commitments');
+
+  const board = JSON.parse((await req('/api/status')).body);
+  const target = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
+  if (!target) { t.skip('no actionable agent on the synthetic roster'); return; }
+
+  lifecycle.setRunner(() => '');
+  try {
+    lifecycle.setDryRun(false);
+    commitments.report(target.sessionName, [{ what: 'work that must survive a compact' }]);
+
+    const fresh = JSON.parse((await req('/api/status')).body);
+    const now = fresh.agents.find((a) => a.sessionName === target.sessionName);
+    const res = await req(`/api/agent/${encodeURIComponent(target.sessionName)}/compact`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: now.commitments.token }),
+    });
+    assert.equal(res.status, 200, JSON.parse(res.body).because || res.body);
+    assert.equal(JSON.parse(res.body).reconciled, null,
+      'compact reported reconciling a record it should not have touched');
+
+    const after = commitments.read(target.sessionName);
+    assert.equal(after.state, commitments.STATE.HOLDING,
+      'a compact marked the agent\'s commitments as destroyed');
+    assert.equal(after.commitments.length, 1);
+    assert.ok(!after.commitments[0].destroyed, 'the surviving item was marked destroyed');
+  } finally {
+    lifecycle.setDryRun(true);
+    lifecycle.setRunner(null);
+  }
+});
+
 test('dry-run cannot be switched off while the real runner is installed', () => {
   // ⚠️ The invariant that makes `setDryRun` safe to exist at all. Without it
   // this is a switch that disarms the fleet-wide protection on a machine with

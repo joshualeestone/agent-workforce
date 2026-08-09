@@ -338,20 +338,16 @@ function read(agent) {
   // code removed it. Keeping the items is what lets the board say what was lost.
   if (rec.destroyedAt) {
     return {
-      // ⚠️ ONE sentence, and an attempt at two is recorded here rather than
-      // shipped. Two situations reach this branch: a record that is only a
-      // tombstone (the items ARE what was destroyed) and one that has been
-      // added to since (the items are post-clear). They want different wording,
-      // and `commitments.length` cannot tell them apart — both are non-empty.
-      // Distinguishing them needs the record to mark which items post-date the
-      // tombstone, which is a store change for a path no route reaches today:
-      // `add` is library-only, and the UI writes through `report`.
-      //
-      // So this keeps the sentence that is right for the case that actually
-      // renders, and the merge bug (post-clear items joining the destroyed
-      // list, making them indistinguishable) is fixed in `add` instead — which
-      // was the part that mattered.
-      ...unknown('we cleared its conversation, so it can no longer tell us what it was holding'),
+      // ⚠️ Two situations reach here and they now have different sentences,
+      // because `markDestroyed` marks the items it destroyed. A record that is
+      // only a tombstone lists what was destroyed. A record added to since also
+      // holds something the agent said afterwards, and calling that un-tellable
+      // is the store asserting something plainly false about work it can point
+      // at. An earlier attempt keyed this on `commitments.length`, which cannot
+      // tell them apart because both are non-empty.
+      ...unknown(rec.commitments.some((c) => c && c.destroyed !== true)
+        ? 'we cleared its conversation, so anything it has not told us since is lost to us'
+        : 'we cleared its conversation, so it can no longer tell us what it was holding'),
       reportedAt: rec.reportedAt,
       destroyedAt: rec.destroyedAt,
       commitments: rec.commitments,
@@ -435,12 +431,17 @@ function sanitise(commitments) {
     const createdAt = supplied && !Number.isNaN(Date.parse(supplied))
       ? supplied
       : new Date().toISOString();
-    return {
+    const out = {
       id: String((c && c.id) || crypto.randomUUID()).slice(0, 80),
       what: what.slice(0, 300),
       createdAt,
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
+    // Carried through, never invented: only `markDestroyed` sets this, and a
+    // rewrite that dropped it would quietly turn destroyed work back into
+    // current work.
+    if (c && c.destroyed === true) out.destroyed = true;
+    return out;
   });
 }
 
@@ -556,6 +557,13 @@ function capForDisplay(commitments) {
       what: String(c.what).trim().slice(0, 300),
       createdAt: String(c.createdAt).slice(0, 40),
       source: String(c.source).slice(0, 40),
+      // ⚠️ Carried, not dropped. This function rebuilds each item field by
+      // field on the way OUT, which is right — it is what stops a hand-edited
+      // record serving an unbounded value — and it silently discarded the
+      // tombstone marker, so `markDestroyed` wrote a flag that `read` then
+      // threw away. Exactly one boolean, and only ever true when the record on
+      // disk already said so: never invented here.
+      ...(c.destroyed === true ? { destroyed: true } : {}),
     }));
   } catch {
     return null;
@@ -600,23 +608,18 @@ function add(agent, what) {
   // is sanitised. Re-running sanitise() over the existing list rewrote an
   // unparseable createdAt to `now`, silently reversing the read path's
   // never-invent rule through the convenience API.
-  // ⚠️ After a TOMBSTONE the destroyed items are not a base to extend.
+  // ⚠️ Destroyed items are KEPT and the new one simply joins them, because
+  // `markDestroyed` marks each item it destroyed. Two earlier versions of this
+  // line each solved half the problem and broke the other half: merging made
+  // the new item indistinguishable from the destroyed ones (so the read path
+  // called a post-clear commitment un-tellable), and dropping them lost the
+  // only surviving account of what was destroyed — which is the loss this
+  // store exists to prevent, so it was the worse of the two.
   //
-  // `preserveDestroyed` stopped `add`/`resolve` laundering a tombstone away and
-  // re-publishing destroyed work at full confidence. It also created the
-  // inverse: the new item was MERGED into the destroyed list, so the two became
-  // indistinguishable and `read()` answered "we cleared its conversation, so it
-  // can no longer tell us what it was holding" about a commitment made after
-  // the clear.
-  //
-  // The new item replaces the destroyed list rather than joining it. The
-  // tombstone stays, because `add` is not the agent re-asserting what it holds
-  // — only `report` is, and that distinction is the one this store is built on.
-  // So the record still reads `unknown`: we know one thing it is holding and
-  // cannot vouch for the rest, which is exactly true.
-  const base = rec.destroyedAt ? [] : rec.commitments;
-
-  const next = [...base, ...sanitise([{ what }])];
+  // The tombstone stays either way: `add` is not the agent re-asserting what it
+  // holds, only `report` is, and that distinction is what this store is built
+  // on.
+  const next = [...rec.commitments, ...sanitise([{ what }])];
   if (isStale(rec)) {
     return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, true);
   }
@@ -747,6 +750,21 @@ function markDestroyed(agent) {
   if (raw.name !== String(agent)) return false;
 
   raw.destroyedAt = new Date().toISOString();
+  // ⚠️ Mark WHICH items the tombstone is about, rather than relying on
+  // "everything currently in the list".
+  //
+  // Without this the store had to choose between two bad answers when an item
+  // arrived after the clear: merge it (and the read path then says "we cleared
+  // its conversation, so it can no longer tell us what it was holding" about a
+  // commitment made afterwards) or drop the destroyed items (and lose the only
+  // surviving account of what was destroyed, which is the loss this store
+  // exists to prevent). Both were shipped in turn. Marking them costs one
+  // boolean and makes the question answerable.
+  if (Array.isArray(raw.commitments)) {
+    raw.commitments = raw.commitments.map((c) => (
+      c && typeof c === 'object' && !Array.isArray(c) ? { ...c, destroyed: true } : c
+    ));
+  }
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));

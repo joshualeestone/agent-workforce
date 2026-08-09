@@ -1193,18 +1193,27 @@ test('adding to a destroyed record does not re-publish what we destroyed', () =>
     'a destroyed record was re-published as confident by an add');
   assert.ok(after.destroyedAt, 'the tombstone was erased');
 
-  // ⚠️ And the destroyed items are NOT carried alongside the new one.
+  // ⚠️ Destroyed work is KEPT, and is DISTINGUISHABLE from what came after.
   //
-  // `preserveDestroyed` stopped the tombstone being laundered away, and created
-  // the inverse: the post-clear item was MERGED into the destroyed list, so the
-  // two became indistinguishable and `read()` said "we cleared its conversation,
-  // so it can no longer tell us what it was holding" over a commitment made
-  // after the clear. The record could never recover.
-  //
-  // The tombstone stays (only `report` is the agent re-asserting what it
-  // holds), but the destroyed items do not come back.
-  assert.deepEqual(after.commitments.map((x) => x.what), ['a brand new thing said after the clear'],
-    'destroyed work was re-listed alongside a commitment made after the clear');
+  // Three versions of this shipped in turn, and the middle two each fixed half
+  // of it:
+  //   merge      -> the new item became indistinguishable from the destroyed
+  //                 ones, so read() called a post-clear commitment un-tellable
+  //   drop        -> the destroyed items vanished, losing the only surviving
+  //                 account of what was destroyed, which is the loss this
+  //                 store exists to prevent
+  //   mark        -> markDestroyed stamps the items it destroyed, so both
+  //                 questions are answerable and nothing is thrown away
+  const destroyed = after.commitments.filter((x) => x.destroyed === true);
+  const since = after.commitments.filter((x) => x.destroyed !== true);
+  assert.deepEqual(destroyed.map((x) => x.what), ['the thing that was destroyed with the conversation'],
+    'the record of what was destroyed was thrown away');
+  assert.deepEqual(since.map((x) => x.what), ['a brand new thing said after the clear'],
+    'the post-clear commitment was not distinguishable from the destroyed ones');
+
+  // And the sentence follows the distinction rather than contradicting it.
+  assert.match(after.because, /anything it has not told us since is lost to us/,
+    'the store called a commitment made after the clear un-tellable');
 
   // But the agent SPEAKING for itself is exactly what should clear it.
   c.report(agent, [{ what: 'what I am actually holding now that I am back' }]);
