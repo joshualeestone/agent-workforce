@@ -491,7 +491,15 @@ function invalidatesCommitments(action, result) {
 }
 
 module.exports = {
-  ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN, setDryRun,
+  ACTIONS, OUTCOME, RESTART_SCRIPT, setDryRun,
+  // ⚠️ A GETTER, not the value. `DRY_RUN` was exported by value, so
+  // `lifecycle.DRY_RUN` froze at module load and could never reflect
+  // `setDryRun()` — a second copy of the fleet-wide safety flag that silently
+  // disagreed with the real one. Harmless while only a test read it; wrong the
+  // first time anything checks it before doing something destructive. Exactly
+  // the one-fact-two-derivations shape this module's comments are written
+  // against, in the module's own public surface.
+  get DRY_RUN() { return DRY_RUN; },
   safeTarget, safeServiceName, sendCommand, restart, clear, compact, perform, setRunner,
   invalidatesCommitments, mayTypeInto,
 };

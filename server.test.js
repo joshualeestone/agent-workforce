@@ -104,25 +104,77 @@ test.after(() => {
 });
 
 /**
- * An agent name the write routes will accept, or null with a VISIBLE skip.
+ * A SYNTHETIC roster, installed for the whole file.
  *
- * `knownAgent()` guards the write routes and `server.js` destructures
- * `snapshot()` at import, so the roster cannot be stubbed from here. That makes
- * these two tests dependent on live tmux state, which is worth saying out loud
- * rather than papering over: a silent early return prints a tick for a test
- * that asserted nothing, and a hard failure makes the suite unrunnable on CI.
+ * ⚠️ Every test of this feature's safety surface used to source its agent from
+ * the LIVE roster, and an earlier version of this comment argued that was
+ * unavoidable ("`server.js` destructures `snapshot()` at import, so the roster
+ * cannot be stubbed from here"). That was wrong: the seam is INSIDE
+ * `engine/status.js`, below the import boundary, so a destructured reference
+ * goes through it too. Verified, not assumed.
+ *
+ * The cost of believing it was unavoidable: measured on a machine with the
+ * roster forced empty, `node --test server.test.js` reported 41 passed, 0
+ * failed, 19 SKIPPED — and the nineteen were the cross-site guard, the
+ * confirmation token, the alias guard, the `mayTypeInto` call site and the
+ * tombstone. A suite that goes green on a laptop with no agents while testing
+ * none of the dangerous paths is worse than one that fails, because it reports
+ * success for work it did not do.
+ *
+ * ⚠️ Synthetic names, deliberately. Pointing these at a real agent meant every
+ * run wrote commitment records and instruction files keyed to a colleague's
+ * name, and left the roster's real names in temp directories. `zeta` and `yara`
+ * exist nowhere on this machine.
+ *
+ * Both halves are needed: a pane list alone yields agents whose panes cannot be
+ * captured, so they classify `unknown` and the action routes correctly refuse
+ * them, which would leave the interesting tests skipping for a new reason.
+ */
+const status = require('./engine/status');
+
+const FAKE_PANES = [
+  'zeta-discord\t0.0\t2.1.212\t0\tSummarising the quarterly quotes',
+  'yara-discord\t0.0\tnode\t0\tReconciling the July statements',
+  // ⚠️ An agent in a REFUSING state, present on purpose. Without one, the test
+  // that pins the route's `mayTypeInto` call site — the single line stopping a
+  // bare Enter from confirming a permission prompt — skipped for a new reason
+  // even after the roster became ours. A synthetic fleet made entirely of
+  // healthy agents cannot exercise the guard that exists for unhealthy ones.
+  'xander-discord\t0.0\tclaude\t0\tWaiting on you',
+].join('\n');
+
+const FAKE_CAPTURE = {
+  // "Worked for" is what the classifier reads as finished-and-waiting.
+  'zeta-discord:0.0': 'Worked for 2m 14s\n> \n',
+  // A spinner in the title is what reads as working; the tail just has to not
+  // contain a question or a rate-limit marker.
+  'yara-discord:0.0': 'esc to interrupt\n',
+  // A permission prompt: the exact pane where a stray Enter would confirm Yes.
+  'xander-discord:0.0': 'Do you want to proceed?\n\u276f 1. Yes\n  2. No\n',
+};
+
+test.before(() => {
+  status.setPaneSource(() => FAKE_PANES);
+  status.setPaneCapture((target) => FAKE_CAPTURE[target] || '');
+});
+test.after(() => {
+  status.setPaneSource(null);
+  status.setPaneCapture(null);
+});
+
+/**
+ * An agent name the write routes will accept.
+ *
+ * No longer conditional, and no longer able to skip: the roster is ours.
  */
 async function anyAgent(t) {
   const board = await req('/api/status');
   if (!board.type.includes('application/json')) {
-    t.skip('the status engine did not return a board on this machine');
+    t.skip('the status engine did not return a board at all');
     return null;
   }
   const agents = JSON.parse(board.body).agents || [];
-  if (!agents.length) {
-    t.skip('no live agents on this machine, so the write routes cannot be exercised');
-    return null;
-  }
+  assert.ok(agents.length, 'the synthetic roster did not reach the server');
   return encodeURIComponent(agents[0].sessionName);
 }
 
@@ -1454,27 +1506,32 @@ test('the browser fallback descriptions match the engine word for word', async (
   // has already drifted once: the first version said compact "loses nothing",
   // which is the one claim the engine was reworded to stop making.
   const engine = JSON.parse((await req('/api/actions')).body);
-  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  // ⚠️ EVALUATE the fallback, do not grep for its strings.
+  //
+  // This asserted `page.includes(engine[id].what)` — a substring match anywhere
+  // in an 1,800-line, comment-dense file. Proved by mutation: replacing the
+  // fallback with `let ACTIONS = {};` and moving the original object into a
+  // block comment left this test, and every other test in the file, green —
+  // while every `?fresh=` deep link and every render before `/api/actions`
+  // resolves would throw in `optionBlock` reading `act.gentlest` of undefined.
+  //
+  // A test that passes because the values it wants appear SOMEWHERE in the file
+  // is not testing the code, it is testing the comments.
+  const fallback = pageValue('ACTIONS');
 
   for (const id of ['compact', 'clear', 'restart']) {
-    assert.ok(page.includes(engine[id].what), `the page's fallback "what" for ${id} has drifted`);
-    assert.ok(page.includes(engine[id].loses), `the page's fallback "loses" for ${id} has drifted`);
-    assert.ok(page.includes(`label: '${engine[id].label}'`), `the page's fallback label for ${id} has drifted`);
+    assert.ok(fallback[id], `the page has no fallback for ${id} at all`);
+    assert.equal(fallback[id].what, engine[id].what, `the page's fallback "what" for ${id} has drifted`);
+    assert.equal(fallback[id].loses, engine[id].loses, `the page's fallback "loses" for ${id} has drifted`);
+    assert.equal(fallback[id].label, engine[id].label, `the page's fallback label for ${id} has drifted`);
+    // `gentlest` decides which button is visually primary. If the engine moved
+    // it, a fallback still marking Compact primary would put the wrong
+    // recommendation on the most destructive screen in the product, and no
+    // assertion on wording would notice.
+    assert.equal(fallback[id].gentlest, engine[id].gentlest,
+      `the page marks ${id} differently from the engine`);
   }
-
-  // ⚠️ `gentlest` too, not just the prose. It decides which button is visually
-  // primary, and the fallback is what renders for every `?fresh=` deep link and
-  // every render before `/api/actions` resolves. If the engine ever moved
-  // `gentlest` to a different action, a fallback still marking Compact primary
-  // would put the wrong recommendation on the most destructive screen here —
-  // and no assertion on wording would notice.
-  const gentlestInEngine = ['compact', 'clear', 'restart'].filter((id) => engine[id].gentlest);
-  assert.deepEqual(gentlestInEngine, ['compact'], 'the engine changed which action is gentlest');
-  const fallbackGentlest = [...page.matchAll(/(\w+): \{ label: '[^']*', gentlest: (true|false)/g)]
-    .filter((m) => m[2] === 'true')
-    .map((m) => m[1]);
-  assert.deepEqual(fallbackGentlest, gentlestInEngine,
-    'the page marks a different action gentlest than the engine does');
 });
 
 /**
@@ -1490,6 +1547,34 @@ test('the browser fallback descriptions match the engine word for word', async (
  * deleting or renaming `ageText` fails this file loudly instead of silently
  * skipping the assertions that pin it.
  */
+/**
+ * Read a top-level `let <name> = { … };` out of the page and return the value.
+ *
+ * Same reasoning as `pageFunction`: there is no build step and no module
+ * system, so the alternative to evaluating the real text is grepping for
+ * strings — which passes when the code is gone as long as the strings survive
+ * in a comment.
+ */
+function pageValue(name) {
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const start = page.search(new RegExp(`^(?:let|const|var)\\s+${name}\\s*=\\s*\\{`, 'm'));
+  if (start === -1) throw new Error(`web/index.html no longer defines ${name}`);
+
+  const open = page.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < page.length; i += 1) {
+    if (page[i] === '{') depth += 1;
+    else if (page[i] === '}') {
+      depth -= 1;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end === -1) throw new Error(`could not find the end of ${name}`);
+  // eslint-disable-next-line no-new-func
+  return new Function(`return (${page.slice(open, end)});`)();
+}
+
 function pageFunction(name) {
   const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const start = page.indexOf(`function ${name}(`);
@@ -1543,6 +1628,52 @@ test('the freshness stamp stays readable at both ends of the range', () => {
 
   // An unparseable timestamp must say so rather than rendering "NaN seconds ago".
   assert.equal(ageText(NaN), 'at an unknown time');
+});
+
+test('the DOING NOW badge errs toward over-warning, never toward under-warning', () => {
+  // ⚠️ This decides the wireframe's central callout and had no test at all.
+  //
+  // The two states are NOT symmetric, which is the whole reason the rule is
+  // strict. `promised` is what the dialog calls dangerous, so a false DOING NOW
+  // SUPPRESSES the warning ("Angel is not visibly working on any of these") and
+  // quietly removes an item from the count of dangerous ones. A false PROMISED
+  // merely over-warns. One direction loses commitments; the other annoys.
+  const visiblyDoing = pageFunction('visiblyDoing');
+
+  // The real case: the task line describes the same work.
+  assert.equal(visiblyDoing({ what: 'Reconciling the July supplier statements' },
+    'Reconciling the July supplier statements'), true);
+
+  // ⚠️ The measured false positive that motivated the rule. A pane's task line
+  // is often a BRANCH NAME, not a description of work, and two shared words was
+  // enough for `add-editable-agent-detail` to match an unrelated commitment on
+  // "detail" and "agent", badge it DOING NOW, and drop it from the count.
+  assert.equal(visiblyDoing({ what: 'Detail the agent handover notes' },
+    'add-editable-agent-detail'), false,
+    'a branch name matched an unrelated commitment and suppressed the warning');
+
+  // ⚠️ Distinct words, not a count. Counting duplicates let a task line of
+  // "Detail: detail" satisfy ">= 2" on a single real match.
+  assert.equal(visiblyDoing({ what: 'Detail the handover' }, 'Detail: detail'), false,
+    'a repeated word was counted twice and re-opened the false DOING NOW');
+
+  // Every word of the task must appear, not merely most of them.
+  assert.equal(visiblyDoing({ what: 'Draft the supplier note' },
+    'Draft the supplier invoice'), false);
+
+  // A single shared long word is never enough.
+  assert.equal(visiblyDoing({ what: 'Reconciling the statements' }, 'Reconciling'), false);
+
+  // No task line at all is not evidence of doing anything.
+  assert.equal(visiblyDoing({ what: 'anything at all here' }, ''), false);
+  assert.equal(visiblyDoing({ what: 'anything at all here' }, null), false);
+
+  // An empty commitment cannot match either.
+  assert.equal(visiblyDoing({ what: '' }, 'Reconciling the July statements'), false);
+
+  // Short words are noise and are dropped, so a task made only of them cannot
+  // match anything.
+  assert.equal(visiblyDoing({ what: 'do the a of it' }, 'do the a of it'), false);
 });
 
 test('an unreadable check time is flagged stale, not silently treated as fresh', () => {

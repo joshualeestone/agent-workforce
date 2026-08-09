@@ -70,6 +70,10 @@ photograph, live task lines and a dated obligation naming a person, before
 anyone noticed. Adding a second way to render the screen was the fix; asking
 people to remember was not.
 
+⚠️ **Forward fix only.** Some of those images are already in this repository's
+history, and re-shooting them does not remove the blobs. Settle that before
+making this repository public.
+
 ### Probing the restart, clear and compact routes by hand
 
 Set `AGENT_WORKFORCE_DRY_RUN=1` first. Always.

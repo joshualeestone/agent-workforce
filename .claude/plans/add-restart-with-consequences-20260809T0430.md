@@ -141,6 +141,35 @@ Verified on this machine, not assumed:
 - **Restarting anything that is not a fleet agent with a launchd service.**
 - **Undo.** There is none for a clear. That is the reason the dialog exists.
 
+## ⚠️ OUTSTANDING, and not fixed by this branch: live data in `main`'s history
+
+Recorded here because everything else about this incident reads as solved, and
+a fix that is only half done is most dangerous when the story around it sounds
+finished.
+
+**What is fixed.** This branch introduced two screenshots of the real fleet and
+they are gone from its history: the commit that added them was dropped and the
+branch rebuilt (tree verified byte-identical). Every screenshot in the repo is
+now rendered by `tools/screenshot-fixture.js` against an invented roster, and
+that tool exists so the disclosure rule finally has a mechanism behind it rather
+than a reminder.
+
+**What is NOT fixed.** `main` already carries three screenshots from PR #20,
+and they are still reachable in its history. They show a real agent name, its
+live task line, and instruction text naming a commercial partner. Re-shooting
+them at the tip, which this branch does, does not remove the blobs.
+
+The repo's own `.gitignore` header says it is private now, public later, and to
+treat every commit as public. So this must be resolved **before** the repo is
+made public, and it cannot be resolved from a feature branch: it needs a history
+rewrite of a pushed `main`, which is the operator's call.
+
+- [ ] Decide: rewrite `main`'s history, squash the repo, or accept and fix at
+      the moment of publication.
+- [ ] Whoever flips this repo to public checks this box first.
+
+Raised with Josh on 2026-08-09; no decision yet at the time of writing.
+
 ## The thing to watch, carried from #9
 
 Five of the nine blockers in #9's challenge loop were in code added *during* the

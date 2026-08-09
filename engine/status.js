@@ -273,7 +273,32 @@ function onePanePerSession(panes) {
   return [...bySession.values()];
 }
 
+/**
+ * Where a pane's visible text comes from. The companion to `setPaneSource`.
+ *
+ * ⚠️ Both seams exist for one reason, and it is a coverage reason rather than a
+ * convenience one. Every test of this feature's safety surface sourced its
+ * agent from the LIVE roster, so on a machine without a running fleet the whole
+ * surface skipped and the suite still reported green: measured at 19 skips,
+ * including the cross-site guard, the confirmation token, the alias guard, the
+ * `mayTypeInto` call site and the tombstone. A suite that passes on a laptop
+ * with no agents while testing none of the dangerous paths is worse than one
+ * that fails.
+ *
+ * `setPaneSource` alone was not enough: a synthetic pane has no real tmux
+ * session, so `capturePane` returns null and every agent classifies `unknown`,
+ * which the action routes correctly refuse. Both halves are needed to describe
+ * an agent that is idle and actionable.
+ *
+ * Read-only, like its companion: this replaces where the TEXT comes from and
+ * nothing about what is done with it, so neither seam can reach an agent.
+ */
+let paneCapture = null;
+
+function setPaneCapture(fn) { paneCapture = typeof fn === 'function' ? fn : null; }
+
 function capturePane(target, lines = 40) {
+  if (paneCapture) return paneCapture(target, lines);
   return sh('tmux', ['capture-pane', '-p', '-t', target, '-S', `-${lines}`]);
 }
 
@@ -749,7 +774,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, onePanePerSession, setPaneSource, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

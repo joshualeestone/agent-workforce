@@ -450,6 +450,28 @@ const server = http.createServer((req, res) => {
         // poll to render a badge. The text is fetched once, by the detail page,
         // when someone actually opens it.
         instructions: instructions.staleness(a.sessionName),
+        // ⚠️ Whether each action would be REFUSED, decided by the same function
+        // the route decides with.
+        //
+        // The dialog offered all three whatever the agent's state, so for an
+        // agent showing a question or sitting on a rate limit the visually
+        // primary GENTLEST button was guaranteed to come back 409. That is the
+        // offer-an-action-that-cannot-work state the instruction editor was
+        // explicitly changed to remove, reinstated on the more dangerous
+        // screen, and it trains exactly the click-through this card exists to
+        // prevent.
+        //
+        // Computed HERE from `lifecycle.mayTypeInto` rather than re-derived in
+        // the browser from `state` and `isAgentPane`. Those fields are all in
+        // this payload, so the screen could have worked it out itself — and
+        // that would be a second copy of the rule that decides whether a
+        // destructive action is allowed, drifting from the first. The button is
+        // disabled by the answer, not by a lookalike of it.
+        may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
+          const verdict = lifecycle.mayTypeInto(action, a);
+          acc[action] = { ok: verdict.ok, because: verdict.because || null };
+          return acc;
+        }, {}),
       }));
       body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {

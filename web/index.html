@@ -283,6 +283,12 @@ svg { display: block; }
 #d-instr:disabled {
   background: var(--bg-sunken); color: var(--label-2); cursor: not-allowed; resize: none;
 }
+/* A refused option reads as unavailable without disappearing: someone needs to
+   see that Compact exists and why it is not on offer right now, or the dialog
+   looks like it is missing a feature. */
+.opt.refused { opacity: 0.72; }
+.opt.refused h4, .opt.refused p { color: var(--label-2); }
+.why-not { margin-top: 4px; font: var(--text-caption) var(--font-ui); color: var(--label); }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 
@@ -701,7 +707,17 @@ async function tick() {
     // about what is being approved.
     if (FRESH_FOR && !document.getElementById('fresh-scrim').hidden) {
       const now = LAST.find((x) => x.sessionName === FRESH_FOR.sessionName);
-      if (now && holdingToken(now.commitments) === FRESH_TOKEN && now.task !== FRESH_FOR.task) {
+      // ⚠️ NOT while an action is in flight. `renderFresh` replaces the whole
+      // of `#fresh-options`, so a poll landing mid-action swapped the disabled
+      // buttons for freshly enabled ones — and the `finally` that re-enables
+      // them holds references to nodes that are no longer in the document. The
+      // token is still valid at that moment (nothing is tombstoned until the
+      // action returns), so a second click would be accepted: double-submit
+      // re-opened on the one dialog built to make the action deliberate.
+      //
+      // Most reachable on restart, where the script sleeps eight seconds and
+      // covers one or two polls.
+      if (!FRESH_BUSY && now && holdingToken(now.commitments) === FRESH_TOKEN && now.task !== FRESH_FOR.task) {
         FRESH_FOR = now;
         renderFresh(now);
       }
@@ -1394,6 +1410,10 @@ document.getElementById('d-save').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 
 let FRESH_FOR = null;      // the agent the dialog is open for
+// ⚠️ True from the click until the action settles. The poll must not repaint
+// the option buttons while one is in flight: doing so replaces the disabled
+// buttons with enabled ones and detaches the nodes the `finally` re-enables.
+let FRESH_BUSY = false;
 let FRESH_TOKEN = null;    // what it was holding when we showed you
 let FRESH_RETURN = null;   // the control to give focus back to
 
@@ -1512,7 +1532,7 @@ function li(c, task) {
   return `<li><span class="badge">${doing ? 'DOING NOW' : 'PROMISED'}</span><span>${esc(c.what)}</span></li>`;
 }
 
-function optionBlock(id, act, losesAll) {
+function optionBlock(id, act, losesAll, may) {
   // The cost comes from the ENGINE, not from copy written beside the button,
   // so the screen cannot describe an action differently from the thing that
   // performs it.
@@ -1536,14 +1556,18 @@ function optionBlock(id, act, losesAll) {
   const cost = act.gentlest
     ? `Loses ${act.loses}.`
     : `Loses ${act.loses}${losesAll || '.'}`;
-  return `<div class="opt ${act.gentlest ? 'gentlest' : ''}">
+  // ⚠️ An action the server would refuse is shown REFUSED, with the server's
+  // own sentence, rather than offered and then 409'd on click.
+  const refused = may && may.ok === false;
+  return `<div class="opt ${act.gentlest ? 'gentlest' : ''} ${refused ? 'refused' : ''}">
     ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
     <div>
       <h4>${esc(act.label)}</h4>
       <p>${esc(act.what)}</p>
       <div class="cost">${esc(cost)}</div>
+      ${refused ? `<div class="why-not">Not available: ${esc(may.because || 'we cannot do this right now')}.</div>` : ''}
     </div>
-    <button class="btn ${act.gentlest ? 'primary' : ''}" data-act="${id}">${esc(act.label)}</button>
+    <button class="btn ${act.gentlest ? 'primary' : ''}" data-act="${id}"${refused ? ' disabled' : ''}>${esc(act.label)}</button>
   </div>`;
 }
 
@@ -1588,9 +1612,9 @@ function renderFresh(a) {
 
   document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
   document.getElementById('fresh-options').innerHTML =
-    optionBlock('compact', ACTIONS.compact, losesAll)
-    + optionBlock('clear', ACTIONS.clear, losesAll)
-    + optionBlock('restart', ACTIONS.restart, losesAll);
+    optionBlock('compact', ACTIONS.compact, losesAll, (a.may || {}).compact)
+    + optionBlock('clear', ACTIONS.clear, losesAll, (a.may || {}).clear)
+    + optionBlock('restart', ACTIONS.restart, losesAll, (a.may || {}).restart);
 }
 
 function openFresh(sessionName, returnTo) {
@@ -1735,6 +1759,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
   const forAgent = FRESH_FOR.sessionName;
   const msg = document.getElementById('fresh-msg');
   const buttons = [...document.querySelectorAll('#fresh-options button')];
+  FRESH_BUSY = true;
   buttons.forEach((b) => { b.disabled = true; });
   // ⚠️ Move focus BEFORE the browser drops it. Disabling the button that was
   // just activated makes `activeElement` fall back to `<body>`, which strands a
@@ -1869,7 +1894,11 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       }
     }
   } finally {
-    buttons.forEach((b) => { b.disabled = false; });
+    FRESH_BUSY = false;
+    // Re-enable whatever is on screen NOW, not the nodes captured at click
+    // time: several paths above replace `#fresh-options` wholesale, and the
+    // captured list is then detached from the document.
+    [...document.querySelectorAll('#fresh-options button')].forEach((b) => { b.disabled = false; });
   }
 });
 

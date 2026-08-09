@@ -18,6 +18,12 @@
  * in direct conflict, and the rule lost quietly. So the fix is not "remember
  * harder", it is a second way to render the screen.
  *
+ * ⚠️ This is the FORWARD fix only. Three screenshots taken the same way are
+ * already merged to `main` and remain in its history; re-shooting at the tip
+ * does not remove a blob. That is tracked in the plan file for this branch and
+ * has to be settled before the repo is made public. Read this comment as "it
+ * cannot happen again", not as "it has been undone".
+ *
  * It reads nothing. No tmux, no launchd, no commitment store, no worker
  * directory, no `~/Library/Application Support`. The roster below is invented,
  * which is the whole point: there is no path from this process to anything
@@ -53,6 +59,7 @@ const AGENTS = [
     because: 'it finished and is waiting for you',
     task: 'Summarise the Q3 supplier quotes',
     isAgentPane: true,
+    isAgentSession: true,
     hasAvatar: false,
     target: 'aria-discord:0.0',
     context: {
@@ -92,6 +99,7 @@ const AGENTS = [
     because: 'it is producing output right now',
     task: 'Reconciling the July statements',
     isAgentPane: true,
+    isAgentSession: true,
     hasAvatar: false,
     target: 'bram-discord:0.0',
     context: {
@@ -121,6 +129,7 @@ const AGENTS = [
     because: 'it finished and is waiting for you',
     task: 'Confirm the Thursday slot with the venue',
     isAgentPane: true,
+    isAgentSession: true,
     hasAvatar: false,
     target: 'cleo-discord:0.0',
     context: { tokens: 60000, percent: 6, confidence: 'structured', because: 'read from the transcript' },
@@ -153,6 +162,7 @@ const AGENTS = [
     because: 'it finished and is waiting for you',
     task: 'Waiting',
     isAgentPane: true,
+    isAgentSession: true,
     hasAvatar: false,
     target: 'dov-discord:0.0',
     context: { tokens: null, percent: null, confidence: 'unknown', because: 'no transcript was found for it' },
@@ -207,8 +217,20 @@ function serve(req, res) {
     // A fixture that misstates the board's own honesty summary is worse than no
     // fixture: the summary line is the product's headline claim about what it
     // does and does not know, and the documentation image showed it lying.
+    // ⚠️ `may` from the REAL `mayTypeInto`, like `/api/actions` above. Hand-
+    // writing it here would be a fixture asserting the product allows something
+    // it does not, which is the failure mode a fixture is most able to hide.
+    const lifecycle = require(path.join(ROOT, 'engine', 'lifecycle'));
+    const agents = AGENTS.map((a) => ({
+      ...a,
+      may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
+        const verdict = lifecycle.mayTypeInto(action, a);
+        acc[action] = { ok: verdict.ok, because: verdict.because || null };
+        return acc;
+      }, {}),
+    }));
     res.end(JSON.stringify({
-      agents: AGENTS,
+      agents,
       version: '0.1.0',
       checkedAt: new Date().toISOString(),
       counts: {

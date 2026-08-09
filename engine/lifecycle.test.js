@@ -58,11 +58,28 @@ function recorder({ throwOn } = {}) {
  * `AGENT_WORKFORCE_DRY_RUN` is the mechanism everywhere else, and it is the
  * wrong tool here: it makes every action return `DRY_RUN`, which is exactly the
  * outcome vocabulary these tests assert against. So the mechanism for this file
- * is a default that throws. A test that means to run something installs a
- * recorder; a test that forgot gets a loud failure instead of a live agent.
+ * is a default that cannot reach the machine.
+ *
+ * ⚠️ **What this does and does not guarantee**, stated precisely, because the
+ * first version of this comment promised something it did not deliver.
+ *
+ * It DOES guarantee nothing real runs: the runner is replaced, so
+ * `execFileSync` is unreachable whatever a test forgets.
+ *
+ * It does NOT guarantee a loud failure, and claiming so was wrong. `lifecycle`
+ * catches runner throws itself and turns them into ordinary outcomes: measured,
+ * a forgotten recorder yields `clear` → REFUSED "we could not reach that agent
+ * to ask", and `restart` → ASKED "the restart did not finish cleanly". Those are
+ * values several tests in this file legitimately assert, so a test that forgot
+ * `recorder()` can PASS while proving nothing. The flag below is how a reader
+ * tells the two apart.
  */
+let poisonFired = false;
+
 function poison() {
+  poisonFired = false;
   lifecycle.setRunner((file, args) => {
+    poisonFired = true;
     throw new Error(
       'lifecycle.test.js tried to run a real command with no recorder installed: '
       + [file].concat(args || []).join(' ')
@@ -71,8 +88,22 @@ function poison() {
   });
 }
 
+/**
+ * Assert that the test just run actually installed a recorder.
+ *
+ * Called from `afterEach`, so a test that forgot is caught at the end of ITS
+ * OWN run and named, rather than passing quietly on a swallowed error.
+ */
+function assertRecorderWasUsed() {
+  const fired = poisonFired;
+  poisonFired = false;
+  assert.equal(fired, false,
+    'this test reached the poison runner: it acted without installing recorder() first, '
+    + 'and lifecycle swallowed the error into an ordinary outcome, so whatever it asserted proved nothing');
+}
+
 poison();
-test.afterEach(poison);
+test.afterEach(() => { assertRecorderWasUsed(); poison(); });
 
 // ---------------------------------------------------------------------------
 // Containment: these names become tmux targets and launchd services
