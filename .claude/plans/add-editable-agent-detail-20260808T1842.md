@@ -1,0 +1,723 @@
+# Plan: add-editable-agent-detail
+
+**Issue:** joshualeestone/agent-workforce#9, agent detail page, editable
+**Branch:** `add-editable-agent-detail`
+**Reviewer:** `joshualeestone`
+**Author:** Angel
+**Date:** 2026-08-08
+**Wireframe:** `Josh-Brain/Projects/agent-platform-wireframes/screen3-agent-detail.png`
+
+---
+
+## 1. ⚠️ The binding constraint, first
+
+From the card, and it governs everything below:
+
+> **This card IS the first real write surface.** It is safe right now for exactly one reason: the server binds to `127.0.0.1`. There is no auth, no token, no check on who is asking.
+
+**Nothing in this plan binds to anything but loopback.** The tempting one-line change lives in this card's code, which is why the warning is repeated at the top of the plan and not only on the issue.
+
+This branch also adds the **most powerful write yet**: editing the file an agent reads at startup. That is a bigger deal than an avatar, and it is why §5 is the longest section here.
+
+---
+
+## 2. What the wireframe shows that this plan does NOT build
+
+The wireframe is considerably broader than the card, and two parts of it are stale or unbacked. Listing them so the gap is a decision rather than an oversight.
+
+| Wireframe element | Status | Why |
+|---|---|---|
+| **Printed `97%` in the ring** | ⛔️ **Stale** | Contradicts a settled decision: *avatars in the gauge, no printed percentage, coloured arc*. The wireframe predates it. **Do not build it back.** |
+| **Instruction path `~/.claude-workers/angel/CLAUDE.md`** | ⛔️ **Wrong** | Verified: that path does not exist. The real one is `~/work/workers/<agent>/CLAUDE.md`, as the card says. |
+| **Projects Angel can work in** | ⏭️ Deferred | **There is no project data model.** The `projects` in `engine/status.js` are Claude config roots, not agent projects. Building this means inventing the model that #4 and the Joint Projects decision will define. Assuming an answer now bakes it into storage where it is expensive to remove. |
+| **Allowed without asking** (permissions) | ⏭️ Deferred | Same: no data model, and it *is* the permission-posture decision (spec §3), which is explicitly still open with Josh. |
+| **Restart / Stop** | ⏭️ #1 | Next card. #2 just merged, so its confirmation can now enumerate what will be lost. |
+| **Danger zone / Archive** | ⏭️ Not in card scope | Destructive, and it needs the archive semantics deciding first. |
+
+**What that leaves is still the whole point of the card**: the page becomes editable, and the instruction file stops being invisible.
+
+---
+
+## 3. Ordering, taken from the card
+
+The card sets this order deliberately, riskiest last:
+
+1. **Avatar upload**: Josh tests cold and unaided
+2. **Name and role**: config an agent reads at startup
+3. **Instruction file editing**: writes to a live agent's config
+4. **Restart**: #1, separate card
+
+> *"Something usable lands at step 1 rather than step 4, and the risky parts land on fresh judgement rather than at midnight."*
+
+---
+
+## 4. Icons, and the pencil
+
+- [x] **4.1** Adopt **Lucide** (ISC), subset to the icons actually used, **inlined as SVG**. No font file, no network request, no dependency. The repo stays at zero dependencies.
+- [x] **4.2** ⚠️ **Never a CDN.** Two reasons, both from the card: it breaks offline on an always-on Mac that may have no internet, and it phones a third party on every page load from a product whose entire pitch is that nothing of yours leaves your machine. **That sentence cannot be said honestly while the console fetches a remote asset to draw a pencil.**
+- [x] **4.3** Licensing, since this ships commercially: Font Awesome Free is CC BY 4.0 and **requires visible attribution**; Pro is paid per developer. Lucide/Heroicons/Phosphor carry neither. ⚠️ **If Josh wants Font Awesome's shapes specifically, this becomes an attribution line in the UI**, so flag before switching.
+- [x] **4.4** Replace the pencil. It is currently `&#9998;`, a **text character**, so its shape is chosen by the operating system and differs per machine. Flipping the glyph fixes the direction and not the cause; an inline SVG fixes both.
+
+---
+
+## 5. The instruction file: the risky part
+
+**What it is:** `~/work/workers/<agent>/CLAUDE.md`. Verified to exist (mine is 6,715 bytes). It is read **once at session start** and injected into the agent's context.
+
+### 5a. The trap this must not build
+
+Per spec §7, **only restart re-reads config**, and compact and clear do not. So:
+
+> You edit the bio. It saves. The UI shows the new text. **The agent keeps behaving exactly as before.** No error, nothing broken-looking, and the screen is now asserting something untrue.
+
+**A toast on save is not enough.** It disappears on navigation and does nothing when the file is edited outside the app.
+
+- [x] **5.1** ⚠️ **Build it as a STATE, not a message.** Session start is derivable, verified today: the transcript file's `birthtime` matches its first entry's timestamp exactly. Compare that against the instruction file's `mtime`.
+- [x] **5.2** When the file is newer than the session, the card and the detail page both say so:
+      > **Running on older instructions.** Edited 14:12, running since 09:40. Restart to apply.
+- [x] **5.3** It must be correct **when the file is edited outside the app**, which a toast never is. That is the whole reason for deriving it rather than announcing it.
+- [x] **5.4** ⚠️ `birthtime` is reliable on macOS and can be `0` on some Linux filesystems. The product is Mac-only for now, but the code must treat a missing birthtime as **"cannot tell"** rather than as "not stale". Same rule as everywhere else in this codebase: **unknown must never render as healthy.**
+
+### 5b. Writing to it safely
+
+This writes a file a live agent depends on. It is not an avatar.
+
+- [x] **5.5** Write-then-rename, matching `store.writeProfile()` and `commitments.writeRecord()`. A half-written CLAUDE.md is an agent that boots with truncated instructions.
+- [x] **5.6** Resolve the path through one function, and assert the result is inside `~/work/workers/`. The `#2` review found that three separate `path.join` derivations let a traversal test pass against a vulnerable build. **One derivation.**
+- [x] **5.7** Size cap, and refuse a write that would empty the file. An empty CLAUDE.md is an agent with no instructions at all.
+- [x] **5.8** Refuse to create the file if the agent has no worker directory. Creating one invents an agent.
+- [x] **5.9** Never surface a raw errno: it carries the absolute path. House rule, and `#2` shipped a violation of it.
+
+### 5c. The layering warning
+
+The card is explicit, and it is about a mental model rather than a feature:
+
+> The wireframe shows instructions as **one editable box**, which asserts *everything here is yours to change*. The moment a company policy layer exists that is false.
+
+- [~] **5.10** **Label the box with where its contents come from.** PARTIAL, and corrected after a reviewer checked the shipped text against this box. The label reads "What they should focus on", which names the purpose rather than the provenance; the provenance survives only in the hint ("Your words") and the "Saved to <path>" footer. That is weaker than this box claimed, and it makes the later read-only "Company policy" block slightly less obviously additive than the rationale assumed. That is cheap, honest today, and makes a second read-only "Company policy" block **additive rather than a redesign**.
+- [x] **5.11** ⚠️ **Do not build a layer system.** There is one layer. Building an unused abstraction is the speculative-scaffolding failure Josh has already ruled against once this week. The label is the whole mitigation.
+
+---
+
+## 6. Name, role, model
+
+- [x] **6.1** **Role** already works. Keep it.
+- [ ] **6.2** ⛔️ **NOT BUILT.** **Name**: the status engine carries `name` and `nameDerived`, so a display name that overrides the derived one goes in the existing profile store. It does **not** rename the tmux session.
+- [ ] **6.3** ⛔️ **N/A, 6.2 not built.** ⚠️ **Name is used as a store key elsewhere.** `#18` is open precisely because `safeKey` collisions and non-canonical names break the write routes. A display-name override must **not** become a second identity: `sessionName` stays the key everywhere.
+- [ ] **6.4** ⛔️ **NOT BUILT.** **Model, shown read-only**, with the wireframe's own honest line: *"Changing this restarts Angel. You will be shown what it is working on before anything is lost."* The dropdown lands with #1, because the sentence is only true once the restart control and the commitment store are both there. **#2 merged today, so half of that is now real.**
+
+---
+
+## 7. Tests
+
+Matching the existing pattern: `node --test`, no framework, zero dependencies.
+
+- [x] **7.1** Stale detection: file newer than session → stale; older → not; **missing birthtime → cannot tell, never "fresh"**.
+- [x] **7.2** Path traversal through the **real read and write paths**, not a helper. A record fixture whose own name is the attack string, so the path guard cannot be covered for by another guard. (This is exactly how `#2`'s traversal test passed against a vulnerable build for three revisions.)
+- [x] **7.3** Write-then-rename leaves no temp file on failure, and a failed write leaves the original intact.
+- [x] **7.4** An empty or oversized instruction body is refused.
+- [x] **7.5** A write outside `~/work/workers/` is impossible.
+- [x] **7.6** The route answers JSON, never the HTML page, with and without a query string. (`#16`'s bug class.)
+- [x] **7.7** Every guard verified by **removing it and confirming a named test fails**. Any guard that cannot be pinned gets said out loud in a comment rather than implied.
+
+---
+
+## 8. Definition of done
+
+1. `npm test` green, still zero dependencies.
+2. The pencil is an inline SVG pointing the way Josh asked, and no icon is fetched from a network.
+3. The instruction file is editable in the app, with its real path shown.
+4. **An agent running on older instructions says so, and keeps saying so after a page reload and after an edit made outside the app.**
+5. Nothing binds to anything but `127.0.0.1`.
+6. `/challenge-loop` to convergence or an explicit stop, proof committed.
+7. Screenshots in the PR and posted to Discord before merge.
+
+---
+
+## 9. Two things I want Josh to decide
+
+Neither blocks starting; both change the finished screen.
+
+1. **Icon set.** Lucide unless he wants Font Awesome's shapes specifically, in which case an attribution line goes in the UI.
+2. **Whether the instruction editor ships behind anything.** It writes the file a live agent boots from. It is safe on loopback, and it is the single most powerful thing on this page. If he would rather it land after #10 rather than before, that is a reasonable call and the rest of the card still ships without it.
+
+---
+
+## ⛔️ Ticked in error, then corrected
+
+The checkboxes above were first ticked with a blanket find-and-replace, which
+marked **6.2 (name editing)** and **6.4 (the model note)** as done when neither
+was built. Corrected before the checkpoint. Recording it because a plan that
+claims work it did not do is the same failure this branch's sibling spent eleven
+review rounds removing from comments, and a bulk edit is exactly how it happens.
+
+**Not built, and deferred deliberately:**
+
+- **6.2 / 6.3 Name editing.** The display name is derived by the status engine
+  and `sessionName` is the key for the avatar, profile and commitment stores. A
+  display-name override is a small feature with a sharp edge (#18 is open
+  precisely because non-canonical names break the write routes), and it does not
+  belong in the same PR as the instruction editor.
+- **6.4 The model note.** Model already shows in the meta line. The honest
+  sentence the wireframe carries -- *"Changing this restarts Angel. You will be
+  shown what it is working on before anything is lost."* -- is only true once
+  the restart control exists, which is #1. Adding the dropdown now would promise
+  something the page cannot do.
+
+## Execution record, 2026-08-08
+
+**Josh's two decisions:** Lucide, and the instruction editor ships before #10.
+
+### Verified before building on it
+
+- **Session start IS derivable.** The transcript file's `birthtime` matches its own first entry's timestamp exactly. `tmux`'s `pane_start_time` is unsupported here and was the obvious wrong route.
+- **The wireframe's instruction path is wrong.** `~/.claude-workers/…` does not exist; `~/work/workers/<agent>/CLAUDE.md` does.
+- **`transcriptFor` was not exported.** Exported it rather than re-deriving, since a second copy is exactly the multiple-derivation problem that let the commitment store's traversal test pass against a vulnerable build.
+
+### Decisions taken during the build
+
+- **Staleness rides on `/api/status`; the TEXT does not.** The board polls every five seconds for thirteen agents and the real files are several KB each. Carrying the text would put ~90KB per poll on the wire to render a badge. Measured payload with staleness only: **12KB for 13 agents.**
+- **The card shows a mark only for a POSITIVE stale finding.** `unknown` shows nothing there: a card has no room to explain, and a warning glyph that might mean "we cannot tell" reads as "something is wrong". The detail page has the room and says which it is.
+- **Warn colours added as tokens** for both themes, because the existing palette had none. The plan's CSS was first written against invented variable names; checking the real token block caught it before it shipped as silently-unstyled markup.
+
+### Honestly declared, not implied
+
+The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearing today** and removing it leaves the suite green, because `safeKey` strips separators first. It stays because the consequence of safeKey ever changing is a traversal *write*. Both the code and the test say so, rather than leaving a traversal-named test looking like it covers both guards.
+
+### Guards verified by removing them
+
+| Guard removed | Result |
+|---|---|
+| Missing-timestamp becomes comparable | fails |
+| Empty instruction file allowed | fails |
+| is-a-file guard | fails |
+| size half of the read guard | fails |
+| `lstat` to `stat` on the FILE (symlink) | fails |
+| `lstat` to `stat` on the DIRECTORY (symlink) | fails |
+| `dirEscapes` in `inspect` (read and staleness share it) | fails |
+| `dirEscapes` on the WRITE path | fails |
+| The linked-folder check in `status.readIdentity` | fails |
+| `readIdentity` bypassing the shared reader | fails |
+| is-a-file / size check in `workerfile` | fails (6 tests) |
+| Panel re-syncing staleness from the poll | **green, no browser test harness** |
+| Containment assertion in `workerfile` | fails |
+| Open-then-fstat instead of lstat-then-read | fails, but incidentally (see below) |
+| ENOENT distinguished from every other lstat failure | fails |
+| `root` required by the shared reader | fails |
+| `CONFLICT` code instead of matching prose for the 409 | fails **only with a live tmux fleet** |
+| Save carrying the load generation, not just the agent | **green, no browser test harness** |
+| Realpath containment (symlinked INTERMEDIATE component) | fails |
+| `unreadable` distinct from `absent` as a version | **green, declared untested in code** |
+| Controls disabled until the load lands | **green, no browser test harness** |
+| Keeping the replaced version as `CLAUDE.md.previous` | fails (3 tests) |
+| `O_NOFOLLOW` on the backup write | fails |
+| `O_NONBLOCK` on the backup write | fails |
+| is-a-file on the backup write | **green, masked by the truncation, declared** |
+| `nlink` (hard link) on the backup write | fails |
+| `ftruncate` on the backup write | fails |
+| `staleness` carrying `editable` | fails |
+| `Host` header checked against loopback (DNS rebinding) | fails |
+| No-op save not rotating the kept version | fails |
+| Allowlist parsing (port, case, trailing dot) | fails, behaviourally |
+| Trailing-dot / case on the incoming `Host` | fails |
+| `fchmod` on the backup write | fails |
+| `hasPrevious` checking it is a regular file | fails (2 tests) |
+| `staleness` carrying the content version | fails (2 tests) |
+| `staleness` re-deriving showability itself | fails (3 tests) |
+| Conflict answering 409 rather than 400 | fails **only with a live tmux fleet** |
+| `editable` derived from prose instead of structure | **green, declared untested in code** |
+| Create the worker directory instead of refusing | fails |
+| Refuse-to-clobber a file the read path hid | fails (5 tests) |
+| `registryKey` back to `safeKey` at the call site | fails (2 tests) |
+| Unusable-mtime guard | fails |
+| `knownAgent` on GET | fails |
+| Refuse-to-clobber an UNREADABLE file (asks `read`) | fails |
+| Temp write flag `wx` to default (symlink) | fails |
+| `staleness` `lstat` to `stat` (symlink) | fails (2 tests) |
+| Malformed-JSON message guard | fails **only with a live tmux fleet** |
+| File-mode preservation across the rename | fails |
+| Changed-since-read refusal (engine) | fails (4 tests) |
+| Route forwarding the version | fails **only with a live tmux fleet** |
+| `absent` as a real version (the DELETE path) | fails |
+| Refusing to show a non-UTF-8 file | fails (2 tests) |
+| `status.js` root, pinned WITHOUT a live fleet | fails |
+| Version token back to an mtime | fails (2 tests) |
+| `status.js` back to its own hardcoded workers root | fails |
+| Containment assertion in `fileFor` | **green, declared untested in code and test** |
+| `iso()` NaN guard | **green, declared untested in code** |
+| Hashing bytes rather than the decoded string | **green, declared untested in code** |
+| The mode WINDOW (final mode is pinned) | **green, declared untested in code** |
+
+Iteration 2 of the challenge loop found that the refuse-to-clobber guard, added
+in iteration 1, did not do what its own comment claimed. It compared against a
+PARALLEL predicate (regular file, within the ceiling) rather than asking `read`,
+so a file that exists and is perfectly ordinary but cannot be opened (mode 000,
+a bad mount) passed the guard while `read` reported "no instruction file yet".
+Reproduced end to end before fixing: the editor showed an empty box and the save
+destroyed the file. The guard now asks `read` itself, because two derivations of
+one question drift and one cannot. That is the same root cause as the original
+finding, one level down, which is why the fix is structural rather than another
+condition.
+
+Iteration 3 found no blockers, and its most useful findings were two comments of
+mine that asserted something false. Both claimed the unusable-mtime guard
+prevented an agent being shown as `current` when we could not date its file.
+`compare` tests `!editedAt` first and both NaN and the epoch are falsy, so both
+already reached `unknown` by another route: the guard buys an accurate reason
+and no bogus 1970 timestamp, and nothing more. The claims are corrected in place
+rather than deleted, because a guard documented as preventing a failure it
+cannot prevent is the same defect as a test that pins nothing, and quietly
+removing the sentence would leave the next reader to rediscover it.
+
+It also found that a save widened the file's permissions (0600 became 0644,
+verified) and that a save was an unconditional overwrite: the file is read once
+when the panel opens, so an agent rewriting its own instructions, or the
+operator editing by hand, was destroyed without warning by a panel that had been
+sitting open. The read now carries `editedAt` and a save that would clobber a
+newer version is refused, because two versions cannot be merged and picking the
+one in the textarea is picking silently.
+
+Iteration 4 was aimed specifically at the newest guard, on the theory that the
+last thing added is the least reviewed, and that was right. The changed-since-
+read refusal compared MTIMES, and it was wrong twice. It had nothing to compare
+on the create path, so a panel showing "there is no instruction file for this
+one yet" sent no version, the guard skipped itself, and a CLAUDE.md the agent
+wrote in the meantime was destroyed with no warning: the exact failure the guard
+was added for, still live in the one case the guard could not express. And an
+mtime is not a version at all, since anything that restores timestamps (rsync,
+git checkout, a Time Machine restore) changes the bytes and leaves the mtime
+alone. The token is now a sha256 of the contents, with `absent` as a real
+version rather than the absence of one, which closes both in the same change.
+That is the third time in this loop the answer was to stop deriving the same
+fact two ways.
+
+Iteration 4 also found that the shared workers root, the ONE thing keeping the
+test suite off twelve live agents' instruction files, was pinned by nothing:
+reverting it left the suite green. It is now pinned by a named test.
+
+Iteration 5 found the version token was hashing the DECODED string rather than
+the bytes. Every invalid byte decodes to the same replacement character, so two
+genuinely different files hashed identically and the changed-since-read guard
+waved the save through, and separately an open-then-save of any non-UTF-8 file
+rewrote it lossily while reporting "Saved." Measured: 50 bytes in, 52 out,
+contents changed. The fix refuses to SHOW a file that would not survive being
+handed back, which the existing refuse-to-replace-what-read-hid guard then
+extends to the write for free. That is the fourth time in this loop the answer
+was to make one path ask the other rather than re-derive the same fact.
+
+It also caught the plan overstating itself: the `absent`-as-a-version row
+claimed coverage the tests did not have, because the create-path test reaches
+`write` with the file already present and never touches that branch. The branch
+it actually serves is the DELETE path, which now has its own test, and the row
+is renamed to say which one it is. A guard table that overstates what is pinned
+is the same defect as a test that pins nothing, in the one document written to
+catch it.
+
+Iteration 6 found no blockers and two things worth having. The panel said
+"There is no instruction file for this one yet" for four cases where the file is
+very much there and was deliberately refused (not UTF-8, over the ceiling,
+unopenable, a symlink), so the screen said no file existed while Save said one
+existed and could not be replaced. Two surfaces contradicting each other about
+the same file, which is the failure this whole feature is written against. The
+panel now uses the reason the engine already returns, and where the file cannot
+be edited it disables the box and the button rather than offering an action that
+will be refused.
+
+It also caught a second false claim in the `knownAgent` comment: it said that
+declining to widen the gate avoided accepting two names that sanitise to the
+same directory. The gate compares on `safeKey` already, so `an.gel`, `ANGEL` and
+`ang!el` all pass and all resolve to `angel`. Checked against the live roster
+rather than reasoned about. The real latent risk is two DIFFERENT agents
+colliding under `safeKey`, there are none today, and the comment now says that
+instead.
+
+While fixing this I introduced a regression and caught it only by looking at a
+screenshot: a reference to `box` before its declaration threw out of
+`loadInstructions`, and because `openDetail` does not await it the panel simply
+rendered blank. `node --check` passed, the test suite passed, and the bug was
+plainly visible in the picture. Worth recording as the reason the UI states get
+screenshotted rather than reasoned about.
+
+Iteration 7 found the containment escape that six previous passes missed:
+`fileFor` asserts on the name, and `read` used `lstat` on the FILE, but nothing
+checked the worker DIRECTORY on the read side. A symlinked `<ROOT>/<agent>`
+therefore made `read` return `exists: true` with the contents of a file outside
+the root, under a path that content had not come from, while `staleness`
+disclosed that file's mtime. The write path had been guarded and tested; the
+test was named for the directory and asserted only on `write`, so the read side
+looked covered and was not. One shared `dirEscapes` now serves all three paths,
+and each of the three is pinned separately.
+
+Two comments claimed more than the code delivered as a result, and both are
+corrected: the module docstring said every path was asserted inside the root,
+and the temp-file comment listed the worker directory among the routes already
+closed. Both were true of `write` alone.
+
+Iteration 8 found the worst defect of the whole loop, and it is the same shape
+as the previous three. `staleness` re-derived "can we read this file" as the
+size-and-type check alone, while `read` applied four refusals. So a file the app
+had already decided it could not read still got a confident verdict on its card,
+and with a back-dated mtime that verdict was **`current`**: a positive claim of
+health, plus a disclosed timestamp, about a file we cannot read at all. That is
+the one rule this codebase is built on, broken on the surface it was written
+for, with every individual guard looking correct.
+
+The fix is structural rather than another condition: one `inspect` decides
+everything the file can tell us, and both `read` and `staleness` are built on
+it, so they cannot disagree. Four separate times this loop the answer has been
+to stop deriving the same fact twice, and this is the fourth.
+
+It also caught the same anti-pattern having escaped into the browser: the panel
+decided whether to offer an editor by regex-matching this module's English
+prose, so rewording one sentence would have silently removed the ability to
+write a first instruction file. The engine now answers that as a field.
+
+Iteration 9 found no blockers. Its useful finding was a FOURTH reader of the
+workers root: `status.readIdentity` still followed a linked worker folder, so
+the board rendered a name and role parsed out of a file outside the root and
+presented it as that agent's identity, while the instructions route for the same
+agent correctly refused. Three paths had been closed and the one in the other
+module had not, which is the same shape as everything else this loop has found.
+
+It also caught two rows of this table describing what is now a single call site
+after the `inspect` restructure, which overstated independent coverage in the
+document written to catch exactly that. They are now one row.
+
+And it caught a mistake of mine: a `sed` I ran to return 409 on a conflict was
+too broad and pasted conflict-detection onto three routes that cannot produce
+one, implying a behaviour those routes do not have. Reverted to the single
+writer that throws it.
+
+Iteration 10 was told to assume a sixth instance of the recurring defect existed
+and go looking. It found one, and it was in the fix from iteration 9: I had
+given `readIdentity` the DIRECTORY check and left it with no FILE check. So it
+still followed a symlinked CLAUDE.md and served a name parsed out of a file
+outside the workers root, and worse, it blocked FOREVER on a fifo. Because
+`knownAgent` also calls `snapshot()`, that wedged every route on the server with
+nothing crashing to say why. Both measured.
+
+So the fix this time is not another guard. `engine/workerfile.js` now answers
+"can we safely read this worker file" once, and both `instructions.js` and
+`status.js` import it. Six instances of one defect on one branch is not six
+oversights, it is one missing abstraction, and a seventh now requires editing
+that file rather than forgetting to.
+
+The fifo guard also produced the loop's one genuinely awkward test. Removing it
+made the suite HANG rather than fail, in-process and in every variant, because a
+synchronous read of a fifo cannot be interrupted. A hung suite reads as broken
+infrastructure rather than as a caught bug, which is the worst possible signal
+for the one guard whose absence takes down the whole server, so the probe runs
+in a child process with a timeout and fails with a message that says so.
+
+Two more of my own false claims were corrected: `status.js` said the
+name-derivation divergence "fails safe in both directions" when the unsafe
+direction is a cross-agent WRITE (reproduced with two colliding names), and a
+`sed` of mine had pasted conflict-detection onto three routes that cannot
+produce one.
+
+Iteration 11 found no blockers and three things worth having. The shared reader
+introduced in iteration 10 was itself check-then-use: it `lstat`ed the path and
+then `readFileSync`ed the same PATH, so swapping the file for a fifo between
+those two calls blocked forever anyway, which is the exact failure the check
+exists to prevent. It now opens the file with `O_NONBLOCK`, asks the DESCRIPTOR
+what it is, and reads from that same descriptor, so check and use are one object
+rather than one name used twice.
+
+Extracting the reader also did NOT close containment for its second caller, and
+the module's own docstring read as though it had: `readIdentity` joins the tmux
+session name verbatim, so `readIdentity('../victim')` returned a name and role
+parsed out of a file outside the root. Containment is now asserted inside the
+shared reader, which is where the docstring already claimed it lived.
+
+And `isShowable` had become dead code carrying an inverted claim, describing
+itself as shared by `read` and `write` "so the two cannot disagree" when the
+iteration-2 fix was to STOP using that parallel predicate. Deleted rather than
+left for a future author to wire back in.
+
+While fixing this I deleted six tests by accident, using a text replacement
+whose end anchor was further down the file than I thought. The suite dropped
+from 175 to 169 and I restored them verbatim from the last commit. Worth
+recording because the count is the only reason I noticed.
+
+Iteration 12 found no blockers. Its two substantive findings were both cases of
+an answer being more confident than the evidence: any `lstat` failure was
+reported as "there is no instruction file yet", which becomes `editable: true`
+upstream, so an unsearchable worker folder holding real instructions got an
+enabled empty editor offered over the top of it. Only ENOENT means absent now.
+And containment was an OPTIONAL argument in the one module written so that a
+guard cannot be forgotten, which is a contradiction in terms; it is required.
+
+It also caught two comments of MINE that were measurably false, both about what
+is untested. One claimed reverting the open-then-fstat read "leaves every
+deterministic test green" (it reddens one, incidentally, via the fstat
+injection). The other said removing the fifo type check "would hang" the suite,
+which stopped being true the moment the reader started opening with O_NONBLOCK.
+Both are corrected in place. A comment that overstates what is UNTESTED is the
+same defect as one that overstates what is tested, and after eleven iterations
+of hunting the second kind it was worth noticing I had produced the first.
+
+The row above is marked "incidentally" for exactly that reason: the revert does
+redden a test, but not one that tests the race window, and the window itself
+remains unpinned.
+
+Iteration 13 found no blockers and one real data-loss path, in the browser
+where nothing tests anything. The save handler rechecked only the AGENT NAME
+after its await, which cannot tell "a different agent is open" from "this agent
+was reopened". Reproduced end to end: type new text, hit Save, go back and
+reopen the same agent before the write answers. The reload restores the old text
+and the old version token, then the save's answer lands and replaces the token
+with the hash of the NEW text now on disk. The box is now showing text its
+version does not describe, so the next ordinary save passes the changed-since-
+read guard, reports "Saved.", and wipes the text that had just been saved. No
+conflict, no warning. The load path had solved this with a monotonic token; the
+save path was never given one, and now carries it.
+
+It also caught two rows of this table UNDERSTATING their own coverage, which is
+the safe direction but still wrong, and nine tests that bailed with a bare
+return when symlinks or mkfifo are unavailable, printing a tick for a test that
+asserted nothing. Those are the one thing that would have gone quiet on a
+filesystem without symlink support, and they now skip visibly.
+
+Iteration 14 found no blockers and one more containment escape, one level up
+from the last: the check was a string PREFIX on a non-canonical path, and
+`dirEscapes` only ever lstats the IMMEDIATE parent, so a symlinked intermediate
+component satisfied both. Measured: `<root>/sub` linked elsewhere made the
+shared reader return the contents of a file outside the root, and put a name and
+role parsed from it on the board as an agent's identity. `realpath` resolves
+every component at once, which is why the fix is one call rather than a walk.
+
+Its other real finding was a comment of mine that described the bug the line
+beneath it created: a note explaining that the footer must be reset "or a failed
+load reads 'Saved to  · a real file you can also edit by hand' with no path at
+all", sitting directly above the line that produced exactly that, for the
+duration of every load and permanently on `/?tab=detail`. Controls now match
+what they will do: disabled until the answer lands.
+
+And the panel now says when the file has moved on from the text in the box. It
+was re-dating the staleness note from the poll without touching the textarea, so
+it read "Edited <new time>. Restart to apply." beside the PREVIOUS text, where
+restarting would apply the edit made elsewhere rather than what was on screen.
+
+Iteration 15 found a BLOCKER that iteration 14 had just introduced. The new
+"this file has changed since you opened it" notice fired on 100% of successful
+saves, because the loaded-at stamp was set only in `loadInstructions` and a save
+is the other way the box comes to match disk. So the primary flow of the feature
+ended with the screen telling the person their box was out of date and to reopen
+the agent, which would have discarded what they had just written. A fix for a
+screen asserting something untrue, asserting something untrue.
+
+Its most valuable finding was not a defect at all. The box is labelled "what
+they should focus on" and hinted as "your words, in plain language", but it
+holds an agent's entire boot file: kilobytes of hard rules, escalation policy,
+house style. The only floor on a save is twenty characters, and there was no
+backup, no history and no undo anywhere. Someone taking the hint at face value
+and typing two sentences would permanently destroy the rules an agent depends
+on, and be told "Saved."
+
+The write now keeps the version it replaces as `CLAUDE.md.previous`, written
+before the rename, and the panel says so. That is not version history and it is
+not offered as a restore button. It means the bytes still exist for someone to
+put back, which is the difference between a mistake and a loss.
+
+Iteration 16 found a BLOCKER in the safety net iteration 15 had just added, and
+it was the worst single defect of the loop. `CLAUDE.md.previous` was written
+with a plain `writeFileSync`, whose default flag FOLLOWS a symlink, and that
+path is not one any containment guard looks at. So planting a link there gave an
+arbitrary file write outside the workers root, performed by the operator's own
+next Save. Measured: a file outside the root was replaced. The fourth symlink
+route into this directory, opened by the thing added to make the feature safer.
+
+It is now opened with `O_NOFOLLOW`, which fails rather than follows, and
+`fchmod`ed explicitly because the `mode` argument only applies when a file is
+CREATED, so an existing backup kept whatever mode it was first made with: a
+CLAUDE.md the operator later locked to 0600 left its previous contents at 0644.
+The same permission leak the temp-file path had already been fixed for,
+reintroduced two lines away.
+
+Two further honesty problems in the same code: a backup that failed to write was
+swallowed while the panel kept promising "the version before your last save is
+kept", and `existsSync` reported a DIRECTORY planted at that path as a kept
+version. The write now returns whether it actually kept anything, and
+`hasPrevious` requires a regular file.
+
+Separately, the "this file has changed since you opened it" notice compared
+mtimes, so a bare `touch` announced a change and told the person to reopen the
+agent, discarding the box, over a byte-identical file. It compares the content
+hash now, which the status poll carries.
+
+Iteration 17 found a BLOCKER in the fix from iteration 16, which was itself a
+fix for the safety net added in iteration 15. `O_NOFOLLOW` closed the symlink
+route into the backup path and left the FIFO one open: opening a fifo for
+writing blocks until a reader appears, so a Save never returned and took every
+route on this single-threaded server with it, silently. The same failure
+`workerfile` documents at length and guards against, two modules over,
+reintroduced by the backup write.
+
+**Three iterations in a row, the worst defect was in code I had just added to
+make something safer.** That is the most useful thing this loop produced. A new
+guard is not a safe change: it is new code on the most dangerous path in the
+product, written under the impression that it is defensive, and it deserves more
+suspicion than what it protects rather than less.
+
+The browser had also re-added the inference `keptPrevious` exists to prevent:
+after a save it showed "the version before your last save is kept" whenever ANY
+regular file sat at that path, so a failed backup still promised a copy that was
+two saves old or zero bytes. On the save path the honest predicate is
+`keptPrevious` alone.
+
+Iteration 18 found no blockers and a fourth variant of the same escape:
+`O_NOFOLLOW` does not see a HARD link. `ln <victim> <agent>/CLAUDE.md.previous`
+made the next Save truncate a file outside the workers root, fill it with the
+agent's old instructions and reset its permissions. Measured. `st_nlink > 1` is
+the only thing that tells a hard link from an ordinary file, so the descriptor
+is now asked for that too.
+
+It also caught two guards I had added without pinning and without declaring, and
+one of them turned out to be masked: removing the is-a-file check on the backup
+descriptor leaves the suite green, because `ftruncate` fails on a fifo a step
+later and refuses the write anyway. So the truncation is the guard doing the
+work and the type check is belt to its braces, which is now said at the code
+rather than implied by a test that passes for a different reason.
+
+And it found dead state in the browser: an `INSTR_LOADED_AT` assigned in three
+places, read in none, with a comment crediting it for a failure that
+`INSTR_VERSION` actually prevents. Removed. A variable that looks load-bearing
+and is not is the same defect as a comment that overstates a guard.
+
+Iteration 19 found a BLOCKER in iteration 18's fix, which makes it **five
+consecutive iterations where the worst defect was in code just added to make
+something safer.** The poll's new "take the editor away if the file cannot be
+shown" branch keyed on "unknown with no version", and an agent with NO
+instruction file yet has exactly that shape. So within five seconds of opening
+any agent whose first file had not been written, the editor and Save went dead
+with whatever had been typed stranded in the box. The create path is the one
+case the `editable`/`absent` design was built for, and the guard protecting the
+feature broke it.
+
+`staleness` now carries `editable`, because the status poll is the only
+instruction signal an open panel gets and it genuinely could not distinguish the
+two cases. The browser keys on that field alone.
+
+**The pattern is the finding.** Iterations 15 through 19 each introduced their
+worst defect in a guard, and each guard was added in response to the previous
+iteration. New defensive code is not a safe change: it is new code on the most
+dangerous path in the product, written with the confidence that comes from
+believing you are making things safer. It earns more scrutiny than what it
+protects, not less. That is worth more than any individual fix in this table.
+
+Iteration 20 found no blockers and said it would ship this. Its four findings
+were all worth having.
+
+The generation guard I added in iteration 19 was a **tautology**: the token was
+captured after both awaits, so it compared a value to itself and could never
+fire. It also would have returned from `tick()` outright, skipping the grid
+repaint and the freshness stamp, if it ever had. A guard credited with
+preventing a failure it cannot prevent, which is the defect this loop has now
+found in my own code six times. It is a real epoch counter now, bumped on both
+a load and a save, captured before the request goes out.
+
+It also found `staleness` omitting the version on two paths where `read` returns
+one, so a panel open on an agent whose file was then DELETED never heard about
+it. `ABSENT` exists precisely so "there was a file and now there is not"
+compares unequal; that held on the read path and had been dropped on the poll
+path.
+
+And it pointed out that **DNS rebinding was survivable before this branch and is
+not now.** The server never checked the `Host` header, so a page on any site
+whose DNS is repointed at 127.0.0.1 becomes same-origin with it: no preflight,
+the response readable, every write route reachable. That was a bad afternoon
+when the writes were an avatar and a job title. It is remote code execution by
+the agent, one restart later, now that the same hole rewrites the file an agent
+boots from. Closed, and pinned.
+
+⚠️ The test for it had to be rewritten with `node:http`: `Host` is a forbidden
+header name, so `fetch` silently drops it and the first version of the test
+passed against a server with no check at all. A test that pins nothing, written
+while adding the guard it was supposed to pin.
+
+Iteration 21 found no blockers and said it would ship this. Three things worth
+having.
+
+The `Host` check I added in iteration 20 **refuses a reverse-proxied request**,
+which is correct for a server with no authentication that now edits the file an
+agent boots from, but it was a silent behaviour change and it contradicted two
+of the file's own comments. It is now stated plainly, with
+`AGENT_WORKFORCE_ALLOWED_HOSTS` as a deliberate opt-in so the choice is made on
+purpose rather than discovered, trailing dots and case handled, and the README
+says so.
+
+A comment twenty lines above that check still said DNS rebinding was open and
+"tracked separately". Understating protection rather than overstating it, but
+the same defect: a comment whose claim the code does not support.
+
+And a **no-op save burned the undo**. One-deep backup is the design, so pressing
+Save without typing rotated the good original out and replaced it with a copy of
+the current file. A click that did nothing destroyed the only recoverable
+version. Byte-identical saves now short-circuit entirely.
+
+⚠️ That fix broke an existing test in a way worth recording: `a failed write
+leaves no temp file` wrote content identical to the fixture, so it began
+short-circuiting before the rename it was named for. The test was passing for a
+new wrong reason within minutes of the change.
+
+Iteration 22 was the first pass to find **no blockers and no warnings.** Its
+four remaining items were all about the newest code, and two were mine to own.
+
+The `Host` normalisation and the `AGENT_WORKFORCE_ALLOWED_HOSTS` opt-in, added
+one iteration earlier, were pinned by nothing and, unlike every other unpinned
+guard here, not declared as such. Both fail closed, so the risk was a silently
+dead opt-in rather than an opening, but a guard that looks covered and is not is
+the thing this table exists to prevent. Both are pinned now.
+
+And the allowlist silently dropped any entry written as `host:port`, which is
+exactly what an operator would paste out of a proxy config after reading the
+README line telling them to name the host. They would get a 400 saying the
+request was not addressed to this server, with nothing pointing at the cause.
+
+The plan's own green-row count was also wrong, understating by one. Corrected,
+and now derived by counting rather than by hand.
+
+Iteration 23 found no blockers and one warning, and the warning was the sharpest
+single finding of the loop because it was aimed at me.
+
+The test I wrote in iteration 22 to pin the allowlist normalisation asserted on
+`server.js` SOURCE TEXT with a regex. It was inverted in both directions:
+deleting the case and trailing-dot handling, a real regression that silently
+stops an operator's `Board.Local` entry from matching, left it green; rewriting
+the same regex as an equivalent `/:[0-9]+$/`, no behaviour change whatsoever,
+turned it red. **A test that fails on harmless refactors and passes on the
+regression it is named for.** That is precisely the "test that pins nothing"
+shape this entire suite is written against, committed by me while adding the
+guard it was supposed to pin, in the same commit as a comment claiming the
+shipped code agreed with what it asserted.
+
+My stated excuse was that the allowlist is read at module load so a live server
+cannot be asked about it. The answer is a child process with the environment
+set, which `engine/instructions.test.js` was already doing three files over. It
+now drives a real server and checks real responses, and I verified the polarity
+both ways: the regression reddens it, the refactor does not.
+
+Twenty-three iterations in, the loop's most consistent finding is not any
+individual bug. It is that **the code written to make something safer, and the
+tests written to prove it, are the least trustworthy things in the diff.**
+
+Every row above was produced by actually deleting the guard and running the
+suite, not by reading the code. 10 rows are green. Every engine row says so at the guard itself; the browser
+rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
+for "this file has no automated coverage at all".
+
+⚠️ Four rows are marked "fails **only with a live tmux fleet**". They are pinned
+by route tests that call `anyAgent`, which `t.skip`s when no agents are running,
+and node:test reports a skipped run as pass/fail=0. So on any CI runner those
+four guards could be deleted and the suite would stay green. That hazard was
+identified for the `status.js` root row and fixed there by adding an engine-level
+test that does not need a fleet; it was then left unstated for these four. Saying
+which rows depend on this machine is the minimum; moving them off tmux is the
+real fix and is not in this branch. Two rows started green while looking covered and
+were fixed rather than accepted: the size half of the read guard was riding on a
+test that only ever planted a directory, and `registryKey` had a unit test that
+pinned the helper while nothing pinned that production code called it. Two rows
+are still green and are declared as such in both the code and the test, because
+a guard that looks covered and is not is worse than one openly marked untested.
+
+**194 tests, zero dependencies.**

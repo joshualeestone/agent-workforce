@@ -39,6 +39,13 @@
   --border-strong: rgba(0,0,0,0.22);
   --shadow-card:   0 1px 2px rgba(0,0,0,0.06), 0 1px 6px rgba(0,0,0,0.04);
   --attn-bg:       rgba(0,0,0,0.035);
+  /* Amber, for "this is not wrong but you should know". The tinted box carries
+     its text in --label rather than --warn-ink, because a whole paragraph of
+     amber reads as an error; --warn-ink is for the card glyph, where it sits on
+     the card background rather than on the tint. */
+  --warn-bg:       rgba(176,116,0,0.10);
+  --warn-border:   rgba(176,116,0,0.38);
+  --warn-ink:      #7a5200;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -52,6 +59,9 @@
     --border-strong: rgba(255,255,255,0.26);
     --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
     --attn-bg:       rgba(255,255,255,0.055);
+    --warn-bg:       rgba(255,190,60,0.12);
+    --warn-border:   rgba(255,190,60,0.32);
+    --warn-ink:      #ffca55;
   }
 }
 @media (prefers-contrast: more) {
@@ -115,6 +125,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
 .btn:hover { background: var(--attn-bg); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled:hover { background: var(--bg); }
 .fmsg { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); min-height: 1em; }
 .card { cursor: pointer; position: relative; }
 /* The card was clickable with nothing to say so. An affordance you have to
@@ -199,6 +211,49 @@ svg { display: block; }
          border-left: 2px solid var(--border-strong); }
 .err   { background: var(--bg-elevated); border: 0.5px solid var(--border-strong);
          border-radius: var(--radius-card); padding: var(--space-6); font: var(--text-body) var(--font-ui); }
+
+/* The instruction editor. It is the biggest control on the page because it is
+   the most important: the only place an agent's purpose is written down. */
+#d-instr {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 220px;
+  font: var(--text-body) var(--font-ui); line-height: 1.5;
+  padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
+}
+.instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
+.fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+
+/* Running on older instructions. A STATE, not a toast: it survives a reload,
+   and it is still right when the file was edited outside this app entirely. */
+.stale-note {
+  margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-control); border: 0.5px solid var(--warn-border);
+  background: var(--warn-bg); color: var(--label);
+  font: var(--text-callout) var(--font-ui); line-height: 1.45;
+}
+.card-stale {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
+}
+.card-stale svg { width: 13px; height: 13px; }
+
+/* Present to a screen reader, absent to the eye. Used where a finding is
+   carried by a glyph, which on its own says nothing to anyone not looking at
+   it. `clip-path` rather than `display:none`, which would remove it from the
+   accessibility tree along with everything else. */
+.vh {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Icons: Lucide (ISC), subset and inlined as SVG. No font file, no network
+   request, no dependency, and identical on every machine.
+   A local-first product must not fetch a remote asset to draw a pencil, and it
+   has to keep working on a machine with no internet at all. */
+.icon { width: 16px; height: 16px; display: block; stroke: currentColor;
+        fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.edit .icon { width: 15px; height: 15px; }
 </style>
 </head>
 <body>
@@ -244,6 +299,31 @@ svg { display: block; }
       <button class="btn" id="d-save" type="button">Save</button>
     </div>
     <div class="fmsg" id="d-role-msg"></div>
+  </div>
+
+  <div class="field">
+    <label class="flabel" for="d-instr">What they should focus on</label>
+    <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
+    <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
+    <!-- Ships DISABLED. `loadInstructions` enables it when there is something
+         real in it. Without this, /?tab=detail (a deep link this file supports)
+         never calls that function at all and renders a permanently enabled,
+         empty editor whose Save button does nothing when clicked. -->
+    <textarea id="d-instr" rows="14" spellcheck="true" disabled></textarea>
+    <div class="frow instr-foot">
+      <div class="fpath" id="d-instr-foot" hidden>Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
+      <button class="btn" id="d-instr-save" type="button" disabled>Save</button>
+    </div>
+    <!-- Announced: this is the only channel for every outcome of the most
+         powerful write in the product, including each refusal and the reason a
+         file cannot be edited. The staleness note beside it is already a live
+         region; this was not. WCAG 2.1 SC 4.1.3, which is AA. -->
+    <div class="stale-note" id="d-instr-outdated" role="status" aria-live="polite" hidden>
+      <b>This file has changed since you opened it.</b> What is in the box is not
+      what is on disk any more. Reopen this agent to see the current version.
+    </div>
+    <div class="fpath" id="d-instr-prev" hidden>An earlier version is kept beside it as <code>CLAUDE.md.previous</code>.</div>
+    <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
 </section>
 
@@ -291,6 +371,35 @@ const STATE_COPY = {
   stopped:      { label: 'Not running',   attn: true  },
   unknown:      { label: "Can't tell",    attn: true  },
 };
+
+/**
+ * Lucide icons (ISC), subset to what this page actually uses and inlined.
+ *
+ * Not a CDN link and not a font file. Two reasons, and both are about what this
+ * product claims to be:
+ *   1. It runs on an always-on Mac that may have no internet. A remote icon
+ *      sheet means every icon silently vanishes.
+ *   2. Its whole pitch is that nothing of yours leaves your machine. That
+ *      sentence cannot be said honestly while the console fetches a third-party
+ *      asset on every page load to draw a pencil.
+ *
+ * ISC also carries no attribution requirement, unlike Font Awesome Free's
+ * CC BY 4.0, which would put a credit line in a product we intend to sell.
+ */
+const ICONS = {
+  // Mirrored horizontally so it points the other way, which is what Josh asked
+  // for. The old control was the text character U+270E, whose exact shape is
+  // chosen by the operating system and differs per machine -- flipping a glyph
+  // would have fixed the direction and not the cause.
+  pencil: '<g transform="translate(24 0) scale(-1 1)"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+};
+
+function icon(name, extraClass) {
+  const body = ICONS[name];
+  if (!body) return '';
+  return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
+}
 
 function initials(name) {
   const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
@@ -349,6 +458,24 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+/**
+ * The card's "running on older instructions" mark.
+ *
+ * Shown only for a POSITIVE stale finding. `unknown` deliberately shows nothing
+ * here: the card has no room to explain, and a warning glyph that might mean
+ * "we cannot tell" would be read as "something is wrong". The detail page,
+ * which has the room, says which it is.
+ */
+function staleBadge(a) {
+  const s = a.instructions;
+  if (!s || s.state !== 'stale') return '';
+  // The glyph is decorative and the `title` only appears on hover, so the text
+  // is carried in a visually-hidden span. Without it the whole finding is
+  // invisible to a screen reader and unreachable without a mouse.
+  return `<span class="card-stale" title="Its instructions were edited after it started. Only a restart re-reads them."`
+    + `><span class="vh">Running on older instructions. Only a restart re-reads them.</span>${icon('alert')}</span>`;
+}
+
 function card(a) {
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   // Provenance deliberately not shown here. It appeared on nearly every card,
@@ -368,10 +495,10 @@ function card(a) {
         : '');
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
-    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">&#9998;</button>
+    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
-      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}</div>
+      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
       <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
@@ -384,6 +511,9 @@ function card(a) {
 async function tick() {
   const checked = document.getElementById('checked');
   try {
+    // Captured BEFORE the request goes out, so a slow poll can be recognised as
+    // predating a save or a reload.
+    const pollEpoch = INSTR_EPOCH;
     const res = await fetch('/api/status', { cache: 'no-store' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
@@ -391,6 +521,82 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
+
+    // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
+    //
+    // The card badge is repainted from this poll; the panel's note was rendered
+    // once, when the panel opened, and never again. So the two surfaces
+    // disagreed about the same agent along the product's primary flow: the
+    // panel says "Restart to apply", you restart, the card clears within five
+    // seconds, and the panel keeps telling you to restart. The inverse too, an
+    // edit made elsewhere raises the card glyph while the panel shows nothing.
+    //
+    // This poll already carries fresh `instructions` for every agent, so it is
+    // one call. Same fact, one source: the shape this whole branch is about.
+    if (CURRENT) {
+      const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
+      // Not while a load is in flight or the file is one we refused: the note
+      // then belongs to the load, not to the poll.
+      if (fresh && INSTR_READY) {
+        renderStale(fresh.instructions);
+
+        // ⚠️ And say so when the file has moved on from what the box holds.
+        //
+        // Re-dating the note without touching the textarea produced a screen
+        // that was untrue: "Running on older instructions. Edited <new time>.
+        // Restart to apply." beside the PREVIOUS text. Restarting would apply
+        // the edit made elsewhere, not what is on screen, so the sentence named
+        // the wrong thing. The staleness state exists to stop the screen
+        // asserting something untrue about what an agent is running, and this
+        // was that failure one level in.
+        // Compared on the CONTENT hash, not the mtime. Keyed on `editedAt`
+        // this announced "the file has changed" after a bare `touch`, or after
+        // an editor that re-saves without changing a byte, and told the person
+        // to reopen the agent over a file identical to the one in the box.
+        const note = document.getElementById('d-instr-outdated');
+        const seenVersion = fresh.instructions && fresh.instructions.version;
+        // ⚠️ Skip a poll that was ISSUED before the panel's version last
+        // changed. Its payload predates the change, so acting on it announces
+        // "this file has changed since you opened it" over text that was just
+        // saved successfully.
+        //
+        // An earlier version of this guard captured the token AFTER both
+        // awaits, which compared a value to itself and could never fire, and
+        // returned from `tick()` outright, which would have skipped the grid
+        // repaint and the freshness stamp. A guard credited with preventing a
+        // failure it cannot prevent is the defect this branch keeps finding.
+        if (pollEpoch === INSTR_EPOCH && seenVersion && INSTR_VERSION) {
+          note.hidden = seenVersion === INSTR_VERSION;
+        }
+
+        // ⚠️ And if the file has become one we would REFUSE to show, take the
+        // editor away, exactly as a fresh load would.
+        //
+        // The poll re-dated the note and left the controls alone, so an agent
+        // that grew its own file past the ceiling (or wrote a non-UTF-8 byte
+        // into it) left an enabled Save that could only ever answer "there is
+        // already a file there that this editor cannot safely replace", beside
+        // a footer still naming the file as one you can edit by hand. That is
+        // the offer-an-action-that-will-fail state the load path was changed to
+        // remove, reachable by simply leaving the panel open.
+        // ⚠️ Keyed on `editable`, NOT on "unknown with no version". Those two
+        // are the same shape for an agent with no instruction file yet, so the
+        // first version of this branch disabled the editor within five seconds
+        // of opening any agent whose first file had not been written, with
+        // whatever had been typed sitting in a dead box behind a dead Save.
+        // The create path is exactly what `editable` was added to express.
+        if (fresh.instructions && fresh.instructions.editable === false) {
+          INSTR_READY = false;
+          document.getElementById('d-instr').disabled = true;
+          document.getElementById('d-instr-save').disabled = true;
+          document.getElementById('d-instr-foot').hidden = true;
+        }
+        // If the poll cannot see a version (the file became unreadable), say
+        // nothing new rather than RETRACTING a notice that was true. Hiding it
+        // there took a correct "this file has changed since you opened it" back
+        // off the screen while the box still held the older text.
+      }
+    }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
     document.getElementById('grid').innerHTML = shown.map(card).join('');
 
@@ -402,8 +608,15 @@ async function tick() {
     document.getElementById('summary').textContent = bits.join(' · ');
     // Says "early" out loud. For a product whose whole thesis is not
     // overstating what it knows, admitting its own maturity is on-brand.
+    //
+    // ⚠️ It used to say "read-only, nothing here can change your agents", and
+    // that stopped being true the moment this screen could edit the file an
+    // agent boots from. A banner asserting something false about safety is the
+    // worst possible instance of the trap this whole codebase is written
+    // against, so it now says which way the writing goes.
     document.getElementById('build').innerHTML =
-      '<b>BETA</b> · version ' + esc(data.version || 'unknown') + ' · read-only, nothing here can change your agents';
+      '<b>BETA</b> · version ' + esc(data.version || 'unknown')
+      + ' · editing an agent here changes the real file it starts from';
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
@@ -452,6 +665,39 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 let LAST = [];
 let CURRENT = null;
 
+/**
+ * Just the picture.
+ *
+ * Split out of openDetail so that changing an avatar does not have to re-run
+ * the whole panel. It used to, and re-running it blanks the instruction
+ * textarea and refetches from disk, so typing new instructions and then
+ * swapping the picture threw the typing away with no prompt.
+ */
+function renderAvatar(a) {
+  const img = document.getElementById('d-img');
+  const ini = document.getElementById('d-initials');
+  if (a && a.hasAvatar) {
+    img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
+    img.hidden = false;
+    ini.hidden = true;
+  } else {
+    img.hidden = true;
+    ini.hidden = false;
+  }
+}
+
+/**
+ * Refresh the open agent's picture from the latest poll, keeping everything
+ * else on the panel, including anything typed and not yet saved.
+ */
+function refreshAvatar() {
+  if (!CURRENT) return;
+  const a = LAST.find((x) => x.sessionName === CURRENT.sessionName);
+  if (!a) return;
+  CURRENT = a;
+  renderAvatar(a);
+}
+
 function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
@@ -465,17 +711,10 @@ function openDetail(sessionName) {
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
-  const img = document.getElementById('d-img');
-  if (a.hasAvatar) {
-    img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
-    img.hidden = false;
-    document.getElementById('d-initials').hidden = true;
-  } else {
-    img.hidden = true;
-    document.getElementById('d-initials').hidden = false;
-  }
+  renderAvatar(a);
   document.getElementById('d-msg').textContent = '';
   document.getElementById('d-role-msg').textContent = '';
+  loadInstructions(a.sessionName);
   showTab('detail');
 }
 
@@ -483,45 +722,417 @@ document.getElementById('grid').addEventListener('click', (e) => {
   const card = e.target.closest('.card');
   if (card) openDetail(card.dataset.agent);
 });
+/**
+ * Fetch the instruction file for the open agent.
+ *
+ * Fetched HERE rather than carried on /api/status, because the board polls that
+ * every five seconds for every agent and the real files run to several
+ * kilobytes each. Putting them on the poll would mean ~90KB on the wire, every
+ * five seconds, to render a badge nobody is looking at.
+ */
+/**
+ * Which load is the current one.
+ *
+ * ⚠️ Load-bearing, not bookkeeping. Two fetches are in flight the moment
+ * someone opens one agent and then another before the first answers, and
+ * without this the slower answer wins and drops agent A's instructions into the
+ * box while agent B is open. Save reads the box and posts it to CURRENT, so the
+ * next click writes A's instructions into B's CLAUDE.md. A stale answer is
+ * discarded rather than rendered.
+ */
+let INSTR_LOAD = 0;
+
+/**
+ * The `version` of what is in the textarea. A hash, not a timestamp.
+ *
+ * ⚠️ null while a load is in flight, because `loadInstructions` clears the box
+ * synchronously and only learns the version when its answer lands. Save must
+ * therefore refuse to run mid-load rather than post a token it did not receive
+ * for the text it is showing.
+ */
+let INSTR_VERSION = null;
+
+/**
+ * Bumped whenever the panel's idea of the file changes: a load, or a save.
+ *
+ * A poll issued before either of those lands afterwards carrying the older
+ * version, and acting on it makes the panel contradict what just happened.
+ */
+let INSTR_EPOCH = 0;
+
+/**
+ * Whether the box currently holds a version we actually received.
+ *
+ * ⚠️ Save must refuse unless this is true, and NOT merely fall back to sending
+ * no version. A missing version skips the changed-since-read guard entirely, so
+ * "the load failed, save anyway" would be an unguarded overwrite of a file we
+ * never managed to read: the worst possible response to not knowing what is
+ * there.
+ */
+let INSTR_READY = false;
+
+/**
+ * ⚠️ Nothing in this file is pinned by a test. `web/index.html` has NO
+ * automated coverage in this repo, so every statement here, including the
+ * load/save generation pairing and the poll re-sync below, is verified by
+ * driving the page and by nothing else. Said where someone editing it will
+ * read it, not only in the plan.
+ *
+ * (An `INSTR_LOADED_AT` used to live here, assigned in three places, read in
+ * none, and credited by a comment with preventing a failure that
+ * `INSTR_VERSION` actually prevents. Removed rather than left as a guard that
+ * looks load-bearing.)
+ */
+
+async function loadInstructions(sessionName) {
+  const mine = ++INSTR_LOAD;
+  INSTR_EPOCH += 1;
+  INSTR_VERSION = null;
+  INSTR_READY = false;
+  const box = document.getElementById('d-instr');
+  const saveBtn = document.getElementById('d-instr-save');
+  const pathEl = document.getElementById('d-instr-path');
+  const msg = document.getElementById('d-instr-msg');
+  box.value = '';
+  msg.textContent = '';
+  pathEl.textContent = '';
+  // Re-enabled on every load: a previous agent whose file could not be edited
+  // left both of these disabled.
+  // ⚠️ Disabled and hidden UNTIL the answer lands, not from the moment the
+  // request goes out.
+  //
+  // Enabling them here meant the controls said one thing and did another for
+  // the whole duration of every load: Save was enabled but answered "these
+  // instructions have not loaded, so saving is off", the footer asserted a real
+  // file path while `pathEl` was empty (rendering "Saved to  · a real file you
+  // can also edit by hand"), and text typed into the enabled empty box was
+  // silently replaced when the load landed. On `/?tab=detail` with no agent
+  // chosen, those states were permanent rather than momentary.
+  //
+  // The previous comment here claimed to PREVENT the empty-footer string and
+  // was the line that produced it.
+  box.disabled = true;
+  saveBtn.disabled = true;
+  document.getElementById('d-instr-foot').hidden = true;
+  // Reset with everything else, not only when the load succeeds: a failed load
+  // used to leave the PREVIOUS agent's notice sitting on the new agent's panel,
+  // beside a message saying this one could not be read at all.
+  document.getElementById('d-instr-outdated').hidden = true;
+  // Reset with the rest: it used to survive onto the next agent's panel, so a
+  // failed load showed "the version before your last save is kept" about an
+  // agent with no folder at all.
+  document.getElementById('d-instr-prev').hidden = true;
+  renderStale(null);
+
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/instructions?t=' + Date.now(),
+      { cache: 'no-store' });
+    const data = await res.json();
+    if (mine !== INSTR_LOAD) return; // a newer agent is open; this answer is for the old one
+    if (!res.ok) throw new Error(data.error || 'that did not work');
+
+    box.value = data.text || '';
+    // Remember which version this is, so Save can refuse to clobber an edit
+    // made after this load.
+    INSTR_VERSION = data.version || null;
+    // What the box is showing, so the poll can tell when the file has moved on
+    // from it rather than only that it is newer than the session.
+    document.getElementById('d-instr-outdated').hidden = true;
+    INSTR_READY = true;
+    // Now that there is something real in the box, the controls may match it.
+    box.disabled = false;
+    saveBtn.disabled = false;
+    const foot = document.getElementById('d-instr-foot');
+    foot.hidden = false;
+    // Say that the previous version is kept, and where. A safety net nobody
+    // knows about is half a safety net, and this is the screen where someone
+    // is about to replace an agent's entire boot file.
+    document.getElementById('d-instr-prev').hidden = !data.hasPrevious;
+    // Only name the file when it is one this screen can actually save to.
+    // Otherwise the footer said "a real file you can also edit by hand" about
+    // a path the panel had just refused, or about an agent with no folder.
+    pathEl.textContent = data.editable ? (data.path || '').replace(/^\/Users\/[^/]+/, '~') : '';
+    document.getElementById('d-instr-foot').hidden = !data.editable;
+
+    // Any message left over from the in-flight window (a Save clicked before
+    // this load landed) is about a state that no longer holds.
+    msg.textContent = '';
+
+    // ⚠️ `exists: false` does NOT mean there is no file. The read path also
+    // refuses a file that IS there but cannot be shown: not UTF-8, over the
+    // size ceiling, unopenable, a symlink, or an agent with no folder at all.
+    // Saying "there is no instruction file for this one yet" in those cases is
+    // the screen asserting something untrue, and it contradicts Save.
+    //
+    // ⚠️ Keyed on `editable`, a structured field, NOT on the wording of the
+    // reason. An earlier version regex-matched the engine's English, so
+    // rewording one sentence there would have silently removed the ability to
+    // write a first instruction file. That is the same two-derivations problem
+    // the engine was restructured to remove, moved into the browser.
+    if (!data.exists) {
+      if (data.editable) {
+        msg.textContent = 'There is no instruction file for this one yet.';
+      } else {
+        msg.textContent = 'This cannot be edited from this screen: '
+          + (data.because || 'we cannot read it') + '.';
+        INSTR_READY = false;
+        box.disabled = true;
+        saveBtn.disabled = true;
+      }
+    }
+    renderStale(data.staleness);
+  } catch (err) {
+    if (mine !== INSTR_LOAD) return;
+    // The load is finished and broken, which is a different state from "still
+    // in flight" and gets a different sentence. It leaves INSTR_READY false, so
+    // Save stays refused: we have no version, and saving without one would be
+    // an unguarded overwrite of a file we could not read.
+    INSTR_VERSION = null;
+    // A failed load must look like the other cannot-edit states, not like an
+    // editable one: the top of this function re-enabled both controls, and
+    // leaving them enabled offers a Save that INSTR_READY will always refuse.
+    // Already disabled from the top of the load; restated so the failure path
+    // is readable on its own.
+    box.disabled = true;
+    saveBtn.disabled = true;
+    document.getElementById('d-instr-foot').hidden = true;
+    // Never the raw exception. A failed fetch surfaces "Failed to fetch"
+    // verbatim, which is the one place on this surface a person is most likely
+    // to see an exception name, and every other refusal here says what to do.
+    msg.textContent = 'These instructions could not be loaded. The board may have stopped.';
+  }
+}
+
+/**
+ * Say, in the editor itself, whether the agent is actually running on what is
+ * in the box.
+ *
+ * This is the trap the card exists to avoid: the file is read ONCE at session
+ * start, so editing it changes nothing until a restart. A screen that saves the
+ * text and shows it back is asserting something untrue.
+ *
+ * It is a STATE rather than a save-time message on purpose. A toast disappears
+ * the moment you navigate away, and says nothing at all when the file was
+ * edited outside this app. This is derived every time the page opens, so it is
+ * right in both cases.
+ */
+/**
+ * Write into a live region ONLY when what it says has changed.
+ *
+ * ⚠️ `aria-live="polite"` announces on mutation, not on difference, and
+ * assigning identical HTML still replaces the child nodes. `renderStale` runs
+ * on every five-second poll, so a screen-reader user with the panel open heard
+ * "Running on older instructions. Edited ..., running since .... Restart to
+ * apply." re-announced every five seconds, forever. Measured with a
+ * MutationObserver: three mutations in sixteen seconds for one distinct string.
+ */
+function setLive(el, html) {
+  if (el.innerHTML === html) return;
+  el.innerHTML = html;
+}
+
+function renderStale(s) {
+  const el = document.getElementById('d-instr-stale');
+  if (!s || s.state === 'current') {
+    if (!el.hidden) { el.hidden = true; el.textContent = ''; }
+    return;
+  }
+
+  const when = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
+  };
+
+  if (s.state === 'stale') {
+    const edited = when(s.editedAt);
+    const started = when(s.startedAt);
+    setLive(el, '<b>Running on older instructions.</b> '
+      + (edited && started
+        ? `Edited ${esc(edited)}, running since ${esc(started)}. `
+        : '')
+      // ⚠️ Says what restarting MEANS and that this app cannot do it. The line
+      // used to read only "Restart to apply.", which is an instruction to
+      // perform an action the product does not offer and does not explain, on a
+      // screen aimed at someone who does not know what restarting an agent is.
+      // Naming it as a manual step is the honest version until the restart
+      // button exists.
+      + 'Restarting the agent is what applies them, and this app cannot do that yet.');
+    el.hidden = false;
+    return;
+  }
+
+  // unknown. Say which kind of not-knowing it is, rather than implying fine.
+  // Sentence-cased and terminated here rather than in the engine: the reasons
+  // are written as clause fragments so they can also be read as "... because
+  // <reason>", and rendering one straight after a full stop produced "running
+  // on. its instruction file is not UTF-8 text".
+  const why = String(s.because || '');
+  const sentence = why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}${/[.!?]$/.test(why) ? '' : '.'}` : '';
+  setLive(el, `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`);
+  el.hidden = false;
+}
+
+document.getElementById('d-instr-save').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const msg = document.getElementById('d-instr-msg');
+  const text = document.getElementById('d-instr').value;
+  // Which agent this save is FOR. The panel can be showing a different one by
+  // the time the answer lands, and the load path guards against exactly this
+  // while the save path did not: open A, hit Save, go back, open B, and A's
+  // response painted "Running on older instructions. Edited <A's time>" into
+  // B's panel. The write went to the right agent; the screen then said
+  // something untrue about a different one, which is the failure this state
+  // exists to prevent.
+  const forAgent = CURRENT.sessionName;
+  // ⚠️ The LOAD GENERATION this save belongs to, not just the agent.
+  //
+  // Checking the agent name alone cannot tell "someone opened a different
+  // agent" from "someone reopened THIS one", and the second case is a silent
+  // data-loss path. Measured: type new text, hit Save, go back and reopen the
+  // same agent before the write answers. The reload restores the OLD text and
+  // the old version, then the save's answer lands and overwrites
+  // `INSTR_VERSION` with the hash of the NEW text now on disk. The box then
+  // shows text that its version token does not describe, so the next ordinary
+  // save passes the changed-since-read guard, reports "Saved.", and wipes the
+  // text that was successfully saved a moment earlier. No conflict, no warning.
+  //
+  // `loadInstructions` already solved exactly this with a monotonic token; the
+  // save path was simply never given one.
+  const forLoad = INSTR_LOAD;
+  if (!INSTR_READY) {
+    // Either a load is still in flight (the box is empty and any version we
+    // hold belongs to the agent that was open before) or the load failed. In
+    // both cases we do not know what is in the file, and saving would either
+    // post the wrong agent's token or skip the guard entirely.
+    msg.textContent = 'These instructions have not loaded, so saving is off.';
+    return;
+  }
+  // Disabled for the duration, because a double-click sends two saves carrying
+  // the SAME version: the first succeeds, the second is refused as a conflict,
+  // and the message blames an edit nobody else made.
+  const btn = document.getElementById('d-instr-save');
+  btn.disabled = true;
+  msg.textContent = 'Saving…';
+  try {
+    // ⚠️ The fetch's own rejection is caught HERE and replaced. Downstream,
+    // every throw carries a message the server wrote on purpose, so the catch
+    // can pass those through verbatim. `err.message || fallback` could not tell
+    // the two apart, because "Failed to fetch" is perfectly truthy.
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/instructions',
+      { method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, version: INSTR_VERSION }) })
+      .catch(() => { throw new Error('That did not save. The board may have stopped.'); });
+    const data = await res.json();
+    // A different agent, OR the same agent reloaded since this save began.
+    if (!CURRENT || CURRENT.sessionName !== forAgent || INSTR_LOAD !== forLoad) return;
+    if (!res.ok) throw new Error(data.error || 'that did not work');
+    msg.textContent = 'Saved.';
+    INSTR_VERSION = data.version || null;
+    INSTR_EPOCH += 1;
+    // ⚠️ Updating INSTR_VERSION above is what stops the very next poll deciding
+    // the file has "changed since you opened it" and telling the person to
+    // reopen the agent, discarding the box. On 100% of saves, on the feature's
+    // primary flow, until a save started refreshing it.
+    document.getElementById('d-instr-outdated').hidden = true;
+    // A save is the moment the kept version comes into existence, and this is
+    // the one screen where someone has just replaced an agent's entire boot
+    // file. It used to stay hidden until the agent was reopened, so the safety
+    // net went unmentioned exactly when it had just been created.
+    //
+    // ⚠️ `keptPrevious` ALONE on this path, never `|| hasPrevious`.
+    // `hasPrevious` is true whenever any regular file sits at that name, so
+    // when the backup write failed the panel still promised "the version before
+    // your last save is kept" about a copy from two saves ago, or a zero-byte
+    // file left by a failed write. That inference is exactly what the engine
+    // returns `keptPrevious` to prevent, re-added in the browser.
+    // `keptPrevious` for a real save, and `hasPrevious` when the save changed
+    // nothing. The strict rule is right for a real save (a stale or zero-byte
+    // backup must not be promised), but a byte-identical save is the one case
+    // where the existing kept version is known-good and still exactly what it
+    // says it is, so hiding the note there takes back a true statement at the
+    // moment it matters most.
+    document.getElementById('d-instr-prev').hidden =
+      !(data.keptPrevious || (data.unchanged && data.hasPrevious));
+    // Re-derive rather than assume: saving makes the file newer than the
+    // session, so this is exactly when the stale state becomes true.
+    renderStale(data.staleness);
+    await tick();
+  } catch (err) {
+    if (!CURRENT || CURRENT.sessionName !== forAgent || INSTR_LOAD !== forLoad) return;
+    // Safe to show verbatim: the only throws that reach here are the server's
+    // own curated messages, plus the one substituted at the fetch above.
+    msg.textContent = err.message;
+  } finally {
+    // Only for the agent and the load this save was for. Otherwise a save
+    // started on A re-enables a Save button that B's load deliberately disabled
+    // because B's file cannot be edited, putting back the
+    // offer-an-action-that-will-fail state the disable exists to remove.
+    if (CURRENT && CURRENT.sessionName === forAgent && INSTR_LOAD === forLoad) {
+      btn.disabled = false;
+    }
+  }
+});
+
 document.getElementById('detail-back').addEventListener('click', () => showTab('agents'));
 
 document.getElementById('d-file').addEventListener('change', async (e) => {
   const f = e.target.files && e.target.files[0];
   if (!f || !CURRENT) return;
   const msg = document.getElementById('d-msg');
+  // Same capture-and-recheck as the instruction save. Without it, uploading a
+  // picture for A and switching to B before it lands reports "Saved." on B's
+  // panel, about a file B has nothing to do with.
+  const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar',
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/avatar',
       { method: 'PUT', headers: { 'content-type': f.type }, body: f });
     const out = await res.json();
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     // Say what to do, never surface an exception name.
     if (!res.ok) throw new Error(out.error || 'that did not work');
     msg.textContent = 'Saved.';
     await tick();
-    openDetail(CURRENT.sessionName);
+    // Only the picture. openDetail would re-run the whole panel and throw away
+    // anything typed into the instruction box but not yet saved.
+    refreshAvatar();
   } catch (err) { msg.textContent = err.message; }
 });
 
 document.getElementById('d-remove').addEventListener('click', async () => {
   if (!CURRENT) return;
-  await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/avatar', { method: 'DELETE' });
-  document.getElementById('d-msg').textContent = 'Removed.';
+  const forAgent = CURRENT.sessionName;
+  const msg = document.getElementById('d-msg');
+  const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/avatar', { method: 'DELETE' });
+  if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+  // It reported "Removed." whatever came back, so a refusal read as a success.
+  if (!res.ok) { msg.textContent = 'That picture could not be removed.'; return; }
+  msg.textContent = 'Removed.';
   await tick();
-  openDetail(CURRENT.sessionName);
+  refreshAvatar();
 });
 
 document.getElementById('d-save').addEventListener('click', async () => {
   if (!CURRENT) return;
   const msg = document.getElementById('d-role-msg');
+  // The last handler on this panel without the capture-and-recheck its two
+  // neighbours carry. The write went to the right agent, but "Saved." landed
+  // under whichever agent happened to be open when the answer arrived.
+  const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/agent/' + encodeURIComponent(CURRENT.sessionName) + '/profile',
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/profile',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ role: document.getElementById('d-role').value.trim() }) });
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     if (!res.ok) throw new Error('that did not save');
     msg.textContent = 'Saved.';
     await tick();
-  } catch (err) { msg.textContent = err.message; }
+  } catch (err) {
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    msg.textContent = err.message;
+  }
 });
 
 // Deep-link straight to one agent, so a page can be shared or bookmarked.

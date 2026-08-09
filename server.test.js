@@ -30,20 +30,39 @@
  *   node --test server.test.js
  */
 
-// Sandbox the commitment store BEFORE requiring the server: commitments.js
-// reads this at module load.
+// Sandbox the real stores BEFORE requiring the server: both modules read their
+// root at module load.
 //
-// ⚠️ This is a PARTIAL sandbox. `AGENT_WORKFORCE_DATA` moves the commitment
-// store only; avatars and profiles still resolve through `store.ROOT`, which is
-// the operator's real app data. That is why no test in this file sends a PUT or
-// DELETE to an avatar or profile route, and why any test that does must sandbox
-// `store.ROOT` first. A reviewer once deleted a real avatar by assuming this
-// variable covered everything.
+// ⚠️ There are THREE real roots behind this server, and these two variables
+// cover two of them.
+//
+//   1. `AGENT_WORKFORCE_DATA`  -> the commitment store. Sandboxed here.
+//   2. `AGENT_WORKFORCE_WORKERS` -> the instruction files, `~/work/workers/
+//      <agent>/CLAUDE.md`. Sandboxed here. These are the LIVE files that the
+//      working agents boot from, so a stray PUT does not corrupt test data, it
+//      changes how a real agent behaves the next time it starts. The route
+//      tests below deliberately drive PUT with a real agent's name, and before
+//      this line the only thing standing between them and those files was the
+//      handler's `typeof text !== 'string'` check. One test with a valid string
+//      would have rewritten a colleague's instructions.
+//
+//      ⚠️ This variable only covered the instruction read and write when it was
+//      first added. `status.js` had its own hardcoded copy of the same path for
+//      `readIdentity`, so `snapshot()` kept reading the real files while this
+//      comment said they were sandboxed. Reads only, nothing was corrupted, but
+//      the comment was the thing a future author would trust before deciding a
+//      write was safe. Both modules now read this one variable.
+//   3. `store.ROOT` -> avatars and profiles. NOT sandboxed, no variable for it.
+//      That is why no test here sends a PUT or DELETE to an avatar or profile
+//      route, and why any test that does must sandbox it first. A reviewer once
+//      deleted a real avatar by assuming one variable covered everything.
 const os = require('node:os');
 const fs = require('node:fs');
 const nodePath = require('node:path');
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
+const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
+process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -59,9 +78,12 @@ test.after(() => {
   // suite can hang on a slower dispatcher even though every test has passed.
   server.closeAllConnections();
   server.close();
-  // Every run otherwise leaks one temp directory holding commitment records
-  // under real agent names.
+  // Every run otherwise leaks a temp directory: SANDBOX holds commitment
+  // records under real agent names, WORKERS holds the instruction files the
+  // route tests write. Both, not just the first: WORKERS was added later and
+  // the cleanup was not extended with it.
   fs.rmSync(SANDBOX, { recursive: true, force: true });
+  fs.rmSync(WORKERS, { recursive: true, force: true });
 });
 
 /**
@@ -131,6 +153,111 @@ test('an API route never answers with HTML, whatever the query string or method'
     assert.ok(!res.type.includes('text/html'),
       `${options ? options.method + ' ' : ''}${path} answered with the page`);
   }
+});
+
+test('a request claiming a non-loopback Host is refused', async () => {
+  // ⚠️ DNS rebinding. The routing check inspects the request TARGET; this
+  // inspects what the client thinks it is talking to, and they are different
+  // questions. Without it the server answers `Host: evil.example.com` with the
+  // full agent roster, which means a page on another site whose DNS is then
+  // pointed at 127.0.0.1 becomes same-origin with this server: no CORS
+  // preflight, the response readable, and every write route reachable.
+  //
+  // The gap predates this branch and was survivable while the writes were an
+  // avatar and a job title. It is not survivable now that the same hole rewrites
+  // the file an agent boots from.
+  // ⚠️ Driven with `node:http`, NOT `fetch`. `Host` is a forbidden header name,
+  // so fetch silently drops it and the request goes out with the real host: a
+  // version of this test written with `fetch` passes against a server that has
+  // no check at all, which is the "test that pins nothing" shape exactly.
+  const raw = (host) => new Promise((resolve, reject) => {
+    const r = require('node:http').request({
+      host: '127.0.0.1', port: server.address().port, path: '/api/status',
+      method: 'GET', headers: { Host: host },
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    r.on('error', reject);
+    r.end();
+  });
+
+  const evil = await raw('evil.example.com');
+  assert.equal(evil.status, 400, 'a rebound host was served the agent roster');
+  assert.ok(!evil.body.includes('sessionName'), 'the roster leaked in the refusal');
+
+  // Every spelling of loopback still works, and the PORT is deliberately not
+  // compared: a proxy in front of this process legitimately names another one.
+  //
+  // The trailing dot and the case are load-bearing rather than tidiness: a
+  // browser will send `localhost.`, and `Host` is case-insensitive, so without
+  // the normalisation the guard refuses the operator's own board.
+  for (const host of ['localhost:1', '127.0.0.1:65535', '[::1]:4317',
+    'localhost.', 'LOCALHOST', 'LocalHost:4317', '127.0.0.1.']) {
+    const ok = await raw(host);
+    assert.notEqual(ok.status, 400, `${host} should still be routed`);
+  }
+});
+
+test('the allowlist opt-in is reachable, and tolerant of how it is written', async () => {
+  // ⚠️ Drives a REAL server in a child process with the variable set, rather
+  // than asserting on `server.js` source text.
+  //
+  // The first version of this test regex-matched the shipped source, and it was
+  // inverted in both directions: deleting the case and trailing-dot handling (a
+  // real regression, an operator's `Board.Local` entry silently stops matching)
+  // left it green, while rewriting the same regex as an equivalent `/:[0-9]+$/`
+  // (no behaviour change at all) turned it red. It failed on harmless refactors
+  // and passed on the regression it was named for, which is the "test that pins
+  // nothing" shape this whole suite is written against, committed while adding
+  // the guard it was supposed to pin.
+  //
+  // The excuse was that the allowlist is read at module load so a running
+  // server cannot be asked about it. A child process with the environment set
+  // is the answer, and `engine/instructions.test.js` already does exactly this.
+  const probe = `
+    process.env.AGENT_WORKFORCE_ALLOWED_HOSTS = ' Board.Local , proxy.example.com:8443 , Dotted.Example. ';
+    process.env.AGENT_WORKFORCE_DATA = ${JSON.stringify(SANDBOX)};
+    process.env.AGENT_WORKFORCE_WORKERS = ${JSON.stringify(WORKERS)};
+    const http = require('node:http');
+    const { start, server } = require(${JSON.stringify(nodePath.join(__dirname, 'server.js'))});
+    const ask = (host) => new Promise((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: server.address().port,
+        path: '/api/status', headers: { Host: host } },
+        (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+      r.on('error', reject); r.end();
+    });
+    start(0).then(async () => {
+      const out = {};
+      for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
+                       'proxy.example.com:8443', 'proxy.example.com',
+                       'dotted.example', 'dotted.example.',
+                       'evil.example.com', 'board.local.evil.com']) {
+        out[h] = await ask(h);
+      }
+      console.log(JSON.stringify(out));
+      server.closeAllConnections(); server.close();
+    });
+  `;
+  const out = require('node:child_process')
+    .execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 20000 });
+  const got = JSON.parse(out.trim().split('\n').pop());
+
+  // Every spelling of an allowed host, including the one an operator would
+  // paste out of a proxy config with the port still attached.
+  // Includes an entry WRITTEN with a trailing dot, which was the one axis of the
+  // parser the fixture did not exercise: dropping the config-side dot strip
+  // left the suite green while an operator's `Dotted.Example.` entry silently
+  // stopped matching.
+  for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
+    'proxy.example.com:8443', 'proxy.example.com',
+    'dotted.example', 'dotted.example.']) {
+    assert.notEqual(got[h], 400, `${h} should have been allowed`);
+  }
+  // And the allowlist must not become a suffix match.
+  assert.equal(got['evil.example.com'], 400);
+  assert.equal(got['board.local.evil.com'], 400, 'the allowlist matched a suffix');
 });
 
 test('an unknown agent avatar still 404s with a query string attached', async () => {
@@ -774,4 +901,197 @@ test('a null PUT body is refused with a readable message, not an exception name'
   const { error } = JSON.parse(res.body);
   assert.match(error, /commitments list/, `unhelpful message: ${error}`);
   assert.ok(!/Cannot read properties/.test(error), 'surfaced a raw exception message');
+});
+
+// ---------------------------------------------------------------------------
+// The instructions route: the most powerful write on the surface
+// ---------------------------------------------------------------------------
+
+test('instructions are reachable with a query string attached', async () => {
+  // The detail page cache-busts this fetch, which is the exact shape that
+  // returned the HTML page before routing moved to the pathname.
+  const bare = await req('/api/agent/angel/instructions');
+  const busted = await req('/api/agent/angel/instructions?t=1');
+  assert.match(bare.type, /application\/json/);
+  assert.match(busted.type, /application\/json/, 'a query string sent it to the catch-all');
+  assert.equal(busted.status, bare.status);
+});
+
+test('a malformed agent name does not crash the instructions route', async () => {
+  for (const path of ['/api/agent/%/instructions', '/api/agent/%zz/instructions?t=1']) {
+    const res = await req(path);
+    assert.equal(res.status, 404, `${path} should be refused`);
+  }
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'server died on a malformed name');
+});
+
+test('PUT refuses an unknown agent and a body that is not text', async (t) => {
+  const unknown = await req('/api/agent/definitely-not-an-agent/instructions', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'a'.repeat(50) }),
+  });
+  assert.equal(unknown.status, 404);
+
+  const name = await anyAgent(t);
+  if (!name) return;
+  for (const body of ['{}', '{"text":123}', '{"text":null}', 'null']) {
+    const res = await req(`/api/agent/${name}/instructions`,
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 400, `${body} should be refused`);
+    assert.match(JSON.parse(res.body).error, /as text/);
+  }
+});
+
+test('a successful PUT rewrites the file and answers with the new stale state', async (t) => {
+  // The riskiest path on the surface, and it was covered at the engine level
+  // only: every route test above asserts a REFUSAL, so nothing drove this to a
+  // 200 and checked that the bytes on disk actually changed. Safe to write now
+  // only because AGENT_WORKFORCE_WORKERS is sandboxed at the top of this file.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  // A worker directory inside the SANDBOX, named for a real agent so the
+  // handler's knownAgent guard passes. Nothing under ~/work/workers is touched.
+  const dir = nodePath.join(WORKERS, decodeURIComponent(name));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = nodePath.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(file, 'The instructions this agent had before the test ran.');
+
+  const text = 'These are the instructions the route was asked to save for this agent.';
+  const res = await req(`/api/agent/${name}/instructions`,
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+
+  assert.equal(res.status, 200, res.body);
+  assert.equal(fs.readFileSync(file, 'utf8'), text, 'the file on disk did not change');
+
+  const body = JSON.parse(res.body);
+  assert.equal(body.text, text, 'the answer must reflect what was stored, not what was sent');
+  assert.equal(body.exists, true);
+  // A save makes the file newer than the session, which is exactly when the
+  // agent stops running on what the box now shows. It must not answer
+  // `current`, because that is the untrue claim the whole state exists to stop.
+  assert.notEqual(body.staleness.state, 'current',
+    'a just-saved file cannot be what a running agent already booted from');
+
+  const back = await req(`/api/agent/${name}/instructions`);
+  assert.equal(JSON.parse(back.body).text, text, 'a re-read did not see the write');
+});
+
+test('both modules resolve worker files under the SAME sandboxed root', async (t) => {
+  // ⚠️ Pins the one thing standing between `node --test` and the live CLAUDE.md
+  // files that real agents boot from. `status.js` used to carry its own
+  // hardcoded `~/work/workers`, so this suite read the operator's real agents
+  // while believing it was sandboxed. Nothing pinned the fix, so reverting that
+  // one line silently restored the regression with the whole suite green.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const plain = decodeURIComponent(name);
+
+  if (plain === 'claudebot') {
+    t.skip('this agent has a hardcoded identity override, so readIdentity never reads its file');
+    return;
+  }
+
+  const dir = nodePath.join(WORKERS, plain);
+  fs.mkdirSync(dir, { recursive: true });
+  // Shaped to match what readIdentity actually parses (`You are **Name**, role`)
+  // rather than to any text that merely contains a marker.
+  const marker = 'Sandbox Marker Agent';
+  fs.writeFileSync(nodePath.join(dir, 'CLAUDE.md'),
+    `# ${plain}\n\nYou are **${marker}**, the sandbox fixture worker.\n`);
+
+  // The instruction route reads through instructions.js...
+  const got = JSON.parse((await req(`/api/agent/${name}/instructions`)).body);
+  assert.match(got.text, /Sandbox Marker Agent/, 'instructions.js read outside the sandbox');
+  assert.ok(got.path.startsWith(WORKERS),
+    `instructions.js resolved outside the sandbox: ${got.path}`);
+
+  // ...and the status payload reads through status.js readIdentity. If the two
+  // disagree about the root, this file is invisible to one of them, which is
+  // exactly the state the suite shipped in.
+  const board = JSON.parse((await req('/api/status')).body);
+  const mine = (board.agents || []).find((a) => a.sessionName === plain);
+  assert.ok(mine, 'the agent vanished from the board');
+  assert.equal(mine.name, marker,
+    'status.js did not read the sandboxed file, so it is resolving a different root');
+});
+
+test('the route refuses a save that would overwrite an edit made since the read', async (t) => {
+  const name = await anyAgent(t);
+  if (!name) return;
+  const dir = nodePath.join(WORKERS, decodeURIComponent(name));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = nodePath.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(file, 'The version the editor was shown when the panel opened.');
+
+  const opened = JSON.parse((await req(`/api/agent/${name}/instructions`)).body);
+  assert.ok(opened.version, 'GET must say which version it served');
+
+  // Someone edits the file while the panel sits open, and the mtime is put back
+  // so the guard cannot pass by comparing timestamps.
+  const before = fs.statSync(file).mtime;
+  const outside = 'AN EDIT MADE OUTSIDE THE APP THAT MUST NOT BE LOST';
+  fs.writeFileSync(file, outside);
+  fs.utimesSync(file, before, before);
+
+  const res = await req(`/api/agent/${name}/instructions`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'a'.repeat(40), version: opened.version }),
+  });
+  // 409, not 400: this is a conflict, not a malformed request, and a
+  // non-browser client keys on the difference to offer a reload over a retry.
+  assert.equal(res.status, 409, res.body);
+  assert.match(JSON.parse(res.body).error, /changed since you opened them/);
+  assert.equal(fs.readFileSync(file, 'utf8'), outside, 'the outside edit was destroyed');
+});
+
+test('an unparseable body is refused with a readable message, not an exception name', async (t) => {
+  const name = await anyAgent(t);
+  if (!name) return;
+  for (const body of ['{', 'not json at all', '{"text":']) {
+    const res = await req(`/api/agent/${name}/instructions`,
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 400, `${body} should be refused`);
+    const { error } = JSON.parse(res.body);
+    assert.doesNotMatch(error, /SyntaxError|Unexpected token|JSON at position/,
+      `the message named an exception instead of saying what to send: ${error}`);
+    assert.match(error, /as JSON/);
+  }
+});
+
+test('GET refuses an unknown agent rather than reporting a path for it', async () => {
+  const res = await req('/api/agent/definitely-not-an-agent/instructions');
+  assert.equal(res.status, 404);
+  assert.equal(JSON.parse(res.body).path, undefined, 'a refusal must not hand back a filesystem path');
+});
+
+test('the status payload carries staleness but NOT the instruction text', async (t) => {
+  // The board polls this every five seconds for every agent, and the real files
+  // run to several kilobytes each. Carrying them here would put roughly 90KB on
+  // the wire per poll to render a badge.
+  const res = await req('/api/status');
+  if (!res.type.includes('application/json')) {
+    t.skip('the status engine did not return a board on this machine');
+    return;
+  }
+  const body = JSON.parse(res.body);
+  const agents = body.agents || [];
+  if (!agents.length) {
+    // A bare return here prints a tick for a test that asserted nothing, which
+    // is the failure `anyAgent` exists to avoid. Say it out loud instead.
+    t.skip('no live agents on this machine, so there is no payload to inspect');
+    return;
+  }
+
+  for (const a of agents) {
+    assert.ok(a.instructions, `${a.sessionName} has no instructions block`);
+    assert.ok(['current', 'stale', 'unknown'].includes(a.instructions.state),
+      `${a.sessionName} has an unexpected state: ${a.instructions.state}`);
+    assert.equal(a.instructions.text, undefined,
+      'the instruction TEXT must not ride on the status poll');
+  }
+
+  assert.ok(JSON.stringify(body).length < 200 * 1024,
+    `status payload is ${JSON.stringify(body).length} bytes; the text is probably riding along`);
 });

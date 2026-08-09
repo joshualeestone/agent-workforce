@@ -3,8 +3,9 @@
 /**
  * A local window onto the agents running on this machine.
  *
- * Binds to localhost only, and it WRITES: it stores avatars, roles, and the
- * commitments each agent says it is holding. It does not yet send input to an
+ * Binds to localhost only, and it WRITES: it stores avatars, roles, the
+ * commitments each agent says it is holding, and the instruction file each
+ * agent reads at startup. It does not yet send input to an
  * agent or start or stop one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
@@ -23,6 +24,7 @@ const { snapshot } = require('./engine/status');
 const { version } = require('./package.json');
 const store = require('./engine/store');
 const commitments = require('./engine/commitments');
+const instructions = require('./engine/instructions');
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
 // server is still a way to fill someone's memory by accident.
@@ -41,6 +43,32 @@ function readBody(req) {
   });
 }
 
+/**
+ * Is this a name the board actually knows?
+ *
+ * ⚠️ Known limitation, written down rather than left to be discovered. This
+ * compares against `safeKey(name)`, so an agent whose tmux session name is not
+ * already its own sanitised form (a capital, a dot, a space) is rejected by
+ * every route here, even though the status poll publishes a real staleness
+ * verdict for it. The card would show "running on older instructions" and
+ * clicking through would 404.
+ *
+ * ⚠️ And a correction to what an earlier version of this comment claimed. It
+ * said that NOT widening the gate avoided accepting two names that sanitise to
+ * the same directory. That was wrong: the gate compares against `safeKey(name)`
+ * and `fileFor` resolves through `safeKey` too, so it ALREADY accepts every
+ * spelling that sanitises to a live agent. Verified against the live roster:
+ * `an.gel`, `ANGEL`, `a n g e l` and `ang!el` all pass and all resolve to
+ * `angel/CLAUDE.md`. That is harmless while it is the same agent.
+ *
+ * The real latent risk, stated accurately: if two agents ever exist whose names
+ * sanitise to the SAME key (sessions `mybot` and `my.bot`), the gate cannot
+ * tell them apart and both read and write one file. Nothing detects that today.
+ * There are currently no such collisions and no agent whose name differs from
+ * its own sanitised form, both checked rather than assumed. The real fix is one
+ * identity per agent instead of a name that is sanitised in one place and
+ * verbatim in another, which is a change to the avatar and profile stores too.
+ */
 function knownAgent(name) {
   try {
     return snapshot().agents.some((a) => a.sessionName === store.safeKey(name));
@@ -83,6 +111,26 @@ const ROUTING_BASE = 'http://localhost';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
+ * Extra hostnames this server will answer to, comma-separated.
+ *
+ * Empty by default. Set it only if you are deliberately putting a proxy in
+ * front of this port, and read the warning above `start()` first: there is no
+ * authentication here, and the writes include the file an agent boots from.
+ */
+const ALLOWED_HOSTS = new Set(
+  String(process.env.AGENT_WORKFORCE_ALLOWED_HOSTS || '')
+    .split(',')
+    // ⚠️ The PORT is stripped, because the incoming value is compared as a bare
+    // hostname and an operator copying `host:port` out of their proxy config
+    // would otherwise get a silently dead entry and a 400 with nothing pointing
+    // at the cause. Trailing dot and case too, matching how the header is
+    // normalised below: an allowlist that only works if you spell it the way
+    // the code happens to expect is not an allowlist.
+    .map((h) => h.trim().replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase())
+    .filter(Boolean),
+);
+
+/**
  * Returns the request's path with any query string removed, or `null` when the
  * target is not one we should route at all.
  *
@@ -113,11 +161,12 @@ function pathOf(req) {
   // authority -- `//host/path`, or an absolute `http://host/path` -- otherwise
   // has its host silently discarded and gets routed on the path alone.
   //
-  // ⚠️ This inspects the request TARGET, not the `Host` header, so it is not an
-  // origin check and does not stop DNS rebinding: `GET /api/status` with
-  // `Host: evil.example` is still answered. That gap is real on an auth-free
-  // server and is tracked separately; do not read this guard as protection it
-  // does not provide.
+  // ⚠️ This inspects the request TARGET, not the `Host` header. Those are
+  // different questions and this one is not an origin check. The `Host` check
+  // that closes DNS rebinding is a separate block further down, added later;
+  // this comment used to say the gap was "tracked separately" and left that
+  // standing after it was closed, which understates the protection rather than
+  // overstating it but is the same defect either way.
   //
   // Checking the parsed host rather than the string shape is deliberate. The
   // obvious guard is `raw.startsWith('//')`, and it does not work: the URL
@@ -127,6 +176,55 @@ function pathOf(req) {
   // actually produced is the only version that holds, because it tests the
   // property we care about rather than a spelling of it.
   if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+
+  // ⚠️ And the `Host` HEADER, which is a different question from the target's
+  // authority and closes a different hole.
+  //
+  // The check above inspects what the client ASKED FOR. This one inspects what
+  // it thinks it is talking to, and without it the server answers
+  // `Host: evil.example.com` with the full agent roster. That is DNS rebinding:
+  // a page on some other site, whose DNS then points at 127.0.0.1, becomes
+  // same-origin with this server, so no CORS preflight is involved and the
+  // response is readable. The attacker enumerates the agents and then PUTs a
+  // new instruction file for any of them.
+  //
+  // This gap predates the branch and was survivable while the writes were an
+  // avatar and a job title. It is not survivable now: this server edits the
+  // file an agent boots from, so the same hole is remote code execution by the
+  // agent, one restart later. The comment above `start()` used to enumerate
+  // "two ways that protection is lost" and this was not one of them.
+  //
+  // ⚠️ This REFUSES a proxied request, and that is deliberate rather than an
+  // oversight. Said plainly because it is a behaviour change: a reverse proxy
+  // forwards its own hostname in `Host`, so nginx or a Tailscale Funnel in
+  // front of this port now gets a 400 where it used to get the board.
+  //
+  // That is the posture the warning above `start()` already describes: this
+  // server has no authentication, so a tunnel pointed at it exposes every write
+  // route to whoever finds the URL, and it now edits the file an agent boots
+  // from. Refusing is the honest default for a thing that was only ever safe
+  // because it was unreachable.
+  //
+  // `AGENT_WORKFORCE_ALLOWED_HOSTS` is the deliberate opt-in for someone who
+  // genuinely wants that, comma-separated hostnames. It exists so the choice is
+  // made on purpose rather than discovered, and so this change does not
+  // silently break a deployment that already relies on it.
+  //
+  // Only the HOSTNAME is compared: a proxy legitimately names a different port.
+  // A request with no `Host` at all is HTTP/1.0 or a raw socket, neither of
+  // which is a browser being rebound.
+  const sent = req.headers && req.headers.host;
+  if (sent) {
+    let asked;
+    try {
+      asked = new URL(`http://${sent}`).hostname;
+    } catch {
+      return null;
+    }
+    // A trailing dot is the same host, and a browser will send one.
+    const bare = asked.replace(/\.$/, '').toLowerCase();
+    if (!LOOPBACK_HOSTS.has(bare) && !ALLOWED_HOSTS.has(bare)) return null;
+  }
 
   return parsed.pathname;
 }
@@ -177,6 +275,12 @@ const server = http.createServer((req, res) => {
       const agents = snap.agents.map((a) => ({
         ...a,
         commitments: commitments.read(a.sessionName),
+        // Staleness only, NOT the instruction text. The board polls this every
+        // five seconds for every agent, and the real files run to several
+        // kilobytes each -- carrying them here would put ~90KB on the wire per
+        // poll to render a badge. The text is fetched once, by the detail page,
+        // when someone actually opens it.
+        instructions: instructions.staleness(a.sessionName),
       }));
       body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {
@@ -363,6 +467,67 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // --- instructions: the file an agent reads to know what it is for --------
+  //
+  // ⚠️ The most powerful write in the product. It changes how a live agent
+  // behaves the next time it starts, which is why engine/instructions.js guards
+  // it harder than anything else here.
+  const instr = pathname.match(/^\/api\/agent\/([^/]+)\/instructions$/);
+  if (instr && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(instr[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    // Guarded the same way PUT is. Without this, GET answers 200 for any name
+    // at all and hands back the absolute path it would have used, which turns
+    // the route into a "does ~/work/workers/<x> exist" oracle for names that
+    // are not agents. There is no reason for the read and the write to disagree
+    // about which names exist.
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    try {
+      sendJson(res, 200, instructions.read(name));
+    } catch {
+      sendJson(res, 500, { error: 'those instructions could not be read' });
+    }
+    return;
+  }
+
+  if (instr && req.method === 'PUT') {
+    const name = decodeSegment(instr[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let patch;
+        try {
+          patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          // A raw SyntaxError here reads "Unexpected token } in JSON at
+          // position 4", which is an exception name and an offset rather than
+          // anything a person can act on. Every other refusal on this route
+          // says what to send instead, and unparseable input was the one hole.
+          throw new Error('send the instructions as JSON, like {"text": "..."}');
+        }
+        if (typeof patch.text !== 'string') {
+          throw new Error('send the instructions as text');
+        }
+        // `version` is the sha256 the editor was last shown. Passing it through lets
+        // the engine refuse a save that would overwrite an edit made since,
+        // rather than silently picking the version in the textarea.
+        sendJson(res, 200, instructions.write(name, patch.text, patch.version));
+      })
+      // The message reaches the person verbatim, so it says what to do rather
+      // than naming an exception.
+      .catch((err) => {
+        // A conflict is not a malformed request. 409 is what a non-browser
+        // client keys on to offer a reload rather than a retry.
+        //
+        // Keyed on `err.code`, not on the wording: this used to regex-match the
+        // engine's English, so rewording one sentence silently downgraded the
+        // status to 400.
+        sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
+      });
+    return;
+  }
+
   // Anything under /api/ that reached here matched no handler -- usually a
   // method the route does not implement, e.g. PATCH on an avatar. Falling
   // through to the page would answer an API call with HTML at 200, which is the
@@ -394,9 +559,9 @@ const server = http.createServer((req, res) => {
 /**
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * It sets roles, stores avatars, and records the commitments the restart
- * confirmation will read, and restart is next. There is no authentication of
- * any kind.
+ * It sets roles, stores avatars, records the commitments the restart
+ * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. Restart is
+ * next. There is no authentication of any kind.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *

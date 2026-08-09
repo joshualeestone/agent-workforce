@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const store = require('./store');
+const { readWorkerFile } = require('./workerfile');
 
 const HOME = os.homedir();
 
@@ -415,7 +416,39 @@ function readModel(agentName) {
  * Where it cannot be derived we show the raw session name and say so, rather
  * than inventing something friendlier.
  */
-const WORKERS_DIR = path.join(HOME, 'work', 'workers');
+/**
+ * Where worker directories live.
+ *
+ * ⚠️ Honours `AGENT_WORKFORCE_WORKERS` because `engine/instructions.js` does,
+ * and these two must be the SAME root. They were not: this one was hardcoded,
+ * so relocating the variable moved the instruction READ and WRITE while leaving
+ * `readIdentity` pointed at the operator's live `~/work/workers`. A test suite
+ * that believed it was sandboxed was still reading real agents' files, and the
+ * sandbox comment in server.test.js said so in good faith while being wrong.
+ *
+ * ⚠️ The ROOT is now shared. The per-agent SEGMENT still is not: `readIdentity`
+ * below joins the verbatim `sessionName`, while `instructions.fileFor` joins
+ * `safeKey(sessionName)`. For any agent whose session name is not already its
+ * own sanitised form, those two resolve to different directories, so the board
+ * can show a derived name and role read from one file while staleness reports
+ * on another.
+ *
+ * ⚠️ An earlier version of this said "it fails safe in both directions". That
+ * is false, and the correction matters because the unsafe direction is a
+ * CROSS-AGENT WRITE. Measured with two agents whose names collide under
+ * `safeKey` (`mybot` and `my.bot`), each with its own worker directory:
+ * `readIdentity('my.bot')` read `my.bot`'s file, while `fileFor('my.bot')`
+ * resolved to `mybot`'s, `read` returned `mybot`'s text and `staleness`
+ * returned a confident `current` computed from it. `knownAgent` compares
+ * `sessionName === safeKey(name)`, so `PUT /api/agent/my.bot/instructions`
+ * passes the gate and rewrites `mybot`'s boot file.
+ *
+ * There are no such collisions on this machine, checked rather than assumed,
+ * and `server.js` states the same risk accurately at `knownAgent`. The real fix
+ * is one identity per agent instead of a name sanitised in one place and taken
+ * verbatim in another, which reaches the avatar and profile stores too.
+ */
+const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
 /**
  * Explicit overrides for agents whose identity is not derivable.
@@ -439,12 +472,25 @@ function readIdentity(sessionName) {
   if (override) return { ...override, derived: true, source: 'override' };
 
   const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
-  let text;
-  try {
-    text = fs.readFileSync(file, 'utf8').slice(0, 4000);
-  } catch {
-    return { displayName: sessionName, role: null, derived: false };
-  }
+
+  // ⚠️ Through the SHARED reader, not a local `readFileSync`.
+  //
+  // This was the sixth instance of one defect on this branch: a second reader
+  // of the workers directory with fewer guards than the first. It followed a
+  // symlinked worker folder, then, once that was fixed, still followed a
+  // symlinked CLAUDE.md and served a name parsed out of a file outside the
+  // root, while the instructions route for the same agent correctly refused.
+  // It also blocked FOREVER on a fifo, and because `knownAgent` calls
+  // `snapshot()`, that wedged every route on the server with no crash to say
+  // why. Both measured, not theorised.
+  //
+  // The guards are no longer duplicated here, because duplicating them is what
+  // kept going wrong. `engine/workerfile.js` sits below both modules on purpose:
+  // `instructions.js` already requires this one, so anything shared has to live
+  // underneath or the require becomes a cycle.
+  const got = readWorkerFile(file, WORKERS_DIR);
+  if (!got.ok) return { displayName: sessionName, role: null, derived: false };
+  const text = got.buf.toString('utf8').slice(0, 4000);
 
   const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
   if (!m) return { displayName: sessionName, role: null, derived: false };
@@ -511,7 +557,13 @@ function snapshot() {
   };
 }
 
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, STATE, CONFIDENCE, CONTEXT_LIMITS };
+// `transcriptFor` is exported for the instructions module, which needs a
+// session start time. It resolves by session id rather than by guessing a
+// directory from the agent's name, for the reason its own comment gives: a
+// guess finds *a* transcript every time, so it looks like it worked while
+// reporting from the wrong session. One derivation, shared, rather than a
+// second copy that can drift.
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');
