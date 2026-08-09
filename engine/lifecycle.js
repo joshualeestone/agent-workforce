@@ -1,0 +1,261 @@
+'use strict';
+
+/**
+ * Giving an agent a fresh start: compact, clear, restart.
+ *
+ * ⚠️ **These are the first actions in the product that reach a RUNNING agent.**
+ * Everything before this edited files an agent reads. These interrupt a live
+ * session, and two of the three destroy its conversation, which is where every
+ * commitment it is holding lives.
+ *
+ * The three are ordered by what they cost, and the ordering is the whole point:
+ *
+ *   - **compact** summarises the older part of the conversation. Loses nothing.
+ *   - **clear** empties the conversation. The agent keeps running and forgets.
+ *   - **restart** stops and starts the process. Also forgets, and is the ONLY
+ *     one that re-reads the instruction file, which is what ties this to the
+ *     editor added alongside it.
+ *
+ * ⚠️ **Restart goes through `restart-bot.sh`, and that is not incidental.**
+ * The script drives launchd, which runs the launch script, which supplies
+ * `--dangerously-skip-permissions`. A hand-rolled `tmux kill-session` +
+ * `new-session` looks equivalent and is not: the bot comes back WITHOUT that
+ * flag and freezes on its first permission prompt, silently, until a human
+ * notices it has stopped answering. This is a standing fleet rule, and it is
+ * why this module shells out to a script instead of doing the obvious thing.
+ */
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+/**
+ * The blessed restart path. Overridable so tests never touch the real one.
+ */
+const RESTART_SCRIPT = process.env.AGENT_WORKFORCE_RESTART_SCRIPT
+  || path.join(os.homedir(), '.claude', 'bin', 'restart-bot.sh');
+
+/**
+ * Perform nothing; report what would have happened.
+ *
+ * ⚠️ This exists because I sent `/compact` to a live agent while testing these
+ * very routes, and that agent was the session doing the work. The command
+ * queued in its composer and would have wiped the conversation the moment the
+ * turn ended.
+ *
+ * The cause is worth stating exactly, because it is not carelessness: the two
+ * sandbox variables this codebase already had (`AGENT_WORKFORCE_DATA`,
+ * `AGENT_WORKFORCE_WORKERS`) redirect FILE roots, and every previous feature
+ * touched only files. tmux and launchd are global to the machine. There was no
+ * safe way to exercise these routes at all, so the first honest probe hit a
+ * real agent, and the plan's own rule ("no test may restart, clear or compact a
+ * real agent") had no mechanism behind it.
+ *
+ * So the mechanism is here. `AGENT_WORKFORCE_DRY_RUN=1` and every action
+ * becomes a description of itself. Any manual probing of this surface must set
+ * it.
+ */
+const DRY_RUN = process.env.AGENT_WORKFORCE_DRY_RUN === '1';
+
+/**
+ * What each action costs, in the product's own words.
+ *
+ * Held here rather than in the browser so the screen cannot describe an action
+ * differently from the thing that performs it. The editor shipped a version of
+ * exactly that bug: the panel decided whether a file was editable by
+ * regex-matching the engine's English prose, and rewording one sentence would
+ * have silently changed behaviour.
+ */
+const ACTIONS = {
+  compact: {
+    id: 'compact',
+    label: 'Compact',
+    gentlest: true,
+    what: 'Summarises the older part of the conversation instead of deleting it. It keeps running and keeps everything it is holding.',
+    loses: 'nothing',
+  },
+  clear: {
+    id: 'clear',
+    label: 'Clear',
+    gentlest: false,
+    what: 'Empties the conversation. It keeps running but forgets what was said.',
+    loses: 'everything it is holding',
+  },
+  restart: {
+    id: 'restart',
+    label: 'Restart',
+    gentlest: false,
+    what: 'Stops it and starts it again. The only option that re-reads its instructions, so a change there needs this one.',
+    loses: 'everything it is holding',
+  },
+};
+
+/**
+ * Did we actually do it, or only ask?
+ *
+ * ⚠️ Three outcomes, not two, for the same reason the rest of this codebase
+ * refuses to answer in two: a send-keys returns the instant the keystrokes are
+ * queued and confirms nothing about whether the agent acted on them. Reporting
+ * that as `done` would be the product asserting something it did not verify,
+ * on the screen whose entire job is to be honest about consequences.
+ */
+const OUTCOME = {
+  DONE: 'done',         // performed and verified
+  ASKED: 'asked',       // the request was delivered; we cannot confirm the effect
+  REFUSED: 'refused',   // we did not attempt it, and why
+  DRY_RUN: 'dry-run',   // nothing was done; this is what would have been
+};
+
+/**
+ * A tmux pane target we are willing to send keystrokes to.
+ *
+ * ⚠️ Validates, never transforms, and never interpolates. This string reaches
+ * `tmux send-keys -t <target>`, so anything shell-ish or option-ish in it is a
+ * problem. `execFileSync` with an argument array means there is no shell to
+ * inject into, but a leading dash would still be read by tmux as an option, and
+ * a name that is not on the roster is not ours to touch at all.
+ *
+ * Deliberately strict: sessions on this fleet are `<name>-discord` and panes are
+ * `<window>.<pane>`. Anything else is refused rather than sanitised, because
+ * sanitising a target means acting on an agent the caller did not name.
+ */
+function safeTarget(target) {
+  const t = String(target == null ? '' : target);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*:[0-9]+\.[0-9]+$/.test(t)) return null;
+  return t;
+}
+
+/**
+ * A launchd service name we are willing to restart.
+ *
+ * Same discipline: the agent name becomes `com.<name>.discord`, so it is
+ * validated as a bare name rather than cleaned up into one.
+ */
+function safeServiceName(agent) {
+  const a = String(agent == null ? '' : agent);
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(a)) return null;
+  return a;
+}
+
+/**
+ * Run a command, capturing whether it worked without leaking how it failed.
+ *
+ * Injectable so the tests can exercise every path without touching a real
+ * agent. ⚠️ A test suite that can restart the fleet is worse than no test
+ * suite, so the seam is here rather than in the caller.
+ */
+function defaultRunner(file, args, opts) {
+  return execFileSync(file, args, { encoding: 'utf8', timeout: 30000, ...opts });
+}
+
+let run = defaultRunner;
+
+/** Swap the runner. Tests only. */
+function setRunner(fn) {
+  run = typeof fn === 'function' ? fn : defaultRunner;
+}
+
+/**
+ * Send a slash command into an agent's pane.
+ *
+ * `send-keys` twice on purpose: the text, then Enter as a separate key. Sending
+ * `"/clear\n"` as one argument types a literal newline into the composer on
+ * some terminal setups rather than submitting it, which leaves the command
+ * sitting there unsent and the caller believing it ran.
+ */
+function sendCommand(target, command) {
+  const t = safeTarget(target);
+  if (!t) {
+    return { outcome: OUTCOME.REFUSED, because: 'we do not have a usable pane for that agent' };
+  }
+  if (DRY_RUN) {
+    return {
+      outcome: OUTCOME.DRY_RUN,
+      because: `nothing was sent; this would have typed ${command} into ${t}`,
+    };
+  }
+
+  try {
+    run('tmux', ['send-keys', '-t', t, command]);
+    run('tmux', ['send-keys', '-t', t, 'Enter']);
+  } catch {
+    // Never the raw errno: it carries absolute paths and says nothing useful.
+    return { outcome: OUTCOME.REFUSED, because: 'we could not reach that agent to ask' };
+  }
+  return {
+    outcome: OUTCOME.ASKED,
+    // ⚠️ Deliberately not "done". The keystrokes were delivered; whether the
+    // agent acted on them is not something this can see.
+    because: 'we asked it to, and it does not report back when it has',
+  };
+}
+
+/**
+ * Restart an agent through launchd.
+ */
+function restart(agent) {
+  const name = safeServiceName(agent);
+  if (!name) {
+    return { outcome: OUTCOME.REFUSED, because: 'that is not a name we can restart' };
+  }
+
+  // Refuse rather than improvise. The whole reason this path exists is that the
+  // obvious alternative silently produces a bot with no permissions flag, so a
+  // missing script must stop us, not route us around the rule it enforces.
+  let usable = false;
+  try {
+    usable = fs.statSync(RESTART_SCRIPT).isFile();
+  } catch {
+    usable = false;
+  }
+  if (!usable) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: 'the restart script is not on this machine, and restarting another way would bring it back without its permissions',
+    };
+  }
+
+  if (DRY_RUN) {
+    return {
+      outcome: OUTCOME.DRY_RUN,
+      because: `nothing was done; this would have restarted ${name}`,
+    };
+  }
+
+  try {
+    run(RESTART_SCRIPT, [name]);
+  } catch {
+    return { outcome: OUTCOME.REFUSED, because: 'the restart did not complete' };
+  }
+  // The script stops the service, starts it, and checks the session came back,
+  // so unlike a send-keys this one has actually been verified by the time it
+  // returns.
+  return { outcome: OUTCOME.DONE, because: 'it was stopped and started again' };
+}
+
+function clear(agent, target) {
+  return sendCommand(target, '/clear');
+}
+
+function compact(agent, target) {
+  return sendCommand(target, '/compact');
+}
+
+/**
+ * Perform one action by id.
+ */
+function perform(action, agent, target) {
+  switch (action) {
+    case 'restart': return restart(agent);
+    case 'clear': return clear(agent, target);
+    case 'compact': return compact(agent, target);
+    default:
+      return { outcome: OUTCOME.REFUSED, because: 'that is not something we know how to do' };
+  }
+}
+
+module.exports = {
+  ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN,
+  safeTarget, safeServiceName, sendCommand, restart, clear, compact, perform, setRunner,
+};

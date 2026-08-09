@@ -25,6 +25,7 @@ const { version } = require('./package.json');
 const store = require('./engine/store');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
+const lifecycle = require('./engine/lifecycle');
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
 // server is still a way to fill someone's memory by accident.
@@ -75,6 +76,21 @@ function knownAgent(name) {
   } catch {
     return false;
   }
+}
+
+/**
+ * A stable fingerprint of what an agent is holding.
+ *
+ * ⚠️ Includes the STATE, not just the items. `unknown` with three items and
+ * `holding` with the same three are different situations: the first means we
+ * cannot vouch for the list. A token built from the items alone would let a
+ * dialog that said "we cannot tell" be approved against a later moment when we
+ * could, which is the two-things-one-token conflation the instruction editor
+ * had to fix between `absent` and `unreadable`.
+ */
+function holdingToken(seen) {
+  const ids = (seen.commitments || []).map((c) => c.id).sort().join(',');
+  return `${seen.state}:${ids}`;
 }
 
 function sendJson(res, code, obj) {
@@ -523,6 +539,79 @@ const server = http.createServer((req, res) => {
         // Keyed on `err.code`, not on the wording: this used to regex-match the
         // engine's English, so rewording one sentence silently downgraded the
         // status to 400.
+        sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
+      });
+    return;
+  }
+
+  // The engine's own description of each action, so the dialog cannot describe
+  // one differently from the code that performs it. The instruction editor
+  // shipped a version of that bug and it took two review passes to find.
+  if (pathname === '/api/actions' && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendJson(res, 200, lifecycle.ACTIONS);
+    return;
+  }
+
+  // ---------------------------------------------------------------------
+  // Giving an agent a fresh start: compact, clear, restart.
+  //
+  // ⚠️ The first routes that reach a RUNNING agent. Everything above edits
+  // files an agent reads; these interrupt a live session, and two of the three
+  // destroy its conversation, which is where every commitment it is holding
+  // lives.
+  // ---------------------------------------------------------------------
+  const life = pathname.match(/^\/api\/agent\/([^/]+)\/(restart|clear|compact)$/);
+  if (life && req.method === 'POST') {
+    const name = decodeSegment(life[1]);
+    const action = life[2];
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+
+    readBody(req)
+      .then((buf) => {
+        let patch;
+        try {
+          patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('send the request as JSON');
+        }
+
+        // ⚠️ The caller must say what the dialog SHOWED it was about to
+        // destroy, and this refuses if that is no longer true.
+        //
+        // Same shape as the instruction editor's changed-since-read guard, and
+        // for a sharper reason: a dialog listing three commitments, approved
+        // twenty minutes later, must not quietly destroy a fourth that arrived
+        // in between. The whole point of this screen is that you saw the cost
+        // before you paid it, and a cost that changed underneath you was never
+        // shown.
+        //
+        // `compact` loses nothing, so it is exempt: requiring a token for the
+        // one action with no consequences would train people to click through.
+        const seen = commitments.read(name);
+        if (action !== 'compact') {
+          if (typeof patch.holding !== 'string') {
+            throw new Error('say what you were shown this would lose');
+          }
+          if (patch.holding !== holdingToken(seen)) {
+            const err = new Error('what this agent is holding changed since you were shown it, look again before going ahead');
+            err.code = 'CONFLICT';
+            throw err;
+          }
+        }
+
+        const agent = snapshot().agents.find((a) => a.sessionName === store.safeKey(name));
+        const result = lifecycle.perform(action, store.safeKey(name), agent && agent.target);
+
+        sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
+          action,
+          ...result,
+          // What it was holding when we acted, so the answer is a record of the
+          // cost actually paid rather than of the cost quoted.
+          holding: seen,
+        });
+      })
+      .catch((err) => {
         sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
       });
     return;

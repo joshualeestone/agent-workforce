@@ -241,6 +241,52 @@ svg { display: block; }
    carried by a glyph, which on its own says nothing to anyone not looking at
    it. `clip-path` rather than `display:none`, which would remove it from the
    accessibility tree along with everything else. */
+.fresh { position: absolute; top: var(--space-4); right: 38px;
+        width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+        border: 0.5px solid var(--separator); background: var(--bg-elevated);
+        color: var(--label-2); display: flex; align-items: center; justify-content: center; }
+.fresh:hover { background: var(--attn-bg); color: var(--label); }
+.fresh svg { width: 13px; height: 13px; }
+
+/* The fresh-start dialog. Modal because the whole point is that you read the
+   cost before you pay it, and a non-modal panel can be ignored. */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+         display: flex; align-items: center; justify-content: center; padding: var(--space-6); z-index: 50; }
+.modal { background: var(--bg-elevated); border-radius: var(--radius-card);
+         box-shadow: 0 8px 40px rgba(0,0,0,0.25); max-width: 620px; width: 100%;
+         max-height: 90vh; overflow-y: auto; padding: var(--space-8); }
+.modal h2 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; margin-bottom: var(--space-3); }
+.modal .lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+.modal h3 { font: 600 var(--text-subhead) var(--font-ui); text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--label-3); margin-bottom: var(--space-4); }
+.holding { border: 1px solid var(--separator); border-radius: var(--radius-control);
+           background: var(--bg-sunken); padding: var(--space-5); margin-bottom: var(--space-7); }
+.holding ul { list-style: none; margin: 0; padding: 0; }
+.holding li { display: flex; gap: var(--space-4); align-items: baseline; margin-bottom: var(--space-3);
+              font: var(--text-body) var(--font-ui); }
+.holding .badge { flex: none; font: 600 var(--text-caption) var(--font-ui); text-transform: uppercase;
+                  letter-spacing: 0.04em; border: 1px solid var(--border-strong);
+                  border-radius: var(--radius-control); padding: 1px 5px; color: var(--label-2); }
+.holding .danger { border-top: 0.5px solid var(--separator); margin-top: var(--space-5);
+                   padding-top: var(--space-4); font: var(--text-callout) var(--font-ui); color: var(--label); }
+.holding .cannot { font: var(--text-body) var(--font-ui); color: var(--label); }
+.opt { border: 1px solid var(--separator); border-radius: var(--radius-control);
+       padding: var(--space-5); margin-bottom: var(--space-4); position: relative;
+       display: flex; gap: var(--space-5); align-items: flex-start; justify-content: space-between; }
+.opt.gentlest { border: 2px solid var(--label); }
+.opt .tag { position: absolute; top: -9px; left: var(--space-5); background: var(--label);
+            color: var(--bg-elevated); font: 600 var(--text-caption) var(--font-ui);
+            text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; }
+.opt h4 { font: 600 var(--text-body) var(--font-ui); margin-bottom: 2px; }
+.opt p { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-3); }
+.opt .cost { font: 600 var(--text-callout) var(--font-ui); color: var(--label); }
+.btn.primary { background: var(--label); color: var(--bg-elevated); border-color: var(--label); }
+.btn.primary:hover { opacity: 0.85; background: var(--label); }
+.modal-foot { border-top: 0.5px solid var(--separator); margin-top: var(--space-6);
+              padding-top: var(--space-5); display: flex; justify-content: space-between;
+              align-items: center; gap: var(--space-5); }
+.modal-foot .fine { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
+
 .vh {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; overflow: hidden;
@@ -267,6 +313,24 @@ svg { display: block; }
   <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
+<!-- The fresh-start dialog. Modal on purpose: the whole point is that the cost
+     is read before it is paid, and a non-modal panel can be ignored. -->
+<div class="scrim" id="fresh-scrim" hidden>
+  <div class="modal" id="fresh-modal" role="dialog" aria-modal="true" aria-labelledby="fresh-title">
+    <h2 id="fresh-title"></h2>
+    <p class="lede" id="fresh-lede"></p>
+    <h3>What it is holding right now</h3>
+    <div id="fresh-holding"></div>
+    <h3>How to give it a fresh start</h3>
+    <div id="fresh-options"></div>
+    <div class="modal-foot">
+      <div class="fine">If its commitments cannot be read, this says so rather than telling you it is safe.</div>
+      <button class="btn" id="fresh-cancel" type="button">Cancel</button>
+    </div>
+    <div class="fmsg" id="fresh-msg" role="status" aria-live="polite"></div>
+  </div>
+</div>
+
 <section class="detail" id="panel-detail" hidden>
   <button class="back" id="detail-back">&#8592; All agents</button>
   <div class="detail-head">
@@ -392,6 +456,10 @@ const ICONS = {
   // chosen by the operating system and differs per machine -- flipping a glyph
   // would have fixed the direction and not the cause.
   pencil: '<g transform="translate(24 0) scale(-1 1)"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>',
+  // Lucide `rotate-ccw`. The fresh-start affordance, on the card rather than
+  // buried in the detail page: restart is the most-used operation in the fleet
+  // and it was absent from every screen.
+  refresh: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
 
@@ -496,6 +564,7 @@ function card(a) {
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
     <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
+    <button class="fresh" data-fresh="${esc(a.sessionName)}" title="Give ${esc(a.name)} a fresh start" aria-label="Give ${esc(a.name)} a fresh start">${icon('refresh')}</button>
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
@@ -521,6 +590,7 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
+    if (WANT_FRESH && !FRESH_FOR && document.getElementById('fresh-scrim').hidden) openFresh(WANT_FRESH, null);
 
     // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
     //
@@ -1135,9 +1205,247 @@ document.getElementById('d-save').addEventListener('click', async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// The fresh-start dialog
+//
+// ⚠️ The point of this screen is NOT "are you sure". It is that you see what
+// you are about to destroy before you destroy it, read from the commitment
+// store rather than from process state.
+//
+// The dangerous case is the agent that is BETWEEN things: nothing visibly
+// running, so a dialog that only checked whether it was busy would have told
+// you it was safe, and the commitments would die silently.
+// ---------------------------------------------------------------------------
+
+let FRESH_FOR = null;      // the agent the dialog is open for
+let FRESH_TOKEN = null;    // what it was holding when we showed you
+let FRESH_RETURN = null;   // the control to give focus back to
+
+/**
+ * A stable fingerprint of what an agent is holding, matching the server's.
+ *
+ * ⚠️ Includes the STATE, not just the ids. `unknown` with three items and
+ * `holding` with the same three are different situations, and approving one
+ * against the other is exactly the mistake this token exists to catch.
+ */
+function holdingToken(h) {
+  const ids = ((h && h.commitments) || []).map((c) => c.id).sort().join(',');
+  return `${h ? h.state : 'unknown'}:${ids}`;
+}
+
+function holdingBlock(a) {
+  const h = a.commitments || { state: 'unknown', commitments: [] };
+  const items = h.commitments || [];
+
+  // ⚠️ `unknown` never renders as an empty list. An empty list reads as
+  // "nothing to lose", which is the precise lie this card exists to prevent.
+  // The store decays a stale report to `unknown` while still returning the
+  // items, so we can say "these were pending, and we cannot vouch for that now".
+  if (h.state === 'unknown') {
+    const aged = items.length
+      ? `<ul>${items.map((c) => li(c, a.task)).join('')}</ul>
+         <div class="danger">These are the last thing it told us, and we cannot
+         vouch for them now: ${esc(h.because || 'we cannot tell')}.</div>`
+      : `<div class="cannot"><b>We cannot tell what ${esc(a.name)} is holding.</b>
+         ${esc(h.because || '')}</div>`;
+    return `<div class="holding">${aged}</div>`;
+  }
+
+  if (!items.length) {
+    return `<div class="holding"><div class="cannot">${esc(a.name)} reported that it is
+      holding nothing.</div></div>`;
+  }
+
+  // The wireframe's callout, DERIVED rather than hardcoded: it names the items
+  // the agent is not visibly working on, which are the ones a busy-check would
+  // have missed.
+  const quiet = items.filter((c) => !visiblyDoing(c, a.task));
+  // ⚠️ Worded from what is actually true. When SOME items are quiet the
+  // contrast is the point ("the second and third are the dangerous ones").
+  // When ALL of them are, there is no contrast to draw and claiming one would
+  // be the screen inventing a distinction, so it says the simpler true thing.
+  let callout = '';
+  if (quiet.length && quiet.length < items.length) {
+    callout = `<div class="danger"><b>${quiet.length === 1 ? 'One of these is' : `${quiet.length} of these are`}
+      more dangerous than ${quiet.length === 1 ? 'it looks' : 'they look'}.</b>
+      ${esc(a.name)} is not visibly working on ${quiet.length === 1 ? 'it' : 'them'}, so a dialog that only
+      checked whether it was busy would have told you this was safe.</div>`;
+  } else if (quiet.length === items.length) {
+    callout = `<div class="danger"><b>${esc(a.name)} is not visibly working on any of these.</b>
+      A dialog that only checked whether it was busy would have told you this was safe.</div>`;
+  }
+
+  return `<div class="holding"><ul>${items.map((c) => li(c, a.task)).join('')}</ul>${callout}</div>`;
+}
+
+/**
+ * Is the agent visibly working on this one right now?
+ *
+ * ⚠️ DERIVED, because the commitment store does not carry it. The store records
+ * what an agent said it is holding; it has no doing-versus-promised field, and
+ * an earlier version of this dialog printed a DOING NOW / PROMISED badge as
+ * though it did. That badge was decoration: everything rendered as PROMISED and
+ * the callout beneath it then claimed a contrast that did not exist.
+ *
+ * "Visibly working on it" is exactly what the wireframe means, and the board
+ * already knows it: the task line scraped from the agent's pane. So the badge
+ * compares the two, and DEFAULTS TO PROMISED on anything less than a clear
+ * match. That default is the safe direction: `promised` is the one the dialog
+ * calls dangerous, so an uncertain match errs toward warning rather than
+ * reassuring.
+ */
+function visiblyDoing(c, task) {
+  if (!task) return false;
+  const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 3);
+  const a = new Set(norm(c.what));
+  const b = norm(task);
+  if (!a.size || !b.length) return false;
+  const shared = b.filter((w) => a.has(w)).length;
+  // Two substantial words in common, which on a one-line task description is a
+  // real match rather than a coincidence of shared vocabulary.
+  return shared >= 2;
+}
+
+function li(c, task) {
+  const doing = visiblyDoing(c, task);
+  return `<li><span class="badge">${doing ? 'DOING NOW' : 'PROMISED'}</span><span>${esc(c.what)}</span></li>`;
+}
+
+function optionBlock(id, act, losesAll) {
+  // The cost comes from the ENGINE, not from copy written beside the button,
+  // so the screen cannot describe an action differently from the thing that
+  // performs it.
+  const cost = act.loses === 'nothing'
+    ? 'Loses nothing.'
+    : (losesAll || 'Loses everything it is holding.');
+  return `<div class="opt ${act.gentlest ? 'gentlest' : ''}">
+    ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
+    <div>
+      <h4>${esc(act.label)}</h4>
+      <p>${esc(act.what)}</p>
+      <div class="cost">${esc(cost)}</div>
+    </div>
+    <button class="btn ${act.gentlest ? 'primary' : ''}" data-act="${id}">${esc(act.label)}</button>
+  </div>`;
+}
+
+function openFresh(sessionName, returnTo) {
+  const a = LAST.find((x) => x.sessionName === sessionName);
+  if (!a) return;
+  FRESH_FOR = a;
+  FRESH_TOKEN = holdingToken(a.commitments);
+  FRESH_RETURN = returnTo || null;
+
+  const h = a.commitments || {};
+  const n = (h.commitments || []).length;
+  // "Loses all N items above" only when we can actually count them. With
+  // `unknown` we do not know what the list is, so we do not claim a number.
+  const losesAll = h.state === 'holding' && n
+    ? `Loses all ${n} item${n === 1 ? '' : 's'} above.`
+    : 'Loses whatever it is holding, which we cannot list with confidence.';
+
+  const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
+  const title = nearlyFull
+    ? `${esc(a.name)}'s memory is nearly full`
+    : `Give ${esc(a.name)} a fresh start`;
+
+  document.getElementById('fresh-title').innerHTML = title;
+  document.getElementById('fresh-lede').textContent = nearlyFull
+    ? 'You can give it a fresh start. The three ways of doing that cost you different things, so here is what it is carrying first.'
+    : 'The three ways of doing this cost you different things, so here is what it is carrying first.';
+  document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
+  document.getElementById('fresh-options').innerHTML =
+    optionBlock('compact', ACTIONS.compact, losesAll)
+    + optionBlock('clear', ACTIONS.clear, losesAll)
+    + optionBlock('restart', ACTIONS.restart, losesAll);
+  document.getElementById('fresh-msg').textContent = '';
+
+  document.getElementById('fresh-scrim').hidden = false;
+  // Focus lands on Cancel, not on an action: the default answer to a
+  // destructive dialog is no.
+  document.getElementById('fresh-cancel').focus();
+}
+
+function closeFresh() {
+  document.getElementById('fresh-scrim').hidden = true;
+  FRESH_FOR = null;
+  FRESH_TOKEN = null;
+  if (FRESH_RETURN && document.contains(FRESH_RETURN)) FRESH_RETURN.focus();
+  FRESH_RETURN = null;
+}
+
+/** The engine's own descriptions, fetched once so the screen cannot drift. */
+let ACTIONS = {
+  compact: { label: 'Compact', gentlest: true, what: '', loses: 'nothing' },
+  clear: { label: 'Clear', gentlest: false, what: '', loses: 'everything it is holding' },
+  restart: { label: 'Restart', gentlest: false, what: '', loses: 'everything it is holding' },
+};
+fetch('/api/actions', { cache: 'no-store' })
+  .then((r) => r.json())
+  .then((a) => { if (a && a.compact) ACTIONS = a; })
+  .catch(() => { /* the fallbacks above are honest about cost, just terser */ });
+
+document.getElementById('grid').addEventListener('click', (e) => {
+  const fresh = e.target.closest('.fresh');
+  if (fresh) {
+    e.stopPropagation();   // do not also open the detail panel
+    openFresh(fresh.dataset.fresh, fresh);
+  }
+}, true);
+
+document.getElementById('fresh-cancel').addEventListener('click', closeFresh);
+document.getElementById('fresh-scrim').addEventListener('click', (e) => {
+  if (e.target.id === 'fresh-scrim') closeFresh();
+});
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('fresh-scrim').hidden) return;
+  if (e.key === 'Escape') { closeFresh(); return; }
+  // Trap focus in the dialog: tabbing out of a modal leaves you operating a
+  // page you cannot see.
+  if (e.key !== 'Tab') return;
+  const focusable = [...document.querySelectorAll('#fresh-modal button')].filter((b) => !b.disabled);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+document.getElementById('fresh-options').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn || !FRESH_FOR) return;
+  const action = btn.dataset.act;
+  const forAgent = FRESH_FOR.sessionName;
+  const msg = document.getElementById('fresh-msg');
+  const buttons = [...document.querySelectorAll('#fresh-options button')];
+  buttons.forEach((b) => { b.disabled = true; });
+  msg.textContent = 'Working…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/' + action,
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ holding: FRESH_TOKEN }) })
+      .catch(() => { throw new Error('That did not go through. The board may have stopped.'); });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'that did not work');
+    // ⚠️ Reports what the ENGINE said happened, including "we asked and cannot
+    // confirm". Saying "Done" for a keystroke we cannot verify would be the
+    // screen asserting something it does not know, on the one screen whose
+    // whole job is honesty about consequences.
+    msg.textContent = data.because || 'Done.';
+    await tick();
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+});
+
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
+// Deep-linkable like the detail panel, and for the same two reasons: a state
+// can be shared, and it is the only way to screenshot this dialog headlessly.
+const WANT_FRESH = PARAMS.get('fresh');
 showTab(PARAMS.get('tab') || 'agents');
 
 tick();
