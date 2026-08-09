@@ -360,10 +360,36 @@ test('only a pane that actually holds a running agent may be typed into', () => 
     [{ session: 'my-shell', command: '2.1.212' }, 'not a fleet session name'],
     [{ session: 'angel-discord', command: 'zsh' }, 'a shell, whatever it is called'],
     [{ session: 'angel-discord', command: 'bash' }, 'a shell'],
-    [{ session: 'notes', command: 'vim' }, 'an editor'],
+    [{ session: 'notes', command: 'vim' }, 'an editor in a non-fleet session'],
+    // ⚠️ These are the ones that mattered. The first version merely excluded
+    // six shell names, so INSIDE a fleet session every other command passed and
+    // the comment claiming it stopped an editor or a REPL was false.
+    [{ session: 'angel-discord', command: 'vim' }, 'an editor inside a fleet session'],
+    [{ session: 'angel-discord', command: 'node' }, 'a REPL inside a fleet session'],
+    [{ session: 'angel-discord', command: 'ssh' }, 'a remote shell inside a fleet session'],
+    [{ session: 'angel-discord', command: 'less' }, 'a pager inside a fleet session'],
+    [{ session: 'angel-discord', command: 'python3' }, 'python inside a fleet session'],
     [{ session: '', command: '2.1.212' }, 'no session'],
     [{}, 'nothing at all'],
   ]) {
     assert.equal(isAgentPane(pane), false, `${why} was treated as an agent pane`);
   }
+});
+
+test('a restart that fails after the stop is not reported as never attempted', () => {
+  // ⚠️ `REFUSED` means "we did not attempt it", and `invalidatesCommitments`
+  // relies on that to decide whether to tombstone the commitment record.
+  //
+  // `restart-bot.sh` runs `launchctl stop` unconditionally before anything can
+  // fail, so a non-zero exit or a timeout almost always means the agent WAS
+  // stopped and then something went wrong. Calling that "did not attempt"
+  // skipped the tombstone, so the conversation was destroyed while the board
+  // went on serving "it reported these itself" at full confidence.
+  lifecycle.setRunner(() => { throw new Error('ETIMEDOUT'); });
+  const got = lifecycle.restart('angel');
+  assert.equal(got.outcome, lifecycle.OUTCOME.ASKED,
+    'a failure after the stop was reported as never attempted');
+  assert.match(got.because, /may have been stopped/);
+  assert.equal(lifecycle.invalidatesCommitments('restart', got.outcome), true,
+    'the record would have been left standing for a destroyed conversation');
 });

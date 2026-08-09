@@ -94,7 +94,20 @@ function sh(cmd, args) {
  */
 function isAgentPane(pane) {
   if (!pane || !/-discord$/.test(String(pane.session || ''))) return false;
-  return isClaudeRunning(pane.command);
+
+  // ⚠️ An ALLOW list, not a deny list.
+  //
+  // `isClaudeRunning` merely excludes six known shell names, so inside a
+  // `*-discord` session every other command passed: `vim`, `nvim`, `node`,
+  // `less`, `ssh`, `python3` all classified as an agent pane, and the comment
+  // above claimed it stopped an editor or a REPL. It stopped neither.
+  //
+  // `pane_current_command` reports a VERSION STRING when Claude Code is running
+  // (`2.1.212`), which is a positive signal rather than the absence of a
+  // negative one. Anything else is refused, which is the right direction for a
+  // check that decides whether we may type into a pane.
+  const command = String((pane.command || '')).trim();
+  return /^[0-9]+\.[0-9]+(\.[0-9]+)?$/.test(command);
 }
 
 function listPanes() {

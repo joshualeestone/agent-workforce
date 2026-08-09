@@ -1119,7 +1119,18 @@ test('a cross-site POST cannot restart an agent', async (t) => {
   // And it covers EVERY write, not just the new ones: PUT and DELETE are safe
   // today only because HTML cannot emit them, which is a property of browsers
   // rather than a decision this code made.
-  const del = await req(`/api/agent/${name}/avatar`, {
+  //
+  // ⚠️ Aimed at a name that is NOT on the roster, deliberately. The avatar
+  // store is the one root with no environment override (`store.ROOT` is
+  // hardcoded under the real Application Support directory), so a DELETE at a
+  // LIVE agent here would be protected only by the very guard it is testing:
+  // narrow that guard to POST-only, a plausible edit, and the test deletes a
+  // real avatar on its way to reporting the failure. This file's own header
+  // records a reviewer doing exactly that once.
+  //
+  // The guard runs ahead of every route, including `knownAgent`, so an unknown
+  // name still exercises it and can touch nothing.
+  const del = await req('/api/agent/definitely-not-an-agent/avatar', {
     method: 'DELETE', headers: { Origin: 'https://evil.example' },
   });
   assert.equal(del.status, 403, 'a cross-site DELETE was allowed');

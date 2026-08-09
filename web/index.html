@@ -1353,13 +1353,21 @@ function optionBlock(id, act, losesAll) {
   </div>`;
 }
 
-function openFresh(sessionName, returnTo) {
-  const a = LAST.find((x) => x.sessionName === sessionName);
-  if (!a) return;
-  FRESH_FOR = a;
-  FRESH_TOKEN = holdingToken(a.commitments);
-  FRESH_RETURN = returnTo || null;
-
+/**
+ * Render the list AND the costs together.
+ *
+ * ⚠️ These must never be rendered separately, and separating them was a real
+ * defect: the 409 recovery re-rendered the corrected list while the option
+ * buttons went on quoting the count captured when the dialog opened. The
+ * operator was shown nine items and "Loses all 3 items above", and the token
+ * had already been refreshed to the nine, so the next click destroyed nine.
+ *
+ * That is exactly the "a dialog listing three commitments, approved later, must
+ * not quietly destroy a fourth" guarantee the token exists for, defeated by the
+ * recovery path added to enforce it. One function, so a caller cannot update
+ * half the truth.
+ */
+function renderFresh(a) {
   const h = a.commitments || {};
   const n = (h.commitments || []).length;
   // "Loses all N items above" only when we can actually count them. With
@@ -1367,6 +1375,20 @@ function openFresh(sessionName, returnTo) {
   const losesAll = h.state === 'holding' && n
     ? `Loses all ${n} item${n === 1 ? '' : 's'} above.`
     : 'Loses whatever it is holding, which we cannot list with confidence.';
+
+  document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
+  document.getElementById('fresh-options').innerHTML =
+    optionBlock('compact', ACTIONS.compact, losesAll)
+    + optionBlock('clear', ACTIONS.clear, losesAll)
+    + optionBlock('restart', ACTIONS.restart, losesAll);
+}
+
+function openFresh(sessionName, returnTo) {
+  const a = LAST.find((x) => x.sessionName === sessionName);
+  if (!a) return;
+  FRESH_FOR = a;
+  FRESH_TOKEN = holdingToken(a.commitments);
+  FRESH_RETURN = returnTo || null;
 
   const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
   const title = nearlyFull
@@ -1377,11 +1399,7 @@ function openFresh(sessionName, returnTo) {
   document.getElementById('fresh-lede').textContent = nearlyFull
     ? 'You can give it a fresh start. The three ways of doing that cost you different things, so here is what it is carrying first.'
     : 'The three ways of doing this cost you different things, so here is what it is carrying first.';
-  document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
-  document.getElementById('fresh-options').innerHTML =
-    optionBlock('compact', ACTIONS.compact, losesAll)
-    + optionBlock('clear', ACTIONS.clear, losesAll)
-    + optionBlock('restart', ACTIONS.restart, losesAll);
+  renderFresh(a);
   document.getElementById('fresh-msg').textContent = '';
 
   document.getElementById('fresh-scrim').hidden = false;
@@ -1489,7 +1507,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     if (fresh) {
       FRESH_FOR = fresh;
       FRESH_TOKEN = holdingToken(fresh.commitments);
-      document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
+      renderFresh(fresh);
     } else {
       // ⚠️ Not a corner case: this is the ordinary restart path. The agent is
       // expected to be missing from the very next poll, and skipping the
@@ -1526,7 +1544,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       if (fresh) {
         FRESH_FOR = fresh;
         FRESH_TOKEN = holdingToken(fresh.commitments);
-        document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
+        renderFresh(fresh);
         msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
       } else {
         // The agent has left the roster. Saying nothing here left the operator

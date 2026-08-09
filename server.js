@@ -730,7 +730,14 @@ const server = http.createServer((req, res) => {
         // the next thirty minutes with nothing anywhere saying so.
         let reconciled = null;
         if (lifecycle.invalidatesCommitments(action, result.outcome)) {
-          reconciled = commitments.markDestroyed(key);
+          // ⚠️ Only meaningful when there was a record to reconcile.
+          // `markDestroyed` also returns false for an agent that never reported,
+          // and warning "we could not update our record" when there was nothing
+          // to update makes the sentence useless as a signal for the times it
+          // matters.
+          const hadRecord = (seen.commitments || []).length > 0 || seen.reportedAt;
+          const marked = commitments.markDestroyed(key);
+          reconciled = hadRecord ? marked : null;
         }
 
         // A reconciliation we could not perform is said out loud, appended to

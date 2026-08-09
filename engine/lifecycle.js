@@ -250,7 +250,21 @@ function restart(agent) {
   try {
     out = String(run(RESTART_SCRIPT, [name]) || '');
   } catch {
-    return { outcome: OUTCOME.REFUSED, because: 'the restart did not complete' };
+    // ⚠️ ASKED, not REFUSED, and the difference decides whether the commitment
+    // record gets tombstoned.
+    //
+    // `REFUSED` means "we did not attempt it", and that is true of the checks
+    // above (bad name, missing script) but NOT of a failure here. The script
+    // runs `launchctl stop` unconditionally before anything can fail, so a
+    // non-zero exit or a timeout almost always means the agent was stopped and
+    // then something went wrong. Calling that "did not attempt" skipped the
+    // tombstone, so the conversation was destroyed while the board went on
+    // serving "it reported these itself" at full confidence: the exact failure
+    // the tombstone exists to prevent, on the one path that skipped it.
+    return {
+      outcome: OUTCOME.ASKED,
+      because: 'the restart did not finish cleanly, and it may have been stopped, so check on it',
+    };
   }
 
   // ⚠️ The EXIT CODE is not the answer, and believing it was is the worst bug
