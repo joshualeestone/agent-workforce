@@ -215,6 +215,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | is-a-file on the backup write | **green, masked by the truncation, declared** |
 | `nlink` (hard link) on the backup write | fails |
 | `ftruncate` on the backup write | fails |
+| `staleness` carrying `editable` | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
@@ -579,6 +580,27 @@ places, read in none, with a comment crediting it for a failure that
 `INSTR_VERSION` actually prevents. Removed. A variable that looks load-bearing
 and is not is the same defect as a comment that overstates a guard.
 
+Iteration 19 found a BLOCKER in iteration 18's fix, which makes it **five
+consecutive iterations where the worst defect was in code just added to make
+something safer.** The poll's new "take the editor away if the file cannot be
+shown" branch keyed on "unknown with no version", and an agent with NO
+instruction file yet has exactly that shape. So within five seconds of opening
+any agent whose first file had not been written, the editor and Save went dead
+with whatever had been typed stranded in the box. The create path is the one
+case the `editable`/`absent` design was built for, and the guard protecting the
+feature broke it.
+
+`staleness` now carries `editable`, because the status poll is the only
+instruction signal an open panel gets and it genuinely could not distinguish the
+two cases. The browser keys on that field alone.
+
+**The pattern is the finding.** Iterations 15 through 19 each introduced their
+worst defect in a guard, and each guard was added in response to the previous
+iteration. New defensive code is not a safe change: it is new code on the most
+dangerous path in the product, written with the confidence that comes from
+believing you are making things safer. It earns more scrutiny than what it
+protects, not less. That is worth more than any individual fix in this table.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -598,4 +620,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**190 tests, zero dependencies.**
+**191 tests, zero dependencies.**

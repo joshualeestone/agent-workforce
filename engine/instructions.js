@@ -244,7 +244,15 @@ function inspect(agent) {
  */
 function staleness(agent, seen) {
   const file = seen || inspect(agent);
-  if (!file.ok) return { state: STALENESS.UNKNOWN, because: file.because };
+  if (!file.ok) {
+    // ⚠️ Carries `editable`, because the status poll is the ONLY instruction
+    // signal an open panel gets and it could not otherwise tell "there is no
+    // file yet" from "there is a file we refuse to show". Both arrive here as
+    // `unknown` with no version, so a panel that disabled the editor on that
+    // basis also disabled it for an agent whose first instruction file has not
+    // been written, which is the one case the create path exists for.
+    return { state: STALENESS.UNKNOWN, because: file.because, editable: file.missing === true };
+  }
 
   const editedAt = file.stat.mtime.getTime();
 
@@ -254,6 +262,8 @@ function staleness(agent, seen) {
   // resolve carried no version at all and the panel silently fell back to
   // announcing nothing.
   const version = versionOf(true, file.buf);
+  // A readable file is always editable; the browser keys on this field alone.
+  const editable = true;
 
   // An mtime can arrive as NaN, and on some filesystems as the epoch. Both stop
   // here so the answer says which kind of not-knowing it is, and so we do not
@@ -269,6 +279,7 @@ function staleness(agent, seen) {
   if (!Number.isFinite(editedAt) || editedAt <= 0) {
     return {
       state: STALENESS.UNKNOWN,
+      editable,
       because: 'we cannot tell when its instruction file was last edited',
     };
   }
@@ -279,6 +290,7 @@ function staleness(agent, seen) {
       state: STALENESS.UNKNOWN,
       editedAt: iso(editedAt),
       version,
+      editable,
       because: 'we cannot tell when this agent last started',
     };
   }
@@ -288,6 +300,7 @@ function staleness(agent, seen) {
     editedAt: iso(editedAt),
     startedAt: iso(startedAt),
     version,
+    editable,
   };
 }
 

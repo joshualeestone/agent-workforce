@@ -322,7 +322,7 @@ svg { display: block; }
       <b>This file has changed since you opened it.</b> What is in the box is not
       what is on disk any more. Reopen this agent to see the current version.
     </div>
-    <div class="fpath" id="d-instr-prev" hidden>The version before your last save is kept beside it as <code>CLAUDE.md.previous</code>.</div>
+    <div class="fpath" id="d-instr-prev" hidden>An earlier version is kept beside it as <code>CLAUDE.md.previous</code>.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
 </section>
@@ -531,6 +531,7 @@ async function tick() {
     // This poll already carries fresh `instructions` for every agent, so it is
     // one call. Same fact, one source: the shape this whole branch is about.
     if (CURRENT) {
+      const atLoad = INSTR_LOAD;
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
@@ -552,6 +553,10 @@ async function tick() {
         // to reopen the agent over a file identical to the one in the box.
         const note = document.getElementById('d-instr-outdated');
         const seenVersion = fresh.instructions && fresh.instructions.version;
+        // A poll issued before a save can land after it, carrying the pre-save
+        // version, and would then announce "this file has changed since you
+        // opened it" over text that was just saved successfully.
+        if (INSTR_LOAD !== atLoad) return;
         if (seenVersion && INSTR_VERSION) {
           note.hidden = seenVersion === INSTR_VERSION;
         }
@@ -566,7 +571,13 @@ async function tick() {
         // a footer still naming the file as one you can edit by hand. That is
         // the offer-an-action-that-will-fail state the load path was changed to
         // remove, reachable by simply leaving the panel open.
-        if (fresh.instructions && fresh.instructions.state === 'unknown' && !seenVersion) {
+        // ⚠️ Keyed on `editable`, NOT on "unknown with no version". Those two
+        // are the same shape for an agent with no instruction file yet, so the
+        // first version of this branch disabled the editor within five seconds
+        // of opening any agent whose first file had not been written, with
+        // whatever had been typed sitting in a dead box behind a dead Save.
+        // The create path is exactly what `editable` was added to express.
+        if (fresh.instructions && fresh.instructions.editable === false) {
           INSTR_READY = false;
           document.getElementById('d-instr').disabled = true;
           document.getElementById('d-instr-save').disabled = true;

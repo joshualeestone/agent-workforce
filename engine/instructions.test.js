@@ -931,6 +931,30 @@ test('read says whether a save is possible as a field, not as prose', () => {
   assert.equal(instructions.read('editablelatin').editable, false);
 });
 
+test('staleness says whether a file can be written, not just whether it is readable', () => {
+  // ⚠️ The status poll is the ONLY instruction signal an open panel gets, and
+  // "there is no file yet" and "there is a file we refuse to show" both arrive
+  // as `unknown` with no version. A panel that took the editor away on that
+  // basis therefore took it away from any agent whose FIRST instruction file
+  // had not been written, within five seconds of opening it, with whatever had
+  // been typed sitting in a dead box behind a dead Save. The create path is the
+  // one case the whole `editable` / `absent` design exists for.
+  fs.mkdirSync(path.join(ROOT, 'stnofile'), { recursive: true });
+  const noFile = instructions.staleness('stnofile');
+  assert.equal(noFile.state, instructions.STALENESS.UNKNOWN);
+  assert.equal(noFile.editable, true, 'an agent with no file yet must stay writable');
+
+  fs.mkdirSync(path.join(ROOT, 'stlatin'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, 'stlatin', 'CLAUDE.md'),
+    Buffer.from('You are Ren\xE9 here.\n', 'latin1'));
+  const refused = instructions.staleness('stlatin');
+  assert.equal(refused.state, instructions.STALENESS.UNKNOWN);
+  assert.equal(refused.editable, false, 'a file we refuse to show must not read as writable');
+
+  makeAgent('streadable');
+  assert.equal(instructions.staleness('streadable').editable, true);
+});
+
 test('staleness carries a content version, so a touch is not an edit', () => {
   // ⚠️ The panel polls this to decide whether to announce "this file has
   // changed since you opened it" and tell the person to reopen the agent,
