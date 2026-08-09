@@ -555,6 +555,23 @@ async function tick() {
         if (seenVersion && INSTR_VERSION) {
           note.hidden = seenVersion === INSTR_VERSION;
         }
+
+        // ⚠️ And if the file has become one we would REFUSE to show, take the
+        // editor away, exactly as a fresh load would.
+        //
+        // The poll re-dated the note and left the controls alone, so an agent
+        // that grew its own file past the ceiling (or wrote a non-UTF-8 byte
+        // into it) left an enabled Save that could only ever answer "there is
+        // already a file there that this editor cannot safely replace", beside
+        // a footer still naming the file as one you can edit by hand. That is
+        // the offer-an-action-that-will-fail state the load path was changed to
+        // remove, reachable by simply leaving the panel open.
+        if (fresh.instructions && fresh.instructions.state === 'unknown' && !seenVersion) {
+          INSTR_READY = false;
+          document.getElementById('d-instr').disabled = true;
+          document.getElementById('d-instr-save').disabled = true;
+          document.getElementById('d-instr-foot').hidden = true;
+        }
         // If the poll cannot see a version (the file became unreadable), say
         // nothing new rather than RETRACTING a notice that was true. Hiding it
         // there took a correct "this file has changed since you opened it" back
@@ -728,15 +745,17 @@ let INSTR_VERSION = null;
 let INSTR_READY = false;
 
 /**
- * The `editedAt` of the file version currently in the box.
+ * ⚠️ Nothing in this file is pinned by a test. `web/index.html` has NO
+ * automated coverage in this repo, so every statement here, including the
+ * load/save generation pairing and the poll re-sync below, is verified by
+ * driving the page and by nothing else. Said where someone editing it will
+ * read it, not only in the plan.
  *
- * ⚠️ Not pinned by any test, and neither is the load/save generation pairing
- * below it: `web/index.html` has NO automated coverage in this repo, so every
- * statement in this file is verified by driving the page and by nothing else.
- * Said here rather than only in the plan, because a guard that is unpinned
- * should say so where someone editing it will read it.
+ * (An `INSTR_LOADED_AT` used to live here, assigned in three places, read in
+ * none, and credited by a comment with preventing a failure that
+ * `INSTR_VERSION` actually prevents. Removed rather than left as a guard that
+ * looks load-bearing.)
  */
-let INSTR_LOADED_AT = null;
 
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
@@ -775,7 +794,6 @@ async function loadInstructions(sessionName) {
   // failed load showed "the version before your last save is kept" about an
   // agent with no folder at all.
   document.getElementById('d-instr-prev').hidden = true;
-  INSTR_LOADED_AT = null;
   renderStale(null);
 
   try {
@@ -791,7 +809,6 @@ async function loadInstructions(sessionName) {
     INSTR_VERSION = data.version || null;
     // What the box is showing, so the poll can tell when the file has moved on
     // from it rather than only that it is newer than the session.
-    INSTR_LOADED_AT = (data.staleness && data.staleness.editedAt) || null;
     document.getElementById('d-instr-outdated').hidden = true;
     INSTR_READY = true;
     // Now that there is something real in the box, the controls may match it.
@@ -984,13 +1001,10 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
     INSTR_VERSION = data.version || null;
-    // ⚠️ And the loaded-at stamp, or the very next poll decides the file has
-    // "changed since you opened it" and tells the person to reopen the agent,
-    // discarding the box. On 100% of saves, on the feature's primary flow.
-    // Introduced by the notice itself: the stamp was set only in
-    // `loadInstructions`, and a save is the other way the box comes to match
-    // disk.
-    INSTR_LOADED_AT = (data.staleness && data.staleness.editedAt) || null;
+    // ⚠️ Updating INSTR_VERSION above is what stops the very next poll deciding
+    // the file has "changed since you opened it" and telling the person to
+    // reopen the agent, discarding the box. On 100% of saves, on the feature's
+    // primary flow, until a save started refreshing it.
     document.getElementById('d-instr-outdated').hidden = true;
     // A save is the moment the kept version comes into existence, and this is
     // the one screen where someone has just replaced an agent's entire boot

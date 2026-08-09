@@ -211,7 +211,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Controls disabled until the load lands | **green, no browser test harness** |
 | Keeping the replaced version as `CLAUDE.md.previous` | fails (3 tests) |
 | `O_NOFOLLOW` on the backup write | fails |
-| `O_NONBLOCK` + is-a-file on the backup write | fails |
+| `O_NONBLOCK` on the backup write | fails |
+| is-a-file on the backup write | **green, masked by the truncation, declared** |
+| `nlink` (hard link) on the backup write | fails |
+| `ftruncate` on the backup write | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
@@ -557,6 +560,25 @@ regular file sat at that path, so a failed backup still promised a copy that was
 two saves old or zero bytes. On the save path the honest predicate is
 `keptPrevious` alone.
 
+Iteration 18 found no blockers and a fourth variant of the same escape:
+`O_NOFOLLOW` does not see a HARD link. `ln <victim> <agent>/CLAUDE.md.previous`
+made the next Save truncate a file outside the workers root, fill it with the
+agent's old instructions and reset its permissions. Measured. `st_nlink > 1` is
+the only thing that tells a hard link from an ordinary file, so the descriptor
+is now asked for that too.
+
+It also caught two guards I had added without pinning and without declaring, and
+one of them turned out to be masked: removing the is-a-file check on the backup
+descriptor leaves the suite green, because `ftruncate` fails on a fifo a step
+later and refuses the write anyway. So the truncation is the guard doing the
+work and the type check is belt to its braces, which is now said at the code
+rather than implied by a test that passes for a different reason.
+
+And it found dead state in the browser: an `INSTR_LOADED_AT` assigned in three
+places, read in none, with a comment crediting it for a failure that
+`INSTR_VERSION` actually prevents. Removed. A variable that looks load-bearing
+and is not is the same defect as a comment that overstates a guard.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -576,4 +598,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**187 tests, zero dependencies.**
+**190 tests, zero dependencies.**

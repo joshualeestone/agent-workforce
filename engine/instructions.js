@@ -600,7 +600,7 @@ function write(agent, text, expectedVersion) {
       //
       // `wx` is not available here: the backup has to be replaceable. So the
       // file is opened with `O_NOFOLLOW`, which fails rather than follows, and
-      // `O_TRUNC` to replace the contents.
+      // emptied through the descriptor afterwards rather than by `O_TRUNC`.
       //
       // The mode is set with an explicit `fchmod` rather than the `mode`
       // argument, because that argument only applies when the file is CREATED:
@@ -617,6 +617,13 @@ function write(agent, text, expectedVersion) {
         // fifo planted here made a Save never return, and with it every route
         // on this single-threaded server, with no crash and no log. Measured.
         //
+        // And `O_NOFOLLOW` does not see a HARD link, which is the same escape
+        // by another name: `ln <victim outside the root> <agent>/CLAUDE.md.previous`
+        // made the next Save truncate that victim and fill it with the agent's
+        // old instructions, and `fchmod` reset its permissions too. Measured.
+        // `st_nlink > 1` is the only thing that distinguishes it, so the
+        // descriptor is asked for that as well as for its type.
+        //
         // This is the same failure `workerfile` documents at length and guards
         // against, two modules over, reintroduced by the backup write. Third
         // time on this branch that a guard added to make something safer opened
@@ -627,7 +634,27 @@ function write(agent, text, expectedVersion) {
           fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
           mode,
         );
-        if (!fs.fstatSync(pfd).isFile()) throw new Error('not a regular file');
+        const pstat = fs.fstatSync(pfd);
+        // A regular file, and one that is not ALSO known by another name.
+        //
+        // ⚠️ The type check is NOT pinned, and that is measured rather than
+        // assumed: removing it leaves the suite green, because `ftruncate`
+        // fails with EINVAL on a fifo and refuses the write a step later. So
+        // the guard that actually stops a fifo here is the truncation, and this
+        // line is belt to its braces. It stays because relying on a side effect
+        // of an unrelated call is exactly how a guard disappears in a later
+        // refactor, and declared untested rather than left looking covered.
+        //
+        // The `nlink` check IS pinned, and is not redundant with anything:
+        // `O_NOFOLLOW` does not see a hard link, and a hard link is a perfectly
+        // ordinary regular file.
+        if (!pstat.isFile()) throw new Error('not a regular file');
+        if (pstat.nlink > 1) throw new Error('that file is also known by another name');
+        // Truncate through the DESCRIPTOR rather than with `O_TRUNC`, so the
+        // file is emptied only after the checks above have accepted it. With
+        // `O_TRUNC` the open itself destroys the contents, before we know what
+        // we opened. Without any truncation the backup keeps a tail of the
+        // previous one when the new text is shorter.
         fs.ftruncateSync(pfd, 0);
         fs.fchmodSync(pfd, mode);
         fs.writeFileSync(pfd, shown.text);

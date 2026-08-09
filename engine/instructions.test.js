@@ -293,6 +293,79 @@ test('a fifo at the backup path cannot wedge the save', (t) => {
   }
 });
 
+test('a HARD link at the backup path cannot redirect the write out of the root', (t) => {
+  // ⚠️ The same escape as the symlink, by another name, and `O_NOFOLLOW` does
+  // not see it. Measured before the fix: `ln <victim> <agent>/CLAUDE.md.previous`
+  // made the next Save truncate a file outside the workers root, fill it with
+  // the agent's old instructions, and reset its permissions.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-hardlink-'));
+  const victim = path.join(outside, 'victim.txt');
+  fs.writeFileSync(victim, 'A VICTIM FILE OUTSIDE THE ROOT');
+  const file = makeAgent('hardlinkagent', 'SECRET boot rules, at least twenty characters long.');
+  try {
+    fs.linkSync(victim, `${file}.previous`);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    t.skip('hard links are unavailable on this filesystem');
+    return;
+  }
+  try {
+    const got = instructions.write('hardlinkagent', 'a replacement set of instructions here');
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'A VICTIM FILE OUTSIDE THE ROOT',
+      'the backup wrote through a hard link to a file outside the root');
+    assert.equal(got.keptPrevious, false);
+  } finally {
+    fs.rmSync(`${file}.previous`, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a fifo with a live reader at the backup path is refused, not written into', (t) => {
+  // The case `O_NONBLOCK` does not cover on its own: it only turns a READERLESS
+  // fifo into ENXIO, so with a reader holding it open the open succeeds.
+  //
+  // ⚠️ This does NOT isolate the is-a-file check, and saying so matters.
+  // Removing that check leaves this green, because `ftruncate` fails with
+  // EINVAL on a fifo and refuses the write a step later. What this pins is
+  // "some guard stopped it", which is the shape that hid a vulnerable build in
+  // the commitment store. The truncation is the guard actually doing the work
+  // here; the type check is declared untested at the code itself.
+  const dir = path.join(ROOT, 'fifolive');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'SECRET boot rules, at least twenty characters long.');
+  const fifo = path.join(dir, 'CLAUDE.md.previous');
+  const cp = require('node:child_process');
+  try {
+    cp.execFileSync('mkfifo', [fifo]);
+  } catch {
+    t.skip('mkfifo is unavailable on this machine');
+    return;
+  }
+  const reader = cp.spawn('cat', [fifo], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let heard = '';
+  reader.stdout.on('data', (c) => { heard += c.toString(); });
+  try {
+    const got = instructions.write('fifolive', 'a replacement set of instructions here');
+    assert.equal(got.keptPrevious, false, 'claimed to keep a version by writing into a fifo');
+    assert.ok(!heard.includes('SECRET boot rules'),
+      'the previous instruction file was piped to a listener');
+  } finally {
+    reader.kill();
+    fs.rmSync(fifo, { force: true });
+  }
+});
+
+test('the kept version does not keep a tail of the one before it', () => {
+  // Pins the truncation. Without it, saving a shorter file leaves the end of
+  // the PREVIOUS backup on disk, so the "version before your last save" is a
+  // splice of two versions that never existed.
+  const file = makeAgent('prevtruncate', 'x'.repeat(400));
+  instructions.write('prevtruncate', 'y'.repeat(60));   // .previous becomes 400 bytes
+  instructions.write('prevtruncate', 'z'.repeat(30) + ' padded to clear the floor');
+  const kept = fs.readFileSync(`${file}.previous`, 'utf8');
+  assert.equal(kept, 'y'.repeat(60), `the kept version is ${kept.length} bytes, spliced with an older one`);
+});
+
 test('a directory at the backup path is not reported as a kept version', () => {
   // `existsSync` is true for a directory, so the panel promised "the version
   // before your last save is kept" about an empty folder.
