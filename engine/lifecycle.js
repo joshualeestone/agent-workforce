@@ -364,10 +364,27 @@ function mayTypeInto(action, agent) {
   if (!agent || !agent.isAgentPane) {
     return { ok: false, because: 'we are not confident that is a running agent, so we will not type into it' };
   }
-  if (agent.state === 'needs_you') {
+  // ⚠️ An ALLOWLIST of states we can vouch for, NOT a denylist of `needs_you`.
+  //
+  // `classify` reports ONE state from a priority-ordered list, and it tests the
+  // rate-limit markers BEFORE the question markers. So a pane genuinely showing
+  // `Do you want to proceed? ❯ 1. Yes` classifies as `rate_limited` the moment
+  // the same 25-line tail also contains "rate limit" — which a Bash call
+  // grepping for that phrase is enough to do. Measured: that exact pane text
+  // returned `rate_limited`, my denylist returned ok, and the Enter would have
+  // confirmed the highlighted Yes. Two agents on this board are `rate_limited`
+  // right now.
+  //
+  // `unknown` is refused for the reason this whole codebase exists: it is what
+  // `classify` returns when it could not read the pane at all, so it is exactly
+  // the case where we cannot see whether a prompt is on screen. The question
+  // markers are a five-regex heuristic, and anything they miss lands here too.
+  if (agent.state !== 'idle' && agent.state !== 'working') {
     return {
       ok: false,
-      because: 'it is waiting on an answer from you right now, and a keystroke would answer that question instead. Deal with the question first',
+      because: agent.state === 'needs_you'
+        ? 'it is waiting on an answer from you right now, and a keystroke would answer that question instead. Deal with the question first'
+        : 'we cannot see clearly enough what it is showing to be sure a keystroke would not answer something',
     };
   }
   return { ok: true };
@@ -391,9 +408,18 @@ function mayTypeInto(action, agent) {
  *   - A DRY RUN did nothing either, and destroying a real record while
  *     pretending to act would make the safety flag itself destructive.
  */
-function invalidatesCommitments(action, outcome) {
+function invalidatesCommitments(action, outcome, because) {
   if (action === 'compact') return false;
-  return outcome === OUTCOME.DONE || outcome === OUTCOME.ASKED;
+  if (outcome === OUTCOME.DONE || outcome === OUTCOME.ASKED) return true;
+
+  // ⚠️ And a REFUSED that may still have landed. `sendCommand` returns REFUSED
+  // when the text arrived and the Enter did not, saying the command "may be
+  // sitting in its composer unsent" — which means the conversation may still be
+  // destroyed at the end of the turn. `restart` already took this branch for
+  // the identical we-may-have-done-it case; the reasoning was not carried
+  // across, so a half-sent clear left the board asserting commitments that were
+  // about to stop existing.
+  return outcome === OUTCOME.REFUSED && /sitting in its composer/.test(String(because || ''));
 }
 
 module.exports = {

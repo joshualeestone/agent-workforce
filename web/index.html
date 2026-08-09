@@ -1235,29 +1235,21 @@ let FRESH_RETURN = null;   // the control to give focus back to
  * `holding` with the same three are different situations, and approving one
  * against the other is exactly the mistake this token exists to catch.
  */
-async function sha256Hex(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 /**
  * The fingerprint the server compares against.
  *
- * ⚠️ Covers the TEXT of each commitment, not just its id. An agent can keep an
- * id and change what it says, and the dialog would then be approving the
- * destruction of something other than what it displayed.
+ * ⚠️ Handed DOWN with the data, not recomputed here. The browser version used
+ * `crypto.subtle`, which is undefined outside a secure context, so on the very
+ * proxy deployment the server's allowlist exists to support the token was never
+ * produced: every action answered "say what you were shown this would lose"
+ * with nothing on screen explaining why. It was also async, so the dialog
+ * rendered enabled buttons before the token existed.
  *
- * Computed here rather than taken from the server so the token describes what
- * the operator was actually SHOWN. Async because `crypto.subtle` is, which is
- * why every caller awaits it.
+ * Taking it from the payload is not weaker. The token describes exactly the
+ * data this dialog was drawn from, which is the property that matters.
  */
-async function holdingToken(h) {
-  const items = ((h && h.commitments) || [])
-    .map((c) => `${c.id}\u0000${c.what}`)
-    .sort()
-    .join('\u0001');
-  const digest = (await sha256Hex(items)).slice(0, 32);
-  return `${h ? h.state : 'unknown'}:${digest}`;
+function holdingToken(h) {
+  return (h && h.token) || null;
 }
 
 function holdingBlock(a) {
@@ -1407,7 +1399,8 @@ function openFresh(sessionName, returnTo) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
   FRESH_FOR = a;
-  holdingToken(a.commitments).then((t) => { if (FRESH_FOR === a) FRESH_TOKEN = t; });
+  FRESH_TOKEN = holdingToken(a.commitments);
+  // The agent NAME, not the button element: the grid is replaced on every poll.
   FRESH_RETURN = returnTo || null;
 
   const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
@@ -1432,7 +1425,14 @@ function closeFresh() {
   document.getElementById('fresh-scrim').hidden = true;
   FRESH_FOR = null;
   FRESH_TOKEN = null;
-  if (FRESH_RETURN && document.contains(FRESH_RETURN)) FRESH_RETURN.focus();
+  // ⚠️ Re-find the button rather than holding the ELEMENT. `tick` replaces the
+  // whole grid every five seconds, so the node captured on open is detached
+  // from the document by the first poll and focus was silently never restored
+  // for any dialog open longer than that.
+  if (FRESH_RETURN) {
+    const live = document.querySelector(`.fresh[data-fresh="${CSS.escape(FRESH_RETURN)}"]`);
+    if (live) live.focus();
+  }
   FRESH_RETURN = null;
 }
 
@@ -1460,7 +1460,7 @@ document.getElementById('grid').addEventListener('click', (e) => {
   const fresh = e.target.closest('.fresh');
   if (fresh) {
     e.stopPropagation();   // do not also open the detail panel
-    openFresh(fresh.dataset.fresh, fresh);
+    openFresh(fresh.dataset.fresh, fresh.dataset.fresh);
   }
 }, true);
 
@@ -1526,7 +1526,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     const fresh = LAST.find((x) => x.sessionName === forAgent);
     if (fresh) {
       FRESH_FOR = fresh;
-      FRESH_TOKEN = await holdingToken(fresh.commitments);
+      FRESH_TOKEN = holdingToken(fresh.commitments);
       renderFresh(fresh);
     } else {
       // ⚠️ Not a corner case: this is the ordinary restart path. The agent is
@@ -1563,7 +1563,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       const fresh = LAST.find((x) => x.sessionName === forAgent);
       if (fresh) {
         FRESH_FOR = fresh;
-        FRESH_TOKEN = await holdingToken(fresh.commitments);
+        FRESH_TOKEN = holdingToken(fresh.commitments);
         renderFresh(fresh);
         msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
       } else {

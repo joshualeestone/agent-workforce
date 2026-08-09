@@ -1142,9 +1142,16 @@ test('a non-browser caller is still allowed through', async (t) => {
   // every legitimate non-browser caller to stop an attack that needs a browser.
   const name = await anyAgent(t);
   if (!name) return;
+  // ⚠️ The REAL token, so this request actually reaches the action. It used to
+  // send a made-up `unknown:`, which always 409'd, so the dry-run assertion
+  // below was unreachable and the protection it claims to pin was not pinned.
+  const board = JSON.parse((await req('/api/status')).body);
+  const mine = (board.agents || []).find((a) => a.sessionName === decodeURIComponent(name));
+  assert.ok(mine, 'the agent vanished from the board');
+
   const res = await req(`/api/agent/${name}/compact`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ holding: 'unknown:' }),
+    body: JSON.stringify({ holding: mine.commitments.token }),
   });
   assert.notEqual(res.status, 403);
   // ⚠️ And nothing actually happened to the agent. This is the one test here
@@ -1320,13 +1327,18 @@ test('an agent waiting on a question is never typed into', async (t) => {
     t.skip('no agent is waiting on a question right now, so the live path cannot be driven');
     return;
   }
+  // ⚠️ The token must be the REAL one, taken from the payload. The first
+  // version of this sent a made-up `unknown:`, so the changed-since-shown check
+  // threw CONFLICT before `mayTypeInto` ever ran, and the assertion below read
+  // `.because` off a body that only has `.error`. It could never have passed,
+  // and it never ran, because no agent happened to be waiting.
   for (const action of ['clear', 'compact']) {
     const res = await req(`/api/agent/${encodeURIComponent(waiting.sessionName)}/${action}`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ holding: 'unknown:' }),
+      body: JSON.stringify({ holding: waiting.commitments.token }),
     });
     assert.equal(res.status, 409, `${action} was sent to an agent showing a question`);
-    assert.match(JSON.parse(res.body).because, /waiting on an answer/);
+    assert.match(JSON.parse(res.body).because, /waiting on an answer|cannot see clearly enough/);
   }
 });
 

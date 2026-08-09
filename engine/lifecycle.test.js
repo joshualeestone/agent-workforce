@@ -453,10 +453,26 @@ test('an agent showing a question is never typed into', () => {
 
   for (const action of ['clear', 'compact']) {
     assert.equal(mayTypeInto(action, ready).ok, true, `${action} refused a ready agent`);
+    assert.equal(mayTypeInto(action, { isAgentPane: true, state: 'working' }).ok, true);
 
     const blocked = mayTypeInto(action, asking);
     assert.equal(blocked.ok, false, `${action} would have answered a permission prompt`);
     assert.match(blocked.because, /waiting on an answer/);
+
+    // ⚠️ An ALLOWLIST, and this is the case that proves why. `classify` reports
+    // ONE state from a priority-ordered list and tests the rate-limit markers
+    // BEFORE the question markers, so a pane genuinely showing
+    // `Do you want to proceed? ❯ 1. Yes` comes back as `rate_limited` the
+    // moment the same tail also contains "rate limit" — which a Bash call
+    // grepping for that phrase is enough to do. Measured, and two agents on
+    // this board were `rate_limited` at the time.
+    assert.equal(mayTypeInto(action, { isAgentPane: true, state: 'rate_limited' }).ok, false,
+      `${action} typed into a pane whose real state a single label could not carry`);
+
+    // And `unknown` is what `classify` returns when it could not read the pane
+    // at all, which is exactly when we cannot see whether a prompt is showing.
+    assert.equal(mayTypeInto(action, { isAgentPane: true, state: 'unknown' }).ok, false);
+    assert.equal(mayTypeInto(action, { isAgentPane: true, state: 'stopped' }).ok, false);
 
     // And a pane we cannot vouch for at all.
     assert.equal(mayTypeInto(action, { isAgentPane: false, state: 'idle' }).ok, false);
@@ -466,4 +482,25 @@ test('an agent showing a question is never typed into', () => {
   // Restart types nothing: it goes through launchd, so neither refusal applies.
   assert.equal(mayTypeInto('restart', asking).ok, true);
   assert.equal(mayTypeInto('restart', null).ok, true);
+});
+
+test('a half-sent clear still invalidates the commitment record', () => {
+  // ⚠️ `sendCommand` returns REFUSED when the text landed and the Enter did
+  // not, saying the command "may be sitting in its composer unsent" — which
+  // means the conversation may still be destroyed at the end of the turn.
+  //
+  // Treating that as "nothing happened" left the board asserting commitments
+  // at full confidence about work that was about to stop existing. `restart`
+  // already took the opposite branch for the identical we-may-have-done-it
+  // case; the reasoning simply had not been carried across.
+  let n = 0;
+  lifecycle.setRunner(() => { n += 1; if (n === 2) throw new Error('EPIPE'); return ''; });
+  const got = lifecycle.clear('angel', 'angel-discord:0.0');
+  assert.equal(got.outcome, lifecycle.OUTCOME.REFUSED);
+  assert.equal(lifecycle.invalidatesCommitments('clear', got.outcome, got.because), true,
+    'a command left sitting in the composer would have left the record standing');
+
+  // A refusal that genuinely sent nothing must NOT tombstone.
+  const nothing = lifecycle.clear('angel', '-X kill-server');
+  assert.equal(lifecycle.invalidatesCommitments('clear', nothing.outcome, nothing.because), false);
 });

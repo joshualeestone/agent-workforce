@@ -166,6 +166,11 @@ function crossSite(req) {
   return false;
 }
 
+/** The commitment block, with the fingerprint the confirmation compares. */
+function withToken(seen) {
+  return { ...seen, token: holdingToken(seen) };
+}
+
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -373,7 +378,19 @@ const server = http.createServer((req, res) => {
       // the caller unable to tell "nothing pending" from "never asked".
       const agents = snap.agents.map((a) => ({
         ...a,
-        commitments: commitments.read(a.sessionName),
+        // ⚠️ The confirmation token rides WITH the data the dialog renders
+        // from, computed by the same function the route checks against.
+        //
+        // It used to be recomputed in the browser with `crypto.subtle`, which
+        // is undefined outside a secure context: on the very proxy deployment
+        // `AGENT_WORKFORCE_ALLOWED_HOSTS` exists to support, the token was
+        // never produced, every action answered "say what you were shown this
+        // would lose", and nothing on screen explained why. It was also async,
+        // so the dialog rendered enabled buttons before the token existed.
+        //
+        // Handing it down removes both problems and is not weaker: the token
+        // describes exactly the payload the dialog was drawn from.
+        commitments: withToken(commitments.read(a.sessionName)),
         // Staleness only, NOT the instruction text. The board polls this every
         // five seconds for every agent, and the real files run to several
         // kilobytes each -- carrying them here would put ~90KB on the wire per
@@ -715,7 +732,7 @@ const server = http.createServer((req, res) => {
             action,
             outcome: lifecycle.OUTCOME.REFUSED,
             because: allowed.because,
-            holding: seen,
+            holding: withToken(seen),
           });
           return;
         }
@@ -741,7 +758,7 @@ const server = http.createServer((req, res) => {
         // the board serving "it reported these itself" at full confidence for
         // the next thirty minutes with nothing anywhere saying so.
         let reconciled = null;
-        if (lifecycle.invalidatesCommitments(action, result.outcome)) {
+        if (lifecycle.invalidatesCommitments(action, result.outcome, result.because)) {
           // ⚠️ Only meaningful when there was a record to reconcile.
           // `markDestroyed` also returns false for an agent that never reported,
           // and warning "we could not update our record" when there was nothing
@@ -766,7 +783,7 @@ const server = http.createServer((req, res) => {
           reconciled,
           // What it was holding when we acted, so the answer is a record of the
           // cost actually paid rather than of the cost quoted.
-          holding: seen,
+          holding: withToken(seen),
         });
       })
       .catch((err) => {
