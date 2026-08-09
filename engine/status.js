@@ -102,25 +102,39 @@ function isAgentPane(pane) {
   // `less`, `ssh`, `python3` all classified as an agent pane, and the comment
   // above claimed it stopped an editor or a REPL. It stopped neither.
   //
-  // `pane_current_command` reports a VERSION STRING when Claude Code is running
-  // (`2.1.212`), which is a positive signal rather than the absence of a
-  // negative one. Anything else is refused, which is the right direction for a
-  // check that decides whether we may type into a pane.
+  // Matched against the fleet's CANONICAL rule rather than a rule invented
+  // here: `~/.claude/scripts/lib/claude-process-classify.sh` accepts a strict
+  // three-segment version (the native install fronts as `2.1.212`) or one of
+  // the legacy names, because an npm-global install fronts as `node`. A
+  // two-segment form was accepted here for one round, which the canonical rule
+  // deliberately excludes to avoid matching an unrelated numeric-named process,
+  // and the legacy names were rejected, which silently removed this feature for
+  // any agent on an npm install.
   const command = String((pane.command || '')).trim();
-  return /^[0-9]+\.[0-9]+(\.[0-9]+)?$/.test(command);
+  const native = /^[0-9]+\.[0-9]+\.[0-9]+$/.test(command);
+  const legacy = command === 'claude' || command === 'claude.exe' || command === 'node';
+  if (!native && !legacy) return false;
+
+  // ⚠️ And not while the pane is scrolled back in copy-mode. There, keystrokes
+  // go to copy-mode bindings rather than the composer, so nothing is compacted
+  // or cleared and the route would still answer "we asked it to".
+  return pane.inMode !== '1';
 }
 
 function listPanes() {
-  const fmt = '#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}';
+  const fmt = '#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_in_mode}\t#{pane_title}';
   const out = sh('tmux', ['list-panes', '-a', '-F', fmt]);
   if (!out) return [];
   return out.trim().split('\n').filter(Boolean).map((line) => {
-    const [session, pane, command, ...titleParts] = line.split('\t');
+    const [session, pane, command, inMode, ...titleParts] = line.split('\t');
     return {
       name: session.replace(/-discord$/, ''),
       session,
       target: `${session}:${pane}`,
       command: command || '',
+      // 1 when the pane is scrolled back in copy-mode, where keystrokes go to
+      // copy-mode bindings rather than to the composer.
+      inMode: inMode || '0',
       title: titleParts.join('\t') || '',
     };
   });

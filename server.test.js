@@ -1243,25 +1243,90 @@ test('the confirmation token distinguishes a state we can vouch for', async (t) 
   const name = await anyAgent(t);
   if (!name) return;
 
+  // ⚠️ Same id, DIFFERENT text. `resolve(agent, id)` requires ids to be stable
+  // across reports, so an agent re-reporting an item with new wording is
+  // ordinary. Measured before the fix: the dialog showed "Draft the internal
+  // memo", the agent re-reported that id as "Wire the 40k payment to the
+  // vendor", and the original token was still accepted — the operator approved
+  // destroying one thing and destroyed another.
+  const seed = async (what) => {
+    const r = await req(`/api/agent/${name}/commitments`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ commitments: [{ id: 'stable-id-1', what }] }),
+    });
+    assert.equal(r.status, 200, r.body);
+  };
+
+  await seed('Draft the internal memo');
+  const shown = JSON.parse((await req(`/api/agent/${name}/instructions`)).body); // any GET refreshes nothing; token comes from status
   const board = JSON.parse((await req('/api/status')).body);
   const mine = (board.agents || []).find((a) => a.sessionName === decodeURIComponent(name));
   assert.ok(mine, 'the agent vanished from the board');
-  const ids = ((mine.commitments.commitments) || []).map((c) => c.id).sort().join(',');
+  assert.ok(shown, 'fixture read failed');
 
-  // The ids alone must NOT be accepted: the state has to match too.
-  const idsOnly = await req(`/api/agent/${name}/clear`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ holding: `:${ids}` }),
-  });
-  assert.equal(idsOnly.status, 409, 'a token missing its state was accepted');
+  // Reproduce the token the dialog would have held for the FIRST wording.
+  const crypto = require('node:crypto');
+  const tokenFor = (items, state) => `${state}:${crypto.createHash('sha256')
+    .update(items.map((c) => `${c.id}\u0000${c.what}`).sort().join('\u0001'), 'utf8')
+    .digest('hex').slice(0, 32)}`;
+  const staleToken = tokenFor([{ id: 'stable-id-1', what: 'Draft the internal memo' }], mine.commitments.state);
 
-  // And a state that does not match the current one is refused as well.
-  const wrongState = await req(`/api/agent/${name}/clear`, {
+  // Now the same id says something else entirely.
+  await seed('Wire the 40k payment to the vendor');
+
+  const res = await req(`/api/agent/${name}/clear`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ holding: `holding:${ids}` }),
+    body: JSON.stringify({ holding: staleToken }),
   });
-  if (mine.commitments.state !== 'holding') {
-    assert.equal(wrongState.status, 409, 'a token claiming the wrong state was accepted');
+  assert.equal(res.status, 409,
+    'a commitment whose text changed under a stable id walked past the confirmation');
+
+  // ⚠️ And the DISCRIMINATING half. The assertion above passes against an
+  // id-only token too, because a client hashing id+text would not match an
+  // id-only server either. This one sends exactly the token an ID-ONLY server
+  // would accept for the CURRENT record: if the text is not in the fingerprint,
+  // it matches and the clear fires.
+  const idsOnly = `${mine.commitments.state}:${crypto.createHash('sha256')
+    .update(['stable-id-1'].join('\u0001'), 'utf8').digest('hex').slice(0, 32)}`;
+  const idOnlyRes = await req(`/api/agent/${name}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: idsOnly }),
+  });
+  assert.equal(idOnlyRes.status, 409,
+    'a fingerprint that ignores the commitment text was accepted');
+
+  // And the state still has to match: ids and text alone are not enough.
+  const noState = await req(`/api/agent/${name}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: tokenFor([{ id: 'stable-id-1', what: 'Wire the 40k payment to the vendor' }], '') }),
+  });
+  assert.equal(noState.status, 409, 'a token missing its state was accepted');
+});
+
+test('an agent waiting on a question is never typed into', async (t) => {
+  // ⚠️ The most dangerous thing in this feature. `clear` and `compact` send the
+  // command and then a bare `Enter`. If the agent is sitting on a permission
+  // prompt, the text is ignored by the select and the ENTER CONFIRMS THE
+  // HIGHLIGHTED OPTION, which is Yes. Clicking the gentlest button on a screen
+  // built to show you the cost of an action would instead approve an arbitrary
+  // tool call the operator never saw.
+  //
+  // This asserts the RULE rather than driving a live prompt: the board already
+  // computes `needs_you` and counts it on the summary line, so the route simply
+  // has to consult it.
+  const board = JSON.parse((await req('/api/status')).body);
+  const waiting = (board.agents || []).find((a) => a.state === 'needs_you');
+  if (!waiting) {
+    t.skip('no agent is waiting on a question right now, so the live path cannot be driven');
+    return;
+  }
+  for (const action of ['clear', 'compact']) {
+    const res = await req(`/api/agent/${encodeURIComponent(waiting.sessionName)}/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: 'unknown:' }),
+    });
+    assert.equal(res.status, 409, `${action} was sent to an agent showing a question`);
+    assert.match(JSON.parse(res.body).because, /waiting on an answer/);
   }
 });
 

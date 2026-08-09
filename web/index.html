@@ -1235,9 +1235,29 @@ let FRESH_RETURN = null;   // the control to give focus back to
  * `holding` with the same three are different situations, and approving one
  * against the other is exactly the mistake this token exists to catch.
  */
-function holdingToken(h) {
-  const ids = ((h && h.commitments) || []).map((c) => c.id).sort().join(',');
-  return `${h ? h.state : 'unknown'}:${ids}`;
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The fingerprint the server compares against.
+ *
+ * ⚠️ Covers the TEXT of each commitment, not just its id. An agent can keep an
+ * id and change what it says, and the dialog would then be approving the
+ * destruction of something other than what it displayed.
+ *
+ * Computed here rather than taken from the server so the token describes what
+ * the operator was actually SHOWN. Async because `crypto.subtle` is, which is
+ * why every caller awaits it.
+ */
+async function holdingToken(h) {
+  const items = ((h && h.commitments) || [])
+    .map((c) => `${c.id}\u0000${c.what}`)
+    .sort()
+    .join('\u0001');
+  const digest = (await sha256Hex(items)).slice(0, 32);
+  return `${h ? h.state : 'unknown'}:${digest}`;
 }
 
 function holdingBlock(a) {
@@ -1387,7 +1407,7 @@ function openFresh(sessionName, returnTo) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
   FRESH_FOR = a;
-  FRESH_TOKEN = holdingToken(a.commitments);
+  holdingToken(a.commitments).then((t) => { if (FRESH_FOR === a) FRESH_TOKEN = t; });
   FRESH_RETURN = returnTo || null;
 
   const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
@@ -1506,7 +1526,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     const fresh = LAST.find((x) => x.sessionName === forAgent);
     if (fresh) {
       FRESH_FOR = fresh;
-      FRESH_TOKEN = holdingToken(fresh.commitments);
+      FRESH_TOKEN = await holdingToken(fresh.commitments);
       renderFresh(fresh);
     } else {
       // ⚠️ Not a corner case: this is the ordinary restart path. The agent is
@@ -1543,7 +1563,7 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       const fresh = LAST.find((x) => x.sessionName === forAgent);
       if (fresh) {
         FRESH_FOR = fresh;
-        FRESH_TOKEN = holdingToken(fresh.commitments);
+        FRESH_TOKEN = await holdingToken(fresh.commitments);
         renderFresh(fresh);
         msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
       } else {

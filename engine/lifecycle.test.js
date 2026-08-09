@@ -354,7 +354,19 @@ test('only a pane that actually holds a running agent may be typed into', () => 
   // removing that line leaves the suite green. Declared rather than implied.
   const { isAgentPane } = require('./status');
 
+  // The native install fronts as a strict three-segment version; an npm-global
+  // install fronts as `node`. Both are the fleet's canonical rule, not one
+  // invented here, and rejecting the legacy names silently removed this feature
+  // for any agent on an npm install.
   assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212' }), true);
+  assert.equal(isAgentPane({ session: 'angel-discord', command: 'node' }), true);
+  assert.equal(isAgentPane({ session: 'angel-discord', command: 'claude' }), true);
+
+  // ⚠️ Not while scrolled back in copy-mode: keystrokes go to copy-mode
+  // bindings rather than the composer, so nothing would be cleared and the
+  // route would still answer "we asked it to".
+  assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212', inMode: '1' }), false,
+    'a pane scrolled back in copy-mode was treated as typeable');
 
   for (const [pane, why] of [
     [{ session: 'my-shell', command: '2.1.212' }, 'not a fleet session name'],
@@ -365,7 +377,10 @@ test('only a pane that actually holds a running agent may be typed into', () => 
     // six shell names, so INSIDE a fleet session every other command passed and
     // the comment claiming it stopped an editor or a REPL was false.
     [{ session: 'angel-discord', command: 'vim' }, 'an editor inside a fleet session'],
-    [{ session: 'angel-discord', command: 'node' }, 'a REPL inside a fleet session'],
+    // A two-segment number is excluded deliberately: the canonical rule is
+    // strict three-segment, to avoid matching an unrelated numeric-named
+    // process on the one check that decides whether we may type into a pane.
+    [{ session: 'angel-discord', command: '2.1' }, 'a two-segment version'],
     [{ session: 'angel-discord', command: 'ssh' }, 'a remote shell inside a fleet session'],
     [{ session: 'angel-discord', command: 'less' }, 'a pager inside a fleet session'],
     [{ session: 'angel-discord', command: 'python3' }, 'python inside a fleet session'],
@@ -392,4 +407,63 @@ test('a restart that fails after the stop is not reported as never attempted', (
   assert.match(got.because, /may have been stopped/);
   assert.equal(lifecycle.invalidatesCommitments('restart', got.outcome), true,
     'the record would have been left standing for a destroyed conversation');
+});
+
+test('a restart script that is not executable is refused, not reported as maybe-stopped', () => {
+  // ⚠️ `statSync().isFile()` passes for a mode-644 script, so `execFileSync`
+  // threw EACCES with NOTHING having run, and the catch reported `asked` —
+  // "it may have been stopped" — which tombstones the commitment record. The
+  // board then told you an agent's conversation had been cleared while it was
+  // sitting there intact, and only a full fresh report would clear that.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-noexec-'));
+  const script = path.join(dir, 'restart-bot.sh');
+  fs.writeFileSync(script, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  try {
+    const probe = require('node:child_process').execFileSync(process.execPath, ['-e', `
+      process.env.AGENT_WORKFORCE_RESTART_SCRIPT = ${JSON.stringify(script)};
+      const l = require(${JSON.stringify(require.resolve('./lifecycle'))});
+      let ran = 0;
+      l.setRunner(() => { ran += 1; return ''; });
+      const got = l.restart('angel');
+      console.log(JSON.stringify({ outcome: got.outcome, ran, invalidates: l.invalidatesCommitments('restart', got.outcome) }));
+    `], { encoding: 'utf8', timeout: 10000 });
+    const out = JSON.parse(probe.trim().split('\n').pop());
+    assert.equal(out.ran, 0, 'it tried to run a non-executable script');
+    assert.equal(out.outcome, 'refused', 'a never-attempted restart reported as maybe-stopped');
+    assert.equal(out.invalidates, false, 'it would have tombstoned an untouched agent');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an agent showing a question is never typed into', () => {
+  // ⚠️ The most dangerous thing in this feature, and the reason this decision
+  // is a function rather than an inline check: it needs an agent that happens
+  // to be sitting on a permission prompt, and no test can arrange that on a
+  // live fleet.
+  //
+  // `clear` and `compact` send the command and then a bare `Enter`. On a
+  // permission prompt the text is ignored by the select and the Enter CONFIRMS
+  // THE HIGHLIGHTED OPTION, which is Yes. So the gentlest, visually-primary
+  // button on a screen built to show you the cost of an action would instead
+  // approve an arbitrary tool call nobody saw.
+  const { mayTypeInto } = lifecycle;
+  const ready = { isAgentPane: true, state: 'idle' };
+  const asking = { isAgentPane: true, state: 'needs_you' };
+
+  for (const action of ['clear', 'compact']) {
+    assert.equal(mayTypeInto(action, ready).ok, true, `${action} refused a ready agent`);
+
+    const blocked = mayTypeInto(action, asking);
+    assert.equal(blocked.ok, false, `${action} would have answered a permission prompt`);
+    assert.match(blocked.because, /waiting on an answer/);
+
+    // And a pane we cannot vouch for at all.
+    assert.equal(mayTypeInto(action, { isAgentPane: false, state: 'idle' }).ok, false);
+    assert.equal(mayTypeInto(action, null).ok, false);
+  }
+
+  // Restart types nothing: it goes through launchd, so neither refusal applies.
+  assert.equal(mayTypeInto('restart', asking).ok, true);
+  assert.equal(mayTypeInto('restart', null).ok, true);
 });

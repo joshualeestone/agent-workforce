@@ -226,9 +226,15 @@ function restart(agent) {
   // Refuse rather than improvise. The whole reason this path exists is that the
   // obvious alternative silently produces a bot with no permissions flag, so a
   // missing script must stop us, not route us around the rule it enforces.
+  // ⚠️ Executable, not merely present. A script that exists and is mode 644
+  // makes `execFileSync` throw EACCES with NOTHING having run, and the catch
+  // below reports that as `asked` ("it may have been stopped"), which
+  // tombstones the commitment record of an agent nobody touched. The board then
+  // tells you its conversation was cleared while it is sitting there intact.
   let usable = false;
   try {
     usable = fs.statSync(RESTART_SCRIPT).isFile();
+    fs.accessSync(RESTART_SCRIPT, fs.constants.X_OK);
   } catch {
     usable = false;
   }
@@ -334,6 +340,40 @@ function perform(action, agent, target) {
 }
 
 /**
+ * May we type a command into this agent's pane at all?
+ *
+ * ⚠️ Extracted as a decision rather than left inline in the route, because
+ * inline it could not be pinned: the `needs_you` case needs an agent that
+ * happens to be showing a question right now, and no test can arrange that.
+ *
+ * Two refusals, and the second is the most dangerous thing in this feature:
+ *
+ *   - **Not an agent pane.** `list-panes -a` returns every pane on the machine,
+ *     and `/clear` typed into a shell is EXECUTED rather than read as a command.
+ *   - **Waiting on a question.** `clear` and `compact` send the command and then
+ *     a bare `Enter`. On a permission prompt the text is ignored by the select
+ *     and the ENTER CONFIRMS THE HIGHLIGHTED OPTION, which is Yes. So the
+ *     gentlest button on a screen built to show you the cost of an action would
+ *     instead approve an arbitrary tool call nobody saw, and the answer would
+ *     say "we asked it to compact".
+ *
+ * `restart` is exempt from both: it goes through launchd and types nothing.
+ */
+function mayTypeInto(action, agent) {
+  if (action === 'restart') return { ok: true };
+  if (!agent || !agent.isAgentPane) {
+    return { ok: false, because: 'we are not confident that is a running agent, so we will not type into it' };
+  }
+  if (agent.state === 'needs_you') {
+    return {
+      ok: false,
+      because: 'it is waiting on an answer from you right now, and a keystroke would answer that question instead. Deal with the question first',
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Should the agent's commitment record be forgotten after this?
  *
  * ⚠️ Pulled out as a decision rather than left inline at the call site, because
@@ -359,5 +399,5 @@ function invalidatesCommitments(action, outcome) {
 module.exports = {
   ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN,
   safeTarget, safeServiceName, sendCommand, restart, clear, compact, perform, setRunner,
-  invalidatesCommitments,
+  invalidatesCommitments, mayTypeInto,
 };

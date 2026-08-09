@@ -89,8 +89,19 @@ function knownAgent(name) {
  * had to fix between `absent` and `unreadable`.
  */
 function holdingToken(seen) {
-  const ids = (seen.commitments || []).map((c) => c.id).sort().join(',');
-  return `${seen.state}:${ids}`;
+  // ⚠️ The TEXT, not just the ids. A commitment can keep its id and change what
+  // it says: `resolve(agent, id)` requires ids to be stable across reports, so
+  // an agent re-reporting the same item with new wording is ordinary, not
+  // exotic. Measured: the dialog showed "Draft the internal memo", the agent
+  // re-reported that id as "Wire the 40k payment to the vendor", and the
+  // original token was still accepted. The operator approved destroying one
+  // thing and destroyed another.
+  const items = (seen.commitments || [])
+    .map((c) => `${c.id}\u0000${c.what}`)
+    .sort()
+    .join('\u0001');
+  const digest = require('node:crypto').createHash('sha256').update(items, 'utf8').digest('hex').slice(0, 32);
+  return `${seen.state}:${digest}`;
 }
 
 /**
@@ -698,11 +709,12 @@ const server = http.createServer((req, res) => {
         // `tmux list-panes -a`, which is EVERY pane on the machine, so without
         // this `/clear` and Enter could be typed into a plain shell or an
         // editor, where the text is executed rather than read as a command.
-        if (action !== 'restart' && !(agent && agent.isAgentPane)) {
+        const allowed = lifecycle.mayTypeInto(action, agent);
+        if (!allowed.ok) {
           sendJson(res, 409, {
             action,
             outcome: lifecycle.OUTCOME.REFUSED,
-            because: 'we are not confident that is a running agent, so we will not type into it',
+            because: allowed.because,
             holding: seen,
           });
           return;
