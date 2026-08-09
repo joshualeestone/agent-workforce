@@ -204,10 +204,13 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Open-then-fstat instead of lstat-then-read | fails, but incidentally (see below) |
 | ENOENT distinguished from every other lstat failure | fails |
 | `root` required by the shared reader | fails |
-| `CONFLICT` code instead of matching prose for the 409 | fails |
+| `CONFLICT` code instead of matching prose for the 409 | fails **only with a live tmux fleet** |
 | Save carrying the load generation, not just the agent | **green, no browser test harness** |
+| Realpath containment (symlinked INTERMEDIATE component) | fails |
+| `unreadable` distinct from `absent` as a version | **green, declared untested in code** |
+| Controls disabled until the load lands | **green, no browser test harness** |
 | `staleness` re-deriving showability itself | fails (3 tests) |
-| Conflict answering 409 rather than 400 | fails |
+| Conflict answering 409 rather than 400 | fails **only with a live tmux fleet** |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
 | Create the worker directory instead of refusing | fails |
 | Refuse-to-clobber a file the read path hid | fails (5 tests) |
@@ -217,10 +220,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Refuse-to-clobber an UNREADABLE file (asks `read`) | fails |
 | Temp write flag `wx` to default (symlink) | fails |
 | `staleness` `lstat` to `stat` (symlink) | fails (2 tests) |
-| Malformed-JSON message guard | fails |
+| Malformed-JSON message guard | fails **only with a live tmux fleet** |
 | File-mode preservation across the rename | fails |
 | Changed-since-read refusal (engine) | fails (4 tests) |
-| Route forwarding the version | fails |
+| Route forwarding the version | fails **only with a live tmux fleet** |
 | `absent` as a real version (the DELETE path) | fails |
 | Refusing to show a non-UTF-8 file | fails (2 tests) |
 | `status.js` root, pinned WITHOUT a live fleet | fails |
@@ -461,13 +464,43 @@ return when symlinks or mkfifo are unavailable, printing a tick for a test that
 asserted nothing. Those are the one thing that would have gone quiet on a
 filesystem without symlink support, and they now skip visibly.
 
+Iteration 14 found no blockers and one more containment escape, one level up
+from the last: the check was a string PREFIX on a non-canonical path, and
+`dirEscapes` only ever lstats the IMMEDIATE parent, so a symlinked intermediate
+component satisfied both. Measured: `<root>/sub` linked elsewhere made the
+shared reader return the contents of a file outside the root, and put a name and
+role parsed from it on the board as an agent's identity. `realpath` resolves
+every component at once, which is why the fix is one call rather than a walk.
+
+Its other real finding was a comment of mine that described the bug the line
+beneath it created: a note explaining that the footer must be reset "or a failed
+load reads 'Saved to  · a real file you can also edit by hand' with no path at
+all", sitting directly above the line that produced exactly that, for the
+duration of every load and permanently on `/?tab=detail`. Controls now match
+what they will do: disabled until the answer lands.
+
+And the panel now says when the file has moved on from the text in the box. It
+was re-dating the staleness note from the poll without touching the textarea, so
+it read "Edited <new time>. Restart to apply." beside the PREVIOUS text, where
+restarting would apply the edit made elsewhere rather than what was on screen.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Seven rows are green and every one of them says
-so in the code itself. Two rows started green while looking covered and
+suite, not by reading the code. Ten rows are green. Every engine row says so at the guard itself; the browser
+rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
+for "this file has no automated coverage at all".
+
+⚠️ Four rows are marked "fails **only with a live tmux fleet**". They are pinned
+by route tests that call `anyAgent`, which `t.skip`s when no agents are running,
+and node:test reports a skipped run as pass/fail=0. So on any CI runner those
+four guards could be deleted and the suite would stay green. That hazard was
+identified for the `status.js` root row and fixed there by adding an engine-level
+test that does not need a fleet; it was then left unstated for these four. Saying
+which rows depend on this machine is the minimum; moving them off tmux is the
+real fix and is not in this branch. Two rows started green while looking covered and
 were fixed rather than accepted: the size half of the read guard was riding on a
 test that only ever planted a directory, and `registryKey` had a unit test that
 pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**177 tests, zero dependencies.**
+**178 tests, zero dependencies.**

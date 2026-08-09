@@ -1022,6 +1022,45 @@ test('a file we cannot get at is not reported as a file that is not there', (t) 
   }
 });
 
+test('a symlinked INTERMEDIATE component cannot lead the read out of the root', (t) => {
+  // ⚠️ The escape a string-prefix containment check believes.
+  //
+  // `path.resolve(file).startsWith(root)` is satisfied by any path that LOOKS
+  // like it is under the root, and `dirEscapes` only lstats the IMMEDIATE
+  // parent, so a link one level further up passed both. Measured before the
+  // fix: `<ROOT>/sub` linked elsewhere made `readWorkerFile` return `ok: true`
+  // with the foreign file's contents, and `readIdentity('sub/victim')` put a
+  // name and role parsed out of that file on the board as an agent's identity.
+  //
+  // Same escape as the immediate parent, one level up, in the module written so
+  // it could not happen again. `realpath` resolves every component at once.
+  const workerfile = require('./workerfile');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-mid-'));
+  fs.mkdirSync(path.join(outside, 'victim'), { recursive: true });
+  fs.writeFileSync(path.join(outside, 'victim', 'CLAUDE.md'),
+    'You are **Outside Secret**, the file outside the workers root.\n');
+  const link = path.join(ROOT, 'sublink');
+  try {
+    fs.symlinkSync(outside, link);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
+  }
+  try {
+    const got = workerfile.readWorkerFile(path.join(ROOT, 'sublink', 'victim', 'CLAUDE.md'), ROOT);
+    assert.equal(got.ok, false, 'the read followed a symlinked intermediate component');
+
+    const status = require('./status');
+    const id = status.readIdentity(path.join('sublink', 'victim'));
+    assert.equal(id.derived, false, 'an identity was derived from outside the root');
+    assert.notEqual(id.displayName, 'Outside Secret');
+  } finally {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('the shared reader refuses a path outside the workers root', () => {
   // ⚠️ Extracting the file checks into `workerfile` did NOT close containment
   // for its second caller, and the module read as though it had.

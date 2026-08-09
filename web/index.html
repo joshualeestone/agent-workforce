@@ -314,6 +314,10 @@ svg { display: block; }
          powerful write in the product, including each refusal and the reason a
          file cannot be edited. The staleness note beside it is already a live
          region; this was not. WCAG 2.1 SC 4.1.3, which is AA. -->
+    <div class="stale-note" id="d-instr-outdated" role="status" aria-live="polite" hidden>
+      <b>This file has changed since you opened it.</b> What is in the box is not
+      what is on disk any more. Reopen this agent to see the current version.
+    </div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
 </section>
@@ -525,7 +529,25 @@ async function tick() {
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
-      if (fresh && INSTR_READY) renderStale(fresh.instructions);
+      if (fresh && INSTR_READY) {
+        renderStale(fresh.instructions);
+
+        // ⚠️ And say so when the file has moved on from what the box holds.
+        //
+        // Re-dating the note without touching the textarea produced a screen
+        // that was untrue: "Running on older instructions. Edited <new time>.
+        // Restart to apply." beside the PREVIOUS text. Restarting would apply
+        // the edit made elsewhere, not what is on screen, so the sentence named
+        // the wrong thing. The staleness state exists to stop the screen
+        // asserting something untrue about what an agent is running, and this
+        // was that failure one level in.
+        const movedOn = fresh.instructions
+          && fresh.instructions.editedAt
+          && INSTR_LOADED_AT
+          && fresh.instructions.editedAt !== INSTR_LOADED_AT;
+        const note = document.getElementById('d-instr-outdated');
+        note.hidden = !movedOn;
+      }
     }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
     document.getElementById('grid').innerHTML = shown.map(card).join('');
@@ -693,6 +715,17 @@ let INSTR_VERSION = null;
  */
 let INSTR_READY = false;
 
+/**
+ * The `editedAt` of the file version currently in the box.
+ *
+ * ⚠️ Not pinned by any test, and neither is the load/save generation pairing
+ * below it: `web/index.html` has NO automated coverage in this repo, so every
+ * statement in this file is verified by driving the page and by nothing else.
+ * Said here rather than only in the plan, because a guard that is unpinned
+ * should say so where someone editing it will read it.
+ */
+let INSTR_LOADED_AT = null;
+
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
   INSTR_VERSION = null;
@@ -706,11 +739,22 @@ async function loadInstructions(sessionName) {
   pathEl.textContent = '';
   // Re-enabled on every load: a previous agent whose file could not be edited
   // left both of these disabled.
-  box.disabled = false;
-  saveBtn.disabled = false;
-  // Reset too, or a failed load inherits the previous agent's footer and reads
-  // "Saved to  · a real file you can also edit by hand" with no path at all.
-  document.getElementById('d-instr-foot').hidden = false;
+  // ⚠️ Disabled and hidden UNTIL the answer lands, not from the moment the
+  // request goes out.
+  //
+  // Enabling them here meant the controls said one thing and did another for
+  // the whole duration of every load: Save was enabled but answered "these
+  // instructions have not loaded, so saving is off", the footer asserted a real
+  // file path while `pathEl` was empty (rendering "Saved to  · a real file you
+  // can also edit by hand"), and text typed into the enabled empty box was
+  // silently replaced when the load landed. On `/?tab=detail` with no agent
+  // chosen, those states were permanent rather than momentary.
+  //
+  // The previous comment here claimed to PREVENT the empty-footer string and
+  // was the line that produced it.
+  box.disabled = true;
+  saveBtn.disabled = true;
+  document.getElementById('d-instr-foot').hidden = true;
   renderStale(null);
 
   try {
@@ -724,7 +768,15 @@ async function loadInstructions(sessionName) {
     // Remember which version this is, so Save can refuse to clobber an edit
     // made after this load.
     INSTR_VERSION = data.version || null;
+    // What the box is showing, so the poll can tell when the file has moved on
+    // from it rather than only that it is newer than the session.
+    INSTR_LOADED_AT = (data.staleness && data.staleness.editedAt) || null;
+    document.getElementById('d-instr-outdated').hidden = true;
     INSTR_READY = true;
+    // Now that there is something real in the box, the controls may match it.
+    box.disabled = false;
+    saveBtn.disabled = false;
+    document.getElementById('d-instr-foot').hidden = false;
     // Only name the file when it is one this screen can actually save to.
     // Otherwise the footer said "a real file you can also edit by hand" about
     // a path the panel had just refused, or about an agent with no folder.
@@ -768,6 +820,8 @@ async function loadInstructions(sessionName) {
     // A failed load must look like the other cannot-edit states, not like an
     // editable one: the top of this function re-enabled both controls, and
     // leaving them enabled offers a Save that INSTR_READY will always refuse.
+    // Already disabled from the top of the load; restated so the failure path
+    // is readable on its own.
     box.disabled = true;
     saveBtn.disabled = true;
     document.getElementById('d-instr-foot').hidden = true;

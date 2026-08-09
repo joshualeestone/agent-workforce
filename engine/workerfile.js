@@ -119,6 +119,31 @@ function readWorkerFile(file, root) {
     return { ok: false, because: 'that file is not inside the workers folder' };
   }
 
+  // ⚠️ And again on the CANONICAL path, because the check above is a string
+  // prefix and a string prefix believes symlinks.
+  //
+  // `dirEscapes` only ever lstats the IMMEDIATE parent, so an intermediate
+  // component could still be a link: with `<root>/sub` linked elsewhere,
+  // `<root>/sub/victim/CLAUDE.md` passed the prefix test AND the parent test,
+  // and `readIdentity('sub/victim')` served a name and role parsed out of a
+  // file outside the root. Measured. This is the same escape as the immediate
+  // parent, one level up, in the module written so it could not happen again.
+  //
+  // `realpath` resolves every component, so one call replaces walking the path.
+  // The ROOT is canonicalised too: on macOS `/tmp` is itself a link to
+  // `/private/tmp`, so comparing a resolved child against an unresolved root
+  // would refuse perfectly good files.
+  //
+  // A directory that does not exist yet is not an escape; the existence check
+  // below is what answers that case.
+  try {
+    const realRoot = fs.realpathSync(root);
+    const realDir = fs.realpathSync(path.dirname(file));
+    if (realDir !== realRoot && !realDir.startsWith(realRoot + path.sep)) {
+      return { ok: false, because: 'that file is not inside the workers folder' };
+    }
+  } catch { /* something on the path does not exist; handled below */ }
+
   if (dirEscapes(file)) {
     // Says which it actually is. A plain file where the worker folder should be
     // is not a link, and naming the wrong cause on a surface whose whole point

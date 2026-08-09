@@ -341,6 +341,21 @@ function compare(editedAt, startedAt) {
  */
 const ABSENT = 'absent';
 
+/**
+ * The version of a file that EXISTS but which we refuse to show.
+ *
+ * ⚠️ Deliberately not `absent`, which is what it used to be. `absent` means
+ * "there is no file", and a caller that echoed it back got
+ * `now === expected === 'absent'`, so the changed-since-read guard passed and
+ * only the refuse-to-clobber guard stood between that and a write. One token
+ * meaning two different things, in the module whose thesis is that one fact
+ * must not have two derivations.
+ *
+ * Never equal to any hash and never equal to `absent`, so it can only ever
+ * compare unequal, which is the correct answer for a file we cannot read.
+ */
+const UNREADABLE = 'unreadable';
+
 function versionOf(exists, buf) {
   if (!exists) return ABSENT;
   return `sha256:${crypto.createHash('sha256').update(buf).digest('hex')}`;
@@ -377,9 +392,12 @@ function read(agent) {
       // can catch is a reword breaking it, and that test would have to do the
       // rewording. Listed green in the plan's table for the same reason.
       editable: seen.missing === true,
+      // `absent` ONLY when there really is no file. Anything else that cannot
+      // be shown gets a token that can never match, so echoing it back cannot
+      // satisfy the changed-since-read guard.
+      version: seen.missing === true ? ABSENT : UNREADABLE,
       path: seen.file,
       text: '',
-      version: ABSENT,
       because: seen.because,
       staleness: staleness(agent, seen),
     };
@@ -546,6 +564,6 @@ function write(agent, text, expectedVersion) {
 }
 
 module.exports = {
-  ROOT, FILENAME, MAX_BYTES, MIN_CHARS, STALENESS, ABSENT,
+  ROOT, FILENAME, MAX_BYTES, MIN_CHARS, STALENESS, ABSENT, UNREADABLE,
   fileFor, registryKey, sessionStartedAt, staleness, compare, versionOf, read, write,
 };
