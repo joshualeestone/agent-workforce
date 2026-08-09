@@ -218,7 +218,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `staleness` carrying `editable` | fails |
 | `Host` header checked against loopback (DNS rebinding) | fails |
 | No-op save not rotating the kept version | fails |
-| Allowlist parsing (port, case, trailing dot) | fails |
+| Allowlist parsing (port, case, trailing dot) | fails, behaviourally |
 | Trailing-dot / case on the incoming `Host` | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
@@ -676,6 +676,30 @@ request was not addressed to this server, with nothing pointing at the cause.
 
 The plan's own green-row count was also wrong, understating by one. Corrected,
 and now derived by counting rather than by hand.
+
+Iteration 23 found no blockers and one warning, and the warning was the sharpest
+single finding of the loop because it was aimed at me.
+
+The test I wrote in iteration 22 to pin the allowlist normalisation asserted on
+`server.js` SOURCE TEXT with a regex. It was inverted in both directions:
+deleting the case and trailing-dot handling, a real regression that silently
+stops an operator's `Board.Local` entry from matching, left it green; rewriting
+the same regex as an equivalent `/:[0-9]+$/`, no behaviour change whatsoever,
+turned it red. **A test that fails on harmless refactors and passes on the
+regression it is named for.** That is precisely the "test that pins nothing"
+shape this entire suite is written against, committed by me while adding the
+guard it was supposed to pin, in the same commit as a comment claiming the
+shipped code agreed with what it asserted.
+
+My stated excuse was that the allowlist is read at module load so a live server
+cannot be asked about it. The answer is a child process with the environment
+set, which `engine/instructions.test.js` was already doing three files over. It
+now drives a real server and checks real responses, and I verified the polarity
+both ways: the regression reddens it, the refactor does not.
+
+Twenty-three iterations in, the loop's most consistent finding is not any
+individual bug. It is that **the code written to make something safer, and the
+tests written to prove it, are the least trustworthy things in the diff.**
 
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. 10 rows are green. Every engine row says so at the guard itself; the browser

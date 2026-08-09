@@ -200,30 +200,58 @@ test('a request claiming a non-loopback Host is refused', async () => {
   }
 });
 
-test('the allowlist opt-in is reachable, and tolerant of how it is written', () => {
-  // ⚠️ Tests the PARSING, not a live request, and says so: the allowlist is read
-  // from the environment at module load, so a running server cannot be asked
-  // about a host it was not started with. What can go wrong here is an entry
-  // that silently never matches, and that is a pure function of the string.
+test('the allowlist opt-in is reachable, and tolerant of how it is written', async () => {
+  // ⚠️ Drives a REAL server in a child process with the variable set, rather
+  // than asserting on `server.js` source text.
   //
-  // The port is the case that bites: the README says to name the host, and the
-  // obvious thing to paste is the `host:port` from a proxy config. Unstripped,
-  // that entry is dead and the operator gets a 400 with nothing pointing at it.
-  const parse = (raw) => new Set(
-    String(raw || '').split(',')
-      .map((h) => h.trim().replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase())
-      .filter(Boolean),
-  );
-  const got = parse(' Board.Local , proxy.example.com:8443 ,evil2.com. , ');
-  assert.ok(got.has('board.local'), 'case and whitespace should not matter');
-  assert.ok(got.has('proxy.example.com'), 'an entry written with a port was dropped');
-  assert.ok(got.has('evil2.com'), 'a trailing dot was not normalised away');
-  assert.equal(got.size, 3, 'empty entries should not become hosts');
+  // The first version of this test regex-matched the shipped source, and it was
+  // inverted in both directions: deleting the case and trailing-dot handling (a
+  // real regression, an operator's `Board.Local` entry silently stops matching)
+  // left it green, while rewriting the same regex as an equivalent `/:[0-9]+$/`
+  // (no behaviour change at all) turned it red. It failed on harmless refactors
+  // and passed on the regression it was named for, which is the "test that pins
+  // nothing" shape this whole suite is written against, committed while adding
+  // the guard it was supposed to pin.
+  //
+  // The excuse was that the allowlist is read at module load so a running
+  // server cannot be asked about it. A child process with the environment set
+  // is the answer, and `engine/instructions.test.js` already does exactly this.
+  const probe = `
+    process.env.AGENT_WORKFORCE_ALLOWED_HOSTS = ' Board.Local , proxy.example.com:8443 ';
+    process.env.AGENT_WORKFORCE_DATA = ${JSON.stringify(SANDBOX)};
+    process.env.AGENT_WORKFORCE_WORKERS = ${JSON.stringify(WORKERS)};
+    const http = require('node:http');
+    const { start, server } = require(${JSON.stringify(nodePath.join(__dirname, 'server.js'))});
+    const ask = (host) => new Promise((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: server.address().port,
+        path: '/api/status', headers: { Host: host } },
+        (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+      r.on('error', reject); r.end();
+    });
+    start(0).then(async () => {
+      const out = {};
+      for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
+                       'proxy.example.com:8443', 'proxy.example.com',
+                       'evil.example.com', 'board.local.evil.com']) {
+        out[h] = await ask(h);
+      }
+      console.log(JSON.stringify(out));
+      server.closeAllConnections(); server.close();
+    });
+  `;
+  const out = require('node:child_process')
+    .execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 20000 });
+  const got = JSON.parse(out.trim().split('\n').pop());
 
-  // And the shape actually shipped agrees with what was just asserted.
-  const src = fs.readFileSync(nodePath.join(__dirname, 'server.js'), 'utf8');
-  assert.match(src, /replace\(\/:\\d\+\$\/, ''\)/,
-    'server.js no longer strips the port from allowlist entries');
+  // Every spelling of an allowed host, including the one an operator would
+  // paste out of a proxy config with the port still attached.
+  for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
+    'proxy.example.com:8443', 'proxy.example.com']) {
+    assert.notEqual(got[h], 400, `${h} should have been allowed`);
+  }
+  // And the allowlist must not become a suffix match.
+  assert.equal(got['evil.example.com'], 400);
+  assert.equal(got['board.local.evil.com'], 400, 'the allowlist matched a suffix');
 });
 
 test('an unknown agent avatar still 404s with a query string attached', async () => {
