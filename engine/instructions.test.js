@@ -206,6 +206,39 @@ test('a successful write replaces the file and leaves no temp behind', () => {
   assert.deepEqual(strays, [], `temp files left behind: ${strays.join(', ')}`);
 });
 
+test('the version being replaced is kept beside the file', () => {
+  // ⚠️ The most destructive edit in the product had no way back. The box is
+  // labelled "what they should focus on" and hinted as "your words, in plain
+  // language", but it holds an agent's entire boot file: kilobytes of hard
+  // rules, escalation policy and house style. The only floor on a save is
+  // twenty characters, so someone taking that hint at face value and typing two
+  // sentences destroyed those rules permanently and was told "Saved."
+  const file = makeAgent('backuptest', 'THE ORIGINAL OPERATING RULES THAT MUST BE RECOVERABLE');
+  instructions.write('backuptest', 'two sentences of my own words here, nothing more');
+
+  assert.equal(fs.readFileSync(file, 'utf8'), 'two sentences of my own words here, nothing more');
+  assert.equal(fs.readFileSync(`${file}.previous`, 'utf8'),
+    'THE ORIGINAL OPERATING RULES THAT MUST BE RECOVERABLE',
+    'the replaced version was not kept');
+});
+
+test('a first save has nothing to keep and does not invent a backup', () => {
+  fs.mkdirSync(path.join(ROOT, 'firstsave'), { recursive: true });
+  instructions.write('firstsave', 'the first instructions this agent has ever had');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'firstsave', 'CLAUDE.md.previous')),
+    'a backup was written for a file that did not exist');
+});
+
+test('a refused save does not disturb the kept version', () => {
+  const file = makeAgent('backupkeep', 'THE VERSION THAT SHOULD STAY IN THE BACKUP SLOT');
+  instructions.write('backupkeep', 'a legitimate first replacement of the instructions');
+  const kept = fs.readFileSync(`${file}.previous`, 'utf8');
+
+  assert.throws(() => instructions.write('backupkeep', 'too short'), /at least 20 characters/);
+  assert.equal(fs.readFileSync(`${file}.previous`, 'utf8'), kept,
+    'a refused save rewrote the backup');
+});
+
 test('a directory where the instruction file should be is refused, not written through', () => {
   const dir = path.join(ROOT, 'dirwritetest');
   fs.mkdirSync(path.join(dir, 'CLAUDE.md'), { recursive: true });

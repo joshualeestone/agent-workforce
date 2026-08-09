@@ -209,6 +209,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Realpath containment (symlinked INTERMEDIATE component) | fails |
 | `unreadable` distinct from `absent` as a version | **green, declared untested in code** |
 | Controls disabled until the load lands | **green, no browser test harness** |
+| Keeping the replaced version as `CLAUDE.md.previous` | fails (3 tests) |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails **only with a live tmux fleet** |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -484,6 +485,27 @@ was re-dating the staleness note from the poll without touching the textarea, so
 it read "Edited <new time>. Restart to apply." beside the PREVIOUS text, where
 restarting would apply the edit made elsewhere rather than what was on screen.
 
+Iteration 15 found a BLOCKER that iteration 14 had just introduced. The new
+"this file has changed since you opened it" notice fired on 100% of successful
+saves, because the loaded-at stamp was set only in `loadInstructions` and a save
+is the other way the box comes to match disk. So the primary flow of the feature
+ended with the screen telling the person their box was out of date and to reopen
+the agent, which would have discarded what they had just written. A fix for a
+screen asserting something untrue, asserting something untrue.
+
+Its most valuable finding was not a defect at all. The box is labelled "what
+they should focus on" and hinted as "your words, in plain language", but it
+holds an agent's entire boot file: kilobytes of hard rules, escalation policy,
+house style. The only floor on a save is twenty characters, and there was no
+backup, no history and no undo anywhere. Someone taking the hint at face value
+and typing two sentences would permanently destroy the rules an agent depends
+on, and be told "Saved."
+
+The write now keeps the version it replaces as `CLAUDE.md.previous`, written
+before the rename, and the panel says so. That is not version history and it is
+not offered as a restore button. It means the bytes still exist for someone to
+put back, which is the difference between a mistake and a loss.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Ten rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -503,4 +525,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**178 tests, zero dependencies.**
+**181 tests, zero dependencies.**

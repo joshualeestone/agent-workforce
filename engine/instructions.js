@@ -409,6 +409,9 @@ function read(agent) {
     path: seen.file,
     text: seen.text,
     version: versionOf(true, seen.buf),
+    // Whether there is a version to go back to. The screen says so; bytes on
+    // disk nobody is told about are half a safety net.
+    hasPrevious: fs.existsSync(`${seen.file}.previous`),
     // `editedAt` is reported for display only. The changed-since-read guard
     // keys on `version` above, NOT on this: an mtime is not a version.
     editedAt: iso(seen.stat.mtime.getTime()),
@@ -551,6 +554,27 @@ function write(agent, text, expectedVersion) {
     // here is a real failure, not a best effort: silently handing back
     // permissions other than the ones the file had is the bug above.
     if (before) fs.chmodSync(tmp, mode);
+
+    // ⚠️ Keep the version we are replacing.
+    //
+    // This is the most destructive edit in the product and until now it had no
+    // way back. A real instruction file is several kilobytes of hard rules,
+    // escalation policy and house style; the box is labelled "what they should
+    // focus on" and hinted as "your words, in plain language", and the only
+    // floor on a save is twenty characters. Someone taking that hint at face
+    // value and typing two sentences destroyed the operating rules an agent
+    // depends on, permanently, and was told "Saved."
+    //
+    // One previous version, beside the file, written before the rename so a
+    // failure at any point leaves either the old file or the old file plus a
+    // copy of itself. Not version history, and not offered in the UI yet: the
+    // point is that the bytes still exist on disk for someone to put back.
+    if (shown && shown.exists) {
+      try {
+        fs.writeFileSync(`${file}.previous`, shown.text, { mode });
+      } catch { /* a missing backup must never block the save itself */ }
+    }
+
     fs.renameSync(tmp, file);
   } catch {
     // Any failure between the write and the rename otherwise leaves the temp

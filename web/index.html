@@ -305,10 +305,14 @@ svg { display: block; }
     <label class="flabel" for="d-instr">What they should focus on</label>
     <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
-    <textarea id="d-instr" rows="14" spellcheck="true"></textarea>
+    <!-- Ships DISABLED. `loadInstructions` enables it when there is something
+         real in it. Without this, /?tab=detail (a deep link this file supports)
+         never calls that function at all and renders a permanently enabled,
+         empty editor whose Save button does nothing when clicked. -->
+    <textarea id="d-instr" rows="14" spellcheck="true" disabled></textarea>
     <div class="frow instr-foot">
-      <div class="fpath" id="d-instr-foot">Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
-      <button class="btn" id="d-instr-save" type="button">Save</button>
+      <div class="fpath" id="d-instr-foot" hidden>Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
+      <button class="btn" id="d-instr-save" type="button" disabled>Save</button>
     </div>
     <!-- Announced: this is the only channel for every outcome of the most
          powerful write in the product, including each refusal and the reason a
@@ -318,6 +322,7 @@ svg { display: block; }
       <b>This file has changed since you opened it.</b> What is in the box is not
       what is on disk any more. Reopen this agent to see the current version.
     </div>
+    <div class="fpath" id="d-instr-prev" hidden>The version before your last save is kept beside it as <code>CLAUDE.md.previous</code>.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
 </section>
@@ -755,6 +760,11 @@ async function loadInstructions(sessionName) {
   box.disabled = true;
   saveBtn.disabled = true;
   document.getElementById('d-instr-foot').hidden = true;
+  // Reset with everything else, not only when the load succeeds: a failed load
+  // used to leave the PREVIOUS agent's notice sitting on the new agent's panel,
+  // beside a message saying this one could not be read at all.
+  document.getElementById('d-instr-outdated').hidden = true;
+  INSTR_LOADED_AT = null;
   renderStale(null);
 
   try {
@@ -776,7 +786,12 @@ async function loadInstructions(sessionName) {
     // Now that there is something real in the box, the controls may match it.
     box.disabled = false;
     saveBtn.disabled = false;
-    document.getElementById('d-instr-foot').hidden = false;
+    const foot = document.getElementById('d-instr-foot');
+    foot.hidden = false;
+    // Say that the previous version is kept, and where. A safety net nobody
+    // knows about is half a safety net, and this is the screen where someone
+    // is about to replace an agent's entire boot file.
+    document.getElementById('d-instr-prev').hidden = !data.hasPrevious;
     // Only name the file when it is one this screen can actually save to.
     // Otherwise the footer said "a real file you can also edit by hand" about
     // a path the panel had just refused, or about an agent with no folder.
@@ -845,9 +860,27 @@ async function loadInstructions(sessionName) {
  * edited outside this app. This is derived every time the page opens, so it is
  * right in both cases.
  */
+/**
+ * Write into a live region ONLY when what it says has changed.
+ *
+ * ⚠️ `aria-live="polite"` announces on mutation, not on difference, and
+ * assigning identical HTML still replaces the child nodes. `renderStale` runs
+ * on every five-second poll, so a screen-reader user with the panel open heard
+ * "Running on older instructions. Edited ..., running since .... Restart to
+ * apply." re-announced every five seconds, forever. Measured with a
+ * MutationObserver: three mutations in sixteen seconds for one distinct string.
+ */
+function setLive(el, html) {
+  if (el.innerHTML === html) return;
+  el.innerHTML = html;
+}
+
 function renderStale(s) {
   const el = document.getElementById('d-instr-stale');
-  if (!s || s.state === 'current') { el.hidden = true; el.textContent = ''; return; }
+  if (!s || s.state === 'current') {
+    if (!el.hidden) { el.hidden = true; el.textContent = ''; }
+    return;
+  }
 
   const when = (iso) => {
     if (!iso) return null;
@@ -858,11 +891,17 @@ function renderStale(s) {
   if (s.state === 'stale') {
     const edited = when(s.editedAt);
     const started = when(s.startedAt);
-    el.innerHTML = '<b>Running on older instructions.</b> '
+    setLive(el, '<b>Running on older instructions.</b> '
       + (edited && started
         ? `Edited ${esc(edited)}, running since ${esc(started)}. `
         : '')
-      + 'Restart to apply.';
+      // ⚠️ Says what restarting MEANS and that this app cannot do it. The line
+      // used to read only "Restart to apply.", which is an instruction to
+      // perform an action the product does not offer and does not explain, on a
+      // screen aimed at someone who does not know what restarting an agent is.
+      // Naming it as a manual step is the honest version until the restart
+      // button exists.
+      + 'Restarting the agent is what applies them, and this app cannot do that yet.');
     el.hidden = false;
     return;
   }
@@ -874,7 +913,7 @@ function renderStale(s) {
   // on. its instruction file is not UTF-8 text".
   const why = String(s.because || '');
   const sentence = why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}${/[.!?]$/.test(why) ? '' : '.'}` : '';
-  el.innerHTML = `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`;
+  setLive(el, `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`);
   el.hidden = false;
 }
 
@@ -934,6 +973,14 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
     INSTR_VERSION = data.version || null;
+    // ⚠️ And the loaded-at stamp, or the very next poll decides the file has
+    // "changed since you opened it" and tells the person to reopen the agent,
+    // discarding the box. On 100% of saves, on the feature's primary flow.
+    // Introduced by the notice itself: the stamp was set only in
+    // `loadInstructions`, and a save is the other way the box comes to match
+    // disk.
+    INSTR_LOADED_AT = (data.staleness && data.staleness.editedAt) || null;
+    document.getElementById('d-instr-outdated').hidden = true;
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);
