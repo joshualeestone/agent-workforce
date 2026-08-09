@@ -19,9 +19,11 @@ const {
   readIdentity,
   isAgentPane,
   isAgentSession,
+  isFleetSession,
   parsePanes,
   onePanePerSession,
   setPaneSource,
+  setPaneCapture,
   snapshot,
   PANE_FORMAT,
   PANE_COLUMNS,
@@ -176,11 +178,11 @@ test('the pane format and the pane parser cannot drift apart', () => {
   assert.ok(PANE_FORMAT.includes('#{pane_in_mode}'), 'copy-mode is no longer being asked for');
 
   // Round-trip a line built from the format's own column order.
-  const line = ['angel-discord', '0.0', '2.1.212', '0', 'Idle'].join('\t');
+  const line = ['zeta-discord', '0.0', '2.1.212', '0', 'Idle'].join('\t');
   const [got] = parsePanes(line);
-  assert.equal(got.session, 'angel-discord');
-  assert.equal(got.name, 'angel');
-  assert.equal(got.target, 'angel-discord:0.0');
+  assert.equal(got.session, 'zeta-discord');
+  assert.equal(got.name, 'zeta');
+  assert.equal(got.target, 'zeta-discord:0.0');
   assert.equal(got.command, '2.1.212');
   assert.equal(got.inMode, '0');
   assert.equal(got.title, 'Idle');
@@ -191,7 +193,7 @@ test('a pane title containing a tab does not shift every other column', () => {
   // and absorbs the remainder. If it were not, a title with a tab would push
   // real values into the wrong fields — and the field it would corrupt first is
   // whichever came after it.
-  const line = ['bram-discord', '1.2', 'node', '1', 'Working\ton\tthe thing'].join('\t');
+  const line = ['yara-discord', '1.2', 'node', '1', 'Working\ton\tthe thing'].join('\t');
   const [got] = parsePanes(line);
   assert.equal(got.command, 'node');
   assert.equal(got.inMode, '1');
@@ -203,7 +205,7 @@ test('a truncated pane line is treated as in copy-mode, not as safe to type into
   // Defaulting to '0' reads as "not in copy mode, safe to type" — asserting the
   // SAFE answer from an absence of information, which is the one move this
   // engine exists to refuse. Flipping the default to '0' fails this test.
-  const [got] = parsePanes('angel-discord\t0.0\t2.1.212');
+  const [got] = parsePanes('zeta-discord\t0.0\t2.1.212');
   assert.equal(got.inMode, '1');
   assert.equal(isAgentPane(got), false, 'a truncated line was ruled typeable');
 
@@ -220,19 +222,27 @@ test('no output and empty output both yield an empty roster, not a crash', () =>
   assert.deepEqual(parsePanes('\n\n'), []);
 });
 
-test('a plain shell in an agent-named session is not restartable', () => {
+test('a session that merely shares an agent name is not one of our agents', () => {
   // ⚠️ The roster STRIPS the `-discord` suffix but never requires it, so a
-  // person running `tmux new -s mikey` appears on the board as an agent named
-  // `mikey`. Restart was exempt from every roster check, so that card's Restart
-  // button ran `restart-bot.sh mikey` against the REAL bot.
-  const [impostor] = parsePanes('mikey\t0.0\tzsh\t0\t');
-  assert.equal(impostor.name, 'mikey', 'the card really does claim to be mikey');
+  // person running `tmux new -s kappa` for unrelated work appears on the board
+  // as an agent named `kappa`. Restart was exempt from every roster check, so
+  // that card's Restart button would run `restart-bot.sh kappa` against the
+  // real agent of that name. THIS is the accident the suffix test closes, and
+  // it is the reason restart is gated on `isFleetSession` rather than nothing.
+  const [impostor] = parsePanes('kappa\t0.0\tzsh\t0\t');
+  assert.equal(impostor.name, 'kappa', 'the card really does claim to be kappa');
+  assert.equal(isFleetSession(impostor), false, 'a session with no suffix passed the restart gate');
   assert.equal(isAgentSession(impostor), false, 'a shell was accepted as an agent session');
   assert.equal(isAgentPane(impostor), false);
 
-  // And the suffix alone is not enough either: the process still has to be one.
-  const [shellInSuffix] = parsePanes('mikey-discord\t0.0\tzsh\t0\t');
-  assert.equal(isAgentSession(shellInSuffix), false);
+  // ⚠️ A shell inside a REAL agent's session is a different case, and the three
+  // tiers deliberately answer it differently. It is our session (restart may
+  // act: this is what a crashed agent looks like), it is not a running agent,
+  // and it must never be typed into.
+  const [crashed] = parsePanes('kappa-discord\t0.0\tzsh\t0\t');
+  assert.equal(isFleetSession(crashed), true, 'a crashed agent lost its Restart button');
+  assert.equal(isAgentSession(crashed), false);
+  assert.equal(isAgentPane(crashed), false, 'a shell would have been typed into');
 });
 
 test('a split window does not put the same agent on the board twice', () => {
@@ -243,24 +253,24 @@ test('a split window does not put the same agent on the board twice', () => {
   // `.find()`, which takes whichever sorted first — so the operator could click
   // the card for one pane and have the keystrokes go to the other.
   const panes = parsePanes([
-    'angel-discord\t0.0\t2.1.212\t0\tWorking',
-    'angel-discord\t0.1\tzsh\t0\t',            // the split, running a shell
-    'bram-discord\t0.0\tnode\t0\tIdle',
+    'zeta-discord\t0.0\t2.1.212\t0\tWorking',
+    'zeta-discord\t0.1\tzsh\t0\t',            // the split, running a shell
+    'yara-discord\t0.0\tnode\t0\tIdle',
   ].join('\n'));
   assert.equal(panes.length, 3, 'the parser should still report every pane');
 
   const roster = onePanePerSession(panes);
   assert.equal(roster.length, 2);
   const names = roster.map((p) => p.name).sort();
-  assert.deepEqual(names, ['angel', 'bram']);
+  assert.deepEqual(names, ['yara', 'zeta']);
 
   // ⚠️ And the survivor is the pane actually running Claude, not merely the
   // first one listed. Picking by order would hand the agent's card a shell's
   // target, which `isAgentPane` then refuses — taking the feature away from a
   // perfectly healthy agent because somebody split its window.
-  const angel = roster.find((p) => p.name === 'angel');
-  assert.equal(angel.target, 'angel-discord:0.0');
-  assert.equal(isAgentPane(angel), true);
+  const zeta = roster.find((p) => p.name === 'zeta');
+  assert.equal(zeta.target, 'zeta-discord:0.0');
+  assert.equal(isAgentPane(zeta), true);
 });
 
 test('the agent pane wins even when the shell is listed first', () => {
@@ -268,11 +278,11 @@ test('the agent pane wins even when the shell is listed first', () => {
   // for the wrong reason if the choice were "first wins" and the agent happened
   // to be first.
   const roster = onePanePerSession(parsePanes([
-    'angel-discord\t0.0\tzsh\t0\t',
-    'angel-discord\t0.1\t2.1.212\t0\tWorking',
+    'zeta-discord\t0.0\tzsh\t0\t',
+    'zeta-discord\t0.1\t2.1.212\t0\tWorking',
   ].join('\n')));
   assert.equal(roster.length, 1);
-  assert.equal(roster[0].target, 'angel-discord:0.1', 'the shell was chosen over the agent');
+  assert.equal(roster[0].target, 'zeta-discord:0.1', 'the shell was chosen over the agent');
 });
 
 test('a session with no agent pane still appears, refused rather than hidden', () => {
@@ -292,35 +302,45 @@ test('snapshot itself never returns the same agent twice', () => {
   // covered, its one call site not — so the pane source is injectable and this
   // drives the real `snapshot()`.
   try {
+    // ⚠️ Invented names, and the pane capture stubbed too. Driving this against
+    // `angel-discord` meant shelling `tmux capture-pane` at a LIVE agent and
+    // reading its real instruction file and transcript, in a file that
+    // sandboxes neither root. Read-only, so nothing broke; still the wrong
+    // shape, and the same "we believed we were sandboxed" assumption this
+    // codebase has already been caught by once.
     setPaneSource(() => [
-      'angel-discord\t0.0\t2.1.212\t0\tWorking on something',
-      'angel-discord\t0.1\tzsh\t0\t',
-      'angel-discord\t0.2\tzsh\t0\t',
-      'bram-discord\t0.0\tnode\t0\tIdle',
+      'zeta-discord\t0.0\t2.1.212\t0\tWorking on something',
+      'zeta-discord\t0.1\tzsh\t0\t',
+      'zeta-discord\t0.2\tzsh\t0\t',
+      'yara-discord\t0.0\tnode\t0\tIdle',
     ].join('\n'));
+    setPaneCapture(() => 'Worked for 1m 02s\n> \n');
 
     const board = snapshot();
     const names = board.agents.map((a) => a.sessionName);
-    assert.deepEqual(names.slice().sort(), ['angel', 'bram']);
+    assert.deepEqual(names.slice().sort(), ['yara', 'zeta']);
     assert.equal(new Set(names).size, names.length, 'the same agent appeared on the board twice');
 
     // The surviving card points at the pane running Claude, so the action it
     // offers goes where the card says it does.
-    const angel = board.agents.find((a) => a.sessionName === 'angel');
-    assert.equal(angel.target, 'angel-discord:0.0');
-    assert.equal(angel.isAgentPane, true);
+    const zeta = board.agents.find((a) => a.sessionName === 'zeta');
+    assert.equal(zeta.target, 'zeta-discord:0.0');
+    assert.equal(zeta.isAgentPane, true);
   } finally {
     setPaneSource(null);
+    setPaneCapture(null);
   }
 });
 
 test('an empty roster is a board with no agents, not a crash', () => {
   try {
     setPaneSource(() => '');
+    setPaneCapture(() => '');
     const board = snapshot();
     assert.deepEqual(board.agents, []);
     assert.equal(board.counts.total, 0);
   } finally {
     setPaneSource(null);
+    setPaneCapture(null);
   }
 });

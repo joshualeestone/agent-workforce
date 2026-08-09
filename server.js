@@ -766,7 +766,15 @@ const server = http.createServer((req, res) => {
         try {
           patch = JSON.parse(buf.toString('utf8') || '{}') || {};
         } catch {
-          throw new Error('send the request as JSON');
+          // ⚠️ Carries a code. `errorAnswer` only echoes messages we wrote, and
+          // this one had none — so the clearest error on the route came back as
+          // 500 "something went wrong here, and we could not tell what". The
+          // comment on `errorAnswer` asserted every deliberate throw in this
+          // chain sets a code; this was the one that did not, which is exactly
+          // how a claim in a comment stops being true.
+          const err = new Error('send the request as JSON');
+          err.code = 'SAY_WHAT';
+          throw err;
         }
 
         // ⚠️ The caller must say what the dialog SHOWED it was about to

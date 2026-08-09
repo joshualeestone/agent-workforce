@@ -109,8 +109,38 @@ function sh(cmd, args) {
  * would take the feature away in a state the operator can enter by accident
  * with a scroll wheel.
  */
+/**
+ * Is this pane in one of the fleet's sessions, whatever is running in it?
+ *
+ * ⚠️ Three tiers now, and the distinction between this one and
+ * `isAgentSession` is the difference between restart working and restart being
+ * useless in the case it matters most.
+ *
+ * `isAgentSession` additionally requires a live Claude process. Gating RESTART
+ * on that was too strict in a way that inverted the feature: an agent that has
+ * crashed back to a shell inside its own `*-discord` session has no Claude
+ * process, so it classified `stopped` and its Restart button answered "we are
+ * not confident that card is one of your agents". That sentence is untrue — it
+ * plainly is one of your agents — and a crashed agent is the single most
+ * valuable thing a Restart button can act on. The guard refused precisely the
+ * case the feature exists for.
+ *
+ * The hazard restart was actually exposed to is an unrelated session that
+ * merely COLLIDES with an agent's name (`tmux new -s mikey`), and the suffix
+ * test alone closes that: `mikey` is not `mikey-discord`. `restart-bot.sh`
+ * refuses independently when there is no `com.<name>.discord` plist, so a name
+ * that is not a real service cannot reach launchd either.
+ *
+ * What this deliberately does NOT stop is somebody opening a session literally
+ * called `<agent>-discord` by hand. That is not the accident this guards
+ * against, and anyone able to do it can run `restart-bot.sh` directly.
+ */
+function isFleetSession(pane) {
+  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+}
+
 function isAgentSession(pane) {
-  if (!pane || !/-discord$/.test(String(pane.session || ''))) return false;
+  if (!isFleetSession(pane)) return false;
 
   // ⚠️ An ALLOW list, not a deny list.
   //
@@ -736,6 +766,8 @@ function snapshot() {
       isAgentPane: isAgentPane(pane),
       // Restart needs this one, not the copy-mode-sensitive one above.
       isAgentSession: isAgentSession(pane),
+      // The suffix alone. Restart asks this one: see isFleetSession.
+      isFleetSession: isFleetSession(pane),
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,
@@ -774,7 +806,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

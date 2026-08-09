@@ -286,7 +286,12 @@ svg { display: block; }
 /* A refused option reads as unavailable without disappearing: someone needs to
    see that Compact exists and why it is not on offer right now, or the dialog
    looks like it is missing a feature. */
-.opt.refused { opacity: 0.72; }
+/* ⚠️ NO group opacity. `opacity: 0.72` over `--label-2` composited to 3.15:1 in
+   light and 4.03:1 in dark, both under AA — and only the BUTTON is a disabled
+   control, so the exemption does not cover this copy. The refusal reads from
+   the muted border and the sentence, which is what actually carries the
+   meaning; dimming the text was decoration that cost legibility. */
+.opt.refused { background: var(--bg-sunken); }
 .opt.refused h4, .opt.refused p { color: var(--label-2); }
 .why-not { margin-top: 4px; font: var(--text-caption) var(--font-ui); color: var(--label); }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
@@ -717,7 +722,14 @@ async function tick() {
       //
       // Most reachable on restart, where the script sleeps eight seconds and
       // covers one or two polls.
-      if (!FRESH_BUSY && now && holdingToken(now.commitments) === FRESH_TOKEN && now.task !== FRESH_FOR.task) {
+      // ⚠️ Also when ACTIONABILITY changed, not only the task line. `may` can
+      // flip (idle → needs_you, or a rate limit appearing) with the pane title
+      // untouched and the commitments untouched, so the token still matches and
+      // neither of the other conditions fires — leaving Compact rendered as the
+      // primary enabled button, guaranteed to 409.
+      const mayChanged = now && JSON.stringify(now.may || {}) !== JSON.stringify(FRESH_FOR.may || {});
+      if (!FRESH_BUSY && now && holdingToken(now.commitments) === FRESH_TOKEN
+          && (now.task !== FRESH_FOR.task || mayChanged)) {
         FRESH_FOR = now;
         renderFresh(now);
       }
@@ -1668,11 +1680,25 @@ function closeFresh() {
     // succeeds, the instructions stop being stale, `renderStale` hides the very
     // button that opened this, and focus would land on <body>. So fall back to
     // something real and in the same place rather than accepting that.
-    if (live && !live.hidden) {
+    // ⚠️ `offsetParent`, not `.hidden`. The fallback targeted `#detail-back`,
+    // which lives inside a `hidden` section: on the grid entry path after a
+    // restart the card is gone, `live` is null, and focusing a button inside a
+    // display:none ancestor is a no-op — focus lands on <body>, which is the
+    // WCAG 2.4.3 failure this block exists to prevent, on the path the comment
+    // above calls the ordinary restart path. `.hidden` inspects the element;
+    // `offsetParent` is null whenever any ancestor is hidden too.
+    const visible = (el) => el && (el.offsetParent !== null || el === document.body);
+    if (visible(live)) {
       live.focus();
     } else {
-      const back = document.getElementById('detail-back');
-      if (back) back.focus();
+      const candidates = [
+        document.getElementById('detail-back'),
+        document.querySelector('.fresh'),
+        document.querySelector('#grid .card'),
+        document.querySelector('nav button, .tabs button'),
+      ];
+      const target = candidates.find(visible);
+      if (target) target.focus();
     }
   }
   FRESH_RETURN = null;
@@ -1898,7 +1924,16 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // Re-enable whatever is on screen NOW, not the nodes captured at click
     // time: several paths above replace `#fresh-options` wholesale, and the
     // captured list is then detached from the document.
-    [...document.querySelectorAll('#fresh-options button')].forEach((b) => { b.disabled = false; });
+    //
+    // ⚠️ EXCEPT the ones the server said it would refuse. A blanket re-enable
+    // put a live, clickable button next to "Not available: …" — re-opening the
+    // click-through the `may` field was added to prevent, introduced by the fix
+    // for the detached-node bug. Two fixes in a row, each breaking the other's
+    // case.
+    [...document.querySelectorAll('#fresh-options .opt')].forEach((opt) => {
+      if (opt.classList.contains('refused')) return;
+      opt.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    });
   }
 });
 

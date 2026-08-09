@@ -190,9 +190,21 @@ function defaultRunner(file, args, opts) {
 
 let run = defaultRunner;
 
-/** Swap the runner. Tests only. */
+/**
+ * Swap the runner. Tests only.
+ *
+ * ⚠️ Restoring the DEFAULT runner re-arms dry-run, and that is not tidiness.
+ * The `setDryRun` invariant was one-directional: it refuses to leave dry-run
+ * while the real runner is installed, but nothing stopped the reverse order
+ * (`setDryRun(false)` then `setRunner(null)`), which left `execFileSync` armed
+ * with the fleet-wide protection off, on a machine running thirteen agents. The
+ * one test doing this happens to order its `finally` correctly; a guard that
+ * depends on everyone remembering the order is not a guard.
+ */
 function setRunner(fn) {
-  run = typeof fn === 'function' ? fn : defaultRunner;
+  if (typeof fn === 'function') { run = fn; return; }
+  run = defaultRunner;
+  DRY_RUN = true;
 }
 
 /**
@@ -421,7 +433,14 @@ function perform(action, agent, target) {
  */
 function mayTypeInto(action, agent) {
   if (action === 'restart') {
-    if (!agent || !agent.isAgentSession) {
+    // ⚠️ `isFleetSession`, NOT `isAgentSession`. The difference is whether a
+    // Claude process is currently running in the pane, and requiring one made
+    // restart refuse a CRASHED agent — the single case the button is most
+    // needed for — with the untrue sentence "we are not confident that card is
+    // one of your agents". The accident this guards against is an unrelated
+    // session colliding with an agent's name, and the `-discord` suffix test
+    // alone closes that.
+    if (!agent || !agent.isFleetSession) {
       return { ok: false, because: 'we are not confident that card is one of your agents, so we will not restart anything under its name' };
     }
     return { ok: true };

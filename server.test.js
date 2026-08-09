@@ -163,9 +163,26 @@ test.after(() => {
 });
 
 /**
- * An agent name the write routes will accept.
+ * An agent name the write routes will accept, and that the ACTION routes will
+ * act on rather than refuse.
  *
- * No longer conditional, and no longer able to skip: the roster is ours.
+ * ⚠️ It returns an ACTIONABLE agent, and that is load-bearing, not tidiness.
+ *
+ * This used to return `agents[0]`. Once the roster became synthetic, `agents[0]`
+ * sorted to `xander` — the agent deliberately parked on a permission prompt so
+ * the refusal path had something to refuse. Every guard test then got its 409
+ * from `mayTypeInto` rather than from the guard under test, and since those
+ * tests asserted only `status === 409`, three of them passed with the guard they
+ * were named for deleted: the alias-spelling guard and both halves of the
+ * confirmation token.
+ *
+ * That is the second time on this branch that a fix for a coverage problem
+ * created a coverage problem. The synthetic roster removed 19 skips and quietly
+ * hollowed out three of the tests it recovered.
+ *
+ * So: actionable agent here, `refusingAgent()` where a refusal is the point, and
+ * the tests assert on the BODY as well as the status, because 409 is now a
+ * value two different mechanisms can produce.
  */
 async function anyAgent(t) {
   const board = await req('/api/status');
@@ -175,7 +192,19 @@ async function anyAgent(t) {
   }
   const agents = JSON.parse(board.body).agents || [];
   assert.ok(agents.length, 'the synthetic roster did not reach the server');
-  return encodeURIComponent(agents[0].sessionName);
+  const actionable = agents.find((a) => a.state === 'idle' || a.state === 'working');
+  assert.ok(actionable,
+    'the synthetic roster has no actionable agent, so every guard test would be '
+    + 'refused by mayTypeInto before reaching the guard it is named for');
+  return encodeURIComponent(actionable.sessionName);
+}
+
+/** An agent the action routes will REFUSE, for the tests where that is the point. */
+async function refusingAgent() {
+  const board = JSON.parse((await req('/api/status')).body);
+  const found = (board.agents || []).find((a) => a.state !== 'idle' && a.state !== 'working');
+  assert.ok(found, 'the synthetic roster has no refusing agent');
+  return found;
 }
 
 async function req(path, options) {
@@ -1297,6 +1326,13 @@ test('an alias spelling of an agent name cannot walk past the confirmation', asy
     });
     assert.equal(res.status, 409,
       `${alias} walked past the confirmation and would have cleared the agent`);
+    // ⚠️ And on the BODY. A status-only assertion here passed with the guard
+    // deleted: reading the raw name makes `parseRecord`'s owner check fail, the
+    // record reads back `unknown` with no items, the empty token then MATCHES,
+    // and execution falls through to a 409 from somewhere else entirely. The
+    // number was right for the wrong reason.
+    assert.match(JSON.parse(res.body).error || '', /changed since you were shown/,
+      `${alias} was refused, but not by the confirmation check this test is named for`);
   }
 });
 
@@ -1346,6 +1382,8 @@ test('the confirmation token distinguishes a state we can vouch for', async (t) 
   });
   assert.equal(res.status, 409,
     'a commitment whose text changed under a stable id walked past the confirmation');
+  assert.match(JSON.parse(res.body).error || '', /changed since you were shown/,
+    'refused, but not by the confirmation check this test is named for');
 
   // ⚠️ And the DISCRIMINATING half. The assertion above passes against an
   // id-only token too, because a client hashing id+text would not match an
@@ -1360,6 +1398,8 @@ test('the confirmation token distinguishes a state we can vouch for', async (t) 
   });
   assert.equal(idOnlyRes.status, 409,
     'a fingerprint that ignores the commitment text was accepted');
+  assert.match(JSON.parse(idOnlyRes.body).error || '', /changed since you were shown/,
+    'refused, but not by the token check this half of the test exists to prove');
 
   // And the state still has to match: ids and text alone are not enough.
   const noState = await req(`/api/agent/${name}/clear`, {
@@ -1729,6 +1769,40 @@ test('an unexpected failure never puts an errno or a path on screen', () => {
   assert.equal(errorAnswer(null).status, 500);
   assert.equal(errorAnswer({ code: 'ENOENT', message: '/Users/example/secret' }).status, 500);
   assert.doesNotMatch(errorAnswer({ code: 'ENOENT', message: '/Users/example/secret' }).error, /Users/);
+});
+
+test('the status payload says which actions would be refused', async () => {
+  // ⚠️ Pins the `may` block, which had NO test: deleting it from /api/status
+  // left 247 green, and the browser then reads `may.ok === false` as false for
+  // all three and re-enables every option — the "offer an action that cannot
+  // work" state the block exists to remove.
+  const board = JSON.parse((await req('/api/status')).body);
+  const asking = (board.agents || []).find((a) => a.state === 'needs_you');
+  const ready = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
+  assert.ok(asking && ready, 'the synthetic roster no longer covers both cases');
+
+  for (const action of ['compact', 'clear', 'restart']) {
+    assert.ok(ready.may && ready.may[action], `no verdict for ${action} on a ready agent`);
+    assert.equal(ready.may[action].ok, true, `${action} was refused for a ready agent`);
+  }
+
+  // An agent on a permission prompt: typing is refused, restart is not, because
+  // restart sends no keystrokes.
+  assert.equal(asking.may.clear.ok, false, 'clear was offered to an agent showing a question');
+  assert.equal(asking.may.compact.ok, false, 'compact was offered to an agent showing a question');
+  assert.match(asking.may.clear.because, /waiting on an answer|cannot see clearly enough/);
+  assert.equal(asking.may.restart.ok, true, 'restart was refused for an agent that can be restarted');
+
+  // ⚠️ And it must agree with what the ROUTE does, or the screen disables a
+  // button the server would have allowed (or worse, the reverse). Same
+  // function, asserted to give the same answer through both surfaces.
+  const res = await req(`/api/agent/${encodeURIComponent(asking.sessionName)}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: asking.commitments.token }),
+  });
+  assert.equal(res.status, 409);
+  assert.equal(JSON.parse(res.body).because, asking.may.clear.because,
+    'the screen and the route disagree about why this is refused');
 });
 
 test('the action descriptions are served from the engine', async () => {

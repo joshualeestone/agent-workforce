@@ -548,8 +548,17 @@ test('an agent showing a question is never typed into', () => {
 
   // Restart types nothing, so the waiting-on-a-question refusal does not apply
   // to it: an agent sitting on a permission prompt is restartable.
-  assert.equal(mayTypeInto('restart', { isAgentSession: true, state: 'needs_you' }).ok, true);
-  assert.equal(mayTypeInto('restart', { isAgentSession: true, state: 'unknown' }).ok, true);
+  assert.equal(mayTypeInto('restart', { isFleetSession: true, state: 'needs_you' }).ok, true);
+  assert.equal(mayTypeInto('restart', { isFleetSession: true, state: 'unknown' }).ok, true);
+
+  // ⚠️ And a CRASHED agent, which is the case restart matters most for. Gating
+  // this on `isAgentSession` (which requires a live Claude process) refused a
+  // dead agent in its own session with "we are not confident that card is one
+  // of your agents" — untrue, and it removed the feature exactly where it is
+  // needed. Switching the check back to `isAgentSession` fails here.
+  assert.equal(mayTypeInto('restart',
+    { isFleetSession: true, isAgentSession: false, isAgentPane: false, state: 'stopped' }).ok, true,
+  'restart was refused for a crashed agent in its own session');
 
   // ⚠️ But it is NOT exempt from the is-this-really-one-of-my-agents refusal,
   // and it used to be. The roster is every tmux pane on the machine with the
@@ -561,17 +570,17 @@ test('an agent showing a question is never typed into', () => {
   // the thing being restarted.
   //
   // Deleting the `isAgentSession` check in `mayTypeInto` fails here.
-  assert.equal(mayTypeInto('restart', { isAgentSession: false, state: 'idle' }).ok, false,
+  assert.equal(mayTypeInto('restart', { isFleetSession: false, state: 'idle' }).ok, false,
     'restart fired at a pane that is not one of our agent sessions');
   assert.equal(mayTypeInto('restart', null).ok, false);
-  assert.match(mayTypeInto('restart', { isAgentSession: false }).because, /not confident that card is one of your agents/);
+  assert.match(mayTypeInto('restart', { isFleetSession: false }).because, /not confident that card is one of your agents/);
 
   // ⚠️ And it asks `isAgentSession`, NOT `isAgentPane`. The difference is the
   // copy-mode clause, which exists because keystrokes go to copy-mode bindings
   // instead of the composer — irrelevant to an action that sends no keystrokes.
   // Swapping this check to `isAgentPane` would take restart away from any pane
   // the operator had scrolled back with a mouse wheel.
-  assert.equal(mayTypeInto('restart', { isAgentSession: true, isAgentPane: false, state: 'idle' }).ok, true,
+  assert.equal(mayTypeInto('restart', { isFleetSession: true, isAgentPane: false, state: 'idle' }).ok, true,
     'restart was refused for a pane that is merely scrolled back');
 });
 
