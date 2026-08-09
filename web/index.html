@@ -2003,11 +2003,17 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       }
     }
   } finally {
-    FRESH_BUSY = false;
-    // Only touch the buttons if this is still our dialog: re-enabling another
-    // agent's options from a stale response is the same wrong-dialog defect in
-    // a quieter form.
+    // ⚠️ BEHIND the guard, like every other state write in this handler.
+    //
+    // Clearing it unconditionally meant a stale response from an abandoned
+    // dialog cleared the busy flag of a DIFFERENT action still in flight:
+    // start on A, Escape, open B, click Restart (the script sleeps about eight
+    // seconds), A's response lands and unsets the flag, and the next poll
+    // repaints B's options with freshly enabled buttons mid-action. That is
+    // the double-submit the flag exists to prevent, reached through the
+    // `closeFresh` reset added to fix the mirror-image "flag stuck true" bug.
     if (!stillMine()) return;
+    FRESH_BUSY = false;
     // Re-enable whatever is on screen NOW, not the nodes captured at click
     // time: several paths above replace `#fresh-options` wholesale, and the
     // captured list is then detached from the document.

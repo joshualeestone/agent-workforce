@@ -1145,6 +1145,57 @@ test('a malformed record cannot crash the tombstone after the action has fired',
   }
 });
 
+test('an agent cannot report a commitment as already destroyed', () => {
+  // ⚠️ The tombstone marker must not be settable from outside this module.
+  // `markDestroyed` writes the record directly and never goes through
+  // `sanitise`, so the only reachable input to a `destroyed` field on the write
+  // path was the untrusted body of PUT /commitments. Carrying it there made the
+  // marker FORGEABLE: an agent could report work already flagged as destroyed,
+  // putting a claim the app never made into the one store whose job is being
+  // the honest account of what we destroyed.
+  //
+  // Re-adding `if (c && c.destroyed === true) out.destroyed = true;` to
+  // `sanitise` fails this.
+  const agent = 'forger';
+  c.report(agent, [
+    { what: 'a thing the agent claims was already destroyed', destroyed: true },
+    { what: 'an ordinary thing' },
+  ]);
+  const got = c.read(agent);
+  assert.equal(got.state, c.STATE.HOLDING, 'a forged marker changed the record state');
+  assert.equal(got.commitments.filter((x) => x.destroyed === true).length, 0,
+    'a caller-supplied destroyed marker was stored');
+  assert.equal(got.destroyedAt, undefined, 'a forged item created a tombstone');
+});
+
+test('the tombstone survives add and resolve without a second read of the file', () => {
+  // ⚠️ `writeRecord` used to re-read the record with a bare `readFileSync` to
+  // recover `destroyedAt` — a second derivation of one fact, under different
+  // rules from `parseRecord`: no lstat (this file records that readFileSync on
+  // a FIFO blocks the request handler forever), no size cap, and no 40-char cap
+  // on the value, so a hand-edited record re-persisted it unbounded on every
+  // add. Both callers already held the parsed value.
+  const agent = 'tombcarry';
+  c.report(agent, [{ what: 'work destroyed with the conversation' }]);
+  c.markDestroyed(agent);
+
+  c.add(agent, 'something said afterwards');
+  let got = c.read(agent);
+  assert.ok(got.destroyedAt, 'add lost the tombstone');
+  assert.equal(got.commitments.filter((x) => x.destroyed === true).length, 1);
+
+  const survivor = got.commitments.find((x) => x.destroyed !== true);
+  c.resolve(agent, survivor.id);
+  got = c.read(agent);
+  assert.ok(got.destroyedAt, 'resolve lost the tombstone');
+  assert.equal(got.commitments.filter((x) => x.destroyed === true).length, 1,
+    'resolve dropped the record of what was destroyed');
+
+  // And the value is bounded, whatever a hand-edited record claimed.
+  const raw = JSON.parse(fs.readFileSync(c.recordPath(agent), 'utf8'));
+  assert.ok(raw.destroyedAt.length <= 40);
+});
+
 test('a tombstone is never stamped on a record belonging to another agent', () => {
   // ⚠️ `parseRecord` refuses a record whose stored `name` is not the agent being
   // asked about, because `safeKey` maps several spellings onto one file and two

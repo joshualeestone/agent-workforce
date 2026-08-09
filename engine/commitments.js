@@ -437,10 +437,19 @@ function sanitise(commitments) {
       createdAt,
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
-    // Carried through, never invented: only `markDestroyed` sets this, and a
-    // rewrite that dropped it would quietly turn destroyed work back into
-    // current work.
-    if (c && c.destroyed === true) out.destroyed = true;
+    // ⚠️ `destroyed` is DELIBERATELY NOT carried here, and the comment this
+    // replaces was false in both halves. It claimed "carried through, never
+    // invented: only markDestroyed sets this" — but `markDestroyed` writes the
+    // record directly and never passes through `sanitise`, so the only
+    // reachable input to that line was the untrusted body of
+    // `PUT /api/agent/<name>/commitments`. It made the tombstone marker
+    // FORGEABLE from outside: an agent could report an item already flagged as
+    // destroyed, putting a claim the app never made into the one store whose
+    // job is being the honest account of what we destroyed.
+    //
+    // The load-bearing carry is `capForDisplay` on the READ path, which is
+    // where a marker written by `markDestroyed` has to survive. That one is
+    // pinned by a named test. This one only ever admitted a forgery.
     return out;
   });
 }
@@ -474,7 +483,7 @@ function idsAreUnique(commitments) {
  * answer. That is the exact failure this module exists to prevent, reached
  * through the module's own convenience API.
  */
-function writeRecord(key, rawName, clean, reportedAt, preserveDestroyed = false) {
+function writeRecord(key, rawName, clean, reportedAt, preserveDestroyed = null) {
   // Capped HERE rather than only in report(). add() and resolve() call this
   // directly on a stale record, and because that branch deliberately preserves
   // the old timestamp the record stays stale, so every later add() takes the
@@ -496,13 +505,22 @@ function writeRecord(key, rawName, clean, reportedAt, preserveDestroyed = false)
   // API shape this file already records once, undoing the one honesty guarantee
   // `markDestroyed` exists to provide. `report()` clears it deliberately: that
   // IS the agent speaking again.
-  if (preserveDestroyed) {
-    try {
-      const prev = JSON.parse(fs.readFileSync(recordPath(rawName), 'utf8'));
-      if (prev && typeof prev === 'object' && typeof prev.destroyedAt === 'string') {
-        next.destroyedAt = prev.destroyedAt;
-      }
-    } catch { /* no prior record, nothing to preserve */ }
+  // ⚠️ The value is PASSED IN, not re-read from disk.
+  //
+  // This used to `JSON.parse(fs.readFileSync(...))` the record again, which
+  // derived `destroyedAt` a second time under different rules from
+  // `parseRecord`: no `lstat`/`isFile` (this file's own comment records that
+  // `readFileSync` on a FIFO blocks the request handler forever), no
+  // `MAX_RECORD_BYTES` check, and no 40-character cap — so a hand-edited
+  // record with a 100KB `destroyedAt` was re-persisted unbounded on every
+  // `add()`. That is the "capped on the way out, uncapped through the
+  // convenience API" shape this file already records as fixed once, for
+  // `createdAt`.
+  //
+  // Both callers already hold the parsed value, so the extra read bought
+  // nothing but a second way to be wrong.
+  if (typeof preserveDestroyed === 'string' && preserveDestroyed) {
+    next.destroyedAt = preserveDestroyed.slice(0, 40);
   }
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
@@ -621,9 +639,9 @@ function add(agent, what) {
   // on.
   const next = [...rec.commitments, ...sanitise([{ what }])];
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, true);
+    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, rec.destroyedAt);
   }
-  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString(), true);
+  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString(), rec.destroyedAt);
 }
 
 /** Convenience: mark one done. */
@@ -641,9 +659,9 @@ function resolve(agent, id) {
   // list is known", which is what made the laundering read as intentional.
   // Same rule: what is already stored is preserved verbatim.
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt, true);
+    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt, rec.destroyedAt);
   }
-  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString(), true);
+  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString(), rec.destroyedAt);
 }
 
 /**
