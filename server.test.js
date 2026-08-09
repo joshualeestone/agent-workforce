@@ -217,7 +217,7 @@ test('the allowlist opt-in is reachable, and tolerant of how it is written', asy
   // server cannot be asked about it. A child process with the environment set
   // is the answer, and `engine/instructions.test.js` already does exactly this.
   const probe = `
-    process.env.AGENT_WORKFORCE_ALLOWED_HOSTS = ' Board.Local , proxy.example.com:8443 ';
+    process.env.AGENT_WORKFORCE_ALLOWED_HOSTS = ' Board.Local , proxy.example.com:8443 , Dotted.Example. ';
     process.env.AGENT_WORKFORCE_DATA = ${JSON.stringify(SANDBOX)};
     process.env.AGENT_WORKFORCE_WORKERS = ${JSON.stringify(WORKERS)};
     const http = require('node:http');
@@ -232,6 +232,7 @@ test('the allowlist opt-in is reachable, and tolerant of how it is written', asy
       const out = {};
       for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
                        'proxy.example.com:8443', 'proxy.example.com',
+                       'dotted.example', 'dotted.example.',
                        'evil.example.com', 'board.local.evil.com']) {
         out[h] = await ask(h);
       }
@@ -245,8 +246,13 @@ test('the allowlist opt-in is reachable, and tolerant of how it is written', asy
 
   // Every spelling of an allowed host, including the one an operator would
   // paste out of a proxy config with the port still attached.
+  // Includes an entry WRITTEN with a trailing dot, which was the one axis of the
+  // parser the fixture did not exercise: dropping the config-side dot strip
+  // left the suite green while an operator's `Dotted.Example.` entry silently
+  // stopped matching.
   for (const h of ['board.local', 'BOARD.local:9', 'board.local.',
-    'proxy.example.com:8443', 'proxy.example.com']) {
+    'proxy.example.com:8443', 'proxy.example.com',
+    'dotted.example', 'dotted.example.']) {
     assert.notEqual(got[h], 400, `${h} should have been allowed`);
   }
   // And the allowlist must not become a suffix match.
