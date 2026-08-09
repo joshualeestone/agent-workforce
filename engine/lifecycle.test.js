@@ -310,17 +310,17 @@ test('only a real destructive action invalidates the commitment record', () => {
   // destructive.
   const { OUTCOME, invalidatesCommitments: inv } = lifecycle;
 
-  assert.equal(inv('clear', OUTCOME.ASKED), true);
-  assert.equal(inv('restart', OUTCOME.DONE), true);
+  assert.equal(inv('clear', { outcome: OUTCOME.ASKED }), true);
+  assert.equal(inv('restart', { outcome: OUTCOME.DONE }), true);
 
-  assert.equal(inv('compact', OUTCOME.ASKED), false, 'compact does not empty the conversation');
-  assert.equal(inv('compact', OUTCOME.DONE), false);
+  assert.equal(inv('compact', { outcome: OUTCOME.ASKED }), false, 'compact does not empty the conversation');
+  assert.equal(inv('compact', { outcome: OUTCOME.DONE }), false);
 
-  assert.equal(inv('clear', OUTCOME.REFUSED), false, 'a refusal did nothing to forget');
-  assert.equal(inv('restart', OUTCOME.REFUSED), false);
+  assert.equal(inv('clear', { outcome: OUTCOME.REFUSED }), false, 'a refusal did nothing to forget');
+  assert.equal(inv('restart', { outcome: OUTCOME.REFUSED }), false);
 
-  assert.equal(inv('clear', OUTCOME.DRY_RUN), false, 'a dry run destroyed a real record');
-  assert.equal(inv('restart', OUTCOME.DRY_RUN), false);
+  assert.equal(inv('clear', { outcome: OUTCOME.DRY_RUN }), false, 'a dry run destroyed a real record');
+  assert.equal(inv('restart', { outcome: OUTCOME.DRY_RUN }), false);
 });
 
 test('a two-part send that half-lands is not reported as harmless', () => {
@@ -405,7 +405,7 @@ test('a restart that fails after the stop is not reported as never attempted', (
   assert.equal(got.outcome, lifecycle.OUTCOME.ASKED,
     'a failure after the stop was reported as never attempted');
   assert.match(got.because, /may have been stopped/);
-  assert.equal(lifecycle.invalidatesCommitments('restart', got.outcome), true,
+  assert.equal(lifecycle.invalidatesCommitments('restart', got), true,
     'the record would have been left standing for a destroyed conversation');
 });
 
@@ -425,7 +425,7 @@ test('a restart script that is not executable is refused, not reported as maybe-
       let ran = 0;
       l.setRunner(() => { ran += 1; return ''; });
       const got = l.restart('angel');
-      console.log(JSON.stringify({ outcome: got.outcome, ran, invalidates: l.invalidatesCommitments('restart', got.outcome) }));
+      console.log(JSON.stringify({ outcome: got.outcome, ran, invalidates: l.invalidatesCommitments('restart', got) }));
     `], { encoding: 'utf8', timeout: 10000 });
     const out = JSON.parse(probe.trim().split('\n').pop());
     assert.equal(out.ran, 0, 'it tried to run a non-executable script');
@@ -497,10 +497,39 @@ test('a half-sent clear still invalidates the commitment record', () => {
   lifecycle.setRunner(() => { n += 1; if (n === 2) throw new Error('EPIPE'); return ''; });
   const got = lifecycle.clear('angel', 'angel-discord:0.0');
   assert.equal(got.outcome, lifecycle.OUTCOME.REFUSED);
-  assert.equal(lifecycle.invalidatesCommitments('clear', got.outcome, got.because), true,
+  assert.equal(lifecycle.invalidatesCommitments('clear', got), true,
     'a command left sitting in the composer would have left the record standing');
 
   // A refusal that genuinely sent nothing must NOT tombstone.
   const nothing = lifecycle.clear('angel', '-X kill-server');
-  assert.equal(lifecycle.invalidatesCommitments('clear', nothing.outcome, nothing.because), false);
+  assert.equal(lifecycle.invalidatesCommitments('clear', nothing), false);
+});
+
+test('a missing launchd service is refused, not reported as maybe-stopped', () => {
+  // ⚠️ `restart-bot.sh` exits 1 with "No launchd service found" BEFORE it
+  // reaches `launchctl stop`, so that agent is genuinely untouched. Reporting
+  // it as maybe-stopped tombstoned the commitment record of an agent nobody
+  // had touched, and the board then said its conversation had been cleared
+  // while it sat there intact.
+  //
+  // Reachable in ordinary use: restart is exempt from the is-this-an-agent
+  // gate, and the roster is every pane on the machine, so any unrelated tmux
+  // session gets a Restart button.
+  lifecycle.setRunner(() => {
+    const err = new Error('Command failed');
+    err.stdout = "Error: No launchd service found for 'notanagent'\n";
+    err.stderr = '';
+    throw err;
+  });
+  const got = lifecycle.restart('notanagent');
+  assert.equal(got.outcome, lifecycle.OUTCOME.REFUSED, 'an untouched agent reported as maybe-stopped');
+  assert.match(got.because, /nothing to restart/);
+  assert.equal(lifecycle.invalidatesCommitments('restart', got), false,
+    'it would have tombstoned an agent it never touched');
+
+  // Any OTHER failure is past the stop, so it must still tombstone.
+  lifecycle.setRunner(() => { const e = new Error('ETIMEDOUT'); e.stdout = ''; e.stderr = ''; throw e; });
+  const other = lifecycle.restart('angel');
+  assert.equal(other.outcome, lifecycle.OUTCOME.ASKED);
+  assert.equal(lifecycle.invalidatesCommitments('restart', other), true);
 });

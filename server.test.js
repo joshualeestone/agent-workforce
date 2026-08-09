@@ -1225,16 +1225,23 @@ test('an alias spelling of an agent name cannot walk past the confirmation', asy
   // Reading the raw alias finds no record, so the token matches and the clear
   // fires. Reading the sanitised key finds the real record, so it does not. A
   // test that merely sent a wrong token would 409 either way and pin nothing.
+  const crypto = require('node:crypto');
   const seeded = await req(`/api/agent/${name}/commitments`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ commitments: [{ what: 'work that must not be destroyed by an alias' }] }),
   });
   assert.equal(seeded.status, 200, seeded.body);
 
+  // ⚠️ The token must be the REAL one an agent with no record produces, not a
+  // made-up `unknown:`. The first version sent the latter, which no code path
+  // ever generates, so it 409'd whichever name was read and the mutation that
+  // reintroduces the raw-name defect left the whole file green.
+  const emptyToken = `unknown:${crypto.createHash('sha256').update('', 'utf8').digest('hex').slice(0, 32)}`;
+
   for (const alias of [plain.toUpperCase(), plain.split('').join('.')]) {
     const res = await req(`/api/agent/${encodeURIComponent(alias)}/clear`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ holding: 'unknown:' }),
+      body: JSON.stringify({ holding: emptyToken }),
     });
     assert.equal(res.status, 409,
       `${alias} walked past the confirmation and would have cleared the agent`);
@@ -1339,6 +1346,22 @@ test('an agent waiting on a question is never typed into', async (t) => {
     });
     assert.equal(res.status, 409, `${action} was sent to an agent showing a question`);
     assert.match(JSON.parse(res.body).because, /waiting on an answer|cannot see clearly enough/);
+  }
+});
+
+test('the browser fallback descriptions match the engine word for word', async () => {
+  // ⚠️ `web/index.html` carries a copy of the action copy for the window before
+  // `/api/actions` resolves. The engine's own comment says the costs live there
+  // "so the screen cannot describe an action differently from the thing that
+  // performs it", and this fallback re-creates exactly that drift channel. It
+  // has already drifted once: the first version said compact "loses nothing",
+  // which is the one claim the engine was reworded to stop making.
+  const engine = JSON.parse((await req('/api/actions')).body);
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  for (const id of ['compact', 'clear', 'restart']) {
+    assert.ok(page.includes(engine[id].what), `the page's fallback "what" for ${id} has drifted`);
+    assert.ok(page.includes(engine[id].loses), `the page's fallback "loses" for ${id} has drifted`);
   }
 });
 

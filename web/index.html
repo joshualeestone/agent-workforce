@@ -701,12 +701,19 @@ async function tick() {
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
     checked.className = 'checked' + (age > 30 ? ' stale' : '');
     checked.innerHTML = 'checked<strong>' + (age < 5 ? 'just now' : age + ' seconds ago') + '</strong>';
+    // ⚠️ Says whether the poll actually succeeded. It swallowed its own failure
+    // and returned nothing, so a caller that re-read `LAST` afterwards could
+    // not tell fresh data from the data it already had, and the fresh-start
+    // dialog announced "the list above has been updated" over an identical
+    // stale list whenever the poll was the thing that broke.
+    return true;
   } catch (err) {
     checked.className = 'checked stale';
     checked.innerHTML = 'checked<strong>failed</strong>';
     document.getElementById('grid').innerHTML =
       '<div class="err"><b>We cannot read the agents right now.</b><br>' +
       'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
+    return false;
   }
 }
 
@@ -1509,6 +1516,14 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       // refusal answers 409 with `outcome: 'refused'`. The difference decides
       // whether re-rendering the list is the right response.
       e.conflict = res.status === 409 && data.outcome !== 'refused';
+      // ⚠️ And whether the SERVER changed the record, which `outcome` no longer
+      // tells us. A half-sent clear answers `refused` and still tombstones,
+      // because the command may be sitting in the composer and destroy the
+      // conversation at end of turn. Keying the re-render on `outcome` left the
+      // dialog showing all three items as current, with the callout and "Loses
+      // all 3 items above" beside a live Restart, about work the server had
+      // just recorded as destroyed.
+      e.reconciled = data.reconciled === true;
       throw e;
     }
     // Including "we asked and cannot confirm". Saying "Done" for a keystroke we
@@ -1549,6 +1564,14 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // have silently stopped this recovery firing and restored the infinite-409
     // dead end it exists to prevent. Two different things answer 409 — a stale
     // view, and an engine refusal — so the discriminator has to be structured.
+    // The record changed underneath us even though the action was refused, so
+    // what is on screen is no longer true whatever else happened.
+    if (err.reconciled) {
+      await tick();
+      const after = LAST.find((x) => x.sessionName === forAgent);
+      if (after) { FRESH_FOR = after; FRESH_TOKEN = holdingToken(after.commitments); renderFresh(after); }
+    }
+
     if (err.conflict) {
       // ⚠️ Re-read from the SERVER first. `LAST` is only refreshed by the
       // five-second poll, and a 409 is precisely the case where the client's
@@ -1559,9 +1582,16 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       //
       // The success path already awaited a poll before re-rendering. This one,
       // which needs it more, did not.
-      await tick();
-      const fresh = LAST.find((x) => x.sessionName === forAgent);
-      if (fresh) {
+      // ⚠️ `tick` swallows its own failure and leaves LAST untouched, so a poll
+      // that broke would have this announcing "the list above has been updated"
+      // over the identical stale list, recomputing the identical stale token.
+      // The modal covers the grid, so the board's own error banner is not
+      // visible behind it either.
+      const polled = await tick();
+      const fresh = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
+      if (!polled) {
+        msg.textContent = 'What it is holding changed, and we could not re-read it just now. Close this and open it again.';
+      } else if (fresh) {
         FRESH_FOR = fresh;
         FRESH_TOKEN = holdingToken(fresh.commitments);
         renderFresh(fresh);

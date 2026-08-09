@@ -758,7 +758,7 @@ const server = http.createServer((req, res) => {
         // the board serving "it reported these itself" at full confidence for
         // the next thirty minutes with nothing anywhere saying so.
         let reconciled = null;
-        if (lifecycle.invalidatesCommitments(action, result.outcome, result.because)) {
+        if (lifecycle.invalidatesCommitments(action, result)) {
           // ⚠️ Only meaningful when there was a record to reconcile.
           // `markDestroyed` also returns false for an agent that never reported,
           // and warning "we could not update our record" when there was nothing

@@ -201,6 +201,11 @@ function sendCommand(target, command) {
     // Never the raw errno: it carries absolute paths and says nothing useful.
     return {
       outcome: OUTCOME.REFUSED,
+      // ⚠️ A STRUCTURED flag, not a sentence to be matched later. The decision
+      // to destroy a commitment record keyed on a regex over this English for
+      // one round, which is the coupling this file's own ACTIONS comment
+      // condemns and the browser had to be fixed for twice.
+      mayHaveLanded: sent,
       because: sent
         ? `we could not finish, and ${command} may be sitting in its composer unsent, so check on it`
         : 'we could not reach that agent to ask',
@@ -255,15 +260,28 @@ function restart(agent) {
   let out = '';
   try {
     out = String(run(RESTART_SCRIPT, [name]) || '');
-  } catch {
+  } catch (err) {
+    // ⚠️ Except when the script told us it never started. `restart-bot.sh`
+    // exits 1 with "No launchd service found" BEFORE it reaches
+    // `launchctl stop`, so that one is genuinely untouched, and reporting it as
+    // maybe-stopped tombstoned the record of an agent nobody had touched. The
+    // comment below used to claim the stop was unconditional; it is not.
+    const said = `${(err && err.stdout) || ''}${(err && err.stderr) || ''}`;
+    if (/No launchd service found/.test(said)) {
+      return {
+        outcome: OUTCOME.REFUSED,
+        because: 'there is no launchd service by that name, so there was nothing to restart',
+      };
+    }
+
     // ⚠️ ASKED, not REFUSED, and the difference decides whether the commitment
     // record gets tombstoned.
     //
     // `REFUSED` means "we did not attempt it", and that is true of the checks
-    // above (bad name, missing script) but NOT of a failure here. The script
-    // runs `launchctl stop` unconditionally before anything can fail, so a
-    // non-zero exit or a timeout almost always means the agent was stopped and
-    // then something went wrong. Calling that "did not attempt" skipped the
+    // above (bad name, missing script) and of the missing-service case just
+    // handled, but NOT of anything else. Past that point the script has already
+    // run `launchctl stop`, so a non-zero exit or a timeout means the agent was
+    // stopped and then something went wrong. Calling that "did not attempt" skipped the
     // tombstone, so the conversation was destroyed while the board went on
     // serving "it reported these itself" at full confidence: the exact failure
     // the tombstone exists to prevent, on the one path that skipped it.
@@ -408,18 +426,21 @@ function mayTypeInto(action, agent) {
  *   - A DRY RUN did nothing either, and destroying a real record while
  *     pretending to act would make the safety flag itself destructive.
  */
-function invalidatesCommitments(action, outcome, because) {
+function invalidatesCommitments(action, result) {
   if (action === 'compact') return false;
+  const outcome = result && result.outcome;
   if (outcome === OUTCOME.DONE || outcome === OUTCOME.ASKED) return true;
 
   // ⚠️ And a REFUSED that may still have landed. `sendCommand` returns REFUSED
-  // when the text arrived and the Enter did not, saying the command "may be
-  // sitting in its composer unsent" — which means the conversation may still be
-  // destroyed at the end of the turn. `restart` already took this branch for
-  // the identical we-may-have-done-it case; the reasoning was not carried
-  // across, so a half-sent clear left the board asserting commitments that were
-  // about to stop existing.
-  return outcome === OUTCOME.REFUSED && /sitting in its composer/.test(String(because || ''));
+  // when the text arrived and the Enter did not, which means the command is
+  // sitting in the composer and the conversation may still be destroyed at the
+  // end of the turn. `restart` already took this branch for the identical
+  // we-may-have-done-it case; the reasoning was not carried across, so a
+  // half-sent clear left the board asserting commitments that were about to
+  // stop existing.
+  //
+  // Keyed on the flag, not on the wording of the message.
+  return outcome === OUTCOME.REFUSED && result.mayHaveLanded === true;
 }
 
 module.exports = {
