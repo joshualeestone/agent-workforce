@@ -64,6 +64,23 @@ process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 
+//   4. tmux and launchd. There is NO variable that can relocate those: they are
+//      global to the machine, and this machine has thirteen live agents. The
+//      fresh-start routes below drive `tmux send-keys` and `restart-bot.sh`
+//      against whatever the live roster says, so a test that reached them for
+//      real would clear or restart a colleague mid-work.
+//
+//      ⚠️ `AGENT_WORKFORCE_DRY_RUN` is what stands in for a sandbox here, and it
+//      is set for this ENTIRE FILE rather than per test. `node --test` runs each
+//      test file in its own process, so this cannot leak into
+//      `engine/lifecycle.test.js`, which needs the real behaviour to test it.
+//
+//      This is not hypothetical caution: probing these routes by hand typed
+//      `/compact` into a live agent's composer, and that agent was the session
+//      doing the work. One of the tests below posts a valid confirmation token,
+//      and without this line it would have done the same thing on every run.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { start, server, pathOf, decodeSegment } = require('./server');
@@ -1064,6 +1081,127 @@ test('GET refuses an unknown agent rather than reporting a path for it', async (
   const res = await req('/api/agent/definitely-not-an-agent/instructions');
   assert.equal(res.status, 404);
   assert.equal(JSON.parse(res.body).path, undefined, 'a refusal must not hand back a filesystem path');
+});
+
+// ---------------------------------------------------------------------------
+// The fresh-start routes: the only ones that reach a RUNNING agent
+// ---------------------------------------------------------------------------
+
+test('a cross-site POST cannot restart an agent', async (t) => {
+  // ⚠️ The one that mattered most. Every pre-existing write is PUT or DELETE,
+  // which an HTML form cannot emit, so this diff introduced the first forgeable
+  // write and it was `restart`. A `<form enctype="text/plain">` is a CORS
+  // simple request: no preflight, and the JSON body smuggles through the field
+  // name. Measured before the guard: 200, and it reached the restart.
+  //
+  // The `Host` check does NOT cover this and cannot. That one stops DNS
+  // rebinding, where the attacker controls the hostname; here the request
+  // really is addressed to 127.0.0.1 and the Host header is genuine.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  const forged = await req(`/api/agent/${name}/restart`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain', Origin: 'https://evil.example' },
+    body: '{"holding":"unknown:","x":"="}',
+  });
+  assert.equal(forged.status, 403, 'a cross-site form POST reached a restart');
+  assert.match(JSON.parse(forged.body).error, /another site/);
+
+  // The other signal a browser sends, which script cannot forge.
+  const fetched = await req(`/api/agent/${name}/compact`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
+    body: '{}',
+  });
+  assert.equal(fetched.status, 403);
+
+  // And it covers EVERY write, not just the new ones: PUT and DELETE are safe
+  // today only because HTML cannot emit them, which is a property of browsers
+  // rather than a decision this code made.
+  const del = await req(`/api/agent/${name}/avatar`, {
+    method: 'DELETE', headers: { Origin: 'https://evil.example' },
+  });
+  assert.equal(del.status, 403, 'a cross-site DELETE was allowed');
+});
+
+test('a non-browser caller is still allowed through', async (t) => {
+  // curl and scripts send neither header. They are already inside the loopback
+  // boundary and cannot be aimed by a web page, so refusing them would break
+  // every legitimate non-browser caller to stop an attack that needs a browser.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const res = await req(`/api/agent/${name}/compact`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: 'unknown:' }),
+  });
+  assert.notEqual(res.status, 403);
+  // ⚠️ And nothing actually happened to the agent. This is the one test here
+  // that carries a token which can MATCH, so it is the one that would have
+  // reached a live `tmux send-keys` without the dry-run set at the top of this
+  // file. Asserting the outcome makes that protection visible rather than
+  // implicit, and fails loudly if the flag is ever dropped.
+  if (res.status === 200) {
+    assert.equal(JSON.parse(res.body).outcome, 'dry-run',
+      'this test performed a REAL action on a live agent');
+  }
+});
+
+test('every fresh-start action requires the caller to say what it was shown', async (t) => {
+  // ⚠️ Including compact. It was exempt on the grounds that it loses nothing,
+  // which was false: `/compact` replaces the older conversation with a summary,
+  // and this feature's premise is that commitments live in the conversation.
+  const name = await anyAgent(t);
+  if (!name) return;
+  for (const action of ['compact', 'clear', 'restart']) {
+    const res = await req(`/api/agent/${name}/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    assert.equal(res.status, 400, `${action} fired with no confirmation`);
+    assert.match(JSON.parse(res.body).error, /what you were shown/);
+  }
+});
+
+test('a stale view of what an agent is holding is refused with 409', async (t) => {
+  // The dialog listed three commitments; approving twenty minutes later must
+  // not quietly destroy a fourth that arrived in between. The cost you agreed
+  // to pay has to be the cost that is actually there.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const res = await req(`/api/agent/${name}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: 'holding:a-commitment-that-does-not-exist' }),
+  });
+  assert.equal(res.status, 409, res.body);
+  assert.match(JSON.parse(res.body).error, /changed since you were shown/);
+});
+
+test('an unknown agent and an unknown action are both refused', async () => {
+  const unknown = await req('/api/agent/definitely-not-an-agent/restart', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: 'unknown:' }),
+  });
+  assert.equal(unknown.status, 404);
+
+  // `reboot` is not a route at all, so it must not fall through to the page.
+  const bogus = await req('/api/agent/angel/reboot', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.ok(!bogus.type.includes('text/html'), 'an unknown action was answered with the page');
+});
+
+test('the action descriptions are served from the engine', async () => {
+  // So the dialog cannot describe an action differently from the code that
+  // performs it. The instruction editor shipped that exact bug.
+  const res = await req('/api/actions');
+  assert.match(res.type, /application\/json/);
+  const body = JSON.parse(res.body);
+  for (const id of ['compact', 'clear', 'restart']) {
+    assert.ok(body[id], `${id} missing`);
+    assert.ok(body[id].what && body[id].loses, `${id} has no description or cost`);
+  }
+  assert.equal(body.compact.gentlest, true);
+  assert.notEqual(body.compact.loses, 'nothing', 'the gentlest option claims to be free');
 });
 
 test('the status payload carries staleness but NOT the instruction text', async (t) => {

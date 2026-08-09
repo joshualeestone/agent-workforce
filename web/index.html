@@ -590,7 +590,14 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
-    if (WANT_FRESH && !FRESH_FOR && document.getElementById('fresh-scrim').hidden) openFresh(WANT_FRESH, null);
+    // ⚠️ ONCE. Without the latch, cancelling put the page back into exactly the
+    // state this condition tests for, so the dialog reappeared on the next poll
+    // and stole focus again — a destructive modal that will not stay dismissed,
+    // which trains the click-through this screen exists to prevent.
+    if (WANT_FRESH && !FRESH_SHOWN && !FRESH_FOR && document.getElementById('fresh-scrim').hidden) {
+      FRESH_SHOWN = true;
+      openFresh(WANT_FRESH, null);
+    }
 
     // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
     //
@@ -1301,9 +1308,17 @@ function visiblyDoing(c, task) {
   const b = norm(task);
   if (!a.size || !b.length) return false;
   const shared = b.filter((w) => a.has(w)).length;
-  // Two substantial words in common, which on a one-line task description is a
-  // real match rather than a coincidence of shared vocabulary.
-  return shared >= 2;
+  // ⚠️ Every word of the task line must appear in the commitment, not merely
+  // two of them.
+  //
+  // Two shared words was measured to err the WRONG WAY, which is the direction
+  // that matters here: the pane's task line is often a branch name rather than
+  // a description of work, so `add-editable-agent-detail` matched an unrelated
+  // commitment about "Detail the agent handover notes" on "detail" and "agent",
+  // badged it DOING NOW, and quietly removed it from the count of dangerous
+  // items. `promised` is the state this dialog calls dangerous, so a false
+  // DOING NOW suppresses the warning while a false PROMISED merely over-warns.
+  return shared === b.length && shared >= 2;
 }
 
 function li(c, task) {
@@ -1315,8 +1330,12 @@ function optionBlock(id, act, losesAll) {
   // The cost comes from the ENGINE, not from copy written beside the button,
   // so the screen cannot describe an action differently from the thing that
   // performs it.
-  const cost = act.loses === 'nothing'
-    ? 'Loses nothing.'
+  // The cost comes from the engine verbatim where it is not a count, and from
+  // the counted form where it is. Compact deliberately does NOT say "loses
+  // nothing": it summarises, which is lossy, and claiming otherwise on this
+  // screen would be the one overstatement of safety in the product.
+  const cost = act.gentlest
+    ? `Loses ${act.loses}.`
     : (losesAll || 'Loses everything it is holding.');
   return `<div class="opt ${act.gentlest ? 'gentlest' : ''}">
     ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
@@ -1426,15 +1445,41 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
         body: JSON.stringify({ holding: FRESH_TOKEN }) })
       .catch(() => { throw new Error('That did not go through. The board may have stopped.'); });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'that did not work');
-    // ⚠️ Reports what the ENGINE said happened, including "we asked and cannot
-    // confirm". Saying "Done" for a keystroke we cannot verify would be the
-    // screen asserting something it does not know, on the one screen whose
-    // whole job is honesty about consequences.
+    // ⚠️ `because` FIRST, on both paths. A refusal answers with `because` and
+    // never `error`, so `data.error || 'that did not work'` threw away every
+    // carefully-written reason the engine produces — the missing restart
+    // script, the unreachable pane, the unusable target — and showed "that did
+    // not work" instead. The one comment claiming this screen reports what the
+    // engine said was true only when nothing went wrong.
+    if (!res.ok) throw new Error(data.because || data.error || 'that did not work');
+    // Including "we asked and cannot confirm". Saying "Done" for a keystroke we
+    // cannot verify would be the screen asserting something it does not know.
     msg.textContent = data.because || 'Done.';
+
+    // Re-render from the answer rather than leaving a list of commitments that
+    // were just destroyed sitting beside a live Restart button.
+    if (data.holding) {
+      const fresh = LAST.find((x) => x.sessionName === forAgent);
+      if (fresh) { fresh.commitments = data.holding; FRESH_TOKEN = holdingToken(data.holding); }
+      document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh || FRESH_FOR);
+    }
     await tick();
   } catch (err) {
     msg.textContent = err.message;
+    // ⚠️ A changed-since-shown refusal says "look again", and the dialog could
+    // not honour it: the list was rendered once on open and never refreshed, so
+    // clicking again produced the same 409 forever and the only escape was
+    // Cancel, which the message did not mention. Re-render from the latest poll
+    // so "look again" has something to look at.
+    if (/changed since you were shown/.test(err.message)) {
+      const fresh = LAST.find((x) => x.sessionName === forAgent);
+      if (fresh) {
+        FRESH_FOR = fresh;
+        FRESH_TOKEN = holdingToken(fresh.commitments);
+        document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
+        msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
+      }
+    }
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
   }
@@ -1446,6 +1491,7 @@ const WANT_AGENT = PARAMS.get('agent');
 // Deep-linkable like the detail panel, and for the same two reasons: a state
 // can be shared, and it is the only way to screenshot this dialog headlessly.
 const WANT_FRESH = PARAMS.get('fresh');
+let FRESH_SHOWN = false;
 showTab(PARAMS.get('tab') || 'agents');
 
 tick();

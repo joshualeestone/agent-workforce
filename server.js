@@ -93,6 +93,57 @@ function holdingToken(seen) {
   return `${seen.state}:${ids}`;
 }
 
+/**
+ * Is this request coming from a page on some OTHER site?
+ *
+ * ⚠️ Closes a cross-site request forgery hole that the `Host` check does not,
+ * and cannot. That check stops DNS REBINDING, where the attacker controls the
+ * hostname. This is the other shape: a page on `evil.example` posting straight
+ * at `http://127.0.0.1:4317`, where the `Host` header is a perfectly genuine
+ * loopback value because the request really is addressed to us.
+ *
+ * Measured before this existed: a `POST /api/agent/angel/restart` carrying
+ * `Content-Type: text/plain` and `Origin: https://evil.example` was answered
+ * 200 and reached the restart. A plain HTML `<form>` can emit exactly that,
+ * with the JSON body smuggled through the field name, and a form POST is a CORS
+ * "simple request" so no preflight ever happens.
+ *
+ * It matters most for the newest routes and it is applied to every write:
+ * `PUT`/`DELETE` are protected today only because a form cannot emit them,
+ * which is a property of HTML rather than a decision this code made.
+ *
+ * Two signals, either sufficient to refuse:
+ *
+ *   - `Sec-Fetch-Site` is what browsers now send, and `same-origin` is the only
+ *     value we accept. It cannot be set by script.
+ *   - `Origin` is sent on every cross-origin POST, and on same-origin POSTs by
+ *     most browsers. Loopback origins only.
+ *
+ * A request with NEITHER header is curl, a script, or an old client. Those are
+ * already inside the loopback boundary and cannot be aimed by a web page, so
+ * they pass: refusing them would break every non-browser caller to stop an
+ * attack that needs a browser to happen.
+ */
+function crossSite(req) {
+  const h = (req && req.headers) || {};
+
+  const fetchSite = h['sec-fetch-site'];
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return true;
+
+  const origin = h.origin;
+  if (origin && origin !== 'null') {
+    let host;
+    try {
+      host = new URL(origin).hostname;
+    } catch {
+      return true; // unparseable origin is not one we can vouch for
+    }
+    if (!LOOPBACK_HOSTS.has(host)) return true;
+  }
+
+  return false;
+}
+
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -273,6 +324,16 @@ const server = http.createServer((req, res) => {
     // Not addressed to us. Saying so is better than handing back the index,
     // which would look like a successful page load.
     sendJson(res, 400, { error: 'that request was not addressed to this server' });
+    return;
+  }
+
+  // ⚠️ Every state-changing request, before any route sees it. Placed here
+  // rather than per-route so a route added later inherits it by default: the
+  // recurring defect in this codebase is one path guarded and a second path on
+  // the same fact left open, and a per-route check is that shape waiting to
+  // happen.
+  if (pathname.startsWith('/api/') && req.method !== 'GET' && req.method !== 'HEAD' && crossSite(req)) {
+    sendJson(res, 403, { error: 'that request came from another site' });
     return;
   }
 
@@ -586,10 +647,17 @@ const server = http.createServer((req, res) => {
         // before you paid it, and a cost that changed underneath you was never
         // shown.
         //
-        // `compact` loses nothing, so it is exempt: requiring a token for the
-        // one action with no consequences would train people to click through.
+        // ⚠️ ALL THREE require it now, compact included.
+        //
+        // Compact was exempt on the grounds that it loses nothing and that
+        // requiring confirmation for a harmless action trains people to click
+        // through. The first half was wrong: `/compact` replaces the older
+        // conversation with a summary, which is lossy by construction, and this
+        // card's premise is that commitments live in the conversation. An
+        // action that can lose something must not be the one action that can
+        // fire with no evidence the operator saw anything.
         const seen = commitments.read(name);
-        if (action !== 'compact') {
+        {
           if (typeof patch.holding !== 'string') {
             throw new Error('say what you were shown this would lose');
           }
@@ -602,6 +670,21 @@ const server = http.createServer((req, res) => {
 
         const agent = snapshot().agents.find((a) => a.sessionName === store.safeKey(name));
         const result = lifecycle.perform(action, store.safeKey(name), agent && agent.target);
+
+        // ⚠️ Reconcile the record with what we just did to it.
+        //
+        // `clear` and `restart` destroy the conversation, which is where the
+        // agent's memory of its own commitments lives. Leaving the record
+        // standing made the board go on asserting those commitments at FULL
+        // confidence ("it reported these itself") for the next thirty minutes,
+        // about work that no longer exists anywhere. A cleared agent will never
+        // correct it either, because it has forgotten it ever said them.
+        //
+        // Forgotten rather than reported-empty: `report(name, [])` would record
+        // the agent saying it holds nothing, and it said no such thing. Removing
+        // the record leaves `unknown`, which is the true state — we destroyed
+        // what it knew, and we cannot know what it holds until it speaks again.
+        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.forget(name);
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
           action,

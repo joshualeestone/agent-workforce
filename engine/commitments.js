@@ -606,4 +606,36 @@ function readAll() {
   return out;
 }
 
-module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath };
+/**
+ * Forget what an agent said it was holding.
+ *
+ * ⚠️ Not the same as reporting nothing, and the difference is the whole point.
+ * `report(agent, [])` records the agent SAYING it holds nothing, which reads
+ * back as `clear` with "it reported that it is holding nothing". After a clear
+ * or a restart that sentence is false: the agent did not tell us anything, we
+ * destroyed the conversation it would have told us from.
+ *
+ * So the record is removed, and `read` falls back to `unknown`. That is the
+ * honest state: we know what it USED to be holding, we know we just destroyed
+ * it, and we cannot know what it holds now until it speaks again.
+ *
+ * Without this the board went on asserting the destroyed commitments at full
+ * confidence for the next thirty minutes, on the one screen whose entire thesis
+ * is that it does not lie about cost.
+ */
+function forget(agent) {
+  let file;
+  try {
+    file = recordPath(agent);
+  } catch {
+    return false;
+  }
+  try {
+    fs.rmSync(file, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath, forget };

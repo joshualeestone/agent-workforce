@@ -180,7 +180,14 @@ test('the cost of each action is stated by the engine, not by the screen', () =>
   // file was editable by regex-matching the engine's English, so rewording one
   // sentence would have silently changed behaviour. The costs live with the
   // code that performs the action.
-  assert.equal(lifecycle.ACTIONS.compact.loses, 'nothing');
+  // ⚠️ NOT "nothing". `/compact` replaces the older conversation with a
+  // summary, which is lossy by construction, and this card's premise is that
+  // commitments live in the conversation. "Loses nothing" was the only cost
+  // claim here that overstated safety, and it was what exempted compact from
+  // the confirmation the other two require.
+  assert.notEqual(lifecycle.ACTIONS.compact.loses, 'nothing',
+    'the gentlest option must not claim to be free');
+  assert.match(lifecycle.ACTIONS.compact.loses, /detail/);
   assert.equal(lifecycle.ACTIONS.clear.loses, 'everything it is holding');
   assert.equal(lifecycle.ACTIONS.restart.loses, 'everything it is holding');
   assert.equal(lifecycle.ACTIONS.compact.gentlest, true);
@@ -250,4 +257,32 @@ test('dry run is OFF by default, so it cannot mask a real action in production',
   // The inverse of the test above, and the reason it matters: a flag that
   // defaulted on would make every action a no-op that reported success.
   assert.equal(lifecycle.DRY_RUN, false);
+});
+
+test('only a real destructive action invalidates the commitment record', () => {
+  // ⚠️ Pins the decision that a `clear` or `restart` must forget what the agent
+  // said it was holding.
+  //
+  // Leaving the record standing made the board go on asserting those
+  // commitments at FULL confidence ("it reported these itself") for thirty
+  // minutes, about work that no longer exists anywhere, and a cleared agent
+  // will never correct it because it has forgotten it ever said them.
+  //
+  // The three exclusions each matter: compact summarises rather than empties;
+  // a refusal did nothing; and a dry run did nothing either, so destroying a
+  // real record while pretending to act would make the safety flag itself
+  // destructive.
+  const { OUTCOME, invalidatesCommitments: inv } = lifecycle;
+
+  assert.equal(inv('clear', OUTCOME.ASKED), true);
+  assert.equal(inv('restart', OUTCOME.DONE), true);
+
+  assert.equal(inv('compact', OUTCOME.ASKED), false, 'compact does not empty the conversation');
+  assert.equal(inv('compact', OUTCOME.DONE), false);
+
+  assert.equal(inv('clear', OUTCOME.REFUSED), false, 'a refusal did nothing to forget');
+  assert.equal(inv('restart', OUTCOME.REFUSED), false);
+
+  assert.equal(inv('clear', OUTCOME.DRY_RUN), false, 'a dry run destroyed a real record');
+  assert.equal(inv('restart', OUTCOME.DRY_RUN), false);
 });

@@ -72,8 +72,17 @@ const ACTIONS = {
     id: 'compact',
     label: 'Compact',
     gentlest: true,
-    what: 'Summarises the older part of the conversation instead of deleting it. It keeps running and keeps everything it is holding.',
-    loses: 'nothing',
+    what: 'Summarises the older part of the conversation instead of deleting it. It keeps running, and what it is holding should survive the summary.',
+    // ⚠️ NOT "nothing", though the wireframe says so and it is the tempting
+    // word for the gentlest option.
+    //
+    // `/compact` replaces the older conversation with a summary. That is lossy
+    // by construction, and this card's own premise is that an agent's
+    // commitments live in the conversation. "Loses nothing" was the only cost
+    // claim in this file that overstated safety, on the one screen whose entire
+    // job is to state cost honestly, and it was also what exempted compact from
+    // the confirmation the other two require.
+    loses: 'detail, but not usually the things it is holding',
   },
   clear: {
     id: 'clear',
@@ -255,7 +264,31 @@ function perform(action, agent, target) {
   }
 }
 
+/**
+ * Should the agent's commitment record be forgotten after this?
+ *
+ * ⚠️ Pulled out as a decision rather than left inline at the call site, because
+ * inline it could not be pinned by any test: it fires only on a REAL action,
+ * and no test in this repo may clear or restart a live agent. A guard that
+ * cannot be tested where it lives gets moved somewhere it can be.
+ *
+ * True only when something destructive ACTUALLY happened. Three deliberate
+ * exclusions:
+ *
+ *   - `compact` summarises rather than empties, so what the agent is holding
+ *     should survive it. It is the one action that does not invalidate the
+ *     record.
+ *   - A REFUSED action did nothing, so the record still describes reality.
+ *   - A DRY RUN did nothing either, and destroying a real record while
+ *     pretending to act would make the safety flag itself destructive.
+ */
+function invalidatesCommitments(action, outcome) {
+  if (action === 'compact') return false;
+  return outcome === OUTCOME.DONE || outcome === OUTCOME.ASKED;
+}
+
 module.exports = {
   ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN,
   safeTarget, safeServiceName, sendCommand, restart, clear, compact, perform, setRunner,
+  invalidatesCommitments,
 };
