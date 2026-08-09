@@ -196,11 +196,28 @@ function serve(req, res) {
     // runs. That is a one-line diff in an image, and worth far less than the
     // honesty signal being wrong — but a false claim in a comment is how the
     // next person stops checking.
+    // ⚠️ `counts` is DERIVED from the roster with the engine's own predicates,
+    // not hand-written. The hand-written version disagreed with the agents
+    // beside it — it claimed `unknown: 1` when every fixture agent is idle or
+    // working, and `unknownFullness: 0` when `dov` has no readable percentage —
+    // and that contradiction shipped in `docs/screenshots/board.png`, which
+    // reads "4 agents · 1 we cannot read" above four cards none of which is in
+    // that state.
+    //
+    // A fixture that misstates the board's own honesty summary is worse than no
+    // fixture: the summary line is the product's headline claim about what it
+    // does and does not know, and the documentation image showed it lying.
     res.end(JSON.stringify({
       agents: AGENTS,
       version: '0.1.0',
       checkedAt: new Date().toISOString(),
-      counts: { total: AGENTS.length, needsYou: 0, unknown: 1, unknownFullness: 0 },
+      counts: {
+        total: AGENTS.length,
+        needsYou: AGENTS.filter((a) => a.state === 'needs_you').length,
+        unknown: AGENTS.filter((a) => a.state === 'unknown').length,
+        unreadableTokens: AGENTS.filter((a) => a.context.tokens === null).length,
+        unknownFullness: AGENTS.filter((a) => a.context.percent === null).length,
+      },
     }));
     return;
   }

@@ -210,6 +210,48 @@ from step 5, or a frozen permission prompt from step 8.
 
 No install, no dependencies, no build. It reads what is already running.
 
+⚠️ **Restart will not work until you add one more file.** The board shells out
+to `~/.claude/bin/restart-bot.sh` and refuses if it is not there, because the
+alternative — killing the tmux session and starting a new one — silently drops
+`--dangerously-skip-permissions` and brings the agent back frozen (step 8). None
+of the eleven steps above creates that script, so a board installed by following
+this document to the letter answers "the restart script is not on this machine"
+every time. Compact and Clear work; Restart does not.
+
+    mkdir -p ~/.claude/bin
+    cat > ~/.claude/bin/restart-bot.sh <<'SH'
+    #!/bin/bash
+    # Restart one agent THROUGH launchd, so the launch script's flags are applied.
+    set -e
+    BOT="$1"
+    [ -z "$BOT" ] && { echo "usage: restart-bot.sh <agent>"; exit 1; }
+    PLIST="$HOME/Library/LaunchAgents/com.$BOT.discord.plist"
+    [ -f "$PLIST" ] && echo "Error: No launchd service found for '$BOT'" >/dev/null
+    if [ ! -f "$PLIST" ]; then echo "Error: No launchd service found for '$BOT'"; exit 1; fi
+    launchctl stop "com.$BOT.discord" 2>/dev/null || true
+    launchctl start "com.$BOT.discord"
+    sleep 8
+    if tmux has-session -t "$BOT-discord" 2>/dev/null; then
+      echo "OK: $BOT-discord tmux session is running"
+    else
+      echo "Error: $BOT-discord did not come back"; exit 1
+    fi
+    if tmux capture-pane -p -t "$BOT-discord" -S -50 | grep -q "bypass permissions"; then
+      echo "OK: bypass permissions is ON"
+    else
+      echo "WARN: bypass permissions not confirmed yet"
+    fi
+    SH
+    chmod +x ~/.claude/bin/restart-bot.sh
+
+⚠️ The two `OK:` lines are not decoration. The board parses for **both** before
+it will report a restart as done, precisely so it cannot tell you an agent came
+back healthy when it came back without its permissions flag and is about to
+freeze. If you change this script, keep those strings.
+
+**So it is twelve steps, not eleven, if you want the board's Restart button.**
+Counted honestly rather than filed under "optional".
+
 ---
 
 ## Where a newbie actually fails

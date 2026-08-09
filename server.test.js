@@ -1360,6 +1360,92 @@ test('an agent waiting on a question is never typed into', async (t) => {
   }
 });
 
+test('a destructive action tombstones what it destroyed', async (t) => {
+  // ⚠️ THE guard of this feature, and until now it ran in no test at all.
+  //
+  // `AGENT_WORKFORCE_DRY_RUN=1` is set file-wide above, so `perform()` always
+  // returned `dry-run`, so `invalidatesCommitments()` always returned false, so
+  // the route's whole reconciliation block never executed. Deleting that block
+  // — the `markDestroyed` call, the `hadRecord` check and the appended warning
+  // — left all 244 tests green. The flag added to make this surface safe to
+  // probe was precisely what stopped its most consequential branch being
+  // pinned: new safety code disabling the coverage of the thing it protects.
+  //
+  // Without the tombstone the board goes on asserting the destroyed items at
+  // FULL confidence ("it reported these itself") for the next thirty minutes,
+  // about work that no longer exists anywhere, and the cleared agent can never
+  // correct it because it has forgotten it ever said them.
+  //
+  // ⚠️ Safety here rests on the injected runner, not on the flag. `setRunner`
+  // is installed FIRST and `setDryRun(false)` refuses to fire while the real
+  // runner is in place, so no keystroke can reach a live pane.
+  const lifecycle = require('./engine/lifecycle');
+  const commitments = require('./engine/commitments');
+
+  const board = JSON.parse((await req('/api/status')).body);
+  const target = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
+  if (!target) {
+    t.skip('no agent on this board is in a state the route would act on');
+    return;
+  }
+
+  const sent = [];
+  lifecycle.setRunner((file, args) => { sent.push([file, ...args]); return ''; });
+  try {
+    lifecycle.setDryRun(false);
+
+    // Seed the SANDBOXED store, never the real one.
+    commitments.report(target.sessionName, [
+      { what: 'a thing that is about to stop existing' },
+      { what: 'a second thing nobody will remember' },
+    ]);
+    const before = commitments.read(target.sessionName);
+    assert.equal(before.state, commitments.STATE.HOLDING);
+    assert.equal(before.commitments.length, 2);
+
+    const fresh = JSON.parse((await req('/api/status')).body);
+    const now = fresh.agents.find((a) => a.sessionName === target.sessionName);
+    const res = await req(`/api/agent/${encodeURIComponent(target.sessionName)}/clear`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: now.commitments.token }),
+    });
+
+    assert.equal(res.status, 200, JSON.parse(res.body).because || res.body);
+    const body = JSON.parse(res.body);
+    assert.notEqual(body.outcome, 'dry-run', 'the action was still dry-run, so this proves nothing');
+
+    // Nothing reached a real agent: the recorder saw the send-keys instead.
+    assert.ok(sent.length >= 1, 'no command was issued at all');
+    assert.ok(sent.every((c) => c[0] === 'tmux'), 'something other than tmux was run');
+
+    // The answer carries what was lost, not an empty list.
+    assert.equal(body.holding.commitments.length, 2,
+      'the record of the cost actually paid was empty');
+
+    // And the store no longer asserts them at full confidence.
+    const after = commitments.read(target.sessionName);
+    assert.equal(after.state, commitments.STATE.UNKNOWN,
+      'the board would still be claiming these at full confidence');
+    assert.equal(body.reconciled, true, 'the route did not report reconciling the record');
+  } finally {
+    lifecycle.setDryRun(true);
+    lifecycle.setRunner(null);
+  }
+});
+
+test('dry-run cannot be switched off while the real runner is installed', () => {
+  // ⚠️ The invariant that makes `setDryRun` safe to exist at all. Without it
+  // this is a switch that disarms the fleet-wide protection on a machine with
+  // thirteen live agents, and the next test to call it in the wrong order sends
+  // real keystrokes. Deleting the guard in `setDryRun` fails here.
+  const lifecycle = require('./engine/lifecycle');
+  lifecycle.setRunner(null);
+  assert.throws(() => lifecycle.setDryRun(false), /refusing to leave dry-run/);
+  // Still armed afterwards.
+  assert.equal(lifecycle.compact('nobody', 'nobody-discord:0.0').outcome, 'dry-run');
+});
+
 test('the browser fallback descriptions match the engine word for word', async () => {
   // ⚠️ `web/index.html` carries a copy of the action copy for the window before
   // `/api/actions` resolves. The engine's own comment says the costs live there
@@ -1490,7 +1576,7 @@ test('an unexpected failure never puts an errno or a path on screen', () => {
   // fleet. Same reasoning that made `mayTypeInto` a function.
   const { errorAnswer } = require('./server');
 
-  const leaky = new Error("EACCES: permission denied, open '/Users/agent1/.claude/projects/x.jsonl'");
+  const leaky = new Error("EACCES: permission denied, open '/Users/example/.claude/projects/x.jsonl'");
   const answer = errorAnswer(leaky);
   assert.equal(answer.status, 500);
   assert.doesNotMatch(answer.error, /EACCES|\/Users\/|\.jsonl/, 'the raw error reached the operator');
@@ -1510,8 +1596,8 @@ test('an unexpected failure never puts an errno or a path on screen', () => {
 
   // A thrown non-Error, and a code we never set, both land on the safe side.
   assert.equal(errorAnswer(null).status, 500);
-  assert.equal(errorAnswer({ code: 'ENOENT', message: '/Users/agent1/secret' }).status, 500);
-  assert.doesNotMatch(errorAnswer({ code: 'ENOENT', message: '/Users/agent1/secret' }).error, /Users/);
+  assert.equal(errorAnswer({ code: 'ENOENT', message: '/Users/example/secret' }).status, 500);
+  assert.doesNotMatch(errorAnswer({ code: 'ENOENT', message: '/Users/example/secret' }).error, /Users/);
 });
 
 test('the action descriptions are served from the engine', async () => {

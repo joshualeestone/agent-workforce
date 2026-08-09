@@ -56,7 +56,37 @@ const RESTART_SCRIPT = process.env.AGENT_WORKFORCE_RESTART_SCRIPT
  * becomes a description of itself. Any manual probing of this surface must set
  * it.
  */
-const DRY_RUN = process.env.AGENT_WORKFORCE_DRY_RUN === '1';
+let DRY_RUN = process.env.AGENT_WORKFORCE_DRY_RUN === '1';
+
+/**
+ * Turn dry-run off for one test, and ONLY with an injected runner in place.
+ *
+ * ⚠️ This exists because the safety mechanism disabled the coverage of the
+ * thing it protects, which is the sharpest instance yet of the pattern this
+ * branch keeps hitting: new defensive code breaking something the previous
+ * code did correctly.
+ *
+ * `server.test.js` sets `AGENT_WORKFORCE_DRY_RUN=1` file-wide, so `perform()`
+ * always returns `DRY_RUN`, so `invalidatesCommitments()` always returns false,
+ * so the route's entire reconciliation block — the tombstone that stops the
+ * board asserting destroyed commitments at full confidence for the next thirty
+ * minutes — never executed in any test. Deleting that block left the suite
+ * green. The flag added to make this surface safe to probe was the reason its
+ * most consequential guard could not be pinned.
+ *
+ * ⚠️ Turning it OFF requires a runner to already be installed, and this throws
+ * otherwise. That invariant is the whole safety of this function: with a
+ * recorder in place nothing can reach `execFileSync`, and without one the only
+ * way to clear dry-run is an exception. A flag that could be switched off on a
+ * machine running thirteen agents, with nothing checking what would run, is a
+ * worse hazard than the untested branch it was added to fix.
+ */
+function setDryRun(on) {
+  if (!on && run === defaultRunner) {
+    throw new Error('refusing to leave dry-run with the real runner installed: call setRunner() first');
+  }
+  DRY_RUN = Boolean(on);
+}
 
 /**
  * What each action costs, in the product's own words.
@@ -461,7 +491,7 @@ function invalidatesCommitments(action, result) {
 }
 
 module.exports = {
-  ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN,
+  ACTIONS, OUTCOME, RESTART_SCRIPT, DRY_RUN, setDryRun,
   safeTarget, safeServiceName, sendCommand, restart, clear, compact, perform, setRunner,
   invalidatesCommitments, mayTypeInto,
 };

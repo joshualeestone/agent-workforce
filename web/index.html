@@ -82,8 +82,28 @@
     --warn-ink:      #ffca55;
   }
 }
+/* ⚠️ High contrast has to be written for BOTH schemes, and this rule was
+   light-only while sitting AFTER the dark block.
+   On a dark + high-contrast system both queries match, the later one wins, and
+   `--label-2` became rgba(0,0,0,0.78): near-black text on #1c1c1e. That is a
+   severe failure across every meta line, the option copy in the fresh-start
+   dialog, and the disabled instruction textarea — which `#d-instr:disabled`
+   deliberately routes through `--label-2` because it measured well. Asking for
+   MORE contrast made the page unreadable for the users most likely to need it.
+   `--label-3` was not raised by it either. */
 @media (prefers-contrast: more) {
-  :root { --label-2: rgba(0,0,0,0.78); --separator: rgba(0,0,0,0.3); }
+  :root {
+    --label-2:   rgba(0,0,0,0.78);
+    --label-3:   rgba(0,0,0,0.72);
+    --separator: rgba(0,0,0,0.30);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --label-2:   rgba(255,255,255,0.86);
+    --label-3:   rgba(255,255,255,0.78);
+    --separator: rgba(255,255,255,0.34);
+  }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -247,12 +267,19 @@ svg { display: block; }
 
    `not-allowed` rather than `default` on the cursor: the pointer is the only
    feedback available to someone who tries it before reading the sentence. */
-/* ⚠️ `--label-2` (0.60), NOT `--label-3` (0.42). WCAG exempts disabled controls
-   from the contrast rule, and this box is exactly the case where taking that
-   exemption is wrong: a disabled editor can still be holding the operator's
-   instruction text, and greying it to 0.42 puts that text at 2.98:1 on the
-   sunken background — unreadable, on the screen whose entire job is showing you
-   what an agent boots from. 0.60 measures 5.1:1 and still reads as inactive. */
+/* ⚠️ `--label-2` (0.60), the tier ABOVE `--label-3`. WCAG exempts disabled
+   controls from the contrast rule, and this box is exactly the case where
+   taking that exemption is wrong: a disabled editor can still be holding the
+   operator's instruction text, and greying it out puts that text below the
+   threshold on the screen whose entire job is showing you what an agent boots
+   from. 0.60 measures 5.1:1 on the sunken background and still reads inactive.
+
+   (This comment used to quote `--label-3` as 0.42 and cite the 2.98:1 it
+   measured there. That token was raised to 0.56 in the same change that added
+   this rule, so the number was stale on arrival — in a file whose own comment
+   two hundred lines up says a false claim in a comment is how the next person
+   stops checking. Named as a tier rather than a number so it cannot go stale
+   the same way again.) */
 #d-instr:disabled {
   background: var(--bg-sunken); color: var(--label-2); cursor: not-allowed; resize: none;
 }
@@ -1493,9 +1520,22 @@ function optionBlock(id, act, losesAll) {
   // the counted form where it is. Compact deliberately does NOT say "loses
   // nothing": it summarises, which is lossy, and claiming otherwise on this
   // screen would be the one overstatement of safety in the product.
+  // ⚠️ The engine's own words in EVERY case, not just the gentlest one.
+  //
+  // This rendered `act.loses` only when `act.gentlest`, and composed the other
+  // two in the browser. So `ACTIONS.clear.loses` and `ACTIONS.restart.loses`
+  // were dead data: the engine could reword the cost of the two destructive
+  // actions and nothing on screen would change, and no test would notice —
+  // while the comment directly above claimed the cost comes from the engine so
+  // the screen cannot describe an action differently from the thing performing
+  // it. That held for one of three, and not for either of the two that destroy
+  // a conversation.
+  //
+  // The count is a QUALIFIER on the engine's sentence now, rather than a
+  // replacement for it, so both facts survive.
   const cost = act.gentlest
     ? `Loses ${act.loses}.`
-    : (losesAll || 'Loses everything it is holding.');
+    : `Loses ${act.loses}${losesAll || '.'}`;
   return `<div class="opt ${act.gentlest ? 'gentlest' : ''}">
     ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
     <div>
@@ -1524,11 +1564,27 @@ function optionBlock(id, act, losesAll) {
 function renderFresh(a) {
   const h = a.commitments || {};
   const n = (h.commitments || []).length;
-  // "Loses all N items above" only when we can actually count them. With
-  // `unknown` we do not know what the list is, so we do not claim a number.
-  const losesAll = h.state === 'holding' && n
-    ? `Loses all ${n} item${n === 1 ? '' : 's'} above.`
-    : 'Loses whatever it is holding, which we cannot list with confidence.';
+  // The qualifier appended to the engine's cost sentence. Three states, three
+  // different true things, and the third is the one that used to be wrong.
+  //
+  // ⚠️ `clear` is NOT the same as `unknown`. The store CAN vouch for an agent
+  // that reported it is holding nothing, and saying "we cannot list it with
+  // confidence" there was the dialog understating its own knowledge on the one
+  // state it is certain about — the mirror of the overstatement this screen
+  // exists to prevent, and just as misleading to someone deciding.
+  // ⚠️ Each qualifier carries its own separator, because they do not join to
+  // the engine's sentence the same way. Composing them all with a colon
+  // produced "Loses everything it is holding: and it reported it is holding
+  // nothing." — ungrammatical, and self-contradictory on the state it was
+  // added to describe correctly.
+  let losesAll;
+  if (h.state === 'holding' && n) {
+    losesAll = `: all ${n} item${n === 1 ? '' : 's'} above.`;
+  } else if (h.state === 'clear') {
+    losesAll = ', and it reported that is nothing.';
+  } else {
+    losesAll = ', and we cannot list what that is with confidence.';
+  }
 
   document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
   document.getElementById('fresh-options').innerHTML =
@@ -1729,9 +1785,23 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // "What it is holding right now", callout and all, with Clear and Restart
     // live beside it. The comment here previously claimed to prevent exactly
     // that.
-    await tick();
-    const fresh = LAST.find((x) => x.sessionName === forAgent);
-    if (fresh) {
+    // ⚠️ The poll's RESULT is checked. `tick` swallows its own failure and
+    // returns false with `LAST` untouched, so on a failed poll `LAST.find`
+    // returns the PRE-action object — and re-rendering that paints the list
+    // just destroyed back under "What it is holding right now", callout and
+    // all, beside live Clear and Restart. Exactly what the comment above says
+    // this code prevents, reached by the one path it did not check.
+    //
+    // The 409 branch below already took `const polled = await tick()` for this
+    // reason. Same fact, two places, one of them guarded.
+    const polled = await tick();
+    const fresh = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
+    if (!polled) {
+      document.getElementById('fresh-holding').innerHTML =
+        '<div class="holding"><div class="cannot"><b>We could not re-read what it is holding.</b> '
+        + 'The action above went through; this is only our view of it. Close this and open it again.</div></div>';
+      document.getElementById('fresh-options').innerHTML = '';
+    } else if (fresh) {
       FRESH_FOR = fresh;
       FRESH_TOKEN = holdingToken(fresh.commitments);
       renderFresh(fresh);
@@ -1759,8 +1829,12 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // The record changed underneath us even though the action was refused, so
     // what is on screen is no longer true whatever else happened.
     if (err.reconciled) {
-      await tick();
-      const after = LAST.find((x) => x.sessionName === forAgent);
+      // ⚠️ Checked, for the same reason as the success path: a failed poll
+      // leaves `LAST` holding the PRE-action object, and re-rendering it puts
+      // commitments the server has already recorded as destroyed back on screen
+      // as though they were current.
+      const polled = await tick();
+      const after = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
       if (after) { FRESH_FOR = after; FRESH_TOKEN = holdingToken(after.commitments); renderFresh(after); }
     }
 

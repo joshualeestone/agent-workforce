@@ -72,12 +72,31 @@ function readBody(req) {
  * identity per agent instead of a name that is sanitised in one place and
  * verbatim in another, which is a change to the avatar and profile stores too.
  */
-function knownAgent(name) {
+/**
+ * The agent record for a name, or `null`.
+ *
+ * ⚠️ ONE implementation of "is this a known agent", used by every route.
+ *
+ * The fresh-start route grew its own inline copy in order to take a single
+ * snapshot for both the gate and the action — a correct goal, reached by adding
+ * a second derivation of the identity rule, which is the defect this codebase
+ * has now found in eight places. This gives that route the record it needs
+ * without either route inventing its own idea of who counts.
+ *
+ * Never throws: `snapshot()` shells out to tmux, and a route that 500s because
+ * the machine hiccupped is worse than one that says it does not know the agent.
+ */
+function findAgent(name) {
   try {
-    return snapshot().agents.some((a) => a.sessionName === store.safeKey(name));
+    const key = store.safeKey(name);
+    return snapshot().agents.find((a) => a.sessionName === key) || null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function knownAgent(name) {
+  return findAgent(name) !== null;
 }
 
 /**
@@ -700,22 +719,23 @@ const server = http.createServer((req, res) => {
     const action = life[2];
     if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
 
-    // ⚠️ ONE snapshot for the gate AND the action, taken here.
+    // ⚠️ ONE snapshot for the gate AND the action, and one shared definition of
+    // which agent that is.
     //
     // This route asked twice: `knownAgent` took a snapshot to decide the agent
     // exists, and the body handler took another to find the record it acts on.
-    // Two shell-outs to `tmux list-panes` plus a transcript read for every agent
-    // on the machine, per click — but the reason to fix it is not the cost. Two
-    // reads of one fact is the defect this codebase has found in seven places,
-    // and here it opens a window where the agent is present for the gate and
-    // gone for the lookup, so `agent` arrives at `mayTypeInto` as undefined
-    // after the route has already decided the agent is real.
-    let agent = null;
-    try {
-      agent = snapshot().agents.find((a) => a.sessionName === store.safeKey(name)) || null;
-    } catch {
-      agent = null;
-    }
+    // Two shell-outs to `tmux list-panes` plus a transcript read per agent, per
+    // click — but the reason to fix it was never the cost. Two reads of one fact
+    // opened a window where the agent was present for the gate and gone for the
+    // lookup, so `agent` reached `mayTypeInto` as undefined after the route had
+    // already decided it was real.
+    //
+    // Through `findAgent`, which `knownAgent` is now also built on: the first
+    // attempt at this fix inlined the lookup here and left the other five routes
+    // on `knownAgent`, which solved the double snapshot by creating a second
+    // definition of identity — trading this codebase's most common defect for
+    // its most common defect.
+    const agent = findAgent(name);
     if (!agent) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
 
     readBody(req)
