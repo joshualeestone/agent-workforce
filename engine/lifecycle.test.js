@@ -44,7 +44,35 @@ function recorder({ throwOn } = {}) {
   return calls;
 }
 
-test.afterEach(() => lifecycle.setRunner(null));
+/**
+ * ⚠️ The runner this file falls back to REFUSES, rather than being the real one.
+ *
+ * `setRunner(null)` restored the module's default, which is a live
+ * `execFileSync`. Combined with `afterEach`, that meant every test began with
+ * the real runner installed, and the file's own header rule — no test may
+ * restart, clear or compact a real agent — held only because every test
+ * happened to call `recorder()` before doing anything. The next test written
+ * here, or an early `return` before the recorder line, sends real keystrokes to
+ * a real pane on a machine running thirteen agents.
+ *
+ * `AGENT_WORKFORCE_DRY_RUN` is the mechanism everywhere else, and it is the
+ * wrong tool here: it makes every action return `DRY_RUN`, which is exactly the
+ * outcome vocabulary these tests assert against. So the mechanism for this file
+ * is a default that throws. A test that means to run something installs a
+ * recorder; a test that forgot gets a loud failure instead of a live agent.
+ */
+function poison() {
+  lifecycle.setRunner((file, args) => {
+    throw new Error(
+      'lifecycle.test.js tried to run a real command with no recorder installed: '
+      + [file].concat(args || []).join(' ')
+      + ' — call recorder() first',
+    );
+  });
+}
+
+poison();
+test.afterEach(poison);
 
 // ---------------------------------------------------------------------------
 // Containment: these names become tmux targets and launchd services
@@ -349,24 +377,32 @@ test('only a pane that actually holds a running agent may be typed into', () => 
   // Latent on this machine, where all thirteen sessions happen to be agents,
   // which is exactly why it needs a test rather than an observation.
   //
-  // ⚠️ What this pins is the CLASSIFICATION. The one-line refusal in the route
-  // that consumes it is NOT pinned: every live pane classifies as an agent, so
-  // removing that line leaves the suite green. Declared rather than implied.
+  // (The one-line refusal in the route that consumes this is pinned separately,
+  // by `an agent waiting on a question is never typed into` in server.test.js.)
   const { isAgentPane } = require('./status');
 
   // The native install fronts as a strict three-segment version; an npm-global
   // install fronts as `node`. Both are the fleet's canonical rule, not one
   // invented here, and rejecting the legacy names silently removed this feature
   // for any agent on an npm install.
-  assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212' }), true);
-  assert.equal(isAgentPane({ session: 'angel-discord', command: 'node' }), true);
-  assert.equal(isAgentPane({ session: 'angel-discord', command: 'claude' }), true);
+  assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212', inMode: '0' }), true);
+  assert.equal(isAgentPane({ session: 'angel-discord', command: 'node', inMode: '0' }), true);
+  assert.equal(isAgentPane({ session: 'angel-discord', command: 'claude', inMode: '0' }), true);
 
   // ⚠️ Not while scrolled back in copy-mode: keystrokes go to copy-mode
   // bindings rather than the composer, so nothing would be cleared and the
   // route would still answer "we asked it to".
   assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212', inMode: '1' }), false,
     'a pane scrolled back in copy-mode was treated as typeable');
+
+  // ⚠️ And an ALLOWLIST on that field too. These earlier asserted `true` with
+  // no `inMode` at all, which pinned the permissive reading of a missing value
+  // — the test defending the guard was defending the hole. Anything that is not
+  // an explicit "not in copy-mode" is refused.
+  for (const missing of [undefined, '', null, '2', 'yes']) {
+    assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212', inMode: missing }), false,
+      `an unreadable copy-mode flag (${JSON.stringify(missing)}) was treated as typeable`);
+  }
 
   for (const [pane, why] of [
     [{ session: 'my-shell', command: '2.1.212' }, 'not a fleet session name'],

@@ -147,7 +147,15 @@ function isAgentPane(pane) {
   // to copy-mode bindings rather than the composer, so nothing is compacted or
   // cleared and the route would still answer "we asked it to". This clause is
   // about TYPING, which is why restart asks `isAgentSession` instead.
-  return pane.inMode !== '1';
+  //
+  // ⚠️ `=== '0'`, an ALLOWLIST, not `!== '1'`. The negative form ruled a pane
+  // typeable whenever `inMode` was anything unexpected — undefined, empty, a
+  // value from a future tmux — which is asserting the safe answer from an
+  // absence of information. `parsePanes` already defends that default at the
+  // boundary, and defending one fact in only one of the two places that decide
+  // it is precisely the shape this codebase keeps shipping: any caller holding
+  // a pane object it did not get from the parser got the permissive answer.
+  return pane.inMode === '0';
 }
 
 /**
@@ -189,6 +197,10 @@ function parsePanes(out) {
     return {
       name: session.replace(/-discord$/, ''),
       session,
+      // Kept, not just folded into `target`: choosing one pane per session
+      // needs to compare indexes, and re-parsing them back out of the target
+      // would be a second derivation of something we already had.
+      pane: raw.pane || '',
       target: `${session}:${raw.pane}`,
       command: raw.command || '',
       // '1' when the pane is scrolled back in copy-mode, where keystrokes go to
@@ -204,8 +216,61 @@ function parsePanes(out) {
   });
 }
 
+/**
+ * Where the raw `list-panes` output comes from.
+ *
+ * ⚠️ A seam, and it exists for one reason: without it the WIRING is unpinnable.
+ * `onePanePerSession` had three tests and deleting its call from `snapshot()`
+ * left all of them green, because every pane on this machine is already a
+ * distinct session — the duplicate case cannot be arranged on a live fleet, so
+ * a test that reads the real board can never fail. The same shape as
+ * `setRunner` in `engine/lifecycle.js`, and for the same reason.
+ *
+ * Read-only either way: this replaces where the TEXT comes from, never what is
+ * done with it, so it cannot be used to reach a real agent.
+ */
+let paneSource = null;
+
+function setPaneSource(fn) { paneSource = typeof fn === 'function' ? fn : null; }
+
 function listPanes() {
-  return parsePanes(sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]));
+  const out = paneSource
+    ? paneSource()
+    : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  return parsePanes(out);
+}
+
+/**
+ * One entry per tmux SESSION, not per pane.
+ *
+ * ⚠️ `list-panes -a` returns every pane, and the roster mapped straight over
+ * it. A `*-discord` session with a split window therefore produced two cards
+ * with the same name, the same commitment record, and the same `data-fresh`
+ * value — and both the card click and the action route resolve an agent by
+ * `.find()`, which takes whichever sorted first. So the operator could click
+ * the card for one pane and have the keystrokes go to the other.
+ *
+ * The representative is the pane actually running Claude, lowest index first.
+ * A session with no agent pane still yields one entry, because the board must
+ * show a session it cannot read rather than hiding it — but it will be an entry
+ * that `isAgentPane` refuses, which is the honest answer for it.
+ */
+function onePanePerSession(panes) {
+  const bySession = new Map();
+  for (const pane of panes) {
+    const key = pane.session;
+    const held = bySession.get(key);
+    if (!held) { bySession.set(key, pane); continue; }
+
+    const heldIsAgent = isAgentSession(held);
+    const paneIsAgent = isAgentSession(pane);
+    // Prefer a real agent pane; between two of a kind, the lower pane index.
+    if ((paneIsAgent && !heldIsAgent)
+      || (paneIsAgent === heldIsAgent && String(pane.pane) < String(held.pane))) {
+      bySession.set(key, pane);
+    }
+  }
+  return [...bySession.values()];
 }
 
 function capturePane(target, lines = 40) {
@@ -626,7 +691,7 @@ function safeAvatar(name) {
 }
 
 function snapshot() {
-  const panes = listPanes();
+  const panes = onePanePerSession(listPanes());
   const agents = panes.map((pane) => {
     const text = capturePane(pane.target);
     const status = classify(pane, text);
@@ -684,7 +749,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, onePanePerSession, setPaneSource, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

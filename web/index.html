@@ -648,7 +648,36 @@ async function tick() {
     // which trains the click-through this screen exists to prevent.
     if (WANT_FRESH && !FRESH_SHOWN && !FRESH_FOR && document.getElementById('fresh-scrim').hidden) {
       FRESH_SHOWN = true;
-      openFresh(WANT_FRESH, null);
+      // ⚠️ A return target, not `null`. This passed `null`, so `closeFresh`
+      // skipped the whole restore block and focus was left on a Cancel button
+      // that had just been hidden — which drops it to <body>. WCAG 2.4.3, on
+      // the one entry path where the operator did not click anything to get
+      // here and so has no idea where focus was.
+      openFresh(WANT_FRESH, `.fresh[data-fresh="${CSS.escape(WANT_FRESH)}"]`);
+    }
+
+    // ⚠️ Keep the dialog's DERIVED callout in step with the board.
+    //
+    // "X is not visibly working on any of these" is the sentence the wireframe
+    // calls the point of the whole screen, and it is derived from `task` — the
+    // agent's pane title — captured when the dialog opened. The dialog never
+    // re-rendered while open, and the confirmation token covers only the
+    // commitments' state, ids and text. So a dialog left open while the agent
+    // picked up one of those items went on asserting it was not working on it,
+    // for as long as the operator left it there, and the server had no reason
+    // to refuse: nothing the token covers had changed.
+    //
+    // ⚠️ Only when the commitments are UNCHANGED. If those changed, the token
+    // no longer matches and the designed flow is the server refusing and the
+    // operator being told; quietly repainting the list here would show a new
+    // list under an old token, which is the display and the guard disagreeing
+    // about what is being approved.
+    if (FRESH_FOR && !document.getElementById('fresh-scrim').hidden) {
+      const now = LAST.find((x) => x.sessionName === FRESH_FOR.sessionName);
+      if (now && holdingToken(now.commitments) === FRESH_TOKEN && now.task !== FRESH_FOR.task) {
+        FRESH_FOR = now;
+        renderFresh(now);
+      }
     }
 
     // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.

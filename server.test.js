@@ -1325,13 +1325,24 @@ test('an agent waiting on a question is never typed into', async (t) => {
   // built to show you the cost of an action would instead approve an arbitrary
   // tool call the operator never saw.
   //
-  // This asserts the RULE rather than driving a live prompt: the board already
-  // computes `needs_you` and counts it on the summary line, so the route simply
-  // has to consult it.
+  // ⚠️ Accepts ANY state the allowlist refuses, not only `needs_you`.
+  //
+  // This test named the route's most dangerous guard and had never once run:
+  // it required an agent to be sitting on a permission prompt at the exact
+  // moment the suite executed, which on a healthy fleet is almost never. So
+  // deleting the `if (!allowed.ok)` block in the route left all 238 tests
+  // green — the guard was pinned by a test that skipped.
+  //
+  // `mayTypeInto` is an ALLOWLIST of `idle` and `working`, so every other
+  // state refuses through the identical branch: `rate_limited`, `unknown`,
+  // `stopped` and `needs_you` all exercise the same line. Any of them proves
+  // the route consults the decision, and at least one is almost always present
+  // on a real board.
   const board = JSON.parse((await req('/api/status')).body);
-  const waiting = (board.agents || []).find((a) => a.state === 'needs_you');
+  const REFUSED_STATES = ['needs_you', 'rate_limited', 'unknown', 'stopped'];
+  const waiting = (board.agents || []).find((a) => REFUSED_STATES.includes(a.state));
   if (!waiting) {
-    t.skip('no agent is waiting on a question right now, so the live path cannot be driven');
+    t.skip('every agent on this board is idle or working, so no refusing state exists to drive');
     return;
   }
   // ⚠️ The token must be the REAL one, taken from the payload. The first

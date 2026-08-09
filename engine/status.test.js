@@ -20,6 +20,9 @@ const {
   isAgentPane,
   isAgentSession,
   parsePanes,
+  onePanePerSession,
+  setPaneSource,
+  snapshot,
   PANE_FORMAT,
   PANE_COLUMNS,
   STATE,
@@ -230,4 +233,94 @@ test('a plain shell in an agent-named session is not restartable', () => {
   // And the suffix alone is not enough either: the process still has to be one.
   const [shellInSuffix] = parsePanes('mikey-discord\t0.0\tzsh\t0\t');
   assert.equal(isAgentSession(shellInSuffix), false);
+});
+
+test('a split window does not put the same agent on the board twice', () => {
+  // ⚠️ `list-panes -a` returns one line per PANE and the roster mapped straight
+  // over it, so a `*-discord` session with a split window produced two cards
+  // with the same name, the same commitment record and the same `data-fresh`
+  // value. Both the card click and the action route resolve an agent with
+  // `.find()`, which takes whichever sorted first — so the operator could click
+  // the card for one pane and have the keystrokes go to the other.
+  const panes = parsePanes([
+    'angel-discord\t0.0\t2.1.212\t0\tWorking',
+    'angel-discord\t0.1\tzsh\t0\t',            // the split, running a shell
+    'bram-discord\t0.0\tnode\t0\tIdle',
+  ].join('\n'));
+  assert.equal(panes.length, 3, 'the parser should still report every pane');
+
+  const roster = onePanePerSession(panes);
+  assert.equal(roster.length, 2);
+  const names = roster.map((p) => p.name).sort();
+  assert.deepEqual(names, ['angel', 'bram']);
+
+  // ⚠️ And the survivor is the pane actually running Claude, not merely the
+  // first one listed. Picking by order would hand the agent's card a shell's
+  // target, which `isAgentPane` then refuses — taking the feature away from a
+  // perfectly healthy agent because somebody split its window.
+  const angel = roster.find((p) => p.name === 'angel');
+  assert.equal(angel.target, 'angel-discord:0.0');
+  assert.equal(isAgentPane(angel), true);
+});
+
+test('the agent pane wins even when the shell is listed first', () => {
+  // Order-independence, stated separately because the previous test would pass
+  // for the wrong reason if the choice were "first wins" and the agent happened
+  // to be first.
+  const roster = onePanePerSession(parsePanes([
+    'angel-discord\t0.0\tzsh\t0\t',
+    'angel-discord\t0.1\t2.1.212\t0\tWorking',
+  ].join('\n')));
+  assert.equal(roster.length, 1);
+  assert.equal(roster[0].target, 'angel-discord:0.1', 'the shell was chosen over the agent');
+});
+
+test('a session with no agent pane still appears, refused rather than hidden', () => {
+  // The board must show a session it cannot vouch for rather than dropping it:
+  // an agent that has crashed to a shell is exactly what someone needs to see.
+  const roster = onePanePerSession(parsePanes('ghost-discord\t0.0\tzsh\t0\t'));
+  assert.equal(roster.length, 1);
+  assert.equal(isAgentPane(roster[0]), false);
+});
+
+test('snapshot itself never returns the same agent twice', () => {
+  // ⚠️ Pins the WIRING, not the helper. `onePanePerSession` had three passing
+  // tests and deleting its call from `snapshot()` left every one of them green:
+  // each pane on this machine is already its own session, so the duplicate case
+  // cannot be arranged against the real board and a test reading it can never
+  // fail. That is the defect this whole branch keeps re-finding — the guard
+  // covered, its one call site not — so the pane source is injectable and this
+  // drives the real `snapshot()`.
+  try {
+    setPaneSource(() => [
+      'angel-discord\t0.0\t2.1.212\t0\tWorking on something',
+      'angel-discord\t0.1\tzsh\t0\t',
+      'angel-discord\t0.2\tzsh\t0\t',
+      'bram-discord\t0.0\tnode\t0\tIdle',
+    ].join('\n'));
+
+    const board = snapshot();
+    const names = board.agents.map((a) => a.sessionName);
+    assert.deepEqual(names.slice().sort(), ['angel', 'bram']);
+    assert.equal(new Set(names).size, names.length, 'the same agent appeared on the board twice');
+
+    // The surviving card points at the pane running Claude, so the action it
+    // offers goes where the card says it does.
+    const angel = board.agents.find((a) => a.sessionName === 'angel');
+    assert.equal(angel.target, 'angel-discord:0.0');
+    assert.equal(angel.isAgentPane, true);
+  } finally {
+    setPaneSource(null);
+  }
+});
+
+test('an empty roster is a board with no agents, not a crash', () => {
+  try {
+    setPaneSource(() => '');
+    const board = snapshot();
+    assert.deepEqual(board.agents, []);
+    assert.equal(board.counts.total, 0);
+  } finally {
+    setPaneSource(null);
+  }
 });

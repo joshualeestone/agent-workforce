@@ -186,8 +186,16 @@ function serve(req, res) {
     // Pinning it too made the shipped documentation screenshot render "206 days
     // ago" under the stale squiggle: the board's headline honesty signal, caught
     // displaying its own failure state, in the image meant to show the product
-    // working. Still deterministic — a fresh timestamp always renders "just
-    // now", so the picture is identical every run.
+    // working.
+    //
+    // ⚠️ This is NOT fully deterministic, and an earlier version of this comment
+    // claimed it was ("a fresh timestamp always renders 'just now'"). It does
+    // not: `ageText` only says "just now" below five seconds, and every
+    // committed screenshot in fact reads "5 seconds ago" because the capture
+    // takes longer than that. The stamp can therefore differ by a word between
+    // runs. That is a one-line diff in an image, and worth far less than the
+    // honesty signal being wrong — but a false claim in a comment is how the
+    // next person stops checking.
     res.end(JSON.stringify({
       agents: AGENTS,
       version: '0.1.0',

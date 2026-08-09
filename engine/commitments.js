@@ -702,6 +702,21 @@ function markDestroyed(agent) {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
 
+  // ⚠️ The OWNERSHIP guard too. The comment above claimed "every guard
+  // `parseRecord` applies, applied here too" and this one was missing, which is
+  // worse than not claiming it: the claim is what stops the next reader
+  // checking.
+  //
+  // `parseRecord` refuses a record whose stored `name` is not this agent,
+  // because `safeKey` maps several spellings to one file and two agents could
+  // collide on it (`mybot` / `my.bot`, documented on `knownAgent`). Without the
+  // same check here, that record is refused by `read()` — so the dialog shows
+  // nothing and `hadRecord` is false — and then gets `destroyedAt` stamped onto
+  // it anyway. That writes a claim into ANOTHER agent's record saying its
+  // conversation was destroyed, on a store whose entire purpose is being the
+  // last honest account of what was lost.
+  if (raw.name !== String(agent)) return false;
+
   raw.destroyedAt = new Date().toISOString();
   const tmp = `${file}.${process.pid}.tmp`;
   try {

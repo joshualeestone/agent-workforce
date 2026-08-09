@@ -1145,6 +1145,37 @@ test('a malformed record cannot crash the tombstone after the action has fired',
   }
 });
 
+test('a tombstone is never stamped on a record belonging to another agent', () => {
+  // ⚠️ `parseRecord` refuses a record whose stored `name` is not the agent being
+  // asked about, because `safeKey` maps several spellings onto one file and two
+  // agents could collide on it (`mybot` / `my.bot`, documented on
+  // `server.js:knownAgent`). `markDestroyed` carried a comment claiming it
+  // applied "every guard parseRecord applies" and was missing this one.
+  //
+  // The consequence is the worst available: `read()` refuses the record, so the
+  // dialog shows nothing and the route computes `hadRecord` as false — and then
+  // the tombstone is written anyway, putting "your conversation was destroyed"
+  // into ANOTHER agent's record. In a store whose only job is being the honest
+  // account of what was lost, that is a fabricated loss.
+  //
+  // Deleting the `raw.name !== String(agent)` line in markDestroyed fails here.
+  const agent = 'tombowner';
+  c.report(agent, [{ what: 'work that belongs to somebody else entirely' }]);
+
+  const onDisk = JSON.parse(fs.readFileSync(c.recordPath(agent), 'utf8'));
+  onDisk.name = 'a-completely-different-agent';
+  fs.writeFileSync(c.recordPath(agent), JSON.stringify(onDisk, null, 2));
+
+  // Precondition: the reader already refuses it, which is what makes the
+  // missing guard invisible from the outside.
+  assert.equal(c.read(agent).state, c.STATE.UNKNOWN);
+
+  assert.equal(c.markDestroyed(agent), false, 'stamped a tombstone on a foreign record');
+  const after = JSON.parse(fs.readFileSync(c.recordPath(agent), 'utf8'));
+  assert.equal(after.destroyedAt, undefined, 'a destruction we never performed was recorded');
+  assert.equal(after.name, 'a-completely-different-agent', 'the foreign record was rewritten');
+});
+
 test('adding to a destroyed record does not re-publish what we destroyed', () => {
   // ⚠️ `add()` and `resolve()` route through the same writer, which did not
   // carry `destroyedAt`. So a single add erased the tombstone and brought the
