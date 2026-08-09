@@ -111,6 +111,20 @@ const ROUTING_BASE = 'http://localhost';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
+ * Extra hostnames this server will answer to, comma-separated.
+ *
+ * Empty by default. Set it only if you are deliberately putting a proxy in
+ * front of this port, and read the warning above `start()` first: there is no
+ * authentication here, and the writes include the file an agent boots from.
+ */
+const ALLOWED_HOSTS = new Set(
+  String(process.env.AGENT_WORKFORCE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim().replace(/\.$/, '').toLowerCase())
+    .filter(Boolean),
+);
+
+/**
  * Returns the request's path with any query string removed, or `null` when the
  * target is not one we should route at all.
  *
@@ -141,11 +155,12 @@ function pathOf(req) {
   // authority -- `//host/path`, or an absolute `http://host/path` -- otherwise
   // has its host silently discarded and gets routed on the path alone.
   //
-  // ⚠️ This inspects the request TARGET, not the `Host` header, so it is not an
-  // origin check and does not stop DNS rebinding: `GET /api/status` with
-  // `Host: evil.example` is still answered. That gap is real on an auth-free
-  // server and is tracked separately; do not read this guard as protection it
-  // does not provide.
+  // ⚠️ This inspects the request TARGET, not the `Host` header. Those are
+  // different questions and this one is not an origin check. The `Host` check
+  // that closes DNS rebinding is a separate block further down, added later;
+  // this comment used to say the gap was "tracked separately" and left that
+  // standing after it was closed, which understates the protection rather than
+  // overstating it but is the same defect either way.
   //
   // Checking the parsed host rather than the string shape is deliberate. The
   // obvious guard is `raw.startsWith('//')`, and it does not work: the URL
@@ -173,9 +188,25 @@ function pathOf(req) {
   // agent, one restart later. The comment above `start()` used to enumerate
   // "two ways that protection is lost" and this was not one of them.
   //
-  // A port is legitimately different behind a proxy, so only the HOSTNAME is
-  // compared, exactly as above. A request with no `Host` at all is HTTP/1.0 or
-  // a raw socket, neither of which is a browser being rebound.
+  // ⚠️ This REFUSES a proxied request, and that is deliberate rather than an
+  // oversight. Said plainly because it is a behaviour change: a reverse proxy
+  // forwards its own hostname in `Host`, so nginx or a Tailscale Funnel in
+  // front of this port now gets a 400 where it used to get the board.
+  //
+  // That is the posture the warning above `start()` already describes: this
+  // server has no authentication, so a tunnel pointed at it exposes every write
+  // route to whoever finds the URL, and it now edits the file an agent boots
+  // from. Refusing is the honest default for a thing that was only ever safe
+  // because it was unreachable.
+  //
+  // `AGENT_WORKFORCE_ALLOWED_HOSTS` is the deliberate opt-in for someone who
+  // genuinely wants that, comma-separated hostnames. It exists so the choice is
+  // made on purpose rather than discovered, and so this change does not
+  // silently break a deployment that already relies on it.
+  //
+  // Only the HOSTNAME is compared: a proxy legitimately names a different port.
+  // A request with no `Host` at all is HTTP/1.0 or a raw socket, neither of
+  // which is a browser being rebound.
   const sent = req.headers && req.headers.host;
   if (sent) {
     let asked;
@@ -184,7 +215,9 @@ function pathOf(req) {
     } catch {
       return null;
     }
-    if (!LOOPBACK_HOSTS.has(asked)) return null;
+    // A trailing dot is the same host, and a browser will send one.
+    const bare = asked.replace(/\.$/, '').toLowerCase();
+    if (!LOOPBACK_HOSTS.has(bare) && !ALLOWED_HOSTS.has(bare)) return null;
   }
 
   return parsed.pathname;

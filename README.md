@@ -11,7 +11,15 @@ instruction file each one reads when it starts. It cannot start, stop or
 message any of them yet.
 
 ⚠️ That instruction file is the real thing an agent boots from, not a copy, so
-editing it here changes how that agent behaves the next time it starts.
+editing it here changes how that agent behaves the next time it starts. The
+version it replaces is kept beside it as `CLAUDE.md.previous`.
+
+⚠️ It answers only on **loopback**, and now checks the `Host` header as well as
+the address, so a page on another site cannot reach it by pointing its own DNS
+at your machine. That refuses a reverse proxy too, which is deliberate: there is
+no authentication here. If you genuinely want one, name it in
+`AGENT_WORKFORCE_ALLOWED_HOSTS` and understand that anyone who reaches that URL
+can rewrite the file any of your agents boots from.
 
     node server.js      # then open http://127.0.0.1:4317
 

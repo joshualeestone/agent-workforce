@@ -388,6 +388,26 @@ test('the kept version carries the live file permissions, not the ones it was cr
     'the kept version stayed world-readable after the live file was locked down');
 });
 
+test('a save that changes nothing does not burn the kept version', () => {
+  // ⚠️ One-deep backup is the design, so rotating it on a no-op save destroys
+  // the only recoverable version: make a real edit and save (the original is
+  // kept), then press Save again without typing, and the backup becomes a copy
+  // of the current file. The undo is gone, burned by a click that did nothing.
+  const file = makeAgent('noopsave', 'THE ORIGINAL INSTRUCTIONS WORTH RECOVERING');
+  const edited = 'a genuine replacement of the instructions here';
+  instructions.write('noopsave', edited);
+  assert.equal(fs.readFileSync(`${file}.previous`, 'utf8'),
+    'THE ORIGINAL INSTRUCTIONS WORTH RECOVERING');
+
+  const again = instructions.write('noopsave', edited);
+  assert.equal(again.unchanged, true, 'a byte-identical save was treated as a change');
+  assert.equal(again.keptPrevious, false);
+  assert.equal(fs.readFileSync(`${file}.previous`, 'utf8'),
+    'THE ORIGINAL INSTRUCTIONS WORTH RECOVERING',
+    'a no-op save rotated the backup and destroyed the recoverable version');
+  assert.equal(fs.readFileSync(file, 'utf8'), edited);
+});
+
 test('a first save has nothing to keep and does not invent a backup', () => {
   fs.mkdirSync(path.join(ROOT, 'firstsave'), { recursive: true });
   instructions.write('firstsave', 'the first instructions this agent has ever had');
@@ -432,8 +452,12 @@ function withFailingRename(fn) {
 test('a failed write leaves no temp file and does not damage the original', () => {
   const file = makeAgent('failtest');
   const before = fs.readFileSync(file, 'utf8');
+  // Deliberately DIFFERENT from what is on disk: a byte-identical save now
+  // short-circuits before the rename, so writing `REAL` here would never reach
+  // the path this test is named for.
+  const changed = 'a genuinely different set of instructions for the fail test';
   withFailingRename(() => {
-    assert.throws(() => instructions.write('failtest', REAL), /could not be saved/);
+    assert.throws(() => instructions.write('failtest', changed), /could not be saved/);
   });
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'the original must survive a failed write');
   const strays = fs.readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp'));

@@ -217,6 +217,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `ftruncate` on the backup write | fails |
 | `staleness` carrying `editable` | fails |
 | `Host` header checked against loopback (DNS rebinding) | fails |
+| No-op save not rotating the kept version | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
@@ -632,6 +633,31 @@ header name, so `fetch` silently drops it and the first version of the test
 passed against a server with no check at all. A test that pins nothing, written
 while adding the guard it was supposed to pin.
 
+Iteration 21 found no blockers and said it would ship this. Three things worth
+having.
+
+The `Host` check I added in iteration 20 **refuses a reverse-proxied request**,
+which is correct for a server with no authentication that now edits the file an
+agent boots from, but it was a silent behaviour change and it contradicted two
+of the file's own comments. It is now stated plainly, with
+`AGENT_WORKFORCE_ALLOWED_HOSTS` as a deliberate opt-in so the choice is made on
+purpose rather than discovered, trailing dots and case handled, and the README
+says so.
+
+A comment twenty lines above that check still said DNS rebinding was open and
+"tracked separately". Understating protection rather than overstating it, but
+the same defect: a comment whose claim the code does not support.
+
+And a **no-op save burned the undo**. One-deep backup is the design, so pressing
+Save without typing rotated the good original out and replaced it with a copy of
+the current file. A click that did nothing destroyed the only recoverable
+version. Byte-identical saves now short-circuit entirely.
+
+⚠️ That fix broke an existing test in a way worth recording: `a failed write
+leaves no temp file` wrote content identical to the fixture, so it began
+short-circuiting before the rename it was named for. The test was passing for a
+new wrong reason within minutes of the change.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -651,4 +677,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**192 tests, zero dependencies.**
+**193 tests, zero dependencies.**

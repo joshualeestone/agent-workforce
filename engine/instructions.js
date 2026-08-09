@@ -559,6 +559,17 @@ function write(agent, text, expectedVersion) {
   // synchronous end to end. Between processes it can, and closing it needs a
   // lock file rather than a comment. Stated so the guarantee is not read as
   // stronger than it is.
+  // ⚠️ A save that changes nothing changes nothing.
+  //
+  // One-deep backup is the design, so rotating it on a no-op save destroys the
+  // only recoverable version: make a real edit and save (the good original is
+  // kept), then open the panel again and press Save without typing, and the
+  // backup becomes a copy of the current file. The undo is gone, burned by a
+  // click that did nothing. Comparing the bytes is the whole fix.
+  if (shown && shown.exists && shown.version === versionOf(true, Buffer.from(body, 'utf8'))) {
+    return { ...read(agent), keptPrevious: false, unchanged: true };
+  }
+
   let keptPrevious = false;
   const tmp = `${file}.${process.pid}.tmp`;
   try {
