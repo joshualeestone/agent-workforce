@@ -1046,7 +1046,14 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     // your last save is kept" about a copy from two saves ago, or a zero-byte
     // file left by a failed write. That inference is exactly what the engine
     // returns `keptPrevious` to prevent, re-added in the browser.
-    document.getElementById('d-instr-prev').hidden = !data.keptPrevious;
+    // `keptPrevious` for a real save, and `hasPrevious` when the save changed
+    // nothing. The strict rule is right for a real save (a stale or zero-byte
+    // backup must not be promised), but a byte-identical save is the one case
+    // where the existing kept version is known-good and still exactly what it
+    // says it is, so hiding the note there takes back a true statement at the
+    // moment it matters most.
+    document.getElementById('d-instr-prev').hidden =
+      !(data.keptPrevious || (data.unchanged && data.hasPrevious));
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);

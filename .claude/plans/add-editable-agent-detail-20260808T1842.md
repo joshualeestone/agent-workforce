@@ -218,6 +218,8 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `staleness` carrying `editable` | fails |
 | `Host` header checked against loopback (DNS rebinding) | fails |
 | No-op save not rotating the kept version | fails |
+| Allowlist parsing (port, case, trailing dot) | fails |
+| Trailing-dot / case on the incoming `Host` | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
@@ -658,8 +660,25 @@ leaves no temp file` wrote content identical to the fixture, so it began
 short-circuiting before the rename it was named for. The test was passing for a
 new wrong reason within minutes of the change.
 
+Iteration 22 was the first pass to find **no blockers and no warnings.** Its
+four remaining items were all about the newest code, and two were mine to own.
+
+The `Host` normalisation and the `AGENT_WORKFORCE_ALLOWED_HOSTS` opt-in, added
+one iteration earlier, were pinned by nothing and, unlike every other unpinned
+guard here, not declared as such. Both fail closed, so the risk was a silently
+dead opt-in rather than an opening, but a guard that looks covered and is not is
+the thing this table exists to prevent. Both are pinned now.
+
+And the allowlist silently dropped any entry written as `host:port`, which is
+exactly what an operator would paste out of a proxy config after reading the
+README line telling them to name the host. They would get a 400 saying the
+request was not addressed to this server, with nothing pointing at the cause.
+
+The plan's own green-row count was also wrong, understating by one. Corrected,
+and now derived by counting rather than by hand.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
+suite, not by reading the code. 10 rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
 for "this file has no automated coverage at all".
 
@@ -677,4 +696,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**193 tests, zero dependencies.**
+**194 tests, zero dependencies.**

@@ -189,10 +189,41 @@ test('a request claiming a non-loopback Host is refused', async () => {
 
   // Every spelling of loopback still works, and the PORT is deliberately not
   // compared: a proxy in front of this process legitimately names another one.
-  for (const host of ['localhost:1', '127.0.0.1:65535', '[::1]:4317']) {
+  //
+  // The trailing dot and the case are load-bearing rather than tidiness: a
+  // browser will send `localhost.`, and `Host` is case-insensitive, so without
+  // the normalisation the guard refuses the operator's own board.
+  for (const host of ['localhost:1', '127.0.0.1:65535', '[::1]:4317',
+    'localhost.', 'LOCALHOST', 'LocalHost:4317', '127.0.0.1.']) {
     const ok = await raw(host);
     assert.notEqual(ok.status, 400, `${host} should still be routed`);
   }
+});
+
+test('the allowlist opt-in is reachable, and tolerant of how it is written', () => {
+  // ⚠️ Tests the PARSING, not a live request, and says so: the allowlist is read
+  // from the environment at module load, so a running server cannot be asked
+  // about a host it was not started with. What can go wrong here is an entry
+  // that silently never matches, and that is a pure function of the string.
+  //
+  // The port is the case that bites: the README says to name the host, and the
+  // obvious thing to paste is the `host:port` from a proxy config. Unstripped,
+  // that entry is dead and the operator gets a 400 with nothing pointing at it.
+  const parse = (raw) => new Set(
+    String(raw || '').split(',')
+      .map((h) => h.trim().replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase())
+      .filter(Boolean),
+  );
+  const got = parse(' Board.Local , proxy.example.com:8443 ,evil2.com. , ');
+  assert.ok(got.has('board.local'), 'case and whitespace should not matter');
+  assert.ok(got.has('proxy.example.com'), 'an entry written with a port was dropped');
+  assert.ok(got.has('evil2.com'), 'a trailing dot was not normalised away');
+  assert.equal(got.size, 3, 'empty entries should not become hosts');
+
+  // And the shape actually shipped agrees with what was just asserted.
+  const src = fs.readFileSync(nodePath.join(__dirname, 'server.js'), 'utf8');
+  assert.match(src, /replace\(\/:\\d\+\$\/, ''\)/,
+    'server.js no longer strips the port from allowlist entries');
 });
 
 test('an unknown agent avatar still 404s with a query string attached', async () => {

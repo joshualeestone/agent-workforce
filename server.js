@@ -120,7 +120,13 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const ALLOWED_HOSTS = new Set(
   String(process.env.AGENT_WORKFORCE_ALLOWED_HOSTS || '')
     .split(',')
-    .map((h) => h.trim().replace(/\.$/, '').toLowerCase())
+    // ⚠️ The PORT is stripped, because the incoming value is compared as a bare
+    // hostname and an operator copying `host:port` out of their proxy config
+    // would otherwise get a silently dead entry and a 400 with nothing pointing
+    // at the cause. Trailing dot and case too, matching how the header is
+    // normalised below: an allowlist that only works if you spell it the way
+    // the code happens to expect is not an allowlist.
+    .map((h) => h.trim().replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase())
     .filter(Boolean),
 );
 
