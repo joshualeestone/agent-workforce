@@ -253,6 +253,46 @@ test('a planted backup symlink cannot redirect the write out of the root', (t) =
   }
 });
 
+test('a fifo at the backup path cannot wedge the save', (t) => {
+  // ⚠️ `O_NOFOLLOW` closed the symlink route at this path and left the fifo
+  // one open. Opening a fifo for WRITING blocks until a reader appears, so a
+  // Save never returned and took every route on the single-threaded server
+  // with it, silently. Measured.
+  //
+  // Probed in a child process with a timeout for the same reason as the other
+  // fifo test: in-process, a regression here hangs the suite instead of
+  // failing it, and a hung suite reads as broken infrastructure.
+  const dir = path.join(ROOT, 'fifoprev');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'the original instructions for this agent');
+  const fifo = path.join(dir, 'CLAUDE.md.previous');
+  try {
+    require('node:child_process').execFileSync('mkfifo', [fifo]);
+  } catch {
+    t.skip('mkfifo is unavailable on this machine');
+    return;
+  }
+  const probe = `
+    process.env.AGENT_WORKFORCE_WORKERS = ${JSON.stringify(ROOT)};
+    const i = require(${JSON.stringify(require.resolve('./instructions'))});
+    const r = i.write('fifoprev', 'a replacement set of instructions here');
+    if (r.keptPrevious) throw new Error('claimed to keep a version through a fifo');
+    if (r.hasPrevious) throw new Error('reported a fifo as a kept version');
+    console.log('ok');
+  `;
+  try {
+    const out = require('node:child_process')
+      .execFileSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 5000 });
+    assert.match(out, /ok/);
+  } catch (err) {
+    assert.fail(err.killed
+      ? 'the save BLOCKED on a fifo at the backup path: every route on the server would hang'
+      : `the fifo-backup probe failed: ${err.stderr || err.message}`);
+  } finally {
+    fs.rmSync(fifo, { force: true });
+  }
+});
+
 test('a directory at the backup path is not reported as a kept version', () => {
   // `existsSync` is true for a directory, so the panel promised "the version
   // before your last save is kept" about an empty folder.

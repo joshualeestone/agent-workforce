@@ -209,8 +209,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Realpath containment (symlinked INTERMEDIATE component) | fails |
 | `unreadable` distinct from `absent` as a version | **green, declared untested in code** |
 | Controls disabled until the load lands | **green, no browser test harness** |
-| Keeping the replaced version as `CLAUDE.md.previous` | fails (2 tests) |
-| `O_NOFOLLOW` on the backup write | fails (2 tests) |
+| Keeping the replaced version as `CLAUDE.md.previous` | fails (3 tests) |
+| `O_NOFOLLOW` on the backup write | fails |
+| `O_NONBLOCK` + is-a-file on the backup write | fails |
+| `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
 | `staleness` re-deriving showability itself | fails (3 tests) |
@@ -535,6 +537,26 @@ mtimes, so a bare `touch` announced a change and told the person to reopen the
 agent, discarding the box, over a byte-identical file. It compares the content
 hash now, which the status poll carries.
 
+Iteration 17 found a BLOCKER in the fix from iteration 16, which was itself a
+fix for the safety net added in iteration 15. `O_NOFOLLOW` closed the symlink
+route into the backup path and left the FIFO one open: opening a fifo for
+writing blocks until a reader appears, so a Save never returned and took every
+route on this single-threaded server with it, silently. The same failure
+`workerfile` documents at length and guards against, two modules over,
+reintroduced by the backup write.
+
+**Three iterations in a row, the worst defect was in code I had just added to
+make something safer.** That is the most useful thing this loop produced. A new
+guard is not a safe change: it is new code on the most dangerous path in the
+product, written under the impression that it is defensive, and it deserves more
+suspicion than what it protects rather than less.
+
+The browser had also re-added the inference `keptPrevious` exists to prevent:
+after a save it showed "the version before your last save is kept" whenever ANY
+regular file sat at that path, so a failed backup still promised a copy that was
+two saves old or zero bytes. On the save path the honest predicate is
+`keptPrevious` alone.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -554,4 +576,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**186 tests, zero dependencies.**
+**187 tests, zero dependencies.**

@@ -609,11 +609,26 @@ function write(agent, text, expectedVersion) {
       // sitting at 0644. The same leak the temp-file path was fixed for.
       let pfd;
       try {
+        // ⚠️ `O_NONBLOCK` as well as `O_NOFOLLOW`, and the type checked on the
+        // DESCRIPTOR before anything is written.
+        //
+        // `O_NOFOLLOW` alone closed the symlink route and left the fifo one
+        // open: opening a fifo for writing BLOCKS until a reader appears, so a
+        // fifo planted here made a Save never return, and with it every route
+        // on this single-threaded server, with no crash and no log. Measured.
+        //
+        // This is the same failure `workerfile` documents at length and guards
+        // against, two modules over, reintroduced by the backup write. Third
+        // time on this branch that a guard added to make something safer opened
+        // a new hole: the fix for the fix deserves the suspicion, not less of
+        // it. `O_TRUNC` is applied after the type check for the same reason.
         pfd = fs.openSync(
           `${file}.previous`,
-          fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW,
+          fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
           mode,
         );
+        if (!fs.fstatSync(pfd).isFile()) throw new Error('not a regular file');
+        fs.ftruncateSync(pfd, 0);
         fs.fchmodSync(pfd, mode);
         fs.writeFileSync(pfd, shown.text);
         keptPrevious = true;

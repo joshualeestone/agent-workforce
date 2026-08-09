@@ -550,12 +550,15 @@ async function tick() {
         // this announced "the file has changed" after a bare `touch`, or after
         // an editor that re-saves without changing a byte, and told the person
         // to reopen the agent over a file identical to the one in the box.
-        const movedOn = fresh.instructions
-          && fresh.instructions.version
-          && INSTR_VERSION
-          && fresh.instructions.version !== INSTR_VERSION;
         const note = document.getElementById('d-instr-outdated');
-        note.hidden = !movedOn;
+        const seenVersion = fresh.instructions && fresh.instructions.version;
+        if (seenVersion && INSTR_VERSION) {
+          note.hidden = seenVersion === INSTR_VERSION;
+        }
+        // If the poll cannot see a version (the file became unreadable), say
+        // nothing new rather than RETRACTING a notice that was true. Hiding it
+        // there took a correct "this file has changed since you opened it" back
+        // off the screen while the box still held the older text.
       }
     }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
@@ -993,7 +996,14 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     // the one screen where someone has just replaced an agent's entire boot
     // file. It used to stay hidden until the agent was reopened, so the safety
     // net went unmentioned exactly when it had just been created.
-    document.getElementById('d-instr-prev').hidden = !(data.hasPrevious || data.keptPrevious);
+    //
+    // ⚠️ `keptPrevious` ALONE on this path, never `|| hasPrevious`.
+    // `hasPrevious` is true whenever any regular file sits at that name, so
+    // when the backup write failed the panel still promised "the version before
+    // your last save is kept" about a copy from two saves ago, or a zero-byte
+    // file left by a failed write. That inference is exactly what the engine
+    // returns `keptPrevious` to prevent, re-added in the browser.
+    document.getElementById('d-instr-prev').hidden = !data.keptPrevious;
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);
