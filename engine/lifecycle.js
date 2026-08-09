@@ -185,12 +185,26 @@ function sendCommand(target, command) {
     };
   }
 
+  // ⚠️ Two calls, and which one failed changes what is true afterwards.
+  //
+  // If the TEXT landed and the Enter did not, `/clear` is now sitting in a live
+  // agent's composer waiting to submit itself on the next keypress or at the
+  // end of its turn. That is the incident in this module's header. Reporting it
+  // as a clean "we could not reach that agent" would be the product saying
+  // nothing happened when something did, and the operator would never look.
+  let sent = false;
   try {
     run('tmux', ['send-keys', '-t', t, command]);
+    sent = true;
     run('tmux', ['send-keys', '-t', t, 'Enter']);
   } catch {
     // Never the raw errno: it carries absolute paths and says nothing useful.
-    return { outcome: OUTCOME.REFUSED, because: 'we could not reach that agent to ask' };
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: sent
+        ? `we could not finish, and ${command} may be sitting in its composer unsent, so check on it`
+        : 'we could not reach that agent to ask',
+    };
   }
   return {
     outcome: OUTCOME.ASKED,

@@ -322,3 +322,48 @@ test('only a real destructive action invalidates the commitment record', () => {
   assert.equal(inv('clear', OUTCOME.DRY_RUN), false, 'a dry run destroyed a real record');
   assert.equal(inv('restart', OUTCOME.DRY_RUN), false);
 });
+
+test('a two-part send that half-lands is not reported as harmless', () => {
+  // ⚠️ `sendCommand` types the text, then Enter, as two calls. If the text
+  // lands and the Enter throws, `/clear` is now SITTING IN THE COMPOSER of a
+  // live agent, waiting for the next keypress or turn end to submit itself.
+  //
+  // That is not a hypothetical: it is the incident in this module's own header,
+  // where a queued `/compact` would have wiped a conversation the moment the
+  // turn ended. Reporting it as a clean refusal ("we could not reach that agent
+  // to ask") is the screen saying nothing happened when something did.
+  let n = 0;
+  lifecycle.setRunner(() => { n += 1; if (n === 2) throw new Error('EPIPE'); return ''; });
+  const got = lifecycle.clear('angel', 'angel-discord:0.0');
+  assert.equal(got.outcome, lifecycle.OUTCOME.REFUSED);
+  assert.match(got.because, /may be sitting in its composer/,
+    'a half-sent command was reported as if nothing had happened');
+});
+
+test('only a pane that actually holds a running agent may be typed into', () => {
+  // ⚠️ The roster comes from `tmux list-panes -a`, which is EVERY pane on the
+  // machine. `/clear` and Enter typed into a plain shell is EXECUTED, not read
+  // as a slash command, so "is this on the roster" is not the same question as
+  // "may I type into this".
+  //
+  // Latent on this machine, where all thirteen sessions happen to be agents,
+  // which is exactly why it needs a test rather than an observation.
+  //
+  // ⚠️ What this pins is the CLASSIFICATION. The one-line refusal in the route
+  // that consumes it is NOT pinned: every live pane classifies as an agent, so
+  // removing that line leaves the suite green. Declared rather than implied.
+  const { isAgentPane } = require('./status');
+
+  assert.equal(isAgentPane({ session: 'angel-discord', command: '2.1.212' }), true);
+
+  for (const [pane, why] of [
+    [{ session: 'my-shell', command: '2.1.212' }, 'not a fleet session name'],
+    [{ session: 'angel-discord', command: 'zsh' }, 'a shell, whatever it is called'],
+    [{ session: 'angel-discord', command: 'bash' }, 'a shell'],
+    [{ session: 'notes', command: 'vim' }, 'an editor'],
+    [{ session: '', command: '2.1.212' }, 'no session'],
+    [{}, 'nothing at all'],
+  ]) {
+    assert.equal(isAgentPane(pane), false, `${why} was treated as an agent pane`);
+  }
+});

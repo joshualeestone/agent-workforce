@@ -79,6 +79,24 @@ function sh(cmd, args) {
 }
 
 /** Every agent pane on the machine, by tmux session name. */
+/**
+ * Is this pane one we are willing to send an agent command into?
+ *
+ * ⚠️ `list-panes -a` returns EVERY pane on the machine, and the roster it feeds
+ * gates the clear and compact routes. Without this, `/clear` and Enter would be
+ * typed into a plain shell, an editor, or a REPL, where the text is EXECUTED
+ * rather than read as a slash command. Latent while every session happens to be
+ * a Claude agent; live the moment anyone opens an unrelated tmux session.
+ *
+ * The fleet's sessions are `<name>-discord`. Matching on that is a convention
+ * rather than a proof, so it is paired with the process check the classifier
+ * already does: a pane running a shell is not an agent whatever it is called.
+ */
+function isAgentPane(pane) {
+  if (!pane || !/-discord$/.test(String(pane.session || ''))) return false;
+  return isClaudeRunning(pane.command);
+}
+
 function listPanes() {
   const fmt = '#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}';
   const out = sh('tmux', ['list-panes', '-a', '-F', fmt]);
@@ -87,6 +105,7 @@ function listPanes() {
     const [session, pane, command, ...titleParts] = line.split('\t');
     return {
       name: session.replace(/-discord$/, ''),
+      session,
       target: `${session}:${pane}`,
       command: command || '',
       title: titleParts.join('\t') || '',
@@ -525,6 +544,11 @@ function snapshot() {
       nameDerived: identity.derived,
       role: identity.role,
       target: pane.target,
+      // ⚠️ Whether this pane is one an action may be typed into. `list-panes -a`
+      // returns every pane on the machine, so the roster alone is not evidence
+      // that a pane holds an agent, and `/clear` typed into a shell is executed
+      // rather than read as a command.
+      isAgentPane: isAgentPane(pane),
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,
@@ -563,7 +587,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

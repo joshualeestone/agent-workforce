@@ -693,6 +693,21 @@ const server = http.createServer((req, res) => {
         }
 
         const agent = snapshot().agents.find((a) => a.sessionName === key);
+
+        // ⚠️ A pane we are willing to type into. The roster comes from
+        // `tmux list-panes -a`, which is EVERY pane on the machine, so without
+        // this `/clear` and Enter could be typed into a plain shell or an
+        // editor, where the text is executed rather than read as a command.
+        if (action !== 'restart' && !(agent && agent.isAgentPane)) {
+          sendJson(res, 409, {
+            action,
+            outcome: lifecycle.OUTCOME.REFUSED,
+            because: 'we are not confident that is a running agent, so we will not type into it',
+            holding: seen,
+          });
+          return;
+        }
+
         const result = lifecycle.perform(action, key, agent && agent.target);
 
         // ⚠️ Reconcile the record with what we just did to it.
@@ -708,11 +723,28 @@ const server = http.createServer((req, res) => {
         // the agent saying it holds nothing, and it said no such thing. Removing
         // the record leaves `unknown`, which is the true state — we destroyed
         // what it knew, and we cannot know what it holds until it speaks again.
-        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.markDestroyed(key);
+        // ⚠️ The return value is not discarded. `markDestroyed` returns false
+        // rather than throwing, so a tombstone that could not be written failed
+        // SILENTLY: the conversation destroyed, the record left standing, and
+        // the board serving "it reported these itself" at full confidence for
+        // the next thirty minutes with nothing anywhere saying so.
+        let reconciled = null;
+        if (lifecycle.invalidatesCommitments(action, result.outcome)) {
+          reconciled = commitments.markDestroyed(key);
+        }
+
+        // A reconciliation we could not perform is said out loud, appended to
+        // the engine's own sentence rather than replacing it: what we did still
+        // happened, and this is an additional thing the operator needs to know.
+        const because = reconciled === false
+          ? `${result.because}. We could not update our record of what it was holding, so the board may still show it for a while.`
+          : result.because;
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
           action,
           ...result,
+          because,
+          reconciled,
           // What it was holding when we acted, so the answer is a record of the
           // cost actually paid rather than of the cost quoted.
           holding: seen,

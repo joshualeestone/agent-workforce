@@ -1490,6 +1490,17 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       FRESH_FOR = fresh;
       FRESH_TOKEN = holdingToken(fresh.commitments);
       document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
+    } else {
+      // ⚠️ Not a corner case: this is the ordinary restart path. The agent is
+      // expected to be missing from the very next poll, and skipping the
+      // re-render left the list of just-destroyed work on screen under "What it
+      // is holding right now", callout and all, with Clear and Restart live
+      // beside it.
+      document.getElementById('fresh-holding').innerHTML =
+        '<div class="holding"><div class="cannot"><b>It is not on the board at the moment.</b> '
+        + 'That is expected right after a restart. Whatever it was holding is gone with the conversation.</div></div>';
+      document.getElementById('fresh-options').innerHTML = '';
+      FRESH_TOKEN = null;
     }
   } catch (err) {
     msg.textContent = err.message;
@@ -1501,12 +1512,26 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // dead end it exists to prevent. Two different things answer 409 — a stale
     // view, and an engine refusal — so the discriminator has to be structured.
     if (err.conflict) {
+      // ⚠️ Re-read from the SERVER first. `LAST` is only refreshed by the
+      // five-second poll, and a 409 is precisely the case where the client's
+      // copy is known to be wrong, so re-rendering from it announced "the list
+      // above has been updated" while showing the same stale list and
+      // recomputing the same stale token. Measured: the screen showed three
+      // items the server no longer held, and a second click reproduced it.
+      //
+      // The success path already awaited a poll before re-rendering. This one,
+      // which needs it more, did not.
+      await tick();
       const fresh = LAST.find((x) => x.sessionName === forAgent);
       if (fresh) {
         FRESH_FOR = fresh;
         FRESH_TOKEN = holdingToken(fresh.commitments);
         document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
         msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
+      } else {
+        // The agent has left the roster. Saying nothing here left the operator
+        // clicking into the same 409 forever with no way out but Cancel.
+        msg.textContent = 'What it is holding changed, and this agent is no longer on the board. Close this and open it again.';
       }
     }
   } finally {
