@@ -546,10 +546,14 @@ async function tick() {
         // the wrong thing. The staleness state exists to stop the screen
         // asserting something untrue about what an agent is running, and this
         // was that failure one level in.
+        // Compared on the CONTENT hash, not the mtime. Keyed on `editedAt`
+        // this announced "the file has changed" after a bare `touch`, or after
+        // an editor that re-saves without changing a byte, and told the person
+        // to reopen the agent over a file identical to the one in the box.
         const movedOn = fresh.instructions
-          && fresh.instructions.editedAt
-          && INSTR_LOADED_AT
-          && fresh.instructions.editedAt !== INSTR_LOADED_AT;
+          && fresh.instructions.version
+          && INSTR_VERSION
+          && fresh.instructions.version !== INSTR_VERSION;
         const note = document.getElementById('d-instr-outdated');
         note.hidden = !movedOn;
       }
@@ -764,6 +768,10 @@ async function loadInstructions(sessionName) {
   // used to leave the PREVIOUS agent's notice sitting on the new agent's panel,
   // beside a message saying this one could not be read at all.
   document.getElementById('d-instr-outdated').hidden = true;
+  // Reset with the rest: it used to survive onto the next agent's panel, so a
+  // failed load showed "the version before your last save is kept" about an
+  // agent with no folder at all.
+  document.getElementById('d-instr-prev').hidden = true;
   INSTR_LOADED_AT = null;
   renderStale(null);
 
@@ -981,6 +989,11 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     // disk.
     INSTR_LOADED_AT = (data.staleness && data.staleness.editedAt) || null;
     document.getElementById('d-instr-outdated').hidden = true;
+    // A save is the moment the kept version comes into existence, and this is
+    // the one screen where someone has just replaced an agent's entire boot
+    // file. It used to stay hidden until the agent was reopened, so the safety
+    // net went unmentioned exactly when it had just been created.
+    document.getElementById('d-instr-prev').hidden = !(data.hasPrevious || data.keptPrevious);
     // Re-derive rather than assume: saving makes the file newer than the
     // session, so this is exactly when the stale state becomes true.
     renderStale(data.staleness);

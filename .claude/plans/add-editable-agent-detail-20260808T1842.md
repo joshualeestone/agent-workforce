@@ -209,7 +209,10 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | Realpath containment (symlinked INTERMEDIATE component) | fails |
 | `unreadable` distinct from `absent` as a version | **green, declared untested in code** |
 | Controls disabled until the load lands | **green, no browser test harness** |
-| Keeping the replaced version as `CLAUDE.md.previous` | fails (3 tests) |
+| Keeping the replaced version as `CLAUDE.md.previous` | fails (2 tests) |
+| `O_NOFOLLOW` on the backup write | fails (2 tests) |
+| `hasPrevious` checking it is a regular file | fails (2 tests) |
+| `staleness` carrying the content version | fails (2 tests) |
 | `staleness` re-deriving showability itself | fails (3 tests) |
 | Conflict answering 409 rather than 400 | fails **only with a live tmux fleet** |
 | `editable` derived from prose instead of structure | **green, declared untested in code** |
@@ -506,8 +509,34 @@ before the rename, and the panel says so. That is not version history and it is
 not offered as a restore button. It means the bytes still exist for someone to
 put back, which is the difference between a mistake and a loss.
 
+Iteration 16 found a BLOCKER in the safety net iteration 15 had just added, and
+it was the worst single defect of the loop. `CLAUDE.md.previous` was written
+with a plain `writeFileSync`, whose default flag FOLLOWS a symlink, and that
+path is not one any containment guard looks at. So planting a link there gave an
+arbitrary file write outside the workers root, performed by the operator's own
+next Save. Measured: a file outside the root was replaced. The fourth symlink
+route into this directory, opened by the thing added to make the feature safer.
+
+It is now opened with `O_NOFOLLOW`, which fails rather than follows, and
+`fchmod`ed explicitly because the `mode` argument only applies when a file is
+CREATED, so an existing backup kept whatever mode it was first made with: a
+CLAUDE.md the operator later locked to 0600 left its previous contents at 0644.
+The same permission leak the temp-file path had already been fixed for,
+reintroduced two lines away.
+
+Two further honesty problems in the same code: a backup that failed to write was
+swallowed while the panel kept promising "the version before your last save is
+kept", and `existsSync` reported a DIRECTORY planted at that path as a kept
+version. The write now returns whether it actually kept anything, and
+`hasPrevious` requires a regular file.
+
+Separately, the "this file has changed since you opened it" notice compared
+mtimes, so a bare `touch` announced a change and told the person to reopen the
+agent, discarding the box, over a byte-identical file. It compares the content
+hash now, which the status poll carries.
+
 Every row above was produced by actually deleting the guard and running the
-suite, not by reading the code. Ten rows are green. Every engine row says so at the guard itself; the browser
+suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
 for "this file has no automated coverage at all".
 
@@ -525,4 +554,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**181 tests, zero dependencies.**
+**186 tests, zero dependencies.**

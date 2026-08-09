@@ -248,6 +248,13 @@ function staleness(agent, seen) {
 
   const editedAt = file.stat.mtime.getTime();
 
+  // The CONTENT version, on every answer that has a readable file, so a caller
+  // polling this can tell a real edit from a touched timestamp. It was on the
+  // fully-compared path only, so any agent whose session start we cannot
+  // resolve carried no version at all and the panel silently fell back to
+  // announcing nothing.
+  const version = versionOf(true, file.buf);
+
   // An mtime can arrive as NaN, and on some filesystems as the epoch. Both stop
   // here so the answer says which kind of not-knowing it is, and so we do not
   // report `editedAt: 1970-01-01` as though it were a real edit time.
@@ -271,6 +278,7 @@ function staleness(agent, seen) {
     return {
       state: STALENESS.UNKNOWN,
       editedAt: iso(editedAt),
+      version,
       because: 'we cannot tell when this agent last started',
     };
   }
@@ -279,6 +287,7 @@ function staleness(agent, seen) {
     ...compare(editedAt, startedAt),
     editedAt: iso(editedAt),
     startedAt: iso(startedAt),
+    version,
   };
 }
 
@@ -411,7 +420,13 @@ function read(agent) {
     version: versionOf(true, seen.buf),
     // Whether there is a version to go back to. The screen says so; bytes on
     // disk nobody is told about are half a safety net.
-    hasPrevious: fs.existsSync(`${seen.file}.previous`),
+    //
+    // A REGULAR FILE, not merely something at that path: `existsSync` is true
+    // for a directory, so a directory planted there had the panel promising a
+    // kept version that was an empty folder.
+    hasPrevious: (() => {
+      try { return fs.lstatSync(`${seen.file}.previous`).isFile(); } catch { return false; }
+    })(),
     // `editedAt` is reported for display only. The changed-since-read guard
     // keys on `version` above, NOT on this: an mtime is not a version.
     editedAt: iso(seen.stat.mtime.getTime()),
@@ -518,6 +533,7 @@ function write(agent, text, expectedVersion) {
   // synchronous end to end. Between processes it can, and closing it needs a
   // lock file rather than a comment. Stated so the guarantee is not read as
   // stronger than it is.
+  let keptPrevious = false;
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     // ⚠️ `wx`, not the default `w`. The temp name is predictable, and the
@@ -569,10 +585,45 @@ function write(agent, text, expectedVersion) {
     // failure at any point leaves either the old file or the old file plus a
     // copy of itself. Not version history, and not offered in the UI yet: the
     // point is that the bytes still exist on disk for someone to put back.
+    keptPrevious = false;
     if (shown && shown.exists) {
+      // ⚠️ `O_NOFOLLOW`, and an explicit chmod, because this backup was itself
+      // a way out of the workers directory.
+      //
+      // Written with a plain `writeFileSync`, it used the default `w` flag,
+      // which FOLLOWS a symlink. `CLAUDE.md.previous` is not a path any of the
+      // containment guards look at, so planting a link there gave an arbitrary
+      // file write outside the root, performed by the operator's next Save.
+      // Measured: a file outside the root was replaced. That is the fourth
+      // symlink route into this directory and the only one the module had not
+      // closed, added by the safety net itself.
+      //
+      // `wx` is not available here: the backup has to be replaceable. So the
+      // file is opened with `O_NOFOLLOW`, which fails rather than follows, and
+      // `O_TRUNC` to replace the contents.
+      //
+      // The mode is set with an explicit `fchmod` rather than the `mode`
+      // argument, because that argument only applies when the file is CREATED:
+      // an existing backup kept whatever mode it was first made with, so a
+      // CLAUDE.md the operator later locked to 0600 left its previous contents
+      // sitting at 0644. The same leak the temp-file path was fixed for.
+      let pfd;
       try {
-        fs.writeFileSync(`${file}.previous`, shown.text, { mode });
-      } catch { /* a missing backup must never block the save itself */ }
+        pfd = fs.openSync(
+          `${file}.previous`,
+          fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW,
+          mode,
+        );
+        fs.fchmodSync(pfd, mode);
+        fs.writeFileSync(pfd, shown.text);
+        keptPrevious = true;
+      } catch {
+        // A backup that could not be written must never block the save. It
+        // must also never be CLAIMED: `keptPrevious` stays false and the answer
+        // says so, rather than the screen promising a version that is not there.
+      } finally {
+        if (pfd !== undefined) { try { fs.closeSync(pfd); } catch { /* gone */ } }
+      }
     }
 
     fs.renameSync(tmp, file);
@@ -584,7 +635,10 @@ function write(agent, text, expectedVersion) {
     throw new Error('those instructions could not be saved');
   }
 
-  return read(agent);
+  // The answer carries whether the backup ACTUALLY happened, rather than
+  // letting the caller infer it from a file that might be a directory, a stale
+  // copy from two saves ago, or a link we refused to follow.
+  return { ...read(agent), keptPrevious };
 }
 
 module.exports = {

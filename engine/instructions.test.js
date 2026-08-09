@@ -222,6 +222,59 @@ test('the version being replaced is kept beside the file', () => {
     'the replaced version was not kept');
 });
 
+test('a planted backup symlink cannot redirect the write out of the root', (t) => {
+  // ⚠️ The FOURTH symlink route into the workers directory, opened by the
+  // safety net itself. `CLAUDE.md.previous` is not a path any containment guard
+  // looks at, and the backup was written with the default flag, which follows a
+  // link. Measured before the fix: a file outside the root was replaced, by the
+  // operator's own Save.
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-prevlink-'));
+  const target = path.join(outside, 'target.txt');
+  fs.writeFileSync(target, 'A FILE OUTSIDE THE ROOT THAT MUST NOT BE TOUCHED');
+  const file = makeAgent('prevlinkagent', 'the original instructions for this agent');
+  try {
+    fs.symlinkSync(target, `${file}.previous`);
+  } catch {
+    fs.rmSync(outside, { recursive: true, force: true });
+    t.skip('symlinks are unavailable on this filesystem');
+    return;
+  }
+  try {
+    const got = instructions.write('prevlinkagent', 'a replacement set of instructions here');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'A FILE OUTSIDE THE ROOT THAT MUST NOT BE TOUCHED',
+      'the backup followed a symlink out of the workers root');
+    // The save itself still succeeds: a backup that cannot be written must
+    // never block it. But it must not be CLAIMED either.
+    assert.equal(got.keptPrevious, false, 'claimed to keep a version it could not write');
+    assert.equal(got.hasPrevious, false, 'a symlink is not a kept version');
+  } finally {
+    fs.rmSync(`${file}.previous`, { force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a directory at the backup path is not reported as a kept version', () => {
+  // `existsSync` is true for a directory, so the panel promised "the version
+  // before your last save is kept" about an empty folder.
+  const file = makeAgent('prevdiragent', 'the original instructions for this agent');
+  fs.mkdirSync(`${file}.previous`, { recursive: true });
+  const got = instructions.write('prevdiragent', 'a replacement set of instructions here');
+  assert.equal(got.keptPrevious, false);
+  assert.equal(got.hasPrevious, false, 'a directory was reported as a kept version');
+});
+
+test('the kept version carries the live file permissions, not the ones it was created with', () => {
+  // The `mode` argument to writeFileSync only applies when the file is CREATED,
+  // so an existing backup kept whatever mode it was first made with: a file the
+  // operator later locked to 0600 left its previous contents at 0644.
+  const file = makeAgent('prevmodeagent', 'v1 instructions for the mode test agent');
+  instructions.write('prevmodeagent', 'v2 instructions for the mode test agent');
+  fs.chmodSync(file, 0o600);
+  instructions.write('prevmodeagent', 'v3 instructions for the mode test agent');
+  assert.equal(fs.statSync(`${file}.previous`).mode & 0o777, 0o600,
+    'the kept version stayed world-readable after the live file was locked down');
+});
+
 test('a first save has nothing to keep and does not invent a backup', () => {
   fs.mkdirSync(path.join(ROOT, 'firstsave'), { recursive: true });
   instructions.write('firstsave', 'the first instructions this agent has ever had');
@@ -763,6 +816,37 @@ test('read says whether a save is possible as a field, not as prose', () => {
   fs.writeFileSync(path.join(ROOT, 'editablelatin', 'CLAUDE.md'),
     Buffer.from('You are Ren\xE9 here.\n', 'latin1'));
   assert.equal(instructions.read('editablelatin').editable, false);
+});
+
+test('staleness carries a content version, so a touch is not an edit', () => {
+  // ⚠️ The panel polls this to decide whether to announce "this file has
+  // changed since you opened it" and tell the person to reopen the agent,
+  // which discards whatever is in the box. Keyed on `editedAt` it fired after a
+  // bare `touch`, or after any editor that re-saves without changing a byte,
+  // over a file identical to the one on screen. This module's own comment says
+  // an mtime is not a version; the poll simply did not carry one.
+  const file = makeAgent('versionpoll', 'the instructions for this agent, unchanged throughout');
+  makeSession('versionpoll', 'sess-versionpoll');
+
+  const first = instructions.staleness('versionpoll').version;
+  assert.ok(first, 'staleness must carry a version for a readable file');
+
+  fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  assert.equal(instructions.staleness('versionpoll').version, first,
+    'a touch with no content change reported as a different version');
+
+  fs.writeFileSync(file, 'genuinely different instructions now for this agent');
+  assert.notEqual(instructions.staleness('versionpoll').version, first,
+    'a real edit did not change the version');
+});
+
+test('a version rides along even when the session start is unknown', () => {
+  // It was on the fully-compared path only, so any agent whose session we
+  // cannot resolve carried no version and the panel silently announced nothing.
+  makeAgent('versionnosession', 'instructions for an agent with no resolvable session');
+  const got = instructions.staleness('versionnosession');
+  assert.equal(got.state, instructions.STALENESS.UNKNOWN);
+  assert.ok(got.version, 'no version on the unknown-session path');
 });
 
 test('staleness never throws, whatever is at the path', () => {
