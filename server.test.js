@@ -155,6 +155,46 @@ test('an API route never answers with HTML, whatever the query string or method'
   }
 });
 
+test('a request claiming a non-loopback Host is refused', async () => {
+  // ⚠️ DNS rebinding. The routing check inspects the request TARGET; this
+  // inspects what the client thinks it is talking to, and they are different
+  // questions. Without it the server answers `Host: evil.example.com` with the
+  // full agent roster, which means a page on another site whose DNS is then
+  // pointed at 127.0.0.1 becomes same-origin with this server: no CORS
+  // preflight, the response readable, and every write route reachable.
+  //
+  // The gap predates this branch and was survivable while the writes were an
+  // avatar and a job title. It is not survivable now that the same hole rewrites
+  // the file an agent boots from.
+  // ⚠️ Driven with `node:http`, NOT `fetch`. `Host` is a forbidden header name,
+  // so fetch silently drops it and the request goes out with the real host: a
+  // version of this test written with `fetch` passes against a server that has
+  // no check at all, which is the "test that pins nothing" shape exactly.
+  const raw = (host) => new Promise((resolve, reject) => {
+    const r = require('node:http').request({
+      host: '127.0.0.1', port: server.address().port, path: '/api/status',
+      method: 'GET', headers: { Host: host },
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    r.on('error', reject);
+    r.end();
+  });
+
+  const evil = await raw('evil.example.com');
+  assert.equal(evil.status, 400, 'a rebound host was served the agent roster');
+  assert.ok(!evil.body.includes('sessionName'), 'the roster leaked in the refusal');
+
+  // Every spelling of loopback still works, and the PORT is deliberately not
+  // compared: a proxy in front of this process legitimately names another one.
+  for (const host of ['localhost:1', '127.0.0.1:65535', '[::1]:4317']) {
+    const ok = await raw(host);
+    assert.notEqual(ok.status, 400, `${host} should still be routed`);
+  }
+});
+
 test('an unknown agent avatar still 404s with a query string attached', async () => {
   // Before the fix this was a 200 and the HTML page, which is indistinguishable
   // from success to an <img> tag -- it just renders broken.

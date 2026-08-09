@@ -511,6 +511,9 @@ function card(a) {
 async function tick() {
   const checked = document.getElementById('checked');
   try {
+    // Captured BEFORE the request goes out, so a slow poll can be recognised as
+    // predating a save or a reload.
+    const pollEpoch = INSTR_EPOCH;
     const res = await fetch('/api/status', { cache: 'no-store' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
@@ -531,7 +534,6 @@ async function tick() {
     // This poll already carries fresh `instructions` for every agent, so it is
     // one call. Same fact, one source: the shape this whole branch is about.
     if (CURRENT) {
-      const atLoad = INSTR_LOAD;
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
@@ -553,11 +555,17 @@ async function tick() {
         // to reopen the agent over a file identical to the one in the box.
         const note = document.getElementById('d-instr-outdated');
         const seenVersion = fresh.instructions && fresh.instructions.version;
-        // A poll issued before a save can land after it, carrying the pre-save
-        // version, and would then announce "this file has changed since you
-        // opened it" over text that was just saved successfully.
-        if (INSTR_LOAD !== atLoad) return;
-        if (seenVersion && INSTR_VERSION) {
+        // ⚠️ Skip a poll that was ISSUED before the panel's version last
+        // changed. Its payload predates the change, so acting on it announces
+        // "this file has changed since you opened it" over text that was just
+        // saved successfully.
+        //
+        // An earlier version of this guard captured the token AFTER both
+        // awaits, which compared a value to itself and could never fire, and
+        // returned from `tick()` outright, which would have skipped the grid
+        // repaint and the freshness stamp. A guard credited with preventing a
+        // failure it cannot prevent is the defect this branch keeps finding.
+        if (pollEpoch === INSTR_EPOCH && seenVersion && INSTR_VERSION) {
           note.hidden = seenVersion === INSTR_VERSION;
         }
 
@@ -745,6 +753,14 @@ let INSTR_LOAD = 0;
 let INSTR_VERSION = null;
 
 /**
+ * Bumped whenever the panel's idea of the file changes: a load, or a save.
+ *
+ * A poll issued before either of those lands afterwards carrying the older
+ * version, and acting on it makes the panel contradict what just happened.
+ */
+let INSTR_EPOCH = 0;
+
+/**
  * Whether the box currently holds a version we actually received.
  *
  * ⚠️ Save must refuse unless this is true, and NOT merely fall back to sending
@@ -770,6 +786,7 @@ let INSTR_READY = false;
 
 async function loadInstructions(sessionName) {
   const mine = ++INSTR_LOAD;
+  INSTR_EPOCH += 1;
   INSTR_VERSION = null;
   INSTR_READY = false;
   const box = document.getElementById('d-instr');
@@ -1012,6 +1029,7 @@ document.getElementById('d-instr-save').addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'that did not work');
     msg.textContent = 'Saved.';
     INSTR_VERSION = data.version || null;
+    INSTR_EPOCH += 1;
     // ⚠️ Updating INSTR_VERSION above is what stops the very next poll deciding
     // the file has "changed since you opened it" and telling the person to
     // reopen the agent, discarding the box. On 100% of saves, on the feature's

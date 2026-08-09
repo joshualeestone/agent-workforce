@@ -251,7 +251,19 @@ function staleness(agent, seen) {
     // `unknown` with no version, so a panel that disabled the editor on that
     // basis also disabled it for an agent whose first instruction file has not
     // been written, which is the one case the create path exists for.
-    return { state: STALENESS.UNKNOWN, because: file.because, editable: file.missing === true };
+    return {
+      state: STALENESS.UNKNOWN,
+      because: file.because,
+      editable: file.missing === true,
+      // ⚠️ `absent` here too, matching `read`. It was omitted, so a panel open
+      // on an agent whose file was then DELETED never heard about it: the
+      // comparison needs a version on both sides and short-circuited on
+      // `undefined`. `ABSENT` was defined as "a real version rather than the
+      // absence of one" precisely so that "there was a file and now there is
+      // not" compares unequal like any other change; that held on the read
+      // path and was dropped on the poll path.
+      version: file.missing === true ? ABSENT : UNREADABLE,
+    };
   }
 
   const editedAt = file.stat.mtime.getTime();
@@ -280,6 +292,7 @@ function staleness(agent, seen) {
     return {
       state: STALENESS.UNKNOWN,
       editable,
+      version,
       because: 'we cannot tell when its instruction file was last edited',
     };
   }

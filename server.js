@@ -156,6 +156,37 @@ function pathOf(req) {
   // property we care about rather than a spelling of it.
   if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
 
+  // ⚠️ And the `Host` HEADER, which is a different question from the target's
+  // authority and closes a different hole.
+  //
+  // The check above inspects what the client ASKED FOR. This one inspects what
+  // it thinks it is talking to, and without it the server answers
+  // `Host: evil.example.com` with the full agent roster. That is DNS rebinding:
+  // a page on some other site, whose DNS then points at 127.0.0.1, becomes
+  // same-origin with this server, so no CORS preflight is involved and the
+  // response is readable. The attacker enumerates the agents and then PUTs a
+  // new instruction file for any of them.
+  //
+  // This gap predates the branch and was survivable while the writes were an
+  // avatar and a job title. It is not survivable now: this server edits the
+  // file an agent boots from, so the same hole is remote code execution by the
+  // agent, one restart later. The comment above `start()` used to enumerate
+  // "two ways that protection is lost" and this was not one of them.
+  //
+  // A port is legitimately different behind a proxy, so only the HOSTNAME is
+  // compared, exactly as above. A request with no `Host` at all is HTTP/1.0 or
+  // a raw socket, neither of which is a browser being rebound.
+  const sent = req.headers && req.headers.host;
+  if (sent) {
+    let asked;
+    try {
+      asked = new URL(`http://${sent}`).hostname;
+    } catch {
+      return null;
+    }
+    if (!LOOPBACK_HOSTS.has(asked)) return null;
+  }
+
   return parsed.pathname;
 }
 

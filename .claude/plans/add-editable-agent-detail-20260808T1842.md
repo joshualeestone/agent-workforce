@@ -216,6 +216,7 @@ The `startsWith(ROOT)` containment assertion in `fileFor()` is **not load-bearin
 | `nlink` (hard link) on the backup write | fails |
 | `ftruncate` on the backup write | fails |
 | `staleness` carrying `editable` | fails |
+| `Host` header checked against loopback (DNS rebinding) | fails |
 | `fchmod` on the backup write | fails |
 | `hasPrevious` checking it is a regular file | fails (2 tests) |
 | `staleness` carrying the content version | fails (2 tests) |
@@ -601,6 +602,36 @@ dangerous path in the product, written with the confidence that comes from
 believing you are making things safer. It earns more scrutiny than what it
 protects, not less. That is worth more than any individual fix in this table.
 
+Iteration 20 found no blockers and said it would ship this. Its four findings
+were all worth having.
+
+The generation guard I added in iteration 19 was a **tautology**: the token was
+captured after both awaits, so it compared a value to itself and could never
+fire. It also would have returned from `tick()` outright, skipping the grid
+repaint and the freshness stamp, if it ever had. A guard credited with
+preventing a failure it cannot prevent, which is the defect this loop has now
+found in my own code six times. It is a real epoch counter now, bumped on both
+a load and a save, captured before the request goes out.
+
+It also found `staleness` omitting the version on two paths where `read` returns
+one, so a panel open on an agent whose file was then DELETED never heard about
+it. `ABSENT` exists precisely so "there was a file and now there is not"
+compares unequal; that held on the read path and had been dropped on the poll
+path.
+
+And it pointed out that **DNS rebinding was survivable before this branch and is
+not now.** The server never checked the `Host` header, so a page on any site
+whose DNS is repointed at 127.0.0.1 becomes same-origin with it: no preflight,
+the response readable, every write route reachable. That was a bad afternoon
+when the writes were an avatar and a job title. It is remote code execution by
+the agent, one restart later, now that the same hole rewrites the file an agent
+boots from. Closed, and pinned.
+
+⚠️ The test for it had to be rewritten with `node:http`: `Host` is a forbidden
+header name, so `fetch` silently drops it and the first version of the test
+passed against a server with no check at all. A test that pins nothing, written
+while adding the guard it was supposed to pin.
+
 Every row above was produced by actually deleting the guard and running the
 suite, not by reading the code. Nine rows are green. Every engine row says so at the guard itself; the browser
 rows say so in `web/index.html` at `INSTR_LOADED_AT`, which is the honest place
@@ -620,4 +651,4 @@ pinned the helper while nothing pinned that production code called it. Two rows
 are still green and are declared as such in both the code and the test, because
 a guard that looks covered and is not is worse than one openly marked untested.
 
-**191 tests, zero dependencies.**
+**192 tests, zero dependencies.**
