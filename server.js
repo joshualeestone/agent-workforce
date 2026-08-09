@@ -173,6 +173,38 @@ function withToken(seen) {
   return { ...seen, token: holdingToken(seen) };
 }
 
+/**
+ * Turn a thrown error into what the operator is told.
+ *
+ * ⚠️ Only messages we WROTE are echoed back. Everything in the fresh-start
+ * chain that throws deliberately does so with a sentence composed for a person,
+ * and those all set `code`. Anything else arriving here is an unexpected throw
+ * — and `snapshot()` is in that chain, shelling out to tmux and reading
+ * transcripts, so it surfaces filesystem errnos and absolute home directory
+ * paths. Passing `err.message` through verbatim put those on screen, against
+ * the rule stated on `safeTarget` and plan item 1.5.
+ *
+ * Keyed on a `code` WE set, not on pattern-matching the text, for the same
+ * reason `editable` is a structured field rather than a regex over English.
+ *
+ * Extracted rather than left inline for the same reason `mayTypeInto` was: the
+ * inline version could not be pinned, because provoking a genuine unexpected
+ * throw from the route means breaking tmux or the filesystem under a live
+ * fleet. As a function the refusal is testable directly.
+ */
+const OUR_ERRORS = new Set(['CONFLICT', 'SAY_WHAT']);
+
+function errorAnswer(err) {
+  const code = err && err.code;
+  if (!OUR_ERRORS.has(code)) {
+    return { status: 500, error: 'something went wrong here, and we could not tell what' };
+  }
+  return {
+    status: code === 'CONFLICT' ? 409 : 400,
+    error: String(err.message),
+  };
+}
+
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -667,7 +699,24 @@ const server = http.createServer((req, res) => {
     const name = decodeSegment(life[1]);
     const action = life[2];
     if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
-    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+
+    // ⚠️ ONE snapshot for the gate AND the action, taken here.
+    //
+    // This route asked twice: `knownAgent` took a snapshot to decide the agent
+    // exists, and the body handler took another to find the record it acts on.
+    // Two shell-outs to `tmux list-panes` plus a transcript read for every agent
+    // on the machine, per click — but the reason to fix it is not the cost. Two
+    // reads of one fact is the defect this codebase has found in seven places,
+    // and here it opens a window where the agent is present for the gate and
+    // gone for the lookup, so `agent` arrives at `mayTypeInto` as undefined
+    // after the route has already decided the agent is real.
+    let agent = null;
+    try {
+      agent = snapshot().agents.find((a) => a.sessionName === store.safeKey(name)) || null;
+    } catch {
+      agent = null;
+    }
+    if (!agent) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
 
     readBody(req)
       .then((buf) => {
@@ -713,7 +762,9 @@ const server = http.createServer((req, res) => {
         const seen = commitments.read(key);
         {
           if (typeof patch.holding !== 'string') {
-            throw new Error('say what you were shown this would lose');
+            const err = new Error('say what you were shown this would lose');
+            err.code = 'SAY_WHAT';
+            throw err;
           }
           if (patch.holding !== holdingToken(seen)) {
             const err = new Error('what this agent is holding changed since you were shown it, look again before going ahead');
@@ -721,8 +772,6 @@ const server = http.createServer((req, res) => {
             throw err;
           }
         }
-
-        const agent = snapshot().agents.find((a) => a.sessionName === key);
 
         // ⚠️ A pane we are willing to type into. The roster comes from
         // `tmux list-panes -a`, which is EVERY pane on the machine, so without
@@ -789,7 +838,8 @@ const server = http.createServer((req, res) => {
         });
       })
       .catch((err) => {
-        sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
+        const answer = errorAnswer(err);
+        sendJson(res, answer.status, { error: answer.error });
       });
     return;
   }
@@ -896,4 +946,4 @@ if (require.main === module) {
 // re-implementation of it. Testing the path helper in isolation would not have
 // caught the routing bug, because the helper was never the broken part -- the
 // routes reading `req.url` around it were.
-module.exports = { server, start, pathOf, decodeSegment };
+module.exports = { server, start, pathOf, decodeSegment, errorAnswer };

@@ -375,10 +375,27 @@ function perform(action, agent, target) {
  *     instead approve an arbitrary tool call nobody saw, and the answer would
  *     say "we asked it to compact".
  *
- * `restart` is exempt from both: it goes through launchd and types nothing.
+ * `restart` types nothing, so the second refusal does not apply to it. It is
+ * NOT exempt from the first.
+ *
+ * ⚠️ It used to be exempt from both, and that was a live hole. The roster is
+ * every tmux pane on the machine with the `-discord` suffix merely STRIPPED,
+ * never required, so a plain shell in a session called `mikey` appeared as an
+ * agent named `mikey` — and its Restart button ran `restart-bot.sh mikey`
+ * against the real bot. "It goes through launchd" answers whether the ACTION is
+ * safe; it does not answer whether this card is the agent that service belongs
+ * to, which is the question that was never asked.
+ *
+ * Restart checks `isAgentSession` rather than `isAgentPane`: the difference is
+ * the copy-mode clause, which is about typing, and restart does not type.
  */
 function mayTypeInto(action, agent) {
-  if (action === 'restart') return { ok: true };
+  if (action === 'restart') {
+    if (!agent || !agent.isAgentSession) {
+      return { ok: false, because: 'we are not confident that card is one of your agents, so we will not restart anything under its name' };
+    }
+    return { ok: true };
+  }
   if (!agent || !agent.isAgentPane) {
     return { ok: false, because: 'we are not confident that is a running agent, so we will not type into it' };
   }

@@ -17,6 +17,11 @@ const {
   classify,
   modelDisplayName,
   readIdentity,
+  isAgentPane,
+  isAgentSession,
+  parsePanes,
+  PANE_FORMAT,
+  PANE_COLUMNS,
   STATE,
   CONFIDENCE,
   CONTEXT_LIMITS,
@@ -149,4 +154,80 @@ test('claudebot resolves to Splinter via explicit override', () => {
   const id = readIdentity('claudebot');
   assert.equal(id.displayName, 'Splinter');
   assert.equal(id.derived, true);
+});
+
+// ---------------------------------------------------------------------------
+// The roster: what tmux told us, and what we decided it meant
+// ---------------------------------------------------------------------------
+
+test('the pane format and the pane parser cannot drift apart', () => {
+  // ⚠️ These were two separate literals — a format string and a positional
+  // destructure — with nothing tying them together. Deleting `#{pane_in_mode}`
+  // from the format, or reordering any column, left the entire suite green
+  // while `inMode` silently held the pane TITLE. `inMode !== '1'` is then true
+  // for every pane, so every copy-mode pane classifies as typeable: the exact
+  // case the clause exists to refuse, switched off by an edit nowhere near it.
+  //
+  // They are one list now. This asserts the property that makes that true.
+  assert.equal(PANE_FORMAT, PANE_COLUMNS.map((c) => c.fmt).join('\t'));
+  assert.ok(PANE_FORMAT.includes('#{pane_in_mode}'), 'copy-mode is no longer being asked for');
+
+  // Round-trip a line built from the format's own column order.
+  const line = ['angel-discord', '0.0', '2.1.212', '0', 'Idle'].join('\t');
+  const [got] = parsePanes(line);
+  assert.equal(got.session, 'angel-discord');
+  assert.equal(got.name, 'angel');
+  assert.equal(got.target, 'angel-discord:0.0');
+  assert.equal(got.command, '2.1.212');
+  assert.equal(got.inMode, '0');
+  assert.equal(got.title, 'Idle');
+});
+
+test('a pane title containing a tab does not shift every other column', () => {
+  // `pane_title` is the one field that can carry a tab, which is why it is last
+  // and absorbs the remainder. If it were not, a title with a tab would push
+  // real values into the wrong fields — and the field it would corrupt first is
+  // whichever came after it.
+  const line = ['bram-discord', '1.2', 'node', '1', 'Working\ton\tthe thing'].join('\t');
+  const [got] = parsePanes(line);
+  assert.equal(got.command, 'node');
+  assert.equal(got.inMode, '1');
+  assert.equal(got.title, 'Working\ton\tthe thing');
+});
+
+test('a truncated pane line is treated as in copy-mode, not as safe to type into', () => {
+  // ⚠️ The default for a missing `inMode` is '1' (in copy-mode), not '0'.
+  // Defaulting to '0' reads as "not in copy mode, safe to type" — asserting the
+  // SAFE answer from an absence of information, which is the one move this
+  // engine exists to refuse. Flipping the default to '0' fails this test.
+  const [got] = parsePanes('angel-discord\t0.0\t2.1.212');
+  assert.equal(got.inMode, '1');
+  assert.equal(isAgentPane(got), false, 'a truncated line was ruled typeable');
+
+  // It is still recognisably one of our agent sessions, so restart — which
+  // sends no keystrokes — is not taken away by a short line.
+  assert.equal(isAgentSession(got), true);
+});
+
+test('no output and empty output both yield an empty roster, not a crash', () => {
+  // `sh` returns null when tmux is missing or times out. A roster that throws
+  // here takes down every route, including the ones that only read.
+  assert.deepEqual(parsePanes(null), []);
+  assert.deepEqual(parsePanes(''), []);
+  assert.deepEqual(parsePanes('\n\n'), []);
+});
+
+test('a plain shell in an agent-named session is not restartable', () => {
+  // ⚠️ The roster STRIPS the `-discord` suffix but never requires it, so a
+  // person running `tmux new -s mikey` appears on the board as an agent named
+  // `mikey`. Restart was exempt from every roster check, so that card's Restart
+  // button ran `restart-bot.sh mikey` against the REAL bot.
+  const [impostor] = parsePanes('mikey\t0.0\tzsh\t0\t');
+  assert.equal(impostor.name, 'mikey', 'the card really does claim to be mikey');
+  assert.equal(isAgentSession(impostor), false, 'a shell was accepted as an agent session');
+  assert.equal(isAgentPane(impostor), false);
+
+  // And the suffix alone is not enough either: the process still has to be one.
+  const [shellInSuffix] = parsePanes('mikey-discord\t0.0\tzsh\t0\t');
+  assert.equal(isAgentSession(shellInSuffix), false);
 });

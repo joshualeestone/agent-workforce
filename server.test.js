@@ -1362,7 +1362,22 @@ test('the browser fallback descriptions match the engine word for word', async (
   for (const id of ['compact', 'clear', 'restart']) {
     assert.ok(page.includes(engine[id].what), `the page's fallback "what" for ${id} has drifted`);
     assert.ok(page.includes(engine[id].loses), `the page's fallback "loses" for ${id} has drifted`);
+    assert.ok(page.includes(`label: '${engine[id].label}'`), `the page's fallback label for ${id} has drifted`);
   }
+
+  // ⚠️ `gentlest` too, not just the prose. It decides which button is visually
+  // primary, and the fallback is what renders for every `?fresh=` deep link and
+  // every render before `/api/actions` resolves. If the engine ever moved
+  // `gentlest` to a different action, a fallback still marking Compact primary
+  // would put the wrong recommendation on the most destructive screen here —
+  // and no assertion on wording would notice.
+  const gentlestInEngine = ['compact', 'clear', 'restart'].filter((id) => engine[id].gentlest);
+  assert.deepEqual(gentlestInEngine, ['compact'], 'the engine changed which action is gentlest');
+  const fallbackGentlest = [...page.matchAll(/(\w+): \{ label: '[^']*', gentlest: (true|false)/g)]
+    .filter((m) => m[2] === 'true')
+    .map((m) => m[1]);
+  assert.deepEqual(fallbackGentlest, gentlestInEngine,
+    'the page marks a different action gentlest than the engine does');
 });
 
 /**
@@ -1450,6 +1465,42 @@ test('an unreadable check time is flagged stale, not silently treated as fresh',
   assert.equal(decide(NaN), ' stale', 'an unknown age renders as freshly checked');
   assert.equal(decide(5), '', 'a recent check is wrongly flagged stale');
   assert.equal(decide(120), ' stale', 'an old check is not flagged');
+});
+
+test('an unexpected failure never puts an errno or a path on screen', () => {
+  // ⚠️ The fresh-start chain calls `snapshot()`, which shells out to tmux and
+  // reads transcripts, so an unexpected throw here carries filesystem errnos
+  // and absolute home-directory paths. The catch echoed `err.message` verbatim,
+  // which handed both to the operator — against the rule `safeTarget` states
+  // and plan item 1.5.
+  //
+  // Pinned as a function because provoking a genuine unexpected throw from the
+  // live route would mean breaking tmux or the filesystem under a running
+  // fleet. Same reasoning that made `mayTypeInto` a function.
+  const { errorAnswer } = require('./server');
+
+  const leaky = new Error("EACCES: permission denied, open '/Users/agent1/.claude/projects/x.jsonl'");
+  const answer = errorAnswer(leaky);
+  assert.equal(answer.status, 500);
+  assert.doesNotMatch(answer.error, /EACCES|\/Users\/|\.jsonl/, 'the raw error reached the operator');
+
+  // Deleting the allowlist check fails the assertion above. These two pin the
+  // other direction: the guard must not swallow the sentences we wrote FOR the
+  // operator, which are the whole point of the confirmation flow.
+  const conflict = new Error('what this agent is holding changed since you were shown it, look again before going ahead');
+  conflict.code = 'CONFLICT';
+  assert.equal(errorAnswer(conflict).status, 409);
+  assert.match(errorAnswer(conflict).error, /changed since you were shown it/);
+
+  const missing = new Error('say what you were shown this would lose');
+  missing.code = 'SAY_WHAT';
+  assert.equal(errorAnswer(missing).status, 400);
+  assert.match(errorAnswer(missing).error, /say what you were shown/);
+
+  // A thrown non-Error, and a code we never set, both land on the safe side.
+  assert.equal(errorAnswer(null).status, 500);
+  assert.equal(errorAnswer({ code: 'ENOENT', message: '/Users/agent1/secret' }).status, 500);
+  assert.doesNotMatch(errorAnswer({ code: 'ENOENT', message: '/Users/agent1/secret' }).error, /Users/);
 });
 
 test('the action descriptions are served from the engine', async () => {

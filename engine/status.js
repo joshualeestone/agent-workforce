@@ -78,12 +78,11 @@ function sh(cmd, args) {
   }
 }
 
-/** Every agent pane on the machine, by tmux session name. */
 /**
- * Is this pane one we are willing to send an agent command into?
+ * Is this pane one of the fleet's agent sessions at all?
  *
  * ⚠️ `list-panes -a` returns EVERY pane on the machine, and the roster it feeds
- * gates the clear and compact routes. Without this, `/clear` and Enter would be
+ * gates every destructive route. Without this, `/clear` and Enter would be
  * typed into a plain shell, an editor, or a REPL, where the text is EXECUTED
  * rather than read as a slash command. Latent while every session happens to be
  * a Claude agent; live the moment anyone opens an unrelated tmux session.
@@ -91,8 +90,26 @@ function sh(cmd, args) {
  * The fleet's sessions are `<name>-discord`. Matching on that is a convention
  * rather than a proof, so it is paired with the process check the classifier
  * already does: a pane running a shell is not an agent whatever it is called.
+ *
+ * ⚠️ Split out of `isAgentPane` because RESTART needs this question and not the
+ * other one, and conflating them was a real hole at both ends.
+ *
+ * Too loose: `restart` was exempt from every roster check on the reasoning that
+ * it goes through launchd and types nothing. But the roster is every tmux pane
+ * on the machine with the `-discord` suffix merely STRIPPED, never required. So
+ * a plain shell in a session called `mikey` appeared as an agent named `mikey`,
+ * and its Restart button ran `restart-bot.sh mikey` against the REAL bot. The
+ * shown cost even looked right, because the dialog reads the real `mikey`'s
+ * commitments. The operator would be acting on a card that is not the thing
+ * being restarted.
+ *
+ * Too tight: making restart use `isAgentPane` instead would refuse whenever the
+ * pane is scrolled back in copy-mode, which matters only for TYPING. Restart
+ * sends no keystrokes, so copy-mode is irrelevant to it, and refusing there
+ * would take the feature away in a state the operator can enter by accident
+ * with a scroll wheel.
  */
-function isAgentPane(pane) {
+function isAgentSession(pane) {
   if (!pane || !/-discord$/.test(String(pane.session || ''))) return false;
 
   // ⚠️ An ALLOW list, not a deny list.
@@ -113,31 +130,82 @@ function isAgentPane(pane) {
   const command = String((pane.command || '')).trim();
   const native = /^[0-9]+\.[0-9]+\.[0-9]+$/.test(command);
   const legacy = command === 'claude' || command === 'claude.exe' || command === 'node';
-  if (!native && !legacy) return false;
+  return native || legacy;
+}
 
-  // ⚠️ And not while the pane is scrolled back in copy-mode. There, keystrokes
-  // go to copy-mode bindings rather than the composer, so nothing is compacted
-  // or cleared and the route would still answer "we asked it to".
+/**
+ * ⚠️ DERIVED from `isAgentSession`, not a second copy of its rule. Writing the
+ * suffix test and the command allowlist out again here is the defect this
+ * codebase has shipped more times than any other: one fact derived in two
+ * places, the two drifting, and the looser one deciding the dangerous path.
+ * This adds exactly one clause and inherits the rest.
+ */
+function isAgentPane(pane) {
+  if (!isAgentSession(pane)) return false;
+
+  // ⚠️ Not while the pane is scrolled back in copy-mode. There, keystrokes go
+  // to copy-mode bindings rather than the composer, so nothing is compacted or
+  // cleared and the route would still answer "we asked it to". This clause is
+  // about TYPING, which is why restart asks `isAgentSession` instead.
   return pane.inMode !== '1';
 }
 
-function listPanes() {
-  const fmt = '#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_in_mode}\t#{pane_title}';
-  const out = sh('tmux', ['list-panes', '-a', '-F', fmt]);
+/**
+ * The columns we ask tmux for, in order.
+ *
+ * ⚠️ ONE list, used to build the format string AND to read the answer back.
+ *
+ * These were two separate literals: a format string here and a positional
+ * destructure below. Nothing tied them together, so deleting `#{pane_in_mode}`
+ * from the format, or reordering any column, left the whole suite green while
+ * `inMode` silently held the pane TITLE. `inMode !== '1'` is then true for every
+ * pane, and every copy-mode pane classifies as typeable — which is precisely
+ * the case the copy-mode clause was added to refuse, disabled by an edit
+ * nowhere near it.
+ *
+ * `title` is last on purpose: it is the only field that can itself contain a
+ * tab, so it absorbs the remainder rather than shifting every column after it.
+ */
+const PANE_COLUMNS = [
+  { key: 'session', fmt: '#{session_name}' },
+  { key: 'pane', fmt: '#{window_index}.#{pane_index}' },
+  { key: 'command', fmt: '#{pane_current_command}' },
+  { key: 'inMode', fmt: '#{pane_in_mode}' },
+  { key: 'title', fmt: '#{pane_title}', rest: true },
+];
+
+const PANE_FORMAT = PANE_COLUMNS.map((c) => c.fmt).join('\t');
+
+/** Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested. */
+function parsePanes(out) {
   if (!out) return [];
   return out.trim().split('\n').filter(Boolean).map((line) => {
-    const [session, pane, command, inMode, ...titleParts] = line.split('\t');
+    const parts = line.split('\t');
+    const raw = {};
+    PANE_COLUMNS.forEach((col, i) => {
+      raw[col.key] = col.rest ? parts.slice(i).join('\t') : parts[i];
+    });
+    const session = raw.session || '';
     return {
       name: session.replace(/-discord$/, ''),
       session,
-      target: `${session}:${pane}`,
-      command: command || '',
-      // 1 when the pane is scrolled back in copy-mode, where keystrokes go to
+      target: `${session}:${raw.pane}`,
+      command: raw.command || '',
+      // '1' when the pane is scrolled back in copy-mode, where keystrokes go to
       // copy-mode bindings rather than to the composer.
-      inMode: inMode || '0',
-      title: titleParts.join('\t') || '',
+      //
+      // ⚠️ Defaults to '1' (in copy-mode), not '0'. A truncated or malformed
+      // line leaves this undefined, and defaulting to '0' meant "not in copy
+      // mode, safe to type" — asserting the safe answer from an absence of
+      // information, which is the one thing this codebase refuses to do.
+      inMode: raw.inMode === undefined || raw.inMode === '' ? '1' : raw.inMode,
+      title: raw.title || '',
     };
   });
+}
+
+function listPanes() {
+  return parsePanes(sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]));
 }
 
 function capturePane(target, lines = 40) {
@@ -576,6 +644,8 @@ function snapshot() {
       // that a pane holds an agent, and `/clear` typed into a shell is executed
       // rather than read as a command.
       isAgentPane: isAgentPane(pane),
+      // Restart needs this one, not the copy-mode-sensitive one above.
+      isAgentSession: isAgentSession(pane),
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,
@@ -614,7 +684,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, parsePanes, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

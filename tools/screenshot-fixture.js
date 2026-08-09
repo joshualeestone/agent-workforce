@@ -175,19 +175,25 @@ const AGENTS = [
   },
 ];
 
-const payload = {
-  agents: AGENTS,
-  version: '0.1.0',
-  checkedAt: NOW,
-  counts: { total: AGENTS.length, needsYou: 0, unknown: 1, unknownFullness: 0 },
-};
-
 function serve(req, res) {
   const url = req.url.split('?')[0];
 
   if (url === '/api/status') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(payload));
+    // ⚠️ `checkedAt` is the ONE field that must be the real current time, while
+    // everything else stays pinned to NOW for reproducibility.
+    //
+    // Pinning it too made the shipped documentation screenshot render "206 days
+    // ago" under the stale squiggle: the board's headline honesty signal, caught
+    // displaying its own failure state, in the image meant to show the product
+    // working. Still deterministic — a fresh timestamp always renders "just
+    // now", so the picture is identical every run.
+    res.end(JSON.stringify({
+      agents: AGENTS,
+      version: '0.1.0',
+      checkedAt: new Date().toISOString(),
+      counts: { total: AGENTS.length, needsYou: 0, unknown: 1, unknownFullness: 0 },
+    }));
     return;
   }
 

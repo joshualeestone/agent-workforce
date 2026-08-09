@@ -34,7 +34,23 @@
   --bg-sunken:     #f5f5f7;
   --label:         rgba(0,0,0,0.85);
   --label-2:       rgba(0,0,0,0.60);   /* 0.60 not Apple's 0.498, to clear AA */
-  --label-3:       rgba(0,0,0,0.42);
+  /* ⚠️ 0.56, not Apple's 0.42, for the same reason --label-2 is 0.60 and not
+     0.498: AA. At 0.42 this measured 3.04:1 on white and 2.98:1 on the sunken
+     background, and it carries TEXT in fourteen places at 11-13px, where the
+     4.5:1 rule applies with no large-text exemption. The failing text included
+     the dialog's own guarantee ("If its commitments cannot be read, this says
+     so rather than telling you it is safe") — the sentence promising honesty,
+     set too faint to read.
+
+     Worked from the threshold rather than guessed: black at alpha a over white
+     needs a >= 0.535, and over --bg-sunken #f5f5f7 needs a >= 0.541; white over
+     the dark modal #2c2c2e needs a >= 0.484. 0.56 clears all three.
+
+     This leaves --label-3 close to --label-2, and that is the honest outcome
+     rather than a mistake: AA leaves very little room below 0.60, so a
+     three-tier grey scale on this background was always going to be two tiers
+     and a contrast failure. */
+  --label-3:       rgba(0,0,0,0.56);
   --separator:     rgba(0,0,0,0.12);
   --border-strong: rgba(0,0,0,0.22);
   --shadow-card:   0 1px 2px rgba(0,0,0,0.06), 0 1px 6px rgba(0,0,0,0.04);
@@ -54,7 +70,9 @@
     --bg-sunken:     #141416;
     --label:         rgba(255,255,255,0.92);
     --label-2:       rgba(255,255,255,0.62);
-    --label-3:       rgba(255,255,255,0.42);
+    /* 0.56 to match the light-mode reasoning above: white over the dark modal
+       #2c2c2e needs alpha >= 0.484 to clear 4.5:1, and 0.42 measured 3.76:1. */
+    --label-3:       rgba(255,255,255,0.56);
     --separator:     rgba(255,255,255,0.14);
     --border-strong: rgba(255,255,255,0.26);
     --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
@@ -284,6 +302,11 @@ svg { display: block; }
             letter-spacing: 0.05em; color: var(--label-3); margin-bottom: var(--space-4); }
 .holding { border: 1px solid var(--separator); border-radius: var(--radius-control);
            background: var(--bg-sunken); padding: var(--space-5); margin-bottom: var(--space-7); }
+/* ⚠️ `list-style: none` removes LIST SEMANTICS in WebKit/VoiceOver, not just the
+   bullets, so this stopped being announced as "list, 3 items" — on the one
+   element whose whole job is telling you how many things you are about to
+   destroy. The explicit `role="list"` on the markup puts it back; the two must
+   stay together. */
 .holding ul { list-style: none; margin: 0; padding: 0; }
 .holding li { display: flex; gap: var(--space-4); align-items: baseline; margin-bottom: var(--space-3);
               font: var(--text-body) var(--font-ui); }
@@ -1352,7 +1375,7 @@ function holdingBlock(a) {
   // items, so we can say "these were pending, and we cannot vouch for that now".
   if (h.state === 'unknown') {
     const aged = items.length
-      ? `<ul>${items.map((c) => li(c, a.task)).join('')}</ul>
+      ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>
          <div class="danger">These are the last thing it told us, and we cannot
          vouch for them now: ${esc(h.because || 'we cannot tell')}.</div>`
       : `<div class="cannot"><b>We cannot tell what ${esc(a.name)} is holding.</b>
@@ -1384,7 +1407,7 @@ function holdingBlock(a) {
       A dialog that only checked whether it was busy would have told you this was safe.</div>`;
   }
 
-  return `<div class="holding"><ul>${items.map((c) => li(c, a.task)).join('')}</ul>${callout}</div>`;
+  return `<div class="holding"><ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>${callout}</div>`;
 }
 
 /**
@@ -1593,10 +1616,29 @@ document.addEventListener('keydown', (e) => {
   // Trap focus in the dialog: tabbing out of a modal leaves you operating a
   // page you cannot see.
   if (e.key !== 'Tab') return;
-  const focusable = [...document.querySelectorAll('#fresh-modal button')].filter((b) => !b.disabled);
+  const modal = document.getElementById('fresh-modal');
+  const focusable = [...modal.querySelectorAll('button')].filter((b) => !b.disabled);
   if (!focusable.length) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
+
+  // ⚠️ Recover focus that has ALREADY left the dialog, before the wrap check.
+  //
+  // The trap only ever fired when `activeElement` was exactly `first` or
+  // `last`, which silently assumed focus was still inside. It routinely is not:
+  // clicking an action disables every option button, so the element that had
+  // focus becomes disabled and the browser drops `activeElement` to `<body>`.
+  // Same on the restart path, which empties `#fresh-options` outright. From
+  // there, neither branch matched and the next Tab landed on the "Agents" tab
+  // BEHIND the scrim, with `aria-modal="true"` still set — the operator now
+  // driving a page they cannot see, which is the exact failure a trap exists to
+  // prevent, reached through the most ordinary interaction in the dialog.
+  if (!modal.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+    return;
+  }
+
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
@@ -1609,6 +1651,15 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
   const msg = document.getElementById('fresh-msg');
   const buttons = [...document.querySelectorAll('#fresh-options button')];
   buttons.forEach((b) => { b.disabled = true; });
+  // ⚠️ Move focus BEFORE the browser drops it. Disabling the button that was
+  // just activated makes `activeElement` fall back to `<body>`, which strands a
+  // keyboard or screen-reader user outside the dialog with no announcement —
+  // and leaves them there until they press Tab, which is the only moment the
+  // trap could otherwise recover it. Cancel is the right landing place: it is
+  // the one control still enabled, and it is the default answer.
+  if (!document.getElementById('fresh-cancel').disabled) {
+    document.getElementById('fresh-cancel').focus();
+  }
   msg.textContent = 'Working…';
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/' + action,
