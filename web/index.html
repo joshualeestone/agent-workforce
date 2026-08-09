@@ -730,8 +730,25 @@ async function tick() {
       const mayChanged = now && JSON.stringify(now.may || {}) !== JSON.stringify(FRESH_FOR.may || {});
       if (!FRESH_BUSY && now && holdingToken(now.commitments) === FRESH_TOKEN
           && (now.task !== FRESH_FOR.task || mayChanged)) {
+        // ⚠️ Remember which control had focus, because `renderFresh` replaces
+        // `#fresh-options` wholesale and detaches it. The click path goes to
+        // real trouble to move focus BEFORE disabling a button for exactly this
+        // reason; this path is newer and did not, so a poll landing while the
+        // operator was on Compact dropped them to <body> inside a dialog with
+        // `aria-modal="true"`, recoverable only on the next Tab.
+        const active = document.activeElement;
+        const hadFocus = active && active.dataset ? active.dataset.act : null;
+
         FRESH_FOR = now;
         renderFresh(now);
+
+        if (hadFocus) {
+          const again = document.querySelector(`#fresh-options button[data-act="${CSS.escape(hadFocus)}"]`);
+          // Only if it is still offered: an option that just became refused is
+          // not somewhere to put focus back.
+          if (again && !again.disabled) again.focus();
+          else document.getElementById('fresh-cancel').focus();
+        }
       }
     }
 
@@ -1836,7 +1853,19 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
       { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ holding: FRESH_TOKEN }) })
       .catch(() => { throw new Error('That did not go through. The board may have stopped.'); });
-    const data = await res.json();
+    // ⚠️ Wrapped. `res.json()` on a non-JSON body throws a raw
+    // `SyntaxError: Unexpected token '<'`, and the catch below writes
+    // `err.message` straight into the dialog. `loadInstructions` states the
+    // rule for this surface ("Never the raw exception") and obeys it; this path
+    // considered the same failure — the comment in the catch names "a non-JSON
+    // body" — and handled only its epoch consequence, not what the person sees.
+    //
+    // Not hypothetical here: this codebase's headline routing bug was an API
+    // path answering with the HTML page at status 200, which is exactly the
+    // body that reaches this line.
+    const data = await res.json().catch(() => {
+      throw new Error('the board answered with something we could not read. Close this and open it again.');
+    });
     // ⚠️ `because` FIRST, on both paths. A refusal answers with `because` and
     // never `error`, so `data.error || 'that did not work'` threw away every
     // carefully-written reason the engine produces — the missing restart

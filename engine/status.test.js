@@ -245,6 +245,30 @@ test('a session that merely shares an agent name is not one of our agents', () =
   assert.equal(isAgentPane(crashed), false, 'a shell would have been typed into');
 });
 
+test('two sessions that resolve to one agent name collapse to the real agent', () => {
+  // ⚠️ The roster strips `-discord` but does not require it, so `kappa` and
+  // `kappa-discord` are TWO sessions and ONE name. Deduping by session left
+  // both on the board under the same name, and every consumer resolves an agent
+  // by `.find()` on that name — so whichever tmux listed first won.
+  //
+  // The damaging order is the impostor first: the REAL agent's dialog then
+  // renders all three options refused with "we are not confident that card is
+  // one of your agents", which is both untrue and the exact refusal the
+  // three-tier split was introduced to eliminate. The two cards also shared a
+  // `data-fresh` value and an SVG element id.
+  //
+  // Keying the dedupe on `session` instead of `name` fails this.
+  const roster = onePanePerSession(parsePanes([
+    'kappa\t0.0\tzsh\t0\t',                        // the impostor, listed first
+    'kappa-discord\t0.0\t2.1.212\t0\tIdle',        // the real agent
+  ].join('\n')));
+
+  assert.equal(roster.length, 1, 'one name produced two cards');
+  assert.equal(roster[0].target, 'kappa-discord:0.0', 'the shell won the collision');
+  assert.equal(isFleetSession(roster[0]), true,
+    'the surviving card would refuse restart for the real agent');
+});
+
 test('a split window does not put the same agent on the board twice', () => {
   // ⚠️ `list-panes -a` returns one line per PANE and the roster mapped straight
   // over it, so a `*-discord` session with a split window produced two cards

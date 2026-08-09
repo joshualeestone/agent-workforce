@@ -231,7 +231,8 @@ every time. Compact and Clear work; Restart does not.
     # and the board tombstones the commitments of an agent that returned
     # perfectly healthy.
     TMUX_BIN="${TMUX_BIN:-/opt/homebrew/bin/tmux}"
-    [ -x "$TMUX_BIN" ] || TMUX_BIN="$(command -v tmux)" 
+    if [ ! -x "$TMUX_BIN" ]; then TMUX_BIN="$(command -v tmux || true)"; fi
+    if [ -z "$TMUX_BIN" ]; then echo "Error: No launchd service found for '$BOT'"; exit 1; fi
     PLIST="$HOME/Library/LaunchAgents/com.$BOT.discord.plist"
     if [ ! -f "$PLIST" ]; then echo "Error: No launchd service found for '$BOT'"; exit 1; fi
     launchctl stop "com.$BOT.discord" 2>/dev/null || true
@@ -249,6 +250,14 @@ every time. Compact and Clear work; Restart does not.
     fi
     SH
     chmod +x ~/.claude/bin/restart-bot.sh
+
+⚠️ **If tmux cannot be found, this exits down the "no service" path on
+purpose.** The obvious `[ -x "$X" ] || X=$(command -v tmux)` is wrong under
+`set -e`: when tmux is genuinely absent the assignment fails, the script exits
+non-zero having printed nothing, and the board reads that as "we asked and
+cannot confirm" — which tombstones the commitment record of an agent nobody
+touched. Of the two things this script can say, only the missing-service message
+is understood as "we did not attempt it".
 
 ⚠️ **This is a minimal reconstruction, not a copy of the fleet's script.** The
 one on this machine differs (different sleep pattern, and it warns rather than

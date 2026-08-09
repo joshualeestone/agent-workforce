@@ -2014,9 +2014,22 @@ test('every await in the destructive handler is followed by a still-my-dialog ch
   // one still satisfied `4 >= 4`. A threshold with slack in it is not a
   // threshold, and this is the assertion that stands in for a behaviour test
   // the suite cannot run.
-  assert.ok(checks >= awaits,
-    `${awaits} awaits but only ${checks} still-my-dialog checks: at least one `
-    + 'continuation can repaint a dialog that now belongs to another agent');
+  // ⚠️ EVERY guard, counted exactly, not "at least as many as the awaits".
+  //
+  // The threshold has now drifted back into slack twice. There are five awaits
+  // and six checks — the sixth being the `finally`'s, which stops a stale
+  // response re-enabling another agent's buttons — so `checks >= awaits`
+  // tolerated deleting one and the suite stayed green. That is the same defect
+  // as `awaits - 1`, arrived at from the other direction: the count of guards
+  // grew and the floor did not.
+  //
+  // Pinned to the exact number, so ADDING an await without a guard fails, and
+  // so does removing a guard. A change to either has to come here and say so.
+  assert.equal(checks, 6,
+    `expected exactly 6 still-my-dialog checks (one per await, plus the finally) `
+    + `but found ${checks} against ${awaits} awaits: either a continuation can `
+    + 'repaint a dialog that now belongs to another agent, or this count needs '
+    + 'updating deliberately');
 
   // ⚠️ The CATCH block specifically, because counting is positional-blind and
   // missed a real hole: two rejection paths throw before the first in-try

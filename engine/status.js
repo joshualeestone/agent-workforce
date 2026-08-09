@@ -294,7 +294,22 @@ function paneOrder(id) {
 function onePanePerSession(panes) {
   const bySession = new Map();
   for (const pane of panes) {
-    const key = pane.session;
+    // ⚠️ Keyed on NAME, not session. Every consumer identifies an agent by
+    // `name` (the session with `-discord` stripped) — `findAgent`, the card's
+    // `data-fresh`, `openFresh`, all `.find()` by name — so deduping by session
+    // left the one collision this function exists to prevent wide open:
+    // `kappa` and `kappa-discord` are two sessions and ONE name.
+    //
+    // Measured: both survived as two roster entries called `kappa`, and
+    // whichever tmux listed first won every lookup. If the impostor sorted
+    // first, the REAL agent's dialog rendered all three options refused with
+    // "we are not confident that card is one of your agents" — the exact untrue
+    // refusal `isFleetSession` was introduced to eliminate. The two cards also
+    // shared a `data-fresh` value and an SVG element id.
+    //
+    // The preference below already resolves it correctly once they collide:
+    // the real agent pane wins over the shell.
+    const key = pane.name;
     const held = bySession.get(key);
     if (!held) { bySession.set(key, pane); continue; }
 
