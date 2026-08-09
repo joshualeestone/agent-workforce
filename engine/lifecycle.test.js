@@ -117,10 +117,34 @@ test('a send reports ASKED, never DONE', () => {
 });
 
 test('restart runs the blessed script with the bare agent name', () => {
-  const calls = recorder();
+  const calls = [];
+  lifecycle.setRunner((file, args) => { calls.push([file, ...args]); return 'OK: angel-discord tmux session is running\n'; });
   const got = lifecycle.restart('angel');
   assert.equal(got.outcome, lifecycle.OUTCOME.DONE);
   assert.deepEqual(calls, [[FAKE_SCRIPT, 'angel']]);
+});
+
+test('a restart the script could not confirm is ASKED, not DONE', () => {
+  // ⚠️ The exit code is not the answer, and believing it was is the worst bug
+  // this module has had.
+  //
+  // `restart-bot.sh` ends with `if tmux has-session; then echo OK; else echo
+  // WARN; fi`, and under `set -euo pipefail` that WARN branch is still the last
+  // command and still exits 0. So a bot that launchd started and that then died
+  // on boot — including the missing-permissions-flag case this module exists to
+  // prevent — came back as a clean exit.
+  //
+  // We reported `done`, "performed and verified", and the route then FORGOT the
+  // agent's commitments on the strength of it: a false claim of success plus
+  // irreversible data loss.
+  lifecycle.setRunner(() => "WARN: tmux session 'angel-discord' not found — check launchd logs\n");
+  const got = lifecycle.restart('angel');
+  assert.equal(got.outcome, lifecycle.OUTCOME.ASKED, 'an unconfirmed restart reported as verified');
+  assert.match(got.because, /has not come back/);
+
+  // And silence is not confirmation either.
+  lifecycle.setRunner(() => '');
+  assert.equal(lifecycle.restart('angel').outcome, lifecycle.OUTCOME.ASKED);
 });
 
 test('restart refuses rather than improvising when the script is missing', () => {

@@ -232,15 +232,38 @@ function restart(agent) {
     };
   }
 
+  let out = '';
   try {
-    run(RESTART_SCRIPT, [name]);
+    out = String(run(RESTART_SCRIPT, [name]) || '');
   } catch {
     return { outcome: OUTCOME.REFUSED, because: 'the restart did not complete' };
   }
-  // The script stops the service, starts it, and checks the session came back,
-  // so unlike a send-keys this one has actually been verified by the time it
-  // returns.
-  return { outcome: OUTCOME.DONE, because: 'it was stopped and started again' };
+
+  // ⚠️ The EXIT CODE is not the answer, and believing it was is the worst bug
+  // this module has had.
+  //
+  // `restart-bot.sh` ends with `if tmux has-session …; then echo OK; else echo
+  // WARN; fi`. Under `set -euo pipefail` that WARN branch is still the last
+  // command and still exits 0, so a bot that launchd started and that then died
+  // on boot — including the missing-permissions-flag case this whole module
+  // exists to prevent — came back as exit 0.
+  //
+  // We reported `done`, "performed and verified", and the route then FORGOT the
+  // agent's commitments on the strength of it. A false claim of success plus
+  // irreversible data loss, on the screen whose stated job is honesty about
+  // consequences. Measured: a faithful reproduction of the script's tail exits
+  // 0 on the WARN path.
+  //
+  // So the output is read. `OK:` present means the session was seen coming
+  // back, which is a real verification. Anything else is `asked`: we ran the
+  // restart and cannot confirm it took.
+  if (/(^|\n)OK:/.test(out)) {
+    return { outcome: OUTCOME.DONE, because: 'it was stopped and started again, and came back' };
+  }
+  return {
+    outcome: OUTCOME.ASKED,
+    because: 'it was stopped and started, but it has not come back yet, so check on it',
+  };
 }
 
 function clear(agent, target) {

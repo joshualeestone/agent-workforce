@@ -1318,7 +1318,12 @@ function visiblyDoing(c, task) {
   // badged it DOING NOW, and quietly removed it from the count of dangerous
   // items. `promised` is the state this dialog calls dangerous, so a false
   // DOING NOW suppresses the warning while a false PROMISED merely over-warns.
-  return shared === b.length && shared >= 2;
+  // Distinct words: counting duplicates let a task line of "Detail: detail"
+  // satisfy `>= 2` on a single real match, re-opening the false DOING NOW this
+  // is written to prevent.
+  const distinct = new Set(b);
+  const hit = [...distinct].filter((w) => a.has(w)).length;
+  return hit === distinct.size && hit >= 2;
 }
 
 function li(c, task) {
@@ -1394,15 +1399,24 @@ function closeFresh() {
 }
 
 /** The engine's own descriptions, fetched once so the screen cannot drift. */
+// ⚠️ These fall back to the SAME wording the engine uses, not to a terser
+// paraphrase. The first version said `loses: 'nothing'` for compact, which is
+// the one claim `engine/lifecycle.js` was reworded to stop making and that its
+// test asserts against — and it rendered whenever `/api/actions` had not
+// resolved yet, which includes every `?fresh=` deep link. A comment beside it
+// claimed the fallbacks were "honest about cost, just terser". They were not.
 let ACTIONS = {
-  compact: { label: 'Compact', gentlest: true, what: '', loses: 'nothing' },
-  clear: { label: 'Clear', gentlest: false, what: '', loses: 'everything it is holding' },
-  restart: { label: 'Restart', gentlest: false, what: '', loses: 'everything it is holding' },
+  compact: { label: 'Compact', gentlest: true, loses: 'detail, but not usually the things it is holding',
+    what: 'Summarises the older part of the conversation instead of deleting it. It keeps running, and what it is holding should survive the summary.' },
+  clear: { label: 'Clear', gentlest: false, loses: 'everything it is holding',
+    what: 'Empties the conversation. It keeps running but forgets what was said.' },
+  restart: { label: 'Restart', gentlest: false, loses: 'everything it is holding',
+    what: 'Stops it and starts it again. The only option that re-reads its instructions, so a change there needs this one.' },
 };
 fetch('/api/actions', { cache: 'no-store' })
   .then((r) => r.json())
   .then((a) => { if (a && a.compact) ACTIONS = a; })
-  .catch(() => { /* the fallbacks above are honest about cost, just terser */ });
+  .catch(() => { /* the fallbacks above carry the engine's own wording */ });
 
 document.getElementById('grid').addEventListener('click', (e) => {
   const fresh = e.target.closest('.fresh');
@@ -1451,27 +1465,42 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // script, the unreachable pane, the unusable target — and showed "that did
     // not work" instead. The one comment claiming this screen reports what the
     // engine said was true only when nothing went wrong.
-    if (!res.ok) throw new Error(data.because || data.error || 'that did not work');
+    if (!res.ok) {
+      const e = new Error(data.because || data.error || 'that did not work');
+      // A stale view answers 409 with an `error` and no `outcome`; an engine
+      // refusal answers 409 with `outcome: 'refused'`. The difference decides
+      // whether re-rendering the list is the right response.
+      e.conflict = res.status === 409 && data.outcome !== 'refused';
+      throw e;
+    }
     // Including "we asked and cannot confirm". Saying "Done" for a keystroke we
     // cannot verify would be the screen asserting something it does not know.
     msg.textContent = data.because || 'Done.';
 
-    // Re-render from the answer rather than leaving a list of commitments that
-    // were just destroyed sitting beside a live Restart button.
-    if (data.holding) {
-      const fresh = LAST.find((x) => x.sessionName === forAgent);
-      if (fresh) { fresh.commitments = data.holding; FRESH_TOKEN = holdingToken(data.holding); }
-      document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh || FRESH_FOR);
-    }
+    // ⚠️ Re-read from the SERVER, not from `data.holding`.
+    //
+    // `data.holding` is the snapshot taken BEFORE the action, so rendering it
+    // put the list that was just destroyed back on screen under the heading
+    // "What it is holding right now", callout and all, with Clear and Restart
+    // live beside it. The comment here previously claimed to prevent exactly
+    // that.
     await tick();
+    const fresh = LAST.find((x) => x.sessionName === forAgent);
+    if (fresh) {
+      FRESH_FOR = fresh;
+      FRESH_TOKEN = holdingToken(fresh.commitments);
+      document.getElementById('fresh-holding').innerHTML = holdingBlock(fresh);
+    }
   } catch (err) {
     msg.textContent = err.message;
-    // ⚠️ A changed-since-shown refusal says "look again", and the dialog could
-    // not honour it: the list was rendered once on open and never refreshed, so
-    // clicking again produced the same 409 forever and the only escape was
-    // Cancel, which the message did not mention. Re-render from the latest poll
-    // so "look again" has something to look at.
-    if (/changed since you were shown/.test(err.message)) {
+    // ⚠️ Keyed on a CODE, not on the wording.
+    //
+    // This matched the server's English, which is the anti-pattern the
+    // instruction editor had to fix twice: rewording one sentence there would
+    // have silently stopped this recovery firing and restored the infinite-409
+    // dead end it exists to prevent. Two different things answer 409 — a stale
+    // view, and an engine refusal — so the discriminator has to be structured.
+    if (err.conflict) {
       const fresh = LAST.find((x) => x.sessionName === forAgent);
       if (fresh) {
         FRESH_FOR = fresh;

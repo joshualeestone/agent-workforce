@@ -131,14 +131,25 @@ function crossSite(req) {
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return true;
 
   const origin = h.origin;
-  if (origin && origin !== 'null') {
+  // ⚠️ `null` is NOT a pass. An opaque origin is what a sandboxed iframe sends
+  // on a form POST, so treating it as "no origin to check" left the exact
+  // cross-site form attack open on browsers that do not send `Sec-Fetch-Site`.
+  // An origin we cannot attribute is one we cannot vouch for.
+  if (origin === 'null') return true;
+  if (origin) {
     let host;
     try {
       host = new URL(origin).hostname;
     } catch {
       return true; // unparseable origin is not one we can vouch for
     }
-    if (!LOOPBACK_HOSTS.has(host)) return true;
+    // ⚠️ The SAME set `pathOf` accepts, loopback plus the deliberate opt-in.
+    // Checking loopback alone turned every write route 403 for anyone running
+    // behind `AGENT_WORKFORCE_ALLOWED_HOSTS`, with an error message asserting
+    // the request "came from another site" when it came from the very origin
+    // the operator had allowed. A guard that is stricter than the door it sits
+    // behind is a bug, not extra safety.
+    if (!LOOPBACK_HOSTS.has(host) && !ALLOWED_HOSTS.has(host)) return true;
   }
 
   return false;
@@ -684,7 +695,7 @@ const server = http.createServer((req, res) => {
         // the agent saying it holds nothing, and it said no such thing. Removing
         // the record leaves `unknown`, which is the true state — we destroyed
         // what it knew, and we cannot know what it holds until it speaks again.
-        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.forget(name);
+        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.markDestroyed(name);
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
           action,

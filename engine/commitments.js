@@ -306,6 +306,10 @@ function parseRecord(agent) {
     // passed the usability check and then threw inside sanitise.
     commitments: clean,
     reportedAt,
+    // Carried through so `read` can tell a record we destroyed from one the
+    // agent simply has not refreshed. Coerced like every other field: a
+    // hand-edited record must not be able to put an object here.
+    destroyedAt: typeof parsed.destroyedAt === 'string' ? parsed.destroyedAt.slice(0, 40) : null,
     ageMs: Date.now() - at,
   };
 }
@@ -320,6 +324,26 @@ function parseRecord(agent) {
 function read(agent) {
   const rec = parseRecord(agent);
   if (!rec.ok) return unknown(rec.because);
+
+  // ⚠️ A record whose conversation we destroyed.
+  //
+  // `unknown`, always, and the items are KEPT. The agent cannot tell us what it
+  // is holding any more because we deleted the conversation it would have told
+  // us from, so it will never correct this record and no later report will
+  // arrive to clear it.
+  //
+  // The first version of this deleted the record outright, which lost the only
+  // surviving list of what had just been destroyed and made `read` answer "this
+  // agent has never reported what it is holding" — false, it reported, and this
+  // code removed it. Keeping the items is what lets the board say what was lost.
+  if (rec.destroyedAt) {
+    return {
+      ...unknown('we cleared its conversation, so it can no longer tell us what it was holding'),
+      reportedAt: rec.reportedAt,
+      destroyedAt: rec.destroyedAt,
+      commitments: rec.commitments,
+    };
+  }
 
   if (rec.ageMs < -FUTURE_TOLERANCE_MS) {
     return {
@@ -607,7 +631,7 @@ function readAll() {
 }
 
 /**
- * Forget what an agent said it was holding.
+ * Mark what an agent said it was holding as destroyed by us.
  *
  * ⚠️ Not the same as reporting nothing, and the difference is the whole point.
  * `report(agent, [])` records the agent SAYING it holds nothing, which reads
@@ -615,27 +639,43 @@ function readAll() {
  * or a restart that sentence is false: the agent did not tell us anything, we
  * destroyed the conversation it would have told us from.
  *
- * So the record is removed, and `read` falls back to `unknown`. That is the
- * honest state: we know what it USED to be holding, we know we just destroyed
- * it, and we cannot know what it holds now until it speaks again.
+ * So the record is MARKED rather than removed, and `read` returns `unknown`
+ * with the items still attached. That is the honest state, and it is the one
+ * the first version of this failed to deliver: deleting the record lost the
+ * only surviving list of what had just been destroyed, and made `read` answer
+ * "this agent has never reported what it is holding", which is false. It
+ * reported. We deleted it.
  *
  * Without this the board went on asserting the destroyed commitments at full
  * confidence for the next thirty minutes, on the one screen whose entire thesis
  * is that it does not lie about cost.
  */
-function forget(agent) {
+function markDestroyed(agent) {
   let file;
   try {
     file = recordPath(agent);
   } catch {
     return false;
   }
+  // Rewrite in place rather than removing: the items are the only record of
+  // what was destroyed, and deleting them is the loss this store exists to
+  // prevent.
+  let raw;
   try {
-    fs.rmSync(file, { force: true });
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return false; // nothing to mark, which is not a failure worth surfacing
+  }
+  raw.destroyedAt = new Date().toISOString();
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
+    fs.renameSync(tmp, file);
     return true;
   } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* nothing more to do */ }
     return false;
   }
 }
 
-module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath, forget };
+module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath, markDestroyed };

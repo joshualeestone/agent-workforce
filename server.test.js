@@ -1190,6 +1190,37 @@ test('an unknown agent and an unknown action are both refused', async () => {
   assert.ok(!bogus.type.includes('text/html'), 'an unknown action was answered with the page');
 });
 
+test('the confirmation token distinguishes a state we can vouch for', async (t) => {
+  // ⚠️ The token carries the STATE, not just the ids. `unknown` with three
+  // items and `holding` with the same three are different situations: the first
+  // means we cannot vouch for the list. Approving one against the other is the
+  // conflation this token exists to catch, and dropping the state component
+  // left the whole suite green.
+  const name = await anyAgent(t);
+  if (!name) return;
+
+  const board = JSON.parse((await req('/api/status')).body);
+  const mine = (board.agents || []).find((a) => a.sessionName === decodeURIComponent(name));
+  assert.ok(mine, 'the agent vanished from the board');
+  const ids = ((mine.commitments.commitments) || []).map((c) => c.id).sort().join(',');
+
+  // The ids alone must NOT be accepted: the state has to match too.
+  const idsOnly = await req(`/api/agent/${name}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: `:${ids}` }),
+  });
+  assert.equal(idsOnly.status, 409, 'a token missing its state was accepted');
+
+  // And a state that does not match the current one is refused as well.
+  const wrongState = await req(`/api/agent/${name}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: `holding:${ids}` }),
+  });
+  if (mine.commitments.state !== 'holding') {
+    assert.equal(wrongState.status, 409, 'a token claiming the wrong state was accepted');
+  }
+});
+
 test('the action descriptions are served from the engine', async () => {
   // So the dialog cannot describe an action differently from the code that
   // performs it. The instruction editor shipped that exact bug.

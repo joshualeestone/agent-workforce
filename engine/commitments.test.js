@@ -1096,3 +1096,35 @@ test('add and resolve preserve stored fields rather than re-sanitising them', ()
   assert.equal(c.read('preserve').commitments[0].createdAt, 'not-a-date-at-all',
     'resolve() rewrote a stored timestamp it could not know');
 });
+
+test('a destroyed conversation is marked, not deleted', () => {
+  // ⚠️ `markDestroyed` is what a clear or a restart leaves behind, and the
+  // first version of it removed the record outright. That lost the only
+  // surviving list of what had just been destroyed, and made `read` answer
+  // "this agent has never reported what it is holding" — which is false. It
+  // reported. We deleted it.
+  //
+  // The state must be `unknown` (the agent cannot correct this record, because
+  // we deleted the conversation it would speak from), and the items must
+  // survive so the board can still say what was lost.
+  const agent = 'tombstoned';
+  c.report(agent, [
+    { what: 'Rewriting the feed parser for #48' },
+    { what: 'Verify the 14:00 sweep settled' },
+  ]);
+  assert.equal(c.read(agent).state, c.STATE.HOLDING);
+
+  assert.equal(c.markDestroyed(agent), true);
+
+  const after = c.read(agent);
+  assert.equal(after.state, c.STATE.UNKNOWN, 'a destroyed record still read as confident');
+  assert.equal(after.commitments.length, 2, 'the record of what was lost was deleted');
+  assert.match(after.because, /cleared its conversation/);
+  assert.doesNotMatch(after.because, /never reported/,
+    'claimed the agent never reported what we ourselves deleted');
+  assert.ok(after.destroyedAt, 'no record of when we destroyed it');
+});
+
+test('marking a record we cannot read is not a failure worth surfacing', () => {
+  assert.equal(c.markDestroyed('an-agent-with-no-record-at-all'), false);
+});
