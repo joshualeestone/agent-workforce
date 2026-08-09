@@ -1190,6 +1190,39 @@ test('an unknown agent and an unknown action are both refused', async () => {
   assert.ok(!bogus.type.includes('text/html'), 'an unknown action was answered with the page');
 });
 
+test('an alias spelling of an agent name cannot walk past the confirmation', async (t) => {
+  // ⚠️ The guard read the RAW name while the action fired on the SANITISED key,
+  // so any alias defeated it entirely: refused under `probe`, and then cleared
+  // `probe` anyway when asked as `PROBE`. `knownAgent` documents that `ANGEL`,
+  // `an.gel` and `ang!el` all reach this route, so the alias is not exotic —
+  // it is the obvious spelling for a human or a script to use.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const plain = decodeURIComponent(name);
+
+  // ⚠️ The fixture is what makes this discriminating. Give the agent REAL
+  // commitments, then ask under an alias with the token for an agent that has
+  // none (`unknown:`).
+  //
+  // Reading the raw alias finds no record, so the token matches and the clear
+  // fires. Reading the sanitised key finds the real record, so it does not. A
+  // test that merely sent a wrong token would 409 either way and pin nothing.
+  const seeded = await req(`/api/agent/${name}/commitments`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commitments: [{ what: 'work that must not be destroyed by an alias' }] }),
+  });
+  assert.equal(seeded.status, 200, seeded.body);
+
+  for (const alias of [plain.toUpperCase(), plain.split('').join('.')]) {
+    const res = await req(`/api/agent/${encodeURIComponent(alias)}/clear`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: 'unknown:' }),
+    });
+    assert.equal(res.status, 409,
+      `${alias} walked past the confirmation and would have cleared the agent`);
+  }
+});
+
 test('the confirmation token distinguishes a state we can vouch for', async (t) => {
   // ⚠️ The token carries the STATE, not just the ids. `unknown` with three
   // items and `holding` with the same three are different situations: the first

@@ -667,7 +667,20 @@ const server = http.createServer((req, res) => {
         // card's premise is that commitments live in the conversation. An
         // action that can lose something must not be the one action that can
         // fire with no evidence the operator saw anything.
-        const seen = commitments.read(name);
+        // ⚠️ ONE identity, derived once, used for the check AND the action.
+        //
+        // This read the RAW name while `perform` acted on the sanitised key, so
+        // any alias spelling defeated the confirmation entirely: `/api/agent/
+        // PROBE/clear` was refused under `probe` and then cleared `probe`
+        // anyway, and the answer reported `holding: {state:"unknown",
+        // commitments:[]}` — "a record of the cost actually paid" saying nothing
+        // was at stake while three commitments were destroyed. `knownAgent`
+        // documents that `ANGEL`, `an.gel` and `ang!el` all reach this route.
+        //
+        // Two derivations of "which agent" is the defect this codebase has now
+        // found in six other places. One here.
+        const key = store.safeKey(name);
+        const seen = commitments.read(key);
         {
           if (typeof patch.holding !== 'string') {
             throw new Error('say what you were shown this would lose');
@@ -679,8 +692,8 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        const agent = snapshot().agents.find((a) => a.sessionName === store.safeKey(name));
-        const result = lifecycle.perform(action, store.safeKey(name), agent && agent.target);
+        const agent = snapshot().agents.find((a) => a.sessionName === key);
+        const result = lifecycle.perform(action, key, agent && agent.target);
 
         // ⚠️ Reconcile the record with what we just did to it.
         //
@@ -695,7 +708,7 @@ const server = http.createServer((req, res) => {
         // the agent saying it holds nothing, and it said no such thing. Removing
         // the record leaves `unknown`, which is the true state — we destroyed
         // what it knew, and we cannot know what it holds until it speaks again.
-        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.markDestroyed(name);
+        if (lifecycle.invalidatesCommitments(action, result.outcome)) commitments.markDestroyed(key);
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
           action,

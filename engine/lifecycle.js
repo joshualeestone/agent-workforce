@@ -257,8 +257,26 @@ function restart(agent) {
   // So the output is read. `OK:` present means the session was seen coming
   // back, which is a real verification. Anything else is `asked`: we ran the
   // restart and cannot confirm it took.
-  if (/(^|\n)OK:/.test(out)) {
+  const cameBack = /(^|\n)OK: .*session is running/.test(out);
+  // ⚠️ The script reports TWO things, and only matching the first was wrong.
+  //
+  // It prints `OK: <session> tmux session is running`, and then EITHER
+  // `OK: bypass permissions is ON` or `WARN: bypass permissions not confirmed`.
+  // A loose `OK:` match saw the first line in both cases, so a bot that came
+  // back WITHOUT its permissions flag — the exact silent-freeze failure this
+  // module's header gives as the reason it shells out to this script at all —
+  // was reported as `done`, "performed and verified", and the commitment record
+  // was destroyed on the strength of it.
+  const permissionsOn = /bypass permissions is ON/.test(out);
+
+  if (cameBack && permissionsOn) {
     return { outcome: OUTCOME.DONE, because: 'it was stopped and started again, and came back' };
+  }
+  if (cameBack) {
+    return {
+      outcome: OUTCOME.ASKED,
+      because: 'it came back, but we could not confirm it has permission to work, so check on it',
+    };
   }
   return {
     outcome: OUTCOME.ASKED,

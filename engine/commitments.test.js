@@ -1128,3 +1128,42 @@ test('a destroyed conversation is marked, not deleted', () => {
 test('marking a record we cannot read is not a failure worth surfacing', () => {
   assert.equal(c.markDestroyed('an-agent-with-no-record-at-all'), false);
 });
+
+test('a malformed record cannot crash the tombstone after the action has fired', () => {
+  // ⚠️ This threw a raw TypeError on a record containing `null`, AFTER the
+  // clear had already been sent. The operator was shown "Cannot set properties
+  // of null" and told the action failed, while the conversation was in fact
+  // destroyed and the record left un-tombstoned. `parseRecord` guards this
+  // exact shape five functions above; the new code did not.
+  const agent = 'malformedtomb';
+  c.report(agent, [{ what: 'something worth not losing here' }]);
+  for (const junk of ['null', '5', '"hi"', 'true', '[]', 'not json at all']) {
+    fs.writeFileSync(c.recordPath(agent), junk);
+    let got;
+    assert.doesNotThrow(() => { got = c.markDestroyed(agent); }, `threw on ${junk}`);
+    assert.equal(got, false, `${junk} reported as successfully marked`);
+  }
+});
+
+test('adding to a destroyed record does not re-publish what we destroyed', () => {
+  // ⚠️ `add()` and `resolve()` route through the same writer, which did not
+  // carry `destroyedAt`. So a single add erased the tombstone and brought the
+  // destroyed commitments back at FULL confidence: laundering through the
+  // module's own convenience API, undoing the one honesty guarantee
+  // `markDestroyed` exists to provide.
+  const agent = 'tomblaunder';
+  c.report(agent, [{ what: 'the thing that was destroyed with the conversation' }]);
+  c.markDestroyed(agent);
+  assert.equal(c.read(agent).state, c.STATE.UNKNOWN);
+
+  c.add(agent, 'a brand new thing said after the clear');
+  const after = c.read(agent);
+  assert.equal(after.state, c.STATE.UNKNOWN,
+    'a destroyed record was re-published as confident by an add');
+  assert.ok(after.destroyedAt, 'the tombstone was erased');
+
+  // But the agent SPEAKING for itself is exactly what should clear it.
+  c.report(agent, [{ what: 'what I am actually holding now that I am back' }]);
+  assert.equal(c.read(agent).state, c.STATE.HOLDING,
+    'a fresh report from the agent did not clear the tombstone');
+});

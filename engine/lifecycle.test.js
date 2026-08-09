@@ -118,7 +118,10 @@ test('a send reports ASKED, never DONE', () => {
 
 test('restart runs the blessed script with the bare agent name', () => {
   const calls = [];
-  lifecycle.setRunner((file, args) => { calls.push([file, ...args]); return 'OK: angel-discord tmux session is running\n'; });
+  lifecycle.setRunner((file, args) => {
+    calls.push([file, ...args]);
+    return 'OK: angel-discord tmux session is running\nOK: bypass permissions is ON\n';
+  });
   const got = lifecycle.restart('angel');
   assert.equal(got.outcome, lifecycle.OUTCOME.DONE);
   assert.deepEqual(calls, [[FAKE_SCRIPT, 'angel']]);
@@ -145,6 +148,15 @@ test('a restart the script could not confirm is ASKED, not DONE', () => {
   // And silence is not confirmation either.
   lifecycle.setRunner(() => '');
   assert.equal(lifecycle.restart('angel').outcome, lifecycle.OUTCOME.ASKED);
+
+  // ⚠️ Nor is a session that came back WITHOUT its permissions flag. That is
+  // the silent-freeze failure this whole module exists to prevent, and a loose
+  // `OK:` match reported it as verified success because the script's FIRST line
+  // is also an OK.
+  lifecycle.setRunner(() => 'OK: angel-discord tmux session is running\nWARN: bypass permissions not confirmed yet\n');
+  const half = lifecycle.restart('angel');
+  assert.equal(half.outcome, lifecycle.OUTCOME.ASKED, 'a bot with no permissions flag reported as verified');
+  assert.match(half.because, /permission to work/);
 });
 
 test('restart refuses rather than improvising when the script is missing', () => {

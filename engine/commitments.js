@@ -460,7 +460,7 @@ function idsAreUnique(commitments) {
  * answer. That is the exact failure this module exists to prevent, reached
  * through the module's own convenience API.
  */
-function writeRecord(key, rawName, clean, reportedAt) {
+function writeRecord(key, rawName, clean, reportedAt, preserveDestroyed = false) {
   // Capped HERE rather than only in report(). add() and resolve() call this
   // directly on a stale record, and because that branch deliberately preserves
   // the old timestamp the record stays stale, so every later add() takes the
@@ -474,6 +474,22 @@ function writeRecord(key, rawName, clean, reportedAt) {
   // asked about: safeKey STRIPS rather than rejects, so `worker.2` and `worker2`
   // collapse to one key.
   const next = { agent: key, name: String(rawName), reportedAt, commitments: clean };
+
+  // ⚠️ A tombstone survives a rewrite unless the agent itself is reporting
+  // afresh. `add()` and `resolve()` route through here on the EXISTING record,
+  // so without this they erased `destroyedAt` and re-published the destroyed
+  // commitments at full confidence — the same laundering-through-a-convenience-
+  // API shape this file already records once, undoing the one honesty guarantee
+  // `markDestroyed` exists to provide. `report()` clears it deliberately: that
+  // IS the agent speaking again.
+  if (preserveDestroyed) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(recordPath(rawName), 'utf8'));
+      if (prev && typeof prev === 'object' && typeof prev.destroyedAt === 'string') {
+        next.destroyedAt = prev.destroyedAt;
+      }
+    } catch { /* no prior record, nothing to preserve */ }
+  }
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
   // machine, and a half-written file that parses as an empty array is exactly
@@ -573,9 +589,9 @@ function add(agent, what) {
   // never-invent rule through the convenience API.
   const next = [...rec.commitments, ...sanitise([{ what }])];
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, true);
   }
-  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString());
+  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString(), true);
 }
 
 /** Convenience: mark one done. */
@@ -593,9 +609,9 @@ function resolve(agent, id) {
   // list is known", which is what made the laundering read as intentional.
   // Same rule: what is already stored is preserved verbatim.
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt, true);
   }
-  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString());
+  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString(), true);
 }
 
 /**
@@ -660,12 +676,32 @@ function markDestroyed(agent) {
   // Rewrite in place rather than removing: the items are the only record of
   // what was destroyed, and deleting them is the loss this store exists to
   // prevent.
+  // ⚠️ Every guard `parseRecord` applies, applied here too.
+  //
+  // This read the file with none of them. A record containing `null` (or `5`,
+  // or `"hi"`) threw a raw TypeError on the assignment below — AFTER the clear
+  // had already been sent — so the operator was shown "Cannot set properties of
+  // null" and told the action failed, while the agent's conversation was in
+  // fact destroyed and the record left un-tombstoned. A FIFO here would block
+  // the request handler forever, and an oversized record that `read` refuses
+  // was still parsed and re-serialised. All three are guarded five functions
+  // above in this same file.
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) return false;
+
   let raw;
   try {
     raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     return false; // nothing to mark, which is not a failure worth surfacing
   }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+
   raw.destroyedAt = new Date().toISOString();
   const tmp = `${file}.${process.pid}.tmp`;
   try {
