@@ -167,6 +167,11 @@ function crossSite(req) {
   // on a form POST, so treating it as "no origin to check" left the exact
   // cross-site form attack open on browsers that do not send `Sec-Fetch-Site`.
   // An origin we cannot attribute is one we cannot vouch for.
+  // ⚠️ NOT currently load-bearing, said out loud rather than implied. The
+  // `new URL(origin)` below throws on 'null' and its catch already refuses, so
+  // deleting this line changes no behaviour and fails no test. Kept as
+  // defence-in-depth against a future refactor that makes the parse lenient,
+  // and labelled so nobody reads it as coverage that exists.
   if (origin === 'null') return true;
   if (origin) {
     let host;

@@ -1193,6 +1193,19 @@ test('adding to a destroyed record does not re-publish what we destroyed', () =>
     'a destroyed record was re-published as confident by an add');
   assert.ok(after.destroyedAt, 'the tombstone was erased');
 
+  // ⚠️ And the destroyed items are NOT carried alongside the new one.
+  //
+  // `preserveDestroyed` stopped the tombstone being laundered away, and created
+  // the inverse: the post-clear item was MERGED into the destroyed list, so the
+  // two became indistinguishable and `read()` said "we cleared its conversation,
+  // so it can no longer tell us what it was holding" over a commitment made
+  // after the clear. The record could never recover.
+  //
+  // The tombstone stays (only `report` is the agent re-asserting what it
+  // holds), but the destroyed items do not come back.
+  assert.deepEqual(after.commitments.map((x) => x.what), ['a brand new thing said after the clear'],
+    'destroyed work was re-listed alongside a commitment made after the clear');
+
   // But the agent SPEAKING for itself is exactly what should clear it.
   c.report(agent, [{ what: 'what I am actually holding now that I am back' }]);
   assert.equal(c.read(agent).state, c.STATE.HOLDING,

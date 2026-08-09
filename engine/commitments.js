@@ -338,6 +338,19 @@ function read(agent) {
   // code removed it. Keeping the items is what lets the board say what was lost.
   if (rec.destroyedAt) {
     return {
+      // ⚠️ ONE sentence, and an attempt at two is recorded here rather than
+      // shipped. Two situations reach this branch: a record that is only a
+      // tombstone (the items ARE what was destroyed) and one that has been
+      // added to since (the items are post-clear). They want different wording,
+      // and `commitments.length` cannot tell them apart — both are non-empty.
+      // Distinguishing them needs the record to mark which items post-date the
+      // tombstone, which is a store change for a path no route reaches today:
+      // `add` is library-only, and the UI writes through `report`.
+      //
+      // So this keeps the sentence that is right for the case that actually
+      // renders, and the merge bug (post-clear items joining the destroyed
+      // list, making them indistinguishable) is fixed in `add` instead — which
+      // was the part that mattered.
       ...unknown('we cleared its conversation, so it can no longer tell us what it was holding'),
       reportedAt: rec.reportedAt,
       destroyedAt: rec.destroyedAt,
@@ -587,7 +600,23 @@ function add(agent, what) {
   // is sanitised. Re-running sanitise() over the existing list rewrote an
   // unparseable createdAt to `now`, silently reversing the read path's
   // never-invent rule through the convenience API.
-  const next = [...rec.commitments, ...sanitise([{ what }])];
+  // ⚠️ After a TOMBSTONE the destroyed items are not a base to extend.
+  //
+  // `preserveDestroyed` stopped `add`/`resolve` laundering a tombstone away and
+  // re-publishing destroyed work at full confidence. It also created the
+  // inverse: the new item was MERGED into the destroyed list, so the two became
+  // indistinguishable and `read()` answered "we cleared its conversation, so it
+  // can no longer tell us what it was holding" about a commitment made after
+  // the clear.
+  //
+  // The new item replaces the destroyed list rather than joining it. The
+  // tombstone stays, because `add` is not the agent re-asserting what it holds
+  // — only `report` is, and that distinction is the one this store is built on.
+  // So the record still reads `unknown`: we know one thing it is holding and
+  // cannot vouch for the rest, which is exactly true.
+  const base = rec.destroyedAt ? [] : rec.commitments;
+
+  const next = [...base, ...sanitise([{ what }])];
   if (isStale(rec)) {
     return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, true);
   }

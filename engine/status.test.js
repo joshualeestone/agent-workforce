@@ -269,6 +269,38 @@ test('two sessions that resolve to one agent name collapse to the real agent', (
     'the surviving card would refuse restart for the real agent');
 });
 
+test('a CRASHED agent still wins its name against an unrelated session', () => {
+  // ⚠️ The regression the name-keyed dedupe introduced, and the case that
+  // matters most.
+  //
+  // Keying on `name` is right (`kappa` and `kappa-discord` are one agent name),
+  // but it lets two UNRELATED sessions compete. The ladder then ranked only
+  // "is a running agent" — so when a crashed agent (`kappa-discord` fallen back
+  // to a shell) met an unrelated `kappa`, neither was running and the winner
+  // fell through to pane index, comparing indexes across two sessions that have
+  // nothing to do with each other.
+  //
+  // Measured with the impostor first: the real agent vanished from the board
+  // entirely, and the surviving card refused all three actions with "we are not
+  // confident that card is one of your agents" — in the crashed-agent case the
+  // module calls the single most valuable thing Restart can act on.
+  //
+  // Removing the `isFleetSession` tier from `rank` fails this.
+  for (const order of [
+    ['kappa\t0.0\tzsh\t0\t', 'kappa-discord\t0.0\tzsh\t0\t'],
+    ['kappa-discord\t0.0\tzsh\t0\t', 'kappa\t0.0\tzsh\t0\t'],
+  ]) {
+    const roster = onePanePerSession(parsePanes(order.join('\n')));
+    assert.equal(roster.length, 1);
+    assert.equal(roster[0].target, 'kappa-discord:0.0',
+      'an unrelated session took the real agent\'s card, so the agent vanished');
+    assert.equal(isFleetSession(roster[0]), true,
+      'the surviving card would refuse to restart a crashed agent');
+    // It is still not typeable, which is the honest answer for a shell.
+    assert.equal(isAgentPane(roster[0]), false);
+  }
+});
+
 test('a split window does not put the same agent on the board twice', () => {
   // ⚠️ `list-panes -a` returns one line per PANE and the roster mapped straight
   // over it, so a `*-discord` session with a split window produced two cards

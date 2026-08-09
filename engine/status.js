@@ -79,20 +79,23 @@ function sh(cmd, args) {
 }
 
 /**
- * Is this pane one of the fleet's agent sessions at all?
+ * ⚠️ Three tiers live here, and mixing them up has caused a defect at every
+ * level, so read which one you want before using it:
  *
- * ⚠️ `list-panes -a` returns EVERY pane on the machine, and the roster it feeds
- * gates every destructive route. Without this, `/clear` and Enter would be
+ *   `isFleetSession` — our session, whatever is running in it. What RESTART
+ *                      asks, because a crashed agent is still our agent.
+ *   `isAgentSession` — the above, AND Claude is actually running.
+ *   `isAgentPane`    — the above, AND the pane is not scrolled back in
+ *                      copy-mode. What TYPING asks.
+ *
+ * `list-panes -a` returns EVERY pane on the machine, and the roster it feeds
+ * gates every destructive route. Without these, `/clear` and Enter would be
  * typed into a plain shell, an editor, or a REPL, where the text is EXECUTED
  * rather than read as a slash command. Latent while every session happens to be
  * a Claude agent; live the moment anyone opens an unrelated tmux session.
  *
- * The fleet's sessions are `<name>-discord`. Matching on that is a convention
- * rather than a proof, so it is paired with the process check the classifier
- * already does: a pane running a shell is not an agent whatever it is called.
- *
- * ⚠️ Split out of `isAgentPane` because RESTART needs this question and not the
- * other one, and conflating them was a real hole at both ends.
+ * ⚠️ Split apart because RESTART needs a different question from typing, and
+ * conflating them was a real hole at both ends.
  *
  * Too loose: `restart` was exempt from every roster check on the reasoning that
  * it goes through launchd and types nothing. But the roster is every tmux pane
@@ -271,20 +274,50 @@ function listPanes() {
 }
 
 /**
- * One entry per tmux SESSION, not per pane.
+ * One entry per agent NAME, not per pane and not per session.
  *
  * ⚠️ `list-panes -a` returns every pane, and the roster mapped straight over
- * it. A `*-discord` session with a split window therefore produced two cards
- * with the same name, the same commitment record, and the same `data-fresh`
- * value — and both the card click and the action route resolve an agent by
- * `.find()`, which takes whichever sorted first. So the operator could click
- * the card for one pane and have the keystrokes go to the other.
+ * it. A `*-discord` session with a split window produced two cards with the
+ * same name, the same commitment record and the same `data-fresh` value — and
+ * both the card click and the action route resolve an agent by `.find()`, which
+ * takes whichever sorted first. So the operator could click the card for one
+ * pane and have the keystrokes go to the other.
  *
- * The representative is the pane actually running Claude, lowest index first.
- * A session with no agent pane still yields one entry, because the board must
- * show a session it cannot read rather than hiding it — but it will be an entry
- * that `isAgentPane` refuses, which is the honest answer for it.
+ * ⚠️ Keyed on NAME rather than session, because the roster STRIPS `-discord`
+ * without requiring it: `kappa` and `kappa-discord` are two sessions and one
+ * agent name, which is the same collision one level up.
+ *
+ * A name with no agent pane still yields one entry, because the board must show
+ * something it cannot read rather than hiding it — but it will be an entry that
+ * `isAgentPane` refuses, which is the honest answer for it. See `rank` for
+ * which pane represents the name.
  */
+/**
+ * How much this pane deserves to be the card for its name. Lower wins.
+ *
+ * ⚠️ THREE tiers, and the middle one is a regression fix for the tier above it.
+ *
+ * Keying the dedupe on `name` (correct: `kappa` and `kappa-discord` are one
+ * agent name) meant two UNRELATED sessions could compete. The ladder then ranked
+ * only "is a running agent", so when a CRASHED agent (`kappa-discord` fallen
+ * back to a shell) met an unrelated `kappa` session, neither was a running agent
+ * and the winner fell through to pane index — comparing indexes across two
+ * sessions that have nothing to do with each other, i.e. arbitrary.
+ *
+ * Measured with the impostor listed first: the real `kappa-discord` agent
+ * disappeared from the board entirely, and the surviving card refused all three
+ * actions with "we are not confident that card is one of your agents". Both of
+ * the failures this function exists to prevent, in the crashed-agent case this
+ * module calls the single most valuable thing a Restart button can act on.
+ *
+ * So: a running agent beats one of our sessions, which beats anything else.
+ */
+function rank(pane) {
+  if (isAgentSession(pane)) return 0;
+  if (isFleetSession(pane)) return 1;
+  return 2;
+}
+
 /** `<window>.<pane>` as a sortable number pair. */
 function paneOrder(id) {
   const [w, p] = String(id || '').split('.');
@@ -313,20 +346,8 @@ function onePanePerSession(panes) {
     const held = bySession.get(key);
     if (!held) { bySession.set(key, pane); continue; }
 
-    const heldIsAgent = isAgentSession(held);
-    const paneIsAgent = isAgentSession(pane);
-    // Prefer a real agent pane; between two of a kind, the lower pane index.
-    //
-    // ⚠️ NUMERIC, not lexicographic. `String('0.10') < String('0.2')` is true,
-    // so a session with ten panes picked `0.10` over `0.2` while the comment
-    // promised the lower index. The pane this chooses becomes the card's
-    // `target`, which is where `/clear` and `/compact` keystrokes are SENT — so
-    // a string compare here is a targeting decision for destructive input,
-    // getting it wrong in exactly the way ("the operator could click the card
-    // for one pane and have the keystrokes go to the other") this function was
-    // added to prevent.
-    if ((paneIsAgent && !heldIsAgent)
-      || (paneIsAgent === heldIsAgent && paneOrder(pane.pane) < paneOrder(held.pane))) {
+    if (rank(pane) < rank(held)
+      || (rank(pane) === rank(held) && paneOrder(pane.pane) < paneOrder(held.pane))) {
       bySession.set(key, pane);
     }
   }
