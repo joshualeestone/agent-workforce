@@ -52,10 +52,19 @@
 //      comment said they were sandboxed. Reads only, nothing was corrupted, but
 //      the comment was the thing a future author would trust before deciding a
 //      write was safe. Both modules now read this one variable.
-//   3. `store.ROOT` -> avatars and profiles. NOT sandboxed, no variable for it.
-//      That is why no test here sends a PUT or DELETE to an avatar or profile
-//      route, and why any test that does must sandbox it first. A reviewer once
-//      deleted a real avatar by assuming one variable covered everything.
+//   3. `store.ROOT` -> avatars and profiles. ⚠️ THIS WAS "NOT sandboxed, no
+//      variable for it", and that is no longer true: `engine/store.js` now
+//      honours `AGENT_WORKFORCE_DATA` too, so all three roots travel together.
+//      Tests on this branch DO write to the avatar store and PUT /profile,
+//      which the old wording forbade — the header was stale for exactly as long
+//      as it took someone to read it and stop. A reviewer once deleted a real
+//      avatar by assuming one variable covered everything; the fix is that it
+//      now does, not that the warning stands.
+//   4. `AGENT_WORKFORCE_CONFIG_ROOT` -> the Claude config root that holds the
+//      agent registry and transcripts. ⚠️ NOT set in this file, so /api/status
+//      reads the operator's real `~/.claude` on every run here. Reads only —
+//      but `engine/status.test.js` sets it, and this file should, and the
+//      asymmetry is worth knowing before adding a test that writes.
 const os = require('node:os');
 const fs = require('node:fs');
 const nodePath = require('node:path');
@@ -850,12 +859,12 @@ test('the status payload carries the STORE value for each agent, not a placehold
     assert.deepEqual(seen.sort(), tied.map((a) => a.sessionName).sort(),
       'read() must be called once per TIED agent, with that agent sessionName');
 
-    // And an untied agent must NOT have been read — the gate, asserted from the
-    // caller's side rather than only from the payload's.
-    for (const a of agents.filter((x) => !x.isNamedOurs)) {
-      assert.ok(!seen.includes(a.sessionName),
-        `${a.sessionName} is untied and read() was called for it anyway`);
-    }
+    // ⚠️ And an untied agent must NOT have been read. This looped over the LIVE
+    // board, which has zero untied agents on this machine — so the loop body
+    // never ran and the assertion proved nothing, which is the same
+    // machine-dependence the comment above condemns. Asserted below against a
+    // stubbed roster instead, where both shapes are guaranteed present.
+    assert.ok(true, 'see the stubbed assertion below');
   } finally {
     commitments.read = real;
   }
@@ -1315,5 +1324,124 @@ test('a roster we cannot read refuses the name-keyed reads rather than serving t
     }
   } finally {
     status.setPaneSource(null);
+  }
+});
+
+test('the gate checks do not capture every pane on every request', async () => {
+  // ⚠️ A real regression, measured rather than suspected. `borrowedName` called
+  // `snapshot()`, which is a synchronous fan-out: one `list-panes` plus one
+  // `capture-pane` PER AGENT plus transcript reads. On the avatar route that
+  // sits on a polling path — the board rebuilds its grid every five seconds and
+  // avatar responses are `no-store`, so every card refetches each tick — which
+  // put ~0.65s of blocked event loop and ~170 extra `capture-pane` invocations
+  // against live agents into every tick on a thirteen-agent fleet.
+  //
+  // Memoising `snapshot()` was the other option and it was WRONG: it makes a
+  // gate answer from a stale roster, which is the wrong direction for a check
+  // deciding whose data to hand out. Two tests caught it immediately.
+  // ⚠️ Asserted through the ROUTE, not by calling the helper. Testing that
+  // `paneRoster()` captures nothing says nothing about whether the gate uses
+  // it — the first version of this test did exactly that, and reverting the
+  // gate to `snapshot()` left it green.
+  const status = require('./engine/status');
+  let captures = 0;
+  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tx');
+  status.setPaneCapture(() => { captures += 1; return 'Worked for 1m\n> \n'; });
+  try {
+    captures = 0;
+    await req('/api/agent/zeta/avatar');
+    assert.equal(captures, 0,
+      'an avatar request captured every pane, so the board shells out once per '
+      + 'agent per card on a five-second polling path');
+
+    captures = 0;
+    await req('/api/agent/zeta/commitments');
+    assert.equal(captures, 0, 'a commitments read captured every pane');
+
+    // The comparison is meaningless if nothing captures at all.
+    captures = 0;
+    status.snapshot();
+    assert.ok(captures > 0, 'snapshot captured nothing, so the assertions above prove nothing');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a live agent is not taken offline by a stranger holding an alias of its name', async () => {
+  // ⚠️ The alias fix corrected the LEAK direction and left the AVAILABILITY
+  // direction wrong. `.find()` returned whichever card sorted first, so with
+  // the real `angel-discord` up AND a colleague's `tmux new -s Angel` open for
+  // unrelated work, "Angel" sorted before "Angel Bridge" and the live agent's
+  // avatar and commitment record went offline — and the restart dialog this
+  // gate exists for would have shown "no agent by that name" as the cost of
+  // clearing a healthy agent.
+  //
+  // The predicate is "some untied card claims this key AND no tied card does",
+  // not "the first card claiming it is untied".
+  const status = require('./engine/status');
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 200,
+      'a healthy agent lost its own record because a stranger held an alias '
+      + 'spelling of its name');
+
+    const put = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'still editable' }),
+    });
+    assert.equal(put.status, 200, 'a healthy agent became uneditable for the same reason');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('/api/status reads the store for a tied agent and not for an untied one', async () => {
+  // ⚠️ Hermetic, because both halves of this were unpinned by accident of this
+  // machine. The tied half passed only because `commitments.read` for an
+  // unseeded name returns `{state:'unknown', commitments:[]}`, which is
+  // byte-identical to what the gate substitutes — so deleting the gate changed
+  // nothing observable. The untied half looped over the live board, which has
+  // zero untied agents here, so its body never ran.
+  //
+  // A stubbed roster gives one of each, and a stub value that cannot be
+  // confused with the gate's substitute.
+  const commitments = require('./engine/commitments');
+  const status = require('./engine/status');
+  const real = commitments.read;
+  const seen = [];
+  commitments.read = (name) => {
+    seen.push(name);
+    return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${name}` }], reportedAt: new Date().toISOString(), because: 'stubbed for this test' };
+  };
+  status.setPaneSource(() => [
+    'tied-discord\t0.0\t2.1.212\t0\tworking',
+    'untied\t0.0\t2.1.212\t0\tworking',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const agents = JSON.parse((await req('/api/status')).body).agents || [];
+    const tied = agents.find((a) => a.sessionName === 'tied');
+    const untied = agents.find((a) => a.sessionName === 'untied');
+    assert.ok(tied && untied, 'the stubbed roster did not produce both shapes');
+
+    assert.equal(tied.commitments.because, 'stubbed for this test',
+      'the tied agent did not get the store value');
+    assert.ok(seen.includes('tied'), 'read() was never called for the tied agent');
+
+    assert.notEqual(untied.commitments.because, 'stubbed for this test',
+      'the untied agent was handed the real store value for the name it borrowed');
+    assert.ok(!seen.includes('untied'),
+      'read() was called for an untied agent, so the gate is not at the call site');
+  } finally {
+    commitments.read = real;
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
   }
 });

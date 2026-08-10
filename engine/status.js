@@ -1036,6 +1036,29 @@ function safeAvatar(name) {
   try { return store.avatarPath(name); } catch { return null; }
 }
 
+/**
+ * Just who is on the board and whether each is tied to its name — no captures.
+ *
+ * ⚠️ Exists because the gate checks were calling `snapshot()`, which is a
+ * synchronous fan-out: one `list-panes` plus one `capture-pane` PER AGENT plus
+ * transcript reads, measured at 43-60ms of blocked event loop for thirteen
+ * agents. On the avatar route that landed on a polling path — the board
+ * refetches every card's picture every five seconds — costing roughly 0.65s of
+ * blocked loop and ~170 extra `capture-pane` calls against live agents per tick.
+ *
+ * A gate needs the NAME and whether it is tied. Both come from the pane list
+ * alone, which is ONE tmux call and no captures. Memoising `snapshot()` was the
+ * other option and it was wrong: it makes a gate answer from a stale roster,
+ * which is exactly the wrong direction for a check that decides whose data to
+ * hand out.
+ */
+function paneRoster() {
+  return onePanePerSession(listPanes()).map((pane) => ({
+    sessionName: pane.name,
+    isNamedOurs: isNamedOurs(pane),
+  }));
+}
+
 function snapshot() {
   const panes = onePanePerSession(listPanes());
   const agents = panes.map((pane) => {
@@ -1143,7 +1166,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, paneRoster, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

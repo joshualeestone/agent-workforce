@@ -15,7 +15,7 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot } = require('./engine/status');
+const { snapshot, paneRoster } = require('./engine/status');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -87,11 +87,23 @@ function borrowedName(name) {
     // twenty-line comment was claiming a protection it was not providing. Same
     // safeKey-vs-verbatim mismatch already documented forty lines above, made
     // again in the function written to fix it.
+    // ⚠️ "Some untied card claims this key AND NO tied card does" — not "the
+    // first card claiming it is untied". `.find()` picked whichever sorted
+    // first, so with the real `angel-discord` up and healthy AND a colleague's
+    // `tmux new -s Angel` open for unrelated work, both cards survive the
+    // roster (they dedupe on the raw name, so `Angel` and `angel` do not
+    // collapse), "Angel" sorts before "Angel Bridge", and the LIVE agent's
+    // avatar and commitment record went offline. The alias bug was corrected in
+    // the leak direction and left wrong in the availability direction — a gate
+    // that refuses a healthy agent is its own failure, and the restart dialog
+    // this exists for would have shown "no agent by that name" as the cost of
+    // clearing a real one.
     const key = store.safeKey(name);
-    const card = snapshot().agents.find((a) => {
+    const claimants = paneRoster().filter((a) => {
       try { return store.safeKey(a.sessionName) === key; } catch { return false; }
     });
-    return Boolean(card) && card.isNamedOurs !== true;
+    if (!claimants.length) return false;
+    return !claimants.some((a) => a.isNamedOurs === true);
   } catch {
     // ⚠️ Fails CLOSED. The first version returned `false` here — "nobody is
     // claiming this name" — so a `snapshot()` that throws served the record.
