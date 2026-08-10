@@ -672,7 +672,39 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
   // Publishing `isNamedOurs` and leaving another branch to honour it is not
   // enough: this module is what asserts the identity, so this module has to
   // stop asserting it.
-  setPaneSource(() => 'claudebot\t0.0\t2.1.212\t0\tstranger doing something else');
+  // ⚠️ The first version of this test named a REAL agent on this machine
+  // (`claudebot`), so it only failed where that agent's registry entry and
+  // transcript happen to exist. On a clean checkout or in CI the assertions
+  // were VACUOUSLY TRUE — the gate they exist to pin was unpinned everywhere it
+  // mattered, and the mutation test passed only because this laptop is the
+  // machine the fleet runs on. That is the same live-agent-read trap this file
+  // condemns twice elsewhere.
+  //
+  // So: compare an UNTIED pane against a TIED one with the same name shape, in
+  // one snapshot. The tied card is the control — if identity reads stop working
+  // altogether the control fails, and if the gate is removed the untied card
+  // starts matching it. Neither depends on which agents exist here.
+  setPaneSource(() => [
+    'ghostly-discord\t0.0\t2.1.212\t0\tthe real one',
+    'ghostly\t0.0\t2.1.212\t0\tstranger doing something else',
+  ].join('\n'));
+  setPaneCapture(() => 'Worked for 2m 14s\n> \n');
+  try {
+    const agents = snapshot().agents;
+    // Both strip to the same NAME, so the roster collapses them and the tied
+    // pane must win — that is `rank`, and it is pinned separately.
+    const [card] = agents;
+    assert.equal(agents.length, 1, 'the two sessions did not collapse to one name');
+    assert.equal(card.isNamedOurs, true, 'the tied pane lost its own name to the stranger');
+    assert.equal(card.target, 'ghostly-discord:0.0');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+
+  // Now the stranger ALONE, which is the case the gate exists for: the real
+  // agent is gone and only the impostor is left to win the name.
+  setPaneSource(() => 'ghostly\t0.0\t2.1.212\t0\tstranger doing something else');
   setPaneCapture(() => 'Worked for 2m 14s\n> \n');
   try {
     const [card] = snapshot().agents;
@@ -681,10 +713,17 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
     assert.equal(card.nameDerived, false,
       'an untied pane was given a display name derived from another agent’s files');
     assert.equal(card.role, null, 'an untied pane borrowed the real agent’s role');
+    assert.equal(card.model, null, 'an untied pane borrowed the real agent’s model');
+    assert.equal(card.modelName, null, 'an untied pane borrowed the real agent’s model name');
     assert.equal(card.context.percent, null,
       'an untied pane borrowed the real agent’s context ring');
     assert.equal(card.context.confidence, CONFIDENCE.NONE,
       'a borrowed context reading was published at real confidence');
+    assert.equal(card.hasAvatar, false,
+      'an untied pane rendered the real agent’s photograph');
+    assert.equal(card.profile, null,
+      'an untied pane carried the real agent’s operator-set profile, which the '
+      + 'detail panel prefers over the role field');
   } finally {
     setPaneSource(null);
     setPaneCapture(null);
@@ -779,6 +818,36 @@ test('isNamedOurs is on the snapshot and means what the consumers think', () => 
     assert.equal(inferred.isNamedOurs, false);
     assert.equal(isNamedOurs({ session: 'x-discord' }), true, 'the function is not exported or not correct');
     assert.equal(isNamedOurs({ session: 'x' }), false);
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('an untied pane does not unlock the write routes for the name it borrowed', () => {
+  // ⚠️ PRE-EXISTING and reachable on main today. `knownAgent` gates every write
+  // route on `sessionName`, and the roster publishes an untied pane's raw
+  // session name — so with the real `angel-discord` down, a stranger's
+  // `tmux new -s angel` made `knownAgent('angel')` true and unlocked
+  // `PUT /api/agent/angel/instructions`, which rewrites the CLAUDE.md the real
+  // agent boots from. Also the avatar and profile routes, against the real
+  // agent's stored data.
+  //
+  // Pinned here rather than in the server tests because the fact it depends on
+  // is this module's: `isNamedOurs` must be on the snapshot and must be false
+  // for a pane whose session name does not carry the suffix. Deleting the
+  // `isNamedOurs === true` clause in `knownAgent` fails the server-side test;
+  // deleting the field here fails this one.
+  setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const [card] = snapshot().agents;
+    assert.equal(card.sessionName, 'angel',
+      'the untied pane no longer publishes the borrowed name, which changes what '
+      + 'knownAgent has to defend against');
+    assert.equal(card.isNamedOurs, false,
+      'the field knownAgent depends on is missing or wrong, so every write route '
+      + 'is open to a session that merely shares an agent’s name');
   } finally {
     setPaneSource(null);
     setPaneCapture(null);

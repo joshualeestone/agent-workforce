@@ -48,6 +48,24 @@ independently reviewable.
    six-name shell denylist — so a crashed agent whose remaining pane was `vim`
    got classified from the editor's screen text and reported healthy.
 
+## ⚠️ Deliberate scope addition: `server.js` `knownAgent`
+
+This branch was meant to be one file plus tests. It touches `server.js` too, in
+one function, and the reason is worth stating rather than hiding in the diff.
+
+`knownAgent` gates every **write** route on `sessionName`, and the roster
+publishes an untied pane's raw session name. So with the real `angel-discord`
+down, a stranger's `tmux new -s angel` made `knownAgent('angel')` true and
+unlocked `PUT /api/agent/angel/instructions` — **rewriting the CLAUDE.md the real
+agent boots from** — plus the avatar and profile routes against the real agent's
+stored data.
+
+**It is pre-existing and reachable on `main` today.** It is fixed here because
+the argument this branch makes about `status.js` applies verbatim to its
+consumers: publishing `isNamedOurs` and expecting someone downstream to honour it
+is not a fix. This is the only consumer in this tree and the change is one
+clause.
+
 ## Verification
 
 - [x] `node --test` — 217 passing, 0 skipped, on this branch off `main`.

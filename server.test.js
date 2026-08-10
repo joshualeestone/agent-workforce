@@ -1095,3 +1095,38 @@ test('the status payload carries staleness but NOT the instruction text', async 
   assert.ok(JSON.stringify(body).length < 200 * 1024,
     `status payload is ${JSON.stringify(body).length} bytes; the text is probably riding along`);
 });
+
+test('a session that merely borrows an agent name cannot rewrite its instructions', async () => {
+  // ⚠️ PRE-EXISTING and reachable on main. `knownAgent` gated every write route
+  // on `sessionName`, and the roster publishes an untied pane's raw session
+  // name — so with the real `angel-discord` down, a stranger's
+  // `tmux new -s angel` made `knownAgent('angel')` true and unlocked
+  // `PUT /api/agent/angel/instructions`, which rewrites the CLAUDE.md the REAL
+  // agent boots from. The avatar and profile routes were open the same way,
+  // against the real agent's stored data.
+  //
+  // Deleting the `isNamedOurs === true` clause in `knownAgent` fails here.
+  const status = require('./engine/status');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    assert.ok(card, 'the fixture did not produce the borrowed-name card');
+    assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
+
+    for (const route of ['instructions', 'profile']) {
+      const res = await req(`/api/agent/angel/${route}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(route === 'instructions' ? { text: 'rewritten by a stranger' } : { role: 'rewritten' }),
+      });
+      assert.equal(res.status, 404,
+        `PUT /${route} was accepted for a session that merely shares the name, so a `
+        + 'stranger can rewrite what the real agent boots from');
+    }
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});

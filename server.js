@@ -71,7 +71,23 @@ function readBody(req) {
  */
 function knownAgent(name) {
   try {
-    return snapshot().agents.some((a) => a.sessionName === store.safeKey(name));
+    // ⚠️ `isNamedOurs` too, and this is a PRE-EXISTING hole rather than one this
+    // branch introduced — it is reachable on `main` today.
+    //
+    // The roster publishes an untied pane's raw session name as `sessionName`,
+    // so with the real `angel-discord` down, a stranger's `tmux new -s angel`
+    // makes `knownAgent('angel')` true. That unlocks
+    // `PUT /api/agent/angel/instructions`, which rewrites
+    // `~/work/workers/angel/CLAUDE.md` — the file the real agent boots from —
+    // plus the avatar and profile routes against the real agent's stored data.
+    //
+    // It is fixed here rather than left for a later branch because the argument
+    // this branch already makes about `status.js` applies verbatim to its
+    // consumers: publishing `isNamedOurs` and expecting someone downstream to
+    // honour it is not a fix. This is the only consumer in this tree, and it is
+    // three lines.
+    return snapshot().agents.some((a) =>
+      a.sessionName === store.safeKey(name) && a.isNamedOurs === true);
   } catch {
     return false;
   }

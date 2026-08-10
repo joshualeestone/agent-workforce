@@ -1065,8 +1065,18 @@ function snapshot() {
       modelName: modelDisplayName(model),
       // Things a person set, which the machine cannot derive. Role in
       // particular: nothing on this machine records what an agent *is*.
-      hasAvatar: Boolean(safeAvatar(pane.name)),
-      profile: store.readProfile(pane.name),
+      // ⚠️ These two are keyed on the NAME as well, and gating identity, model
+      // and context while leaving them open made the first fix incomplete on
+      // its own terms. `hasAvatar` renders the real agent's PHOTOGRAPH on the
+      // stranger's card, and the detail panel reads `profile.role || role` — so
+      // the `role: null` above is only the fallback, and the operator-set role
+      // came straight back through the profile store.
+      //
+      // Every read in this function keyed on `pane.name` needs the same gate.
+      // Fixing four of six is not a partial fix, it is the same defect with a
+      // smaller surface.
+      hasAvatar: tied ? Boolean(safeAvatar(pane.name)) : false,
+      profile: tied ? store.readProfile(pane.name) : null,
     };
   });
 
