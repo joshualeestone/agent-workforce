@@ -18,7 +18,11 @@ independently reviewable.
 
 ## What it contains
 
-`engine/status.js` and `engine/status.test.js` only.
+`engine/status.js` and its tests, plus the consumers of what it publishes —
+`server.js` (four name-keyed reads and the write gate), `engine/store.js` (one
+sandbox seam) and `engine/commitments.js` (one corrected comment). The engine
+alone was the intent; each other file is here because gating the engine without
+gating its readers is not a fix, which this branch learned four times.
 
 - [x] **Three tiers, named and separated** — `isFleetSession` (ours, whatever is
       running), `isAgentSession` (and Claude is running), `isAgentPane` (and not
@@ -66,7 +70,36 @@ consumers: publishing `isNamedOurs` and expecting someone downstream to honour i
 is not a fix. This is the only consumer in this tree and the change is one
 clause.
 
-## ⚠️ Second known cost: non-Discord agents are read-only
+## ⚠️ Second known cost: non-Discord agents are anonymous AND read-only
+
+**This section previously said "read-only", which understated it.** Measured on a
+session `research` with a real `workers/research/CLAUDE.md`:
+
+| | on `main` | on this branch |
+|---|---|---|
+| name | **Rex** | `research` |
+| role | research worker | *(none)* |
+| `nameDerived` | true | false |
+| model / model name | read | *(none)* |
+| context ring | read | *(none)* |
+| avatar | shown | *(none)* |
+| profile | read | *(none)* |
+| commitments | read | *(none)* |
+| instruction staleness | read | *(none)* |
+
+They do not merely lose editing. **They lose their identity and every reading
+attached to it.** That is the largest behavioural change on a branch whose
+headline is "Discord decoupled", and it is the trade-off a reviewer is actually
+being asked to sign off on, so it belongs in the PR description rather than in a
+subsection.
+
+**Why it is nevertheless right:** every one of those readings is filed under the
+NAME, and the finding of this branch is that an untied pane has not been shown to
+be the agent that name belongs to. Reading them means showing one agent's data on
+another's card, which is the defect being fixed. Showing less is an honest
+failure; showing the wrong agent's data is not.
+
+### Why it is not simply reverted
 
 Gating the write routes on `isNamedOurs` closes the borrowed-name hole and, in
 the same stroke, **removes the instruction/profile/avatar editing feature from
@@ -92,7 +125,7 @@ evidence of *whose* a pane is.
 
 ## Verification
 
-- [x] `node --test` — 217 passing, 0 skipped, on this branch off `main`.
+- [x] `node --test` — **231 passing, 0 skipped**, on this branch off `main`.
 - [x] Server smoke-tested: 13 agents, `isNamedOurs` present, board serves 200.
 - [x] Every guard mutation-tested: deleted, suite run, a **named** test confirmed
       to fail.

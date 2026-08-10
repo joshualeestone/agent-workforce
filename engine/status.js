@@ -37,6 +37,21 @@ const HOME = os.homedir();
  * started on one machine.
  */
 function configRoots() {
+  // ⚠️ An override, so a test can point this at a sandbox. Without one, the
+  // only way to give a fixture a registry entry and a transcript was to write
+  // into the operator's REAL `~/.claude` — which the test suite did: it planted
+  // a phantom `ghostly-discord_0.0.json` beside fifteen live agents and a
+  // phantom `projects/seeded/` directory, and removed neither. Fleet tooling
+  // that scans `agent-registry` would have picked it up.
+  //
+  // Worse for the suite itself: because the files persisted between runs, the
+  // test's own anti-vacuity check ("the fixture stopped seeding, so these nulls
+  // are vacuous again") passed off the PREVIOUS run's leftovers. Deleting the
+  // seeding would have left the suite green forever on any machine that had run
+  // it once.
+  if (process.env.AGENT_WORKFORCE_CONFIG_ROOT) {
+    return [process.env.AGENT_WORKFORCE_CONFIG_ROOT];
+  }
   const roots = [];
   let entries = [];
   try {

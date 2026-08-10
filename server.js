@@ -78,11 +78,27 @@ function readBody(req) {
  */
 function borrowedName(name) {
   try {
+    // ⚠️ Compare LIKE FOR LIKE. The first version compared the sanitised key
+    // against the raw `sessionName`, so every alias spelling slipped past it: a
+    // stranger on `tmux new -s Angel` or `tmux new -s an.gel` produced a card
+    // whose `sessionName` is `Angel`/`an.gel`, which never equalled `angel`.
+    // The route was allowed, and the only thing actually stopping the leak was
+    // an independent alias guard in `commitments.js` — so this function's
+    // twenty-line comment was claiming a protection it was not providing. Same
+    // safeKey-vs-verbatim mismatch already documented forty lines above, made
+    // again in the function written to fix it.
     const key = store.safeKey(name);
-    const card = snapshot().agents.find((a) => a.sessionName === key);
+    const card = snapshot().agents.find((a) => {
+      try { return store.safeKey(a.sessionName) === key; } catch { return false; }
+    });
     return Boolean(card) && card.isNamedOurs !== true;
   } catch {
-    return false;
+    // ⚠️ Fails CLOSED. The first version returned `false` here — "nobody is
+    // claiming this name" — so a `snapshot()` that throws served the record.
+    // That is the permissive answer asserted from an absence of information,
+    // which is the move `parsePanes` and `classify` were both changed to refuse
+    // in this same branch. `knownAgent`'s identical catch already fails closed.
+    return true;
   }
 }
 
@@ -353,10 +369,23 @@ const server = http.createServer((req, res) => {
   }
 
   // --- avatar: read -------------------------------------------------------
+  // ⚠️ The FOURTH name-keyed consumer. The comment introducing the third calls
+  // itself "the THIRD", and the `knownAgent` comment that exists specifically to
+  // correct an earlier claim of completeness enumerates the set — both were
+  // incomplete again, in this same file. Three corrections, each missing one.
+  //
+  // Measured: with the only card under `angel` being an untied stranger,
+  // `GET /api/agent/angel/avatar` served the real agent's stored image at 200.
+  // The snapshot sets `hasAvatar: false` so today's board does not request it,
+  // but "the real agent's photograph on a stranger's card" is closed at the
+  // snapshot and open at the route, and a caller that guesses the URL gets it.
   const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(avatarGet[1]);
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    // Same gate as the commitments read, for the same reason: refuse only when
+    // a pane on the board is CLAIMING this name without being tied to it.
+    if (borrowedName(name)) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
     let file = null;
     try { file = store.avatarPath(name); } catch { /* invalid name */ }
     if (!file) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }

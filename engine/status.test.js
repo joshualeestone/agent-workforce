@@ -37,8 +37,16 @@ const nodePath = require('node:path');
 // looked like they covered them. `store.js` now honours the same variable
 // `commitments.js` already did, which is what makes the claim above true.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'status-test-'));
+// Remove it when the run ends, so repeated runs cannot pass off a previous
+// run's leftovers as this run's fixture — which is how the anti-vacuity check
+// below became self-defeating.
+process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ } });
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'data');
+// ⚠️ And the CLAUDE CONFIG ROOT, which had no seam at all — so seeding a
+// registry entry and a transcript meant writing into the operator's real
+// `~/.claude`. The suite did exactly that and cleaned up nothing.
+process.env.AGENT_WORKFORCE_CONFIG_ROOT = nodePath.join(SANDBOX, 'claude');
 fs.mkdirSync(process.env.AGENT_WORKFORCE_WORKERS, { recursive: true });
 fs.mkdirSync(process.env.AGENT_WORKFORCE_DATA, { recursive: true });
 
@@ -60,7 +68,7 @@ function seedWorker(name, body) {
  * that reason, which made it worse than an obviously thin test.
  */
 function seedRegistryAndAvatar(name) {
-  const root = nodePath.join(os.homedir(), '.claude');
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
   const dir = nodePath.join(root, 'agent-registry');
   fs.mkdirSync(dir, { recursive: true });
   const file = nodePath.join(dir, `${name}-discord_0.0.json`);

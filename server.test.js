@@ -106,7 +106,20 @@ async function anyAgent(t) {
     t.skip('no live agents on this machine, so the write routes cannot be exercised');
     return null;
   }
-  return encodeURIComponent(agents[0].sessionName);
+  // ⚠️ A TIED agent, or this goes RED on exactly the machine this branch exists
+  // to serve. It returned the alphabetically-first of every tmux session, while
+  // the write routes now additionally require the name to be tied — so on any
+  // machine whose first-sorted session is a plain shell, or the non-Discord
+  // agent this branch supports, eight write-route tests get 404 where they
+  // assert 200. Green here only because all thirteen sessions on this machine
+  // carry the suffix, which is the machine-dependence this suite condemns
+  // elsewhere.
+  const tied = agents.find((a) => a.isNamedOurs);
+  if (!tied) {
+    t.skip('no agent on this machine can be tied to its name, so the write routes cannot be exercised');
+    return null;
+  }
+  return encodeURIComponent(tied.sessionName);
 }
 
 async function req(path, options) {
@@ -1224,5 +1237,83 @@ test('GET /commitments refuses a name a stranger is currently claiming, but not 
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
+  }
+});
+
+test('a borrowed name is refused by every name-keyed read, including its alias spellings', async () => {
+  // ⚠️ FOUR consumers, found one at a time, each time by a comment that claimed
+  // to enumerate them. This test names all four so the next one is added here
+  // rather than discovered later.
+  //
+  // And the alias half is the sharper failure: `borrowedName` compared the
+  // SANITISED key against the RAW sessionName, so a stranger on
+  // `tmux new -s Angel` or `tmux new -s an.gel` slipped past entirely — the
+  // gate's own twenty-line comment was claiming a protection that was actually
+  // coming from an independent guard in commitments.js.
+  const status = require('./engine/status');
+
+  // ⚠️ The avatar must EXIST for the borrowed name, or the 404 below proves
+  // nothing — the route answers 404 for a missing picture too, so without this
+  // the assertion passed with the gate deleted. Third time on this work that a
+  // test asserted an absence that was already absent.
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const avatarDir = nodePathx.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'avatars');
+  fsx.mkdirSync(avatarDir, { recursive: true });
+  fsx.writeFileSync(nodePathx.join(avatarDir, 'angel.png'), 'seeded', 'utf8');
+
+  // Control: with nobody claiming the name, the picture IS served — so the 404s
+  // below are the gate refusing, not the file being absent.
+  const status0 = require('./engine/status');
+  status0.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status0.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const ok = await req('/api/agent/angel/avatar');
+    assert.equal(ok.status, 200,
+      'the seeded avatar is not reachable at all, so the refusals below prove nothing');
+  } finally {
+    status0.setPaneSource(null);
+    status0.setPaneCapture(null);
+  }
+
+  for (const strangerSession of ['angel', 'Angel', 'an.gel']) {
+    status.setPaneSource(() => `${strangerSession}\t0.0\t2.1.212\t0\tstranger`);
+    status.setPaneCapture(() => 'Worked for 1m\n> \n');
+    try {
+      for (const route of ['commitments', 'avatar']) {
+        const res = await req(`/api/agent/angel/${route}`);
+        assert.equal(res.status, 404,
+          `GET /${route} served the real agent's data while '${strangerSession}' held the name`);
+      }
+      for (const [route, body] of [['instructions', { text: 'x' }], ['profile', { role: 'x' }]]) {
+        const res = await req(`/api/agent/angel/${route}`, {
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        });
+        assert.equal(res.status, 404,
+          `PUT /${route} was accepted while '${strangerSession}' held the name`);
+      }
+    } finally {
+      status.setPaneSource(null);
+      status.setPaneCapture(null);
+    }
+  }
+});
+
+test('a roster we cannot read refuses the name-keyed reads rather than serving them', async () => {
+  // ⚠️ `borrowedName`'s catch returned `false` — "nobody is claiming this name"
+  // — so a `snapshot()` that throws SERVED the record. That is the permissive
+  // answer asserted from an absence of information, the exact move `parsePanes`
+  // and `classify` were both changed to refuse in this same branch, reintroduced
+  // one layer up. `knownAgent`'s identical catch already failed closed.
+  const status = require('./engine/status');
+  status.setPaneSource(() => { throw new Error('tmux is not answering'); });
+  try {
+    for (const route of ['commitments', 'avatar']) {
+      const res = await req(`/api/agent/angel/${route}`);
+      assert.equal(res.status, 404,
+        `GET /${route} served the record while we could not read the roster at all`);
+    }
+  } finally {
+    status.setPaneSource(null);
   }
 });
