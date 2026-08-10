@@ -11,6 +11,13 @@ const nodePath = require('node:path');
 // WRITES INSTRUCTION FILES and WRITES LAUNCHD JOBS. An unsandboxed run would
 // litter the operator's real worker tree and `~/Library/LaunchAgents` with
 // agents that then start on the next reboot.
+// ⚠️ Fixture names are deliberately ones no real agent could have. The first
+// version used `casey` -- which is a LIVE agent on this machine, with its own
+// worker directory and running session. The sandbox held, so nothing happened;
+// but a fixture that names a real agent means the day the sandbox slips, the
+// test overwrites that agent's boot file instead of failing. Checking for
+// leakage afterwards was also useless with that name, because the directory it
+// would have created already existed for real reasons.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'create-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
@@ -49,7 +56,7 @@ test('a name that cannot address an agent is refused before anything is made', (
   for (const bad of ['', '  ', 'My.Bot', 'MyBot', '_bot', '-bot', 'a', 'has space', 'emoji🙂']) {
     assert.ok(create.nameProblem(bad), `'${bad}' was accepted as a name`);
   }
-  for (const good of ['casey', 'casey-2', 'my_bot', 'a1']) {
+  for (const good of ['fixture-agent', 'casey-2', 'my_bot', 'a1']) {
     assert.equal(create.nameProblem(good), null, `'${good}' was refused`);
   }
 });
@@ -90,15 +97,15 @@ test('creating an agent writes its folder, its instructions and its startup job'
   const calls = recorder();
   create.setDryRun(false);
 
-  const r = create.createAgent({ name: 'casey', role: 'pm' });
+  const r = create.createAgent({ name: 'fixture-agent', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
 
-  assert.ok(fs.existsSync(create.instructionFile('casey')), 'no instruction file');
-  const text = fs.readFileSync(create.instructionFile('casey'), 'utf8');
-  assert.match(text, /You are casey, a project manager/,
+  assert.ok(fs.existsSync(create.instructionFile('fixture-agent')), 'no instruction file');
+  const text = fs.readFileSync(create.instructionFile('fixture-agent'), 'utf8');
+  assert.match(text, /You are fixture-agent, a project manager/,
     'the instructions were not written for this agent by name');
 
-  assert.ok(fs.existsSync(create.plistPath('casey')), 'no launchd job');
+  assert.ok(fs.existsSync(create.plistPath('fixture-agent')), 'no launchd job');
 });
 
 test('the launchd job carries PATH and LANG, or the board reports nothing or nonsense', () => {
@@ -110,7 +117,7 @@ test('the launchd job carries PATH and LANG, or the board reports nothing or non
   //     named `angel-discord_0.0_2.1.223_0__ …`.
   // See issue #23. A generated job that omits either recreates a bug we have
   // already paid for.
-  const plist = create.plistFor('casey', '/bin/claude', '/opt/homebrew/bin/tmux');
+  const plist = create.plistFor('fixture-agent', '/bin/claude', '/opt/homebrew/bin/tmux');
   assert.match(plist, /<key>PATH<\/key>/, 'the job has no PATH, so tmux will not be found');
   assert.match(plist, /opt\/homebrew\/bin/, 'the PATH omits Homebrew, where tmux actually is');
   assert.match(plist, /<key>LANG<\/key>/, 'the job has no LANG, so tmux will mangle its own output');
@@ -239,8 +246,8 @@ test('Legal is deliberately absent, and the advice-shaped roles say so themselve
 });
 
 test('the instructions name the agent, and carry no template language', () => {
-  const text = roles.instructionsFor('pm', 'casey');
-  assert.match(text, /You are casey/);
+  const text = roles.instructionsFor('pm', 'fixture-agent');
+  assert.match(text, /You are fixture-agent/);
   assert.doesNotMatch(text, /\{\{/, 'an unsubstituted placeholder shipped into an agent’s boot file');
-  assert.equal(roles.instructionsFor('nosuch', 'casey'), null);
+  assert.equal(roles.instructionsFor('nosuch', 'fixture-agent'), null);
 });
