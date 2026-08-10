@@ -13,6 +13,34 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const nodePath = require('node:path');
+
+// ⚠️ SANDBOX BEFORE REQUIRING `./status`, because it reads these at module load.
+//
+// Without this, every `snapshot()`, `readIdentity()` and `readProfile()` in this
+// file runs against the operator's live `~/work/workers` and the real profile
+// store. It was read-only only because every fixture name happened to be
+// invented — nothing enforced that, and the last fix for a machine-dependent
+// test was to RENAME the fixture rather than to sandbox, which leaves the trap
+// armed for the next author who reaches for a real name.
+//
+// It also makes the gate tests mean something: a fixture can now have real
+// seeded data, so an untied pane returning `null` is evidence the gate fired
+// rather than evidence the file was never there.
+const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'status-test-'));
+process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
+process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'data');
+fs.mkdirSync(process.env.AGENT_WORKFORCE_WORKERS, { recursive: true });
+fs.mkdirSync(process.env.AGENT_WORKFORCE_DATA, { recursive: true });
+
+/** Give a name a worker file, so `readIdentity` has something real to find. */
+function seedWorker(name, body) {
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, 'CLAUDE.md'), body, 'utf8');
+}
 const {
   classify,
   modelDisplayName,
@@ -684,6 +712,14 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
   // one snapshot. The tied card is the control — if identity reads stop working
   // altogether the control fails, and if the gate is removed the untied card
   // starts matching it. Neither depends on which agents exist here.
+  // ⚠️ SEEDED, and this is what makes the assertions below mean anything. The
+  // previous version used a name with no worker file anywhere, so `role: null`
+  // and `nameDerived: false` were what you got with the gate DELETED too —
+  // seven of its eight assertions were vacuous, and it survived mutation only
+  // because `readProfile` happens to return `{}` rather than `null`. A test for
+  // a gate has to be run against data the gate is stopping it from reading.
+  seedWorker('ghostly', 'You are **Ghostly** (Ghostly Bridge), the archive worker.\n');
+
   setPaneSource(() => [
     'ghostly-discord\t0.0\t2.1.212\t0\tthe real one',
     'ghostly\t0.0\t2.1.212\t0\tstranger doing something else',
@@ -697,6 +733,12 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
     assert.equal(agents.length, 1, 'the two sessions did not collapse to one name');
     assert.equal(card.isNamedOurs, true, 'the tied pane lost its own name to the stranger');
     assert.equal(card.target, 'ghostly-discord:0.0');
+    // ⚠️ The CONTROL, and the previous version described one without
+    // implementing it. If identity reads stop working altogether, this fails
+    // and the untied assertions below stop proving anything on their own.
+    assert.equal(card.name, 'Ghostly', 'the tied pane did not read its own worker file');
+    assert.equal(card.nameDerived, true);
+    assert.equal(card.role, 'archive worker', 'the tied pane read no role');
   } finally {
     setPaneSource(null);
     setPaneCapture(null);
@@ -852,4 +894,34 @@ test('an untied pane does not unlock the write routes for the name it borrowed',
     setPaneSource(null);
     setPaneCapture(null);
   }
+});
+
+test('a truncated tmux line is unknown, not a confident "stopped"', () => {
+  // ⚠️ `command` defaulted to '', which reached `classify` as "not a Claude
+  // command" and answered `stopped` at STRUCTURED confidence — a confident
+  // structural claim about an agent, built from a field that was MISSING. The
+  // `inMode` default three lines away explicitly refuses exactly this move, in
+  // the same function, which is this codebase's most repeated defect: one fact
+  // defended in one of the two places that decide it.
+  const [truncated] = parsePanes('zeta-discord\t0.0');
+  assert.equal(truncated.command, null, 'a missing command was given a value it did not have');
+
+  const r = classify(truncated, 'Worked for 2m\n> \n');
+  assert.equal(r.state, STATE.UNKNOWN,
+    'a pane whose command tmux never reported was classified with confidence');
+  assert.equal(r.confidence, CONFIDENCE.NONE);
+});
+
+test('a non-Discord agent still classifies to a real state', () => {
+  // ⚠️ The `classify` gate is pinned in the loosening direction only: tightening
+  // it from `isFleetSession` to `isNamedOurs` left every test green while making
+  // every non-Discord agent report "this is not one of your agent sessions".
+  // That is the coupling this branch exists to remove, reintroduced by a guard
+  // added to fix a different problem.
+  const research = { name: 'research', session: 'research', target: 'research:0.0', command: '2.1.212', inMode: '0', title: '' };
+  const r = classify(research, 'Worked for 2m 14s\n> \n');
+  assert.notEqual(r.state, STATE.UNKNOWN,
+    'a non-Discord agent running Claude was refused a state, which re-couples '
+    + 'the engine to the session-name convention this branch decoupled');
+  assert.equal(r.confidence, CONFIDENCE.SCRAPED);
 });

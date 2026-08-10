@@ -324,7 +324,13 @@ function parsePanes(out) {
       // would be a second derivation of something we already had.
       pane: raw.pane || '',
       target: `${session}:${raw.pane}`,
-      command: raw.command || '',
+      // ⚠️ `null`, not `''`. An empty string reaches `classify` as "not a Claude
+      // command", which answers `stopped` at STRUCTURED confidence — a
+      // confident structural claim that an agent is not running, derived
+      // entirely from a field that was MISSING. That is the move the `inMode`
+      // default three lines below explicitly refuses, made in the same
+      // function.
+      command: raw.command == null ? null : raw.command,
       // '1' when the pane is scrolled back in copy-mode, where keystrokes go to
       // copy-mode bindings rather than to the composer.
       //
@@ -610,6 +616,18 @@ const RATE_LIMIT_MARKERS = [
  * stops the board reporting health it has not verified.
  */
 function classify(pane, paneText) {
+  // ⚠️ A MISSING command is not evidence of anything. A truncated tmux line
+  // gave `command: ''`, which fell through to "no Claude process in this pane"
+  // — `stopped` at STRUCTURED confidence, i.e. a confident structural claim
+  // built from a field that was not there. `unknown` is the honest answer, and
+  // it is the rule the rest of this module runs on.
+  if (pane && pane.command == null) {
+    return {
+      state: STATE.UNKNOWN,
+      confidence: CONFIDENCE.NONE,
+      because: 'tmux did not tell us what is running in this pane',
+    };
+  }
   // ⚠️ FIRST, before the screen is read at all. `classify` consulted only
   // `pane.command`, so a session this engine has explicitly rejected still got
   // a scraped state: measured, a lone `devserver` running `node` with

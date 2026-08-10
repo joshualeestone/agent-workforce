@@ -84,8 +84,14 @@ function knownAgent(name) {
     // It is fixed here rather than left for a later branch because the argument
     // this branch already makes about `status.js` applies verbatim to its
     // consumers: publishing `isNamedOurs` and expecting someone downstream to
-    // honour it is not a fix. This is the only consumer in this tree, and it is
-    // three lines.
+    // honour it is not a fix.
+    //
+    // ⚠️ An earlier version of this comment called this "the only consumer in
+    // this tree". It was not: `commitments.read(a.sessionName)` and
+    // `instructions.staleness(a.sessionName)` sit 200 lines below in this same
+    // file, and those were the ones still leaking the real agent's commitment
+    // text and boot-file hash onto a stranger's card. A comment asserting
+    // completeness is exactly what stops the next reader checking.
     return snapshot().agents.some((a) =>
       a.sessionName === store.safeKey(name) && a.isNamedOurs === true);
   } catch {
@@ -288,15 +294,34 @@ const server = http.createServer((req, res) => {
       // reported -- they come back `unknown`, and it is that value the restart
       // confirmation needs. Omitting the field for silent agents would leave
       // the caller unable to tell "nothing pending" from "never asked".
+      // ⚠️ BOTH of these are keyed on the NAME, so both need the same gate the
+      // snapshot applies to identity, model, context, avatar and profile.
+      // Without it the leak `status.js` closes is reopened one layer up: an
+      // untied stranger's card came back carrying the real agent's commitment
+      // TEXT, its boot-file hash, and a `startedAt` read out of the real
+      // agent's transcript — while the snapshot's own sentence promises "we
+      // will not read another agent's transcript for it".
+      //
+      // It also reinstates the measured wrong-card-cost failure: the restart
+      // dialog reads these, so the cost shown would be the real agent's while
+      // the pane acted on is a stranger's.
       const agents = snap.agents.map((a) => ({
         ...a,
-        commitments: commitments.read(a.sessionName),
+        commitments: a.isNamedOurs
+          ? commitments.read(a.sessionName)
+          : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
         // Staleness only, NOT the instruction text. The board polls this every
         // five seconds for every agent, and the real files run to several
         // kilobytes each -- carrying them here would put ~90KB on the wire per
         // poll to render a badge. The text is fetched once, by the detail page,
         // when someone actually opens it.
-        instructions: instructions.staleness(a.sessionName),
+        // ⚠️ `editable: false` matters as much as hiding the hash. The board
+        // renders an Edit affordance from this, so gating `knownAgent` without
+        // gating this left the card ADVERTISING an edit the route then 404s —
+        // offer-an-action-that-cannot-work, which is worse than refusing plainly.
+        instructions: a.isNamedOurs
+          ? instructions.staleness(a.sessionName)
+          : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
       }));
       body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {

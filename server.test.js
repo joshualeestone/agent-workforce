@@ -1130,3 +1130,43 @@ test('a session that merely borrows an agent name cannot rewrite its instruction
     status.setPaneCapture(null);
   }
 });
+
+test('an untied card carries no commitments and no boot-file hash of the name it borrowed', async () => {
+  // ⚠️ The snapshot closed this leak and `/api/status` reopened it one layer up.
+  // Both enrichments are keyed on the NAME, so an untied stranger's card came
+  // back carrying the real agent's commitment TEXT, its boot-file hash, and a
+  // `startedAt` read out of the real agent's transcript — while the snapshot's
+  // own sentence promises "we will not read another agent's transcript for it".
+  //
+  // It also reinstates the wrong-card-cost failure the engine documents as
+  // measured: the restart dialog reads these, so the cost shown would be the
+  // real agent's while the pane acted on is a stranger's.
+  //
+  // Deleting either gate in the /api/status map fails here.
+  const status = require('./engine/status');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    assert.ok(card, 'the fixture did not produce the borrowed-name card');
+    assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
+
+    assert.deepEqual(card.commitments.commitments, [],
+      'the untied card carried the real agent’s commitment text as the cost of '
+      + 'clearing a pane that is not theirs');
+    assert.equal(card.commitments.state, 'unknown');
+
+    assert.equal(card.instructions.version, null,
+      'the untied card carried the real agent’s boot-file hash');
+    assert.equal(card.instructions.startedAt, null,
+      'the untied card carried a startedAt read out of the real agent’s transcript');
+    // ⚠️ And it must not ADVERTISE an edit the route will then refuse.
+    assert.equal(card.instructions.editable, false,
+      'the untied card offered an Edit that knownAgent 404s, which is worse than '
+      + 'refusing plainly');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});

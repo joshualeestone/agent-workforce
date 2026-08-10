@@ -66,6 +66,30 @@ consumers: publishing `isNamedOurs` and expecting someone downstream to honour i
 is not a fix. This is the only consumer in this tree and the change is one
 clause.
 
+## ⚠️ Second known cost: non-Discord agents are read-only
+
+Gating the write routes on `isNamedOurs` closes the borrowed-name hole and, in
+the same stroke, **removes the instruction/profile/avatar editing feature from
+any agent whose session name does not carry the suffix** — on the branch whose
+stated purpose is decoupling from that suffix.
+
+**Why it is not simply reverted:** the two cases are indistinguishable from tmux
+alone. "A legitimate agent named `research`" and "a stranger squatting on
+`angel`'s name while `angel` is down" are both *a session with no `-discord`
+suffix and no competing claimant*. There is no evidence available here that
+separates them, and the action in question rewrites the file an agent boots from.
+
+**What was done instead of pretending otherwise:** the board no longer advertises
+the edit. `instructions.editable` is `false` for an untied card, so the
+affordance is absent rather than present-and-404ing. Refusing plainly beats
+offering an action that cannot work.
+
+**What would lift it:** a way to tie a pane to a name that does not rely on the
+session-name convention — a marker file the agent writes at startup, or a
+registry entry keyed on the pane. That is its own piece of work and it is what
+"decouple from Discord" ultimately requires; the suffix is currently the only
+evidence of *whose* a pane is.
+
 ## Verification
 
 - [x] `node --test` — 217 passing, 0 skipped, on this branch off `main`.
