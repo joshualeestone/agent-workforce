@@ -348,6 +348,7 @@ svg { display: block; }
 .holding ul { list-style: none; margin: 0; padding: 0; }
 .holding li { display: flex; gap: var(--space-4); align-items: baseline; margin-bottom: var(--space-3);
               font: var(--text-body) var(--font-ui); }
+.holding .badge.gone { background: #6b6b66; text-decoration: line-through; }
 .holding .badge { flex: none; font: 600 var(--text-caption) var(--font-ui); text-transform: uppercase;
                   letter-spacing: 0.04em; border: 1px solid var(--border-strong);
                   border-radius: var(--radius-control); padding: 1px 5px; color: var(--label-2); }
@@ -1501,8 +1502,10 @@ function holdingBlock(a) {
   if (h.state === 'unknown') {
     const aged = items.length
       ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>
-         <div class="danger">These are the last thing it told us, and we cannot
-         vouch for them now: ${esc(h.because || 'we cannot tell')}.</div>`
+         <div class="danger">${items.some((c) => c.destroyed)
+           ? 'Some of these we already destroyed; the rest are the last thing it told us, and we cannot vouch for those now'
+           : 'These are the last thing it told us, and we cannot vouch for them now'
+         }: ${esc(h.because || 'we cannot tell')}.</div>`
       : `<div class="cannot"><b>We cannot tell what ${esc(a.name)} is holding.</b>
          ${esc(h.because || '')}</div>`;
     return `<div class="holding">${aged}</div>`;
@@ -1578,7 +1581,15 @@ function visiblyDoing(c, task) {
 
 function li(c, task) {
   const doing = visiblyDoing(c, task);
-  return `<li><span class="badge">${doing ? 'DOING NOW' : 'PROMISED'}</span><span>${esc(c.what)}</span></li>`;
+  // ⚠️ DESTROYED is its own badge, and it is the whole reason `markDestroyed`
+  // marks individual items rather than stamping the record. The store works to
+  // keep "we already destroyed this" distinguishable from "the agent told us
+  // this afterwards", and the screen threw that away: after a clear followed by
+  // a fresh report, all four items rendered identically under "the last thing
+  // it told us". Understating what the store knows is as misleading to someone
+  // deciding as overstating it.
+  const badge = c.destroyed ? 'DESTROYED' : (doing ? 'DOING NOW' : 'PROMISED');
+  return `<li><span class="badge${c.destroyed ? ' gone' : ''}">${badge}</span><span>${esc(c.what)}</span></li>`;
 }
 
 function optionBlock(id, act, losesAll, may) {
@@ -1658,7 +1669,9 @@ function renderFresh(a) {
   } else if (h.state === 'clear') {
     losesAll = ', and it reported that is nothing.';
   } else {
-    losesAll = ', and we cannot list what that is with confidence.';
+    // "we cannot list it" was untrue while the list sits directly above. The
+    // uncertainty is about vouching for the items, not about having them.
+    losesAll = ', and we cannot vouch for the list above.';
   }
 
   document.getElementById('fresh-holding').innerHTML = holdingBlock(a);

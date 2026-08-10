@@ -1357,21 +1357,67 @@ test('an alias spelling of an agent name cannot walk past the confirmation', asy
   // reintroduces the raw-name defect left the whole file green.
   const emptyToken = `unknown:${crypto.createHash('sha256').update('', 'utf8').digest('hex').slice(0, 32)}`;
 
-  for (const alias of [plain.toUpperCase(), plain.split('').join('.')]) {
-    const res = await req(`/api/agent/${encodeURIComponent(alias)}/clear`, {
+  // ⚠️ The two aliases are now refused by DIFFERENT guards, and asserting one
+  // status for both hid that. Case folding still resolves (the roster is
+  // lower-case and `YARA` is unambiguous), so it reaches the confirmation and
+  // is refused there — 409. Dotted spelling has characters STRIPPED, which is
+  // what makes two different names collapse into one, so `findAgent` now
+  // refuses to resolve it at all — 404, an earlier and stronger refusal.
+  //
+  // Both are still "cannot walk past the confirmation". Flattening them to one
+  // expected status would mean either weakening the dotted case back to a token
+  // check or asserting a number that no longer describes what happened.
+  const caseAlias = plain.toUpperCase();
+  const stripAlias = plain.split('').join('.');
+
+  const cased = await req(`/api/agent/${encodeURIComponent(caseAlias)}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: emptyToken }),
+  });
+  assert.equal(cased.status, 409,
+    `${caseAlias} walked past the confirmation and would have cleared the agent`);
+  // ⚠️ And on the BODY. A status-only assertion here passed with the guard
+  // deleted: reading the raw name makes `parseRecord`'s owner check fail, the
+  // record reads back `unknown` with no items, the empty token then MATCHES,
+  // and execution falls through to a 409 from somewhere else entirely. The
+  // number was right for the wrong reason.
+  assert.match(JSON.parse(cased.body).error || '', /changed since you were shown/,
+    `${caseAlias} was refused, but not by the confirmation check this test is named for`);
+
+  const stripped = await req(`/api/agent/${encodeURIComponent(stripAlias)}/clear`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: emptyToken }),
+  });
+  assert.equal(stripped.status, 404,
+    `${stripAlias} resolved to an agent it does not name, which is how one name `
+    + 'becomes another and a destructive action lands on the wrong agent');
+});
+
+test('a name whose characters get stripped never resolves to a different agent', async (t) => {
+  // ⚠️ The failure this closes, which the confirmation token does NOT: sessions
+  // `mybot` and `my.bot` both reduce to the key `mybot`, so a request naming one
+  // resolved to the other. The token looks like it covers this and does not —
+  // when neither agent has ever reported, both read `unknown` with an empty
+  // list, so both produce the IDENTICAL token and the action proceeds.
+  //
+  // Deleting the stripping check in `findAgent` fails here.
+  const name = await anyAgent(t);
+  if (!name) return;
+  const plain = decodeURIComponent(name);
+
+  for (const spelling of [`${plain}.`, `my.${plain}`, `${plain}!`]) {
+    const res = await req(`/api/agent/${encodeURIComponent(spelling)}/clear`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ holding: emptyToken }),
+      body: JSON.stringify({ confirm: true }),
     });
-    assert.equal(res.status, 409,
-      `${alias} walked past the confirmation and would have cleared the agent`);
-    // ⚠️ And on the BODY. A status-only assertion here passed with the guard
-    // deleted: reading the raw name makes `parseRecord`'s owner check fail, the
-    // record reads back `unknown` with no items, the empty token then MATCHES,
-    // and execution falls through to a 409 from somewhere else entirely. The
-    // number was right for the wrong reason.
-    assert.match(JSON.parse(res.body).error || '', /changed since you were shown/,
-      `${alias} was refused, but not by the confirmation check this test is named for`);
+    assert.equal(res.status, 404,
+      `${spelling} resolved to an agent whose name it is not`);
   }
+
+  // And the legitimate spelling still works, or the fix is just a denial.
+  const board = JSON.parse((await req('/api/status')).body);
+  assert.ok((board.agents || []).some((a) => a.sessionName === plain),
+    'the exact name stopped resolving, so the guard is refusing real agents too');
 });
 
 test('the confirmation token distinguishes a state we can vouch for', async (t) => {
@@ -2194,6 +2240,7 @@ test('clearing a pane we only INFERRED is an agent does not tombstone the record
 
   const calls = [];
   let sawBecause = '';
+  let sawUntied;
   lifecycle.setRunner((cmd, args) => { calls.push([cmd, args]); return { ok: true, stdout: '', stderr: '' }; });
   try {
     lifecycle.setDryRun(false);
@@ -2209,6 +2256,7 @@ test('clearing a pane we only INFERRED is an agent does not tombstone the record
     assert.notEqual(JSON.parse(res.body).outcome, 'dry-run',
       'the action was still dry-run, so the tombstone block never ran');
     sawBecause = JSON.parse(res.body).because || '';
+    sawUntied = JSON.parse(res.body).untied;
   } finally {
     lifecycle.setRunner(null);
   }
@@ -2231,6 +2279,14 @@ test('clearing a pane we only INFERRED is an agent does not tombstone the record
   // failure. "We could not update our record" would be untrue here: we did not
   // try, on purpose, because the record is not this pane's to speak for.
   assert.match(sawBecause, /not the one that agent/);
+
+  // ⚠️ And on the FIELD, not only the prose. Keying this solely on the sentence
+  // means rewording the sentence silently unpins the guard — the exact
+  // anti-pattern several comments in this diff condemn. `untied` is in the
+  // response body so the browser can render it and a test can assert it.
+  assert.equal(sawUntied, true,
+    'the deliberate refusal to tombstone was not reported as a distinct outcome, '
+    + 'so it exists only inside an English sentence');
 });
 
 

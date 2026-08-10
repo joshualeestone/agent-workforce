@@ -86,9 +86,49 @@ function readBody(req) {
  * Never throws: `snapshot()` shells out to tmux, and a route that 500s because
  * the machine hiccupped is worse than one that says it does not know the agent.
  */
+/**
+ * ⚠️ There is deliberately NO server-side in-flight guard here, and the reason
+ * is worth writing down because a review asked for one and I built it before
+ * checking whether it could fire.
+ *
+ * `lifecycle.perform` is `execFileSync`. It blocks the event loop for its whole
+ * duration, so a second request's handler cannot begin until the first has
+ * returned. **Two concurrent destructive actions against one agent are not
+ * reachable in this process** — the second request waits, whatever the browser
+ * or curl does. A `Set` of in-flight keys could never be observed as occupied,
+ * which makes it dead code wearing the costume of a protection, and this
+ * codebase has already shipped several of those.
+ *
+ * The hazard that IS real is **sequential**: request A completes, `launchctl
+ * start` has been issued, the service is still settling, and request B arrives
+ * immediately after. An in-flight set does nothing about that because A is
+ * already finished. The fix for it would be a cooldown, and it is not built
+ * because nothing has shown the back-to-back case actually misbehaves —
+ * `restart-bot.sh` verifies with `has-session` and reports honestly either way.
+ * If it ever does, the shape is a per-agent timestamp, not a busy flag.
+ */
+
 function findAgent(name) {
   try {
-    const key = store.safeKey(name);
+    const raw = String(name || '');
+    const key = store.safeKey(raw);
+
+    // ⚠️ `safeKey` STRIPS illegal characters rather than rejecting them, so two
+    // different names can collapse to one key: `my.bot` becomes `mybot`. Left
+    // alone, a request for `my.bot` resolves to the agent actually called
+    // `mybot` — and on these routes that means `/clear` typed into a different
+    // agent's pane and `restart-bot.sh mybot` at a different agent's service.
+    //
+    // The confirmation token does NOT fail closed here, which is the part worth
+    // spelling out: when neither agent has ever reported commitments, both read
+    // `unknown` with an empty list, so both produce the identical token and the
+    // action proceeds. The guard that looks like it covers this does not.
+    //
+    // Case folding is still allowed — the roster is lower-case and a hand-typed
+    // `MyBot` is unambiguous. Only STRIPPING is refused, because stripping is
+    // the part that makes two names one.
+    if (key !== raw.toLowerCase()) return null;
+
     return snapshot().agents.find((a) => a.sessionName === key) || null;
   } catch {
     return null;
@@ -902,7 +942,8 @@ const server = http.createServer((req, res) => {
             // when there is no record asserts one exists. An inferred pane
             // under a name that never reported would otherwise be told about
             // the careful handling of something that was never there.
-            untied = hadRecord;
+            // Boolean, not the ISO date `hadRecord` can be — it is serialised now.
+            untied = Boolean(hadRecord);
           } else {
             const marked = commitments.markDestroyed(key);
             reconciled = hadRecord ? marked : null;
@@ -923,6 +964,12 @@ const server = http.createServer((req, res) => {
             : result.because;
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
+          // ⚠️ A FIELD, not only a sentence. This outcome existed solely inside
+          // the English composed below, so the only way to pin it was to match
+          // that prose — the exact anti-pattern this file condemns elsewhere,
+          // because rewording the sentence silently unpins the guard. The
+          // browser can also render it now instead of parsing a paragraph.
+          untied: Boolean(untied),
           action,
           ...result,
           because,
@@ -970,9 +1017,20 @@ const server = http.createServer((req, res) => {
 /**
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
- * It sets roles, stores avatars, records the commitments the restart
- * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. Restart is
- * next. There is no authentication of any kind.
+ * It sets roles, stores avatars, edits THE FILE AN AGENT BOOTS FROM, and — as
+ * of this branch — RESTARTS, CLEARS AND COMPACTS running agents, which
+ * irreversibly destroys a conversation and any work it had agreed to do. There
+ * is no authentication of any kind.
+ *
+ * ⚠️ This block said "Restart is next" while restart shipped in the same diff,
+ * and `README.md` points the reader here for "what protects it, and what does
+ * not". The one paragraph documenting blast radius understated it, in the
+ * commit that widened it.
+ *
+ * What protects it today: the loopback bind and the Host allowlist below, a
+ * cross-site check on every write (`Sec-Fetch-Site`, plus an Origin fallback), a
+ * confirmation token that pins what the operator was shown, and a single-flight
+ * guard per agent. What does NOT protect it: anything resembling a login.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *
