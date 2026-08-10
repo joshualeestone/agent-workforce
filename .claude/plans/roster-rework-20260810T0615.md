@@ -125,7 +125,7 @@ evidence of *whose* a pane is.
 
 ## Verification
 
-- [x] `node --test` — **231 passing, 0 skipped**, on this branch off `main`.
+- [x] `node --test` — **238 passing, 0 skipped**, on this branch off `main`.
 - [x] Server smoke-tested: 13 agents, `isNamedOurs` present, board serves 200.
 - [x] Every guard mutation-tested: deleted, suite run, a **named** test confirmed
       to fail.

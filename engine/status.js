@@ -1063,8 +1063,18 @@ function paneRoster() {
   // throw from a test: **the realistic failure failed open and served the
   // record.** A guard whose closed path production cannot take is not a guard.
   //
-  // `snapshot()` deliberately keeps the lenient behaviour — an empty board is
-  // the honest answer there, and it renders as such.
+  // ⚠️ `snapshot()` deliberately keeps the LENIENT behaviour, and the first
+  // version of this note justified that by claiming an empty board "renders as
+  // such". It does not: with tmux dead, `/api/status` answers 200 with zero
+  // agents and a fresh `checkedAt`, so the board paints "0 agents, checked just
+  // now" — byte-identical to a machine that genuinely has none. That is this
+  // module's own rule inverted at the top level, and the sentence asserting
+  // otherwise was written in the same commit that built the distinction here.
+  //
+  // Left lenient rather than fixed in passing: `snapshot()` feeds the whole
+  // board, so making it throw is a visible product decision (what SHOULD the
+  // board show when tmux is gone?) that deserves its own change rather than
+  // riding along in a gate fix. The gate needs the strict answer and gets it.
   const out = paneSource ? paneSource() : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
   if (out === null || out === undefined) {
     throw new Error('could not ask tmux which panes exist');

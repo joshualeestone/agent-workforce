@@ -214,6 +214,19 @@ svg { display: block; }
 
 /* The instruction editor. It is the biggest control on the page because it is
    the most important: the only place an agent's purpose is written down. */
+/* ⚠️ `.danger` was used on the untied explanation and defined NOWHERE, so the
+   one sentence the design leans on to say why every write vanished rendered as
+   unstyled body text. An explanation nobody's eye lands on is not one. */
+#d-untied {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warn, #b8860b);
+  background: var(--bg-sunken);
+  color: var(--label);
+  font-size: var(--text-small);
+  border-radius: var(--radius-sm, 4px);
+}
+
 #d-instr {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 220px;
   font: var(--text-body) var(--font-ui); line-height: 1.5;
@@ -282,7 +295,7 @@ svg { display: block; }
   </div>
 
   <div class="field">
-    <p class="danger" id="d-untied" hidden></p>
+    <p id="d-untied" hidden></p>
     <label class="flabel" for="d-file">Picture</label>
     <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
     <div class="frow">
@@ -536,9 +549,22 @@ async function tick() {
     // one call. Same fact, one source: the shape this whole branch is about.
     if (CURRENT) {
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
+
+      /* ⚠️ RE-APPLY the tie check on every poll, not only when the panel opens.
+         The gate ran once at open and the poll never revisited it, so leaving
+         the panel open while `angel-discord` died and a stranger took the name
+         left the REAL agent's boot file on screen on a card that had become a
+         stranger's — the "worse half of the bug" this branch documents, still
+         reachable simply by not closing the panel. The editor-only branch below
+         disables the textarea but never CLEARS it, and never touches the
+         picture and role controls or the explanation.
+         The inverse stuck too: an agent that came back stayed withdrawn behind
+         a now-false sentence until the panel was reopened. */
+      if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
+
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
-      if (fresh && INSTR_READY) {
+      if (fresh && fresh.isNamedOurs === true && INSTR_READY) {
         renderStale(fresh.instructions);
 
         // ⚠️ And say so when the file has moved on from what the box holds.
@@ -771,9 +797,15 @@ function setWritesOffered(a, tied) {
   const why = document.getElementById('d-untied');
   if (why) {
     why.hidden = tied;
-    why.textContent = tied ? '' : `We found a session called ${a.sessionName}, but not the one `
-      + `${a.name}'s own session runs in — so we cannot say this pane is ${a.name}, `
-      + 'and we will not change that agent\u2019s picture, role or instructions from here.';
+    // ⚠️ NOT built from `a.name`, which for an untied card is forced to the raw
+    // session name — so the sentence read "we found a session called research,
+    // but not the one research's own session runs in", a tautology, and it is
+    // the ONLY message the legitimate non-Discord agent this branch most
+    // affects ever sees.
+    why.textContent = tied ? '' : `This session is called ${a.sessionName}, but it is `
+      + `not the one an agent named ${a.sessionName} would run in — we expect that to be `
+      + `${a.sessionName}-discord. So we cannot say this pane belongs to that agent, and `
+      + 'we will not change its picture, role or instructions from here.';
   }
 }
 

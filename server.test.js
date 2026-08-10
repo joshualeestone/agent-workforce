@@ -864,7 +864,8 @@ test('the status payload carries the STORE value for each agent, not a placehold
     // never ran and the assertion proved nothing, which is the same
     // machine-dependence the comment above condemns. Asserted below against a
     // stubbed roster instead, where both shapes are guaranteed present.
-    assert.ok(true, 'see the stubbed assertion below');
+    // (The hermetic version lives in '/api/status reads the store for a tied
+    // agent and not for an untied one', below.)
   } finally {
     commitments.read = real;
   }
@@ -1560,6 +1561,51 @@ test('the detail panel withdraws the writes it cannot perform, and clears what i
     assert.equal(els[id].disabled, true, `${id} was still offered`);
   }
   assert.equal(els['d-untied'].hidden, false, 'nothing explained why the writes are gone');
+  // ⚠️ And the sentence must not be a tautology. For an untied card the display
+  // name is FORCED to the raw session name, so a message built from both read
+  // "we found a session called research, but not the one research's own session
+  // runs in" — the only message the legitimate non-Discord agent this branch
+  // most affects would ever see.
+  assert.match(els['d-untied'].textContent, /-discord/,
+    'the explanation does not say what session it expected, so it reads as a '
+    + 'tautology for exactly the agents it is shown to');
+
+  // ⚠️ AND the call site, which this test stopped pinning when it replaced the
+  // source-shape version. Driving `setWritesOffered` in isolation proves the
+  // function is right and says nothing about whether anyone calls it — deleting
+  // `openDetail`'s three gate lines left the whole UI half of this branch
+  // reverted with the suite fully green. The behavioural test was the right
+  // move and it removed the only assertions holding the call site down.
+  //
+  // Both are needed: one proves the function does the right thing, the other
+  // proves it runs.
+  const code = script
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+    .join('\n');
+  const openStart = code.indexOf('function openDetail');
+  assert.ok(openStart > -1, 'openDetail vanished');
+  const openBody = code.slice(openStart, code.indexOf('\nfunction ', openStart + 10));
+  assert.match(openBody, /setWritesOffered\s*\(/,
+    'openDetail no longer calls setWritesOffered, so the panel offers writes the '
+    + 'routes refuse and nothing here notices');
+  const loadLine = openBody.split('\n').find((l) => l.includes('loadInstructions('));
+  assert.ok(loadLine, 'openDetail no longer loads instructions at all');
+  assert.match(loadLine, /\bif\b[^\n]*\btied\b/,
+    'the instruction load runs unconditionally again, so opening an untied card '
+    + 'fetches and paints the real agent’s file');
+
+  // ⚠️ And the POLL must re-apply it, not just the open. The gate ran once at
+  // open, so leaving the panel up while the real session died and a stranger
+  // took the name left that agent's boot file on screen on a card that had
+  // become somebody else's — reachable by simply not closing the panel.
+  const tickStart = code.indexOf('function tick');
+  assert.ok(tickStart > -1, 'tick vanished');
+  const tickBody = code.slice(tickStart, code.indexOf('\nfunction ', tickStart + 10));
+  assert.match(tickBody, /setWritesOffered\s*\(/,
+    'the poll never re-applies the tie check, so an agent that dies while its '
+    + 'panel is open keeps offering writes for a card that is now a stranger’s');
 
   // And a tied card gets everything back.
   run({ sessionName: 'zeta', name: 'Zeta' }, true);
