@@ -2550,3 +2550,27 @@ test('may never promises an action perform could not form a command for', async 
     }
   }
 });
+
+test('the fixture renders the same verdicts the product does, not a subset', () => {
+  // ⚠️ The fixture applied ONE of the product's three gates while its own
+  // comment claimed it used the real rule — so an agent shaped like `_bot` or
+  // `my.bot` (both in the real roster on purpose) would have been photographed
+  // with three enabled buttons the product refuses. A documentation screenshot
+  // of a state that cannot happen is the failure a fixture is most able to
+  // hide, because nothing downstream disagrees with it.
+  const lifecycle = require('./engine/lifecycle');
+  const fixture = fs.readFileSync(nodePath.join(__dirname, 'tools', 'screenshot-fixture.js'), 'utf8');
+
+  assert.match(fixture, /lifecycle\.verdictFor\(/,
+    'the fixture computes its own verdicts again, so its screenshots can show '
+    + 'buttons the product would refuse');
+  assert.doesNotMatch(fixture, /lifecycle\.mayTypeInto\(/,
+    'the fixture calls mayTypeInto directly, which is one of three gates');
+
+  // And the gates actually differ, or the assertion above is decoration.
+  const unreachable = { sessionName: '_bot', target: '_bot:0.0', isNamedOurs: true, isFleetSession: true, isAgentPane: true, state: 'idle' };
+  assert.equal(lifecycle.mayTypeInto('clear', unreachable).ok, true,
+    'mayTypeInto alone was expected to allow this shape');
+  assert.equal(lifecycle.verdictFor('clear', unreachable).ok, false,
+    'verdictFor was expected to refuse a name perform cannot form a command for');
+});

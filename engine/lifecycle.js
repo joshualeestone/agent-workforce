@@ -29,6 +29,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const store = require('./store');
 
 /**
  * The blessed restart path. Overridable so tests never touch the real one.
@@ -452,6 +453,51 @@ function canReach(action, agent) {
   return safeTarget(agent && agent.target) !== null;
 }
 
+/**
+ * THE verdict for one action on one agent. Everything that renders a button
+ * asks this, and nothing re-derives it.
+ *
+ * ⚠️ Three gates, in the order the route applies them, and each was added after
+ * something published `ok: true` for an action that could not run:
+ *
+ *   1. **addressable** — the route resolves by EXACT name. `safeKey` strips
+ *      rather than rejects, so `my.bot` and `mybot` collapse to one key and a
+ *      request naming one reached the other.
+ *   2. **canReach** — perform's own containment rules. `safeKey` keeps a leading
+ *      `_` while `safeServiceName` and `safeTarget` require an alphanumeric
+ *      first character, so `_bot` passed everything and then 409'd.
+ *   3. **mayTypeInto** — the state questions.
+ *
+ * It lives here rather than in the route because the SCREENSHOT FIXTURE also
+ * renders these buttons, and it held gate 3 alone under a comment claiming it
+ * used the real rule. A fixture agent named `_bot` would have been photographed
+ * with three enabled buttons the product refuses — a documentation screenshot
+ * of a state that cannot happen, which is the failure a fixture is most able to
+ * hide.
+ */
+function verdictFor(action, agent) {
+  const name = agent && agent.sessionName;
+  let addressable = false;
+  try {
+    const raw = String(name || '');
+    addressable = store.safeKey(raw) === raw;
+  } catch { addressable = false; }
+
+  if (!addressable) {
+    return {
+      ok: false,
+      because: 'this agent\u2019s session name is not one we can address it by exactly, so we will not act on it under a name that is not its own',
+    };
+  }
+  if (!canReach(action, agent)) {
+    return {
+      ok: false,
+      because: 'we cannot form a safe command for this agent from its name and pane, so we will not try',
+    };
+  }
+  return mayTypeInto(action, agent);
+}
+
 function mayTypeInto(action, agent) {
   if (action === 'restart') {
     // ⚠️ `isFleetSession`, NOT `isAgentSession`. The difference is whether a
@@ -563,6 +609,7 @@ function invalidatesCommitments(action, result) {
 
 module.exports = {
   canReach,
+  verdictFor,
   ACTIONS, OUTCOME, RESTART_SCRIPT, setDryRun,
   // ⚠️ A GETTER, not the value. `DRY_RUN` was exported by value, so
   // `lifecycle.DRY_RUN` froze at module load and could never reflect

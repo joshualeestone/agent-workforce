@@ -429,22 +429,24 @@ function isNamedOurs(pane) {
  * restart-only. That is a real regression for that setup and it is the price of
  * not typing into a build watcher.
  *
- * ⚠️ And the tier is WIDER than "a shell", which the first version of this note
- * did not say. `RANK_NAMED_CRASHED` is every named-ours pane that is not native
- * Claude and not one of the three legacy names — so `vim`, `ssh`, `python3`,
- * `less` and `man` all land in it and outrank a `node` pane. `classify` uses a
- * different and narrower definition of "no Claude here" (a six-name shell
- * denylist), so a winning `vim` pane is NOT reported as stopped: its screen is
- * scraped, and `working`, `idle`, `needs_you` and `rate_limited` are all
- * reachable from arbitrary text.
+ * ⚠️ The tier is WIDER than "a shell": `RANK_NAMED_CRASHED` is every named-ours
+ * pane that is not native Claude and not one of the legacy names, so `vim`,
+ * `ssh`, `python3`, `less` and `man` all land in it and outrank a `node` pane.
  *
- * Typing stays refused (`isAgentPane` is an allowlist), so this misreports
- * rather than misfires — but "the board asserts a state read off a program that
- * is not the agent" is exactly the class of defect this module exists to
- * prevent, and it is a real gap rather than an accepted cost. The fix is for
- * `rank` and `classify` to share one definition of "this pane is not running
- * Claude" instead of holding two; it is not done here because that function is
- * `classify`'s and changing it reaches well past this branch.
+ * That used to matter twice over, because `classify` held a SECOND and looser
+ * definition of "no Claude here" — a six-name shell denylist — so a winning
+ * `vim` pane was not reported as stopped, its screen was scraped instead, and
+ * `idle`, `working`, `needs_you` and `rate_limited` were all reachable from
+ * arbitrary text. **That is fixed**: `classify` and `isAgentSession` both derive
+ * from `isClaudeCommand` now, and `status.test.js`'s "a crashed agent is
+ * reported stopped, not scraped off whatever replaced it" pins it for six
+ * commands.
+ *
+ * ⚠️ This note described that gap as OPEN for one commit after the same commit
+ * closed it — a comment claiming a defect that no longer exists, which is the
+ * inverse of the failure this file keeps warning about and just as costly: the
+ * next reader either chases a phantom or "fixes" it by re-loosening `classify`,
+ * which is the actual bug.
  *
  * ⚠️ The ordering principle, and the reason a crashed agent outranks a stranger:
  * **the session name is the only evidence of WHOSE a pane is.** A Claude process

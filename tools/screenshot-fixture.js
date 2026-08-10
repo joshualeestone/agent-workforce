@@ -268,7 +268,12 @@ function serve(req, res) {
     const agents = AGENTS.map((a) => ({
       ...a,
       may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
-        const verdict = lifecycle.mayTypeInto(action, a);
+        // ⚠️ `verdictFor`, not `mayTypeInto`. This applied ONE of the product's
+        // three gates while its comment above claimed it used the real rule —
+        // so a fixture agent named `_bot` or `my.bot` (both shapes the real
+        // test roster now carries) would have been photographed with three
+        // enabled buttons the product refuses.
+        const verdict = lifecycle.verdictFor(action, a);
         acc[action] = { ok: verdict.ok, because: verdict.because || null };
         return acc;
       }, {}),

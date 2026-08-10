@@ -289,7 +289,7 @@ svg { display: block; }
 /* ⚠️ NO group opacity. `opacity: 0.72` over `--label-2` composited to 3.15:1 in
    light and 4.03:1 in dark, both under AA — and only the BUTTON is a disabled
    control, so the exemption does not cover this copy. The refusal reads from
-   the muted border and the sentence, which is what actually carries the
+   the sentence and the disabled button, which is what actually carries the
    meaning; dimming the text was decoration that cost legibility. */
 .opt.refused { background: var(--bg-sunken); }
 .opt.refused h4, .opt.refused p { color: var(--label-2); }
@@ -1536,10 +1536,12 @@ function holdingBlock(a) {
     return `<div class="holding">${listed}
       <div class="danger"><b>This may not be ${esc(a.name)}'s conversation.</b>
       We found a session with this name, but not the one ${esc(a.name)}'s own
-      session runs in.${items.length ? ` Anything listed above belongs to the
-      NAME, and we have not been able to tie it to the pane on this card —` : ''}
-      so clearing here may empty a different conversation and leave
-      ${esc(a.name)}'s work untouched.</div>
+      session runs in.${items.length
+        ? ` Anything listed above belongs to the NAME, and we have not been able
+          to tie it to the pane on this card, so clearing`
+        : ' So clearing'}
+      here may empty a different conversation and leave ${esc(a.name)}'s work
+      untouched.</div>
     </div>`;
   }
 
@@ -1848,7 +1850,16 @@ let ACTIONS = {
 };
 fetch('/api/actions', { cache: 'no-store' })
   .then((r) => r.json())
-  .then((a) => { if (a && a.compact) ACTIONS = a; })
+  .then((a) => {
+    // ⚠️ ALL THREE, not just `compact`. Validating one key and then replacing
+    // the whole object would leave `ACTIONS.clear` undefined on a partial
+    // payload, and `optionBlock` dereferences `act.gentlest` unguarded — a
+    // throw inside `renderFresh`, which runs BEFORE the dialog is unhidden, so
+    // the button would silently do nothing. Same shape as the missing-`may`
+    // throw fixed earlier; the fallback exists precisely so a bad payload
+    // degrades instead of breaking.
+    if (a && a.compact && a.clear && a.restart) ACTIONS = a;
+  })
   .catch(() => { /* the fallbacks above carry the engine's own wording */ });
 
 document.getElementById('grid').addEventListener('click', (e) => {
