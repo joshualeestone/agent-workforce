@@ -2439,12 +2439,20 @@ test('a half-sent clear still tombstones, driven through the ROUTE not the unit'
   commitments.report(target.sessionName, [{ what: 'work that may already be gone' }]);
   assert.equal(commitments.read(target.sessionName).state, 'holding');
 
-  // A runner where the TEXT lands and the ENTER does not: the half-sent case.
+  // ⚠️ The runner must THROW on the second call, not return a failure value.
+  // `sendCommand` only reaches REFUSED-with-mayHaveLanded from its `catch`, so a
+  // runner that RETURNS `{ok:false}` produces OUTCOME.ASKED instead — and the
+  // first version of this test did exactly that. It was named for the half-sent
+  // path, exercised the ordinary one, and `assert.ok([200,409].includes(...))`
+  // hid the difference because ASKED answers 200 and half-sent answers 409.
+  //
+  // A test that does not enter the branch it is named for is worse than no
+  // test: it is a claim of coverage. This is the fourth on this branch.
   let call = 0;
   lifecycle.setRunner(() => {
     call += 1;
     if (call === 1) return { ok: true, stdout: '', stderr: '' };
-    return { ok: false, stdout: '', stderr: 'send-keys: no such pane' };
+    throw new Error('send-keys: no such pane');
   });
   try {
     lifecycle.setDryRun(false);
@@ -2455,7 +2463,14 @@ test('a half-sent clear still tombstones, driven through the ROUTE not the unit'
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ holding: now.commitments.token }),
     });
-    assert.ok([200, 409].includes(res.status), `unexpected ${res.status}: ${res.body}`);
+    // ⚠️ EXACTLY 409, not "either". The half-sent path answers 409 and the
+    // ordinary ASKED path answers 200, so accepting both is what let this test
+    // pass while never entering the branch it exists for.
+    assert.equal(res.status, 409, `expected the half-sent refusal: ${res.body}`);
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, 'refused', 'this is not the half-sent path');
+    assert.match(body.because, /sitting in its composer/,
+      'the response did not describe a command that may be unsent');
   } finally {
     lifecycle.setRunner(null);
   }

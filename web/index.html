@@ -1523,7 +1523,13 @@ function holdingBlock(a) {
      been sent. The operator would have read one agent's cost and paid it with
      another's conversation, which is the single failure this whole screen
      exists to prevent. */
-  if (a.isNamedOurs === false) {
+  // ⚠️ `!== true`, not `=== false`. A payload missing the field must render the
+  // WARNING, not skip it. Reading an absent value as the reassuring answer is
+  // the inverse of the rule applied to the same class of question elsewhere in
+  // this codebase (`isAgentPane` uses `=== '0'` as an allowlist precisely so an
+  // absent value is not read as safe), and this is the most consequential
+  // warning on the most dangerous screen.
+  if (a.isNamedOurs !== true) {
     const listed = items.length
       ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>`
       : '';
@@ -1659,7 +1665,12 @@ function optionBlock(id, act, losesAll, may) {
     : `Loses ${act.loses}${losesAll || '.'}`;
   // ⚠️ An action the server would refuse is shown REFUSED, with the server's
   // own sentence, rather than offered and then 409'd on click.
-  const refused = may && may.ok === false;
+  // ⚠️ Absent means REFUSED, not allowed. A payload without `may` used to
+  // render all three destructive buttons enabled with no explanation — safety
+  // asserted from the absence of an answer, on the screen where that is least
+  // affordable. The server always sends it; this is about what happens when it
+  // one day does not.
+  const refused = !may || may.ok !== true;
   return `<div class="opt ${act.gentlest ? 'gentlest' : ''} ${refused ? 'refused' : ''}">
     ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
     <div>
@@ -1703,16 +1714,32 @@ function renderFresh(a) {
   // nothing." — ungrammatical, and self-contradictory on the state it was
   // added to describe correctly.
   let losesAll;
-  if (h.state === 'holding' && n) {
+  // ⚠️ FIRST, and it overrides every state below. On an untied pane the items
+  // belong to the NAME and this pane has not been tied to it, so "all 3 items
+  // above" is a claim we cannot honour — the server proves it by refusing to
+  // tombstone them. Without this the dialog carried two contradictory costs at
+  // once: the danger block saying the items may not be this pane's, and the
+  // decision text directly beneath promising to destroy exactly those items.
+  // The primary decision text was the one that was wrong, on the screen whose
+  // entire thesis is honest cost.
+  if (a.isNamedOurs !== true) {
+    losesAll = ', and we cannot tell you what — this may not be that agent’s conversation.';
+  } else if (h.state === 'holding' && n) {
     // "all 1 item above" is what the naive plural gives, and it reads as a
     // machine talking. One item does not need the word "all".
     losesAll = n === 1 ? ': the one item above.' : `: all ${n} items above.`;
   } else if (h.state === 'clear') {
     losesAll = ', and it reported that is nothing.';
-  } else {
+  } else if (n) {
     // "we cannot list it" was untrue while the list sits directly above. The
     // uncertainty is about vouching for the items, not about having them.
     losesAll = ', and we cannot vouch for the list above.';
+  } else {
+    // ⚠️ And with NO items there is no list to point at — the state of every
+    // agent that has never reported, i.e. the default on a fresh install and so
+    // the most common fresh-start dialog there is. The previous wording was
+    // right for this shape and the fix for the items-present shape broke it.
+    losesAll = ', and we cannot tell what that is.';
   }
 
   document.getElementById('fresh-holding').innerHTML = holdingBlock(a);

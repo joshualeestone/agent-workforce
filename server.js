@@ -58,15 +58,23 @@ function readBody(req) {
  *
  * ⚠️ And a correction to what an earlier version of this comment claimed. It
  * said that NOT widening the gate avoided accepting two names that sanitise to
- * the same directory. That was wrong: the gate compares against `safeKey(name)`
- * and `fileFor` resolves through `safeKey` too, so it ALREADY accepts every
- * spelling that sanitises to a live agent. Verified against the live roster:
- * `an.gel`, `ANGEL`, `a n g e l` and `ang!el` all pass and all resolve to
- * `angel/CLAUDE.md`. That is harmless while it is the same agent.
+ * the same directory. That was wrong at the time: the gate compared against
+ * `safeKey(name)` and `fileFor` resolved through `safeKey` too, so it accepted
+ * every spelling that sanitised to a live agent — `an.gel`, `ANGEL`,
+ * `a n g e l` and `ang!el` all reached `angel/CLAUDE.md`.
  *
- * The real latent risk, stated accurately: if two agents ever exist whose names
- * sanitise to the SAME key (sessions `mybot` and `my.bot`), the gate cannot
- * tell them apart and both read and write one file. Nothing detects that today.
+ * ⚠️ NONE OF THOSE SPELLINGS REACH ANY ROUTE NOW, and this paragraph described
+ * them as current for several commits after they stopped being. `findAgent`
+ * refuses a name that is not already exactly its own `safeKey` (see
+ * `addressable`), because the latent risk below turned out to be reachable on a
+ * route that DESTROYS rather than one that edits.
+ *
+ * The risk that drove it: two agents whose names sanitise to the SAME key
+ * (sessions `mybot` and `my.bot`) could not be told apart, so a request naming
+ * one resolved to the other — `/clear` into a different agent's pane and
+ * `restart-bot.sh` at a different agent's service. The confirmation token does
+ * NOT fail closed there: when neither has ever reported, both read `unknown`
+ * with an empty list and produce the identical token.
  * There are currently no such collisions and no agent whose name differs from
  * its own sanitised form, both checked rather than assumed. The real fix is one
  * identity per agent instead of a name that is sanitised in one place and
@@ -148,9 +156,10 @@ function findAgent(name) {
     // `unknown` with an empty list, so both produce the identical token and the
     // action proceeds. The guard that looks like it covers this does not.
     //
-    // Case folding is still allowed — the roster is lower-case and a hand-typed
-    // `MyBot` is unambiguous. Only STRIPPING is refused, because stripping is
-    // the part that makes two names one.
+    // ⚠️ EXACT. This comment said case folding was still allowed, for one
+    // commit after it stopped being — see `addressable` above for why it was
+    // removed (the resolver matches a lower-cased key, so a session genuinely
+    // named `Mikey-discord` was advertised as actionable and then 404'd).
     if (!addressable(raw)) return null;
 
     return snapshot().agents.find((a) => a.sessionName === key) || null;
@@ -886,7 +895,10 @@ const server = http.createServer((req, res) => {
         // anyway, and the answer reported `holding: {state:"unknown",
         // commitments:[]}` — "a record of the cost actually paid" saying nothing
         // was at stake while three commitments were destroyed. `knownAgent`
-        // documents that `ANGEL`, `an.gel` and `ang!el` all reach this route.
+        // used to document that `ANGEL`, `an.gel` and `ang!el` all reach this
+        // route. They no longer do — `findAgent` refuses any spelling that is
+        // not already its own `safeKey`. The two-derivations point below still
+        // stands and is the reason this line exists.
         //
         // Two derivations of "which agent" is the defect this codebase has now
         // found in six other places. One here.
