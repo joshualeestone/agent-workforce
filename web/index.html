@@ -282,6 +282,7 @@ svg { display: block; }
   </div>
 
   <div class="field">
+    <p class="danger" id="d-untied" hidden></p>
     <label class="flabel" for="d-file">Picture</label>
     <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
     <div class="frow">
@@ -714,8 +715,43 @@ function openDetail(sessionName) {
   renderAvatar(a);
   document.getElementById('d-msg').textContent = '';
   document.getElementById('d-role-msg').textContent = '';
-  loadInstructions(a.sessionName);
+
+  /* ⚠️ The UI half, which the plan claimed and the code did not do.
+     Every write route now refuses an agent whose pane cannot be tied to its
+     name — but this panel went on OFFERING all three. Opening such a card fired
+     `loadInstructions`, took a 404, and painted the route's own sentence, "no
+     agent by that name", about an agent whose card the operator was looking at.
+     The role Save and the avatar controls stayed enabled and failed the same
+     way with "that did not save".
+     Refusing plainly beats offering an action that cannot work — and a claim of
+     protection the code does not provide is the defect this whole branch is
+     about, so making it in the plan was worse than making it in a comment. */
+  const tied = a.isNamedOurs === true;
+  setWritesOffered(a, tied);
+  if (tied) loadInstructions(a.sessionName);
   showTab('detail');
+}
+
+/**
+ * Show or withdraw the three write affordances, and say why.
+ *
+ * Withdrawn rather than disabled-with-a-tooltip: a disabled control still reads
+ * as "this is for you, later". The honest shape is that this card does not
+ * offer them, with one sentence giving the reason.
+ */
+function setWritesOffered(a, tied) {
+  const controls = ['d-file', 'd-remove', 'd-save', 'd-role'];
+  for (const id of controls) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !tied;
+  }
+  const why = document.getElementById('d-untied');
+  if (why) {
+    why.hidden = tied;
+    why.textContent = tied ? '' : `We found a session called ${a.sessionName}, but not the one `
+      + `${a.name}'s own session runs in — so we cannot say this pane is ${a.name}, `
+      + 'and we will not change that agent\u2019s picture, role or instructions from here.';
+  }
 }
 
 document.getElementById('grid').addEventListener('click', (e) => {

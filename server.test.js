@@ -1445,3 +1445,110 @@ test('/api/status reads the store for a tied agent and not for an untied one', a
     status.setPaneCapture(null);
   }
 });
+
+test('a stranger cannot fetch the real agent’s picture under the stranger’s own spelling', async () => {
+  // ⚠️ The leak reopened by the availability fix, and the URL that matters: a
+  // consumer building a request from the UNTIED card uses that card's OWN
+  // sessionName. Asking per-KEY ("does any tied card claim `angel`?") answered
+  // yes — the real agent does — so the gate allowed it, and `avatarPath`
+  // sanitised `Angel` straight back down to the real agent's file.
+  //
+  // Three directions wrong on one predicate: leak, then availability, then leak
+  // again under a different spelling. The question is per-CARD.
+  const status = require('./engine/status');
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const avatarDir = nodePathx.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'avatars');
+  fsx.mkdirSync(avatarDir, { recursive: true });
+  fsx.writeFileSync(nodePathx.join(avatarDir, 'angel.png'), 'seeded', 'utf8');
+
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // The stranger's own spelling must be refused...
+    const leak = await req('/api/agent/Angel/avatar');
+    assert.equal(leak.status, 404,
+      'the real agent’s picture was served under the stranger’s own session name');
+
+    // ...while the real agent stays reachable under its own.
+    const ok = await req('/api/agent/angel/avatar');
+    assert.equal(ok.status, 200,
+      'the fix took the healthy agent offline again, which is the direction the '
+      + 'previous version broke');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('tmux being unreachable refuses the name-keyed reads rather than serving them', async () => {
+  // ⚠️ The catch in `borrowedName` was documented as failing closed, and the
+  // only input that reached it was an injected throw. The REALISTIC failure —
+  // tmux dead, tmux not installed, the five-second timeout expiring — goes
+  // through `sh()`, which swallows it and returns null, so the roster came back
+  // EMPTY and the gate read that as "nobody is claiming this name" and served.
+  //
+  // A guard whose closed path production cannot take is not a guard. This drives
+  // the production shape: the source returns null, not a throw.
+  const status = require('./engine/status');
+  status.setPaneSource(() => null);
+  try {
+    for (const route of ['commitments', 'avatar']) {
+      const res = await req(`/api/agent/angel/${route}`);
+      assert.equal(res.status, 404,
+        `GET /${route} served the record when tmux could not be asked at all`);
+    }
+  } finally {
+    status.setPaneSource(null);
+  }
+});
+
+test('the detail panel withdraws the writes it cannot perform, rather than offering them', () => {
+  // ⚠️ The plan claimed "the board no longer advertises the edit" while
+  // `web/index.html` was not in the diff at all. Opening an untied card fired
+  // `loadInstructions`, took a 404 from the write gate, and painted the route's
+  // own sentence — "no agent by that name" — about an agent whose card the
+  // operator was looking at. Role Save and the avatar controls stayed enabled
+  // and failed the same way.
+  //
+  // A claim of protection the code does not provide is the defect this entire
+  // branch is about, so making it in the plan was worse than making it in a
+  // comment. Comments stripped first, or this matches its own explanation.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+    .join('\n');
+
+  const start = code.indexOf('function openDetail');
+  assert.ok(start > -1, 'openDetail vanished');
+  const body = code.slice(start, code.indexOf('\nfunction ', start + 10));
+
+  assert.match(body, /isNamedOurs/,
+    'the detail panel never consults isNamedOurs, so it offers writes the routes refuse');
+
+  // ⚠️ The instruction load must be CONDITIONAL, and asserting only that it
+  // comes AFTER the tie check is not enough — deleting the `if` leaves the call
+  // after the check and the ordering assertion still passes. The first version
+  // of this test did exactly that. Assert the call sits on a guarded line.
+  const loadLine = body.split('\n').find((l) => l.includes('loadInstructions('));
+  assert.ok(loadLine, 'loadInstructions is no longer called at all');
+  assert.match(loadLine, /\bif\s*\(/,
+    'loadInstructions runs unconditionally, so opening an untied card still 404s '
+    + 'and paints "no agent by that name" about an agent on screen');
+  assert.match(loadLine, /tied/,
+    'the load is guarded by something other than the tie');
+
+  assert.match(code, /function setWritesOffered/,
+    'nothing withdraws the write affordances');
+  // ⚠️ And it must be CALLED. Asserting the function exists passed with the call
+  // deleted — a definition nobody invokes is the same as no definition, and this
+  // file has caught that shape before.
+  assert.match(body, /setWritesOffered\s*\(/,
+    'setWritesOffered is defined but never called from openDetail, so the '
+    + 'affordances stay offered');
+});

@@ -98,8 +98,33 @@ function borrowedName(name) {
     // that refuses a healthy agent is its own failure, and the restart dialog
     // this exists for would have shown "no agent by that name" as the cost of
     // clearing a real one.
+    // ⚠️ EXACT SPELLING FIRST. This has now been wrong in three different
+    // directions, so the reasoning is worth stating fully.
+    //
+    //   v1 compared the sanitised key against the RAW sessionName, so every
+    //      alias spelling slipped past and leaked.
+    //   v2 compared sanitised-to-sanitised and took the FIRST claimant, which
+    //      closed the leak and broke availability: a healthy agent went offline
+    //      because a stranger's alias-spelled session sorted before it.
+    //   v3 asked a per-KEY question — "does any tied card claim this key" —
+    //      which restored availability and REOPENED the leak for the one URL
+    //      that matters. With real `angel-discord` up and a stranger on
+    //      `tmux new -s Angel`, a consumer building a URL from the untied card
+    //      requests `/api/agent/Angel/avatar`; the key `angel` has a tied
+    //      claimant, so the gate allowed it, and `avatarPath` sanitises the
+    //      name right back down to the real agent's picture.
+    //
+    // The danger is per-CARD, not per-key. So: if some card's OWN spelling
+    // matches what was asked for, that card answers — and if it is untied, we
+    // refuse. Only when no card spells it that way do we fall back to the key,
+    // which is what keeps a healthy agent reachable under its sanitised name.
     const key = store.safeKey(name);
-    const claimants = paneRoster().filter((a) => {
+    const roster = paneRoster();
+
+    const exact = roster.filter((a) => a.sessionName === String(name));
+    if (exact.length) return !exact.some((a) => a.isNamedOurs === true);
+
+    const claimants = roster.filter((a) => {
       try { return store.safeKey(a.sessionName) === key; } catch { return false; }
     });
     if (!claimants.length) return false;

@@ -1053,7 +1053,23 @@ function safeAvatar(name) {
  * hand out.
  */
 function paneRoster() {
-  return onePanePerSession(listPanes()).map((pane) => ({
+  // ⚠️ THROWS when tmux could not be asked, rather than answering "nothing".
+  //
+  // `sh()` swallows every failure and returns `null`, and `parsePanes(null)`
+  // returns `[]` — so tmux dead, tmux missing, or the five-second timeout
+  // expiring all arrived at a caller as an empty roster, indistinguishable from
+  // a machine with no agents. `borrowedName`'s catch is written to fail CLOSED
+  // and its comment says so, but the only input that reached it was an injected
+  // throw from a test: **the realistic failure failed open and served the
+  // record.** A guard whose closed path production cannot take is not a guard.
+  //
+  // `snapshot()` deliberately keeps the lenient behaviour — an empty board is
+  // the honest answer there, and it renders as such.
+  const out = paneSource ? paneSource() : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  if (out === null || out === undefined) {
+    throw new Error('could not ask tmux which panes exist');
+  }
+  return onePanePerSession(parsePanes(out)).map((pane) => ({
     sessionName: pane.name,
     isNamedOurs: isNamedOurs(pane),
   }));
