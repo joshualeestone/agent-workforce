@@ -610,6 +610,24 @@ const RATE_LIMIT_MARKERS = [
  * stops the board reporting health it has not verified.
  */
 function classify(pane, paneText) {
+  // ⚠️ FIRST, before the screen is read at all. `classify` consulted only
+  // `pane.command`, so a session this engine has explicitly rejected still got
+  // a scraped state: measured, a lone `devserver` running `node` with
+  // "Do you want to proceed? (y/N)" on screen produced
+  // `{state:'needs_you', confidence:'scraped'}` and occupied the board's
+  // headline needs-you count — a vite dev server rendered as an agent asking
+  // for help. With "Worked for 3m" on screen it read `idle`.
+  //
+  // That is this module's one rule inverted: something we KNOW is not ours,
+  // reported as something healthy. Reading a pane's screen is only meaningful
+  // once we believe the pane is an agent's.
+  if (!isFleetSession(pane)) {
+    return {
+      state: STATE.UNKNOWN,
+      confidence: CONFIDENCE.NONE,
+      because: 'this is not one of your agent sessions, so we cannot say what it is doing',
+    };
+  }
   if (!isClaudeRunning(pane.command)) {
     return { state: STATE.STOPPED, confidence: CONFIDENCE.STRUCTURED, because: 'no Claude process in this pane' };
   }
@@ -984,9 +1002,30 @@ function snapshot() {
   const agents = panes.map((pane) => {
     const text = capturePane(pane.target);
     const status = classify(pane, text);
-    const { model } = readModel(pane.name);
-    const context = readContext(pane.name, model);
-    const identity = readIdentity(pane.name);
+    // ⚠️ Identity, model and context are all filed under the NAME, and only a
+    // pane whose SESSION NAME says it is ours has been tied to that name.
+    //
+    // Measured with the real `claudebot-discord` absent and a stranger's
+    // `tmux new -s claudebot` running Claude: the card came back named
+    // "Splinter", role "Project Manager", model `claude-opus-4-8`, context ring
+    // 24% at STRUCTURED confidence — all the REAL agent's, read out of its
+    // registry file — while the state and the target were the stranger's. An
+    // operator would be looking at a card that is Splinter in every respect
+    // except the one that decides what a destructive action reaches.
+    //
+    // Publishing `isNamedOurs` and leaving another branch to honour it is not
+    // enough: this module is what asserts the identity, so this module has to
+    // stop asserting it. An inferred pane keeps its raw session name, is marked
+    // underived, and carries no model and no context — which is the honest
+    // answer, because we do not know whose conversation it is.
+    const tied = isNamedOurs(pane);
+    const { model } = tied ? readModel(pane.name) : { model: null };
+    const context = tied
+      ? readContext(pane.name, model)
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tie this pane to an agent by name, so we will not read another agent\u2019s transcript for it' };
+    const identity = tied
+      ? readIdentity(pane.name)
+      : { displayName: pane.name, role: null, derived: false };
     return {
       name: identity.displayName,
       sessionName: pane.name,
@@ -1055,7 +1094,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

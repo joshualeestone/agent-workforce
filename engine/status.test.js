@@ -30,11 +30,32 @@ const {
   STATE,
   CONFIDENCE,
   CONTEXT_LIMITS,
+  isNamedOurs,
+  rank,
+  paneOrder,
 } = require('./status');
 
 // A pane as the engine sees it. `command` is a version string when Claude Code
 // is running and a shell name when it is not.
-const pane = (over = {}) => ({ name: 'test', target: 'test:0.0', command: '2.1.222', title: '', ...over });
+//
+// ⚠️ `session` is REQUIRED and was missing. Every test using this helper means
+// "a pane in an agent's own session", and the helper produced an object with no
+// session at all — so when `classify` started refusing to scrape a pane it
+// cannot tie to an agent, two tests about CRASHED agents began asserting
+// `stopped` against a correct `unknown`. The bug was in the fixture's shape,
+// not in either.
+//
+// This is the same failure as a hand-written roster drifting from the engine:
+// a helper that omits a field the engine reads silently changes what every test
+// built on it is actually testing.
+const pane = (over = {}) => ({
+  name: 'test',
+  session: 'test-discord',
+  target: 'test-discord:0.0',
+  command: '2.1.222',
+  title: '',
+  ...over,
+});
 
 // ---------------------------------------------------------------------------
 // The rule the whole engine exists to enforce
@@ -634,4 +655,132 @@ test('a pane running literally `claude` is not out-ranked by a shell', () => {
   ].join('\n'));
   assert.equal(onePanePerSession(withNode)[0].target, 'zeta-discord:0.1',
     'node stopped being treated as ambiguous, so a watcher can hide a crash again');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The two failures found by splitting this branch out, and four guards that
+// were shipping with no test behind them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a pane we cannot tie to a name does not borrow that agent’s identity', () => {
+  // ⚠️ Measured with the real `claudebot-discord` absent and a stranger's
+  // `tmux new -s claudebot` running Claude: the card came back named
+  // "Splinter", role "Project Manager", with the REAL agent's model and a 24%
+  // context ring at STRUCTURED confidence — all read out of that name's
+  // registry file — while the state and target were the stranger's.
+  //
+  // Publishing `isNamedOurs` and leaving another branch to honour it is not
+  // enough: this module is what asserts the identity, so this module has to
+  // stop asserting it.
+  setPaneSource(() => 'claudebot\t0.0\t2.1.212\t0\tstranger doing something else');
+  setPaneCapture(() => 'Worked for 2m 14s\n> \n');
+  try {
+    const [card] = snapshot().agents;
+    assert.ok(card, 'the stranger produced no card at all, which is a different bug');
+    assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
+    assert.equal(card.nameDerived, false,
+      'an untied pane was given a display name derived from another agent’s files');
+    assert.equal(card.role, null, 'an untied pane borrowed the real agent’s role');
+    assert.equal(card.context.percent, null,
+      'an untied pane borrowed the real agent’s context ring');
+    assert.equal(card.context.confidence, CONFIDENCE.NONE,
+      'a borrowed context reading was published at real confidence');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a session we know is not ours is never given a healthy state', () => {
+  // ⚠️ `classify` consulted only `pane.command`, so a session this engine has
+  // explicitly rejected still got a scraped state. Measured: a lone `devserver`
+  // running `node` with a confirmation prompt on screen produced
+  // `{state:'needs_you'}` and occupied the board's headline needs-you count — a
+  // vite dev server rendered as an agent asking for help.
+  //
+  // This module's one rule, inverted: something we KNOW is not ours, reported
+  // as something healthy.
+  const notOurs = { name: 'devserver', session: 'devserver', target: 'devserver:0.0', command: 'node', title: 'vite' };
+
+  for (const screen of ['Do you want to proceed? (y/N)\n', 'Worked for 3m 1s\n> \n', 'rate limit reached\n']) {
+    const r = classify(notOurs, screen);
+    assert.equal(r.state, STATE.UNKNOWN,
+      `a pane we do not recognise was classified as ${r.state} from its screen text`);
+    assert.equal(r.confidence, CONFIDENCE.NONE);
+  }
+
+  // ⚠️ And a pane that IS ours still gets read, or this guard has eaten the
+  // feature rather than fixed it.
+  const ours = { ...notOurs, session: 'devserver-discord', command: '2.1.212' };
+  assert.notEqual(classify(ours, 'Do you want to proceed? (y/N)\n').state, STATE.UNKNOWN);
+});
+
+test('an inferred agent with a split window still wins its own name', () => {
+  // ⚠️ RANK_INFERRED had no test: replacing it with RANK_NONE left the suite
+  // green, while a non-Discord agent with a second pane silently flipped to the
+  // shell — reading as stopped and losing Clear and Compact. Every non-suffixed
+  // fixture in this file was a single pane or paired against a `-discord`
+  // session, so the tier the plan calls tier 3 was unpinned.
+  const panes = parsePanes([
+    'research\t0.0\t-zsh\t0\t',
+    'research\t0.1\t2.1.212\t0\tSummarising',
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].target, 'research:0.1',
+    'a shell outranked the Claude pane in a non-Discord agent’s own session');
+  assert.equal(isAgentPane(kept[0]), true);
+});
+
+test('a pane object that never went through the parser is not typeable', () => {
+  // ⚠️ `isAgentPane` reads `inMode === '0'` as an ALLOWLIST precisely so a caller
+  // holding a hand-built pane cannot get a permissive answer from a missing
+  // field. The comment said so and nothing tested it: changing it to
+  // `!== '1'` left the suite green.
+  assert.equal(isAgentPane({ session: 'x-discord', command: '2.1.212' }), false,
+    'a pane with no inMode was treated as safe to type into');
+  assert.equal(isAgentPane({ session: 'x-discord', command: '2.1.212', inMode: '0' }), true);
+});
+
+test('a same-rank tie is broken by pane order, not by tmux’s listing order', () => {
+  // ⚠️ `paneOrder` was entirely unpinned — replacing its body with `return 0`
+  // left the suite green, because every collision fixture was decided by `rank`
+  // before reaching the tie-break. A tie would then revert to "whatever tmux
+  // listed first", which is the arbitrary pick the ladder exists to eliminate.
+  assert.equal(paneOrder('0.1') > paneOrder('0.0'), true);
+  assert.equal(paneOrder('1.0') > paneOrder('0.9'), true, 'window is not weighted above pane');
+  assert.equal(paneOrder('10.0') > paneOrder('9.0'), true, 'window order is lexical, not numeric');
+
+  // Two panes of the SAME rank in one session: both crashed shells.
+  const panes = parsePanes([
+    'zeta-discord\t0.2\t-zsh\t0\t',
+    'zeta-discord\t0.1\t-zsh\t0\t',
+  ].join('\n'));
+  assert.equal(onePanePerSession(panes)[0].target, 'zeta-discord:0.1',
+    'the later pane won a same-rank tie, so the winner depends on tmux’s order');
+});
+
+test('isNamedOurs is on the snapshot and means what the consumers think', () => {
+  // ⚠️ Deleting the field from the snapshot left the suite green, and it is the
+  // field a consumer written as `if (agent.isNamedOurs === false) refuse` reads
+  // — so its absence would silently permit everything.
+  setPaneSource(() => [
+    'zeta-discord\t0.0\t2.1.212\t0\tworking',
+    'solo\t0.0\t2.1.212\t0\tworking',
+  ].join('\n'));
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const agents = snapshot().agents;
+    const tied = agents.find((a) => a.sessionName === 'zeta');
+    const inferred = agents.find((a) => a.sessionName === 'solo');
+    assert.ok(tied && inferred, 'the fixture did not produce both shapes');
+    assert.equal(tied.isNamedOurs, true);
+    assert.equal(inferred.isNamedOurs, false);
+    assert.equal(isNamedOurs({ session: 'x-discord' }), true, 'the function is not exported or not correct');
+    assert.equal(isNamedOurs({ session: 'x' }), false);
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
 });
