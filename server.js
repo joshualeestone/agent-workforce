@@ -108,6 +108,22 @@ function readBody(req) {
  * If it ever does, the shape is a per-agent timestamp, not a busy flag.
  */
 
+/**
+ * Can we address this agent by name at all?
+ *
+ * ⚠️ Its own function so `findAgent` and the `may` field cannot disagree. They
+ * did: `may` published `ok: true` for an agent the action route then 404'd,
+ * because the name rule lived only inside `findAgent`.
+ */
+function addressable(sessionName) {
+  try {
+    const raw = String(sessionName || '');
+    return store.safeKey(raw) === raw.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 function findAgent(name) {
   try {
     const raw = String(name || '');
@@ -127,7 +143,7 @@ function findAgent(name) {
     // Case folding is still allowed — the roster is lower-case and a hand-typed
     // `MyBot` is unambiguous. Only STRIPPING is refused, because stripping is
     // the part that makes two names one.
-    if (key !== raw.toLowerCase()) return null;
+    if (!addressable(raw)) return null;
 
     return snapshot().agents.find((a) => a.sessionName === key) || null;
   } catch {
@@ -512,8 +528,21 @@ const server = http.createServer((req, res) => {
         // that would be a second copy of the rule that decides whether a
         // destructive action is allowed, drifting from the first. The button is
         // disabled by the answer, not by a lookalike of it.
+        // ⚠️ AND the route's own name rule, or `may` promises what the action
+        // route then refuses. `findAgent` rejects a name whose characters
+        // `safeKey` would strip, because stripping is what makes two names one
+        // — so an agent in a session called `my.bot-discord` is on the board and
+        // is NOT actionable. Without this clause `may.clear.ok` came back true
+        // and the POST answered 404: the exact offer-an-action-that-cannot-work
+        // state this field was added to remove, and one fact (is this agent
+        // actionable) derived in two places that disagreed.
         may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
-          const verdict = lifecycle.mayTypeInto(action, a);
+          const verdict = addressable(a.sessionName)
+            ? lifecycle.mayTypeInto(action, a)
+            : {
+              ok: false,
+              because: 'this agent\u2019s session name has characters we cannot address it by, so we will not act on it under a name that is not exactly its own',
+            };
           acc[action] = { ok: verdict.ok, because: verdict.because || null };
           return acc;
         }, {}),
@@ -1029,8 +1058,14 @@ const server = http.createServer((req, res) => {
  *
  * What protects it today: the loopback bind and the Host allowlist below, a
  * cross-site check on every write (`Sec-Fetch-Site`, plus an Origin fallback), a
- * confirmation token that pins what the operator was shown, and a single-flight
- * guard per agent. What does NOT protect it: anything resembling a login.
+ * confirmation token that pins what the operator was shown.
+ *
+ * ⚠️ And what does NOT protect it: anything resembling a login, and — read this
+ * before adding it to the list again — there is **no server-side single-flight
+ * guard**. This paragraph claimed one for a few commits because I wrote the list
+ * and then deleted the guard (see the note above `findAgent`, which explains why
+ * it could never fire). The browser's `FRESH_INFLIGHT` is per-tab and a second
+ * tab or a curl bypasses it entirely.
  *
  * Two ways that protection is lost, and only the first is obvious:
  *

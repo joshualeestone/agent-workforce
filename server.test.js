@@ -147,6 +147,12 @@ const FAKE_PANES = [
   // tombstoning a record we cannot tie to the pane has nothing to refuse, and a
   // roster made entirely of properly-named agents cannot exercise it.
   'wren\t0.0\t2.1.212\t0\tDrafting the supplier email',
+  // ⚠️ A session whose name has a character `safeKey` strips. It appears on the
+  // board and must NOT be offered any action, because the route cannot address
+  // it by a name that is exactly its own. Present on purpose: without it, the
+  // clause making `may` agree with `findAgent` has nothing to refuse and a test
+  // asserting they agree passes with the clause deleted.
+  'my.bot-discord\t0.0\t2.1.212\t0\tIndexing the archive',
 ].join('\n');
 
 const FAKE_CAPTURE = {
@@ -158,6 +164,7 @@ const FAKE_CAPTURE = {
   // A permission prompt: the exact pane where a stray Enter would confirm Yes.
   'xander-discord:0.0': 'Do you want to proceed?\n\u276f 1. Yes\n  2. No\n',
   'wren:0.0': 'Worked for 1m 02s\n> \n',
+  'my.bot-discord:0.0': 'Worked for 3m 30s\n> \n',
 };
 
 test.before(() => {
@@ -191,6 +198,31 @@ test.after(() => {
  * the tests assert on the BODY as well as the status, because 409 is now a
  * value two different mechanisms can produce.
  */
+/**
+ * The agent OBJECT the routes will act on, from `may` rather than a predicate.
+ *
+ * ⚠️ Exists because four separate tests re-derived this inline, and each time a
+ * gate was added to the product (isNamedOurs, then addressability) every one of
+ * them silently began selecting an agent the routes refuse — so they failed, or
+ * worse passed, for reasons unrelated to their names. Narrowing them by hand
+ * worked twice and was wrong twice. `may` is computed from the same engine the
+ * routes use, so this cannot drift when the next gate lands.
+ */
+async function actionableAgent() {
+  const board = JSON.parse((await req('/api/status')).body);
+  // ⚠️ Actionable AND tied. `may.clear.ok` alone is not enough and the
+  // difference is deliberate: clearing an INFERRED pane is allowed — it is the
+  // pane the operator clicked — while its commitment record is deliberately not
+  // tombstoned, because the record belongs to the name and the pane has not
+  // been tied to it. So `may.clear.ok` is true for `wren`, and a tombstone test
+  // selecting it fails for a reason that has nothing to do with tombstones.
+  // Tests that specifically want the untied case call `inferredAgent()`.
+  const found = (board.agents || []).find((a) =>
+    a.may && a.may.clear && a.may.clear.ok && a.isNamedOurs);
+  assert.ok(found, 'the synthetic roster has no ordinary agent the routes would act on');
+  return found;
+}
+
 async function anyAgent(t) {
   const board = await req('/api/status');
   if (!board.type.includes('application/json')) {
@@ -206,8 +238,12 @@ async function anyAgent(t) {
   // back, so `a destructive action tombstones what it destroyed` would get its
   // failure from the gate rather than from the behaviour it is named for. The
   // test would then pass with the tombstone code deleted.
-  const actionable = agents.find((a) =>
-    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
+  // ⚠️ `may.clear.ok`, not a hand-rolled predicate. This is the FOURTH gate to
+  // land on this helper (state, isNamedOurs, and now addressability), and each
+  // of the first three silently redirected tests at the wrong agent until it
+  // was added by hand. `may` is computed from the same engine the routes use, so
+  // deriving from it cannot drift when the next gate arrives.
+  const actionable = agents.find((a) => a.may && a.may.clear && a.may.clear.ok);
   assert.ok(actionable,
     'the synthetic roster has no actionable agent we can tie to its record, so '
     + 'every guard test would be refused before reaching the guard it is named for');
@@ -1552,15 +1588,9 @@ test('a destructive action tombstones what it destroyed', async (t) => {
   const lifecycle = require('./engine/lifecycle');
   const commitments = require('./engine/commitments');
 
-  const board = JSON.parse((await req('/api/status')).body);
-  // ⚠️ `isNamedOurs` as well as actionable, and this test re-deriving its own
-  // predicate inline instead of calling `anyAgent()` is exactly the drift that
-  // helper's comment warns about — narrowing the helper did not narrow this.
-  // With the inferred-only agent in the roster, the un-narrowed find selected
-  // it, the tombstone was correctly refused, and this test failed for a reason
-  // that has nothing to do with what it is named for.
-  const target = (board.agents || []).find((a) =>
-    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
+  // Through the shared helper. Re-deriving this inline is what broke this test
+  // twice, each time a new gate landed in the product.
+  const target = await actionableAgent();
   if (!target) {
     t.skip('no agent on this board is in a state the route would act on');
     return;
@@ -1645,8 +1675,7 @@ test('compact does not tombstone what the agent is holding', async (t) => {
   // null by compact's exclusion rather than by anything this test is named for.
   // A green test measuring the wrong mechanism is how three guards on this
   // branch stayed unpinned.
-  const target = (board.agents || []).find((a) =>
-    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
+  const target = await actionableAgent();
   if (!target) { t.skip('no actionable agent on the synthetic roster'); return; }
 
   lifecycle.setRunner(() => '');
@@ -1977,13 +2006,12 @@ test('the status payload says which actions would be refused', async () => {
   // work" state the block exists to remove.
   const board = JSON.parse((await req('/api/status')).body);
   const asking = await refusingAgent();
-  // ⚠️ `isNamedOurs`, or this picks the inferred-only agent, whose restart is
-  // refused ON PURPOSE — and the test would report that correct refusal as a
-  // broken `may` block. Third inline re-derivation of the roster predicate in
-  // this file; each one had to be narrowed separately.
+  // ⚠️ NOT `actionableAgent()` here: this test is about the `may` block itself,
+  // so it needs an agent chosen without consulting `may` — otherwise it asserts
+  // that `may` agrees with `may`.
   const ready = (board.agents || []).find((a) =>
-    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
-  assert.ok(ready, 'the synthetic roster has no actionable agent we can tie to its record');
+    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs && a.sessionName.indexOf('.') === -1);
+  assert.ok(ready, 'the synthetic roster has no ordinary actionable agent');
 
   for (const action of ['compact', 'clear', 'restart']) {
     assert.ok(ready.may && ready.may[action], `no verdict for ${action} on a ready agent`);
@@ -2331,4 +2359,74 @@ test('an action still running is not fired twice by reopening its dialog', () =>
   assert.ok(checkAt < sendAt,
     'the in-flight check runs after the action is already under way, so it '
     + 'cannot prevent the second submit');
+});
+
+
+test('an untied pane warns BEFORE the action, not in the response afterwards', () => {
+  // ⚠️ The server refuses to tombstone an untied pane's record and reports
+  // `untied` — but in the RESPONSE, after the clear has already been sent. The
+  // card meanwhile is dressed as the real agent all the way down: `readIdentity`
+  // reads that NAME's own files, so the title, role, avatar and the listed
+  // commitments are the real agent's. An operator would read one agent's cost
+  // and pay it with a stranger's conversation, which is the single failure this
+  // screen exists to prevent.
+  //
+  // Comments are stripped first: a source test that does not strip them matches
+  // its own explanation and passes against code with the guard deleted.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+    .join('\n');
+
+  const start = code.indexOf('function holdingBlock');
+  assert.ok(start > -1, 'holdingBlock vanished');
+  const body = code.slice(start, code.indexOf('\nfunction ', start + 10));
+
+  assert.match(body, /isNamedOurs/,
+    'the dialog never consults isNamedOurs, so it shows the real agent’s '
+    + 'commitments as the cost of clearing a pane that may not be theirs');
+
+  // And it must be checked BEFORE the ordinary state branches, or the warning
+  // renders only for some states.
+  const guardAt = body.indexOf('isNamedOurs');
+  const stateAt = body.indexOf("state === 'unknown'");
+  assert.ok(guardAt > -1 && stateAt > -1 && guardAt < stateAt,
+    'the untied check runs after the state branches, so the warning is skipped '
+    + 'for whichever state returns first');
+});
+
+test('the DESTROYED badge sets its own ink rather than inheriting one that fails AA', () => {
+  // ⚠️ Computed, not eyeballed. Inheriting the sibling badge's ink measured
+  // 2.65:1 in light and 3.16:1 in dark on #6b6b66, against 4.5:1 for 11px
+  // caption text with no large-text exemption. CLAUDE.md makes a contrast
+  // failure reaching main a hard rule, and this is the one badge whose job is
+  // telling the operator an item is already gone.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const rule = raw.match(/\.holding \.badge\.gone \{[^}]*\}/);
+  assert.ok(rule, 'the .badge.gone rule vanished');
+  assert.match(rule[0], /color:/,
+    'the destroyed badge inherits its ink again, which measured 2.65:1 on its '
+    + 'own background');
+});
+
+test('may never offers an action the route would refuse for the same name', async () => {
+  // ⚠️ One fact — is this agent actionable — derived in two places that
+  // disagreed. `findAgent` refuses a name whose characters `safeKey` would
+  // strip, but `may` was computed from `mayTypeInto` alone, so the board
+  // published ok:true for an agent whose POST answered 404. That is precisely
+  // the offer-an-action-that-cannot-work state `may` was added to remove.
+  const board = JSON.parse((await req('/api/status')).body);
+  for (const a of board.agents || []) {
+    for (const action of ['compact', 'clear', 'restart']) {
+      if (!a.may || !a.may[action] || !a.may[action].ok) continue;
+      const res = await req(`/api/agent/${encodeURIComponent(a.sessionName)}/${action}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      assert.notEqual(res.status, 404,
+        `${a.sessionName}.may.${action} said ok, but the route cannot address that name`);
+    }
+  }
 });

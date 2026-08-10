@@ -933,7 +933,7 @@ function snapshot() {
       modelName: modelDisplayName(model),
       // Things a person set, which the machine cannot derive. Role in
       // particular: nothing on this machine records what an agent *is*.
-      hasAvatar: Boolean(safeAvatar(identity.displayName ? pane.name : pane.name)),
+      hasAvatar: Boolean(safeAvatar(pane.name)),
       profile: store.readProfile(pane.name),
     };
   });

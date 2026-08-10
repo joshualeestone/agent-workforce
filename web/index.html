@@ -348,7 +348,14 @@ svg { display: block; }
 .holding ul { list-style: none; margin: 0; padding: 0; }
 .holding li { display: flex; gap: var(--space-4); align-items: baseline; margin-bottom: var(--space-3);
               font: var(--text-body) var(--font-ui); }
-.holding .badge.gone { background: #6b6b66; text-decoration: line-through; }
+/* ⚠️ An EXPLICIT colour, because inheriting the sibling badge's ink failed AA
+   in both themes and I did not compute it when I added this an hour ago.
+   Measured on #6b6b66: the inherited light ink is 2.65:1 and the inherited dark
+   ink 3.16:1, against a 4.5:1 requirement for 11px caption text with no
+   large-text exemption. Pure white on the same chip is 5.36:1.
+   This is the DESTROYED badge specifically — the one label whose whole job is
+   telling the operator an item is already gone. */
+.holding .badge.gone { background: #6b6b66; color: #fff; text-decoration: line-through; }
 .holding .badge { flex: none; font: 600 var(--text-caption) var(--font-ui); text-transform: uppercase;
                   letter-spacing: 0.04em; border: 1px solid var(--border-strong);
                   border-radius: var(--radius-control); padding: 1px 5px; color: var(--label-2); }
@@ -1499,6 +1506,31 @@ function holdingBlock(a) {
   // "nothing to lose", which is the precise lie this card exists to prevent.
   // The store decays a stale report to `unknown` while still returning the
   // items, so we can say "these were pending, and we cannot vouch for that now".
+  /* ⚠️ BEFORE the action, not after it.
+     The commitment record is filed under the agent's NAME. When the card's pane
+     was only INFERRED to be an agent (`isNamedOurs === false`), the name and the
+     pane can belong to different agents entirely — the real one dead, a
+     stranger's session standing in for it. Everything else on this card is
+     dressed as the real agent, because `readIdentity` reads that name's own
+     files: the title, the role, the avatar, and this list of commitments.
+     The server already refuses to tombstone the record for exactly this reason
+     and returns `untied`, but it says so in the RESPONSE — after the clear has
+     been sent. The operator would have read one agent's cost and paid it with
+     another's conversation, which is the single failure this whole screen
+     exists to prevent. */
+  if (a.isNamedOurs === false) {
+    const listed = items.length
+      ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>`
+      : '';
+    return `<div class="holding">${listed}
+      <div class="danger"><b>This may not be ${esc(a.name)}'s conversation.</b>
+      We found a session with this name, but not the one ${esc(a.name)}'s own
+      session runs in. Anything listed above belongs to the NAME, and we have not
+      been able to tie it to the pane on this card — so clearing here may empty
+      a different conversation and leave ${esc(a.name)}'s work untouched.</div>
+    </div>`;
+  }
+
   if (h.state === 'unknown') {
     const aged = items.length
       ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>
