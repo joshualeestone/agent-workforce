@@ -37,6 +37,21 @@ const HOME = os.homedir();
  * started on one machine.
  */
 function configRoots() {
+  // ⚠️ An override, so a test can point this at a sandbox. Without one, the
+  // only way to give a fixture a registry entry and a transcript was to write
+  // into the operator's REAL `~/.claude` — which the test suite did: it planted
+  // a phantom `ghostly-discord_0.0.json` beside fifteen live agents and a
+  // phantom `projects/seeded/` directory, and removed neither. Fleet tooling
+  // that scans `agent-registry` would have picked it up.
+  //
+  // Worse for the suite itself: because the files persisted between runs, the
+  // test's own anti-vacuity check ("the fixture stopped seeding, so these nulls
+  // are vacuous again") passed off the PREVIOUS run's leftovers. Deleting the
+  // seeding would have left the suite green forever on any machine that had run
+  // it once.
+  if (process.env.AGENT_WORKFORCE_CONFIG_ROOT) {
+    return [process.env.AGENT_WORKFORCE_CONFIG_ROOT];
+  }
   const roots = [];
   let entries = [];
   try {
@@ -78,23 +93,502 @@ function sh(cmd, args) {
   }
 }
 
-/** Every agent pane on the machine, by tmux session name. */
-function listPanes() {
-  const fmt = '#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}';
-  const out = sh('tmux', ['list-panes', '-a', '-F', fmt]);
+/**
+ * ⚠️ Three tiers live here, and mixing them up has caused a defect at every
+ * level, so read which one you want before using it:
+ *
+ *   `isFleetSession` — our session, whatever is running in it. What RESTART
+ *                      asks, because a crashed agent is still our agent.
+ *   `isAgentSession` — the above, AND Claude is actually running.
+ *   `isAgentPane`    — the above, AND the pane is not scrolled back in
+ *                      copy-mode. What TYPING asks.
+ *
+ * `list-panes -a` returns EVERY pane on the machine, and the roster it feeds
+ * gates every destructive route. Without these, `/clear` and Enter would be
+ * typed into a plain shell, an editor, or a REPL, where the text is EXECUTED
+ * rather than read as a slash command. Latent while every session happens to be
+ * a Claude agent; live the moment anyone opens an unrelated tmux session.
+ *
+ * ⚠️ Split apart because RESTART needs a different question from typing, and
+ * conflating them was a real hole at both ends.
+ *
+ * Too loose: `restart` was exempt from every roster check on the reasoning that
+ * it goes through launchd and types nothing. But the roster is every tmux pane
+ * on the machine with the `-discord` suffix merely STRIPPED, never required. So
+ * a plain shell in a session called `mikey` appeared as an agent named `mikey`,
+ * and its Restart button ran `restart-bot.sh mikey` against the REAL bot. The
+ * shown cost even looked right, because the dialog reads the real `mikey`'s
+ * commitments. The operator would be acting on a card that is not the thing
+ * being restarted.
+ *
+ * Too tight: making restart use `isAgentPane` instead would refuse whenever the
+ * pane is scrolled back in copy-mode, which matters only for TYPING. Restart
+ * sends no keystrokes, so copy-mode is irrelevant to it, and refusing there
+ * would take the feature away in a state the operator can enter by accident
+ * with a scroll wheel.
+ */
+/**
+ * Is this pane in one of the fleet's sessions, whatever is running in it?
+ *
+ * ⚠️ Three tiers now, and the distinction between this one and
+ * `isAgentSession` is the difference between restart working and restart being
+ * useless in the case it matters most.
+ *
+ * `isAgentSession` additionally requires a live Claude process. Gating RESTART
+ * on that was too strict in a way that inverted the feature: an agent that has
+ * crashed back to a shell inside its own `*-discord` session has no Claude
+ * process, so it classified `stopped` and its Restart button answered "we are
+ * not confident that card is one of your agents". That sentence is untrue — it
+ * plainly is one of your agents — and a crashed agent is the single most
+ * valuable thing a Restart button can act on. The guard refused precisely the
+ * case the feature exists for.
+ *
+ * The hazard restart was actually exposed to is an unrelated session that
+ * merely COLLIDES with an agent's name (`tmux new -s mikey`).
+ *
+ * ⚠️ The suffix test does NOT close that on its own any more, and this comment
+ * claimed it did for one commit after it stopped being true — which is worse
+ * than saying nothing, because the claim is what stops the next reader checking.
+ * Once the process arm below was added, an impostor session RUNNING CLAUDE
+ * passes this function: `isFleetSession({session:'mikey', command:'2.1.212'})`
+ * is `true`. What actually closes the collision now is `rank`, which puts every
+ * named-ours pane above an unnamed one so the impostor cannot win the name. The
+ * gate here answers "could this be an agent at all"; `rank` answers "which pane
+ * IS this agent". Both are needed and only the second resolves a collision.
+ *
+ * `restart-bot.sh` refuses independently when there is no `com.<name>.discord`
+ * plist, so a name that is not a real service cannot reach launchd either.
+ *
+ * What this deliberately does NOT stop is somebody opening a session literally
+ * called `<agent>-discord` by hand. That is not the accident this guards
+ * against, and anyone able to do it can run `restart-bot.sh` directly.
+ */
+/**
+ * The canonical "this command IS Claude" test, in ONE place.
+ *
+ * ⚠️ Written out three times before this: in `isFleetSession`, in
+ * `isAgentSession`, and in `rank`. The header of this file condemns exactly
+ * that, and `isAgentPane` obeys it — but `rank`, the function that decides
+ * WHICH PANE a destructive action reaches, carried a private copy. Loosening
+ * the rule in the two that read as "the check" would have silently demoted every
+ * real agent a tier in `rank` with no test noticing.
+ */
+function isNativeClaude(command) {
+  return /^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(command || '').trim());
+}
+
+/**
+ * Is a Claude process running in this pane? ONE definition, used by everything.
+ *
+ * ⚠️ There were two, and the looser one decided what the board asserted.
+ * `classify` asked `isClaudeRunning`, a DENYLIST of six shell names, while
+ * `isAgentSession` asked an ALLOWLIST. So `vim`, `ssh`, `python3`, `less` — and
+ * `-zsh`, a login shell, which is not in the denylist at all despite this
+ * branch's own tests using it as the crashed case — were all "Claude is
+ * running" to `classify`.
+ *
+ * The consequence was not theoretical: a crashed agent whose only remaining
+ * pane is an editor won its name in `rank`, then `classify` scraped that
+ * editor's screen and reported `idle` if the buffer contained "Worked for",
+ * `needs_you` if it contained "Do you want to proceed", `rate_limited` if it
+ * contained "rate limit". **The board reported a healthy state for a crashed
+ * agent, on the one card whose Restart button exists for that case.**
+ *
+ * Matched against the fleet's canonical rule
+ * (`~/.claude/scripts/lib/claude-process-classify.sh`): a strict three-segment
+ * version, or one of the legacy names, because an npm-global install fronts as
+ * `node`.
+ */
+function isClaudeCommand(command) {
+  const c = String(command || '').trim();
+  return isUnambiguousClaude(c) || c === 'node';
+}
+
+/**
+ * Claude, with no other plausible reading of the command name.
+ *
+ * ⚠️ The distinction that matters to `rank`: `node` is shared with every dev
+ * server, REPL and build watcher on the machine, so it cannot outrank an
+ * agent's own crashed shell. A version string, `claude` and `claude.exe` are
+ * shared with nothing, so they must.
+ */
+function isUnambiguousClaude(command) {
+  const c = String(command || '').trim();
+  return isNativeClaude(c) || c === 'claude' || c === 'claude.exe';
+}
+
+function isFleetSession(pane) {
+  if (!pane) return false;
+
+  // ⚠️ EITHER a session we recognise by name, OR a pane visibly running Claude.
+  //
+  // This used to require `/-discord$/` and nothing else, which meant an agent
+  // that was not a Discord bot was invisible to every check here: not
+  // restartable, not typeable, effectively unmanaged. That is a straight
+  // contradiction of the product's own second paragraph ("Not Discord as the
+  // surface"), and it was load-bearing rather than cosmetic — it is why the
+  // install instructions grew a Discord developer-portal step nobody should
+  // have to take.
+  //
+  // Both arms are needed, and each covers what the other cannot:
+  //
+  //   - The NAME arm keeps a CRASHED agent ours. Its pane is a shell, so there
+  //     is no Claude process to see, and restart is the whole reason to care
+  //     about it. Only the session name still says whose it is.
+  //   - The PROCESS arm is what removes the Discord coupling. A native Claude
+  //     install fronts as a strict three-segment version, which nothing else on
+  //     a machine looks like, so it is evidence on its own whatever the session
+  //     is called.
+  //
+  // Deliberately NOT in the process arm: `node`. An npm-global Claude install
+  // fronts as `node`, and so does every dev server, REPL and build watcher. A
+  // bare `node` pane is claimed only via the name arm, because trusting it
+  // alone would make `/clear` typeable into a webpack watcher — the exact
+  // hazard these checks exist for.
+  if (isNamedOurs(pane)) return true;
+  return isNativeClaude(pane.command);
+}
+
+function isAgentSession(pane) {
+  if (!isFleetSession(pane)) return false;
+
+  // ⚠️ An ALLOW list, not a deny list.
+  //
+  // `isClaudeRunning` merely excludes six known shell names, so inside a
+  // `*-discord` session every other command passed: `vim`, `nvim`, `node`,
+  // `less`, `ssh`, `python3` all classified as an agent pane, and the comment
+  // above claimed it stopped an editor or a REPL. It stopped neither.
+  //
+  // Matched against the fleet's CANONICAL rule rather than a rule invented
+  // here: `~/.claude/scripts/lib/claude-process-classify.sh` accepts a strict
+  // three-segment version (the native install fronts as `2.1.212`) or one of
+  // the legacy names, because an npm-global install fronts as `node`. A
+  // two-segment form was accepted here for one round, which the canonical rule
+  // deliberately excludes to avoid matching an unrelated numeric-named process,
+  // and the legacy names were rejected, which silently removed this feature for
+  // any agent on an npm install.
+  return isClaudeCommand(pane.command);
+}
+
+/**
+ * ⚠️ DERIVED from `isAgentSession`, not a second copy of its rule. Writing the
+ * suffix test and the command allowlist out again here is the defect this
+ * codebase has shipped more times than any other: one fact derived in two
+ * places, the two drifting, and the looser one deciding the dangerous path.
+ * This adds exactly one clause and inherits the rest.
+ */
+function isAgentPane(pane) {
+  if (!isAgentSession(pane)) return false;
+
+  // ⚠️ Not while the pane is scrolled back in copy-mode. There, keystrokes go
+  // to copy-mode bindings rather than the composer, so nothing is compacted or
+  // cleared and the route would still answer "we asked it to". This clause is
+  // about TYPING, which is why restart asks `isAgentSession` instead.
+  //
+  // ⚠️ `=== '0'`, an ALLOWLIST, not `!== '1'`. The negative form ruled a pane
+  // typeable whenever `inMode` was anything unexpected — undefined, empty, a
+  // value from a future tmux — which is asserting the safe answer from an
+  // absence of information. `parsePanes` already defends that default at the
+  // boundary, and defending one fact in only one of the two places that decide
+  // it is precisely the shape this codebase keeps shipping: any caller holding
+  // a pane object it did not get from the parser got the permissive answer.
+  return pane.inMode === '0';
+}
+
+/**
+ * The columns we ask tmux for, in order.
+ *
+ * ⚠️ ONE list, used to build the format string AND to read the answer back.
+ *
+ * These were two separate literals: a format string here and a positional
+ * destructure below. Nothing tied them together, so deleting `#{pane_in_mode}`
+ * from the format, or reordering any column, left the whole suite green while
+ * `inMode` silently held the pane TITLE. `inMode !== '1'` is then true for every
+ * pane, and every copy-mode pane classifies as typeable — which is precisely
+ * the case the copy-mode clause was added to refuse, disabled by an edit
+ * nowhere near it.
+ *
+ * `title` is last on purpose: it is the only field that can itself contain a
+ * tab, so it absorbs the remainder rather than shifting every column after it.
+ */
+const PANE_COLUMNS = [
+  { key: 'session', fmt: '#{session_name}' },
+  { key: 'pane', fmt: '#{window_index}.#{pane_index}' },
+  { key: 'command', fmt: '#{pane_current_command}' },
+  { key: 'inMode', fmt: '#{pane_in_mode}' },
+  { key: 'title', fmt: '#{pane_title}', rest: true },
+];
+
+const PANE_FORMAT = PANE_COLUMNS.map((c) => c.fmt).join('\t');
+
+/** Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested. */
+function parsePanes(out) {
   if (!out) return [];
   return out.trim().split('\n').filter(Boolean).map((line) => {
-    const [session, pane, command, ...titleParts] = line.split('\t');
+    const parts = line.split('\t');
+    const raw = {};
+    PANE_COLUMNS.forEach((col, i) => {
+      raw[col.key] = col.rest ? parts.slice(i).join('\t') : parts[i];
+    });
+    const session = raw.session || '';
     return {
       name: session.replace(/-discord$/, ''),
-      target: `${session}:${pane}`,
-      command: command || '',
-      title: titleParts.join('\t') || '',
+      session,
+      // Kept, not just folded into `target`: choosing one pane per session
+      // needs to compare indexes, and re-parsing them back out of the target
+      // would be a second derivation of something we already had.
+      pane: raw.pane || '',
+      target: `${session}:${raw.pane}`,
+      // ⚠️ `null`, not `''`. An empty string reaches `classify` as "not a Claude
+      // command", which answers `stopped` at STRUCTURED confidence — a
+      // confident structural claim that an agent is not running, derived
+      // entirely from a field that was MISSING. That is the move the `inMode`
+      // default three lines below explicitly refuses, made in the same
+      // function.
+      // ⚠️ Empty counts as absent, matching the `inMode` default below rather
+      // than merely claiming to. The first version handled only `undefined`, so
+      // a dead or `remain-on-exit` pane reporting an EMPTY command still
+      // reached `classify` as "not Claude" and answered `stopped` at
+      // STRUCTURED confidence — the same confident claim from no information,
+      // in the same function, under a comment asserting parity it did not have.
+      command: raw.command == null || raw.command === '' ? null : raw.command,
+      // '1' when the pane is scrolled back in copy-mode, where keystrokes go to
+      // copy-mode bindings rather than to the composer.
+      //
+      // ⚠️ Defaults to '1' (in copy-mode), not '0'. A truncated or malformed
+      // line leaves this undefined, and defaulting to '0' meant "not in copy
+      // mode, safe to type" — asserting the safe answer from an absence of
+      // information, which is the one thing this codebase refuses to do.
+      inMode: raw.inMode === undefined || raw.inMode === '' ? '1' : raw.inMode,
+      title: raw.title || '',
     };
   });
 }
 
+/**
+ * Where the raw `list-panes` output comes from.
+ *
+ * ⚠️ A seam, and it exists for one reason: without it the WIRING is unpinnable.
+ * `onePanePerSession` had three tests and deleting its call from `snapshot()`
+ * left all of them green, because every pane on this machine is already a
+ * distinct session — the duplicate case cannot be arranged on a live fleet, so
+ * a test that reads the real board can never fail. The same shape as
+ * `setRunner` in `engine/lifecycle.js`, and for the same reason.
+ *
+ * Read-only either way: this replaces where the TEXT comes from, never what is
+ * done with it, so it cannot be used to reach a real agent.
+ */
+let paneSource = null;
+
+function setPaneSource(fn) { paneSource = typeof fn === 'function' ? fn : null; }
+
+function listPanes() {
+  const out = paneSource
+    ? paneSource()
+    : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  return parsePanes(out);
+}
+
+/**
+ * One entry per agent NAME, not per pane and not per session.
+ *
+ * ⚠️ `list-panes -a` returns every pane, and the roster mapped straight over
+ * it. A `*-discord` session with a split window produced two cards with the
+ * same name, the same commitment record and the same `data-fresh` value — and
+ * both the card click and the action route resolve an agent by `.find()`, which
+ * takes whichever sorted first. So the operator could click the card for one
+ * pane and have the keystrokes go to the other.
+ *
+ * ⚠️ Keyed on NAME rather than session, because the roster STRIPS `-discord`
+ * without requiring it: `kappa` and `kappa-discord` are two sessions and one
+ * agent name, which is the same collision one level up.
+ *
+ * A name with no agent pane still yields one entry, because the board must show
+ * something it cannot read rather than hiding it — but it will be an entry that
+ * `isAgentPane` refuses, which is the honest answer for it. See `rank` for
+ * which pane represents the name.
+ */
+/**
+ * Does the SESSION NAME say this pane is ours?
+ *
+ * Separated from `isFleetSession` because the two arms of that function are not
+ * equally strong evidence and `rank` has to tell them apart. The name is
+ * evidence of WHOSE a pane is. A Claude process is evidence only that SOMEONE's
+ * Claude is running there.
+ */
+function isNamedOurs(pane) {
+  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+}
+
+/**
+ * How much this pane deserves to be the card for its name. Lower wins.
+ *
+ * ⚠️ FIVE tiers, because two different pairs of cases used to tie here and a tie
+ * falls through to pane index — which compares indexes across unrelated sessions,
+ * i.e. picks arbitrarily. Both ties were introduced by the commit that removed
+ * the Discord coupling from `isFleetSession`, and both were wrong-agent bugs of
+ * exactly the kind this branch exists to prevent:
+ *
+ *   1. `tmux new -s mikey` with Claude running in it now satisfied
+ *      `isAgentSession` via the new process arm, so the impostor tied with the
+ *      real `mikey-discord` at tier 0. tmux lists `mikey` first, so the impostor
+ *      WON: the real agent vanished from the board, and the surviving card read
+ *      the real agent's commitments, typed `/clear` into the impostor's pane,
+ *      and then tombstoned the real agent's record. One conversation destroyed,
+ *      the cost of a different one displayed, and a false claim that the real
+ *      agent's holdings were gone while they were intact.
+ *   2. Inside a genuine `zeta-discord`, a `node` pane (a build watcher in a
+ *      split) tied with the real agent's version-string pane, because
+ *      `isAgentSession`'s legacy arm accepts `node` for npm-global installs.
+ *      Pane `0.0` won, so `/clear` and a bare Enter were typed into a process
+ *      that EXECUTES text rather than reading it as a slash command.
+ *
+ * ⚠️ CRASHED OUTRANKS LEGACY, and that ordering is deliberately the less
+ * convenient one. Inside a real `<agent>-discord` session, a bare `node` pane
+ * cannot be told apart from the agent itself: an npm-global Claude install
+ * fronts as `node`, and so does a build watcher in a split. Ranking `node`
+ * higher meant that when the agent CRASHED to a shell, the watcher won the name
+ * — so the board reported "we cannot tell" instead of "not running", hiding the
+ * crash on the one card whose Restart button exists for it, and if the
+ * watcher's tail ever matched an idle marker, `/clear` plus a bare Enter went
+ * into a `node` process, which EXECUTES text rather than reading it.
+ *
+ * Both readings are wrong in one direction or the other, so the tie is settled
+ * on which wrongness is recoverable:
+ *
+ *   - Picking the shell when `node` was really an npm-global agent: the board
+ *     says `stopped` for something that is running, and typing is refused.
+ *     **Restart still works** (the session name is still ours), which is the
+ *     recovery, and the operator can see the pane themselves.
+ *   - Picking `node` when it was really a watcher: the board hides a crash and
+ *     may type an executable string into an unrelated process. **Nothing
+ *     recovers that.**
+ *
+ * ⚠️ So the known cost, stated rather than discovered: an npm-global agent that
+ * shares its session with any shell pane reads as `stopped` and is
+ * restart-only. That is a real regression for that setup and it is the price of
+ * not typing into a build watcher.
+ *
+ * ⚠️ The tier is WIDER than "a shell": `RANK_NAMED_CRASHED` is every named-ours
+ * pane that is not native Claude and not one of the legacy names, so `vim`,
+ * `ssh`, `python3`, `less` and `man` all land in it and outrank a `node` pane.
+ *
+ * That used to matter twice over, because `classify` held a SECOND and looser
+ * definition of "no Claude here" — a six-name shell denylist — so a winning
+ * `vim` pane was not reported as stopped, its screen was scraped instead, and
+ * `idle`, `working`, `needs_you` and `rate_limited` were all reachable from
+ * arbitrary text. **That is fixed**: `classify` and `isAgentSession` both derive
+ * from `isClaudeCommand` now, and `status.test.js`'s "a crashed agent is
+ * reported stopped, not scraped off whatever replaced it" pins it for six
+ * commands.
+ *
+ * ⚠️ This note described that gap as OPEN for one commit after the same commit
+ * closed it — a comment claiming a defect that no longer exists, which is the
+ * inverse of the failure this file keeps warning about and just as costly: the
+ * next reader either chases a phantom or "fixes" it by re-loosening `classify`,
+ * which is the actual bug.
+ *
+ * ⚠️ The ordering principle, and the reason a crashed agent outranks a stranger:
+ * **the session name is the only evidence of WHOSE a pane is.** A Claude process
+ * in a session we cannot name is somebody else's Claude. So every named-ours
+ * pane, including one that has crashed to a shell, beats an unnamed one — which
+ * is also the case restart exists for.
+ *
+ * This does NOT re-couple anything to Discord. A non-Discord agent still ranks
+ * (tier 3), still appears, and is still typeable. The name only settles a TIE
+ * against a same-named session that does carry the suffix.
+ */
+const RANK_NAMED_RUNNING = 0;   // ours by name, unambiguously Claude
+const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
+const RANK_NAMED_LEGACY = 2;    // ours by name, AMBIGUOUS process — `node` only
+const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
+const RANK_NONE = 4;
+
+function rank(pane) {
+  if (isNamedOurs(pane)) {
+    // ⚠️ `claude` and `claude.exe` belong UP HERE with the version string, not
+    // down with `node`. Demoting the whole legacy set below a crashed shell
+    // over-corrected: `node` is ambiguous because a dev server looks identical,
+    // but a pane whose command is literally `claude` is not ambiguous at all.
+    // Measured after the first version of this swap: `zeta-discord:0.0 zsh`
+    // plus `zeta-discord:0.1 claude` picked the SHELL, so a healthy running
+    // agent was reported dead and Clear and Compact were refused for it — and
+    // `classify` disagreed, reporting `claude` as running. One fact, two
+    // answers, in the two functions this file most recently unified.
+    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
+    // `isAgentSession` accepts these too, but they are weaker: `node` is what a
+    // dev server looks like, and inside our own session it must not outrank the
+    // pane that is unambiguously Claude.
+    if (isAgentSession(pane)) return RANK_NAMED_LEGACY;
+    return RANK_NAMED_CRASHED;
+  }
+
+  if (isAgentSession(pane)) return RANK_INFERRED;
+  return RANK_NONE;
+}
+
+/** `<window>.<pane>` as a sortable number pair. */
+function paneOrder(id) {
+  const [w, p] = String(id || '').split('.');
+  return (Number(w) || 0) * 10000 + (Number(p) || 0);
+}
+
+function onePanePerSession(panes) {
+  const bySession = new Map();
+  for (const pane of panes) {
+    // ⚠️ Keyed on NAME, not session. Every consumer identifies an agent by
+    // `name` (the session with `-discord` stripped) — `findAgent`, the card's
+    // `data-fresh`, `openFresh`, all `.find()` by name — so deduping by session
+    // left the one collision this function exists to prevent wide open:
+    // `kappa` and `kappa-discord` are two sessions and ONE name.
+    //
+    // Measured: both survived as two roster entries called `kappa`, and
+    // whichever tmux listed first won every lookup. If the impostor sorted
+    // first, the REAL agent's dialog rendered all three options refused with
+    // "we are not confident that card is one of your agents" — the exact untrue
+    // refusal `isFleetSession` was introduced to eliminate. The two cards also
+    // shared a `data-fresh` value and an SVG element id.
+    //
+    // The preference below already resolves it correctly once they collide:
+    // the real agent pane wins over the shell.
+    const key = pane.name;
+    const held = bySession.get(key);
+    if (!held) { bySession.set(key, pane); continue; }
+
+    if (rank(pane) < rank(held)
+      || (rank(pane) === rank(held) && paneOrder(pane.pane) < paneOrder(held.pane))) {
+      bySession.set(key, pane);
+    }
+  }
+  return [...bySession.values()];
+}
+
+/**
+ * Where a pane's visible text comes from. The companion to `setPaneSource`.
+ *
+ * ⚠️ Both seams exist for one reason, and it is a coverage reason rather than a
+ * convenience one. Every test of this feature's safety surface sourced its
+ * agent from the LIVE roster, so on a machine without a running fleet the whole
+ * surface skipped and the suite still reported green: measured at 19 skips,
+ * including the cross-site guard, the confirmation token, the alias guard, the
+ * `mayTypeInto` call site and the tombstone. A suite that passes on a laptop
+ * with no agents while testing none of the dangerous paths is worse than one
+ * that fails.
+ *
+ * `setPaneSource` alone was not enough: a synthetic pane has no real tmux
+ * session, so `capturePane` returns null and every agent classifies `unknown`,
+ * which the action routes correctly refuse. Both halves are needed to describe
+ * an agent that is idle and actionable.
+ *
+ * Read-only, like its companion: this replaces where the TEXT comes from and
+ * nothing about what is done with it, so neither seam can reach an agent.
+ */
+let paneCapture = null;
+
+function setPaneCapture(fn) { paneCapture = typeof fn === 'function' ? fn : null; }
+
 function capturePane(target, lines = 40) {
+  if (paneCapture) return paneCapture(target, lines);
   return sh('tmux', ['capture-pane', '-p', '-t', target, '-S', `-${lines}`]);
 }
 
@@ -105,10 +599,11 @@ function capturePane(target, lines = 40) {
  * is running, and a shell name when it is not. That distinguishes running from
  * stopped and nothing else -- it cannot tell working from idle from blocked.
  */
-const SHELLS = new Set(['zsh', 'bash', 'fish', 'sh', 'tmux', 'login']);
+// ⚠️ DERIVED, not a second rule. This was a denylist of six shell names, which
+// made every editor, REPL and login shell read as a running Claude. See
+// `isClaudeCommand` for what that cost.
 function isClaudeRunning(command) {
-  if (!command) return false;
-  return !SHELLS.has(command.trim());
+  return isClaudeCommand(command);
 }
 
 /**
@@ -142,6 +637,36 @@ const RATE_LIMIT_MARKERS = [
  * stops the board reporting health it has not verified.
  */
 function classify(pane, paneText) {
+  // ⚠️ A MISSING command is not evidence of anything. A truncated tmux line
+  // gave `command: ''`, which fell through to "no Claude process in this pane"
+  // — `stopped` at STRUCTURED confidence, i.e. a confident structural claim
+  // built from a field that was not there. `unknown` is the honest answer, and
+  // it is the rule the rest of this module runs on.
+  if (pane && pane.command == null) {
+    return {
+      state: STATE.UNKNOWN,
+      confidence: CONFIDENCE.NONE,
+      because: 'tmux did not tell us what is running in this pane',
+    };
+  }
+  // ⚠️ FIRST, before the screen is read at all. `classify` consulted only
+  // `pane.command`, so a session this engine has explicitly rejected still got
+  // a scraped state: measured, a lone `devserver` running `node` with
+  // "Do you want to proceed? (y/N)" on screen produced
+  // `{state:'needs_you', confidence:'scraped'}` and occupied the board's
+  // headline needs-you count — a vite dev server rendered as an agent asking
+  // for help. With "Worked for 3m" on screen it read `idle`.
+  //
+  // That is this module's one rule inverted: something we KNOW is not ours,
+  // reported as something healthy. Reading a pane's screen is only meaningful
+  // once we believe the pane is an agent's.
+  if (!isFleetSession(pane)) {
+    return {
+      state: STATE.UNKNOWN,
+      confidence: CONFIDENCE.NONE,
+      because: 'this is not one of your agent sessions, so we cannot say what it is doing',
+    };
+  }
   if (!isClaudeRunning(pane.command)) {
     return { state: STATE.STOPPED, confidence: CONFIDENCE.STRUCTURED, because: 'no Claude process in this pane' };
   }
@@ -511,20 +1036,114 @@ function safeAvatar(name) {
   try { return store.avatarPath(name); } catch { return null; }
 }
 
+/**
+ * Just who is on the board and whether each is tied to its name — no captures.
+ *
+ * ⚠️ Exists because the gate checks were calling `snapshot()`, which is a
+ * synchronous fan-out: one `list-panes` plus one `capture-pane` PER AGENT plus
+ * transcript reads, measured at 43-60ms of blocked event loop for thirteen
+ * agents. On the avatar route that landed on a polling path — the board
+ * refetches every card's picture every five seconds — costing roughly 0.65s of
+ * blocked loop and ~170 extra `capture-pane` calls against live agents per tick.
+ *
+ * A gate needs the NAME and whether it is tied. Both come from the pane list
+ * alone, which is ONE tmux call and no captures. Memoising `snapshot()` was the
+ * other option and it was wrong: it makes a gate answer from a stale roster,
+ * which is exactly the wrong direction for a check that decides whose data to
+ * hand out.
+ */
+function paneRoster() {
+  // ⚠️ THROWS when tmux could not be asked, rather than answering "nothing".
+  //
+  // `sh()` swallows every failure and returns `null`, and `parsePanes(null)`
+  // returns `[]` — so tmux dead, tmux missing, or the five-second timeout
+  // expiring all arrived at a caller as an empty roster, indistinguishable from
+  // a machine with no agents. `borrowedName`'s catch is written to fail CLOSED
+  // and its comment says so, but the only input that reached it was an injected
+  // throw from a test: **the realistic failure failed open and served the
+  // record.** A guard whose closed path production cannot take is not a guard.
+  //
+  // ⚠️ `snapshot()` deliberately keeps the LENIENT behaviour, and the first
+  // version of this note justified that by claiming an empty board "renders as
+  // such". It does not: with tmux dead, `/api/status` answers 200 with zero
+  // agents and a fresh `checkedAt`, so the board paints "0 agents, checked just
+  // now" — byte-identical to a machine that genuinely has none. That is this
+  // module's own rule inverted at the top level, and the sentence asserting
+  // otherwise was written in the same commit that built the distinction here.
+  //
+  // Left lenient rather than fixed in passing: `snapshot()` feeds the whole
+  // board, so making it throw is a visible product decision (what SHOULD the
+  // board show when tmux is gone?) that deserves its own change rather than
+  // riding along in a gate fix. The gate needs the strict answer and gets it.
+  const out = paneSource ? paneSource() : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  if (out === null || out === undefined) {
+    throw new Error('could not ask tmux which panes exist');
+  }
+  return onePanePerSession(parsePanes(out)).map((pane) => ({
+    sessionName: pane.name,
+    isNamedOurs: isNamedOurs(pane),
+  }));
+}
+
 function snapshot() {
-  const panes = listPanes();
+  const panes = onePanePerSession(listPanes());
   const agents = panes.map((pane) => {
     const text = capturePane(pane.target);
     const status = classify(pane, text);
-    const { model } = readModel(pane.name);
-    const context = readContext(pane.name, model);
-    const identity = readIdentity(pane.name);
+    // ⚠️ Identity, model and context are all filed under the NAME, and only a
+    // pane whose SESSION NAME says it is ours has been tied to that name.
+    //
+    // Measured with the real `claudebot-discord` absent and a stranger's
+    // `tmux new -s claudebot` running Claude: the card came back named
+    // "Splinter", role "Project Manager", model `claude-opus-4-8`, context ring
+    // 24% at STRUCTURED confidence — all the REAL agent's, read out of its
+    // registry file — while the state and the target were the stranger's. An
+    // operator would be looking at a card that is Splinter in every respect
+    // except the one that decides what a destructive action reaches.
+    //
+    // Publishing `isNamedOurs` and leaving another branch to honour it is not
+    // enough: this module is what asserts the identity, so this module has to
+    // stop asserting it. An inferred pane keeps its raw session name, is marked
+    // underived, and carries no model and no context — which is the honest
+    // answer, because we do not know whose conversation it is.
+    const tied = isNamedOurs(pane);
+    const { model } = tied ? readModel(pane.name) : { model: null };
+    const context = tied
+      ? readContext(pane.name, model)
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tie this pane to an agent by name, so we will not read another agent\u2019s transcript for it' };
+    const identity = tied
+      ? readIdentity(pane.name)
+      : { displayName: pane.name, role: null, derived: false };
     return {
       name: identity.displayName,
       sessionName: pane.name,
       nameDerived: identity.derived,
       role: identity.role,
       target: pane.target,
+      // ⚠️ Whether this pane is one an action may be typed into. `list-panes -a`
+      // returns every pane on the machine, so the roster alone is not evidence
+      // that a pane holds an agent, and `/clear` typed into a shell is executed
+      // rather than read as a command.
+      isAgentPane: isAgentPane(pane),
+      // Restart needs this one, not the copy-mode-sensitive one above.
+      isAgentSession: isAgentSession(pane),
+      // ⚠️ NOT "the suffix alone", and NOT what restart asks — this comment said
+      // both and neither is true. It is suffix OR a live Claude process, and
+      // restart's effective gate is `isNamedOurs` below, because restart reaches
+      // the launchd service rather than the pane. This is kept because the UI
+      // distinguishes "one of ours" from "an agent we inferred".
+      isFleetSession: isFleetSession(pane),
+      // ⚠️ Whether the SESSION NAME ties this pane to the fleet's record for
+      // this name — as opposed to us having merely inferred an agent from a
+      // Claude process. The distinction exists because a card's name addresses
+      // THREE different objects: the tmux pane, the launchd service
+      // (`com.<name>.discord`, what restart acts on), and the commitment record.
+      // Only the suffixed session name is evidence that all three are the same
+      // agent. Without it we may still show the pane and type into it — it is
+      // the pane the operator clicked — but we must not act on the service or
+      // claim to have destroyed the record, because those belong to whoever
+      // owns the NAME and this pane has not proven it is them.
+      isNamedOurs: isNamedOurs(pane),
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,
@@ -534,8 +1153,18 @@ function snapshot() {
       modelName: modelDisplayName(model),
       // Things a person set, which the machine cannot derive. Role in
       // particular: nothing on this machine records what an agent *is*.
-      hasAvatar: Boolean(safeAvatar(identity.displayName ? pane.name : pane.name)),
-      profile: store.readProfile(pane.name),
+      // ⚠️ These two are keyed on the NAME as well, and gating identity, model
+      // and context while leaving them open made the first fix incomplete on
+      // its own terms. `hasAvatar` renders the real agent's PHOTOGRAPH on the
+      // stranger's card, and the detail panel reads `profile.role || role` — so
+      // the `role: null` above is only the fallback, and the operator-set role
+      // came straight back through the profile store.
+      //
+      // Every read in this function keyed on `pane.name` needs the same gate.
+      // Fixing four of six is not a partial fix, it is the same defect with a
+      // smaller surface.
+      hasAvatar: tied ? Boolean(safeAvatar(pane.name)) : false,
+      profile: tied ? store.readProfile(pane.name) : null,
     };
   });
 
@@ -563,7 +1192,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, classify, modelDisplayName, readIdentity, transcriptFor, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, paneRoster, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');
