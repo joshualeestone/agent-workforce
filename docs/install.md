@@ -141,20 +141,31 @@ prompt, which nobody is sitting there to answer. The symptom is an agent that
 stops replying with no error anywhere. A newbie has no chance of diagnosing
 that, and the flag is named to discourage exactly the person who must use it.
 
-⚠️ The session name should end in `-discord`, but **not for the reason this
-document used to give.** It said the roster "and every one of its safety checks
-key on that suffix". That stopped being true: an agent is now recognised by its
-Claude process, so a session named anything at all appears on the board and is
-restartable and typeable.
+⚠️ **The session name must end in `-discord` for a working agent.** This
+document has now been wrong about this in both directions, so here is what is
+actually true, checked against the code:
 
-What the suffix still buys you, and why it is still worth doing:
+An agent is *recognised* by its Claude process, so a session named anything at
+all **appears on the board and can be cleared and compacted**. What it does not
+get:
 
-- **Context ring and model name.** `sessionIdFor` looks up the session registry
-  by the `-discord` filename, so without the suffix the card renders without
-  those.
-- **`restart-bot.sh`** finds the service as `com.<name>.discord`.
-- **Name collisions resolve in your favour.** If some unrelated session shares
-  the agent's name, the suffixed one wins and stays the card.
+- **Restart is refused**, not degraded. Restart acts on the launchd service
+  `com.<name>.discord`, which is a different object from the pane on the card,
+  and only the suffix ties them together. You get "we found a session with this
+  name, but not the one this agent's service runs in".
+- **No context ring and no model name.** `sessionIdFor` resolves the session
+  registry by the `-discord` filename.
+- **Name collisions stop resolving in your favour.** A suffixed session outranks
+  an unrelated one sharing its name; an unsuffixed one does not.
+- ⚠️ **On an npm-global Claude install, the agent is not recognised at all.**
+  That install fronts as `node`, which is accepted only inside a session we can
+  name — a bare `node` pane anywhere else is a build watcher as far as this code
+  can tell. So an npm-global agent in a session called `mybot` is neither
+  typeable nor restartable.
+
+The suffix is a real requirement today, not a convention. Removing that
+requirement means giving restart a way to find an agent's service that does not
+go through the name, and that work has not been done.
 
 ### 9. Write the launchd plist
 
@@ -298,13 +309,13 @@ Ranked by how likely, and how badly the failure hides itself:
    user, and `launchctl` reports success.
 4. **The wrong `claude` path** (step 4/8). Only visible in a log file nobody has
    been told to look at.
-5. **The session not ending in `-discord`** (step 8). ⚠️ The symptom described
-   here was wrong: the agent is **not** invisible. It appears, and it can be
-   restarted and typed into. What it loses quietly is its **context ring and
-   model name**, because `sessionIdFor` still resolves the session registry by
-   the `-discord` filename. A card that renders but cannot say how full it is
-   presents as a display bug rather than a naming mistake, which is arguably
-   harder to trace than being missing outright.
+5. **The session not ending in `-discord`** (step 8). The agent is **not**
+   invisible — that symptom was wrong — but it is not fine either. On a native
+   install it appears and can be cleared and compacted, while **Restart is
+   refused** and the card shows no context ring or model name. On an npm-global
+   install it is not recognised at all. A card that renders but cannot restart
+   and cannot say how full it is presents as a display bug rather than a naming
+   mistake, which is harder to trace than being missing outright.
 
 Every one of these presents as *silence*, and four of the five leave no error
 message anywhere the user would look. That is the real usability finding here:

@@ -148,6 +148,20 @@ function sh(cmd, args) {
  * called `<agent>-discord` by hand. That is not the accident this guards
  * against, and anyone able to do it can run `restart-bot.sh` directly.
  */
+/**
+ * The canonical "this command IS Claude" test, in ONE place.
+ *
+ * ⚠️ Written out three times before this: in `isFleetSession`, in
+ * `isAgentSession`, and in `rank`. The header of this file condemns exactly
+ * that, and `isAgentPane` obeys it — but `rank`, the function that decides
+ * WHICH PANE a destructive action reaches, carried a private copy. Loosening
+ * the rule in the two that read as "the check" would have silently demoted every
+ * real agent a tier in `rank` with no test noticing.
+ */
+function isNativeClaude(command) {
+  return /^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(command || '').trim());
+}
+
 function isFleetSession(pane) {
   if (!pane) return false;
 
@@ -176,8 +190,8 @@ function isFleetSession(pane) {
   // bare `node` pane is claimed only via the name arm, because trusting it
   // alone would make `/clear` typeable into a webpack watcher — the exact
   // hazard these checks exist for.
-  if (/-discord$/.test(String(pane.session || ''))) return true;
-  return /^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(pane.command || '').trim());
+  if (isNamedOurs(pane)) return true;
+  return isNativeClaude(pane.command);
 }
 
 function isAgentSession(pane) {
@@ -199,9 +213,8 @@ function isAgentSession(pane) {
   // and the legacy names were rejected, which silently removed this feature for
   // any agent on an npm install.
   const command = String((pane.command || '')).trim();
-  const native = /^[0-9]+\.[0-9]+\.[0-9]+$/.test(command);
   const legacy = command === 'claude' || command === 'claude.exe' || command === 'node';
-  return native || legacy;
+  return isNativeClaude(command) || legacy;
 }
 
 /**
@@ -382,11 +395,8 @@ const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
 const RANK_NONE = 4;
 
 function rank(pane) {
-  const command = String((pane && pane.command) || '').trim();
-  const native = /^[0-9]+\.[0-9]+\.[0-9]+$/.test(command);
-
   if (isNamedOurs(pane)) {
-    if (native) return RANK_NAMED_RUNNING;
+    if (isNativeClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
     // `isAgentSession` accepts these too, but they are weaker: `node` is what a
     // dev server looks like, and inside our own session it must not outrank the
     // pane that is unambiguously Claude.
@@ -897,7 +907,11 @@ function snapshot() {
       isAgentPane: isAgentPane(pane),
       // Restart needs this one, not the copy-mode-sensitive one above.
       isAgentSession: isAgentSession(pane),
-      // The suffix alone. Restart asks this one: see isFleetSession.
+      // ⚠️ NOT "the suffix alone", and NOT what restart asks — this comment said
+      // both and neither is true. It is suffix OR a live Claude process, and
+      // restart's effective gate is `isNamedOurs` below, because restart reaches
+      // the launchd service rather than the pane. This is kept because the UI
+      // distinguishes "one of ours" from "an agent we inferred".
       isFleetSession: isFleetSession(pane),
       // ⚠️ Whether the SESSION NAME ties this pane to the fleet's record for
       // this name — as opposed to us having merely inferred an agent from a

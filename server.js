@@ -897,7 +897,12 @@ const server = http.createServer((req, res) => {
           // of defect as the rest of this branch: a confident sentence about
           // something that did not happen the way it says.
           if (!agent.isNamedOurs) {
-            untied = true;
+            // ⚠️ `hadRecord`, for the same reason the `reconciled === false`
+            // path six lines down applies it: saying "we left our record alone"
+            // when there is no record asserts one exists. An inferred pane
+            // under a name that never reported would otherwise be told about
+            // the careful handling of something that was never there.
+            untied = hadRecord;
           } else {
             const marked = commitments.markDestroyed(key);
             reconciled = hadRecord ? marked : null;
@@ -908,7 +913,11 @@ const server = http.createServer((req, res) => {
         // the engine's own sentence rather than replacing it: what we did still
         // happened, and this is an additional thing the operator needs to know.
         const because = untied
-          ? `${result.because}. We left our record of what ${name} was holding alone, because this session is not the one that agent's own session runs in and we cannot say the record is this pane's to destroy.`
+          // `key`, not `name`: `name` is the raw URL segment, so /WREN/clear
+          // would answer "what WREN was holding" about a record filed as `wren`.
+          // The route collapsed its identity derivations to one for exactly this
+          // reason and this line reintroduced a second.
+          ? `${result.because}. We left our record of what ${key} was holding alone, because this session is not the one that agent's own session runs in and we cannot say the record is this pane's to destroy.`
           : reconciled === false
             ? `${result.because}. We could not update our record of what it was holding, so the board may still show it for a while.`
             : result.because;

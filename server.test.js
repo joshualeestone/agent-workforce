@@ -1592,7 +1592,15 @@ test('compact does not tombstone what the agent is holding', async (t) => {
   const commitments = require('./engine/commitments');
 
   const board = JSON.parse((await req('/api/status')).body);
-  const target = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
+  // ⚠️ `isNamedOurs`, the FOURTH inline re-derivation of this predicate in this
+  // file. Un-narrowed it resolves to the inferred-only agent, and the test still
+  // passes — but for the wrong reason: `invalidatesCommitments('compact', …)` is
+  // false, so the tombstone block is never entered at all and `reconciled` is
+  // null by compact's exclusion rather than by anything this test is named for.
+  // A green test measuring the wrong mechanism is how three guards on this
+  // branch stayed unpinned.
+  const target = (board.agents || []).find((a) =>
+    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
   if (!target) { t.skip('no actionable agent on the synthetic roster'); return; }
 
   lifecycle.setRunner(() => '');
@@ -2223,4 +2231,48 @@ test('clearing a pane we only INFERRED is an agent does not tombstone the record
   // failure. "We could not update our record" would be untrue here: we did not
   // try, on purpose, because the record is not this pane's to speak for.
   assert.match(sawBecause, /not the one that agent/);
+});
+
+
+test('an action still running is not fired twice by reopening its dialog', () => {
+  // ⚠️ `FRESH_BUSY` is about the DIALOG and `closeFresh` must clear it, or the
+  // next dialog opens frozen. But the ACTION does not stop when the dialog
+  // closes — `restart-bot.sh` sleeps about eight seconds. So: click Restart on
+  // A, press Escape, reopen A. `renderFresh` paints freshly enabled buttons and
+  // a second Restart fires two overlapping `launchctl stop`/`start` cycles at
+  // one service; the first script's has-session check then races the second's
+  // restart and a healthy agent is reported as "it has not come back yet".
+  //
+  // ⚠️ Comments are STRIPPED before analysing. A source-level test that does not
+  // strip them matches its own explanation and passes against code with the
+  // guard deleted — this file has shipped that mistake before.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+    .join('\n');
+
+  assert.match(code, /let FRESH_INFLIGHT/,
+    'the in-flight marker is gone, so a reopened dialog can fire a second action');
+
+  // It must NOT be cleared by closeFresh: that is the whole difference between
+  // it and FRESH_BUSY.
+  const closeStart = code.indexOf('function closeFresh(');
+  assert.ok(closeStart > -1, 'closeFresh vanished');
+  const closeBody = code.slice(closeStart, code.indexOf('\n}', closeStart));
+  assert.doesNotMatch(closeBody, /FRESH_INFLIGHT\s*=/,
+    'closeFresh cleared the in-flight marker, which is exactly the bug: the '
+    + 'action outlives the dialog, so closing it must not mark the action done');
+
+  // And the click handler must consult it before starting anything.
+  const handlerStart = code.indexOf("getElementById('fresh-options').addEventListener('click'");
+  assert.ok(handlerStart > -1, 'the options click handler vanished');
+  const handler = code.slice(handlerStart, handlerStart + 4000);
+  const checkAt = handler.indexOf('FRESH_INFLIGHT');
+  const sendAt = handler.indexOf('FRESH_BUSY = true');
+  assert.ok(checkAt > -1, 'the click handler never consults the in-flight marker');
+  assert.ok(checkAt < sendAt,
+    'the in-flight check runs after the action is already under way, so it '
+    + 'cannot prevent the second submit');
 });

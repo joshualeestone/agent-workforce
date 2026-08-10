@@ -1443,6 +1443,23 @@ let FRESH_FOR = null;      // the agent the dialog is open for
 // the option buttons while one is in flight: doing so replaces the disabled
 // buttons with enabled ones and detaches the nodes the `finally` re-enables.
 let FRESH_BUSY = false;
+/**
+ * ⚠️ The agent an action is CURRENTLY running for, or null. Deliberately NOT
+ * the same flag as `FRESH_BUSY`, and deliberately not cleared by `closeFresh`.
+ *
+ * `FRESH_BUSY` is about the DIALOG (suppress the live refresh while it is
+ * mid-action), so closing the dialog must clear it or the next dialog opens
+ * frozen. But the ACTION does not stop when the dialog closes: `restart-bot.sh`
+ * sleeps about eight seconds. So: click Restart on A, press Escape, reopen A —
+ * `renderFresh` paints freshly enabled buttons and a second Restart fires two
+ * overlapping `launchctl stop`/`start` cycles at one service. The first
+ * script's has-session check then races the second's restart, and a healthy
+ * agent gets reported as "it has not come back yet".
+ *
+ * This flag tracks the action, so it survives the dialog being closed and
+ * reopened, and is cleared only when the request actually settles.
+ */
+let FRESH_INFLIGHT = null;
 // Bumped on every action and on every open, so a response that arrives after
 // the operator moved on cannot repaint a dialog that is now about someone else.
 let FRESH_EPOCH = 0;
@@ -1810,11 +1827,23 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('fresh-options').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn || !FRESH_FOR) return;
+  // An action for this agent is already running and the dialog was merely
+  // reopened. Say so rather than firing a second one silently.
+  if (FRESH_INFLIGHT) {
+    const msg = document.getElementById('fresh-msg');
+    if (msg) {
+      msg.textContent = FRESH_INFLIGHT === FRESH_FOR.sessionName
+        ? 'That is still running. Give it a moment.'
+        : `Still finishing an action for ${FRESH_INFLIGHT}.`;
+    }
+    return;
+  }
   const action = btn.dataset.act;
   const forAgent = FRESH_FOR.sessionName;
   const msg = document.getElementById('fresh-msg');
   const buttons = [...document.querySelectorAll('#fresh-options button')];
   FRESH_BUSY = true;
+  FRESH_INFLIGHT = forAgent;
   buttons.forEach((b) => { b.disabled = true; });
   // ⚠️ Move focus BEFORE the browser drops it. Disabling the button that was
   // just activated makes `activeElement` fall back to `<body>`, which strands a
@@ -2012,6 +2041,11 @@ document.getElementById('fresh-options').addEventListener('click', async (e) => 
     // repaints B's options with freshly enabled buttons mid-action. That is
     // the double-submit the flag exists to prevent, reached through the
     // `closeFresh` reset added to fix the mirror-image "flag stuck true" bug.
+    // ⚠️ Cleared BEFORE the `stillMine` bail, and unconditionally. This tracks
+    // the action, not the dialog: the action has settled whichever dialog is on
+    // screen now, and returning early without clearing it would wedge every
+    // future action behind an "already running" that never ends.
+    FRESH_INFLIGHT = null;
     if (!stillMine()) return;
     FRESH_BUSY = false;
     // Re-enable whatever is on screen NOW, not the nodes captured at click

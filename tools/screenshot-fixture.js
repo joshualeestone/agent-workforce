@@ -173,7 +173,7 @@ const AGENTS = [
     isNamedOurs: true,
     hasAvatar: false,
     target: 'dov-discord:0.0',
-    context: { tokens: null, percent: null, confidence: 'unknown', because: 'no transcript was found for it' },
+    context: { tokens: null, percent: null, confidence: 'none', because: 'no transcript was found for it' },
     commitments: {
       state: 'unknown',
       because: 'this agent has never reported what it is holding',
