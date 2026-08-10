@@ -1506,49 +1506,113 @@ test('tmux being unreachable refuses the name-keyed reads rather than serving th
   }
 });
 
-test('the detail panel withdraws the writes it cannot perform, rather than offering them', () => {
-  // ⚠️ The plan claimed "the board no longer advertises the edit" while
-  // `web/index.html` was not in the diff at all. Opening an untied card fired
-  // `loadInstructions`, took a 404 from the write gate, and painted the route's
-  // own sentence — "no agent by that name" — about an agent whose card the
-  // operator was looking at. Role Save and the avatar controls stayed enabled
-  // and failed the same way.
+test('the detail panel withdraws the writes it cannot perform, and clears what it cannot show', () => {
+  // ⚠️ BEHAVIOURAL, not source-shape. The first version asserted that
+  // `openDetail` mentions `isNamedOurs`, that the load line contains `if`, and
+  // that a withdrawing function exists and is called. All four held while the
+  // instruction editor stayed live holding the PREVIOUS agent's boot file —
+  // it pinned the incomplete fix rather than the behaviour.
   //
-  // A claim of protection the code does not provide is the defect this entire
-  // branch is about, so making it in the plan was worse than making it in a
-  // comment. Comments stripped first, or this matches its own explanation.
+  // So: run the real function against a fake DOM and look at what it leaves.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-  const code = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
-    .join('\n');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-  const start = code.indexOf('function openDetail');
-  assert.ok(start > -1, 'openDetail vanished');
-  const body = code.slice(start, code.indexOf('\nfunction ', start + 10));
+  const ids = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save',
+    'd-instr-foot', 'd-instr-stale', 'd-instr-outdated', 'd-instr-prev', 'd-instr-msg', 'd-untied'];
+  const els = {};
+  for (const id of ids) els[id] = { id, disabled: false, hidden: false, value: '', textContent: '' };
+  const document = { getElementById: (id) => els[id] || null };
 
-  assert.match(body, /isNamedOurs/,
-    'the detail panel never consults isNamedOurs, so it offers writes the routes refuse');
+  // ⚠️ Brace-matched, not "up to the next function". The first version sliced
+  // to the next `function` keyword and swept up the real `let INSTR_VERSION`
+  // declaration sitting between them, which collided with the prelude — a
+  // reminder that a source-extracting test is itself code that can be wrong.
+  const start = script.indexOf('function setWritesOffered');
+  assert.ok(start > -1, 'setWritesOffered vanished');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of setWritesOffered');
 
-  // ⚠️ The instruction load must be CONDITIONAL, and asserting only that it
-  // comes AFTER the tie check is not enough — deleting the `if` leaves the call
-  // after the check and the ordering assertion still passes. The first version
-  // of this test did exactly that. Assert the call sits on a guarded line.
-  const loadLine = body.split('\n').find((l) => l.includes('loadInstructions('));
-  assert.ok(loadLine, 'loadInstructions is no longer called at all');
-  assert.match(loadLine, /\bif\s*\(/,
-    'loadInstructions runs unconditionally, so opening an untied card still 404s '
-    + 'and paints "no agent by that name" about an agent on screen');
-  assert.match(loadLine, /tied/,
-    'the load is guarded by something other than the tie');
+  // eslint-disable-next-line no-new-func
+  const run = new Function('document', `let INSTR_READY = true; let INSTR_VERSION = 'v1';
+    ${script.slice(start, end)}
+    return (a, tied) => { setWritesOffered(a, tied); return { INSTR_READY, INSTR_VERSION }; };`)(document);
 
-  assert.match(code, /function setWritesOffered/,
-    'nothing withdraws the write affordances');
-  // ⚠️ And it must be CALLED. Asserting the function exists passed with the call
-  // deleted — a definition nobody invokes is the same as no definition, and this
-  // file has caught that shape before.
-  assert.match(body, /setWritesOffered\s*\(/,
-    'setWritesOffered is defined but never called from openDetail, so the '
-    + 'affordances stay offered');
+  // Simulate the dangerous sequence: a tied agent's file is on screen, then an
+  // untied card is opened.
+  els['d-instr'].value = "the real agent's boot file";
+  els['d-instr-foot'].hidden = false;
+  const after = run({ sessionName: 'Angel', name: 'Angel Bridge' }, false);
+
+  assert.equal(els['d-instr'].value, '',
+    "the previous agent's instruction text was left on screen for a card we "
+    + 'cannot tie to that name');
+  assert.equal(els['d-instr'].disabled, true, 'the instruction editor stayed live');
+  assert.equal(els['d-instr-save'].disabled, true, 'Save stayed live');
+  assert.equal(els['d-instr-foot'].hidden, true, "the real agent's file path stayed on screen");
+  assert.equal(after.INSTR_READY, false, 'the editor still believes it holds a loaded file');
+  assert.equal(after.INSTR_VERSION, null, "the previous agent's version stamp survived");
+
+  for (const id of ['d-file', 'd-remove', 'd-save', 'd-role']) {
+    assert.equal(els[id].disabled, true, `${id} was still offered`);
+  }
+  assert.equal(els['d-untied'].hidden, false, 'nothing explained why the writes are gone');
+
+  // And a tied card gets everything back.
+  run({ sessionName: 'zeta', name: 'Zeta' }, true);
+  for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+    assert.equal(els[id].disabled, false, `${id} stayed withdrawn for a tied agent`);
+  }
+  assert.equal(els['d-untied'].hidden, true, 'the explanation stayed up for a tied agent');
+});
+
+test('every write route refuses the untied card’s own spelling while the real agent is up', async () => {
+  // ⚠️ THE defect this whole branch is about, reopened on its most dangerous
+  // half. `borrowedName` was corrected three times until it asked which CARD
+  // answers for the spelling requested; `knownAgent` was left on the old
+  // per-key form. So with the real `angel-discord` up AND a bystander's
+  // `tmux new -s Angel` open, the reads refused correctly while the writes
+  // accepted: PUT /instructions rewrote the real agent's BOOT FILE, PUT /profile
+  // overwrote its role, DELETE /avatar deleted its picture, GET /instructions
+  // handed back its full text and path.
+  //
+  // Both gates are wrappers over one predicate now, and this test exercises the
+  // write half under the untied spelling — the case no test covered.
+  const status = require('./engine/status');
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const refused = [
+      ['GET', '/api/agent/Angel/instructions', null],
+      ['PUT', '/api/agent/Angel/instructions', { text: 'rewritten by a bystander' }],
+      ['PUT', '/api/agent/Angel/profile', { role: 'overwritten' }],
+      ['DELETE', '/api/agent/Angel/avatar', null],
+    ];
+    for (const [method, path, body] of refused) {
+      const res = await req(path, body === null
+        ? (method === 'GET' ? undefined : { method })
+        : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(res.status, 404,
+        `${method} ${path} was accepted under the untied card's own spelling, so a `
+        + 'bystander can act on the real agent');
+    }
+
+    // ⚠️ And the real agent stays writable under its own name, or the fix has
+    // simply broken the feature — the direction a previous version of this
+    // predicate got wrong.
+    const ok = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'still editable' }),
+    });
+    assert.equal(ok.status, 200, 'the real agent became uneditable under its own name');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
 });

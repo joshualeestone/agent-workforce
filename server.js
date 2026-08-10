@@ -76,94 +76,69 @@ function readBody(req) {
  * whether the agent is on the board, which is the wrong question for a record
  * meant to outlive the agent's conversation.
  */
+/**
+ * The card that answers for this spelling, or `null` if none does.
+ *
+ * ⚠️ ONE predicate, because two of them diverged and the divergence was the
+ * worst defect on this branch. `borrowedName` was corrected three times until
+ * it asked the right question — **which CARD answers for the spelling asked
+ * for**, not which cards share a sanitised key — and `knownAgent` was left on
+ * the old per-key form. So with the real `angel-discord` up and a bystander's
+ * `tmux new -s Angel` open, the reads refused correctly while the WRITES
+ * accepted: `PUT /api/agent/Angel/instructions` rewrote the real agent's boot
+ * file, `PUT .../profile` overwrote its role, `DELETE .../avatar` deleted its
+ * picture, and `GET .../instructions` handed back its full text and path.
+ *
+ * That is the fifth time on this work that a fix stopped one layer short, and
+ * it is the reason these are wrappers rather than two implementations: a lesson
+ * learned by one gate has to be structurally impossible for the other to miss.
+ *
+ * The rule, re-derived: if a card's OWN session name is exactly what was asked
+ * for, that card answers — nobody else's spelling is relevant. Only when no
+ * card spells it that way do we fall back to the sanitised key, which is what
+ * keeps a healthy agent reachable under its normalised name.
+ */
+function claimantFor(name) {
+  const roster = paneRoster();
+  const asked = String(name);
+
+  const exact = roster.filter((a) => a.sessionName === asked);
+  if (exact.length) return exact.find((a) => a.isNamedOurs === true) || exact[0];
+
+  const key = store.safeKey(asked);
+  const claimants = roster.filter((a) => {
+    try { return store.safeKey(a.sessionName) === key; } catch { return false; }
+  });
+  if (!claimants.length) return null;
+  return claimants.find((a) => a.isNamedOurs === true) || claimants[0];
+}
+
+/**
+ * Is this spelling answered by a card we cannot tie to the name it is filed
+ * under? The question for a READ.
+ *
+ * ⚠️ Fails CLOSED. `paneRoster` throws when tmux cannot be asked, rather than
+ * answering "nothing" — the realistic failure used to arrive here as an empty
+ * roster and serve the record.
+ */
 function borrowedName(name) {
   try {
-    // ⚠️ Compare LIKE FOR LIKE. The first version compared the sanitised key
-    // against the raw `sessionName`, so every alias spelling slipped past it: a
-    // stranger on `tmux new -s Angel` or `tmux new -s an.gel` produced a card
-    // whose `sessionName` is `Angel`/`an.gel`, which never equalled `angel`.
-    // The route was allowed, and the only thing actually stopping the leak was
-    // an independent alias guard in `commitments.js` — so this function's
-    // twenty-line comment was claiming a protection it was not providing. Same
-    // safeKey-vs-verbatim mismatch already documented forty lines above, made
-    // again in the function written to fix it.
-    // ⚠️ "Some untied card claims this key AND NO tied card does" — not "the
-    // first card claiming it is untied". `.find()` picked whichever sorted
-    // first, so with the real `angel-discord` up and healthy AND a colleague's
-    // `tmux new -s Angel` open for unrelated work, both cards survive the
-    // roster (they dedupe on the raw name, so `Angel` and `angel` do not
-    // collapse), "Angel" sorts before "Angel Bridge", and the LIVE agent's
-    // avatar and commitment record went offline. The alias bug was corrected in
-    // the leak direction and left wrong in the availability direction — a gate
-    // that refuses a healthy agent is its own failure, and the restart dialog
-    // this exists for would have shown "no agent by that name" as the cost of
-    // clearing a real one.
-    // ⚠️ EXACT SPELLING FIRST. This has now been wrong in three different
-    // directions, so the reasoning is worth stating fully.
-    //
-    //   v1 compared the sanitised key against the RAW sessionName, so every
-    //      alias spelling slipped past and leaked.
-    //   v2 compared sanitised-to-sanitised and took the FIRST claimant, which
-    //      closed the leak and broke availability: a healthy agent went offline
-    //      because a stranger's alias-spelled session sorted before it.
-    //   v3 asked a per-KEY question — "does any tied card claim this key" —
-    //      which restored availability and REOPENED the leak for the one URL
-    //      that matters. With real `angel-discord` up and a stranger on
-    //      `tmux new -s Angel`, a consumer building a URL from the untied card
-    //      requests `/api/agent/Angel/avatar`; the key `angel` has a tied
-    //      claimant, so the gate allowed it, and `avatarPath` sanitises the
-    //      name right back down to the real agent's picture.
-    //
-    // The danger is per-CARD, not per-key. So: if some card's OWN spelling
-    // matches what was asked for, that card answers — and if it is untied, we
-    // refuse. Only when no card spells it that way do we fall back to the key,
-    // which is what keeps a healthy agent reachable under its sanitised name.
-    const key = store.safeKey(name);
-    const roster = paneRoster();
-
-    const exact = roster.filter((a) => a.sessionName === String(name));
-    if (exact.length) return !exact.some((a) => a.isNamedOurs === true);
-
-    const claimants = roster.filter((a) => {
-      try { return store.safeKey(a.sessionName) === key; } catch { return false; }
-    });
-    if (!claimants.length) return false;
-    return !claimants.some((a) => a.isNamedOurs === true);
+    const card = claimantFor(name);
+    return Boolean(card) && card.isNamedOurs !== true;
   } catch {
-    // ⚠️ Fails CLOSED. The first version returned `false` here — "nobody is
-    // claiming this name" — so a `snapshot()` that throws served the record.
-    // That is the permissive answer asserted from an absence of information,
-    // which is the move `parsePanes` and `classify` were both changed to refuse
-    // in this same branch. `knownAgent`'s identical catch already fails closed.
     return true;
   }
 }
 
+/**
+ * Is this spelling answered by a card we CAN tie to its name? The question for
+ * a WRITE, and the strictly stronger one: a name nobody is running is not
+ * writable, while its record stays readable.
+ */
 function knownAgent(name) {
   try {
-    // ⚠️ `isNamedOurs` too, and this is a PRE-EXISTING hole rather than one this
-    // branch introduced — it is reachable on `main` today.
-    //
-    // The roster publishes an untied pane's raw session name as `sessionName`,
-    // so with the real `angel-discord` down, a stranger's `tmux new -s angel`
-    // makes `knownAgent('angel')` true. That unlocks
-    // `PUT /api/agent/angel/instructions`, which rewrites
-    // `~/work/workers/angel/CLAUDE.md` — the file the real agent boots from —
-    // plus the avatar and profile routes against the real agent's stored data.
-    //
-    // It is fixed here rather than left for a later branch because the argument
-    // this branch already makes about `status.js` applies verbatim to its
-    // consumers: publishing `isNamedOurs` and expecting someone downstream to
-    // honour it is not a fix.
-    //
-    // ⚠️ An earlier version of this comment called this "the only consumer in
-    // this tree". It was not: `commitments.read(a.sessionName)` and
-    // `instructions.staleness(a.sessionName)` sit 200 lines below in this same
-    // file, and those were the ones still leaking the real agent's commitment
-    // text and boot-file hash onto a stranger's card. A comment asserting
-    // completeness is exactly what stops the next reader checking.
-    return snapshot().agents.some((a) =>
-      a.sessionName === store.safeKey(name) && a.isNamedOurs === true);
+    const card = claimantFor(name);
+    return Boolean(card) && card.isNamedOurs === true;
   } catch {
     return false;
   }

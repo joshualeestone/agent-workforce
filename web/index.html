@@ -740,10 +740,33 @@ function openDetail(sessionName) {
  * offer them, with one sentence giving the reason.
  */
 function setWritesOffered(a, tied) {
-  const controls = ['d-file', 'd-remove', 'd-save', 'd-role'];
+  // ⚠️ `d-instr` and `d-instr-save` were MISSING from this list, and that was
+  // the worse half of the bug. Opening a tied agent and then an untied one left
+  // the REAL agent's instruction text in the textarea, its path in the footer,
+  // its staleness note, and `INSTR_VERSION`/`INSTR_READY` intact — with Save
+  // live. The real agent's boot file, displayed on a stranger's card, behind a
+  // button that (until the gate was fixed) actually wrote to it.
+  //
+  // Skipping the LOAD was never enough: nothing clears what the previous card
+  // left behind.
+  const controls = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save'];
   for (const id of controls) {
     const el = document.getElementById(id);
     if (el) el.disabled = !tied;
+  }
+
+  if (!tied) {
+    // Clear, don't just disable. A disabled textarea still SHOWS the text.
+    const box = document.getElementById('d-instr');
+    if (box) box.value = '';
+    INSTR_READY = false;
+    INSTR_VERSION = null;
+    for (const id of ['d-instr-foot', 'd-instr-stale', 'd-instr-outdated', 'd-instr-prev']) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = true;
+    }
+    const msg = document.getElementById('d-instr-msg');
+    if (msg) msg.textContent = '';
   }
   const why = document.getElementById('d-untied');
   if (why) {
