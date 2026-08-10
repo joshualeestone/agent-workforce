@@ -572,3 +572,37 @@ test('a live Claude pane still beats both a shell and a node pane', () => {
     'the real Claude pane lost to a shell or a watcher in its own session');
   assert.equal(isAgentPane(kept[0]), true);
 });
+
+test('a crashed agent is reported stopped, not scraped off whatever replaced it', () => {
+  // ⚠️ TWO definitions of "a Claude process is running here" lived here, and the
+  // looser one decided what the board asserted. `classify` asked a DENYLIST of
+  // six shell names while `isAgentSession` asked an ALLOWLIST — so an editor, a
+  // REPL, an ssh session, and `-zsh` (a LOGIN shell, absent from the denylist
+  // despite this file using it as the crashed case two tests up) all counted as
+  // Claude running.
+  //
+  // The consequence: a crashed agent whose remaining pane is `vim` won its name
+  // in `rank`, and `classify` then read that editor's SCREEN. A buffer holding
+  // the word "Worked for" made the card `idle`. "Do you want to proceed" made
+  // it `needs_you`. The board reported a healthy state for a dead agent, on the
+  // one card whose Restart button exists for that case.
+  //
+  // The text below is exactly what would have produced a false healthy reading.
+  const healthyLooking = 'Worked for 2m 14s\n> \n';
+
+  for (const command of ['vim', '-zsh', 'ssh', 'python3', 'less', 'man']) {
+    const r = classify({ ...pane(), command }, healthyLooking);
+    assert.equal(r.state, STATE.STOPPED,
+      `a pane running ${command} was classified from its screen text instead of `
+      + 'being reported as having no Claude in it');
+    assert.equal(r.confidence, CONFIDENCE.STRUCTURED);
+  }
+
+  // ⚠️ And the npm-global case still reads as running, or this fix would take
+  // the feature away from every agent on an npm install.
+  for (const command of ['2.1.212', 'node', 'claude']) {
+    const r = classify({ ...pane(), command }, healthyLooking);
+    assert.notEqual(r.state, STATE.STOPPED,
+      `a pane running ${command} was reported stopped, but that is Claude`);
+  }
+});

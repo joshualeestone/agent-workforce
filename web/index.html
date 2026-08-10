@@ -1677,7 +1677,7 @@ function optionBlock(id, act, losesAll, may) {
       <h4>${esc(act.label)}</h4>
       <p>${esc(act.what)}</p>
       <div class="cost">${esc(cost)}</div>
-      ${refused ? `<div class="why-not">Not available: ${esc(may.because || 'we cannot do this right now')}.</div>` : ''}
+      ${refused ? `<div class="why-not">Not available: ${esc((may && may.because) || 'we cannot do this right now')}.</div>` : ''}
     </div>
     <button class="btn ${act.gentlest ? 'primary' : ''}" data-act="${id}"${refused ? ' disabled' : ''}>${esc(act.label)}</button>
   </div>`;

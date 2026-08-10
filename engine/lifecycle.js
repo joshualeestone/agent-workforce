@@ -435,6 +435,23 @@ function perform(action, agent, target) {
  * which is the opposite of the point: the crashed agent is the case restart
  * exists for.
  */
+/**
+ * Can `perform` actually carry this action out for this agent, ignoring state?
+ *
+ * ⚠️ Separate from the state questions in `mayTypeInto` because these are
+ * CONTAINMENT rules, and the `may` field did not consult them. `safeKey`
+ * preserves a leading `_` or `-`, while `safeServiceName` and `safeTarget` both
+ * require the first character to be alphanumeric — so a session named
+ * `_bot-discord` was published with all three buttons enabled and every POST
+ * answered 409. That is the offer-an-action-that-cannot-work state the `may`
+ * block exists to remove, one fact derived in two places that disagreed, for
+ * the third time on this branch.
+ */
+function canReach(action, agent) {
+  if (action === 'restart') return safeServiceName(agent && agent.sessionName) !== null;
+  return safeTarget(agent && agent.target) !== null;
+}
+
 function mayTypeInto(action, agent) {
   if (action === 'restart') {
     // ⚠️ `isFleetSession`, NOT `isAgentSession`. The difference is whether a
@@ -545,6 +562,7 @@ function invalidatesCommitments(action, result) {
 }
 
 module.exports = {
+  canReach,
   ACTIONS, OUTCOME, RESTART_SCRIPT, setDryRun,
   // ⚠️ A GETTER, not the value. `DRY_RUN` was exported by value, so
   // `lifecycle.DRY_RUN` froze at module load and could never reflect

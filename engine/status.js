@@ -162,6 +162,33 @@ function isNativeClaude(command) {
   return /^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(command || '').trim());
 }
 
+/**
+ * Is a Claude process running in this pane? ONE definition, used by everything.
+ *
+ * ⚠️ There were two, and the looser one decided what the board asserted.
+ * `classify` asked `isClaudeRunning`, a DENYLIST of six shell names, while
+ * `isAgentSession` asked an ALLOWLIST. So `vim`, `ssh`, `python3`, `less` — and
+ * `-zsh`, a login shell, which is not in the denylist at all despite this
+ * branch's own tests using it as the crashed case — were all "Claude is
+ * running" to `classify`.
+ *
+ * The consequence was not theoretical: a crashed agent whose only remaining
+ * pane is an editor won its name in `rank`, then `classify` scraped that
+ * editor's screen and reported `idle` if the buffer contained "Worked for",
+ * `needs_you` if it contained "Do you want to proceed", `rate_limited` if it
+ * contained "rate limit". **The board reported a healthy state for a crashed
+ * agent, on the one card whose Restart button exists for that case.**
+ *
+ * Matched against the fleet's canonical rule
+ * (`~/.claude/scripts/lib/claude-process-classify.sh`): a strict three-segment
+ * version, or one of the legacy names, because an npm-global install fronts as
+ * `node`.
+ */
+function isClaudeCommand(command) {
+  const c = String(command || '').trim();
+  return isNativeClaude(c) || c === 'claude' || c === 'claude.exe' || c === 'node';
+}
+
 function isFleetSession(pane) {
   if (!pane) return false;
 
@@ -212,9 +239,7 @@ function isAgentSession(pane) {
   // deliberately excludes to avoid matching an unrelated numeric-named process,
   // and the legacy names were rejected, which silently removed this feature for
   // any agent on an npm install.
-  const command = String((pane.command || '')).trim();
-  const legacy = command === 'claude' || command === 'claude.exe' || command === 'node';
-  return isNativeClaude(command) || legacy;
+  return isClaudeCommand(pane.command);
 }
 
 /**
@@ -523,10 +548,11 @@ function capturePane(target, lines = 40) {
  * is running, and a shell name when it is not. That distinguishes running from
  * stopped and nothing else -- it cannot tell working from idle from blocked.
  */
-const SHELLS = new Set(['zsh', 'bash', 'fish', 'sh', 'tmux', 'login']);
+// ⚠️ DERIVED, not a second rule. This was a denylist of six shell names, which
+// made every editor, REPL and login shell read as a running Claude. See
+// `isClaudeCommand` for what that cost.
 function isClaudeRunning(command) {
-  if (!command) return false;
-  return !SHELLS.has(command.trim());
+  return isClaudeCommand(command);
 }
 
 /**

@@ -554,12 +554,28 @@ const server = http.createServer((req, res) => {
         // state this field was added to remove, and one fact (is this agent
         // actionable) derived in two places that disagreed.
         may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
-          const verdict = addressable(a.sessionName)
-            ? lifecycle.mayTypeInto(action, a)
-            : {
+          // ⚠️ THREE gates, in the order the route applies them, so this field
+          // can never promise what a POST then refuses. Each was added after
+          // publishing `ok: true` for an action that could not run:
+          //   1. addressable — the route resolves by exact name
+          //   2. canReach    — perform's own containment rules on name and pane
+          //   3. mayTypeInto — the state questions
+          // The dead `|| {…}` branch that sat here reported a bad CHARACTER for
+          // what is now also a case mismatch, on a path that could not fire.
+          let verdict;
+          if (!addressable(a.sessionName)) {
+            verdict = {
               ok: false,
-              because: 'this agent\u2019s session name has characters we cannot address it by, so we will not act on it under a name that is not exactly its own',
+              because: 'this agent\u2019s session name is not one we can address it by exactly, so we will not act on it under a name that is not its own',
             };
+          } else if (!lifecycle.canReach(action, a)) {
+            verdict = {
+              ok: false,
+              because: 'we cannot form a safe command for this agent from its name and pane, so we will not try',
+            };
+          } else {
+            verdict = lifecycle.mayTypeInto(action, a);
+          }
           acc[action] = { ok: verdict.ok, because: verdict.because || null };
           return acc;
         }, {}),

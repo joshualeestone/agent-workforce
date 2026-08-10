@@ -1812,7 +1812,7 @@ function pageValue(name) {
   return new Function(`return (${page.slice(open, end)});`)();
 }
 
-function pageFunction(name) {
+function pageFunction(name, scope = {}) {
   const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const start = page.indexOf(`function ${name}(`);
   if (start === -1) throw new Error(`web/index.html no longer defines ${name}()`);
@@ -1830,8 +1830,15 @@ function pageFunction(name) {
     }
   }
   if (end === -1) throw new Error(`could not find the end of ${name}()`);
+  // ⚠️ `scope` lets a caller inject the page helpers a function depends on
+  // (`esc`, say) rather than re-implementing them in the test — a
+  // re-implementation would mean asserting against the test's own copy instead
+  // of the product's, which is the whole failure this helper exists to avoid.
+  const names = Object.keys(scope);
   // eslint-disable-next-line no-new-func
-  return new Function(`${page.slice(start, end)}; return ${name};`)();
+  return new Function(...names, `${page.slice(start, end)}; return ${name};`)(
+    ...names.map((k) => scope[k]),
+  );
 }
 
 test('the freshness stamp stays readable at both ends of the range', () => {
@@ -2478,4 +2485,58 @@ test('a half-sent clear still tombstones, driven through the ROUTE not the unit'
   assert.notEqual(commitments.read(target.sessionName).state, 'holding',
     'a half-sent clear left the board asserting these at full confidence, about '
     + 'work the agent may already have forgotten');
+});
+
+test('the option block survives a payload with no verdict, rather than throwing', () => {
+  // ⚠️ The round-7 fix made an absent `may` render as REFUSED — correct — and
+  // then the refused branch read `may.because`, so it threw a TypeError on the
+  // exact case the comment above it says it handles. `renderFresh` calls this
+  // AFTER writing the holding block and BEFORE unhiding the dialog, so the
+  // throw meant the ↺ button did nothing at all, silently, with no message:
+  // strictly worse than the enabled-buttons bug it was fixing.
+  //
+  // ⚠️ Evaluated out of the real page, so it cannot pass against a copy — and
+  // `esc` comes out of the page too rather than being re-implemented here, or
+  // the test would be asserting against its own escaping rather than the
+  // product's.
+  const esc = pageFunction('esc');
+  const optionBlock = pageFunction('optionBlock', { esc });
+  const act = { label: 'Clear', what: 'Starts it over.', cost: 'Loses everything' };
+
+  for (const verdict of [undefined, null, {}, { ok: false }]) {
+    const html = optionBlock('clear', act, '.', verdict);
+    assert.match(html, /Not available/,
+      `a payload with may=${JSON.stringify(verdict)} did not render as refused`);
+    assert.match(html, /disabled/, 'the button was left enabled');
+  }
+
+  // And a real verdict still renders its own sentence rather than the fallback.
+  const withReason = optionBlock('clear', act, '.', { ok: false, because: 'it is waiting on an answer' });
+  assert.match(withReason, /waiting on an answer/);
+});
+
+test('may never promises an action perform could not form a command for', async () => {
+  // ⚠️ `safeKey` preserves a leading `_` or `-`, while `safeServiceName` and
+  // `safeTarget` both require the first character to be alphanumeric. So an
+  // agent in a session called `_bot-discord` passed `addressable`, passed
+  // `mayTypeInto`, and was published with all three buttons enabled — and every
+  // POST answered 409. Third time on this branch that "is this agent
+  // actionable" was derived in two places that disagreed.
+  const lifecycle = require('./engine/lifecycle');
+
+  // Straight at the containment rules, so this holds for any future caller.
+  assert.equal(lifecycle.canReach('restart', { sessionName: '_bot' }), false);
+  assert.equal(lifecycle.canReach('clear', { target: '_bot:0.0' }), false);
+  assert.equal(lifecycle.canReach('restart', { sessionName: 'bot' }), true);
+  assert.equal(lifecycle.canReach('clear', { target: 'bot:0.0' }), true);
+
+  // And end to end: nothing the board offers may 409 on a formation failure.
+  const board = JSON.parse((await req('/api/status')).body);
+  for (const a of board.agents || []) {
+    for (const action of ['compact', 'clear', 'restart']) {
+      if (!a.may || !a.may[action] || !a.may[action].ok) continue;
+      assert.ok(lifecycle.canReach(action, a),
+        `${a.sessionName}.may.${action} said ok, but perform cannot form a command for it`);
+    }
+  }
 });
