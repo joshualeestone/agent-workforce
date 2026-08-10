@@ -153,6 +153,12 @@ const FAKE_PANES = [
   // clause making `may` agree with `findAgent` has nothing to refuse and a test
   // asserting they agree passes with the clause deleted.
   'my.bot-discord\t0.0\t2.1.212\t0\tIndexing the archive',
+  // ⚠️ A name `safeKey` accepts and `safeServiceName`/`safeTarget` refuse: it
+  // survives sanitising but cannot begin a service name or a tmux target. Here
+  // so the clause making `may` consult perform's containment rules has
+  // something to refuse — without it that clause could be deleted and the
+  // end-to-end assertion below would still pass, having nothing to check.
+  '_bot-discord\t0.0\t2.1.212\t0\tWatching the queue',
 ].join('\n');
 
 const FAKE_CAPTURE = {
@@ -165,6 +171,7 @@ const FAKE_CAPTURE = {
   'xander-discord:0.0': 'Do you want to proceed?\n\u276f 1. Yes\n  2. No\n',
   'wren:0.0': 'Worked for 1m 02s\n> \n',
   'my.bot-discord:0.0': 'Worked for 3m 30s\n> \n',
+  '_bot-discord:0.0': 'Worked for 45s\n> \n',
 };
 
 test.before(() => {
@@ -2002,12 +2009,15 @@ test('the status payload says which actions would be refused', async () => {
   // work" state the block exists to remove.
   const board = JSON.parse((await req('/api/status')).body);
   const asking = await refusingAgent();
-  // ⚠️ NOT `actionableAgent()` here: this test is about the `may` block itself,
-  // so it needs an agent chosen without consulting `may` — otherwise it asserts
-  // that `may` agrees with `may`.
-  const ready = (board.agents || []).find((a) =>
-    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs && a.sessionName.indexOf('.') === -1);
-  assert.ok(ready, 'the synthetic roster has no ordinary actionable agent');
+  // ⚠️ BY NAME, not by predicate. This test is about the `may` block, so it
+  // must not select with `may` — that would assert `may` agrees with itself.
+  // But every predicate written here has been invalidated by the next agent
+  // added to the fixture: first the permission-prompt one, then the
+  // inferred-only one, then the unaddressable one, then the unreachable one.
+  // Four narrowings, each after a green suite went red for an unrelated reason.
+  // Naming the agent cannot drift, and says plainly which shape is meant.
+  const ready = (board.agents || []).find((a) => a.sessionName === 'zeta');
+  assert.ok(ready, 'the fixture lost its ordinary healthy agent');
 
   for (const action of ['compact', 'clear', 'restart']) {
     assert.ok(ready.may && ready.may[action], `no verdict for ${action} on a ready agent`);
