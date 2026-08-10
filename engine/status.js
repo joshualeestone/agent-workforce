@@ -316,6 +316,13 @@ const PANE_COLUMNS = [
   { key: 'pane', fmt: '#{window_index}.#{pane_index}' },
   { key: 'command', fmt: '#{pane_current_command}' },
   { key: 'inMode', fmt: '#{pane_in_mode}' },
+  // ⚠️ The CLAIM, and it must sit before `title` — `title` is `rest: true`, so
+  // it absorbs every remaining tab and anything after it would be swallowed.
+  //
+  // This is a tmux user option Kosmos sets on the session it creates. It reports
+  // empty for every session that does not have one, which is what makes it
+  // evidence rather than a naming convention.
+  { key: 'claim', fmt: '#{@kosmos_agent}' },
   { key: 'title', fmt: '#{pane_title}', rest: true },
 ];
 
@@ -360,6 +367,20 @@ function parsePanes(out) {
       // mode, safe to type" — asserting the safe answer from an absence of
       // information, which is the one thing this codebase refuses to do.
       inMode: raw.inMode === undefined || raw.inMode === '' ? '1' : raw.inMode,
+      // ⚠️ Kosmos's claim on the session. Empty for every session it did not
+      // create, which is what makes it evidence rather than a convention.
+      //
+      // ⚠️ AND THE LESSON: this field existed in `PANE_COLUMNS` and was parsed
+      // into `raw` and then **silently dropped**, because this return builds its
+      // object by hand. `PANE_COLUMNS` was introduced so the format and the
+      // parser could not drift — and the drift moved one step downstream, to
+      // the parser and the object it returns. The round-trip test did not catch
+      // it because it asserted the fields it already knew about.
+      //
+      // Adding a column is therefore TWO edits, and the test below now asserts
+      // that every column reaches the output so the next one cannot be lost the
+      // same way.
+      claim: raw.claim || '',
       title: raw.title || '',
     };
   });
@@ -417,7 +438,35 @@ function listPanes() {
  * Claude is running there.
  */
 function isNamedOurs(pane) {
-  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+  if (!pane) return false;
+
+  // ⚠️ THE CLAIM ARM, and it is what makes an agent Kosmos creates recognisable.
+  //
+  // Before this, the only evidence a pane belonged to the name it is filed under
+  // was a `-discord` suffix — so an agent Kosmos created itself came back
+  // anonymous and unwritable, because it has no reason to carry a naming
+  // convention from our dev environment. The gate was right and its only
+  // evidence was wrong.
+  //
+  // The claim is a tmux user option Kosmos sets on the session at creation, and
+  // it beats a file on disk in the way that matters: **it dies with the
+  // session**. A stranger opening a session with the same name does not inherit
+  // it, and there is no stale record to reconcile — the two failure modes a
+  // claims file on disk would have had.
+  //
+  // ⚠️ It must match the pane's own NAME, not merely be present. A claim naming
+  // a different agent is somebody else's claim, and reading "has a claim" as
+  // "is ours" would be the borrowed-name hole rebuilt out of new parts.
+  //
+  // ⚠️ KOSMOS writes this, never the agent. An agent setting its own option
+  // would let any process claim any name, which is the same hole through a
+  // different door.
+  const claim = String(pane.claim || '').trim();
+  if (claim && claim === String(pane.name || '')) return true;
+
+  // The legacy arm: the existing fleet carries the suffix and no claim, and
+  // must keep working untouched.
+  return /-discord$/.test(String(pane.session || ''));
 }
 
 /**

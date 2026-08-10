@@ -277,8 +277,12 @@ test('the pane format and the pane parser cannot drift apart', () => {
   assert.equal(PANE_FORMAT, PANE_COLUMNS.map((c) => c.fmt).join('\t'));
   assert.ok(PANE_FORMAT.includes('#{pane_in_mode}'), 'copy-mode is no longer being asked for');
 
-  // Round-trip a line built from the format's own column order.
-  const line = ['zeta-discord', '0.0', '2.1.212', '0', 'Idle'].join('\t');
+  // ⚠️ Built FROM the column list rather than hardcoded, so adding a column
+  // cannot make this test wrong while the product is right. The hardcoded
+  // version failed the moment the claim column landed — correctly, but for the
+  // wrong reason: it was asserting the column COUNT, not the round-trip.
+  const values = { session: 'zeta-discord', pane: '0.0', command: '2.1.212', inMode: '0', claim: '', title: 'Idle' };
+  const line = PANE_COLUMNS.map((c) => values[c.key]).join('\t');
   const [got] = parsePanes(line);
   assert.equal(got.session, 'zeta-discord');
   assert.equal(got.name, 'zeta');
@@ -286,6 +290,14 @@ test('the pane format and the pane parser cannot drift apart', () => {
   assert.equal(got.command, '2.1.212');
   assert.equal(got.inMode, '0');
   assert.equal(got.title, 'Idle');
+
+  // ⚠️ And the claim column must come BEFORE the title, or `rest: true`
+  // swallows it. Asserting the ORDER, because that is the property that breaks.
+  const keys = PANE_COLUMNS.map((c) => c.key);
+  assert.ok(keys.indexOf('claim') < keys.indexOf('title'),
+    'the claim column sits after the title, which absorbs the remainder, so it '
+    + 'will always parse empty and every agent will read as unclaimed');
+  assert.equal(keys[keys.length - 1], 'title', 'the rest-column is no longer last');
 });
 
 test('a pane title containing a tab does not shift every other column', () => {
@@ -293,7 +305,8 @@ test('a pane title containing a tab does not shift every other column', () => {
   // and absorbs the remainder. If it were not, a title with a tab would push
   // real values into the wrong fields — and the field it would corrupt first is
   // whichever came after it.
-  const line = ['yara-discord', '1.2', 'node', '1', 'Working\ton\tthe thing'].join('\t');
+  const vals = { session: 'yara-discord', pane: '1.2', command: 'node', inMode: '1', claim: '', title: 'Working\ton\tthe thing' };
+  const line = PANE_COLUMNS.map((c) => vals[c.key]).join('\t');
   const [got] = parsePanes(line);
   assert.equal(got.command, 'node');
   assert.equal(got.inMode, '1');
@@ -985,4 +998,89 @@ test('a non-Discord agent still classifies to a real state', () => {
     'a non-Discord agent running Claude was refused a state, which re-couples '
     + 'the engine to the session-name convention this branch decoupled');
   assert.equal(r.confidence, CONFIDENCE.SCRAPED);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The claim: how Kosmos recognises an agent it created itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a session Kosmos claimed is ours, without carrying a Discord name', () => {
+  // ⚠️ The whole point. Before the claim, the ONLY evidence a pane belonged to
+  // the name it is filed under was a `-discord` suffix — so an agent Kosmos
+  // created came back anonymous and unwritable, because it has no reason to
+  // carry a naming convention from our dev environment. The gate was right and
+  // its only evidence was wrong.
+  const claimed = { session: 'casey', name: 'casey', claim: 'casey' };
+  assert.equal(isNamedOurs(claimed), true,
+    'an agent Kosmos created is still not recognised as its own');
+
+  // And it gets everything a suffixed agent gets.
+  setPaneSource(() => 'casey\t0.0\t2.1.212\t0\tcasey\tworking');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const [card] = snapshot().agents;
+    assert.equal(card.isNamedOurs, true, 'the claim did not survive into the snapshot');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a claim naming a DIFFERENT agent does not make a pane ours', () => {
+  // ⚠️ Reading "has a claim" as "is ours" would rebuild the borrowed-name hole
+  // out of new parts: a session carrying somebody else's claim would speak for
+  // a name it has no relationship to. The claim must match the pane's own name.
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey', claim: 'angel' }), false,
+    'a pane claiming to be a different agent was treated as that agent');
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey', claim: '' }), false);
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey' }), false,
+    'a pane with no claim at all was treated as claimed');
+});
+
+test('a stranger opening a session with the same name inherits no claim', () => {
+  // ⚠️ The property that makes a tmux session option beat a file on disk: it
+  // DIES WITH THE SESSION. Kosmos creates `casey` and claims it; that session
+  // ends; someone else runs `tmux new -s casey`. A claims FILE would still be
+  // sitting there naming `casey` as ours, and the stranger would inherit it.
+  // The option does not survive, so the stranger's pane reports no claim.
+  const kosmosMade = { session: 'casey', name: 'casey', claim: 'casey' };
+  const strangerLater = { session: 'casey', name: 'casey', claim: '' };
+
+  assert.equal(isNamedOurs(kosmosMade), true);
+  assert.equal(isNamedOurs(strangerLater), false,
+    'a session that merely reuses the name was treated as the agent Kosmos made');
+});
+
+test('the existing Discord fleet keeps working with no claim at all', () => {
+  // ⚠️ The legacy arm is not decoration: thirteen agents on this machine carry
+  // the suffix and no claim, and none of them may stop being recognised because
+  // a new mechanism arrived.
+  assert.equal(isNamedOurs({ session: 'angel-discord', name: 'angel', claim: '' }), true,
+    'the existing fleet stopped being recognised');
+  assert.equal(isNamedOurs({ session: 'angel-discord', name: 'angel' }), true);
+});
+
+test('every declared column reaches the parsed pane, not just the ones we remember', () => {
+  // ⚠️ `PANE_COLUMNS` was introduced so the tmux format and the parser could not
+  // drift apart. The drift moved one step downstream instead: the claim column
+  // was declared, parsed into the intermediate object, and then **silently
+  // dropped**, because the return statement builds its result by hand.
+  //
+  // The round-trip test did not catch it — it asserted the fields it already
+  // knew about, which is precisely the shape of test that cannot notice a
+  // missing one. This asserts the PROPERTY: whatever the column list says,
+  // comes out.
+  const values = {};
+  PANE_COLUMNS.forEach(function (c, i) { values[c.key] = 'v' + i; });
+  values.session = 'zeta-discord';
+  values.pane = '0.0';
+
+  const line = PANE_COLUMNS.map((c) => values[c.key]).join('\t');
+  const [got] = parsePanes(line);
+
+  PANE_COLUMNS.forEach(function (c) {
+    assert.ok(c.key in got,
+      `the column '${c.key}' is declared in PANE_COLUMNS and never reaches the `
+      + 'parsed pane, so everything downstream sees it as absent');
+  });
 });
