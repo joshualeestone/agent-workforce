@@ -330,7 +330,13 @@ function parsePanes(out) {
       // entirely from a field that was MISSING. That is the move the `inMode`
       // default three lines below explicitly refuses, made in the same
       // function.
-      command: raw.command == null ? null : raw.command,
+      // ⚠️ Empty counts as absent, matching the `inMode` default below rather
+      // than merely claiming to. The first version handled only `undefined`, so
+      // a dead or `remain-on-exit` pane reporting an EMPTY command still
+      // reached `classify` as "not Claude" and answered `stopped` at
+      // STRUCTURED confidence — the same confident claim from no information,
+      // in the same function, under a comment asserting parity it did not have.
+      command: raw.command == null || raw.command === '' ? null : raw.command,
       // '1' when the pane is scrolled back in copy-mode, where keystrokes go to
       // copy-mode bindings rather than to the composer.
       //

@@ -18,7 +18,16 @@ const os = require('node:os');
 const path = require('node:path');
 
 const APP = 'AgentWorkforce';
-const ROOT = path.join(os.homedir(), 'Library', 'Application Support', APP);
+// ⚠️ Honours `AGENT_WORKFORCE_DATA` so tests can sandbox it, which they could
+// not before: `status.test.js` set that variable, commented that it stopped
+// `readProfile` and `avatarPath` reaching the operator's real store, and was
+// wrong — this module read no environment at all, so those calls went to the
+// live store and the gates that depend on them could not be pinned against
+// seeded data. `engine/commitments.js` already honours the same variable, so
+// this makes two modules agree rather than introducing a new convention.
+const ROOT = process.env.AGENT_WORKFORCE_DATA
+  ? path.join(process.env.AGENT_WORKFORCE_DATA, APP)
+  : path.join(os.homedir(), 'Library', 'Application Support', APP);
 const AVATARS = path.join(ROOT, 'avatars');
 const PROFILES = path.join(ROOT, 'profiles');
 

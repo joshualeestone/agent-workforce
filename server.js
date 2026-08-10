@@ -69,6 +69,23 @@ function readBody(req) {
  * identity per agent instead of a name that is sanitised in one place and
  * verbatim in another, which is a change to the avatar and profile stores too.
  */
+/**
+ * Is this name currently claimed by a pane that is NOT tied to it?
+ *
+ * The precise question for a READ keyed on an agent name. `knownAgent` asks
+ * whether the agent is on the board, which is the wrong question for a record
+ * meant to outlive the agent's conversation.
+ */
+function borrowedName(name) {
+  try {
+    const key = store.safeKey(name);
+    const card = snapshot().agents.find((a) => a.sessionName === key);
+    return Boolean(card) && card.isNamedOurs !== true;
+  } catch {
+    return false;
+  }
+}
+
 function knownAgent(name) {
   try {
     // ⚠️ `isNamedOurs` too, and this is a PRE-EXISTING hole rather than one this
@@ -475,6 +492,27 @@ const server = http.createServer((req, res) => {
     // a try or a promise catch; this one was handed straight to the socket, so
     // any future throw from the store would exit the process rather than answer
     // an error. read() is documented never to throw, and it did once.
+    // ⚠️ The THIRD name-keyed consumer, and the comment at `knownAgent` that
+    // exists specifically to correct an earlier claim of completeness listed
+    // two and missed this one — in the same file. Twice now a correction has
+    // itself been incomplete.
+    //
+    // The board does not call this route today. The restart dialog will, and it
+    // is the caller that would fetch the real agent's commitment text by name
+    // to display as the cost of clearing a stranger's pane, which is the exact
+    // measured failure this branch closes elsewhere. Gating it now costs
+    // nothing and closes it before the consumer arrives.
+    // ⚠️ NOT `knownAgent`, which was the first attempt and was too strict: it
+    // requires the agent to be on the board right now, and a record's whole
+    // purpose is to outlive the conversation — an agent that is stopped
+    // entirely must still be readable. Two tests caught that immediately.
+    //
+    // The danger is narrower than "is it running". It exists only when a pane
+    // IS on the board under this name and that pane is NOT tied to it: then the
+    // caller asking for `angel` gets the real Angel's commitment text while the
+    // card in front of them is a stranger's. If no pane claims the name at all,
+    // there is nobody to be confused with.
+    if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
       sendJson(res, 200, commitments.read(name));
     } catch {

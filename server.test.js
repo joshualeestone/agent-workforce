@@ -819,14 +819,30 @@ test('the status payload carries the STORE value for each agent, not a placehold
     const agents = JSON.parse(res.body).agents || [];
     assert.ok(agents.length > 0, 'no agents on the board, cannot verify enrichment');
 
-    for (const a of agents) {
+    // ⚠️ TIED agents only, and this test was silently machine-dependent without
+    // it. `/api/status` now skips `read()` for a pane it cannot tie to its name,
+    // so this passed here only because all thirteen sessions on this machine
+    // carry the `-discord` suffix — i.e. the suite's green status depended on
+    // the exact coupling this branch exists to remove, and it would go red on
+    // any machine running the non-Discord agent the branch was written for.
+    const tied = agents.filter((a) => a.isNamedOurs);
+    assert.ok(tied.length > 0, 'no tied agents on the board, cannot verify enrichment');
+
+    for (const a of tied) {
       assert.equal(a.commitments.state, 'holding', `${a.sessionName} did not carry the store value`);
       assert.equal(a.commitments.because, 'stubbed for this test');
       assert.deepEqual(a.commitments.commitments.map((x) => x.what), [`pending for ${a.sessionName}`],
         'the block must be this agent value, not a shared placeholder');
     }
-    assert.deepEqual(seen.sort(), agents.map((a) => a.sessionName).sort(),
-      'read() must be called once per agent, with that agent sessionName');
+    assert.deepEqual(seen.sort(), tied.map((a) => a.sessionName).sort(),
+      'read() must be called once per TIED agent, with that agent sessionName');
+
+    // And an untied agent must NOT have been read — the gate, asserted from the
+    // caller's side rather than only from the payload's.
+    for (const a of agents.filter((x) => !x.isNamedOurs)) {
+      assert.ok(!seen.includes(a.sessionName),
+        `${a.sessionName} is untied and read() was called for it anyway`);
+    }
   } finally {
     commitments.read = real;
   }
@@ -1165,6 +1181,46 @@ test('an untied card carries no commitments and no boot-file hash of the name it
     assert.equal(card.instructions.editable, false,
       'the untied card offered an Edit that knownAgent 404s, which is worse than '
       + 'refusing plainly');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('GET /commitments refuses a name a stranger is currently claiming, but not a stopped agent', async () => {
+  // ⚠️ The THIRD name-keyed consumer. The comment at `knownAgent` that exists
+  // specifically to correct an earlier claim of completeness listed two and
+  // missed this one, in the same file — twice now a correction has itself been
+  // incomplete.
+  //
+  // The first fix used `knownAgent`, which was too strict: a record's purpose is
+  // to outlive the conversation, so a STOPPED agent must still be readable. The
+  // danger is narrower — a pane on the board under this name that is not tied
+  // to it — and both halves are asserted here, because a gate that refuses
+  // everything would also have passed the first half.
+  const status = require('./engine/status');
+
+  // Half one: a stranger claiming the name. Must refuse.
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 404,
+      'the route handed out the real agent’s commitment text while a stranger '
+      + 'held that name on the board');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+
+  // Half two: nobody claiming it at all. Must still read.
+  status.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 200,
+      'a record for an agent that is not running became unreadable, which is the '
+      + 'opposite of what a record is for');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);

@@ -29,6 +29,13 @@ const nodePath = require('node:path');
 // It also makes the gate tests mean something: a fixture can now have real
 // seeded data, so an untied pane returning `null` is evidence the gate fired
 // rather than evidence the file was never there.
+//
+// ⚠️ `AGENT_WORKFORCE_DATA` was INERT when this comment first claimed it covered
+// the profile and avatar store: `engine/store.js` hardcoded its root and read no
+// environment at all, so `readProfile` and `avatarPath` went on reaching the
+// operator's real store and three gates stayed unpinned behind assertions that
+// looked like they covered them. `store.js` now honours the same variable
+// `commitments.js` already did, which is what makes the claim above true.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'status-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'data');
@@ -40,6 +47,42 @@ function seedWorker(name, body) {
   const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(nodePath.join(dir, 'CLAUDE.md'), body, 'utf8');
+}
+
+/**
+ * Give a name a registry entry and an avatar, so the `model`, `context` and
+ * `hasAvatar` gates have something to be stopping.
+ *
+ * ⚠️ Without this, three of the six gates this branch adds could be DELETED with
+ * the whole suite green — the fixture had no registry entry and no avatar
+ * anywhere, so every `null` the untied card asserted was `null` with the gate
+ * gone too. The test carried a comment saying it had been fixed for exactly
+ * that reason, which made it worse than an obviously thin test.
+ */
+function seedRegistryAndAvatar(name) {
+  const root = nodePath.join(os.homedir(), '.claude');
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = nodePath.join(dir, `${name}-discord_0.0.json`);
+  fs.writeFileSync(file, JSON.stringify({ session_id: `sess-${name}`, model: 'claude-opus-5' }), 'utf8');
+
+  // ⚠️ The TRANSCRIPT too, because `readModel` and `readContext` read the
+  // registry only to resolve a session id and then read the transcript that id
+  // names. Seeding the registry alone left both returning null, so the gate
+  // still had nothing to stop — the first attempt at fixing this test's vacuity
+  // was itself vacuous, for one layer further down.
+  const projects = nodePath.join(root, 'projects', 'seeded');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(
+    nodePath.join(projects, `sess-${name}.jsonl`),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 1000, output_tokens: 10 } } }) + '\n',
+    'utf8',
+  );
+
+  const avatars = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'avatars');
+  fs.mkdirSync(avatars, { recursive: true });
+  fs.writeFileSync(nodePath.join(avatars, `${name}.png`), 'not-a-real-png', 'utf8');
+  return file;
 }
 const {
   classify,
@@ -719,6 +762,7 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
   // because `readProfile` happens to return `{}` rather than `null`. A test for
   // a gate has to be run against data the gate is stopping it from reading.
   seedWorker('ghostly', 'You are **Ghostly** (Ghostly Bridge), the archive worker.\n');
+  const registryFile = seedRegistryAndAvatar('ghostly');
 
   setPaneSource(() => [
     'ghostly-discord\t0.0\t2.1.212\t0\tthe real one',
@@ -739,6 +783,12 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
     assert.equal(card.name, 'Ghostly', 'the tied pane did not read its own worker file');
     assert.equal(card.nameDerived, true);
     assert.equal(card.role, 'archive worker', 'the tied pane read no role');
+    // ⚠️ The control has to prove the SEEDED data is reachable, or the untied
+    // nulls below still mean nothing. Three gates were unpinned for exactly
+    // this reason: their fixture had no registry entry and no avatar, so their
+    // nulls were null either way.
+    assert.equal(card.hasAvatar, true, 'the seeded avatar was not found, so the hasAvatar gate proves nothing');
+    assert.ok(card.model, 'the seeded registry entry was not read, so the model gate proves nothing');
   } finally {
     setPaneSource(null);
     setPaneCapture(null);
@@ -763,6 +813,9 @@ test('a pane we cannot tie to a name does not borrow that agent’s identity', (
       'a borrowed context reading was published at real confidence');
     assert.equal(card.hasAvatar, false,
       'an untied pane rendered the real agent’s photograph');
+    // ⚠️ `registryFile` exists on disk for this name — that is the point. The
+    // gate is what stops it being read, not its absence.
+    assert.ok(fs.existsSync(registryFile), 'the fixture stopped seeding, so these nulls are vacuous again');
     assert.equal(card.profile, null,
       'an untied pane carried the real agent’s operator-set profile, which the '
       + 'detail panel prefers over the role field');
