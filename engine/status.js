@@ -139,7 +139,35 @@ function sh(cmd, args) {
  * against, and anyone able to do it can run `restart-bot.sh` directly.
  */
 function isFleetSession(pane) {
-  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+  if (!pane) return false;
+
+  // ⚠️ EITHER a session we recognise by name, OR a pane visibly running Claude.
+  //
+  // This used to require `/-discord$/` and nothing else, which meant an agent
+  // that was not a Discord bot was invisible to every check here: not
+  // restartable, not typeable, effectively unmanaged. That is a straight
+  // contradiction of the product's own second paragraph ("Not Discord as the
+  // surface"), and it was load-bearing rather than cosmetic — it is why the
+  // install instructions grew a Discord developer-portal step nobody should
+  // have to take.
+  //
+  // Both arms are needed, and each covers what the other cannot:
+  //
+  //   - The NAME arm keeps a CRASHED agent ours. Its pane is a shell, so there
+  //     is no Claude process to see, and restart is the whole reason to care
+  //     about it. Only the session name still says whose it is.
+  //   - The PROCESS arm is what removes the Discord coupling. A native Claude
+  //     install fronts as a strict three-segment version, which nothing else on
+  //     a machine looks like, so it is evidence on its own whatever the session
+  //     is called.
+  //
+  // Deliberately NOT in the process arm: `node`. An npm-global Claude install
+  // fronts as `node`, and so does every dev server, REPL and build watcher. A
+  // bare `node` pane is claimed only via the name arm, because trusting it
+  // alone would make `/clear` typeable into a webpack watcher — the exact
+  // hazard these checks exist for.
+  if (/-discord$/.test(String(pane.session || ''))) return true;
+  return /^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(pane.command || '').trim());
 }
 
 function isAgentSession(pane) {

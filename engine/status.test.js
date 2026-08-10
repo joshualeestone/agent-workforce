@@ -400,3 +400,55 @@ test('an empty roster is a board with no agents, not a crash', () => {
     setPaneCapture(null);
   }
 });
+
+test('an agent that is not a Discord bot is still an agent', () => {
+  // ⚠️ The roster used to require `/-discord$/` and nothing else, so a Claude
+  // agent in a session called anything else was invisible to every check here:
+  // not restartable, not typeable, effectively unmanaged.
+  //
+  // That is not an inconvenience, it is a contradiction of the product's own
+  // second paragraph ("Not Discord as the surface"), and it is why the install
+  // instructions grew a Discord developer-portal step. Reinstating the suffix
+  // requirement fails this test.
+  const [plain] = parsePanes('research\t0.0\t2.1.212\t0\tSummarising');
+  assert.equal(isFleetSession(plain), true, 'a Claude agent was rejected for its session name');
+  assert.equal(isAgentSession(plain), true);
+  assert.equal(isAgentPane(plain), true, 'a real agent could not be typed into');
+});
+
+test('a bare node pane is NOT claimed without the session convention', () => {
+  // ⚠️ The one command that cannot be trusted on its own. An npm-global Claude
+  // install fronts as `node`, and so does every dev server, REPL and build
+  // watcher on the machine. Adding `node` to the process arm would make
+  // `/clear` typeable into a webpack watcher — the exact hazard these checks
+  // exist for — so it is claimed only via the session name.
+  const [dev] = parsePanes('devserver\t0.0\tnode\t0\tvite');
+  assert.equal(isFleetSession(dev), false, 'a dev server was claimed as an agent');
+  assert.equal(isAgentPane(dev), false);
+
+  // With the convention, it is ours: this is what an npm-global install looks
+  // like on this fleet.
+  const [npmAgent] = parsePanes('writer-discord\t0.0\tnode\t0\tWriting');
+  assert.equal(isAgentSession(npmAgent), true);
+  assert.equal(isAgentPane(npmAgent), true);
+});
+
+test('both arms are load-bearing: neither alone covers the cases', () => {
+  // ⚠️ Pins WHY there are two arms rather than one, because each looks
+  // redundant next to the other and deleting either passes a casual read.
+  //
+  // Drop the NAME arm and a crashed agent stops being ours — its pane is a
+  // shell, there is no Claude process to see, and restart is the entire reason
+  // to care about it.
+  const [crashed] = parsePanes('kappa-discord\t0.0\tzsh\t0\t');
+  assert.equal(isFleetSession(crashed), true, 'a crashed agent lost its Restart button');
+  assert.equal(isAgentSession(crashed), false, 'a shell was reported as a running agent');
+
+  // Drop the PROCESS arm and the Discord coupling comes straight back.
+  const [native] = parsePanes('research\t0.0\t2.1.212\t0\tx');
+  assert.equal(isFleetSession(native), true);
+
+  // And neither arm claims something that is plainly not ours.
+  const [stranger] = parsePanes('kappa\t0.0\tzsh\t0\t');
+  assert.equal(isFleetSession(stranger), false);
+});
