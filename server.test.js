@@ -52,10 +52,19 @@
 //      comment said they were sandboxed. Reads only, nothing was corrupted, but
 //      the comment was the thing a future author would trust before deciding a
 //      write was safe. Both modules now read this one variable.
-//   3. `store.ROOT` -> avatars and profiles. NOT sandboxed, no variable for it.
-//      That is why no test here sends a PUT or DELETE to an avatar or profile
-//      route, and why any test that does must sandbox it first. A reviewer once
-//      deleted a real avatar by assuming one variable covered everything.
+//   3. `store.ROOT` -> avatars and profiles. ⚠️ THIS WAS "NOT sandboxed, no
+//      variable for it", and that is no longer true: `engine/store.js` now
+//      honours `AGENT_WORKFORCE_DATA` too, so all three roots travel together.
+//      Tests on this branch DO write to the avatar store and PUT /profile,
+//      which the old wording forbade — the header was stale for exactly as long
+//      as it took someone to read it and stop. A reviewer once deleted a real
+//      avatar by assuming one variable covered everything; the fix is that it
+//      now does, not that the warning stands.
+//   4. `AGENT_WORKFORCE_CONFIG_ROOT` -> the Claude config root that holds the
+//      agent registry and transcripts. ⚠️ NOT set in this file, so /api/status
+//      reads the operator's real `~/.claude` on every run here. Reads only —
+//      but `engine/status.test.js` sets it, and this file should, and the
+//      asymmetry is worth knowing before adding a test that writes.
 const os = require('node:os');
 const fs = require('node:fs');
 const nodePath = require('node:path');
@@ -106,7 +115,20 @@ async function anyAgent(t) {
     t.skip('no live agents on this machine, so the write routes cannot be exercised');
     return null;
   }
-  return encodeURIComponent(agents[0].sessionName);
+  // ⚠️ A TIED agent, or this goes RED on exactly the machine this branch exists
+  // to serve. It returned the alphabetically-first of every tmux session, while
+  // the write routes now additionally require the name to be tied — so on any
+  // machine whose first-sorted session is a plain shell, or the non-Discord
+  // agent this branch supports, eight write-route tests get 404 where they
+  // assert 200. Green here only because all thirteen sessions on this machine
+  // carry the suffix, which is the machine-dependence this suite condemns
+  // elsewhere.
+  const tied = agents.find((a) => a.isNamedOurs);
+  if (!tied) {
+    t.skip('no agent on this machine can be tied to its name, so the write routes cannot be exercised');
+    return null;
+  }
+  return encodeURIComponent(tied.sessionName);
 }
 
 async function req(path, options) {
@@ -819,14 +841,31 @@ test('the status payload carries the STORE value for each agent, not a placehold
     const agents = JSON.parse(res.body).agents || [];
     assert.ok(agents.length > 0, 'no agents on the board, cannot verify enrichment');
 
-    for (const a of agents) {
+    // ⚠️ TIED agents only, and this test was silently machine-dependent without
+    // it. `/api/status` now skips `read()` for a pane it cannot tie to its name,
+    // so this passed here only because all thirteen sessions on this machine
+    // carry the `-discord` suffix — i.e. the suite's green status depended on
+    // the exact coupling this branch exists to remove, and it would go red on
+    // any machine running the non-Discord agent the branch was written for.
+    const tied = agents.filter((a) => a.isNamedOurs);
+    assert.ok(tied.length > 0, 'no tied agents on the board, cannot verify enrichment');
+
+    for (const a of tied) {
       assert.equal(a.commitments.state, 'holding', `${a.sessionName} did not carry the store value`);
       assert.equal(a.commitments.because, 'stubbed for this test');
       assert.deepEqual(a.commitments.commitments.map((x) => x.what), [`pending for ${a.sessionName}`],
         'the block must be this agent value, not a shared placeholder');
     }
-    assert.deepEqual(seen.sort(), agents.map((a) => a.sessionName).sort(),
-      'read() must be called once per agent, with that agent sessionName');
+    assert.deepEqual(seen.sort(), tied.map((a) => a.sessionName).sort(),
+      'read() must be called once per TIED agent, with that agent sessionName');
+
+    // ⚠️ And an untied agent must NOT have been read. This looped over the LIVE
+    // board, which has zero untied agents on this machine — so the loop body
+    // never ran and the assertion proved nothing, which is the same
+    // machine-dependence the comment above condemns. Asserted below against a
+    // stubbed roster instead, where both shapes are guaranteed present.
+    // (The hermetic version lives in '/api/status reads the store for a tied
+    // agent and not for an untied one', below.)
   } finally {
     commitments.read = real;
   }
@@ -1094,4 +1133,532 @@ test('the status payload carries staleness but NOT the instruction text', async 
 
   assert.ok(JSON.stringify(body).length < 200 * 1024,
     `status payload is ${JSON.stringify(body).length} bytes; the text is probably riding along`);
+});
+
+test('a session that merely borrows an agent name cannot rewrite its instructions', async () => {
+  // ⚠️ PRE-EXISTING and reachable on main. `knownAgent` gated every write route
+  // on `sessionName`, and the roster publishes an untied pane's raw session
+  // name — so with the real `angel-discord` down, a stranger's
+  // `tmux new -s angel` made `knownAgent('angel')` true and unlocked
+  // `PUT /api/agent/angel/instructions`, which rewrites the CLAUDE.md the REAL
+  // agent boots from. The avatar and profile routes were open the same way,
+  // against the real agent's stored data.
+  //
+  // Deleting the `isNamedOurs === true` clause in `knownAgent` fails here.
+  const status = require('./engine/status');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    assert.ok(card, 'the fixture did not produce the borrowed-name card');
+    assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
+
+    for (const route of ['instructions', 'profile']) {
+      const res = await req(`/api/agent/angel/${route}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(route === 'instructions' ? { text: 'rewritten by a stranger' } : { role: 'rewritten' }),
+      });
+      assert.equal(res.status, 404,
+        `PUT /${route} was accepted for a session that merely shares the name, so a `
+        + 'stranger can rewrite what the real agent boots from');
+    }
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('an untied card carries no commitments and no boot-file hash of the name it borrowed', async () => {
+  // ⚠️ The snapshot closed this leak and `/api/status` reopened it one layer up.
+  // Both enrichments are keyed on the NAME, so an untied stranger's card came
+  // back carrying the real agent's commitment TEXT, its boot-file hash, and a
+  // `startedAt` read out of the real agent's transcript — while the snapshot's
+  // own sentence promises "we will not read another agent's transcript for it".
+  //
+  // It also reinstates the wrong-card-cost failure the engine documents as
+  // measured: the restart dialog reads these, so the cost shown would be the
+  // real agent's while the pane acted on is a stranger's.
+  //
+  // Deleting either gate in the /api/status map fails here.
+  const status = require('./engine/status');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    assert.ok(card, 'the fixture did not produce the borrowed-name card');
+    assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
+
+    assert.deepEqual(card.commitments.commitments, [],
+      'the untied card carried the real agent’s commitment text as the cost of '
+      + 'clearing a pane that is not theirs');
+    assert.equal(card.commitments.state, 'unknown');
+
+    assert.equal(card.instructions.version, null,
+      'the untied card carried the real agent’s boot-file hash');
+    assert.equal(card.instructions.startedAt, null,
+      'the untied card carried a startedAt read out of the real agent’s transcript');
+    // ⚠️ And it must not ADVERTISE an edit the route will then refuse.
+    assert.equal(card.instructions.editable, false,
+      'the untied card offered an Edit that knownAgent 404s, which is worse than '
+      + 'refusing plainly');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('GET /commitments refuses a name a stranger is currently claiming, but not a stopped agent', async () => {
+  // ⚠️ The THIRD name-keyed consumer. The comment at `knownAgent` that exists
+  // specifically to correct an earlier claim of completeness listed two and
+  // missed this one, in the same file — twice now a correction has itself been
+  // incomplete.
+  //
+  // The first fix used `knownAgent`, which was too strict: a record's purpose is
+  // to outlive the conversation, so a STOPPED agent must still be readable. The
+  // danger is narrower — a pane on the board under this name that is not tied
+  // to it — and both halves are asserted here, because a gate that refuses
+  // everything would also have passed the first half.
+  const status = require('./engine/status');
+
+  // Half one: a stranger claiming the name. Must refuse.
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 404,
+      'the route handed out the real agent’s commitment text while a stranger '
+      + 'held that name on the board');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+
+  // Half two: nobody claiming it at all. Must still read.
+  status.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 200,
+      'a record for an agent that is not running became unreadable, which is the '
+      + 'opposite of what a record is for');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a borrowed name is refused by every name-keyed read, including its alias spellings', async () => {
+  // ⚠️ FOUR consumers, found one at a time, each time by a comment that claimed
+  // to enumerate them. This test names all four so the next one is added here
+  // rather than discovered later.
+  //
+  // And the alias half is the sharper failure: `borrowedName` compared the
+  // SANITISED key against the RAW sessionName, so a stranger on
+  // `tmux new -s Angel` or `tmux new -s an.gel` slipped past entirely — the
+  // gate's own twenty-line comment was claiming a protection that was actually
+  // coming from an independent guard in commitments.js.
+  const status = require('./engine/status');
+
+  // ⚠️ The avatar must EXIST for the borrowed name, or the 404 below proves
+  // nothing — the route answers 404 for a missing picture too, so without this
+  // the assertion passed with the gate deleted. Third time on this work that a
+  // test asserted an absence that was already absent.
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const avatarDir = nodePathx.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'avatars');
+  fsx.mkdirSync(avatarDir, { recursive: true });
+  fsx.writeFileSync(nodePathx.join(avatarDir, 'angel.png'), 'seeded', 'utf8');
+
+  // Control: with nobody claiming the name, the picture IS served — so the 404s
+  // below are the gate refusing, not the file being absent.
+  const status0 = require('./engine/status');
+  status0.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status0.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const ok = await req('/api/agent/angel/avatar');
+    assert.equal(ok.status, 200,
+      'the seeded avatar is not reachable at all, so the refusals below prove nothing');
+  } finally {
+    status0.setPaneSource(null);
+    status0.setPaneCapture(null);
+  }
+
+  for (const strangerSession of ['angel', 'Angel', 'an.gel']) {
+    status.setPaneSource(() => `${strangerSession}\t0.0\t2.1.212\t0\tstranger`);
+    status.setPaneCapture(() => 'Worked for 1m\n> \n');
+    try {
+      for (const route of ['commitments', 'avatar']) {
+        const res = await req(`/api/agent/angel/${route}`);
+        assert.equal(res.status, 404,
+          `GET /${route} served the real agent's data while '${strangerSession}' held the name`);
+      }
+      for (const [route, body] of [['instructions', { text: 'x' }], ['profile', { role: 'x' }]]) {
+        const res = await req(`/api/agent/angel/${route}`, {
+          method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        });
+        assert.equal(res.status, 404,
+          `PUT /${route} was accepted while '${strangerSession}' held the name`);
+      }
+    } finally {
+      status.setPaneSource(null);
+      status.setPaneCapture(null);
+    }
+  }
+});
+
+test('a roster we cannot read refuses the name-keyed reads rather than serving them', async () => {
+  // ⚠️ `borrowedName`'s catch returned `false` — "nobody is claiming this name"
+  // — so a `snapshot()` that throws SERVED the record. That is the permissive
+  // answer asserted from an absence of information, the exact move `parsePanes`
+  // and `classify` were both changed to refuse in this same branch, reintroduced
+  // one layer up. `knownAgent`'s identical catch already failed closed.
+  const status = require('./engine/status');
+  status.setPaneSource(() => { throw new Error('tmux is not answering'); });
+  try {
+    for (const route of ['commitments', 'avatar']) {
+      const res = await req(`/api/agent/angel/${route}`);
+      assert.equal(res.status, 404,
+        `GET /${route} served the record while we could not read the roster at all`);
+    }
+  } finally {
+    status.setPaneSource(null);
+  }
+});
+
+test('the gate checks do not capture every pane on every request', async () => {
+  // ⚠️ A real regression, measured rather than suspected. `borrowedName` called
+  // `snapshot()`, which is a synchronous fan-out: one `list-panes` plus one
+  // `capture-pane` PER AGENT plus transcript reads. On the avatar route that
+  // sits on a polling path — the board rebuilds its grid every five seconds and
+  // avatar responses are `no-store`, so every card refetches each tick — which
+  // put ~0.65s of blocked event loop and ~170 extra `capture-pane` invocations
+  // against live agents into every tick on a thirteen-agent fleet.
+  //
+  // Memoising `snapshot()` was the other option and it was WRONG: it makes a
+  // gate answer from a stale roster, which is the wrong direction for a check
+  // deciding whose data to hand out. Two tests caught it immediately.
+  // ⚠️ Asserted through the ROUTE, not by calling the helper. Testing that
+  // `paneRoster()` captures nothing says nothing about whether the gate uses
+  // it — the first version of this test did exactly that, and reverting the
+  // gate to `snapshot()` left it green.
+  const status = require('./engine/status');
+  let captures = 0;
+  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tx');
+  status.setPaneCapture(() => { captures += 1; return 'Worked for 1m\n> \n'; });
+  try {
+    captures = 0;
+    await req('/api/agent/zeta/avatar');
+    assert.equal(captures, 0,
+      'an avatar request captured every pane, so the board shells out once per '
+      + 'agent per card on a five-second polling path');
+
+    captures = 0;
+    await req('/api/agent/zeta/commitments');
+    assert.equal(captures, 0, 'a commitments read captured every pane');
+
+    // The comparison is meaningless if nothing captures at all.
+    captures = 0;
+    status.snapshot();
+    assert.ok(captures > 0, 'snapshot captured nothing, so the assertions above prove nothing');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a live agent is not taken offline by a stranger holding an alias of its name', async () => {
+  // ⚠️ The alias fix corrected the LEAK direction and left the AVAILABILITY
+  // direction wrong. `.find()` returned whichever card sorted first, so with
+  // the real `angel-discord` up AND a colleague's `tmux new -s Angel` open for
+  // unrelated work, "Angel" sorted before "Angel Bridge" and the live agent's
+  // avatar and commitment record went offline — and the restart dialog this
+  // gate exists for would have shown "no agent by that name" as the cost of
+  // clearing a healthy agent.
+  //
+  // The predicate is "some untied card claims this key AND no tied card does",
+  // not "the first card claiming it is untied".
+  const status = require('./engine/status');
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const res = await req('/api/agent/angel/commitments');
+    assert.equal(res.status, 200,
+      'a healthy agent lost its own record because a stranger held an alias '
+      + 'spelling of its name');
+
+    const put = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'still editable' }),
+    });
+    assert.equal(put.status, 200, 'a healthy agent became uneditable for the same reason');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('/api/status reads the store for a tied agent and not for an untied one', async () => {
+  // ⚠️ Hermetic, because both halves of this were unpinned by accident of this
+  // machine. The tied half passed only because `commitments.read` for an
+  // unseeded name returns `{state:'unknown', commitments:[]}`, which is
+  // byte-identical to what the gate substitutes — so deleting the gate changed
+  // nothing observable. The untied half looped over the live board, which has
+  // zero untied agents here, so its body never ran.
+  //
+  // A stubbed roster gives one of each, and a stub value that cannot be
+  // confused with the gate's substitute.
+  const commitments = require('./engine/commitments');
+  const status = require('./engine/status');
+  const real = commitments.read;
+  const seen = [];
+  commitments.read = (name) => {
+    seen.push(name);
+    return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${name}` }], reportedAt: new Date().toISOString(), because: 'stubbed for this test' };
+  };
+  status.setPaneSource(() => [
+    'tied-discord\t0.0\t2.1.212\t0\tworking',
+    'untied\t0.0\t2.1.212\t0\tworking',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const agents = JSON.parse((await req('/api/status')).body).agents || [];
+    const tied = agents.find((a) => a.sessionName === 'tied');
+    const untied = agents.find((a) => a.sessionName === 'untied');
+    assert.ok(tied && untied, 'the stubbed roster did not produce both shapes');
+
+    assert.equal(tied.commitments.because, 'stubbed for this test',
+      'the tied agent did not get the store value');
+    assert.ok(seen.includes('tied'), 'read() was never called for the tied agent');
+
+    assert.notEqual(untied.commitments.because, 'stubbed for this test',
+      'the untied agent was handed the real store value for the name it borrowed');
+    assert.ok(!seen.includes('untied'),
+      'read() was called for an untied agent, so the gate is not at the call site');
+  } finally {
+    commitments.read = real;
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a stranger cannot fetch the real agent’s picture under the stranger’s own spelling', async () => {
+  // ⚠️ The leak reopened by the availability fix, and the URL that matters: a
+  // consumer building a request from the UNTIED card uses that card's OWN
+  // sessionName. Asking per-KEY ("does any tied card claim `angel`?") answered
+  // yes — the real agent does — so the gate allowed it, and `avatarPath`
+  // sanitised `Angel` straight back down to the real agent's file.
+  //
+  // Three directions wrong on one predicate: leak, then availability, then leak
+  // again under a different spelling. The question is per-CARD.
+  const status = require('./engine/status');
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const avatarDir = nodePathx.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'avatars');
+  fsx.mkdirSync(avatarDir, { recursive: true });
+  fsx.writeFileSync(nodePathx.join(avatarDir, 'angel.png'), 'seeded', 'utf8');
+
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // The stranger's own spelling must be refused...
+    const leak = await req('/api/agent/Angel/avatar');
+    assert.equal(leak.status, 404,
+      'the real agent’s picture was served under the stranger’s own session name');
+
+    // ...while the real agent stays reachable under its own.
+    const ok = await req('/api/agent/angel/avatar');
+    assert.equal(ok.status, 200,
+      'the fix took the healthy agent offline again, which is the direction the '
+      + 'previous version broke');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('tmux being unreachable refuses the name-keyed reads rather than serving them', async () => {
+  // ⚠️ The catch in `borrowedName` was documented as failing closed, and the
+  // only input that reached it was an injected throw. The REALISTIC failure —
+  // tmux dead, tmux not installed, the five-second timeout expiring — goes
+  // through `sh()`, which swallows it and returns null, so the roster came back
+  // EMPTY and the gate read that as "nobody is claiming this name" and served.
+  //
+  // A guard whose closed path production cannot take is not a guard. This drives
+  // the production shape: the source returns null, not a throw.
+  const status = require('./engine/status');
+  status.setPaneSource(() => null);
+  try {
+    for (const route of ['commitments', 'avatar']) {
+      const res = await req(`/api/agent/angel/${route}`);
+      assert.equal(res.status, 404,
+        `GET /${route} served the record when tmux could not be asked at all`);
+    }
+  } finally {
+    status.setPaneSource(null);
+  }
+});
+
+test('the detail panel withdraws the writes it cannot perform, and clears what it cannot show', () => {
+  // ⚠️ BEHAVIOURAL, not source-shape. The first version asserted that
+  // `openDetail` mentions `isNamedOurs`, that the load line contains `if`, and
+  // that a withdrawing function exists and is called. All four held while the
+  // instruction editor stayed live holding the PREVIOUS agent's boot file —
+  // it pinned the incomplete fix rather than the behaviour.
+  //
+  // So: run the real function against a fake DOM and look at what it leaves.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  const ids = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save',
+    'd-instr-foot', 'd-instr-stale', 'd-instr-outdated', 'd-instr-prev', 'd-instr-msg', 'd-untied'];
+  const els = {};
+  for (const id of ids) els[id] = { id, disabled: false, hidden: false, value: '', textContent: '' };
+  const document = { getElementById: (id) => els[id] || null };
+
+  // ⚠️ Brace-matched, not "up to the next function". The first version sliced
+  // to the next `function` keyword and swept up the real `let INSTR_VERSION`
+  // declaration sitting between them, which collided with the prelude — a
+  // reminder that a source-extracting test is itself code that can be wrong.
+  const start = script.indexOf('function setWritesOffered');
+  assert.ok(start > -1, 'setWritesOffered vanished');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of setWritesOffered');
+
+  // eslint-disable-next-line no-new-func
+  const run = new Function('document', `let INSTR_READY = true; let INSTR_VERSION = 'v1';
+    ${script.slice(start, end)}
+    return (a, tied) => { setWritesOffered(a, tied); return { INSTR_READY, INSTR_VERSION }; };`)(document);
+
+  // Simulate the dangerous sequence: a tied agent's file is on screen, then an
+  // untied card is opened.
+  els['d-instr'].value = "the real agent's boot file";
+  els['d-instr-foot'].hidden = false;
+  const after = run({ sessionName: 'Angel', name: 'Angel Bridge' }, false);
+
+  assert.equal(els['d-instr'].value, '',
+    "the previous agent's instruction text was left on screen for a card we "
+    + 'cannot tie to that name');
+  assert.equal(els['d-instr'].disabled, true, 'the instruction editor stayed live');
+  assert.equal(els['d-instr-save'].disabled, true, 'Save stayed live');
+  assert.equal(els['d-instr-foot'].hidden, true, "the real agent's file path stayed on screen");
+  assert.equal(after.INSTR_READY, false, 'the editor still believes it holds a loaded file');
+  assert.equal(after.INSTR_VERSION, null, "the previous agent's version stamp survived");
+
+  for (const id of ['d-file', 'd-remove', 'd-save', 'd-role']) {
+    assert.equal(els[id].disabled, true, `${id} was still offered`);
+  }
+  assert.equal(els['d-untied'].hidden, false, 'nothing explained why the writes are gone');
+  // ⚠️ And the sentence must not be a tautology. For an untied card the display
+  // name is FORCED to the raw session name, so a message built from both read
+  // "we found a session called research, but not the one research's own session
+  // runs in" — the only message the legitimate non-Discord agent this branch
+  // most affects would ever see.
+  assert.match(els['d-untied'].textContent, /-discord/,
+    'the explanation does not say what session it expected, so it reads as a '
+    + 'tautology for exactly the agents it is shown to');
+
+  // ⚠️ AND the call site, which this test stopped pinning when it replaced the
+  // source-shape version. Driving `setWritesOffered` in isolation proves the
+  // function is right and says nothing about whether anyone calls it — deleting
+  // `openDetail`'s three gate lines left the whole UI half of this branch
+  // reverted with the suite fully green. The behavioural test was the right
+  // move and it removed the only assertions holding the call site down.
+  //
+  // Both are needed: one proves the function does the right thing, the other
+  // proves it runs.
+  const code = script
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, ''))
+    .join('\n');
+  const openStart = code.indexOf('function openDetail');
+  assert.ok(openStart > -1, 'openDetail vanished');
+  const openBody = code.slice(openStart, code.indexOf('\nfunction ', openStart + 10));
+  assert.match(openBody, /setWritesOffered\s*\(/,
+    'openDetail no longer calls setWritesOffered, so the panel offers writes the '
+    + 'routes refuse and nothing here notices');
+  const loadLine = openBody.split('\n').find((l) => l.includes('loadInstructions('));
+  assert.ok(loadLine, 'openDetail no longer loads instructions at all');
+  assert.match(loadLine, /\bif\b[^\n]*\btied\b/,
+    'the instruction load runs unconditionally again, so opening an untied card '
+    + 'fetches and paints the real agent’s file');
+
+  // ⚠️ And the POLL must re-apply it, not just the open. The gate ran once at
+  // open, so leaving the panel up while the real session died and a stranger
+  // took the name left that agent's boot file on screen on a card that had
+  // become somebody else's — reachable by simply not closing the panel.
+  const tickStart = code.indexOf('function tick');
+  assert.ok(tickStart > -1, 'tick vanished');
+  const tickBody = code.slice(tickStart, code.indexOf('\nfunction ', tickStart + 10));
+  assert.match(tickBody, /setWritesOffered\s*\(/,
+    'the poll never re-applies the tie check, so an agent that dies while its '
+    + 'panel is open keeps offering writes for a card that is now a stranger’s');
+
+  // And a tied card gets everything back.
+  run({ sessionName: 'zeta', name: 'Zeta' }, true);
+  for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+    assert.equal(els[id].disabled, false, `${id} stayed withdrawn for a tied agent`);
+  }
+  assert.equal(els['d-untied'].hidden, true, 'the explanation stayed up for a tied agent');
+});
+
+test('every write route refuses the untied card’s own spelling while the real agent is up', async () => {
+  // ⚠️ THE defect this whole branch is about, reopened on its most dangerous
+  // half. `borrowedName` was corrected three times until it asked which CARD
+  // answers for the spelling requested; `knownAgent` was left on the old
+  // per-key form. So with the real `angel-discord` up AND a bystander's
+  // `tmux new -s Angel` open, the reads refused correctly while the writes
+  // accepted: PUT /instructions rewrote the real agent's BOOT FILE, PUT /profile
+  // overwrote its role, DELETE /avatar deleted its picture, GET /instructions
+  // handed back its full text and path.
+  //
+  // Both gates are wrappers over one predicate now, and this test exercises the
+  // write half under the untied spelling — the case no test covered.
+  const status = require('./engine/status');
+  status.setPaneSource(() => [
+    'Angel\t0.0\t2.1.212\t0\tunrelated work',
+    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+  ].join('\n'));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const refused = [
+      ['GET', '/api/agent/Angel/instructions', null],
+      ['PUT', '/api/agent/Angel/instructions', { text: 'rewritten by a bystander' }],
+      ['PUT', '/api/agent/Angel/profile', { role: 'overwritten' }],
+      ['DELETE', '/api/agent/Angel/avatar', null],
+    ];
+    for (const [method, path, body] of refused) {
+      const res = await req(path, body === null
+        ? (method === 'GET' ? undefined : { method })
+        : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(res.status, 404,
+        `${method} ${path} was accepted under the untied card's own spelling, so a `
+        + 'bystander can act on the real agent');
+    }
+
+    // ⚠️ And the real agent stays writable under its own name, or the fix has
+    // simply broken the feature — the direction a previous version of this
+    // predicate got wrong.
+    const ok = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'still editable' }),
+    });
+    assert.equal(ok.status, 200, 'the real agent became uneditable under its own name');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
 });
