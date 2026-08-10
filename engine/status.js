@@ -186,7 +186,20 @@ function isNativeClaude(command) {
  */
 function isClaudeCommand(command) {
   const c = String(command || '').trim();
-  return isNativeClaude(c) || c === 'claude' || c === 'claude.exe' || c === 'node';
+  return isUnambiguousClaude(c) || c === 'node';
+}
+
+/**
+ * Claude, with no other plausible reading of the command name.
+ *
+ * ⚠️ The distinction that matters to `rank`: `node` is shared with every dev
+ * server, REPL and build watcher on the machine, so it cannot outrank an
+ * agent's own crashed shell. A version string, `claude` and `claude.exe` are
+ * shared with nothing, so they must.
+ */
+function isUnambiguousClaude(command) {
+  const c = String(command || '').trim();
+  return isNativeClaude(c) || c === 'claude' || c === 'claude.exe';
 }
 
 function isFleetSession(pane) {
@@ -458,15 +471,24 @@ function isNamedOurs(pane) {
  * (tier 3), still appears, and is still typeable. The name only settles a TIE
  * against a same-named session that does carry the suffix.
  */
-const RANK_NAMED_RUNNING = 0;   // ours by name, definitely Claude
+const RANK_NAMED_RUNNING = 0;   // ours by name, unambiguously Claude
 const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
-const RANK_NAMED_LEGACY = 2;    // ours by name, ambiguous process (`node`)
+const RANK_NAMED_LEGACY = 2;    // ours by name, AMBIGUOUS process — `node` only
 const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
 const RANK_NONE = 4;
 
 function rank(pane) {
   if (isNamedOurs(pane)) {
-    if (isNativeClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
+    // ⚠️ `claude` and `claude.exe` belong UP HERE with the version string, not
+    // down with `node`. Demoting the whole legacy set below a crashed shell
+    // over-corrected: `node` is ambiguous because a dev server looks identical,
+    // but a pane whose command is literally `claude` is not ambiguous at all.
+    // Measured after the first version of this swap: `zeta-discord:0.0 zsh`
+    // plus `zeta-discord:0.1 claude` picked the SHELL, so a healthy running
+    // agent was reported dead and Clear and Compact were refused for it — and
+    // `classify` disagreed, reporting `claude` as running. One fact, two
+    // answers, in the two functions this file most recently unified.
+    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
     // `isAgentSession` accepts these too, but they are weaker: `node` is what a
     // dev server looks like, and inside our own session it must not outrank the
     // pane that is unambiguously Claude.

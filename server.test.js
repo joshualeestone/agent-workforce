@@ -2133,17 +2133,41 @@ test('the screenshot fixture roster is a shape the product actually produces', (
   // What still has to hold is that each agent's verdicts follow from its own
   // state, so the fixture cannot depict a permission the product would not
   // grant.
+  // ⚠️ Compare the fixture against the PRODUCT'S OWN answer, not against a
+  // re-derived expectation. `expected = action === 'restart' ? true : actionable`
+  // hardcoded that every fixture agent must be restartable — which structurally
+  // FORBIDS adding an untied agent, and so made the untied warning
+  // ("This may not be X's conversation") unphotographable. That is the same
+  // defect this test's own comment records fixing for the refusing state, and
+  // it was reintroduced one line below for the untied one.
+  //
+  // Asking `verdictFor` twice would assert nothing, so the fixture is checked
+  // for SHAPE — every agent carries a verdict for all three actions, and the
+  // fields the product computes from are present — while the values come from
+  // the product.
   for (const agent of fixture.AGENTS) {
-    const actionable = agent.state === 'idle' || agent.state === 'working';
+    for (const field of ['sessionName', 'state', 'isNamedOurs', 'isFleetSession', 'isAgentPane']) {
+      assert.ok(field in agent,
+        `the fixture's ${agent.sessionName} has no ${field}, so verdictFor cannot `
+        + 'answer for it the way it answers for a real agent');
+    }
     for (const action of ['compact', 'clear', 'restart']) {
-      const verdict = lifecycle.mayTypeInto(action, agent);
-      const expected = action === 'restart' ? true : actionable;
-      assert.equal(verdict.ok, expected,
-        `the fixture's ${agent.sessionName} (${agent.state}) got ${verdict.ok} for `
-        + `${action} but the product gives ${expected}, so a screenshot of it `
-        + 'shows a state the product does not produce');
+      const verdict = lifecycle.verdictFor(action, agent);
+      assert.equal(typeof verdict.ok, 'boolean',
+        `verdictFor gave no usable answer for the fixture's ${agent.sessionName}`);
+      if (!verdict.ok) {
+        assert.ok(verdict.because,
+          `${agent.sessionName}.${action} is refused with no reason, so the `
+          + 'screenshot would show a disabled button and no explanation');
+      }
     }
   }
+
+  // ⚠️ And the fixture must CARRY an untied agent, or the most consequential
+  // warning on the screen has no picture and no rendering test.
+  assert.ok(fixture.AGENTS.some((a) => a.isNamedOurs === false),
+    'the fixture has no untied agent, so the "this may not be that agent\u2019s '
+    + 'conversation" warning cannot be photographed or rendered by anything');
 
   // And at least one of each, so both the offered and refused renderings can be
   // photographed at all.
@@ -2573,4 +2597,36 @@ test('the fixture renders the same verdicts the product does, not a subset', () 
     'mayTypeInto alone was expected to allow this shape');
   assert.equal(lifecycle.verdictFor('clear', unreachable).ok, false,
     'verdictFor was expected to refuse a name perform cannot form a command for');
+});
+
+test('the route refuses an unreachable name with the same verdict the board shows', async () => {
+  // ⚠️ The route asked `mayTypeInto` — gate 3 of three — while `verdictFor`'s
+  // docstring claimed all three ran "in the order the route applies them". They
+  // did not. A session named `_bot-discord` passes `safeKey` (which keeps a
+  // leading underscore) and passes `mayTypeInto`, so it reached `perform` and
+  // was stopped inside `lifecycle` by `safeServiceName`. Safe, but by a
+  // different mechanism than every comment described, and with a different
+  // sentence than the board was showing for the same agent.
+  //
+  // Deleting the `verdictFor` call at the route fails here.
+  const board = JSON.parse((await req('/api/status')).body);
+  const unreachable = (board.agents || []).find((a) => a.sessionName === '_bot');
+  assert.ok(unreachable, 'the fixture lost its unreachable-name agent');
+  assert.equal(unreachable.may.clear.ok, false, 'the board should already refuse this one');
+
+  // ⚠️ The REAL token. The confirmation check runs before the verdict, so a
+  // missing one answers 400 and this test would pass on a refusal that has
+  // nothing to do with reachability.
+  const res = await req('/api/agent/_bot/clear', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ holding: unreachable.commitments.token }),
+  });
+  assert.equal(res.status, 409, `expected a refusal, got ${res.status}: ${res.body}`);
+
+  // ⚠️ And the SAME sentence. Two surfaces refusing for two different stated
+  // reasons is the drift `verdictFor` exists to remove; asserting only the
+  // status code would pass while they disagreed.
+  const body = JSON.parse(res.body);
+  assert.equal(body.because, unreachable.may.clear.because,
+    'the route and the board refused the same action with different reasons');
 });

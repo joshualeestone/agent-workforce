@@ -919,7 +919,14 @@ const server = http.createServer((req, res) => {
         // `tmux list-panes -a`, which is EVERY pane on the machine, so without
         // this `/clear` and Enter could be typed into a plain shell or an
         // editor, where the text is executed rather than read as a command.
-        const allowed = lifecycle.mayTypeInto(action, agent);
+        // ⚠️ `verdictFor`, the same function `/api/status` publishes `may` from.
+        // The route asked `mayTypeInto` — gate 3 of three — while `verdictFor`'s
+        // docstring claimed all three ran "in the order the route applies
+        // them". They did not: a name `canReach` refuses reached `perform` and
+        // was stopped there instead, safely but by a different mechanism than
+        // the comment described. One function decides for both surfaces now, so
+        // the button and the route cannot disagree by construction.
+        const allowed = lifecycle.verdictFor(action, agent);
         if (!allowed.ok) {
           sendJson(res, 409, {
             action,

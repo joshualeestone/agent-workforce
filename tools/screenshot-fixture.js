@@ -227,6 +227,48 @@ const AGENTS = [
       version: 'sha256:fixture',
     },
   },
+  {
+    sessionName: 'finn',
+    name: 'Finn',
+    nameDerived: true,
+    role: 'invoices',
+    modelName: 'Claude Sonnet 5',
+    // ⚠️ An UNTIED agent: a Claude process in a session whose name does not
+    // carry the suffix, so nothing ties this pane to the record filed under the
+    // name. The real agent may be dead with a stranger's session standing in.
+    //
+    // Present because a test forbade it. `expected = action === 'restart' ?
+    // true : actionable` hardcoded that every fixture agent must be restartable,
+    // which made the "This may not be Finn's conversation" warning — the newest
+    // and most consequential copy on the most dangerous screen — impossible to
+    // photograph and impossible to render anywhere. Exactly the defect that
+    // test's own comment records fixing for the refusing state, one line below.
+    state: 'idle',
+    stateConfidence: 'scraped',
+    because: 'it finished and is waiting for you',
+    task: 'Reconciling the March invoices',
+    isAgentPane: true,
+    isAgentSession: true,
+    isFleetSession: true,
+    isNamedOurs: false,
+    hasAvatar: false,
+    target: 'finn:0.0',
+    context: { tokens: 210000, percent: 21, confidence: 'structured', because: 'read from the transcript' },
+    commitments: {
+      state: 'holding',
+      because: 'it reported these itself',
+      reportedAt: NOW,
+      token: 'holding:fixture333333333333333333333333',
+      commitments: [
+        { id: 'f1', what: 'Chase the two unpaid March invoices', createdAt: NOW, source: 'agent' },
+      ],
+    },
+    instructions: {
+      state: 'current',
+      because: 'this agent started after the file was last edited',
+      version: 'sha256:fixture',
+    },
+  },
 ];
 
 function serve(req, res) {

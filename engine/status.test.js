@@ -606,3 +606,32 @@ test('a crashed agent is reported stopped, not scraped off whatever replaced it'
       `a pane running ${command} was reported stopped, but that is Claude`);
   }
 });
+
+test('a pane running literally `claude` is not out-ranked by a shell', () => {
+  // ⚠️ The over-correction. Demoting `node` below a crashed shell was right —
+  // a build watcher must not hide a crash — but the first version demoted the
+  // whole legacy set with it, and `claude` is not ambiguous the way `node` is.
+  // Measured then: this exact pair picked the SHELL, so a healthy agent on a
+  // legacy install was reported dead and Clear and Compact were refused for it,
+  // while `classify` reported the same command as running. One fact, two
+  // answers, in the two functions this file had just unified.
+  for (const command of ['claude', 'claude.exe']) {
+    const panes = parsePanes([
+      `zeta-discord\t0.0\t-zsh\t0\t`,
+      `zeta-discord\t0.1\t${command}\t0\tSummarising`,
+    ].join('\n'));
+    const kept = onePanePerSession(panes);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].target, 'zeta-discord:0.1',
+      `a shell out-ranked a pane running ${command}, so a live agent reads as dead`);
+    assert.equal(isAgentPane(kept[0]), true);
+  }
+
+  // ⚠️ And `node` stays demoted, or this fix undoes the one it is correcting.
+  const withNode = parsePanes([
+    'zeta-discord\t0.0\tnode\t0\tbuild finished',
+    'zeta-discord\t0.1\t-zsh\t0\t',
+  ].join('\n'));
+  assert.equal(onePanePerSession(withNode)[0].target, 'zeta-discord:0.1',
+    'node stopped being treated as ambiguous, so a watcher can hide a crash again');
+});
