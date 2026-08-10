@@ -129,10 +129,20 @@ function sh(cmd, args) {
  * case the feature exists for.
  *
  * The hazard restart was actually exposed to is an unrelated session that
- * merely COLLIDES with an agent's name (`tmux new -s mikey`), and the suffix
- * test alone closes that: `mikey` is not `mikey-discord`. `restart-bot.sh`
- * refuses independently when there is no `com.<name>.discord` plist, so a name
- * that is not a real service cannot reach launchd either.
+ * merely COLLIDES with an agent's name (`tmux new -s mikey`).
+ *
+ * ⚠️ The suffix test does NOT close that on its own any more, and this comment
+ * claimed it did for one commit after it stopped being true — which is worse
+ * than saying nothing, because the claim is what stops the next reader checking.
+ * Once the process arm below was added, an impostor session RUNNING CLAUDE
+ * passes this function: `isFleetSession({session:'mikey', command:'2.1.212'})`
+ * is `true`. What actually closes the collision now is `rank`, which puts every
+ * named-ours pane above an unnamed one so the impostor cannot win the name. The
+ * gate here answers "could this be an agent at all"; `rank` answers "which pane
+ * IS this agent". Both are needed and only the second resolves a collision.
+ *
+ * `restart-bot.sh` refuses independently when there is no `com.<name>.discord`
+ * plist, so a name that is not a real service cannot reach launchd either.
  *
  * What this deliberately does NOT stop is somebody opening a session literally
  * called `<agent>-discord` by hand. That is not the accident this guards
@@ -321,29 +331,71 @@ function listPanes() {
  * which pane represents the name.
  */
 /**
+ * Does the SESSION NAME say this pane is ours?
+ *
+ * Separated from `isFleetSession` because the two arms of that function are not
+ * equally strong evidence and `rank` has to tell them apart. The name is
+ * evidence of WHOSE a pane is. A Claude process is evidence only that SOMEONE's
+ * Claude is running there.
+ */
+function isNamedOurs(pane) {
+  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+}
+
+/**
  * How much this pane deserves to be the card for its name. Lower wins.
  *
- * ⚠️ THREE tiers, and the middle one is a regression fix for the tier above it.
+ * ⚠️ FIVE tiers, because two different pairs of cases used to tie here and a tie
+ * falls through to pane index — which compares indexes across unrelated sessions,
+ * i.e. picks arbitrarily. Both ties were introduced by the commit that removed
+ * the Discord coupling from `isFleetSession`, and both were wrong-agent bugs of
+ * exactly the kind this branch exists to prevent:
  *
- * Keying the dedupe on `name` (correct: `kappa` and `kappa-discord` are one
- * agent name) meant two UNRELATED sessions could compete. The ladder then ranked
- * only "is a running agent", so when a CRASHED agent (`kappa-discord` fallen
- * back to a shell) met an unrelated `kappa` session, neither was a running agent
- * and the winner fell through to pane index — comparing indexes across two
- * sessions that have nothing to do with each other, i.e. arbitrary.
+ *   1. `tmux new -s mikey` with Claude running in it now satisfied
+ *      `isAgentSession` via the new process arm, so the impostor tied with the
+ *      real `mikey-discord` at tier 0. tmux lists `mikey` first, so the impostor
+ *      WON: the real agent vanished from the board, and the surviving card read
+ *      the real agent's commitments, typed `/clear` into the impostor's pane,
+ *      and then tombstoned the real agent's record. One conversation destroyed,
+ *      the cost of a different one displayed, and a false claim that the real
+ *      agent's holdings were gone while they were intact.
+ *   2. Inside a genuine `zeta-discord`, a `node` pane (a build watcher in a
+ *      split) tied with the real agent's version-string pane, because
+ *      `isAgentSession`'s legacy arm accepts `node` for npm-global installs.
+ *      Pane `0.0` won, so `/clear` and a bare Enter were typed into a process
+ *      that EXECUTES text rather than reading it as a slash command.
  *
- * Measured with the impostor listed first: the real `kappa-discord` agent
- * disappeared from the board entirely, and the surviving card refused all three
- * actions with "we are not confident that card is one of your agents". Both of
- * the failures this function exists to prevent, in the crashed-agent case this
- * module calls the single most valuable thing a Restart button can act on.
+ * ⚠️ The ordering principle, and the reason a crashed agent outranks a stranger:
+ * **the session name is the only evidence of WHOSE a pane is.** A Claude process
+ * in a session we cannot name is somebody else's Claude. So every named-ours
+ * pane, including one that has crashed to a shell, beats an unnamed one — which
+ * is also the case restart exists for.
  *
- * So: a running agent beats one of our sessions, which beats anything else.
+ * This does NOT re-couple anything to Discord. A non-Discord agent still ranks
+ * (tier 3), still appears, and is still typeable. The name only settles a TIE
+ * against a same-named session that does carry the suffix.
  */
+const RANK_NAMED_RUNNING = 0;   // ours by name, definitely Claude
+const RANK_NAMED_LEGACY = 1;    // ours by name, ambiguous process (`node`)
+const RANK_NAMED_CRASHED = 2;   // ours by name, fallen back to a shell
+const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
+const RANK_NONE = 4;
+
 function rank(pane) {
-  if (isAgentSession(pane)) return 0;
-  if (isFleetSession(pane)) return 1;
-  return 2;
+  const command = String((pane && pane.command) || '').trim();
+  const native = /^[0-9]+\.[0-9]+\.[0-9]+$/.test(command);
+
+  if (isNamedOurs(pane)) {
+    if (native) return RANK_NAMED_RUNNING;
+    // `isAgentSession` accepts these too, but they are weaker: `node` is what a
+    // dev server looks like, and inside our own session it must not outrank the
+    // pane that is unambiguously Claude.
+    if (isAgentSession(pane)) return RANK_NAMED_LEGACY;
+    return RANK_NAMED_CRASHED;
+  }
+
+  if (isAgentSession(pane)) return RANK_INFERRED;
+  return RANK_NONE;
 }
 
 /** `<window>.<pane>` as a sortable number pair. */

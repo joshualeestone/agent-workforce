@@ -452,3 +452,82 @@ test('both arms are load-bearing: neither alone covers the cases', () => {
   const [stranger] = parsePanes('kappa\t0.0\tzsh\t0\t');
   assert.equal(isFleetSession(stranger), false);
 });
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Two wrong-agent ties introduced by removing the Discord coupling.
+ *
+ * ⚠️ Both are name collisions where BOTH panes reached the same rank, so the
+ * winner fell through to pane index. Every pre-existing collision test used
+ * `zsh` for the impostor, which never reaches the tiers that tied — so the
+ * suite was green while the dangerous case was untested. The impostor is listed
+ * FIRST in each, because that is the order tmux produces and the order in which
+ * a tie picks the wrong pane.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+test('a name-colliding session that is ITSELF running Claude does not take over the real agent', () => {
+  // `tmux new -s mikey` + a Claude session in it. The process arm of
+  // `isFleetSession` makes this pane look like an agent, and the real agent is
+  // `mikey-discord`. Both strip to the name `mikey`.
+  const panes = parsePanes([
+    'mikey\t0.0\t2.1.212\t0\t',           // impostor, listed first
+    'mikey-discord\t0.0\t2.1.212\t0\t',   // the real agent
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1, 'the two sessions collapse to one agent name');
+  assert.equal(
+    kept[0].target, 'mikey-discord:0.0',
+    'the impostor won the tie, so keystrokes go to a stranger while the '
+    + "commitments and the tombstone are the REAL agent's",
+  );
+});
+
+test('a crashed agent still beats a stranger that is running Claude', () => {
+  // The strongest form of the same rule, and the one that says WHY the name
+  // outranks the process: `omega-discord` has fallen back to a shell, so there
+  // is no Claude in it at all. It is still ours, and restart is the entire
+  // reason to care about it. The stranger's Claude is somebody else's.
+  const panes = parsePanes([
+    'omega\t0.0\t2.1.212\t0\t',   // stranger running Claude, listed first
+    'omega-discord\t0.0\t-zsh\t0\t', // ours, crashed
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(
+    kept[0].target, 'omega-discord:0.0',
+    'a stranger running Claude outranked our own crashed agent — restart would '
+    + 'then act on the stranger, and the crashed agent is the case restart exists for',
+  );
+});
+
+test('inside our own session, a bare `node` pane does not outrank the real Claude pane', () => {
+  // `isAgentSession` accepts `node` because an npm-global Claude install fronts
+  // as it — but so does a build watcher in a split. Ranking them equal let pane
+  // 0.0 win, and `/clear` plus a bare Enter typed into `node` is EXECUTED
+  // rather than read as a slash command.
+  const panes = parsePanes([
+    'zeta-discord\t0.0\tnode\t0\t',      // build watcher in a split, listed first
+    'zeta-discord\t0.1\t2.1.212\t0\t',   // the actual agent
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(
+    kept[0].target, 'zeta-discord:0.1',
+    'a node process outranked the unambiguous Claude pane in the same session',
+  );
+});
+
+test('an agent that is not a Discord bot is still ranked and still wins its own name', () => {
+  // ⚠️ Guards the fix against over-correcting. The point of the process arm was
+  // to stop requiring `-discord`; if the rank change quietly re-coupled to it,
+  // this fails. A non-Discord agent alone under its name must still be the card.
+  const panes = parsePanes('solo\t0.0\t2.1.212\t0\t');
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].target, 'solo:0.0');
+  assert.equal(isFleetSession(kept[0]), true, 'the Discord coupling came back');
+  assert.equal(isAgentSession(kept[0]), true);
+});

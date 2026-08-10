@@ -428,8 +428,12 @@ function perform(action, agent, target) {
  * safe; it does not answer whether this card is the agent that service belongs
  * to, which is the question that was never asked.
  *
- * Restart checks `isAgentSession` rather than `isAgentPane`: the difference is
- * the copy-mode clause, which is about typing, and restart does not type.
+ * Restart checks `isFleetSession` rather than `isAgentPane`. ⚠️ This line said
+ * `isAgentSession` while the code below checked `isFleetSession` — the same fact
+ * stated two ways in one file, with the docstring naming the STRICTER of the two.
+ * A reader trusting it would believe restart requires a live Claude process,
+ * which is the opposite of the point: the crashed agent is the case restart
+ * exists for.
  */
 function mayTypeInto(action, agent) {
   if (action === 'restart') {
@@ -437,9 +441,16 @@ function mayTypeInto(action, agent) {
     // Claude process is currently running in the pane, and requiring one made
     // restart refuse a CRASHED agent — the single case the button is most
     // needed for — with the untrue sentence "we are not confident that card is
-    // one of your agents". The accident this guards against is an unrelated
-    // session colliding with an agent's name, and the `-discord` suffix test
-    // alone closes that.
+    // one of your agents".
+    //
+    // ⚠️ This is a gate, NOT a collision resolver, and it used to claim it was
+    // both ("the `-discord` suffix test alone closes that"). It does not: once
+    // `isFleetSession` grew a process arm, a stranger's session running Claude
+    // passes this check. The collision is resolved upstream in `status.rank`,
+    // which ranks every named-ours pane above an unnamed one so the impostor
+    // never becomes the card in the first place. By the time an agent reaches
+    // here it is already the winner of its name; this only asks whether that
+    // winner is plausibly ours at all.
     if (!agent || !agent.isFleetSession) {
       return { ok: false, because: 'we are not confident that card is one of your agents, so we will not restart anything under its name' };
     }

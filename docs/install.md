@@ -141,8 +141,20 @@ prompt, which nobody is sitting there to answer. The symptom is an agent that
 stops replying with no error anywhere. A newbie has no chance of diagnosing
 that, and the flag is named to discourage exactly the person who must use it.
 
-⚠️ The session name **must** end in `-discord`. The board's roster and every
-one of its safety checks key on that suffix.
+⚠️ The session name should end in `-discord`, but **not for the reason this
+document used to give.** It said the roster "and every one of its safety checks
+key on that suffix". That stopped being true: an agent is now recognised by its
+Claude process, so a session named anything at all appears on the board and is
+restartable and typeable.
+
+What the suffix still buys you, and why it is still worth doing:
+
+- **Context ring and model name.** `sessionIdFor` looks up the session registry
+  by the `-discord` filename, so without the suffix the card renders without
+  those.
+- **`restart-bot.sh`** finds the service as `com.<name>.discord`.
+- **Name collisions resolve in your favour.** If some unrelated session shares
+  the agent's name, the suffixed one wins and stays the card.
 
 ### 9. Write the launchd plist
 
@@ -286,8 +298,13 @@ Ranked by how likely, and how badly the failure hides itself:
    user, and `launchctl` reports success.
 4. **The wrong `claude` path** (step 4/8). Only visible in a log file nobody has
    been told to look at.
-5. **The session not ending in `-discord`** (step 8). The agent runs fine and is
-   invisible to the board, which reads as the board being broken.
+5. **The session not ending in `-discord`** (step 8). ⚠️ The symptom described
+   here was wrong: the agent is **not** invisible. It appears, and it can be
+   restarted and typed into. What it loses quietly is its **context ring and
+   model name**, because `sessionIdFor` still resolves the session registry by
+   the `-discord` filename. A card that renders but cannot say how full it is
+   presents as a display bug rather than a naming mistake, which is arguably
+   harder to trace than being missing outright.
 
 Every one of these presents as *silence*, and four of the five leave no error
 message anywhere the user would look. That is the real usability finding here:
