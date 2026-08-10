@@ -15,7 +15,7 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot, paneRoster } = require('./engine/status');
+const { snapshot } = require('./engine/status');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -69,76 +69,9 @@ function readBody(req) {
  * identity per agent instead of a name that is sanitised in one place and
  * verbatim in another, which is a change to the avatar and profile stores too.
  */
-/**
- * Is this name currently claimed by a pane that is NOT tied to it?
- *
- * The precise question for a READ keyed on an agent name. `knownAgent` asks
- * whether the agent is on the board, which is the wrong question for a record
- * meant to outlive the agent's conversation.
- */
-/**
- * The card that answers for this spelling, or `null` if none does.
- *
- * ⚠️ ONE predicate, because two of them diverged and the divergence was the
- * worst defect on this branch. `borrowedName` was corrected three times until
- * it asked the right question — **which CARD answers for the spelling asked
- * for**, not which cards share a sanitised key — and `knownAgent` was left on
- * the old per-key form. So with the real `angel-discord` up and a bystander's
- * `tmux new -s Angel` open, the reads refused correctly while the WRITES
- * accepted: `PUT /api/agent/Angel/instructions` rewrote the real agent's boot
- * file, `PUT .../profile` overwrote its role, `DELETE .../avatar` deleted its
- * picture, and `GET .../instructions` handed back its full text and path.
- *
- * That is the fifth time on this work that a fix stopped one layer short, and
- * it is the reason these are wrappers rather than two implementations: a lesson
- * learned by one gate has to be structurally impossible for the other to miss.
- *
- * The rule, re-derived: if a card's OWN session name is exactly what was asked
- * for, that card answers — nobody else's spelling is relevant. Only when no
- * card spells it that way do we fall back to the sanitised key, which is what
- * keeps a healthy agent reachable under its normalised name.
- */
-function claimantFor(name) {
-  const roster = paneRoster();
-  const asked = String(name);
-
-  const exact = roster.filter((a) => a.sessionName === asked);
-  if (exact.length) return exact.find((a) => a.isNamedOurs === true) || exact[0];
-
-  const key = store.safeKey(asked);
-  const claimants = roster.filter((a) => {
-    try { return store.safeKey(a.sessionName) === key; } catch { return false; }
-  });
-  if (!claimants.length) return null;
-  return claimants.find((a) => a.isNamedOurs === true) || claimants[0];
-}
-
-/**
- * Is this spelling answered by a card we cannot tie to the name it is filed
- * under? The question for a READ.
- *
- * ⚠️ Fails CLOSED. `paneRoster` throws when tmux cannot be asked, rather than
- * answering "nothing" — the realistic failure used to arrive here as an empty
- * roster and serve the record.
- */
-function borrowedName(name) {
-  try {
-    const card = claimantFor(name);
-    return Boolean(card) && card.isNamedOurs !== true;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Is this spelling answered by a card we CAN tie to its name? The question for
- * a WRITE, and the strictly stronger one: a name nobody is running is not
- * writable, while its record stays readable.
- */
 function knownAgent(name) {
   try {
-    const card = claimantFor(name);
-    return Boolean(card) && card.isNamedOurs === true;
+    return snapshot().agents.some((a) => a.sessionName === store.safeKey(name));
   } catch {
     return false;
   }
@@ -339,34 +272,15 @@ const server = http.createServer((req, res) => {
       // reported -- they come back `unknown`, and it is that value the restart
       // confirmation needs. Omitting the field for silent agents would leave
       // the caller unable to tell "nothing pending" from "never asked".
-      // ⚠️ BOTH of these are keyed on the NAME, so both need the same gate the
-      // snapshot applies to identity, model, context, avatar and profile.
-      // Without it the leak `status.js` closes is reopened one layer up: an
-      // untied stranger's card came back carrying the real agent's commitment
-      // TEXT, its boot-file hash, and a `startedAt` read out of the real
-      // agent's transcript — while the snapshot's own sentence promises "we
-      // will not read another agent's transcript for it".
-      //
-      // It also reinstates the measured wrong-card-cost failure: the restart
-      // dialog reads these, so the cost shown would be the real agent's while
-      // the pane acted on is a stranger's.
       const agents = snap.agents.map((a) => ({
         ...a,
-        commitments: a.isNamedOurs
-          ? commitments.read(a.sessionName)
-          : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
+        commitments: commitments.read(a.sessionName),
         // Staleness only, NOT the instruction text. The board polls this every
         // five seconds for every agent, and the real files run to several
         // kilobytes each -- carrying them here would put ~90KB on the wire per
         // poll to render a badge. The text is fetched once, by the detail page,
         // when someone actually opens it.
-        // ⚠️ `editable: false` matters as much as hiding the hash. The board
-        // renders an Edit affordance from this, so gating `knownAgent` without
-        // gating this left the card ADVERTISING an edit the route then 404s —
-        // offer-an-action-that-cannot-work, which is worse than refusing plainly.
-        instructions: a.isNamedOurs
-          ? instructions.staleness(a.sessionName)
-          : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
+        instructions: instructions.staleness(a.sessionName),
       }));
       body = JSON.stringify({ ...snap, agents, version });
     } catch (err) {
@@ -381,23 +295,10 @@ const server = http.createServer((req, res) => {
   }
 
   // --- avatar: read -------------------------------------------------------
-  // ⚠️ The FOURTH name-keyed consumer. The comment introducing the third calls
-  // itself "the THIRD", and the `knownAgent` comment that exists specifically to
-  // correct an earlier claim of completeness enumerates the set — both were
-  // incomplete again, in this same file. Three corrections, each missing one.
-  //
-  // Measured: with the only card under `angel` being an untied stranger,
-  // `GET /api/agent/angel/avatar` served the real agent's stored image at 200.
-  // The snapshot sets `hasAvatar: false` so today's board does not request it,
-  // but "the real agent's photograph on a stranger's card" is closed at the
-  // snapshot and open at the route, and a caller that guesses the URL gets it.
   const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(avatarGet[1]);
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
-    // Same gate as the commitments read, for the same reason: refuse only when
-    // a pane on the board is CLAIMING this name without being tied to it.
-    if (borrowedName(name)) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
     let file = null;
     try { file = store.avatarPath(name); } catch { /* invalid name */ }
     if (!file) { sendJson(res, 404, { error: 'no picture for that agent' }); return; }
@@ -533,27 +434,6 @@ const server = http.createServer((req, res) => {
     // a try or a promise catch; this one was handed straight to the socket, so
     // any future throw from the store would exit the process rather than answer
     // an error. read() is documented never to throw, and it did once.
-    // ⚠️ The THIRD name-keyed consumer, and the comment at `knownAgent` that
-    // exists specifically to correct an earlier claim of completeness listed
-    // two and missed this one — in the same file. Twice now a correction has
-    // itself been incomplete.
-    //
-    // The board does not call this route today. The restart dialog will, and it
-    // is the caller that would fetch the real agent's commitment text by name
-    // to display as the cost of clearing a stranger's pane, which is the exact
-    // measured failure this branch closes elsewhere. Gating it now costs
-    // nothing and closes it before the consumer arrives.
-    // ⚠️ NOT `knownAgent`, which was the first attempt and was too strict: it
-    // requires the agent to be on the board right now, and a record's whole
-    // purpose is to outlive the conversation — an agent that is stopped
-    // entirely must still be readable. Two tests caught that immediately.
-    //
-    // The danger is narrower than "is it running". It exists only when a pane
-    // IS on the board under this name and that pane is NOT tied to it: then the
-    // caller asking for `angel` gets the real Angel's commitment text while the
-    // card in front of them is a stranger's. If no pane claims the name at all,
-    // there is nobody to be confused with.
-    if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
       sendJson(res, 200, commitments.read(name));
     } catch {

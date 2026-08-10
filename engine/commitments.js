@@ -33,22 +33,12 @@ const store = require('./store');
  * the real app data of whoever is running them. Read once at load, so a test
  * sets it before requiring this module.
  */
-// ⚠️ This USED to move the commitment store only, leaving `store.ROOT` (avatars
-// and profiles) unsandboxed — a trap in a variable named for the whole data
-// directory. `store.js` now honours the same variable, so all three travel
-// together and this comment no longer describes a gap.
-//
-// It described one for several commits AFTER the branch that closed it, which
-// is the inverse of the failure this codebase warns about and costs the same:
-// the next reader either works around a limitation that is gone, or trusts a
-// sandbox they think is partial. Left in place only because knowing the two
-// roots now agree is worth more than silence.
-//
-// ⚠️ They agree on the VARIABLE, not on the layout: this store lives at
-// `$DATA/commitments` while avatars and profiles live at
-// `$DATA/AgentWorkforce/{avatars,profiles}`. A sandboxed run therefore does not
-// mirror the production tree, which is fine for isolation and misleading if you
-// go looking for the files.
+// ⚠️ This moves the COMMITMENT store only. `store.ROOT` still governs avatars
+// and profiles, so a test or local server that sets this is only partly
+// sandboxed. That is a trap in a variable named for the whole data directory,
+// and it is why the tests here also avoid the avatar and profile write routes
+// entirely. Moving the override onto `store.ROOT` so all three travel together
+// is tracked separately.
 const BASE = process.env.AGENT_WORKFORCE_DATA || store.ROOT;
 const DIR = path.join(BASE, 'commitments');
 

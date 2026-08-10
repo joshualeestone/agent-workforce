@@ -5,24 +5,31 @@
 **Author:** Angel
 **Date:** 2026-08-10
 
-## Why this is its own branch
+## What this is
 
-Split out of `add-restart-with-consequences`, which reached 6,878 lines across
-23 files. Ten blind review rounds on that branch found 43 issues, and **roughly
-half were defects introduced by the fix for a previous finding** — which is what
-a diff too large to hold looks like from the inside.
+The **status engine only** — how the board decides which tmux pane represents
+which agent, and what it is willing to say about each one.
 
-This half ships **no destructive route and no new UI**. It changes what the board
-*reports* about agents that already exist, so it is independently valuable and
-independently reviewable.
+It ships **no destructive route, no new UI, and no change to any consumer.** It
+changes what the board *reports* about agents that already exist, so it is
+independently valuable and independently reviewable.
+
+**Files:** `engine/status.js`, `engine/status.test.js`, and one sandbox seam in
+`engine/store.js` that the engine's own tests need.
+
+## Why it is its own branch
+
+Split out of `add-restart-with-consequences`, which reached 6,878 lines across 23
+files. Ten blind review rounds on that branch found 43 issues, and **roughly half
+were defects introduced by the fix for a previous finding** — which is what a
+diff too large to hold looks like from the inside.
+
+⚠️ **And then the split immediately earned itself**: reviewing this engine alone
+found **five defects that ten rounds on the combined branch never surfaced**,
+including a stranger's session borrowing a real agent's identity, and a crashed
+agent being reported healthy from an editor's screen text.
 
 ## What it contains
-
-`engine/status.js` and its tests, plus the consumers of what it publishes —
-`server.js` (four name-keyed reads and the write gate), `engine/store.js` (one
-sandbox seam) and `engine/commitments.js` (one corrected comment). The engine
-alone was the intent; each other file is here because gating the engine without
-gating its readers is not a fix, which this branch learned four times.
 
 - [x] **Three tiers, named and separated** — `isFleetSession` (ours, whatever is
       running), `isAgentSession` (and Claude is running), `isAgentPane` (and not
@@ -34,46 +41,39 @@ gating its readers is not a fix, which this branch learned four times.
       only evidence of whose a pane is** while a running Claude only says
       *someone's* Claude is there.
 - [x] **One definition per fact** — `isNativeClaude`, `isClaudeCommand`,
-      `isUnambiguousClaude`, `isNamedOurs`, `PANE_COLUMNS`. Every one of these
-      replaced two copies that had drifted or could.
-- [x] **`setPaneSource` / `setPaneCapture`** — test seams. Without them 19 safety
-      tests silently skipped on any machine without a live fleet.
-- [x] **`isNamedOurs` on the snapshot**, which the restart branch consumes.
+      `isUnambiguousClaude`, `isNamedOurs`, `PANE_COLUMNS`. Every one replaced
+      two copies that had drifted or could.
+- [x] **`isNamedOurs` gates what the engine will assert.** Identity, role, model,
+      context and avatar are all filed under the NAME; a pane we cannot tie to
+      that name gets none of them.
+- [x] **`setPaneSource` / `setPaneCapture` / `AGENT_WORKFORCE_CONFIG_ROOT`** —
+      test seams. Without them 19 safety tests silently skipped on any machine
+      without a live fleet, and the fixtures could not be sandboxed.
+- [x] **`paneRoster()`** — names and tie only, one tmux call and no captures, for
+      callers that need the roster on a hot path.
 
 ## The defects this fixes, all measured rather than theorised
 
 1. A name-colliding session **running Claude** could take over the real agent's
    card, so the board showed one agent's state under another's name.
 2. A bare `node` pane (a build watcher) could win the name inside a real agent's
-   session.
+   session — and `/clear` into `node` is *executed*.
 3. With the real agent dead, a stranger's session won the name by default.
-4. A `node` watcher outranked an agent's own crashed shell, **hiding the crash**.
+4. A `node` watcher outranked an agent's own crashed shell, **hiding the crash**
+   on the one card whose Restart button exists for it.
 5. **Two definitions of "a Claude process is running here"** — an allowlist and a
    six-name shell denylist — so a crashed agent whose remaining pane was `vim`
    got classified from the editor's screen text and reported healthy.
+6. **A stranger's session borrowed the real agent's identity**: name, role,
+   model, a 24% context ring at full confidence, and its photograph.
+7. A session the engine had **already rejected** still got a scraped state — a
+   `node` dev server with a confirmation prompt on screen read as `needs_you`.
+8. A truncated or empty `pane_current_command` produced a confident `stopped`
+   from a field that carried no information.
 
-## ⚠️ Deliberate scope addition: `server.js` `knownAgent`
+## ⚠️ Known cost: non-Discord agents are anonymous
 
-This branch was meant to be one file plus tests. It touches `server.js` too, in
-one function, and the reason is worth stating rather than hiding in the diff.
-
-`knownAgent` gates every **write** route on `sessionName`, and the roster
-publishes an untied pane's raw session name. So with the real `angel-discord`
-down, a stranger's `tmux new -s angel` made `knownAgent('angel')` true and
-unlocked `PUT /api/agent/angel/instructions` — **rewriting the CLAUDE.md the real
-agent boots from** — plus the avatar and profile routes against the real agent's
-stored data.
-
-**It is pre-existing and reachable on `main` today.** It is fixed here because
-the argument this branch makes about `status.js` applies verbatim to its
-consumers: publishing `isNamedOurs` and expecting someone downstream to honour it
-is not a fix. This is the only consumer in this tree and the change is one
-clause.
-
-## ⚠️ Second known cost: non-Discord agents are anonymous AND read-only
-
-**This section previously said "read-only", which understated it.** Measured on a
-session `research` with a real `workers/research/CLAUDE.md`:
+Measured on a session `research` with a real `workers/research/CLAUDE.md`:
 
 | | on `main` | on this branch |
 |---|---|---|
@@ -83,59 +83,44 @@ session `research` with a real `workers/research/CLAUDE.md`:
 | model / model name | read | *(none)* |
 | context ring | read | *(none)* |
 | avatar | shown | *(none)* |
-| profile | read | *(none)* |
-| commitments | read | *(none)* |
-| instruction staleness | read | *(none)* |
-
-They do not merely lose editing. **They lose their identity and every reading
-attached to it.** That is the largest behavioural change on a branch whose
-headline is "Discord decoupled", and it is the trade-off a reviewer is actually
-being asked to sign off on, so it belongs in the PR description rather than in a
-subsection.
 
 **Why it is nevertheless right:** every one of those readings is filed under the
 NAME, and the finding of this branch is that an untied pane has not been shown to
 be the agent that name belongs to. Reading them means showing one agent's data on
-another's card, which is the defect being fixed. Showing less is an honest
-failure; showing the wrong agent's data is not.
+another's card. Showing less is an honest failure; showing the wrong agent's is
+not.
 
-### Why it is not simply reverted
+**What would lift it:** a way for an agent to prove a pane is its own that does
+not rely on the session-name convention — a marker file written at startup, or a
+registry entry keyed on the pane. That is its own piece of work, and it is what
+"decouple from Discord" ultimately requires.
 
-Gating the write routes on `isNamedOurs` closes the borrowed-name hole and, in
-the same stroke, **removes the instruction/profile/avatar editing feature from
-any agent whose session name does not carry the suffix** — on the branch whose
-stated purpose is decoupling from that suffix.
+## ⚠️ Deliberately NOT in this PR
 
-**Why it is not simply reverted:** the two cases are indistinguishable from tmux
-alone. "A legitimate agent named `research`" and "a stranger squatting on
-`angel`'s name while `angel` is down" are both *a session with no `-discord`
-suffix and no competing claimant*. There is no evidence available here that
-separates them, and the action in question rewrites the file an agent boots from.
+`isNamedOurs` is **published and not yet consumed**. The routes and the board
+still behave as they do on `main`.
 
-**What was done instead of pretending otherwise:** the board no longer advertises
-the edit. `instructions.editable` is `false` for an untied card, so the
-affordance is absent rather than present-and-404ing. Refusing plainly beats
-offering an action that cannot work.
+That is on purpose. The consumer half — gating the read and write routes, the
+`/api/status` enrichments and the detail panel's write affordances — is a
+**separate branch and a separate PR**, because it kept finding defects in its own
+previous fixes long after the engine had settled. Five consecutive review rounds
+found nothing in the engine and something in the consumers each time.
 
-**What would lift it:** a way to tie a pane to a name that does not rely on the
-session-name convention — a marker file the agent writes at startup, or a
-registry entry keyed on the pane. That is its own piece of work and it is what
-"decouple from Discord" ultimately requires; the suffix is currently the only
-evidence of *whose* a pane is.
+⚠️ **One consequence a reviewer should know:** a pre-existing hole stays open
+until that PR lands — with a real agent's session down, a session that merely
+shares its name can still reach its write routes. It is documented in the
+consumer PR and it is **not a regression from this branch**; it is reachable on
+`main` today.
 
 ## Verification
 
-- [x] `node --test` — **238 passing, 0 skipped**, on this branch off `main`.
-- [x] Server smoke-tested: 13 agents, `isNamedOurs` present, board serves 200.
-- [x] Every guard mutation-tested: deleted, suite run, a **named** test confirmed
-      to fail.
-- [ ] `/challenge-loop` to convergence, proof file committed.
+- [x] `node --test` — **226 passing, 0 skipped**, on this branch off `main`.
+- [x] Server smoke-tested against the live 13-agent fleet: board serves 200,
+      identities intact, counts sane.
+- [x] Every guard mutation-tested: deleted or inverted, suite run, a **named**
+      test confirmed to fail. Guards whose first mutation did *not* fail were
+      treated as unpinned and given real tests before being accepted.
+- [x] Suite verified to leave nothing behind outside its sandbox — no phantom
+      registry entries, no writes to the operator's avatar or profile store.
+- [ ] `/challenge-loop` proof file committed.
 - [ ] PR opened with `joshualeestone` as reviewer.
-
-## Known cost, stated rather than discovered
-
-An npm-global agent that shares its session with any shell pane reads as
-`stopped` and is restart-only. `node` cannot be told from a build watcher, and
-the tie is settled on which wrongness is recoverable: a false `stopped` is
-recoverable by restarting, a false `running` may mean typing an executable string
-into an unrelated process.
