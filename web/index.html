@@ -585,7 +585,12 @@ function initials(name) {
 function ring(a) {
   const ctx = a.context;
   const R = 30, C = 2 * Math.PI * R;
-  const clip = 'clip-' + a.sessionName;
+  // ⚠️ ESCAPED. This id is interpolated into `id="…"` and `url(#…)` while every
+  // other use of `sessionName` on this card is escaped, so a tmux session named
+  // with markup injected straight into the board — the page that now carries
+  // the restart and clear buttons. Pre-dates this branch; adding destructive
+  // controls to the page is what makes it worth fixing here.
+  const clip = 'clip-' + esc(String(a.sessionName || '').replace(/[^A-Za-z0-9_-]/g, ''));
   const av = a.hasAvatar
     ? `<defs><clipPath id="${clip}"><circle cx="36" cy="36" r="23"/></clipPath></defs>
        <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
@@ -1525,18 +1530,22 @@ function holdingBlock(a) {
     return `<div class="holding">${listed}
       <div class="danger"><b>This may not be ${esc(a.name)}'s conversation.</b>
       We found a session with this name, but not the one ${esc(a.name)}'s own
-      session runs in. Anything listed above belongs to the NAME, and we have not
-      been able to tie it to the pane on this card — so clearing here may empty
-      a different conversation and leave ${esc(a.name)}'s work untouched.</div>
+      session runs in.${items.length ? ` Anything listed above belongs to the
+      NAME, and we have not been able to tie it to the pane on this card —` : ''}
+      so clearing here may empty a different conversation and leave
+      ${esc(a.name)}'s work untouched.</div>
     </div>`;
   }
 
   if (h.state === 'unknown') {
     const aged = items.length
       ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>
-         <div class="danger">${items.some((c) => c.destroyed)
-           ? 'Some of these we already destroyed; the rest are the last thing it told us, and we cannot vouch for those now'
-           : 'These are the last thing it told us, and we cannot vouch for them now'
+         <div class="danger">${
+           items.every((c) => c.destroyed)
+             ? 'We already destroyed all of these'
+             : items.some((c) => c.destroyed)
+               ? 'Some of these we already destroyed; the rest are the last thing it told us, and we cannot vouch for those now'
+               : 'These are the last thing it told us, and we cannot vouch for them now'
          }: ${esc(h.because || 'we cannot tell')}.</div>`
       : `<div class="cannot"><b>We cannot tell what ${esc(a.name)} is holding.</b>
          ${esc(h.because || '')}</div>`;

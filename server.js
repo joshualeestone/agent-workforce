@@ -118,7 +118,15 @@ function readBody(req) {
 function addressable(sessionName) {
   try {
     const raw = String(sessionName || '');
-    return store.safeKey(raw) === raw.toLowerCase();
+    // ⚠️ EXACT, not case-folded. The first version allowed case folding on the
+    // reasoning that `MyBot` is unambiguous — but `findAgent` resolves against
+    // `a.sessionName === key` where `key` is lower-cased, so a session actually
+    // named `Mikey-discord` was published with `may.*.ok = true` and its POST
+    // answered 404. That is the same promises-what-the-route-refuses state this
+    // function was added to remove, reintroduced by the very clause meant to be
+    // generous. The roster carried no capitalised name, so the test that pins
+    // the agreement passed either way.
+    return store.safeKey(raw) === raw;
   } catch {
     return false;
   }

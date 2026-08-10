@@ -1393,40 +1393,29 @@ test('an alias spelling of an agent name cannot walk past the confirmation', asy
   // reintroduces the raw-name defect left the whole file green.
   const emptyToken = `unknown:${crypto.createHash('sha256').update('', 'utf8').digest('hex').slice(0, 32)}`;
 
-  // ⚠️ The two aliases are now refused by DIFFERENT guards, and asserting one
-  // status for both hid that. Case folding still resolves (the roster is
-  // lower-case and `YARA` is unambiguous), so it reaches the confirmation and
-  // is refused there — 409. Dotted spelling has characters STRIPPED, which is
-  // what makes two different names collapse into one, so `findAgent` now
-  // refuses to resolve it at all — 404, an earlier and stronger refusal.
+  // ⚠️ BOTH aliases are now refused at RESOLUTION, and this assertion has been
+  // rewritten twice as the rule tightened — worth recording, because each step
+  // was driven by a concrete failure rather than by taste.
   //
-  // Both are still "cannot walk past the confirmation". Flattening them to one
-  // expected status would mean either weakening the dotted case back to a token
-  // check or asserting a number that no longer describes what happened.
-  const caseAlias = plain.toUpperCase();
-  const stripAlias = plain.split('').join('.');
-
-  const cased = await req(`/api/agent/${encodeURIComponent(caseAlias)}/clear`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ holding: emptyToken }),
-  });
-  assert.equal(cased.status, 409,
-    `${caseAlias} walked past the confirmation and would have cleared the agent`);
-  // ⚠️ And on the BODY. A status-only assertion here passed with the guard
-  // deleted: reading the raw name makes `parseRecord`'s owner check fail, the
-  // record reads back `unknown` with no items, the empty token then MATCHES,
-  // and execution falls through to a 409 from somewhere else entirely. The
-  // number was right for the wrong reason.
-  assert.match(JSON.parse(cased.body).error || '', /changed since you were shown/,
-    `${caseAlias} was refused, but not by the confirmation check this test is named for`);
-
-  const stripped = await req(`/api/agent/${encodeURIComponent(stripAlias)}/clear`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ holding: emptyToken }),
-  });
-  assert.equal(stripped.status, 404,
-    `${stripAlias} resolved to an agent it does not name, which is how one name `
-    + 'becomes another and a destructive action lands on the wrong agent');
+  //   v1: both refused by the confirmation token (409).
+  //   v2: stripping refused at resolution (404), case still resolved (409),
+  //       because `MyBot` reads as unambiguous.
+  //   v3: case refused too (404). `findAgent` matches `a.sessionName === key`
+  //       with `key` lower-cased, so a session genuinely named `Mikey-discord`
+  //       was published with `may.*.ok = true` and then 404'd on POST. The
+  //       generous clause reintroduced exactly the disagreement it sat beside.
+  //
+  // A refusal that happens BEFORE we resolve a name to an agent is the stronger
+  // one: nothing downstream has to be correct for it to hold.
+  for (const alias of [plain.toUpperCase(), plain.split('').join('.')]) {
+    const res = await req(`/api/agent/${encodeURIComponent(alias)}/clear`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: emptyToken }),
+    });
+    assert.equal(res.status, 404,
+      `${alias} resolved to an agent whose name it is not, which is how one name `
+      + 'becomes another and a destructive action lands on the wrong agent');
+  }
 });
 
 test('a name whose characters get stripped never resolves to a different agent', async (t) => {
@@ -2429,4 +2418,49 @@ test('may never offers an action the route would refuse for the same name', asyn
         `${a.sessionName}.may.${action} said ok, but the route cannot address that name`);
     }
   }
+});
+
+
+test('a half-sent clear still tombstones, driven through the ROUTE not the unit', async () => {
+  // ⚠️ `invalidatesCommitments` is pinned as a unit and its `true` branch is
+  // pinned at the route, but the REFUSED-with-mayHaveLanded branch was pinned
+  // nowhere above the unit: replacing that return with `false` at the call site
+  // left the suite green.
+  //
+  // It is the branch that matters most for honesty. `sendCommand` returns
+  // REFUSED when the text landed and the Enter did not — the command may be
+  // sitting in the composer and may still be applied at the end of the turn. So
+  // the conversation may already be gone while the board still asserts its
+  // commitments at full confidence.
+  const lifecycle = require('./engine/lifecycle');
+  const commitments = require('./engine/commitments');
+
+  const target = await actionableAgent();
+  commitments.report(target.sessionName, [{ what: 'work that may already be gone' }]);
+  assert.equal(commitments.read(target.sessionName).state, 'holding');
+
+  // A runner where the TEXT lands and the ENTER does not: the half-sent case.
+  let call = 0;
+  lifecycle.setRunner(() => {
+    call += 1;
+    if (call === 1) return { ok: true, stdout: '', stderr: '' };
+    return { ok: false, stdout: '', stderr: 'send-keys: no such pane' };
+  });
+  try {
+    lifecycle.setDryRun(false);
+    const fresh = JSON.parse((await req('/api/status')).body);
+    const now = fresh.agents.find((a) => a.sessionName === target.sessionName);
+    const res = await req(`/api/agent/${encodeURIComponent(target.sessionName)}/clear`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: now.commitments.token }),
+    });
+    assert.ok([200, 409].includes(res.status), `unexpected ${res.status}: ${res.body}`);
+  } finally {
+    lifecycle.setRunner(null);
+  }
+
+  assert.notEqual(commitments.read(target.sessionName).state, 'holding',
+    'a half-sent clear left the board asserting these at full confidence, about '
+    + 'work the agent may already have forgotten');
 });

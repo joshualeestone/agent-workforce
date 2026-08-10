@@ -531,3 +531,44 @@ test('an agent that is not a Discord bot is still ranked and still wins its own 
   assert.equal(isFleetSession(kept[0]), true, 'the Discord coupling came back');
   assert.equal(isAgentSession(kept[0]), true);
 });
+
+test('a crashed agent is not hidden by an unrelated node pane in its own session', () => {
+  // ⚠️ The failure: an agent crashes back to a shell in a session that also
+  // runs a build watcher. `node` used to outrank the crashed shell, so the
+  // watcher became the card — the board reported "we cannot tell" instead of
+  // "not running", hiding the crash on the one card whose Restart button exists
+  // for it. And `classify` on a watcher can match an idle marker, at which
+  // point `/clear` plus a bare Enter go into a `node` process, which EXECUTES
+  // the text rather than reading it as a slash command.
+  //
+  // The watcher is listed FIRST because that is the order tmux produces and the
+  // order in which the old ranking picked wrong.
+  const panes = parsePanes([
+    'zeta-discord\t0.0\tnode\t0\tbuild finished in 1.2s',
+    'zeta-discord\t0.1\t-zsh\t0\t',
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].target, 'zeta-discord:0.1',
+    'a node pane won the name over the agent’s own crashed shell, so the board '
+    + 'shows the watcher’s state instead of the crash');
+  assert.equal(isAgentPane(kept[0]), false,
+    'the crashed pane classified as typeable, so /clear could be sent into it');
+});
+
+test('a live Claude pane still beats both a shell and a node pane', () => {
+  // ⚠️ Guards the swap against over-correcting. Reordering the two lower tiers
+  // must not let a crashed shell outrank the agent that is actually running.
+  const panes = parsePanes([
+    'zeta-discord\t0.0\t-zsh\t0\t',
+    'zeta-discord\t0.1\tnode\t0\t',
+    'zeta-discord\t0.2\t2.1.212\t0\tSummarising',
+  ].join('\n'));
+  const kept = onePanePerSession(panes);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].target, 'zeta-discord:0.2',
+    'the real Claude pane lost to a shell or a watcher in its own session');
+  assert.equal(isAgentPane(kept[0]), true);
+});

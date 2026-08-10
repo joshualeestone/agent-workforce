@@ -378,6 +378,32 @@ function isNamedOurs(pane) {
  *      Pane `0.0` won, so `/clear` and a bare Enter were typed into a process
  *      that EXECUTES text rather than reading it as a slash command.
  *
+ * ⚠️ CRASHED OUTRANKS LEGACY, and that ordering is deliberately the less
+ * convenient one. Inside a real `<agent>-discord` session, a bare `node` pane
+ * cannot be told apart from the agent itself: an npm-global Claude install
+ * fronts as `node`, and so does a build watcher in a split. Ranking `node`
+ * higher meant that when the agent CRASHED to a shell, the watcher won the name
+ * — so the board reported "we cannot tell" instead of "not running", hiding the
+ * crash on the one card whose Restart button exists for it, and if the
+ * watcher's tail ever matched an idle marker, `/clear` plus a bare Enter went
+ * into a `node` process, which EXECUTES text rather than reading it.
+ *
+ * Both readings are wrong in one direction or the other, so the tie is settled
+ * on which wrongness is recoverable:
+ *
+ *   - Picking the shell when `node` was really an npm-global agent: the board
+ *     says `stopped` for something that is running, and typing is refused.
+ *     **Restart still works** (the session name is still ours), which is the
+ *     recovery, and the operator can see the pane themselves.
+ *   - Picking `node` when it was really a watcher: the board hides a crash and
+ *     may type an executable string into an unrelated process. **Nothing
+ *     recovers that.**
+ *
+ * ⚠️ So the known cost, stated rather than discovered: an npm-global agent that
+ * shares its session with any shell pane reads as `stopped` and is
+ * restart-only. That is a real regression for that setup and it is the price of
+ * not typing into a build watcher.
+ *
  * ⚠️ The ordering principle, and the reason a crashed agent outranks a stranger:
  * **the session name is the only evidence of WHOSE a pane is.** A Claude process
  * in a session we cannot name is somebody else's Claude. So every named-ours
@@ -389,8 +415,8 @@ function isNamedOurs(pane) {
  * against a same-named session that does carry the suffix.
  */
 const RANK_NAMED_RUNNING = 0;   // ours by name, definitely Claude
-const RANK_NAMED_LEGACY = 1;    // ours by name, ambiguous process (`node`)
-const RANK_NAMED_CRASHED = 2;   // ours by name, fallen back to a shell
+const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
+const RANK_NAMED_LEGACY = 2;    // ours by name, ambiguous process (`node`)
 const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
 const RANK_NONE = 4;
 
