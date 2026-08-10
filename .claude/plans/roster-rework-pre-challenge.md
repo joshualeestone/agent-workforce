@@ -1,4 +1,10 @@
 ---
+pre_challenge: true
+method: challenge-loop
+subdir_audit: passed
+timestamp: 2026-08-10T14:31:39Z
+iterations: 9
+converged: false
 branch: roster-rework
 diff_hash: 15c04348fbdc1a19eb4748633a4d3c06bfda305ac83df381ffd51c774b8d31be
 rounds: 9
