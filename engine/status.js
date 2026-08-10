@@ -899,6 +899,17 @@ function snapshot() {
       isAgentSession: isAgentSession(pane),
       // The suffix alone. Restart asks this one: see isFleetSession.
       isFleetSession: isFleetSession(pane),
+      // ⚠️ Whether the SESSION NAME ties this pane to the fleet's record for
+      // this name — as opposed to us having merely inferred an agent from a
+      // Claude process. The distinction exists because a card's name addresses
+      // THREE different objects: the tmux pane, the launchd service
+      // (`com.<name>.discord`, what restart acts on), and the commitment record.
+      // Only the suffixed session name is evidence that all three are the same
+      // agent. Without it we may still show the pane and type into it — it is
+      // the pane the operator clicked — but we must not act on the service or
+      // claim to have destroyed the record, because those belong to whoever
+      // owns the NAME and this pane has not proven it is them.
+      isNamedOurs: isNamedOurs(pane),
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,

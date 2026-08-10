@@ -141,6 +141,12 @@ const FAKE_PANES = [
   // even after the roster became ours. A synthetic fleet made entirely of
   // healthy agents cannot exercise the guard that exists for unhealthy ones.
   'xander-discord\t0.0\tclaude\t0\tWaiting on you',
+  // ⚠️ An agent we only INFERRED: a Claude process in a session whose name
+  // carries no suffix, so nothing ties this pane to the fleet's record for the
+  // name `wren`. Present on purpose — without it, the guard that stops us
+  // tombstoning a record we cannot tie to the pane has nothing to refuse, and a
+  // roster made entirely of properly-named agents cannot exercise it.
+  'wren\t0.0\t2.1.212\t0\tDrafting the supplier email',
 ].join('\n');
 
 const FAKE_CAPTURE = {
@@ -151,6 +157,7 @@ const FAKE_CAPTURE = {
   'yara-discord:0.0': 'esc to interrupt\n',
   // A permission prompt: the exact pane where a stray Enter would confirm Yes.
   'xander-discord:0.0': 'Do you want to proceed?\n\u276f 1. Yes\n  2. No\n',
+  'wren:0.0': 'Worked for 1m 02s\n> \n',
 };
 
 test.before(() => {
@@ -192,11 +199,34 @@ async function anyAgent(t) {
   }
   const agents = JSON.parse(board.body).agents || [];
   assert.ok(agents.length, 'the synthetic roster did not reach the server');
-  const actionable = agents.find((a) => a.state === 'idle' || a.state === 'working');
+  // ⚠️ `isNamedOurs` too, and this is the THIRD time on this branch that a
+  // roster change silently redirected a guard test at the wrong agent. The
+  // roster now contains an inferred-only agent (`wren`) so the tombstone gate
+  // has something to refuse — and without this clause `anyAgent` could hand it
+  // back, so `a destructive action tombstones what it destroyed` would get its
+  // failure from the gate rather than from the behaviour it is named for. The
+  // test would then pass with the tombstone code deleted.
+  const actionable = agents.find((a) =>
+    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
   assert.ok(actionable,
-    'the synthetic roster has no actionable agent, so every guard test would be '
-    + 'refused by mayTypeInto before reaching the guard it is named for');
+    'the synthetic roster has no actionable agent we can tie to its record, so '
+    + 'every guard test would be refused before reaching the guard it is named for');
   return encodeURIComponent(actionable.sessionName);
+}
+
+/**
+ * An agent we only INFERRED is an agent: a Claude process in a session whose
+ * name does not tie it to the fleet's record for that name.
+ *
+ * The dangerous case it stands for: the real agent is dead, and an unrelated
+ * session has taken over its name by being the only candidate left.
+ */
+async function inferredAgent() {
+  const board = await req('/api/status');
+  const agents = JSON.parse(board.body).agents || [];
+  const inferred = agents.find((a) => a.isNamedOurs === false && a.isAgentPane);
+  assert.ok(inferred, 'the roster lost its inferred-only agent, so the tombstone gate is untested');
+  return encodeURIComponent(inferred.sessionName);
 }
 
 /**
@@ -1477,7 +1507,14 @@ test('a destructive action tombstones what it destroyed', async (t) => {
   const commitments = require('./engine/commitments');
 
   const board = JSON.parse((await req('/api/status')).body);
-  const target = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
+  // ⚠️ `isNamedOurs` as well as actionable, and this test re-deriving its own
+  // predicate inline instead of calling `anyAgent()` is exactly the drift that
+  // helper's comment warns about — narrowing the helper did not narrow this.
+  // With the inferred-only agent in the roster, the un-narrowed find selected
+  // it, the tombstone was correctly refused, and this test failed for a reason
+  // that has nothing to do with what it is named for.
+  const target = (board.agents || []).find((a) =>
+    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
   if (!target) {
     t.skip('no agent on this board is in a state the route would act on');
     return;
@@ -1886,13 +1923,30 @@ test('the status payload says which actions would be refused', async () => {
   // work" state the block exists to remove.
   const board = JSON.parse((await req('/api/status')).body);
   const asking = await refusingAgent();
-  const ready = (board.agents || []).find((a) => a.state === 'idle' || a.state === 'working');
-  assert.ok(ready, 'the synthetic roster has no actionable agent');
+  // ⚠️ `isNamedOurs`, or this picks the inferred-only agent, whose restart is
+  // refused ON PURPOSE — and the test would report that correct refusal as a
+  // broken `may` block. Third inline re-derivation of the roster predicate in
+  // this file; each one had to be narrowed separately.
+  const ready = (board.agents || []).find((a) =>
+    (a.state === 'idle' || a.state === 'working') && a.isNamedOurs);
+  assert.ok(ready, 'the synthetic roster has no actionable agent we can tie to its record');
 
   for (const action of ['compact', 'clear', 'restart']) {
     assert.ok(ready.may && ready.may[action], `no verdict for ${action} on a ready agent`);
     assert.equal(ready.may[action].ok, true, `${action} was refused for a ready agent`);
   }
+
+  // ⚠️ And the inferred-only agent carries the refusal all the way to the
+  // BROWSER, not just to the route. Without this the card would offer a Restart
+  // button that the route then refuses — the "offer an action that cannot work"
+  // state this whole block exists to remove.
+  const inferred = (board.agents || []).find((a) => a.isNamedOurs === false && a.isAgentPane);
+  assert.ok(inferred, 'the roster lost its inferred-only agent');
+  assert.equal(inferred.may.restart.ok, false,
+    'the board offered Restart for a name whose own session is not the pane shown');
+  assert.match(inferred.may.restart.because, /not the one this agent/);
+  assert.equal(inferred.may.clear.ok, true,
+    'typing into the pane on the card is still fine — it is the pane the operator clicked');
 
   // An agent on a permission prompt: typing is refused, restart is not, because
   // restart sends no keystrokes.
@@ -2104,4 +2158,69 @@ test('every await in the destructive handler is followed by a still-my-dialog ch
   const openFresh = page.slice(page.indexOf('function openFresh('));
   assert.match(openFresh.slice(0, 600), /FRESH_EPOCH \+= 1;/,
     'reopening the dialog does not invalidate an in-flight response');
+});
+
+test('clearing a pane we only INFERRED is an agent does not tombstone the record for that name', async () => {
+  // ⚠️ The case no tie-break can reach, and the one the `rank` fix does not
+  // cover: when the real agent is DEAD there is no competing pane to outrank.
+  // `mikey-discord` is gone, someone runs `tmux new -s mikey` with Claude in
+  // it, and that pane becomes the only candidate for the name `mikey`. It wins
+  // by default and every is-this-an-agent check passes.
+  //
+  // Typing into that pane is defensible — it is the pane on the card the
+  // operator clicked. Tombstoning is not: the commitment record belongs to
+  // whoever owns the NAME, and this pane has not proven it is them. Marking it
+  // produces the worst output this board can produce — a confident, FALSE claim
+  // that an agent's commitments were destroyed while that agent is untouched
+  // and still holding them. `unknown` would at least be honest; `destroyed` is
+  // an assertion about work that still exists.
+  const lifecycle = require('./engine/lifecycle');
+  const commitments = require('./engine/commitments');
+
+  const name = decodeURIComponent(await inferredAgent());
+  commitments.report(name, [
+    { what: 'Send the supplier email before 5pm' },
+  ]);
+  const before = commitments.read(name);
+  assert.equal(before.commitments.length, 1, 'the record did not land');
+
+  const calls = [];
+  let sawBecause = '';
+  lifecycle.setRunner((cmd, args) => { calls.push([cmd, args]); return { ok: true, stdout: '', stderr: '' }; });
+  try {
+    lifecycle.setDryRun(false);
+    const fresh = JSON.parse((await req('/api/status')).body);
+    const now = fresh.agents.find((a) => a.sessionName === name);
+    const res = await req(`/api/agent/${encodeURIComponent(name)}/clear`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holding: now.commitments.token }),
+    });
+    assert.ok([200, 409].includes(res.status), `unexpected status ${res.status}: ${res.body}`);
+    // The clear itself must actually have happened, or this proves nothing.
+    assert.notEqual(JSON.parse(res.body).outcome, 'dry-run',
+      'the action was still dry-run, so the tombstone block never ran');
+    sawBecause = JSON.parse(res.body).because || '';
+  } finally {
+    lifecycle.setRunner(null);
+  }
+
+  // ⚠️ Assert the record is INTACT, not merely "not destroyed". The first
+  // version of this test asserted `state !== 'destroyed'`, which passes either
+  // way: a successful tombstone leaves the record `unknown`, never `destroyed`.
+  // Mutation-testing caught it — removing the gate entirely left this green, so
+  // the test named for the guard was pinning nothing at all. That is the third
+  // time on this branch a test written for a guard did not exercise it.
+  const after = commitments.read(name);
+  assert.equal(
+    after.state, 'holding',
+    'the record for this name was tombstoned by clearing a pane that was never '
+    + 'tied to it — the real agent may be untouched and still holding this work',
+  );
+  assert.equal(after.commitments.length, 1, 'the commitment itself was dropped');
+
+  // And the operator is told what we did in terms of a DECISION rather than a
+  // failure. "We could not update our record" would be untrue here: we did not
+  // try, on purpose, because the record is not this pane's to speak for.
+  assert.match(sawBecause, /not the one that agent/);
 });

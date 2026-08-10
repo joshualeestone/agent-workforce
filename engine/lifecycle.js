@@ -454,6 +454,30 @@ function mayTypeInto(action, agent) {
     if (!agent || !agent.isFleetSession) {
       return { ok: false, because: 'we are not confident that card is one of your agents, so we will not restart anything under its name' };
     }
+
+    // ⚠️ Restart addresses the launchd SERVICE (`com.<name>.discord`), not the
+    // pane on the card. Those are different objects, and only the suffixed
+    // session name is evidence they are the same agent.
+    //
+    // The hole this closes, which the `rank` tie-break could not: when the real
+    // agent is DEAD there is no competing pane to outrank. `mikey-discord` is
+    // gone, someone has `tmux new -s mikey` with Claude in it, and that pane is
+    // the ONLY candidate for the name — so it wins by default and every check
+    // above passes. Restart would then run `restart-bot.sh mikey` against the
+    // real service while the card shows a stranger's pane, state and task line.
+    //
+    // Refusing costs nothing real: an agent with no `com.<name>.discord` plist
+    // cannot be restarted by this mechanism anyway, so the alternative is not
+    // "it works" but "it fails after acting". This is not a re-coupling to
+    // Discord — the roster, typing and every read stay decoupled. It is restart
+    // alone, because restart alone reaches launchd, whose naming convention is
+    // what it is.
+    if (!agent.isNamedOurs) {
+      return {
+        ok: false,
+        because: 'we found a session with this name, but not the one this agent\u2019s service runs in, so we will not restart the service under its name',
+      };
+    }
     return { ok: true };
   }
   if (!agent || !agent.isAgentPane) {

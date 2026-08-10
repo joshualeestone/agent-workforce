@@ -555,8 +555,8 @@ test('an agent showing a question is never typed into', () => {
 
   // Restart types nothing, so the waiting-on-a-question refusal does not apply
   // to it: an agent sitting on a permission prompt is restartable.
-  assert.equal(mayTypeInto('restart', { isFleetSession: true, state: 'needs_you' }).ok, true);
-  assert.equal(mayTypeInto('restart', { isFleetSession: true, state: 'unknown' }).ok, true);
+  assert.equal(mayTypeInto('restart', { isFleetSession: true, isNamedOurs: true, state: 'needs_you' }).ok, true);
+  assert.equal(mayTypeInto('restart', { isFleetSession: true, isNamedOurs: true, state: 'unknown' }).ok, true);
 
   // ⚠️ And a CRASHED agent, which is the case restart matters most for. Gating
   // this on `isAgentSession` (which requires a live Claude process) refused a
@@ -564,7 +564,7 @@ test('an agent showing a question is never typed into', () => {
   // of your agents" — untrue, and it removed the feature exactly where it is
   // needed. Switching the check back to `isAgentSession` fails here.
   assert.equal(mayTypeInto('restart',
-    { isFleetSession: true, isAgentSession: false, isAgentPane: false, state: 'stopped' }).ok, true,
+    { isFleetSession: true, isNamedOurs: true, isAgentSession: false, isAgentPane: false, state: 'stopped' }).ok, true,
   'restart was refused for a crashed agent in its own session');
 
   // ⚠️ But it is NOT exempt from the is-this-really-one-of-my-agents refusal,
@@ -576,19 +576,40 @@ test('an agent showing a question is never typed into', () => {
   // commitments — the operator would have been acting on a card that was not
   // the thing being restarted.
   //
-  // Deleting the `isAgentSession` check in `mayTypeInto` fails here.
+  // Deleting the `isFleetSession` check in `mayTypeInto` fails here. ⚠️ This
+  // comment named `isAgentSession` while the code checks `isFleetSession` — the
+  // stale-docstring defect this branch keeps producing, living in the very test
+  // that pins the guard. A reader trusting it would "restore consistency" by
+  // making restart require a live Claude process, re-breaking the crashed-agent
+  // case pinned six lines above.
   assert.equal(mayTypeInto('restart', { isFleetSession: false, state: 'idle' }).ok, false,
     'restart fired at a pane that is not one of our agent sessions');
   assert.equal(mayTypeInto('restart', null).ok, false);
   assert.match(mayTypeInto('restart', { isFleetSession: false }).because, /not confident that card is one of your agents/);
 
-  // ⚠️ And it asks `isAgentSession`, NOT `isAgentPane`. The difference is the
+  // ⚠️ And it asks `isFleetSession`, NOT `isAgentPane`. The difference is the
   // copy-mode clause, which exists because keystrokes go to copy-mode bindings
   // instead of the composer — irrelevant to an action that sends no keystrokes.
   // Swapping this check to `isAgentPane` would take restart away from any pane
   // the operator had scrolled back with a mouse wheel.
-  assert.equal(mayTypeInto('restart', { isFleetSession: true, isAgentPane: false, state: 'idle' }).ok, true,
+  assert.equal(mayTypeInto('restart',
+    { isFleetSession: true, isNamedOurs: true, isAgentPane: false, state: 'idle' }).ok, true,
     'restart was refused for a pane that is merely scrolled back');
+
+  // ⚠️ And the case NO tie-break can reach: the real agent is DEAD, so there is
+  // no competing pane to outrank. `mikey-discord` is gone, someone has
+  // `tmux new -s mikey` with Claude running, and that pane is the only candidate
+  // for the name — it wins by default and `isFleetSession` passes via the
+  // process arm. Restart would run `restart-bot.sh mikey` against the REAL
+  // service while the card shows a stranger's pane, state and task line.
+  //
+  // Restart addresses the launchd SERVICE, not the pane, and only the suffixed
+  // session name ties those two together. Deleting the `isNamedOurs` check in
+  // `mayTypeInto` fails here.
+  const inferredOnly = { isFleetSession: true, isAgentSession: true, isAgentPane: true, isNamedOurs: false, state: 'idle' };
+  assert.equal(mayTypeInto('restart', inferredOnly).ok, false,
+    'restart fired at the service for a name whose own session is not the pane we are showing');
+  assert.match(mayTypeInto('restart', inferredOnly).because, /not the one this agent/);
 });
 
 test('a half-sent clear still invalidates the commitment record', () => {

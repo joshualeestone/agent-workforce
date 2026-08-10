@@ -864,6 +864,9 @@ const server = http.createServer((req, res) => {
         // the board serving "it reported these itself" at full confidence for
         // the next thirty minutes with nothing anywhere saying so.
         let reconciled = null;
+        // Set when we deliberately left the record alone because this pane is
+        // not tied to the name it is filed under. Distinct from a failed write.
+        let untied = false;
         if (lifecycle.invalidatesCommitments(action, result)) {
           // ⚠️ Only meaningful when there was a record to reconcile.
           // `markDestroyed` also returns false for an agent that never reported,
@@ -871,16 +874,44 @@ const server = http.createServer((req, res) => {
           // to update makes the sentence useless as a signal for the times it
           // matters.
           const hadRecord = (seen.commitments || []).length > 0 || seen.reportedAt;
-          const marked = commitments.markDestroyed(key);
-          reconciled = hadRecord ? marked : null;
+
+          // ⚠️ Only tombstone a record we can tie to the pane we just typed
+          // into. The commitment record belongs to whoever owns the NAME; the
+          // pane is whatever won that name in the roster. When the winner is a
+          // pane we merely INFERRED is an agent (a Claude process in a session
+          // whose name does not carry the suffix), those two can be different
+          // agents entirely — the real one dead, a stranger's session standing
+          // in for it.
+          //
+          // Marking anyway produces the worst output this board can produce: a
+          // confident, false claim that the named agent's commitments were
+          // destroyed, while that agent is untouched and still holding them.
+          // Leaving the record alone is not a missed cleanup — it is the honest
+          // answer, because we did not clear that agent.
+          // ⚠️ THREE outcomes, not two, and collapsing the third into `false`
+          // made the board say something untrue about itself. `false` means "we
+          // tried to write the tombstone and could not", and the sentence built
+          // from it says "We could not update our record". Here we did not try,
+          // deliberately, because the record is not this pane's to speak for.
+          // Reporting a considered refusal as a failed write is the same class
+          // of defect as the rest of this branch: a confident sentence about
+          // something that did not happen the way it says.
+          if (!agent.isNamedOurs) {
+            untied = true;
+          } else {
+            const marked = commitments.markDestroyed(key);
+            reconciled = hadRecord ? marked : null;
+          }
         }
 
         // A reconciliation we could not perform is said out loud, appended to
         // the engine's own sentence rather than replacing it: what we did still
         // happened, and this is an additional thing the operator needs to know.
-        const because = reconciled === false
-          ? `${result.because}. We could not update our record of what it was holding, so the board may still show it for a while.`
-          : result.because;
+        const because = untied
+          ? `${result.because}. We left our record of what ${name} was holding alone, because this session is not the one that agent's own session runs in and we cannot say the record is this pane's to destroy.`
+          : reconciled === false
+            ? `${result.because}. We could not update our record of what it was holding, so the board may still show it for a while.`
+            : result.because;
 
         sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
           action,
