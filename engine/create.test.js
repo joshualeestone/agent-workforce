@@ -813,6 +813,10 @@ esac
   // So the harness reads the plist the product actually writes, and substitutes
   // only the two paths it needs to redirect (the fake tmux, and this run's
   // directory). If the order ever changes, this changes with it or fails.
+  // ⚠️ Install first, so the harness does not depend on an earlier test in this
+  // file having created an agent. It ran the INSTALLED copy while every textual
+  // assertion read the repo file, which worked only by order.
+  create.installSupervisor();
   const argv = jobArguments('probe').map((a) => {
     if (a === create.workerDir('probe')) return nodePath.join(dir, 'work');
     if (a === '/opt/homebrew/bin/tmux') return fake;
@@ -1113,6 +1117,12 @@ test('a supervisor that cannot be installed stops the creation', () => {
     assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'it created an agent with no supervisor to run it');
     assert.ok(r.steps.some((s) => /startup script/.test(s.label) && !s.ok),
       'the failing step is not visible in the record');
+    // ⚠️ The SENTENCE, which is the only thing this branch adds to the failure
+    // path beyond a step label, and was the one thing unpinned. A transient
+    // failure must invite a retry; a missing file must not.
+    assert.match(r.because, /could not put the script that starts agents in place/);
+    assert.match(r.because, /try that name again/,
+      'a transient failure tells the person not to bother retrying');
     // ⚠️ This holds through the ROLLBACK as much as through the write ordering,
     // and saying so matters: removing the gate that stops the job being written
     // leaves this assertion green, because the rollback removes it either way.
@@ -1154,4 +1164,76 @@ test('the job passes the supervisor exactly the arguments it reads, in that orde
     assert.ok(script.includes(`${name}="\${${pos}`),
       `the supervisor does not read ${name} from argument ${pos}`);
   }
+});
+
+test('a supervisor missing from the app says so, instead of inviting a retry', () => {
+  // ⚠️ Two different failures, two different sentences. `installSupervisor`
+  // collapsed everything into one boolean, so a full disk was told "trying
+  // again will not help until it is fixed" -- false in exactly the case that
+  // produced it, and the sentence that stops the operator retrying.
+  recorder();
+  create.setDryRun(false);
+  const realCopy = fs.copyFileSync;
+  try {
+    fs.copyFileSync = () => {
+      const err = new Error('no such file'); err.code = 'ENOENT'; throw err;
+    };
+    // The source really is present; the ENOENT is the destination's.
+    const transient = create.createAgent({ ...BINS, name: 'enoent-dest', role: 'pm' });
+    assert.match(transient.because, /try that name again/,
+      'a failure that is not the app missing tells the person not to retry');
+
+    // And with the source genuinely gone, the opposite.
+    const realExists = fs.existsSync;
+    try {
+      fs.existsSync = (f) => (String(f).endsWith('agent-supervisor.sh') ? false : realExists(f));
+      const permanent = create.createAgent({ ...BINS, name: 'no-source', role: 'pm' });
+      assert.match(permanent.because, /missing from this app/,
+        'a missing supervisor invites a retry that can never work');
+    } finally {
+      fs.existsSync = realExists;
+    }
+  } finally {
+    fs.copyFileSync = realCopy;
+  }
+});
+
+test('the supervisor trims its own log rather than growing it forever', () => {
+  // ⚠️ The one destructive branch in the shipped script that nothing exercised.
+  // launchd appends to that log, and a job failing every thirty seconds writes
+  // to it for as long as the machine is on.
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'logtrim-'));
+  const log = nodePath.join(dir, 'start.log');
+  fs.writeFileSync(log, 'x'.repeat(1048576 + 10), 'utf8');
+  const fake = nodePath.join(dir, 'tmux');
+  // A tmux that reports no session at all: the script starts one and falls
+  // straight out of the supervision loop.
+  fs.writeFileSync(fake, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+  try {
+    require('node:child_process').execFileSync(
+      '/bin/bash',
+      [create.supervisorSource(), 'logtrim', dir, '/bin/echo', fake, log],
+      { timeout: 20000, stdio: 'pipe' },
+    );
+  } catch { /* new-session "fails" with this fake, which is fine */ }
+  assert.ok(fs.statSync(log).size < 1048576,
+    'the log was left over its ceiling, so it grows without bound');
+
+  // ⚠️ AND AN UNREADABLE ONE IS NOT AN ERROR. `wc` prints nothing for a file it
+  // cannot read, and `[ "" -gt N ]` is a bash error written into the very log
+  // being managed.
+  fs.writeFileSync(log, 'small', 'utf8');
+  fs.chmodSync(log, 0o000);
+  let stderr = '';
+  try {
+    require('node:child_process').execFileSync(
+      '/bin/bash',
+      [create.supervisorSource(), 'logtrim', dir, '/bin/echo', fake, log],
+      { timeout: 20000, stdio: 'pipe' },
+    );
+  } catch (err) { stderr = String((err && err.stderr) || ''); }
+  fs.chmodSync(log, 0o644);
+  assert.doesNotMatch(stderr, /integer expression expected/,
+    'an unreadable log makes the supervisor emit a bash error');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

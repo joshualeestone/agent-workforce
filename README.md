@@ -18,10 +18,13 @@ own name as an argument. One file rather than a copy per agent, so a change to
 it reaches agents that already exist: it is reinstalled whenever an agent is
 created, and each running agent picks it up at its next start.
 
-⚠️ Two conditions worth stating rather than implying. On a machine where no
-further agent is ever created, nothing reinstalls it. And an agent made by a
-version before this one has its own copy and keeps it: nothing migrates those. No terminal, and nothing claimed that was not observed: if the board
-cannot see it after thirty seconds, the screen says that instead.
+No terminal, and nothing claimed that was not observed: if the board cannot see
+the agent after thirty seconds, the screen says that instead.
+
+⚠️ Two conditions on "reaches agents that already exist", worth stating rather
+than implying. On a machine where no further agent is ever created, nothing
+reinstalls it. And an agent made by a version before this one has its own copy
+of the old script and keeps it: nothing migrates those.
 
 It cannot stop, remove or message an agent yet.
 

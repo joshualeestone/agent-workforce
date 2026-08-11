@@ -18,6 +18,23 @@
 #
 #   agent-supervisor.sh <session> <workdir> <claude-bin> <tmux-bin> [log]
 #
+# ⚠️ THIS VECTOR IS A CONTRACT WITH EVERY AGENT THAT ALREADY EXISTS, and it is
+# the one thing about this file that CANNOT be changed freely.
+#
+# The supervisor is refreshed whenever an agent is created, so a change here
+# reaches agents made long ago. Their launchd jobs are NOT: each plist is
+# written once, at creation, and never rewritten. So the script travels and the
+# arguments do not.
+#
+# Which means: **a new argument must be optional and must have a default**, and
+# the existing five must keep their positions and meanings. Adding a required
+# `${6:?...}`, or reordering, silently bricks every pre-existing agent — bash
+# exits at once, KeepAlive respawns it every thirty seconds forever, and the
+# board shows the agent as simply down with nothing anywhere saying why.
+#
+# If a change ever genuinely needs to break the vector, it needs to rewrite the
+# existing plists at the same time, and that is a migration rather than an edit.
+#
 # ⚠️ The NAME is not re-validated here, deliberately. `engine/create.js`
 # validates it once, hard, before anything is written — the same name that
 # becomes a directory, a service label and a tmux session — and a second, weaker
@@ -62,8 +79,14 @@ say() {
 
 # launchd appends to that log forever, and a persistently failing start writes a
 # line every 30 seconds for as long as the machine is on. Keep it bounded.
-if [ -n "$LOG" ] && [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
-  : > "$LOG"
+# ⚠️ The size is defaulted to 0 rather than used raw: an unreadable file makes
+# `wc` print nothing, and `[ "" -gt N ]` is a bash error -- written, of course,
+# into the very log this is managing.
+if [ -n "$LOG" ] && [ -f "$LOG" ]; then
+  log_bytes=$(wc -c < "$LOG" 2>/dev/null | tr -d ' ')
+  if [ "${log_bytes:-0}" -gt 1048576 ] 2>/dev/null; then
+    : > "$LOG"
+  fi
 fi
 
 # ── the session ──────────────────────────────────────────────────────────────
@@ -151,7 +174,16 @@ if [ -z "$adopt" ]; then
     "$CLAUDE" --dangerously-skip-permissions || exit 1
 fi
 
-# The claim. Without it this agent is anonymous on the board after every
+# The claim. `set-option` cannot take the `=exact` form, and it is safe here
+# because an exact session of this name has just been made or just been seen.
+# ⚠️ One narrow race survives that argument: on the adopt path, if the session
+# dies between the check above and this line, tmux falls back to PREFIX
+# resolution and could stamp this claim onto a longer-named stranger's session.
+# It cannot lead to a kill -- every destructive target is `=`-anchored -- but
+# the board would read that session as a claimed agent. Named rather than fixed,
+# because the fix is a tmux feature that does not exist.
+#
+# Without it this agent is anonymous on the board after every
 # restart, whatever it was when it was created: no name, no role, no model, and
 # no editable instructions. It is a tmux user option, so it dies with the
 # session -- which is exactly why it is trustworthy, and exactly why it has to

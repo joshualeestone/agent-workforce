@@ -240,6 +240,16 @@ function supervisorPath() {
  * seconds for as long as the machine is on.
  */
 function installSupervisor() {
+  /**
+   * ⚠️ Answers WHY it failed, not just that it did.
+   *
+   * Every failure collapsed into one boolean, and the caller then told the
+   * operator "trying again will not help until it is fixed". For a full disk,
+   * or a support directory momentarily unwritable, that sentence is false in
+   * exactly the case that produced it — and it is the sentence that stops them
+   * retrying. A missing source file is genuinely permanent; nothing else here
+   * is.
+   */
   try {
     const dest = supervisorPath();
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -260,13 +270,18 @@ function installSupervisor() {
      * with and picks the new one up at its next start — which is exactly the
      * update model this change is for.
      */
-    const staging = `${dest}.new`;
+    // ⚠️ Per-process, because a fixed name lets two installs interleave into one
+    // inode (`copyFileSync` opens with O_TRUNC) and rename a truncated script
+    // into place for every agent on the machine.
+    const staging = `${dest}.${process.pid}.new`;
     fs.copyFileSync(supervisorSource(), staging);
     fs.chmodSync(staging, 0o755);
     fs.renameSync(staging, dest);
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (err) {
+    // Leave nothing half-written beside the real one.
+    try { fs.rmSync(`${supervisorPath()}.${process.pid}.new`, { force: true }); } catch { /* best effort */ }
+    return { ok: false, missing: err && err.code === 'ENOENT' && !fs.existsSync(supervisorSource()) };
   }
 }
 
@@ -516,10 +531,11 @@ function createAgent(opts) {
    * next reader does not have to re-derive which one is load-bearing.
    */
   // ⚠️ The worker folder is checked with them. It is operator-controlled rather
-  // than request-controlled (it comes from AGENT_WORKFORCE_WORKERS), but it
-  // reaches the same generated shell text by the same route, and the stated
-  // reason for checking the binaries -- closing a door before somebody opens it
-  // -- does not distinguish between them.
+  // than request-controlled (it comes from AGENT_WORKFORCE_WORKERS), and it no
+  // longer reaches any generated shell text -- it is passed to the supervisor as
+  // one argument. Kept for the same reason as the binaries above: a path
+  // carrying a quote or a newline is one nothing good comes of passing
+  // anywhere, and the guard that matters for the plist is the XML escaping.
   for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin], ['the agents folder', workerDir(name)]]) {
     if (/['"\n\r\\$`]/.test(bin)) {
       return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
@@ -612,9 +628,12 @@ function createAgent(opts) {
   // supervisor is not in place, the job would point at a script that does not
   // exist, which is the respawn loop. The gate below stops before the job is
   // written at all.
+  let supervisorMissing = false;
   const installedSupervisor = step('put the startup script in place', () => {
     if (DRY_RUN) return true;
-    return installSupervisor();
+    const done = installSupervisor();
+    supervisorMissing = done.missing === true;
+    return done.ok;
   });
 
   /**
@@ -663,7 +682,9 @@ function createAgent(opts) {
     if (!installedSupervisor) {
       return {
         outcome: OUTCOME.PARTIAL,
-        because: 'we could not put the script that starts agents in place, so we have not made it. That part of this app is missing or cannot be written, and trying again will not help until it is fixed.',
+        because: supervisorMissing
+          ? 'the script that starts agents is missing from this app, so we have not made it. Trying again will not help until that is fixed.'
+          : 'we could not put the script that starts agents in place, so we have not made it. You can try that name again.',
         steps,
       };
     }
