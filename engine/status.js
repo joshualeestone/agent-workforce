@@ -328,10 +328,101 @@ const PANE_COLUMNS = [
 
 const PANE_FORMAT = PANE_COLUMNS.map((c) => c.fmt).join('\t');
 
-/** Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested. */
+/**
+ * Is this line actually a pane, or something we cannot read?
+ *
+ * ⚠️ `PANE_FORMAT` is TAB-separated, and when the separator is absent every
+ * field but the first is missing — so the whole line landed in `session` and
+ * the rest defaulted, producing a syntactically valid agent whose name was the
+ * entire raw line and whose target was `<whole line>:undefined`.
+ *
+ * That is not hypothetical. It happened on this machine: without a UTF-8
+ * locale, **tmux sanitises its own format output** and replaces the tabs with
+ * underscores (bisected: `PATH` alone gives mangled output, `PATH`+`LANG`
+ * gives correct). The board then showed thirteen agents named
+ * `angel-discord_0.0_2.1.223_0__ …` — populated, confident, and wrong, with
+ * those entries carrying a name, a rank and a target into everything
+ * downstream, where `safeKey` would happily sanitise one into a collision with
+ * a real agent's key.
+ *
+ * ⚠️ THE RULE IS "IS THE SESSION A FIELD", NOT "ARE ALL THE FIELDS THERE", and
+ * the difference is a decision, not an oversight.
+ *
+ * Requiring every column would also reject a TRUNCATED line — and this module
+ * deliberately keeps those. A short line still names a session we can identify,
+ * and the missing fields default to the UNSAFE answer (`inMode` defaults to in
+ * copy-mode, a missing `command` classifies `unknown` rather than `stopped`),
+ * which is handled and tested. Dropping them would hide a running agent from
+ * the board, which is the same class of harm as showing a garbage one, pointed
+ * the other way.
+ *
+ * What makes the mangled line different is that NOTHING about it can be
+ * identified: with no separator at all, `session` is the whole line, so there is
+ * no agent to be conservative about.
+ *
+ * ⚠️ "A separator somewhere" is NOT enough, and the first version of this rule
+ * was exactly that. `title` is the one field that can itself contain a tab (see
+ * the format note above, and the test for tab-carrying titles), so a mangled
+ * line whose title happened to hold one sailed through and produced the very
+ * garbage agent this exists to reject — reproduced: a line reading
+ * `angel-discord_0.0_…_ Working<tab>on<tab>the thing` parsed as an agent named
+ * `angel-discord_0.0_…_ Working`, with `rejected: 0`, so nothing refused and
+ * nothing was counted.
+ *
+ * So the second field is CHECKED FOR SHAPE. `#{window_index}.#{pane_index}`
+ * is always two integers separated by a dot, tmux always produces it, and no
+ * mangled line can fake it. A truncated `session<tab>0.0` still passes, which
+ * keeps the deliberate policy above intact.
+ *
+ * ⚠️ A mistake in OUR OWN format string is a different problem and is not
+ * caught here. It is also not constructible in the form the issue imagined:
+ * `PANE_FORMAT` is derived by joining `PANE_COLUMNS` with a tab, so a `\t`
+ * cannot be dropped from it by hand. What can happen is a column being added,
+ * removed or reordered, and the round-trip test over a hand-built line catches a
+ * merge or a reorder — though not an appended column, which nothing currently
+ * would. That is a gap in the tests rather than something this guard should
+ * try to cover.
+ */
+const PANE_INDEX_SHAPE = /^\d+\.\d+$/;
+
+function isParseable(line) {
+  const parts = String(line).split('\t');
+  return parts.length > 1 && PANE_INDEX_SHAPE.test(parts[1]);
+}
+
+/**
+ * Parse `list-panes -F PANE_FORMAT` output, and say what could not be read.
+ *
+ * ⚠️ REJECTING IS ONLY HALF THE FIX, and the missing half is the one that cost
+ * fourteen hours. Dropping unreadable lines silently turns "tmux told us
+ * something we cannot understand" into "there are no agents" — which is exactly
+ * what the board displayed, all night, while thirteen agents were running. An
+ * empty board and an unreadable one look identical and mean opposite things.
+ *
+ * So the count travels with the panes, and `listPanes` refuses rather than
+ * serving an empty fleet it cannot vouch for.
+ */
+function readPanes(out) {
+  if (!out) return { panes: [], rejected: 0 };
+  const lines = out.trim().split('\n').filter(Boolean);
+  // ⚠️ Counted from what actually PARSED, not from a second application of the
+  // filter. Two derivations of "how many did we lose" can drift the moment
+  // `parsePanes` drops a line for any other reason.
+  const panes = parsePanes(out);
+  return { panes, rejected: lines.length - panes.length };
+}
+
+/**
+ * Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested.
+ *
+ * ⚠️ It DROPS lines it cannot read (see `isParseable`) and says nothing about
+ * how many. That silence is the fourteen-hour failure in miniature, so anything
+ * that needs to tell "no agents" from "an answer we could not read" must use
+ * `readPanes`, which returns the count alongside.
+ */
 function parsePanes(out) {
   if (!out) return [];
-  return out.trim().split('\n').filter(Boolean).map((line) => {
+  return out.trim().split('\n').filter(Boolean).filter(isParseable).map((line) => {
     const parts = line.split('\t');
     const raw = {};
     PANE_COLUMNS.forEach((col, i) => {
@@ -407,7 +498,28 @@ function listPanes() {
   const out = paneSource
     ? paneSource()
     : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
-  return parsePanes(out);
+  const { panes, rejected } = readPanes(out);
+
+  /**
+   * ⚠️ TMUX SPOKE AND WE UNDERSTOOD NONE OF IT. That is not an empty machine,
+   * and the difference is the whole reason this module exists.
+   *
+   * Refusing here reaches the board as its "we cannot read the agents right
+   * now" state, which says plainly that it is not claiming they are fine.
+   * Returning an empty list instead would render as a machine with no agents —
+   * which is what this board showed for fourteen hours while thirteen were
+   * running, because a mangled answer and no answer were indistinguishable.
+   */
+  if (rejected > 0 && panes.length === 0) {
+    throw new Error('tmux answered with something we could not read');
+  }
+  // Some read, some did not: the fleet is shown, and the gap is RETURNED
+  // alongside it rather than quietly closed, so `snapshot` can put it in the
+  // counts. Returned rather than stashed in module state — the first version
+  // used a module-level variable and justified it as avoiding a second
+  // derivation, which was not true: threading it costs one destructuring and
+  // cannot go stale.
+  return { panes, rejected };
 }
 
 /**
@@ -1315,7 +1427,38 @@ function paneRoster() {
   if (out === null || out === undefined) {
     throw new Error('could not ask tmux which panes exist');
   }
-  return onePanePerSession(parsePanes(out)).map((pane) => ({
+  /**
+   * ⚠️ AND THE SAME POSTURE FOR AN ANSWER WE CANNOT READ.
+   *
+   * "We could not ask" and "we asked and understood none of it" are the same
+   * thing to a gate: in both, the roster is not evidence that a name is free or
+   * that a pane is a stranger's. This function is what decides whether a write
+   * reaches an agent, so an unreadable answer has to fail CLOSED here rather
+   * than become an empty roster — which every caller reads as "nobody is
+   * claiming this name".
+   *
+   * `listPanes` refuses on the same condition for the board. Two readers, one
+   * rule, and the reason they are not one function is that this one is
+   * deliberately stricter than `snapshot` about being asked at all.
+   *
+   * ⚠️ A PARTIAL answer does NOT refuse here, and that is a decision rather
+   * than an omission. Refusing on any unreadable line would take every
+   * name-keyed read and write away from the whole fleet because one pane's line
+   * was mangled — a machine-wide outage caused by a cosmetic fault in one line.
+   * The gates this feeds are already conservative about a name they cannot
+   * find: `knownAgent` answers false, which fails closed.
+   *
+   * ⚠️ What it costs, said plainly: `borrowedName` also answers false, so a
+   * record stays readable on the strength of a roster this module has just
+   * admitted was incomplete. That is the weaker half of the trade, and it is
+   * bounded — the alternative is refusing every route on the machine for one
+   * bad line, which is a worse failure with a wider blast radius.
+   */
+  const { panes, rejected } = readPanes(out);
+  if (rejected > 0 && panes.length === 0) {
+    throw new Error('tmux answered with something we could not read');
+  }
+  return onePanePerSession(panes).map((pane) => ({
     sessionName: pane.name,
     // The real tmux session beside the board name, for the same reason
     // `snapshot` publishes it: anything that resolves a per-session artifact
@@ -1326,7 +1469,8 @@ function paneRoster() {
 }
 
 function snapshot() {
-  const panes = onePanePerSession(listPanes());
+  const { panes: read, rejected: unreadableLines } = listPanes();
+  const panes = onePanePerSession(read);
   const agents = panes.map((pane) => {
     const text = capturePane(pane.target);
     const status = classify(pane, text);
@@ -1427,6 +1571,11 @@ function snapshot() {
       unknown: agents.filter((a) => a.state === STATE.UNKNOWN).length,
       unreadableTokens: agents.filter((a) => a.context.tokens === null).length,
       unknownFullness: agents.filter((a) => a.context.percent === null).length,
+      // ⚠️ Lines tmux gave us that were not panes. Zero is the normal answer;
+      // anything else means part of the fleet is missing from this board and
+      // the board has to say so rather than presenting what is left as all of
+      // it.
+      unreadableLines,
     },
     agents,
   };
@@ -1438,7 +1587,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, paneRoster, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

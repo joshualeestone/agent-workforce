@@ -756,6 +756,15 @@ async function tick() {
     if (c.needsYou) bits.push(`${c.needsYou} need you`);
     if (c.unknown) bits.push(`${c.unknown} we cannot read`);
     if (c.unknownFullness) bits.push(`${c.unknownFullness} with unknown memory limits`);
+    // ⚠️ Part of the fleet is MISSING FROM THIS BOARD. tmux said something we
+    // could not read, and the agents behind those lines are not below — so this
+    // has to be on screen, or the board is presenting what it managed to parse
+    // as the whole machine. That is the shape of the failure that had it
+    // reporting zero agents for fourteen hours: nothing was wrong on screen,
+    // and everything was missing.
+    if (c.unreadableLines) {
+      bits.push(`${c.unreadableLines} we could not read at all, so some agents may be missing`);
+    }
     document.getElementById('summary').textContent = bits.join(' · ');
     // Says "early" out loud. For a product whose whole thesis is not
     // overstating what it knows, admitting its own maturity is on-brand.
