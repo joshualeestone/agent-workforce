@@ -79,6 +79,7 @@ body {
 
 header { max-width: 1320px; margin: 0 auto; display: flex; justify-content: space-between; align-items: baseline;
          gap: var(--space-7); margin-bottom: var(--space-2); }
+.headright { display: flex; align-items: baseline; gap: var(--space-5); }
 h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked { font: var(--text-caption) var(--font-ui); color: var(--label-3);
            text-align: right; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -154,6 +155,47 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .panel p:last-child { margin-bottom: 0; }
 .panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
                text-transform: uppercase; letter-spacing: .06em; }
+/* --- creating an agent ---------------------------------------------------
+   Three steps in one panel: what it is for, what it is called, and what
+   actually happened. The third is the one that matters -- it reports the
+   engine's own step list rather than a fixed success animation, because a
+   half-made agent is a real outcome and the person has to be able to see
+   which half. */
+.crumb { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+         text-transform: uppercase; letter-spacing: .06em; margin-bottom: var(--space-4); }
+.pick { display: flex; width: 100%; text-align: left; gap: var(--space-5); align-items: flex-start;
+        background: var(--bg); color: var(--label); cursor: pointer;
+        border: 0.5px solid var(--separator); border-radius: var(--radius-control);
+        padding: var(--space-5); margin-bottom: var(--space-4); font: inherit; letter-spacing: inherit; }
+.pick:hover { background: var(--attn-bg); }
+/* Selection is carried by the border weight and the check, never by hue alone:
+   the same greyscale rule the cards follow. */
+.pick[aria-checked="true"] { border: 1.5px solid var(--label); padding: calc(var(--space-5) - 1px); }
+.pick-mark { flex: none; width: 18px; color: var(--label); font-weight: 600; }
+.pick[aria-checked="false"] .pick-mark { color: transparent; }
+.pick b { font: 600 var(--text-body) var(--font-ui); display: block; }
+/* The limit on a role that has one, read while choosing rather than discovered
+   afterwards. Weight and a rule, never hue: it has to survive greyscale like
+   every other signal on this board. */
+.pick .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
+                 border-left: 2px solid var(--border-strong); color: var(--label);
+                 font: var(--text-callout) var(--font-ui); }
+.pick small { font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+.ticks { margin: var(--space-6) 0 0; }
+.tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
+        padding: var(--space-3) 0; display: flex; gap: var(--space-4); align-items: baseline; }
+.tick .mark { font-weight: 600; width: 14px; flex: none; }
+.tick.done { color: var(--label); }
+.tick.fail { color: var(--label); }
+.tick.fail .mark { color: var(--warn-ink); }
+.tick.waiting .mark { color: var(--label-3); }
+.tick.undone { color: var(--label-2); }
+.tick.undone .mark { color: var(--label-3); }
+.first-action { margin-top: var(--space-6); padding: var(--space-5);
+                background: var(--bg-sunken); border-radius: var(--radius-control);
+                border-left: 2px solid var(--border-strong); font: var(--text-body) var(--font-ui); }
+.first-action b { display: block; font-weight: 600; margin-bottom: var(--space-3); }
+.first-action q { color: var(--label-2); font-style: italic; }
 .grid { display: grid; gap: var(--space-5); justify-content: center;
         grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
         max-width: 1320px; margin: 0 auto; }
@@ -272,7 +314,10 @@ svg { display: block; }
 <body>
 <header>
   <h1>Agent Workforce</h1>
-  <div class="checked" id="checked"></div>
+  <div class="headright">
+    <button class="btn" id="new-agent" type="button">New agent</button>
+    <div class="checked" id="checked"></div>
+  </div>
 </header>
 <nav class="tabs" id="tabs" role="tablist">
   <button class="tab on"  data-tab="agents"   role="tab" aria-selected="true">Agents</button>
@@ -341,6 +386,73 @@ svg { display: block; }
   </div>
 </section>
 
+<!-- Creating an agent. Three steps, one panel, reached from the New agent
+     button rather than from the tab bar — the same way the detail panel is
+     reached by clicking a card. Deep-linkable as /?tab=create so it can be
+     screenshotted and shared. -->
+<section class="panel" id="panel-create" hidden>
+  <button class="back" id="create-back">&#8592; All agents</button>
+
+  <div class="cstep" id="cstep-role">
+    <p class="crumb">Step 1 of 2</p>
+    <h2>What should this agent do?</h2>
+    <p>Most people start with a project manager. You can change any of this
+       afterwards, and nothing here is permanent.</p>
+    <!-- radiogroup, not group: this is one choice out of five, and
+         `aria-pressed` toggles announce five independent on/off buttons
+         instead of "2 of 5". -->
+    <div id="roles-list" role="radiogroup" aria-label="What this agent is for"></div>
+    <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
+    <div class="frow" style="margin-top: var(--space-6);">
+      <button class="btn" id="role-next" type="button" disabled>Continue</button>
+    </div>
+  </div>
+
+  <div class="cstep" id="cstep-name" hidden>
+    <p class="crumb">Step 2 of 2</p>
+    <h2 id="create-meet">Name your agent</h2>
+    <p id="create-blurb"></p>
+    <div class="field">
+      <label class="flabel" for="create-name">Name</label>
+      <!-- The rule is stated, not re-implemented. The server owns what a legal
+           name is (`engine/create.nameProblem`); a second copy of the regex
+           here is a second definition of the same fact, and the two would
+           disagree eventually. So this is copy, and the refusal a person sees
+           is the server's own sentence. -->
+      <div class="fhint">Lower case letters, numbers, hyphens and underscores.
+        It becomes the name of its folder, so it is the one thing that is
+        awkward to change later.</div>
+      <div class="frow">
+        <input type="text" id="create-name" autocomplete="off" spellcheck="false"
+               placeholder="casey">
+        <button class="btn" id="create-go" type="button">Create it</button>
+      </div>
+      <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
+    </div>
+    <div class="frow" style="margin-top: var(--space-6);">
+      <button class="btn" id="create-prev" type="button">&#8592; Back</button>
+    </div>
+  </div>
+
+  <div class="cstep" id="cstep-made" hidden>
+    <h2 id="made-head">Making it</h2>
+    <!-- ⚠️ Every line here is either something the engine reported or something
+         this page watched happen. Nothing is asserted on a timer. -->
+    <!-- ⚠️ NOT itself a live region. `paintMade` replaces the whole list on
+         every repaint, so announcing the container re-read all six steps each
+         time the one changing line changed. The live region below carries just
+         that line. -->
+    <div class="ticks" id="made-ticks"></div>
+    <p class="vh" id="made-say" role="status" aria-live="polite"></p>
+    <div class="stale-note" id="made-warn" hidden></div>
+    <div class="first-action" id="made-first" hidden></div>
+    <div class="frow" style="margin-top: var(--space-7);">
+      <button class="btn" id="made-done" type="button" hidden>See it on the board</button>
+      <button class="btn" id="made-retry" type="button" hidden>Start over</button>
+    </div>
+  </div>
+</section>
+
 <section class="panel" id="panel-projects" hidden>
   <h2>Talking to your agents isn't built yet.</h2>
   <p>This is where you'll give them work and read what they say back, the way you
@@ -377,6 +489,18 @@ svg { display: block; }
 
 // Plain words, not internal vocabulary. "rate_limited" is not a thing a person
 // should ever have to read.
+/**
+ * Cancels an in-flight creation watch.
+ *
+ * ⚠️ Declared HERE, at the top, rather than beside the rest of the creation
+ * state four hundred lines down. The tab handler bumps it, and `let` is not
+ * hoisted: that worked only because nothing can dispatch an event during
+ * synchronous evaluation of this script. Deferring the script, making it a
+ * module, or one programmatic click during load turns it into a ReferenceError
+ * that silently kills tab switching.
+ */
+let WATCH = 0;
+
 const STATE_COPY = {
   working:      { label: 'Working',       attn: false },
   needs_you:    { label: 'Needs you',     attn: true  },
@@ -662,19 +786,21 @@ async function tick() {
 
 // A tab that does nothing reads as broken rather than as forthcoming, so each
 // unbuilt one says what it will be and why it isn't here yet.
-const PANELS = ['projects', 'joint', 'settings', 'detail'];
+const PANELS = ['projects', 'joint', 'settings', 'detail', 'create'];
+// Panels with no tab button of their own: reached by clicking an agent, or the
+// New agent button. Bailing when no button exists would silently do nothing,
+// which is how the detail page failed to open at all — so the exception is a
+// LIST rather than one hardcoded name, because the second buttonless panel was
+// always going to arrive.
+const BUTTONLESS = ['detail', 'create'];
 function showTab(tab) {
-  // 'detail' is a panel with no tab button of its own — it is reached by
-  // clicking an agent, not from the tab bar. Bailing when no button
-  // exists would silently do nothing, which is how the detail page failed
-  // to open at all.
   const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
   document.querySelectorAll('.tab').forEach((t) => {
     const on = t === btn;
     t.classList.toggle('on', on);
     t.setAttribute('aria-selected', String(on));
   });
-  if (!btn && tab !== 'detail') return;
+  if (!btn && !BUTTONLESS.includes(tab)) return;
   const agents = tab === 'agents';
   document.getElementById('grid').hidden = !agents;
   document.getElementById('summary').hidden = !agents;
@@ -684,7 +810,9 @@ function showTab(tab) {
 
 document.getElementById('tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab');
-  if (btn) showTab(btn.dataset.tab);
+  // Same reason as the back button: a tab click is also walking away from a
+  // creation in flight.
+  if (btn) { WATCH += 1; showTab(btn.dataset.tab); }
 });
 
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
@@ -1226,10 +1354,451 @@ document.getElementById('d-save').addEventListener('click', async () => {
   }
 });
 
+/* ===========================================================================
+   CREATING AN AGENT
+   ---------------------------------------------------------------------------
+   The one thing this product could not do until now. Every other screen reads
+   or edits something a person made by hand in a terminal.
+
+   Two rules run through all of it:
+
+   1. ⚠️ NOTHING IS CLAIMED THAT WAS NOT VERIFIED. The step list on the last
+      screen is the engine's own report, not a success animation on a timer,
+      and the final line — the only one that is about the agent rather than
+      about us — is watched on the board before it is written.
+   2. ⚠️ NO SECOND COPY OF A RULE. What a legal name is lives in
+      `engine/create.nameProblem`; this page states the rule as copy and shows
+      the server's own refusal, rather than validating alongside it. Two
+      validators of one fact is the defect this codebase keeps finding.
+========================================================================== */
+
+let ROLES = null;          // the menu, fetched once
+let PICKED = null;         // the role key the person chose
+let CREATING = false;      // a create is in flight; guards the double-click
+
+function cstep(which) {
+  ['role', 'name', 'made'].forEach((s) => {
+    document.getElementById('cstep-' + s).hidden = (s !== which);
+  });
+}
+
+function roleByKey(key) { return (ROLES || []).find((r) => r.key === key) || null; }
+
+async function loadRoles() {
+  const list = document.getElementById('roles-list');
+  const msg = document.getElementById('roles-msg');
+  // ⚠️ Fetched once, but the DEFAULT is re-applied every time the panel opens.
+  // Returning early on the second visit left the list rendered from last time
+  // with its old row still marked, while `openCreate` had just cleared the
+  // choice — a screen showing a selection the page did not have.
+  if (ROLES && ROLES.length) { pickRole(ROLES[0].key); return; }
+  msg.textContent = 'Loading…';
+  try {
+    const res = await fetch('/api/roles', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+    ROLES = (data && data.roles) || [];
+    if (!ROLES.length) throw new Error('none came back');
+    msg.textContent = '';
+    list.innerHTML = ROLES.map((r) => `<button class="pick" type="button" role="radio" aria-checked="false" data-role="${esc(r.key)}">
+      <span class="pick-mark" aria-hidden="true">&#10003;</span>
+      <span><b>${esc(r.label)}</b><small>${esc(r.blurb)}</small>${
+        r.caution ? `<small class="caution">${esc(r.caution)}</small>` : ''}</span>
+    </button>`).join('');
+    // The default is a suggestion, not a decision made for them: it is
+    // preselected and visibly so, and any other row replaces it in one click.
+    const first = list.querySelector('.pick');
+    if (first) pickRole(first.dataset.role);
+  } catch (err) {
+    // ⚠️ Do NOT fall back to a hardcoded list. The blurb a person reads while
+    // choosing has to be the copy the agent is actually created from, and a
+    // local copy of the menu is exactly how those two drift apart.
+    ROLES = null;
+    list.innerHTML = '';
+    // Not `esc()`: this goes into textContent, which does its own escaping, so
+    // escaping first renders an `&` in the error as a literal `&amp;`.
+    msg.textContent = 'We could not read the list of roles, so there is nothing safe to choose from. (' + err.message + ')';
+    document.getElementById('role-next').disabled = true;
+  }
+}
+
+function pickRole(key) {
+  const role = roleByKey(key);
+  if (!role) return;
+  PICKED = key;
+  document.querySelectorAll('#roles-list .pick').forEach((b) => {
+    const on = b.dataset.role === key;
+    b.setAttribute('aria-checked', String(on));
+    // Roving tabindex: the chosen row is the group's single Tab stop.
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.getElementById('role-next').disabled = false;
+}
+
+document.getElementById('roles-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('.pick');
+  if (btn) pickRole(btn.dataset.role);
+});
+
+/**
+ * ⚠️ The keyboard model the ARIA role PROMISES.
+ *
+ * `role="radiogroup"` tells a screen reader "2 of 6, use the arrows", and only
+ * click was bound — so the arrows did nothing and the promise was false. Not a
+ * hard trap (every option is a Tab stop and Space activates it), but announcing
+ * an interaction the code does not implement is the same defect this branch
+ * corrects everywhere else, in the one place a person cannot see it.
+ *
+ * With a roving tabindex the group is ONE Tab stop, which is also the right
+ * behaviour for a single choice: tabbing past six roles to reach Continue is
+ * the thing the pattern exists to avoid.
+ */
+document.getElementById('roles-list').addEventListener('keydown', (e) => {
+  const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+  const step = keys[e.key];
+  if (!step || !ROLES || !ROLES.length) return;
+  e.preventDefault();
+  const at = ROLES.findIndex((r) => r.key === PICKED);
+  const next = ROLES[((at < 0 ? 0 : at) + step + ROLES.length) % ROLES.length];
+  pickRole(next.key);
+  const el = document.querySelector('#roles-list .pick[data-role="' + next.key + '"]');
+  if (el) el.focus();
+});
+
+function openCreate() {
+  PICKED = null;
+  CREATING = false;
+  WATCH += 1;
+  document.getElementById('create-name').value = '';
+  document.getElementById('create-msg').textContent = '';
+  document.getElementById('create-go').disabled = false;
+  document.getElementById('role-next').disabled = true;
+  cstep('role');
+  showTab('create');
+  loadRoles();
+}
+
+document.getElementById('new-agent').addEventListener('click', openCreate);
+// ⚠️ Leaving the panel STOPS THE WATCH. `openCreate` bumps the token and this
+// did not, so walking away mid-creation left the loop polling /api/status every
+// two seconds and repainting a hidden panel for the rest of the thirty seconds.
+document.getElementById('create-back').addEventListener('click', () => { WATCH += 1; showTab('agents'); });
+document.getElementById('create-prev').addEventListener('click', () => cstep('role'));
+document.getElementById('made-done').addEventListener('click', () => { showTab('agents'); tick(); });
+document.getElementById('made-retry').addEventListener('click', openCreate);
+
+document.getElementById('role-next').addEventListener('click', () => {
+  const role = roleByKey(PICKED);
+  if (!role) return;
+  document.getElementById('create-meet').textContent = 'Name your ' + role.label.toLowerCase();
+  document.getElementById('create-blurb').textContent = role.blurb + '.';
+  cstep('name');
+  document.getElementById('create-name').focus();
+});
+
+document.getElementById('create-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('create-go').click();
+});
+
+/** One tick line. `state` is 'done' | 'fail' | 'undone' | 'waiting'. */
+function tickLine(state, text) {
+  const mark = state === 'done' ? '&#10003;'
+    : (state === 'fail' ? '&#10007;' : (state === 'undone' ? '&#8722;' : '&#8230;'));
+  // ⚠️ The glyph is the ONLY thing distinguishing a step that worked from one
+  // that failed, it is aria-hidden, and both states render in the same colour
+  // for the greyscale rule. So a screen reader heard "made its folder" and
+  // "started it" identically whether or not they had worked — on the one screen
+  // whose whole purpose is showing WHICH half of a half-made agent failed.
+  const said = state === 'done' ? 'done'
+    : (state === 'fail' ? 'failed' : (state === 'undone' ? 'undone' : 'still waiting'));
+  return `<div class="tick ${state}"><span class="mark" aria-hidden="true">${mark}</span>`
+    + `<span><span class="vh">${said}: </span>${esc(text)}</span></div>`;
+}
+
+/**
+ * Draw what the engine reported, plus the one line we are still watching.
+ *
+ * ⚠️ The engine's steps are claims about US — we wrote a file, we ran a
+ * command. The last line is a claim about the AGENT, and it is the only one
+ * that means the person actually has one, so it is drawn separately and only
+ * ever from something observed on the board.
+ */
+function paintMade(steps, watching) {
+  const lines = (steps || []).map((s) => (s.undone
+    ? tickLine('undone', s.label + ' (undone)')
+    : tickLine(s.ok ? 'done' : 'fail', s.label)));
+  if (watching) lines.push(tickLine(watching.state, watching.text));
+  document.getElementById('made-ticks').innerHTML = lines.join('');
+  // Only what changed, and only in words -- the glyphs say nothing aloud.
+  if (watching) document.getElementById('made-say').textContent = watching.text;
+}
+
+document.getElementById('create-go').addEventListener('click', async () => {
+  if (CREATING) return;
+  const name = document.getElementById('create-name').value.trim();
+  const msg = document.getElementById('create-msg');
+  const role = roleByKey(PICKED);
+  if (!role) { msg.textContent = 'Pick what this agent is for first.'; cstep('role'); return; }
+
+  CREATING = true;
+  document.getElementById('create-go').disabled = true;
+  msg.textContent = 'Making it…';
+  /**
+   * ⚠️ The token is taken BEFORE the request, not inside the watch.
+   *
+   * Minting it in `watchForAgent` left the fetch itself uncovered: leave the
+   * panel while the POST is in flight, and this handler still called
+   * `cstep('made')` on a hidden panel and then started a fresh watch with a
+   * fresh token — so a thirty-second poll ran against a screen nobody was
+   * looking at, announcing into the live region while the person was back on
+   * the board. That is the failure the back button's own comment says it fixed,
+   * arriving through the earlier window.
+   */
+  const attempt = ++WATCH;
+  let result;
+  let res;
+  try {
+    res = await fetch('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, role: PICKED }),
+    });
+    result = await res.json().catch(() => null);
+  } catch (err) {
+    // ⚠️ RE-ENABLE FIRST, then check whether they walked away. Returning before
+    // these two lines left `create-go` disabled for the rest of the page: click
+    // Create, leave the panel before the request fails, and the button is dead
+    // until a reload — including through the Enter key, which clicks it.
+    // ⚠️ Only if this attempt still OWNS the control. Resetting unconditionally
+    // re-armed a button belonging to a newer creation that was still in flight,
+    // so a third click fired a duplicate POST for the same name, bumped the
+    // token, and made the creation that actually succeeded return early -- the
+    // person then reads "there is already an agent called X" about an agent
+    // this flow had just made for them.
+    if (attempt !== WATCH) return;
+    CREATING = false;
+    document.getElementById('create-go').disabled = false;
+    // The request itself did not complete, so we do not know what happened on
+    // the other side — which is not the same as nothing having happened.
+    msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + err.message + ')';
+    return;
+  }
+
+  // Same ownership rule as the error path above: a superseded answer must not
+  // touch a control the current attempt is using. `openCreate` resets both, so
+  // walking away never leaves the button stuck.
+  if (attempt !== WATCH) return;   // they walked away while it was in flight
+  CREATING = false;
+  document.getElementById('create-go').disabled = false;
+
+  // A refusal is the caller's to fix, and it belongs beside the field that
+  // caused it rather than on a screen that has moved on.
+  if (result && result.outcome === 'refused') {
+    msg.textContent = result.because || 'that name will not work';
+    return;
+  }
+
+  /**
+   * ⚠️ ANY OTHER ANSWER IS NOT A CREATION.
+   *
+   * This checked `refused` and nothing else, so a 400, a 403 from the
+   * cross-site guard, a 500, or a body with no outcome at all fell straight
+   * through to the made screen — which painted an empty step list, watched for
+   * thirty seconds, and then told the person their folder and instructions were
+   * on their computer and a job was retrying at every login. Nothing had been
+   * created. That is this branch's first rule inverted, in the exact sentence
+   * `engine/create` names as the one not to say.
+   */
+  if (!res.ok || !result || (result.outcome !== 'created' && result.outcome !== 'partial')) {
+    msg.textContent = (result && (result.error || result.because))
+      || 'we could not make it, and we cannot tell you why';
+    return;
+  }
+
+  msg.textContent = '';
+  cstep('made');
+  document.getElementById('made-head').textContent = 'Making ' + name;
+  document.getElementById('made-first').hidden = true;
+  document.getElementById('made-warn').hidden = true;
+  document.getElementById('made-done').hidden = true;
+  document.getElementById('made-retry').hidden = true;
+  paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' });
+
+  /**
+   * ⚠️ A PARTIAL IS NOT WATCHED, because nothing can arrive.
+   *
+   * This used to start the same thirty-second watch, on the reasoning that "we
+   * could not mark the session as ours" and "it is not running" are different
+   * halves the board can tell apart. That outcome no longer exists — the claim
+   * moved into the startup script — and every partial now rolls back, so there
+   * is no job, no folder and nothing that could come up under that name. A
+   * screen that says "waiting for the board to see it running" about something
+   * it knows was never started is the exact overstatement this whole flow is
+   * built against, and it would have made the person wait half a minute for it.
+   */
+  if (result.outcome === 'partial') {
+    // ⚠️ The steps are drawn as UNDONE. They were true when the engine reported
+    // them and then the rollback took them back, so a column of ticks above
+    // "Nothing was made" contradicts the sentence beside it -- on the screen
+    // whose stated rule is that every line is something reported or something
+    // watched.
+    paintMade((result.steps || []).map((st) => ({ ...st, undone: st.ok })), null);
+    document.getElementById('made-head').textContent = name + ' was not made';
+    // ⚠️ SAY IT OUT LOUD. `paintMade` only writes the live region when there is
+    // a line being watched, and a partial has none -- so the single outcome
+    // this screen exists to communicate was the only one that announced
+    // nothing, while the live region still held "Waiting for the board to see
+    // it running", which had just become false.
+    document.getElementById('made-say').textContent =
+      name + ' was not made. ' + (result.because || '');
+    const warn = document.getElementById('made-warn');
+    // The heading and this line have to agree. They did not: "This one is only
+    // half made" sat above a sentence saying nothing was left on the computer.
+    warn.innerHTML = '<b>Nothing was made.</b> ' + esc(result.because || '');
+    warn.hidden = false;
+    document.getElementById('made-done').hidden = false;
+    document.getElementById('made-retry').hidden = false;
+    tick();
+    return;
+  }
+
+  await watchForAgent(name, result, attempt);
+});
+
+/**
+ * Has the board actually got this agent?
+ *
+ * ⚠️ THE definition, in one place, because it is the only claim on the
+ * creation screen that is about the agent rather than about us. Three facts,
+ * and each is here for a failure it would otherwise let through:
+ *
+ *   - `isAgentSession` — a Claude process is actually RUNNING in that session.
+ *     Without it, a session whose Claude died the moment it started still reads
+ *     as a success.
+ *     ⚠️ This asked `isFleetSession`, which was a DEAD TERM: that function
+ *     returns true immediately for any pane the name arm claims, so for a pane
+ *     that already passed `isNamedOurs` it can never be false. The comment
+ *     described a guarantee the field could not deliver, and a claimed pane
+ *     whose command tmux could not report — `unknown`, not `stopped` — sailed
+ *     through as a running agent. `isAgentSession` is the one that asks the
+ *     question this line claims to ask.
+ *   - `isNamedOurs`    — the board ties that session to this name. This is the
+ *     whole point of the session claim: without it the new agent is on the
+ *     board as an anonymous pane with no role, no model and no editable file,
+ *     which is the blocker this branch exists to remove. A "created" screen
+ *     over that state would be a lie by omission.
+ *   - not `stopped`    — the structural "nothing is running here".
+ *
+ * ⚠️ And `unknown` is deliberately NOT a failure. An agent sitting at its
+ * first prompt has nothing on its screen that says what it is doing, so
+ * `unknown` is the honest classification and it is the NORMAL state of a
+ * healthy thirty-second-old agent. Treating it as failure would fail every
+ * successful creation.
+ */
+function boardCanSeeIt(a) {
+  return Boolean(a) && a.isAgentSession === true && a.isNamedOurs === true && a.state !== 'stopped';
+}
+
+/**
+ * Watch the board until it can see the new agent running.
+ *
+ * ⚠️ This is the honest version of the prototype's "✓ It answered", and it is
+ * deliberately weaker than that sentence. What we can actually establish from
+ * here is that the session exists, a Claude process is running inside it, and
+ * the board ties it to this name — that last part is what the session claim was
+ * built for. Whether it has *answered* is a claim about a conversation we have
+ * not had, so we do not make it.
+ *
+ * A brand-new agent sitting at its first prompt reports state `unknown`, which
+ * is correct — nothing on its screen says what it is doing yet. So `unknown` is
+ * NOT treated as failure here; the structural facts are.
+ */
+async function watchForAgent(name, result, attempt) {
+  // The token from before the request, so one creation is one attempt from the
+  // click to the last poll.
+  const mine = attempt;
+  const until = Date.now() + 30000;
+
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 2000));
+    if (mine !== WATCH) return;             // the person moved on; stop drawing
+    let agents = [];
+    try {
+      const res = await fetch('/api/status', { cache: 'no-store' });
+      if (res.ok) agents = (await res.json()).agents || [];
+    } catch { /* the next round can try again */ }
+    if (mine !== WATCH) return;
+
+    const found = agents.find((a) => a.sessionName === name);
+    if (boardCanSeeIt(found)) {
+      paintMade(result.steps, { state: 'done', text: 'The board can see it running' });
+      document.getElementById('made-head').textContent = name + ' is running';
+      if (result.firstAction) {
+        const box = document.getElementById('made-first');
+        box.innerHTML = '<b>Something to give it first</b><q>' + esc(result.firstAction) + '</q>';
+        box.hidden = false;
+      }
+      document.getElementById('made-done').hidden = false;
+      tick();
+      return;
+    }
+  }
+  if (mine !== WATCH) return;
+
+  // Thirty seconds and the board still cannot see it. Say exactly that, and
+  // nothing about why — we do not know why, and the plausible guess is the
+  // thing this codebase is written against.
+  paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' });
+  document.getElementById('made-head').textContent = name + ' has not come up';
+  const warn = document.getElementById('made-warn');
+  /**
+   * ⚠️ DO NOT OVERWRITE A PARTIAL'S REASON WITH THIS ONE.
+   *
+   * The first version assigned this sentence unconditionally, and a creation
+   * that came back PARTIAL had already written the true explanation into the
+   * same box. So the person lost "we could not write everything it needs" and
+   * got "the folder and the instructions are on your computer either way" in
+   * its place — which, when the instruction write is what failed, is FALSE in
+   * exactly the case that produced it. `engine/create` has a comment naming
+   * that sentence as the thing not to say; the screen said it anyway, one
+   * layer up, thirty seconds later.
+   */
+  if (result.outcome === 'partial') {
+    warn.innerHTML = '<b>This one is only half made.</b> ' + esc(result.because || '')
+      + '<br>Nothing is running under that name, and this screen has stopped waiting for it.';
+  } else {
+    warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
+      + 'The folder and the instructions are on your computer either way. It may still '
+      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
+      // ⚠️ Removing an agent is still a manual job, and this is the screen where
+      // somebody is most likely to want one gone. Saying "it is set to keep
+      // trying" without saying where is how a person ends up with a job they
+      // cannot find.
+      // ⚠️ The folder comes from the ANSWER, not from a path built here. This
+      // page guessed `~/work/workers/<name>`, which is wrong on any machine
+      // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a
+      // folder that does not exist.
+      + (result.folder
+        ? '<br>It is set to keep trying at every login. Its folder is <code>' + esc(result.folder)
+          + '</code>, and removing it for good is written up in the README.'
+        : '<br>It is set to keep trying at every login, and removing it for good is written up in the README.');
+  }
+  warn.hidden = false;
+  document.getElementById('made-done').hidden = false;
+  document.getElementById('made-retry').hidden = false;
+  tick();
+}
+
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
-showTab(PARAMS.get('tab') || 'agents');
+const BOOT_TAB = PARAMS.get('tab') || 'agents';
+showTab(BOOT_TAB);
+// /?tab=create is a deep link like any other, so it has to arrive with its
+// menu. Without this it renders an empty role list and a dead Continue —
+// exactly the failure the instruction editor had when it shipped enabled and
+// empty on its own deep link.
+if (BOOT_TAB === 'create') loadRoles();
 
 tick();
 setInterval(tick, 5000);

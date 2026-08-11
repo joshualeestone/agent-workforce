@@ -1,0 +1,841 @@
+'use strict';
+
+/**
+ * Creating an agent.
+ *
+ * ⚠️ This is the most powerful thing this codebase does. Restart and clear act
+ * on something that already exists; this MAKES things — a directory, a file an
+ * agent boots from, a tmux session, and a launchd job that will start it again
+ * on every reboot until someone removes it.
+ *
+ * So it is built like the destructive routes rather than like a form handler:
+ *
+ *   - **A name is validated once, hard, and early.** It has to be exactly its
+ *     own sanitised form AND start alphanumeric — the two rules the rest of the
+ *     system already enforces separately, which have disagreed before.
+ *   - **Every command is `execFile` with an argument array**, never a shell
+ *     string. A name reaches launchd as one argument, never as text a shell
+ *     could reinterpret.
+ *     ⚠️ This used to read "no shell, ever", and that sentence stopped being
+ *     true the moment the agent needed a supervising startup script — which it
+ *     does, because `tmux new-session -d` exits immediately and launchd would
+ *     otherwise respawn the job forever. So there IS generated shell text now,
+ *     in exactly one place (`launcherFor`), and the safety there is the name
+ *     validator rather than the absence of a shell. Leaving the old sentence
+ *     standing would have been the more dangerous half of the change.
+ *   - **A runner seam with a bidirectional interlock**: leaving dry-run throws
+ *     unless a runner is already injected, and clearing the runner re-arms
+ *     dry-run, so neither ordering leaves a test able to spawn real agents.
+ *     ⚠️ And dry-run now suppresses the WRITES as well as the commands. It
+ *     guarded them with `DRY_RUN && !runner` — true only in the state where the
+ *     commands are inert anyway — so a test that installed a recorder still
+ *     wrote a real plist into `~/Library/LaunchAgents`, and launchd starts that
+ *     job at the next login whether or not anybody ran `bootstrap`. The
+ *     interlock was covering the quieter half of the danger.
+ *     ⚠️ This used to say "dry-run by default", and that was FALSE: the flag
+ *     starts at `AGENT_WORKFORCE_DRY_RUN === '1'`, which is false unless
+ *     somebody sets it, so a fresh process with no runner installed executes
+ *     for real. The server relies on exactly that. What actually holds the
+ *     tests off the machine is the test file arming dry-run at load, which it
+ *     now does explicitly rather than by inheriting a guarantee that was only
+ *     written down. A safety comment claiming more than the code does is worse
+ *     than none — it is what stops the next reader checking.
+ *   - **Nothing is claimed that was not verified.** "Created" is a claim about
+ *     us; "it answered" is a claim about the agent, and only the second means
+ *     the person has an agent.
+ */
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const roles = require('./roles');
+// ⚠️ The ROSTER, from the module that defines what an agent name is. A second
+// reading of tmux here would be a second definition of "who is already
+// running", and this codebase's worst defects have all been two definitions of
+// one fact. `status` does not require this module, so there is no cycle, and
+// its `setPaneSource` seam is what keeps these tests off the real machine.
+const status = require('./status');
+// ⚠️ The same key every name-keyed route resolves by. Comparing raw names let
+// this create `mybot` beside a live `my.bot-discord`: two names, one key, one
+// instruction file, one avatar, one commitment record -- so a write naming
+// either reached the other. This module's own header exists to prevent exactly
+// that ("a name that sanitises to something else means two names can become
+// one"), and the gate was checking the wrong thing to enforce it.
+const store = require('./store');
+
+const HOME = os.homedir();
+const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
+const AGENTS_DIR = process.env.AGENT_WORKFORCE_LAUNCH || path.join(HOME, 'Library', 'LaunchAgents');
+
+const OUTCOME = { CREATED: 'created', REFUSED: 'refused', PARTIAL: 'partial' };
+
+/* ── the runner seam ─────────────────────────────────────────────────────── */
+
+let DRY_RUN = process.env.AGENT_WORKFORCE_DRY_RUN === '1';
+let runner = null;
+
+/**
+ * ⚠️ A BIDIRECTIONAL interlock. `setDryRun(false)` refuses unless a runner is
+ * installed, and `setRunner(null)` re-arms dry-run — so neither ordering can
+ * leave a test able to spawn a real tmux session. A one-directional invariant
+ * would depend on every test's `finally` running in the right order.
+ *
+ * (Earlier comments here cited `engine/lifecycle.js` as the precedent. That
+ * module is on another branch and does not exist beside this one, so a reader
+ * sent to it could not check the invariant being claimed — the same
+ * cross-branch reference that put a call to a nonexistent function in this
+ * file's own route once already.)
+ */
+function setRunner(fn) {
+  runner = fn || null;
+  if (!runner) DRY_RUN = true;
+}
+function setDryRun(on) {
+  if (!on && !runner) {
+    throw new Error('refusing to leave dry-run with no injected runner: this would create real agents');
+  }
+  DRY_RUN = Boolean(on);
+}
+
+function run(file, args) {
+  if (runner) return runner(file, args);
+  if (DRY_RUN) return { ok: true, stdout: '', dryRun: true };
+  // ⚠️ `stdio` pipes stderr rather than inheriting it. Without this, the
+  // `launchctl print` probe -- which fails for every FREE name, by design --
+  // printed "Could not find service" to the operator's console immediately
+  // before the board reported a successful creation.
+  return {
+    ok: true,
+    stdout: execFileSync(file, args, { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }),
+  };
+}
+
+/* ── names ───────────────────────────────────────────────────────────────── */
+
+/**
+ * Is this a name we can build an agent out of?
+ *
+ * ⚠️ ONE function, because the rules it combines have already disagreed with
+ * each other elsewhere in this codebase and the disagreement was the worst
+ * defect found on the previous branch. A name has to survive:
+ *
+ *   - `safeKey` unchanged — the routes resolve by exact name, and a name that
+ *     sanitises to something else means two names can become one.
+ *   - an alphanumeric first character — `safeServiceName` and `safeTarget` both
+ *     require it, so a leading `_` produces a directory we can make and a
+ *     service we cannot.
+ *   - a length a human will actually see, and a shape a person can type.
+ */
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
+
+/**
+ * The name we will actually use, from whatever was typed.
+ *
+ * ⚠️ ONE trim, in one place, EXPORTED. `nameProblem` trimmed its input and
+ * `createAgent` trimmed again independently, so the two agreed only by
+ * coincidence: `nameProblem(' ab')` answered "that is fine" about a string
+ * nobody would ever use, and any third caller that validated a raw value and
+ * then used it unchanged would have carried a leading space into a directory
+ * name and into the startup script. Found by a property test asking what the
+ * validator actually accepts rather than what I remembered it accepting.
+ *
+ * So: validate the cleaned name, use the cleaned name, and let a caller ask for
+ * it rather than re-deriving it.
+ */
+function cleanName(raw) {
+  return String(raw == null ? '' : raw).trim();
+}
+
+function nameProblem(raw) {
+  const name = cleanName(raw);
+  if (!name) return 'give the agent a name';
+  if (name.toLowerCase() !== name) return 'use lower case, so the name is the same everywhere it appears';
+  // ⚠️ Length gets its OWN sentence. `NAME_RE` enforces 2 to 32 characters, and
+  // a person who typed `a` was told to use letters, numbers, hyphens and
+  // underscores -- a rule they had not broken, with no way to work out what was
+  // actually wrong. A refusal that names the wrong rule is worse than a vague
+  // one.
+  if (name.length < 2) return 'use at least two characters, so the name is something you can pick out';
+  if (name.length > 32) return 'keep it to 32 characters or fewer';
+  if (!NAME_RE.test(name)) {
+    return 'use letters, numbers, hyphens and underscores, starting with a letter or number';
+  }
+  /* ⚠️ NOT `<something>-discord`, and this is not cosmetic.
+   *
+   * The board files an agent under its session name with `-discord` STRIPPED.
+   * So an agent created as `angel-discord` would be filed under `angel` — the
+   * name a real agent already holds — and the roster collision check, which
+   * compares board names, would not see it: it looks for `angel-discord` in a
+   * list where the live `angel-discord` session appears as `angel`.
+   *
+   * Two failures from one accepted name. The creation collides with a running
+   * agent the check was written to protect, and even on an empty machine the
+   * new agent is filed under a name that is not its session, so its identity,
+   * its instructions and its writes all resolve to the wrong key and its card
+   * is anonymous and uneditable.
+   */
+  if (/-discord$/.test(name)) {
+    return 'names cannot end in -discord, which the board reads as an agent running somewhere else';
+  }
+  return null;
+}
+
+/* ── paths, derived once ─────────────────────────────────────────────────── */
+
+function workerDir(name) { return path.join(WORKERS_DIR, name); }
+function instructionFile(name) { return path.join(workerDir(name), 'CLAUDE.md'); }
+function launcherFile(name) { return path.join(workerDir(name), 'start.sh'); }
+function logFile(name) { return path.join(workerDir(name), 'start.log'); }
+function serviceLabel(name) { return `com.kosmos.agent.${name}`; }
+function plistPath(name) { return path.join(AGENTS_DIR, `${serviceLabel(name)}.plist`); }
+
+/**
+ * The script that actually starts the agent, and keeps starting it.
+ *
+ * ⚠️ The job CANNOT be `tmux new-session` directly, and the version that was
+ * is the reason this exists. `new-session -d` daemonises and exits immediately,
+ * so launchd sees the job finish, `KeepAlive` restarts it, and the restart
+ * fails because the session it just made already exists — a respawn loop that
+ * runs for as long as the machine is on, while the agent looks perfectly
+ * healthy because the FIRST attempt worked. Invisible, permanent, and shipped
+ * on every agent.
+ *
+ * So the job runs a script that supervises instead: it clears any session of
+ * that name, starts a new one, and then STAYS ALIVE while the session does.
+ * This is the pattern the thirteen agents on this machine already run under,
+ * and its own comment says why: "keeps launchd happy".
+ *
+ * ⚠️ AND IT SETS THE CLAIM ITSELF. The claim is a tmux user option, so it dies
+ * with the session — which is exactly why it is trustworthy, and exactly why
+ * setting it once at creation is not enough. After a reboot launchd starts the
+ * agent afresh, and without this line the session comes back unclaimed: the
+ * board stops recognising an agent it created, shows it anonymous with no role,
+ * no model and no editable instructions, and the whole blocker this branch
+ * exists to remove comes back on the first restart.
+ *
+ * ⚠️ This is still KOSMOS writing the claim, not the agent. The distinction
+ * that matters is that nothing an agent does to itself can claim a name: this
+ * file is written by the creation, run by the job the creation installed, and
+ * lives beside the agent's instructions where a person can read it.
+ *
+ * ⚠️ The name is interpolated into shell text here, which is the one place this
+ * module does that, so it is worth stating why it is safe: `nameProblem`
+ * refuses anything outside `^[a-z0-9][a-z0-9_-]{1,31}$` long before this is
+ * called, and that set contains no quote, no space and no shell metacharacter.
+ * The single quotes are belt and braces on top of a validator that has already
+ * made them unnecessary.
+ */
+function launcherFor(name, claudeBin, tmuxBin) {
+  const dir = workerDir(name);
+  return `#!/bin/bash
+# Starts ${name}, and keeps launchd from restarting it in a loop.
+#
+# Written by Kosmos when this agent was created. It is a real file: you can
+# read it, and you can change it. It runs at every login and whenever the
+# agent's session ends.
+
+SESSION='${name}'
+LOG='${logFile(name)}'
+adopt=
+
+# launchd appends to this log forever, and a persistently failing start writes
+# a line every 30 seconds for as long as the machine is on. Keep it bounded.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
+  : > "$LOG"
+fi
+
+# ⚠️ TWO SPELLINGS OF THE SAME SESSION, and which commands take which was
+# MEASURED on tmux 3.6a rather than assumed, because assuming it broke the claim
+# on a real agent:
+#
+#   has-session, kill-session,
+#   list-panes                : accept "=name" (exact) -- USE IT. Their default
+#                               resolution falls back to a PREFIX match, so
+#                               "kill-session -t sam" will happily kill
+#                               samantha-discord. Measured, by killing one.
+#   set-option, show-options  : REJECT "=name" outright ("no such session:
+#                               =name"). They take the plain name.
+#
+# ⚠️ The first version of this note also listed list-panes as rejecting it. That
+# was a MIS-MEASUREMENT, and how it happened is worth keeping: the probe ran
+# against a session that a previous command in the same terminal had already
+# killed, so "can't find" was true for a reason that had nothing to do with the
+# syntax under test. A measured claim taken against the wrong world is worse
+# than an unmeasured one, because it stops the next person checking.
+#
+# The two plain-name commands prefix-match too, but both run only when an exact
+# session of this name is known to exist -- inside the loop that has-session
+# guarded, or after new-session made it -- and tmux prefers an exact match over
+# a prefix. Also measured.
+TARGET="=${name}"
+# ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
+# socket path of the server you are inside -- and bash keeps the export
+# attribute, so assigning it here hands every child a malformed $TMUX. Run this
+# script by hand from inside a tmux pane, which the header invites, and
+# new-session refuses because it thinks it is being asked to nest.
+TMUX_BIN='${tmuxBin}'
+CLAUDE='${claudeBin}'
+WORKDIR='${dir}'
+
+# ⚠️ Only ever clear a session that is OURS.
+#
+# This ran unconditionally, and it runs at every login and after every crash —
+# so a person who happened to have a tmux session of this name would have had it
+# destroyed with no warning, by a job installed weeks earlier. The board refuses
+# to act on any pane it cannot tie to a name; a script that kills one is the
+# same rule broken from the outside.
+#
+# The claim is the tie. If something else holds the name we WAIT rather than
+# exit: exiting would have launchd restart us every 30 seconds, and waiting
+# recovers on its own the moment that session ends.
+# ── the session ──────────────────────────────────────────────────────────────
+warned=0
+while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
+  if [ "$("$TMUX_BIN" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
+    # ⚠️ Ours -- but do not throw away a HEALTHY one. This file says you can run
+    # it by hand, and the unconditional kill meant doing so destroyed the live
+    # agent and everything it remembered. If something other than a shell is
+    # running in there, the agent is alive: adopt it and supervise, which is
+    # also the right answer when launchd restarts this script under a session
+    # that never stopped.
+    # ⚠️ -s, so this asks about the whole SESSION. Without it tmux resolves the
+    # target as a WINDOW, so this read only the current window -- and with
+    # "head -1", only its first pane. A session where somebody had split the
+    # window or opened a second one with a shell in it (which this file invites,
+    # since it says you can run it yourself) read as "crashed back to a shell"
+    # and the live agent was killed at the next login.
+    #
+    # ⚠️ IF WE CANNOT SEE INSIDE IT, WE DO NOT TOUCH IT. An empty answer used to
+    # mean "every pane is a shell", so a tmux that failed to answer became a
+    # reason to destroy a session we had just confirmed exists and is ours --
+    # "I cannot see it" converted into "it is dead", which is the one inversion
+    # this whole codebase is written against.
+    panes=$("$TMUX_BIN" list-panes -s -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null)
+    if [ -z "$panes" ]; then
+      echo "$(date): could not read what is running in $SESSION -- leaving it alone" >&2
+      adopt=1
+      break
+    fi
+    alive=0
+    while read -r pane_cmd; do
+      # ⚠️ AN ALLOWLIST, matching status.js's isClaudeCommand, NOT a
+      # list of shells to exclude. The denylist this replaces is the exact
+      # defect that module documents at length: a crashed agent whose remaining
+      # pane holds vim, less, ssh or python3 is not Claude, but a
+      # denylist of six shell names says it is. Here that reads alive, so the
+      # script adopts a dead agent and sits in the supervision loop forever --
+      # and launchd's KeepAlive can never recover it, because as far as launchd
+      # is concerned the job is running fine.
+      #
+      # Two definitions of "Claude is running" is what the board already paid
+      # for once. This is the same definition, in the one place that acts on it
+      # destructively: a native install reports a bare version (2.1.227), and
+      # the other spellings are claude, claude.exe and node.
+      # ⚠️ A REGEX, not a glob. The glob [0-9]*.[0-9]*.[0-9]* also matches
+      # 1.2.3.4, 1a.2b.3c and 12x.3.4y, while status.isNativeClaude is
+      # ^[0-9]+\.[0-9]+\.[0-9]+$ and deliberately excludes anything else. A
+      # comment claiming parity with a definition, next to a looser copy of it,
+      # is the thing this file keeps correcting -- and here being loose means
+      # adopting a dead agent and supervising it forever.
+      if [[ "$pane_cmd" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] \\
+        || [ "$pane_cmd" = claude ] || [ "$pane_cmd" = claude.exe ] || [ "$pane_cmd" = node ]; then
+        alive=1
+      fi
+    done <<EOF
+$panes
+EOF
+    if [ "$alive" -eq 1 ]; then
+      echo "$(date): $SESSION is already running -- leaving it alone and watching it" >&2
+      adopt=1
+      break
+    fi
+    # Every pane is a shell: it crashed. Replace it.
+    "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
+    break
+  fi
+  if [ "$warned" -eq 0 ]; then
+    echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
+    warned=1
+  fi
+  sleep 5
+done
+
+# --dangerously-skip-permissions is not optional for an unattended agent.
+# Without it the agent starts, looks healthy, and freezes forever on its first
+# permission prompt with nobody there to answer it.
+#
+# ⚠️ Exit on failure, because the claim below must never land on a session we
+# did not make. The name can be taken between the check above and this line, and
+# stamping @kosmos_agent onto somebody else's session would make the NEXT run of
+# this script recognise it as ours and kill it -- the borrowed-name hazard the
+# wait loop exists to prevent, arriving through the one command whose failure
+# was not checked.
+if [ -z "$adopt" ]; then
+  "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
+    "$CLAUDE" --dangerously-skip-permissions || exit 1
+fi
+
+# The claim. Without it this agent is anonymous on the board after every
+# restart, whatever it was when it was created.
+#
+# ⚠️ Its failure is reported rather than swallowed: an unclaimed session runs
+# fine and shows on the board with no name, no role, no model and no editable
+# instructions, which is the blocker this whole mechanism exists to remove. If
+# it ever happens, the reason belongs in the log rather than in nothing.
+"$TMUX_BIN" set-option -t "$SESSION" @kosmos_agent "$SESSION" \\
+  || echo "$(date): could not claim $SESSION -- the board will not recognise it" >&2
+
+# Stay alive while the session does, so launchd supervises the AGENT rather
+# than a command that exits in a tenth of a second.
+while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
+  sleep 10
+done
+`;
+}
+
+/**
+ * The launchd job.
+ *
+ * ⚠️ `PATH` **and `LANG`**, and neither is optional. launchd's default PATH
+ * omits Homebrew, so tmux is simply not found — the board then serves happily
+ * with zero agents. And without a UTF-8 locale, tmux SANITISES its own format
+ * output, replacing the tab separators with underscores, so every agent parses
+ * as one garbage field. Both were found the hard way on this machine on
+ * 2026-08-10; see issue #23.
+ *
+ * ⚠️ `HOME` too. A launchd job does not reliably carry one, and Claude keeps
+ * everything it knows under `~/.claude` — without it the agent starts as
+ * somebody with no history.
+ *
+ * ⚠️ And somewhere to SEE a failure. A job that cannot start writes its reason
+ * to a log or to nowhere, and "to nowhere" is how the board spent fourteen
+ * hours reporting zero agents this morning.
+ */
+// A path is a legal place for `&` or `<`, and either one emits a plist launchd
+// silently refuses to load. The shell-shape check above rejects quotes and
+// metacharacters; this is the XML half of the same idea.
+function xml(value) {
+  return String(value)
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;');
+}
+
+function plistFor(name, claudeBin, tmuxBin) {
+  const label = serviceLabel(name);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${xml(label)}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${xml(launcherFile(name))}</string>
+  </array>
+  <key>WorkingDirectory</key><string>${xml(workerDir(name))}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>${xml(HOME)}</string>
+    <key>PATH</key><string>${xml(`${path.dirname(claudeBin)}:${path.dirname(tmuxBin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`)}</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>${xml(logFile(name))}</string>
+  <key>StandardErrorPath</key><string>${xml(logFile(name))}</string>
+</dict>
+</plist>
+`;
+}
+
+/* ── the steps ───────────────────────────────────────────────────────────── */
+
+/**
+ * Make an agent, and report honestly about how far it got.
+ *
+ * Returns `{ outcome, because, steps }`. `steps` records each thing attempted
+ * and whether it worked, because a half-made agent is a real state and the
+ * operator has to be able to see which half.
+ */
+function createAgent(opts) {
+  const name = cleanName(opts && opts.name);
+  const roleKey = String((opts && opts.role) || '').trim();
+  // ⚠️ Overridable by environment, because these two defaults are ONE machine's
+  // paths: an Intel Mac keeps Homebrew at `/usr/local`, and an npm-global Claude
+  // is not in `~/.local/bin` at all. Without a way to say so, this product
+  // simply cannot make an agent on those machines — it refuses, correctly but
+  // uselessly. It is also what lets the route be tested without depending on
+  // what happens to be installed on the machine running the suite.
+  //
+  // ⚠️ Environment and arguments only. NOT the request body: honouring a
+  // caller-supplied path would let anything that can reach this server name an
+  // executable to be launched under launchd on every reboot, which is a far
+  // worse hole than the one creation already is.
+  const claudeBin = (opts && opts.claudeBin)
+    || process.env.AGENT_WORKFORCE_CLAUDE_BIN
+    || path.join(HOME, '.local', 'bin', 'claude');
+  const tmuxBin = (opts && opts.tmuxBin)
+    || process.env.AGENT_WORKFORCE_TMUX_BIN
+    || '/opt/homebrew/bin/tmux';
+
+  const steps = [];
+  const problem = nameProblem(name);
+  if (problem) return { outcome: OUTCOME.REFUSED, because: problem, steps };
+
+  const role = roles.byKey(roleKey);
+  if (!role) {
+    return { outcome: OUTCOME.REFUSED, because: 'pick what this agent is for', steps };
+  }
+  /* ⚠️ WHAT IS ALREADY HERE, and the refusal has to name the RIGHT half.
+   *
+   * Three states, not one, because removing an agent is still manual and the
+   * README says so: a folder can outlive its job, and a job can outlive its
+   * folder. Checking only the folder meant a leftover launchd job was
+   * discovered as a FAILED BOOTSTRAP -- "we set it up but could not start it",
+   * which is true and about the wrong thing, on the one screen built to tell
+   * somebody which half failed. Checking only the job inverted it.
+   *
+   * The half-made case matters most in practice: a PARTIAL leaves both on disk,
+   * the screen offers Start over, and the person needs to be told what is in
+   * the way rather than that an agent they can see is not running exists.
+   */
+  const hasFolder = fs.existsSync(workerDir(name));
+  const hasJob = fs.existsSync(plistPath(name));
+  if (hasFolder && hasJob) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `there is already an agent called ${name}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
+      steps,
+    };
+  }
+  if (hasJob) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
+      steps,
+    };
+  }
+  if (hasFolder) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `there is already a folder for an agent called ${name}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
+      steps,
+    };
+  }
+
+  /* ⚠️ AND A SERVICE THAT IS LOADED WITH NO PLIST ON DISK, which is what the
+   * README's own removal recipe produces if the `rm` runs without the
+   * `bootout`, or before it.
+   *
+   * Without this check the creation proceeds, `bootstrap` fails with "service
+   * already bootstrapped", the rollback removes the plist it just wrote, and
+   * the person is told "we have taken it back off your computer. You can try
+   * that name again." Retrying fails identically, forever, against a message
+   * promising the opposite -- while the orphaned job keeps respawning against a
+   * startup script the rollback has just deleted.
+   *
+   * ⚠️ We REFUSE rather than booting the stray service out ourselves. It is a
+   * job this creation did not install, running something we have not looked at,
+   * and unloading somebody else's service to free up a name is exactly the
+   * "act on something we have not tied to us" move the rest of this codebase
+   * refuses to make.
+   */
+  //
+  // ⚠️ Loaded means launchctl actually DESCRIBED the service, not merely that
+  // the command came back. `print` exits non-zero and throws when there is no
+  // such service, and prints a block describing it when there is — so the
+  // presence of output is the signal, and an empty answer is read as "no". That
+  // also keeps the seam honest: a recorder that reports every command as
+  // succeeding does not thereby claim every name is taken.
+  let loaded = false;
+  try {
+    const r = run('/bin/launchctl', ['print', `gui/${process.getuid()}/${serviceLabel(name)}`]);
+    loaded = Boolean(r && r.ok !== false && String(r.stdout || '').trim());
+  } catch {
+    loaded = false;
+  }
+  if (loaded) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is already running as a startup job on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
+      steps,
+    };
+  }
+
+  /* ⚠️ AND a name nobody has a FOLDER for can still be taken, because the board
+   * identifies an agent by its session name with `-discord` STRIPPED. So
+   * creating `casey` beside a running `casey-discord` makes two sessions with
+   * one name — the exact collision `onePanePerSession` exists to survive, which
+   * we would be manufacturing rather than tolerating. Measured on this machine:
+   * the creation screen watched for a session called `casey`, found the fleet's
+   * existing one, and reported "casey is running" over a creation that had done
+   * nothing at all. The screen's verification cannot tell the agent it just made
+   * from one that was already there, so the name has to be free BEFORE we start.
+   *
+   * ⚠️ And it FAILS CLOSED. If tmux cannot be asked who is already running, we
+   * do not know the name is free, and "we could not check" is not "it is
+   * available" — the whole rule this codebase runs on. Creating blind is what
+   * produces the collision, so being unable to check has to stop the creation
+   * rather than wave it through. The board's own gates refuse the same way when
+   * tmux is unreachable.
+   */
+  let roster;
+  try {
+    roster = status.paneRoster();
+  } catch {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: 'we could not check which agents are already running, so we will not risk making a second one with the same name',
+      steps,
+    };
+  }
+  const wantedKey = (() => { try { return store.safeKey(name); } catch { return null; } })();
+  const clash = roster.find((p) => {
+    if (p.sessionName === name) return true;
+    if (!wantedKey) return false;
+    try { return store.safeKey(p.sessionName) === wantedKey; } catch { return false; }
+  });
+  if (clash) {
+    // ⚠️ Names the SESSION rather than asserting an agent exists. `paneRoster`
+    // covers every pane on the machine, so a person with a shell session called
+    // `notes` was told there was an agent called `notes`, which there is not --
+    // the same "refusal that names the wrong thing" the length rule was split
+    // out to avoid.
+    // Names the REAL tmux session, not the board name: the board name is the
+    // stripped form, so for `my.bot-discord` it would have said "this computer
+    // is running my.bot", which is not a session anybody can find.
+    const running = clash.session || clash.sessionName;
+    const also = running === name ? '' : ` (this computer is running ${running}, which the board files under the same name)`;
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is already running on this computer${also}`,
+      steps,
+    };
+  }
+
+  /**
+   * ⚠️ The two programs this agent is made of have to EXIST.
+   *
+   * Both defaults are this machine's paths. On a Mac with an npm-global Claude,
+   * or an Intel Mac where Homebrew lives at `/usr/local`, creation reported
+   * CREATED, the screen waited thirty seconds and then said it did not know
+   * why, and launchd was left respawning an instantly-failing job every thirty
+   * seconds for as long as the machine was on. Refusing up front costs two
+   * lines and names the actual problem.
+   *
+   * ⚠️ And they are checked for SHAPE, not only presence. They are interpolated
+   * into the startup script the same way the name is, and unlike the name they
+   * have never been through `nameProblem`. Not reachable from the HTTP route
+   * today — the route passes neither — so this is closing a door before someone
+   * opens it, which is cheaper than the alternative.
+   */
+  // ⚠️ The worker folder is checked with them. It is operator-controlled rather
+  // than request-controlled (it comes from AGENT_WORKFORCE_WORKERS), but it
+  // reaches the same generated shell text by the same route, and the stated
+  // reason for checking the binaries -- closing a door before somebody opens it
+  // -- does not distinguish between them.
+  for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin], ['the agents folder', workerDir(name)]]) {
+    if (/['"\n\r\\$`]/.test(bin)) {
+      return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
+    }
+    if (what === 'the agents folder') continue;
+    if (!fs.existsSync(bin)) {
+      return {
+        outcome: OUTCOME.REFUSED,
+        because: `we could not find ${what} on this computer, so an agent made now would never start`,
+        steps,
+      };
+    }
+  }
+
+  /**
+   * ⚠️ PUT THE MACHINE BACK.
+   *
+   * Every failure after this point has to leave nothing behind, and the reason
+   * is not tidiness. Two separate half-states shipped before this existed:
+   *
+   *   - A failed write left the FOLDER, so the very next attempt at the same
+   *     name was refused for the folder's existence -- permanently, from a
+   *     screen whose own button is "Start over". The comment beside it claimed
+   *     the cleanup "lets the person try the same name again", which was false.
+   *   - A failed `bootstrap` left the PLIST, and launchd loads every plist in
+   *     that directory at the next login. So an agent the person was told is
+   *     "not running yet" was in fact installed to start at their next login,
+   *     undisclosed, with `--dangerously-skip-permissions`.
+   *
+   * Nothing here existed before this call: the folder is refused if it is
+   * already there, and so is the job. So removing them takes back only what we
+   * just made. The `steps` list still records which half failed, which is where
+   * the diagnostic value actually lives.
+   */
+  function rollBack({ unload = false } = {}) {
+    /* ⚠️ `unload` is for a failed START, and only then.
+     *
+     * `bootstrap` can register a service and still exit non-zero. Removing only
+     * the plist then leaves that job respawning against a `start.sh` this
+     * rollback has just deleted, and every retry of the name hits the
+     * already-loaded refusal above — so the message "you can try that name
+     * again" becomes false forever.
+     *
+     * The refusal above deliberately will NOT unload a stray service, because
+     * it did not install it. This one did, seconds ago, which is exactly the
+     * difference that makes unloading it the right thing rather than an
+     * overreach.
+     */
+    if (DRY_RUN) return;
+    if (unload) {
+      try { run('/bin/launchctl', ['bootout', `gui/${process.getuid()}/${serviceLabel(name)}`]); }
+      catch { /* it was probably never registered, which is the common case */ }
+    }
+    try { fs.rmSync(plistPath(name), { force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(workerDir(name), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+
+  function step(label, fn) {
+    try {
+      const r = fn();
+      steps.push({ label, ok: r !== false });
+      return r !== false;
+    } catch {
+      // ⚠️ Never the raw errno: it carries absolute paths and says nothing a
+      // person can act on. The step label is what the operator needs.
+      steps.push({ label, ok: false });
+      return false;
+    }
+  }
+
+  const madeDir = step('made its folder', () => {
+    if (DRY_RUN) return true;
+    fs.mkdirSync(workerDir(name), { recursive: true });
+  });
+  if (!madeDir) {
+    rollBack();
+    return { outcome: OUTCOME.REFUSED, because: 'we could not make a folder for it', steps };
+  }
+
+  const wroteInstructions = step('wrote its instructions', () => {
+    if (DRY_RUN) return true;
+    fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, name), 'utf8');
+  });
+
+  // ⚠️ Executable, and that is not a detail: launchd runs it through
+  // `/bin/bash`, but a person told "this is a real file you can run" and met
+  // "permission denied" has been handed a file that is real only to us.
+  const wroteLauncher = step('wrote its startup script', () => {
+    if (DRY_RUN) return true;
+    fs.writeFileSync(launcherFile(name), launcherFor(name, claudeBin, tmuxBin), { mode: 0o755 });
+  });
+
+  /**
+   * ⚠️ THE JOB IS WRITTEN LAST, AND REMOVED IF WE CANNOT FINISH.
+   *
+   * Order matters more here than anywhere else in this function. The plist was
+   * written before the gate below, so a failed instructions or launcher write
+   * left a launchd job on disk pointing at a startup script that does not
+   * exist. Skipping `bootstrap` does not help: launchd loads every plist in
+   * `~/Library/LaunchAgents` at the next login, `bash` exits at once on a
+   * missing file, and `KeepAlive` with `ThrottleInterval 30` respawns it every
+   * thirty seconds for as long as the machine is on.
+   *
+   * That is word for word the harm the gate below says it prevents, arriving
+   * through the file the gate does not clean up. And it compounds: the name is
+   * then permanently refused by the leftover-job branch above, so the person
+   * cannot even retry from the screen.
+   */
+  const wroteJob = (wroteInstructions && wroteLauncher) && step('wrote its startup job', () => {
+    if (DRY_RUN) return true;
+    fs.mkdirSync(AGENTS_DIR, { recursive: true });
+    fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
+  });
+
+  /**
+   * ⚠️ STOP BEFORE LOADING A JOB THAT CANNOT WORK.
+   *
+   * Only the folder and the start were gating the outcome, so a failed write
+   * still returned `CREATED` — "set up and starting" over an agent with no
+   * instructions, or with a job pointing at a startup script that was never
+   * written. The second one is actively harmful rather than merely untrue:
+   * `bash` exits immediately on a missing script, `KeepAlive` restarts it,
+   * and the machine gets a job that fails every thirty seconds forever.
+   *
+   * And the screen built on this said "the folder and the instructions are on
+   * your computer either way" — a sentence that is false in exactly the case
+   * that produced it.
+   */
+  if (!wroteInstructions || !wroteLauncher || !wroteJob) {
+    rollBack();
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we could not write everything it needs, so we have not made it. Nothing has been left on your computer, and you can try that name again.',
+      steps,
+    };
+  }
+
+  /**
+   * ⚠️ LOADING the job is what starts the agent, and it is deliberately the
+   * only way it is started.
+   *
+   * The previous version ran tmux itself and left the job on disk unloaded, so
+   * the agent ran now and was gone after a reboot — the one thing the job
+   * exists to prevent. Worse, the two paths would have started it DIFFERENTLY:
+   * a session started here and a session started by the job are set up by
+   * different code, and the second one is the one that runs for the rest of the
+   * agent's life. Starting it any way other than the way it will always be
+   * started means the first run is the only one anybody ever tested.
+   *
+   * So: bootstrap the job, and let `RunAtLoad` do it. One path, exercised at
+   * creation, at reboot, and after every crash.
+   */
+  const started = step('started it', () => {
+    const r = run('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, plistPath(name)]);
+    return r && r.ok !== false;
+  });
+
+  if (!started) {
+    // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
+    // here, so an agent reported as "not running yet" would have started at the
+    // person's next login anyway -- the one outcome nobody would predict from
+    // that sentence. And `bootstrap` can register a service and still fail, so
+    // deleting the plist alone would leave a job nothing on disk explains.
+    rollBack({ unload: true });
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we set it up but could not start it, so we have taken it back off your computer rather than leave something half installed. You can try that name again.',
+      steps,
+    };
+  }
+  // ⚠️ `CREATED` says the job was accepted, and NOT that the agent is up. The
+  // claim, the session and the process all happen inside the job, after this
+  // function has returned — so the thing that decides whether a person actually
+  // has an agent is the board seeing it, which is watched on the screen rather
+  // than asserted here. "We started it" is a claim about us.
+  return {
+    outcome: OUTCOME.CREATED,
+    because: `${name} is set up and starting`,
+    steps,
+    firstAction: role.firstAction,
+    // Where it actually is, so no screen has to rebuild this path and be wrong
+    // about it on a machine with the roots pointed elsewhere.
+    folder: workerDir(name),
+  };
+}
+
+module.exports = {
+  createAgent,
+  nameProblem,
+  cleanName,
+  plistFor,
+  launcherFor,
+  serviceLabel,
+  workerDir,
+  instructionFile,
+  launcherFile,
+  plistPath,
+  setRunner,
+  setDryRun,
+  OUTCOME,
+  get DRY_RUN() { return DRY_RUN; },
+};
