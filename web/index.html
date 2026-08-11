@@ -896,6 +896,13 @@ async function tick() {
         + 'or it may have stopped. Nothing here can change it until it is back.';
     }
     PANEL_WITHDRAWN = true;
+    // ⚠️ And the removal OFFER is re-asked too, not only the write controls.
+    // `setWritesOffered` runs every tick by explicit rule, but `d-remove-start`
+    // and `REMOVE_ASK` were frozen at panel-open state -- so a card that went
+    // tied -> untied while the panel was open kept offering "Remove this
+    // agent…" with the old question. It fails closed (the DELETE re-runs
+    // `plan` and refuses), which makes it an offer that cannot work: the exact
+    // thing `setWritesOffered`'s own note says it exists to prevent.
   } else if (fresh && PANEL_WITHDRAWN) {
     /**
      * ⚠️ AND BACK AGAIN, because the branch above was ONE-WAY.
@@ -915,7 +922,12 @@ async function tick() {
     PANEL_WITHDRAWN = false;
     loadRemoval(fresh.sessionName);
   }
-  if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
+  if (fresh) {
+    setWritesOffered(fresh, fresh.isNamedOurs === true);
+    // Re-ask whether removal is still on offer, for the reason above. Cheap:
+    // one small fetch, and it is already guarded by its own token.
+    loadRemoval(fresh.sessionName);
+  }
 
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
@@ -1078,8 +1090,15 @@ function showTab(tab) {
   // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
   // shows at all depends on there being something in it, which `paintRemoved`
   // decides. Unhiding it on every tab switch put an empty box on screen.
-  if (!agents) document.getElementById('removed-wrap').hidden = true;
-  else paintRemoved();
+  if (!agents) {
+    document.getElementById('removed-wrap').hidden = true;
+    // ⚠️ And the message with it. It deliberately lives outside the wrap so a
+    // repaint cannot erase it -- which also means nothing else hides it, so a
+    // sentence about the removed list would otherwise sit under Settings or
+    // Projects, describing a list those screens do not show.
+    const msg = document.getElementById('removed-msg');
+    if (msg) msg.textContent = '';
+  } else paintRemoved();
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
 }
 
@@ -1947,8 +1966,32 @@ document.getElementById('rm-go').addEventListener('click', async () => {
  * which is a live region and was otherwise unused after the modal opened.
  */
 function reportDiscarded(done, forAgent) {
-  const back = document.getElementById('d-remove-msg');
+  /**
+   * ⚠️ THE DETAIL PANEL MAY BE HIDDEN BY THE TIME THIS ANSWER LANDS, and a
+   * `role="alert"` inside a hidden subtree announces nothing -- the same fact
+   * this file already had to learn about `#removed-msg`.
+   *
+   * The window is not milliseconds. `run()` gives each launchctl and tmux call
+   * a 20-second timeout and blocks while it waits, so a slow removal holds the
+   * request open for seconds -- ample time to press Escape and click "All
+   * agents". The comment on this function used to say `#d-remove-msg` "is a
+   * live region and was otherwise unused", which was true and did not account
+   * for its parent.
+   *
+   * `#removed-msg` sits outside every hideable container, so it is the fallback.
+   */
+  const panel = document.getElementById('panel-detail');
+  const hidden = !panel || panel.hidden;
+  const back = document.getElementById(hidden ? 'removed-msg' : 'd-remove-msg');
   if (!back || !done) return;
+  if (hidden) {
+    // Not scoped to CURRENT: the panel it was about is gone, and this is the
+    // one surface still on screen.
+    if (done.outcome === 'partial' || done.outcome === 'refused' || done.outcome === 'removed') {
+      back.textContent = done.because || done.error || '';
+    }
+    return;
+  }
   // Same reason as the handler above: a thrown removal answers with `error`,
   // not `because`, and it is the message that says the agent may be half gone.
   if (done.error && !done.because) { 
@@ -2023,6 +2066,13 @@ async function paintRemoved() {
   // ⚠️ A newer paint has started since this one asked. Its answer is the
   // current one; ours is not, and painting it would also cache it.
   if (mine !== REMOVED_TOKEN) return;
+
+  // ⚠️ AND WE MAY NO LONGER BE ON THE AGENTS TAB. `tick()` fires this
+  // unawaited, so switching tabs (or opening a card) while /api/removed is in
+  // flight would unhide the removed-agents section underneath Settings or a
+  // detail panel, where nothing hides it again until the next `showTab`. The
+  // token answers "is this answer current"; this answers "is this screen".
+  if (document.getElementById('grid').hidden) return;
 
   if (gone.length === 0) {
     wrap.hidden = true;

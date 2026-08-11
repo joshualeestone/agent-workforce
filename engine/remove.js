@@ -924,7 +924,27 @@ function restoreInner(name) {
    */
   const unsafe = unsafeToActOn(clean);
   if (unsafe) return { outcome: OUTCOME.REFUSED, because: unsafe, steps: [] };
-  const record = readRemoved().find((r) => r.name === clean);
+  /**
+   * ⚠️ `readRemovedForWrite`, NOT `readRemoved`, and the difference is an
+   * assertion of absence.
+   *
+   * `readRemoved` fails OPEN, so an unreadable-but-present list answers `[]` --
+   * and restore would then say "`X` is not on the removed list" about a list
+   * nobody could read. That is the defect class `plan` handles one function up
+   * (`exists()` answers UNKNOWN and the refusal says "we could not check").
+   * Not reachable from the screen today, because an unreadable list also draws
+   * no Restore row to click; fixed for consistency rather than for a live bug,
+   * since the next caller will not know that.
+   */
+  const stored = readRemovedForWrite();
+  if (stored === UNREADABLE) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `we could not read the removed list, so we cannot tell whether ${clean} is on it. Try again in a moment.`,
+      steps: [],
+    };
+  }
+  const record = stored.find((r) => r.name === clean);
   /**
    * ⚠️ SPOKEN NAME, same rule as `remove` and `plan`: act on `clean`, say
    * `shown`. Restore is reached from the removed list, which is the ONE screen

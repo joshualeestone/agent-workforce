@@ -1533,3 +1533,42 @@ test('the removed list is newest first, so the thing you just removed is at the 
   assert.deepEqual(list.map((r) => r.name), ['seeded-newest', 'seeded-middle', 'seeded-oldest'],
     'the undo list is not newest-first, so the agent somebody just removed is not where they look');
 });
+
+test('the success sentence checks the folder by its exact spelling', () => {
+  /**
+   * ⚠️ Unheld until now: swapping `existsExactly` back to `fs.existsSync` here
+   * left all 351 tests green, despite the comment above it explaining the
+   * hazard and despite two sibling sites already being fixed for it.
+   *
+   * On a case-insensitive volume, removing `PLISTCASE` -- which has its own
+   * exact plist and no folder of its own -- resolves the REAL `plistcase`
+   * folder and promises "its folder is still on your computer" about a folder
+   * that agent never had.
+   */
+  const real = 'plistcase';
+  fs.mkdirSync(create.workerDir(real), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(real), 'CLAUDE.md'), `You are **${real}**.\n`, 'utf8');
+
+  const asked = 'PLISTCASE';
+  fs.mkdirSync(nodePath.dirname(create.plistPath(asked)), { recursive: true });
+  fs.writeFileSync(create.plistPath(asked), '<plist/>', 'utf8');
+
+  // ⚠️ CONTROLS: the volume really is case-insensitive, the asked-for agent has
+  // no folder of its own, and there IS something to remove. Without all three
+  // this passes for the wrong reason.
+  assert.ok(fs.existsSync(create.workerDir(asked)),
+    'this volume is case-sensitive, so the hazard under test cannot occur here');
+  assert.ok(!fs.readdirSync(nodePath.dirname(create.workerDir(asked))).includes(asked),
+    'the fixture accidentally has a folder under the asked-for spelling');
+  assert.ok(remove.jobFor(asked), 'the control failed: nothing exists to remove');
+
+  status.setPaneSource(() => '');
+  world();
+  remove.setDryRun(false);
+
+  const r = remove.remove(asked);
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+  assert.doesNotMatch(r.because, /Its folder/,
+    'it promised a folder that belongs to a different agent with a similar name');
+  assert.match(r.because, /Nothing on your computer was deleted/);
+});

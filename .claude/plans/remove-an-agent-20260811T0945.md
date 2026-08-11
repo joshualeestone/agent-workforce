@@ -106,9 +106,16 @@ not hold — two of the four partial paths' record calls, and the
 `disable`-before-`bootout` ordering whose only defence was a comment. Those now
 have tests. What remains deliberately unheld is the handful of guards that are
 **unreachable today** and documented as such: `restore`'s name gate,
-`sessionFor`'s removed fallback, and `recordRemoval`'s read-back. They fail
-closed and they are cheap; they are kept as defence against a future caller,
-not as live paths, and a test would be asserting a state nothing can produce.
+`sessionFor`'s removed fallback, `recordRemoval`'s read-back, and
+`restoreInner`'s own UNREADABLE check (the `readRemoved` call above it already
+refuses first). They fail closed and they are cheap; they are kept as defence
+against a future caller, not as live paths, and a test would be asserting a
+state nothing can produce.
+
+⚠️ **That list has grown twice, both times because a review found a guard I had
+called covered.** The honest reading is that "unreachable" is a claim like any
+other and belongs next to the guard rather than in a summary — which is where
+each of these now says it.
 
 The honest version of the claim: **every fix that can be reached is
 mutation-verified, and the ones that cannot are named.** The blanket version is
