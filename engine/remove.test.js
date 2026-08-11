@@ -1572,3 +1572,42 @@ test('the success sentence checks the folder by its exact spelling', () => {
     'it promised a folder that belongs to a different agent with a similar name');
   assert.match(r.because, /Nothing on your computer was deleted/);
 });
+
+test('an agent Kosmos cannot restart is not promised that Kosmos will put it back', () => {
+  /**
+   * ⚠️ Restore re-enables a launchd job; it does not start a tmux session. For
+   * an agent WITH a job those are the same thing. For one without -- a
+   * hand-started session, which `isNamedOurs` admits -- there is nothing to
+   * re-enable, so the record comes off the list and no card appears, and
+   * nothing will make one.
+   *
+   * Both sentences claimed otherwise: the confirmation said "you can put it
+   * back", and restore said "is back on the board". That is the branch's own
+   * rule slipping on the exact reassurance that makes a single light
+   * confirmation honest.
+   */
+  const name = 'handstarted';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  // ⚠️ CONTROL: it really has no job, and it really is removable.
+  assert.equal(remove.jobFor(name), null, 'the control failed: this fixture has a startup job');
+  boardShows(name, name);
+  const ask = remove.plan(name);
+  assert.equal(ask.ok, true, `it cannot be removed at all: ${ask.because}`);
+
+  assert.doesNotMatch(ask.hint, /you can put it back/,
+    'it promises an undo that Kosmos cannot perform for this agent');
+  assert.match(ask.hint, /cannot start it again for you/,
+    'it does not say who has to start it');
+
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+  const back = remove.restore(name);
+  assert.equal(back.outcome, remove.OUTCOME.RESTORED, back.because);
+  assert.doesNotMatch(back.because, /is back on the board/,
+    'it says the agent is back on a board that will not show it until something starts it');
+  assert.match(back.because, /no longer removed from Kosmos/);
+  assert.match(back.because, /start it again the way you did before/,
+    'it does not tell them what actually has to happen next');
+});

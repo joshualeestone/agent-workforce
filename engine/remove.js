@@ -605,12 +605,25 @@ function plan(name) {
      * what removal will do has to be written where the code that does it lives,
      * or the two drift, and this one already had.
      */
+    /**
+     * ⚠️ "YOU CAN PUT IT BACK" IS A CLAIM RESTORE CANNOT KEEP FOR A JOBLESS
+     * AGENT, and it was on the very sentence that makes a light confirmation
+     * honest.
+     *
+     * Restore re-enables a launchd job. It does not start a tmux session. For
+     * an agent with a job that is the same thing; for one without -- a
+     * hand-started session, which `isNamedOurs` admits -- there is nothing to
+     * re-enable, so putting it back on the list produces no card and nothing
+     * will make one. Nothing is lost, because nothing is deleted; but the
+     * reassurance was describing an undo that does not exist.
+     */
     hint: jobFor(clean)
       ? 'Removing it takes it off this board and stops it starting again. '
         + 'Nothing on your computer is deleted, and you can put it back.'
       : 'Removing it takes it off this board and ends its session. '
-        + 'It has no startup job, so nothing was going to restart it anyway. '
-        + 'Nothing on your computer is deleted, and you can put it back.',
+        + 'It has no startup job, so Kosmos cannot start it again for you -- '
+        + 'you would start it the same way you did the first time. '
+        + 'Nothing on your computer is deleted.',
   };
 }
 
@@ -1060,7 +1073,10 @@ function restoreInner(name) {
     // is "set to start again" would be a claim about a job that does not exist.
     because: (() => {
       if (!record.label) {
-        return `${shown} is back on the board. It had no startup job, so there was nothing to turn back on.`;
+        // ⚠️ Not "is back on the board" -- there is no card until something
+        // starts it, and Kosmos has no job to start. Says what it did do.
+        return `${shown} is no longer removed from Kosmos. It has no startup job, so there was nothing `
+          + 'to turn back on: it will reappear once you start it again the way you did before.';
       }
       if (plistGone) {
         return `${shown} is back on the board, and we have turned its startup entry back on. `

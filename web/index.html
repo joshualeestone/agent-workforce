@@ -925,8 +925,9 @@ async function tick() {
   if (fresh) {
     setWritesOffered(fresh, fresh.isNamedOurs === true);
     // Re-ask whether removal is still on offer, for the reason above. Cheap:
-    // one small fetch, and it is already guarded by its own token.
-    loadRemoval(fresh.sessionName);
+    // one small fetch, guarded by its own token, and `fromPoll` so it does not
+    // blank a message or steal focus on every tick.
+    loadRemoval(fresh.sessionName, { fromPoll: true });
   }
 
       // Not while a load is in flight or the file is one we refused: the note
@@ -1675,12 +1676,35 @@ let REMOVE_ASK = null;
 // Guards against a slow answer landing after the person has moved on.
 let REMOVE_TOKEN = 0;
 
-async function loadRemoval(sessionName) {
+async function loadRemoval(sessionName, { fromPoll = false } = {}) {
   const box = document.getElementById('d-remove-agent');
   const hint = document.getElementById('d-remove-hint');
-  box.hidden = true;
-  document.getElementById('d-remove-msg').textContent = '';
-  REMOVE_ASK = null;
+  /**
+   * ⚠️ THE RESET IS FOR OPENING A DIFFERENT AGENT, NOT FOR THE FIVE-SECOND
+   * POLL, and wiring the poll to this without the distinction was a regression
+   * I introduced one round ago while fixing something else.
+   *
+   * Blanking synchronously is right when the panel is being pointed at a new
+   * agent: whatever is on screen belongs to the previous one. Doing it every
+   * five seconds on the SAME agent does three things it has no business doing:
+   *
+   *   1. `#d-remove-msg` is the only surface `reportDiscarded` writes to while
+   *      the panel is open, so a PARTIAL outcome -- the one message this file
+   *      says a person must not walk away without reading -- is erased within
+   *      five seconds. Guaranteed, not racy: a partial leaves the agent on the
+   *      board, so the poll keeps finding it.
+   *   2. Hiding the box blurs `#d-remove-start`, dropping keyboard focus to
+   *      `<body>` on every tick -- the same defect the removed-list change
+   *      guard exists to prevent, on the sibling control.
+   *   3. The section visibly flashes each poll.
+   *
+   * So the poll re-asks the question without disturbing what is on screen.
+   */
+  if (!fromPoll) {
+    box.hidden = true;
+    document.getElementById('d-remove-msg').textContent = '';
+    REMOVE_ASK = null;
+  }
 
   const mine = ++REMOVE_TOKEN;
   let ask = null;
