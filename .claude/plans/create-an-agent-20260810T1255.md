@@ -42,12 +42,26 @@ agent to prove a pane is its own that does not rely on the session name."
 without it, and nothing else about the product's Discord decoupling is finished
 until it exists.
 
-## The design: a claim file
+## The design: a claim ⚠️ AMENDED DURING IMPLEMENTATION
 
-When Kosmos creates an agent it writes a **claim** — a small file recording that
-*this session name belongs to this agent, and Kosmos made it.*
+**A claim file was the plan. A tmux session option is what shipped**, and the
+plan is amended here rather than left disagreeing with the code about the
+central mechanism of the branch.
 
-- [ ] `~/.../claims/<key>.json` holding `{ sessionName, createdAt, createdBy }`.
+**Why it changed:** the claim's whole job is to say "this LIVE session is ours".
+A file outlives the session it describes, so a stranger who later opens a
+session of that name inherits the claim, and every removal has to remember to
+delete it. A tmux user option (`@kosmos_agent`, set on the session) **dies with
+the session**, which is the property the design actually needed. The `-discord`
+suffix stays as the legacy arm so the existing fleet keeps working.
+
+**What that cost, found later:** because it dies with the session, setting it
+once at creation is not enough — it has to be re-set at every start, so it lives
+in the generated startup script rather than in a one-off command. An agent
+created before that fix came back anonymous after its first restart.
+
+- [x] A tmux session option set by Kosmos, not a file. (Superseded:
+      `~/.../claims/<key>.json` holding `{ sessionName, createdAt, createdBy }`.)
 - [ ] `isNamedOurs` becomes `hasClaim(pane) || /-discord$/`, with the suffix kept
       as the legacy arm so the existing fleet keeps working unchanged.
 - [ ] ⚠️ **The claim is written by KOSMOS, not by the agent.** An agent writing

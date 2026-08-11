@@ -1454,7 +1454,14 @@ document.getElementById('create-name').addEventListener('keydown', (e) => {
 /** One tick line. `state` is 'done' | 'fail' | 'waiting'. */
 function tickLine(state, text) {
   const mark = state === 'done' ? '&#10003;' : (state === 'fail' ? '&#10007;' : '&#8230;');
-  return `<div class="tick ${state}"><span class="mark" aria-hidden="true">${mark}</span><span>${esc(text)}</span></div>`;
+  // ⚠️ The glyph is the ONLY thing distinguishing a step that worked from one
+  // that failed, it is aria-hidden, and both states render in the same colour
+  // for the greyscale rule. So a screen reader heard "made its folder" and
+  // "started it" identically whether or not they had worked — on the one screen
+  // whose whole purpose is showing WHICH half of a half-made agent failed.
+  const said = state === 'done' ? 'done' : (state === 'fail' ? 'failed' : 'still waiting');
+  return `<div class="tick ${state}"><span class="mark" aria-hidden="true">${mark}</span>`
+    + `<span><span class="vh">${said}: </span>${esc(text)}</span></div>`;
 }
 
 /**
@@ -1538,9 +1545,16 @@ document.getElementById('create-go').addEventListener('click', async () => {
  * creation screen that is about the agent rather than about us. Three facts,
  * and each is here for a failure it would otherwise let through:
  *
- *   - `isFleetSession` — a Claude process is running in that session. Without
- *     it, a session whose Claude died the moment it started still reads as a
- *     success, because the session itself outlives nothing.
+ *   - `isAgentSession` — a Claude process is actually RUNNING in that session.
+ *     Without it, a session whose Claude died the moment it started still reads
+ *     as a success.
+ *     ⚠️ This asked `isFleetSession`, which was a DEAD TERM: that function
+ *     returns true immediately for any pane the name arm claims, so for a pane
+ *     that already passed `isNamedOurs` it can never be false. The comment
+ *     described a guarantee the field could not deliver, and a claimed pane
+ *     whose command tmux could not report — `unknown`, not `stopped` — sailed
+ *     through as a running agent. `isAgentSession` is the one that asks the
+ *     question this line claims to ask.
  *   - `isNamedOurs`    — the board ties that session to this name. This is the
  *     whole point of the session claim: without it the new agent is on the
  *     board as an anonymous pane with no role, no model and no editable file,
@@ -1555,7 +1569,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
  * successful creation.
  */
 function boardCanSeeIt(a) {
-  return Boolean(a) && a.isFleetSession === true && a.isNamedOurs === true && a.state !== 'stopped';
+  return Boolean(a) && a.isAgentSession === true && a.isNamedOurs === true && a.state !== 'stopped';
 }
 
 /**
@@ -1608,9 +1622,26 @@ async function watchForAgent(name, result) {
   paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' });
   document.getElementById('made-head').textContent = name + ' has not come up';
   const warn = document.getElementById('made-warn');
-  warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
-    + 'The folder and the instructions are on your computer either way. It may still '
-    + 'appear on the board on its own — this screen stopped waiting, it did not stop it.';
+  /**
+   * ⚠️ DO NOT OVERWRITE A PARTIAL'S REASON WITH THIS ONE.
+   *
+   * The first version assigned this sentence unconditionally, and a creation
+   * that came back PARTIAL had already written the true explanation into the
+   * same box. So the person lost "we could not write everything it needs" and
+   * got "the folder and the instructions are on your computer either way" in
+   * its place — which, when the instruction write is what failed, is FALSE in
+   * exactly the case that produced it. `engine/create` has a comment naming
+   * that sentence as the thing not to say; the screen said it anyway, one
+   * layer up, thirty seconds later.
+   */
+  if (result.outcome === 'partial') {
+    warn.innerHTML = '<b>This one is only half made.</b> ' + esc(result.because || '')
+      + '<br>Nothing is running under that name, and this screen has stopped waiting for it.';
+  } else {
+    warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
+      + 'The folder and the instructions are on your computer either way. It may still '
+      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.';
+  }
   warn.hidden = false;
   document.getElementById('made-done').hidden = false;
   document.getElementById('made-retry').hidden = false;

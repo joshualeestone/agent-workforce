@@ -886,9 +886,15 @@ function sessionIdFor(sessionName, exactSession) {
   // agent's model and memory at structured confidence. `snapshot` holds the
   // pane, so it passes the session itself and this ambiguity never arises
   // there; the fallback below is for callers that have only a name.
+  // ⚠️ The fallback tries the SUFFIXED spelling FIRST. Callers that hold only a
+  // name (`instructions.sessionStartedAt`) used to try that spelling and no
+  // other, so leading with the un-suffixed one silently changed which session
+  // they resolve when a machine has both — the staleness verdict would then be
+  // computed from the wrong agent's transcript. New capability, same order of
+  // preference as before.
   const candidates = exactSession
     ? [`${exactSession}_0.0.json`]
-    : [`${sessionName}_0.0.json`, `${sessionName}-discord_0.0.json`];
+    : [`${sessionName}-discord_0.0.json`, `${sessionName}_0.0.json`];
   for (const root of configRoots()) {
     for (const candidate of candidates) {
       try {

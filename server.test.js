@@ -79,6 +79,11 @@ process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 // LaunchAgents`, and it would then start an agent on their next login. The
 // sandbox has to be in place before the hazard arrives, not after.
 process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-launch-'));
+// And the two programs an agent is made of, so a route test does not depend on
+// whether the machine running the suite happens to have Claude installed where
+// this one does.
+process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
+process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1752,14 +1757,21 @@ test('the creation screen only calls an agent made when the board can see it run
   // rejected it would fail every successful creation while every negative case
   // below still passed, which is precisely the shape of a gate test that
   // passes for the wrong reason.
-  const fresh = { sessionName: 'casey', isFleetSession: true, isNamedOurs: true, state: 'unknown' };
+  const fresh = { sessionName: 'casey', isAgentSession: true, isNamedOurs: true, state: 'unknown' };
   assert.equal(boardCanSeeIt(fresh), true,
     'a healthy new agent sitting at its first prompt is reported as not running');
   assert.equal(boardCanSeeIt({ ...fresh, state: 'idle' }), true);
 
   // Each field flipped in turn: a predicate that ignored any one of these would
   // still pass the control above.
-  assert.equal(boardCanSeeIt({ ...fresh, isFleetSession: false }), false,
+  // ⚠️ `isAgentSession`, NOT `isFleetSession`. This asserted the latter, which
+  // `status.isFleetSession` returns true for whenever `isNamedOurs` is true —
+  // so the combination being pinned here (named ours, not a fleet session) is
+  // one the API cannot produce, and this assertion controlled for NOTHING while
+  // reading as coverage of the died-immediately case. `isAgentSession`
+  // additionally requires a live Claude process, which is the real question,
+  // and a claimed pane whose command tmux could not report does reach it.
+  assert.equal(boardCanSeeIt({ ...fresh, isAgentSession: false }), false,
     'a session whose Claude is not running was reported as a working agent');
   assert.equal(boardCanSeeIt({ ...fresh, isNamedOurs: false }), false,
     'an agent the board cannot tie to this name was reported as made — that is '
@@ -1774,8 +1786,18 @@ test('the creation screen only calls an agent made when the board can see it run
   // every assertion above green with the screen lying again.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const watch = script.slice(script.indexOf('async function watchForAgent'));
-  const body = watch.slice(0, watch.indexOf('\n// Deep-link'));
+  // Brace-matched, like `pageFunction` above: slicing to a comment further down
+  // the file meant that inserting any function between the two silently widened
+  // the slice and weakened both assertions without failing anything.
+  const watchStart = script.indexOf('async function watchForAgent');
+  assert.ok(watchStart > -1, 'watchForAgent vanished');
+  let d = 0; let watchEnd = -1;
+  for (let k = script.indexOf('{', watchStart); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { watchEnd = k + 1; break; } }
+  }
+  assert.ok(watchEnd > -1, 'could not find the end of watchForAgent');
+  const body = script.slice(watchStart, watchEnd);
   assert.match(body, /boardCanSeeIt\s*\(/,
     'watchForAgent no longer asks boardCanSeeIt, so the definition of "it is '
     + 'running" has been forked');
@@ -1868,5 +1890,56 @@ test('a write another website could send is refused, whatever route it names', a
       'the avatar upload is refused as cross-site, so the guard is stricter than the threat');
   } finally {
     create.setRunner(null);
+  }
+});
+
+test('the create route answers a real creation with the record the screen is built on', async () => {
+  // ⚠️ The route test beside this one is named "makes an agent" and never makes
+  // one — both its cases assert 400. So the 200 answer, which is the ENTIRE
+  // contract the creation screen consumes (`outcome`, the ordered `steps` list
+  // it draws, and the `firstAction` it offers), had no end-to-end coverage at
+  // all. It was unsafe to write until this file sandboxed the LaunchAgents
+  // directory; it is safe now, so it exists.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const roles = require('./engine/roles');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  status.setPaneSource(() => '');
+  try {
+    const res = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      // ⚠️ `claudeBin` here is a probe: the route must IGNORE it. If it were
+      // passed through, this creation would be refused for a missing program,
+      // so the 200 below is what proves a caller cannot choose the executable
+      // that launchd will run on every reboot.
+      body: JSON.stringify({ name: 'route-made', role: 'writer', claudeBin: '/nope/claude' }),
+    });
+    assert.equal(res.status, 200, 'a legitimate creation was refused');
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, 'created', body.because);
+
+    // The screen draws exactly this list, in this order, and marks each one.
+    assert.ok(Array.isArray(body.steps) && body.steps.length >= 4, 'no step record came back');
+    for (const s of body.steps) {
+      assert.equal(typeof s.label, 'string', 'a step with no label would draw as a blank line');
+      assert.equal(typeof s.ok, 'boolean', 'a step with no verdict cannot be drawn as done or failed');
+    }
+    assert.ok(body.steps.some((s) => /startup job/.test(s.label)), 'the job step is missing from the record');
+
+    // ⚠️ And the first action is the ROLE's own words, not something the screen
+    // invented — the whole point of serving it from the same library the agent
+    // is created from.
+    assert.equal(body.firstAction, roles.byKey('writer').firstAction,
+      'the screen would offer a first action this agent was not created with');
+
+    // ⚠️ The route must NOT let a caller choose the programs. `claudeBin` in the
+    // body above is ignored: honouring it would let any local page name any
+    // executable to be launched under launchd forever.
+    const started = calls.find((c) => /launchctl$/.test(c[0]));
+    assert.ok(started, 'the job was never loaded, so nothing would start');
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
   }
 });

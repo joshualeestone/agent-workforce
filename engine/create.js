@@ -134,6 +134,23 @@ function nameProblem(raw) {
   if (!NAME_RE.test(name)) {
     return 'use letters, numbers, hyphens and underscores, starting with a letter or number';
   }
+  /* ⚠️ NOT `<something>-discord`, and this is not cosmetic.
+   *
+   * The board files an agent under its session name with `-discord` STRIPPED.
+   * So an agent created as `angel-discord` would be filed under `angel` — the
+   * name a real agent already holds — and the roster collision check, which
+   * compares board names, would not see it: it looks for `angel-discord` in a
+   * list where the live `angel-discord` session appears as `angel`.
+   *
+   * Two failures from one accepted name. The creation collides with a running
+   * agent the check was written to protect, and even on an empty machine the
+   * new agent is filed under a name that is not its session, so its identity,
+   * its instructions and its writes all resolve to the wrong key and its card
+   * is anonymous and uneditable.
+   */
+  if (/-discord$/.test(name)) {
+    return 'names cannot end in -discord, which the board reads as an agent running somewhere else';
+  }
   return null;
 }
 
@@ -192,7 +209,12 @@ function launcherFor(name, claudeBin, tmuxBin) {
 # agent's session ends.
 
 SESSION='${name}'
-TMUX='${tmuxBin}'
+# ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
+# socket path of the server you are inside -- and bash keeps the export
+# attribute, so assigning it here hands every child a malformed $TMUX. Run this
+# script by hand from inside a tmux pane, which the header invites, and
+# new-session refuses because it thinks it is being asked to nest.
+TMUX_BIN='${tmuxBin}'
 CLAUDE='${claudeBin}'
 WORKDIR='${dir}'
 
@@ -208,9 +230,9 @@ WORKDIR='${dir}'
 # exit: exiting would have launchd restart us every 30 seconds, and waiting
 # recovers on its own the moment that session ends.
 warned=0
-while "$TMUX" has-session -t "$SESSION" 2>/dev/null; do
-  if [ "$("$TMUX" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
-    "$TMUX" kill-session -t "$SESSION" 2>/dev/null
+while "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; do
+  if [ "$("$TMUX_BIN" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
+    "$TMUX_BIN" kill-session -t "$SESSION" 2>/dev/null
     break
   fi
   if [ "$warned" -eq 0 ]; then
@@ -223,16 +245,23 @@ done
 # --dangerously-skip-permissions is not optional for an unattended agent.
 # Without it the agent starts, looks healthy, and freezes forever on its first
 # permission prompt with nobody there to answer it.
-"$TMUX" new-session -d -s "$SESSION" -c "$WORKDIR" \\
-  "$CLAUDE" --dangerously-skip-permissions
+#
+# ⚠️ Exit on failure, because the claim below must never land on a session we
+# did not make. The name can be taken between the check above and this line, and
+# stamping @kosmos_agent onto somebody else's session would make the NEXT run of
+# this script recognise it as ours and kill it -- the borrowed-name hazard the
+# wait loop exists to prevent, arriving through the one command whose failure
+# was not checked.
+"$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
+  "$CLAUDE" --dangerously-skip-permissions || exit 1
 
 # The claim. Without it this agent is anonymous on the board after every
 # restart, whatever it was when it was created.
-"$TMUX" set-option -t "$SESSION" @kosmos_agent "$SESSION"
+"$TMUX_BIN" set-option -t "$SESSION" @kosmos_agent "$SESSION"
 
 # Stay alive while the session does, so launchd supervises the AGENT rather
 # than a command that exits in a tenth of a second.
-while "$TMUX" has-session -t "$SESSION" 2>/dev/null; do
+while "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; do
   sleep 10
 done
 `;
@@ -256,30 +285,40 @@ done
  * to a log or to nowhere, and "to nowhere" is how the board spent fourteen
  * hours reporting zero agents this morning.
  */
+// A path is a legal place for `&` or `<`, and either one emits a plist launchd
+// silently refuses to load. The shell-shape check above rejects quotes and
+// metacharacters; this is the XML half of the same idea.
+function xml(value) {
+  return String(value)
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;');
+}
+
 function plistFor(name, claudeBin, tmuxBin) {
   const label = serviceLabel(name);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>${label}</string>
+  <key>Label</key><string>${xml(label)}</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>${launcherFile(name)}</string>
+    <string>${xml(launcherFile(name))}</string>
   </array>
-  <key>WorkingDirectory</key><string>${workerDir(name)}</string>
+  <key>WorkingDirectory</key><string>${xml(workerDir(name))}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>HOME</key><string>${HOME}</string>
-    <key>PATH</key><string>${path.dirname(claudeBin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>${xml(HOME)}</string>
+    <key>PATH</key><string>${xml(`${path.dirname(claudeBin)}:${path.dirname(tmuxBin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`)}</string>
     <key>LANG</key><string>en_US.UTF-8</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>StandardOutPath</key><string>${logFile(name)}</string>
-  <key>StandardErrorPath</key><string>${logFile(name)}</string>
+  <key>StandardOutPath</key><string>${xml(logFile(name))}</string>
+  <key>StandardErrorPath</key><string>${xml(logFile(name))}</string>
 </dict>
 </plist>
 `;
@@ -297,8 +336,23 @@ function plistFor(name, claudeBin, tmuxBin) {
 function createAgent(opts) {
   const name = cleanName(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
-  const claudeBin = (opts && opts.claudeBin) || path.join(HOME, '.local', 'bin', 'claude');
-  const tmuxBin = (opts && opts.tmuxBin) || '/opt/homebrew/bin/tmux';
+  // ⚠️ Overridable by environment, because these two defaults are ONE machine's
+  // paths: an Intel Mac keeps Homebrew at `/usr/local`, and an npm-global Claude
+  // is not in `~/.local/bin` at all. Without a way to say so, this product
+  // simply cannot make an agent on those machines — it refuses, correctly but
+  // uselessly. It is also what lets the route be tested without depending on
+  // what happens to be installed on the machine running the suite.
+  //
+  // ⚠️ Environment and arguments only. NOT the request body: honouring a
+  // caller-supplied path would let anything that can reach this server name an
+  // executable to be launched under launchd on every reboot, which is a far
+  // worse hole than the one creation already is.
+  const claudeBin = (opts && opts.claudeBin)
+    || process.env.AGENT_WORKFORCE_CLAUDE_BIN
+    || path.join(HOME, '.local', 'bin', 'claude');
+  const tmuxBin = (opts && opts.tmuxBin)
+    || process.env.AGENT_WORKFORCE_TMUX_BIN
+    || '/opt/homebrew/bin/tmux';
 
   const steps = [];
   const problem = nameProblem(name);

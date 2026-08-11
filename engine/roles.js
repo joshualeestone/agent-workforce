@@ -7,13 +7,20 @@
  * is the one that keeps getting forgotten:
  *
  *   1. `instructions` — what the agent is, written as the agent's own file.
- *   2. `scope`        — the folder it works in, so nobody is asked to choose one.
- *   3. `firstAction`  — something to give it the moment it exists.
+ *   2. `firstAction`  — something to give it the moment it exists.
  *
- * The third exists because of a specific failure: with no suggested action, a
+ * The second exists because of a specific failure: with no suggested action, a
  * role lands the person on a working agent and a blank prompt, which is the
  * exact blank box the role library was introduced to remove. A role without a
  * first action is not finished.
+ *
+ * ⚠️ There WAS a third, `scope`, documented here as "the folder it works in, so
+ * nobody is asked to choose one". Nothing read it: every agent is created in
+ * `~/work/workers/<name>`, which is what the job and the session both use, and
+ * the roles route never served it. A field whose comment describes behaviour
+ * the code does not have is exactly what this file's own header warns about, so
+ * it is gone rather than left looking implemented. When agents get a real
+ * working folder, it comes back as something the creation actually reads.
  *
  * ⚠️ EVERY template opens `You are **<name>**, <a role>.` and the emphasis is
  * not decoration. It is the shape `status.readIdentity` parses to work out who
@@ -39,7 +46,6 @@ const ROLES = [
     key: 'pm',
     label: 'Project manager',
     blurb: 'Organises work and briefs your other agents',
-    scope: 'Documents',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
     instructions: [
       'You are **{{NAME}}**, a project manager.',
@@ -60,7 +66,6 @@ const ROLES = [
     key: 'ea',
     label: 'Executive assistant',
     blurb: 'Email, calendar and follow-ups',
-    scope: 'Documents',
     firstAction: 'Point me at your inbox or your notes and I will draft the follow-ups.',
     instructions: [
       'You are **{{NAME}}**, an executive assistant.',
@@ -80,7 +85,6 @@ const ROLES = [
     key: 'writer',
     label: 'Writer',
     blurb: 'Drafts and edits what you need written',
-    scope: 'Documents',
     firstAction: 'Point me at something to write up, or tell me what it needs to say.',
     instructions: [
       'You are **{{NAME}}**, a writer.',
@@ -100,7 +104,6 @@ const ROLES = [
     key: 'researcher',
     label: 'Researcher',
     blurb: 'Looks things up and writes them up',
-    scope: 'Documents',
     firstAction: 'Give me a question and I will come back with what I found and how sure I am.',
     instructions: [
       'You are **{{NAME}}**, a researcher.',
@@ -120,7 +123,6 @@ const ROLES = [
     key: 'finance',
     label: 'Finance',
     blurb: 'Builds and checks spreadsheets and models from your numbers',
-    scope: 'Documents',
     firstAction: 'Point me at a spreadsheet and tell me what you want it to answer.',
     // ⚠️ Scoped to producing work for a person to check, and it says so in the
     // agent's own instructions rather than only in a disclaimer the operator
