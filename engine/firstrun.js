@@ -63,7 +63,20 @@ function complete() {
 function fleet() {
   try {
     const agents = status.paneRoster();
-    return { known: true, count: agents.length, names: agents.map((a) => a.name).slice(0, 12) };
+    /**
+     * ⚠️ `paneRoster` cards carry `sessionName`, NOT a display name -- the name
+     * a person recognises is parsed out of the agent's instruction file by
+     * `readIdentity`. Mapping `.name` here returned an array of nulls, and the
+     * screen would have shown "We found 4 agents" over four blank rows.
+     *
+     * Caught by reading the route's output rather than its status code, which
+     * was 200 the whole time.
+     */
+    const names = agents.map((a) => {
+      try { return status.readIdentity(a.sessionName).displayName || a.sessionName; }
+      catch { return a.sessionName; }
+    });
+    return { known: true, count: agents.length, names: names.slice(0, 12) };
   } catch {
     // ⚠️ An unreachable tmux is not an empty machine. That confusion is the
     // one this codebase is built against, and here it would route somebody
