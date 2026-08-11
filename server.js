@@ -23,6 +23,8 @@ const { snapshot, paneRoster } = require('./engine/status');
 // that drifts.
 const { version } = require('./package.json');
 const store = require('./engine/store');
+const create = require('./engine/create');
+const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
 
@@ -496,6 +498,68 @@ const server = http.createServer((req, res) => {
   }
 
   // --- profile: things the machine cannot derive (role, etc.) -------------
+  // --- the roles a new agent can be ----------------------------------------
+  //
+  // Read-only and unkeyed: it is a menu, not an agent. It carries the blurb and
+  // the suggested first action so the screen cannot invent either — the copy a
+  // person reads while choosing has to be the copy the agent is actually
+  // created from.
+  if (pathname === '/api/roles' && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendJson(res, 200, {
+      roles: roles.ROLES.map((r) => ({
+        key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+      })),
+    });
+    return;
+  }
+
+  // --- create an agent -----------------------------------------------------
+  //
+  // ⚠️ The most powerful route here, and the reasoning for shipping it on a
+  // server with no login is worth stating rather than assuming.
+  //
+  // It does NOT cross a new line. This server already lets any local process
+  // rewrite the file an existing agent boots from — which is remote code
+  // execution by that agent, one restart later, and strictly worse than adding
+  // a new one. Creation is a smaller step than a capability already present.
+  //
+  // What it does add is PERSISTENCE: a launchd job outlives the session that
+  // made it. So the containment is in `engine/create`, which validates the name
+  // hard and early, never touches a shell, and reports PARTIAL rather than
+  // claiming success it did not verify.
+  //
+  // ⚠️ It is still behind the same loopback bind and Host allowlist as every
+  // other write, and it should be behind a login the moment one exists. The
+  // honest summary is that it is no worse than what is here, not that it is
+  // safe.
+  if (pathname === '/api/agents' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          const err = new Error('we could not read that request');
+          err.code = 'SAY_WHAT';
+          throw err;
+        }
+
+        const result = create.createAgent({ name: body.name, role: body.role });
+        // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
+        // ours, and it is a 200 because the thing half-happened and the caller
+        // needs the detail rather than an error.
+        const code = result.outcome === create.OUTCOME.REFUSED ? 400 : 200;
+        sendJson(res, code, result);
+      })
+      // ⚠️ OUR sentence, never the raw message. The first version called
+      // `errorAnswer`, which does not exist on this branch — it is from another
+      // one — so the catch path would have thrown at runtime, and the suite went
+      // green because nothing exercised it. A route's error path needs a test as
+      // much as its happy path does.
+      .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
   const prof = pathname.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
     const name = decodeSegment(prof[1]);

@@ -1662,3 +1662,52 @@ test('every write route refuses the untied card’s own spelling while the real 
     status.setPaneCapture(null);
   }
 });
+
+test('the create route makes an agent, and refuses a name it could not address', async () => {
+  // ⚠️ Driven through the ROUTE, because engine tests do not prove a route is
+  // wired — and this route's catch path called a function from a different
+  // branch, which would have thrown at runtime while the suite stayed green.
+  const create = require('./engine/create');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  try {
+    create.setDryRun(false);
+
+    const bad = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '_nope', role: 'pm' }),
+    });
+    assert.equal(bad.status, 400, 'a name the routes cannot address was accepted');
+    assert.match(JSON.parse(bad.body).because, /letters, numbers/);
+    assert.equal(calls.length, 0, 'a refused name still ran a command');
+
+    // ⚠️ And the ERROR path, which is the one that would have thrown.
+    const broken = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    assert.equal(broken.status, 400, 'a malformed body did not answer cleanly');
+    assert.ok(JSON.parse(broken.body).error, 'no readable error came back');
+  } finally {
+    create.setRunner(null);
+  }
+});
+
+test('the roles route carries the copy the creation actually uses', async () => {
+  // ⚠️ The screen must not invent its own blurb or first action. The words
+  // someone reads while choosing have to be the words the agent is created
+  // from, or the picker is describing something the product does not build.
+  const roles = require('./engine/roles');
+  const res = await req('/api/roles');
+  assert.equal(res.status, 200);
+  const got = JSON.parse(res.body).roles;
+
+  assert.equal(got.length, roles.ROLES.length, 'the route drops or invents roles');
+  for (const r of got) {
+    const real = roles.byKey(r.key);
+    assert.ok(real, `the route served a role '${r.key}' that cannot be created`);
+    assert.equal(r.blurb, real.blurb);
+    assert.equal(r.firstAction, real.firstAction, 'the picker would show a first action the agent never gets');
+  }
+  assert.ok(!got.some((r) => r.key === 'legal'), 'Legal is being offered before its wording is settled');
+});
