@@ -891,6 +891,28 @@ function limitFor(model) {
  * confident numbers about the wrong conversation, which is the exact failure
  * this whole resolution path was written to avoid.
  */
+/**
+ * ⚠️ A NAME THAT CANNOT WALK OUT OF THE REGISTRY DIRECTORY.
+ *
+ * Both arguments below are joined into a filename, and both arrive from tmux —
+ * which accepts a `/` in a session name (measured: `tmux new -s 'a/b'`
+ * succeeds). So a local session called `../../something-discord` is tied by the
+ * legacy suffix arm and would have this function read a JSON file outside the
+ * root and take a session id from it.
+ *
+ * `instructions.registryKey` exists to refuse exactly that, and threading the
+ * real session through here routed around it. Rather than import across
+ * modules for four lines, the same rule is applied at the point the value
+ * becomes a path, which is where it can be checked against what it is about to
+ * do.
+ */
+function registrySafe(value) {
+  const name = String(value == null ? '' : value);
+  if (!name || name === '.' || name === '..') return null;
+  if (/[/\\\0]/.test(name) || name.includes('..')) return null;
+  return name;
+}
+
 function sessionIdsFor(sessionName, exactSession) {
   // ⚠️ When the caller knows the REAL session name, only that spelling is
   // tried. The board's name is the session with `-discord` stripped, so `foo`
@@ -905,9 +927,15 @@ function sessionIdsFor(sessionName, exactSession) {
   // they resolve when a machine has both — the staleness verdict would then be
   // computed from the wrong agent's transcript. New capability, same order of
   // preference as before.
-  const candidates = exactSession
-    ? [`${exactSession}_0.0.json`]
-    : [`${sessionName}-discord_0.0.json`, `${sessionName}_0.0.json`];
+  const safeExact = exactSession === undefined ? undefined : registrySafe(exactSession);
+  const safeName = registrySafe(sessionName);
+  // A name we would refuse to build a path from resolves to nothing at all,
+  // rather than to a path we then hope is harmless.
+  if (exactSession !== undefined && !safeExact) return [];
+  if (!safeName) return [];
+  const candidates = safeExact
+    ? [`${safeExact}_0.0.json`]
+    : [`${safeName}-discord_0.0.json`, `${safeName}_0.0.json`];
   const found = [];
   // ⚠️ CANDIDATE-major, not root-major. The comment above promises the suffixed
   // spelling is preferred, and root-major iteration silently broke that promise
@@ -1236,6 +1264,10 @@ function paneRoster() {
   }
   return onePanePerSession(parsePanes(out)).map((pane) => ({
     sessionName: pane.name,
+    // The real tmux session beside the board name, for the same reason
+    // `snapshot` publishes it: anything that resolves a per-session artifact
+    // needs the name tmux knows, not the one we display.
+    session: pane.session,
     isNamedOurs: isNamedOurs(pane),
   }));
 }

@@ -189,6 +189,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .tick.fail { color: var(--label); }
 .tick.fail .mark { color: var(--warn-ink); }
 .tick.waiting .mark { color: var(--label-3); }
+.tick.undone { color: var(--label-2); }
+.tick.undone .mark { color: var(--label-3); }
 .first-action { margin-top: var(--space-6); padding: var(--space-5);
                 background: var(--bg-sunken); border-radius: var(--radius-control);
                 border-left: 2px solid var(--border-strong); font: var(--text-body) var(--font-ui); }
@@ -487,6 +489,18 @@ svg { display: block; }
 
 // Plain words, not internal vocabulary. "rate_limited" is not a thing a person
 // should ever have to read.
+/**
+ * Cancels an in-flight creation watch.
+ *
+ * ⚠️ Declared HERE, at the top, rather than beside the rest of the creation
+ * state four hundred lines down. The tab handler bumps it, and `let` is not
+ * hoisted: that worked only because nothing can dispatch an event during
+ * synchronous evaluation of this script. Deferring the script, making it a
+ * module, or one programmatic click during load turns it into a ReferenceError
+ * that silently kills tab switching.
+ */
+let WATCH = 0;
+
 const STATE_COPY = {
   working:      { label: 'Working',       attn: false },
   needs_you:    { label: 'Needs you',     attn: true  },
@@ -1361,7 +1375,6 @@ document.getElementById('d-save').addEventListener('click', async () => {
 let ROLES = null;          // the menu, fetched once
 let PICKED = null;         // the role key the person chose
 let CREATING = false;      // a create is in flight; guards the double-click
-let WATCH = 0;             // cancels an in-flight verification watch
 
 function cstep(which) {
   ['role', 'name', 'made'].forEach((s) => {
@@ -1461,13 +1474,15 @@ document.getElementById('create-name').addEventListener('keydown', (e) => {
 
 /** One tick line. `state` is 'done' | 'fail' | 'waiting'. */
 function tickLine(state, text) {
-  const mark = state === 'done' ? '&#10003;' : (state === 'fail' ? '&#10007;' : '&#8230;');
+  const mark = state === 'done' ? '&#10003;'
+    : (state === 'fail' ? '&#10007;' : (state === 'undone' ? '&#8722;' : '&#8230;'));
   // ⚠️ The glyph is the ONLY thing distinguishing a step that worked from one
   // that failed, it is aria-hidden, and both states render in the same colour
   // for the greyscale rule. So a screen reader heard "made its folder" and
   // "started it" identically whether or not they had worked — on the one screen
   // whose whole purpose is showing WHICH half of a half-made agent failed.
-  const said = state === 'done' ? 'done' : (state === 'fail' ? 'failed' : 'still waiting');
+  const said = state === 'done' ? 'done'
+    : (state === 'fail' ? 'failed' : (state === 'undone' ? 'undone' : 'still waiting'));
   return `<div class="tick ${state}"><span class="mark" aria-hidden="true">${mark}</span>`
     + `<span><span class="vh">${said}: </span>${esc(text)}</span></div>`;
 }
@@ -1481,7 +1496,9 @@ function tickLine(state, text) {
  * ever from something observed on the board.
  */
 function paintMade(steps, watching) {
-  const lines = (steps || []).map((s) => tickLine(s.ok ? 'done' : 'fail', s.label));
+  const lines = (steps || []).map((s) => (s.undone
+    ? tickLine('undone', s.label + ' (undone)')
+    : tickLine(s.ok ? 'done' : 'fail', s.label)));
   if (watching) lines.push(tickLine(watching.state, watching.text));
   document.getElementById('made-ticks').innerHTML = lines.join('');
   // Only what changed, and only in words -- the glyphs say nothing aloud.
@@ -1524,18 +1541,27 @@ document.getElementById('create-go').addEventListener('click', async () => {
     // these two lines left `create-go` disabled for the rest of the page: click
     // Create, leave the panel before the request fails, and the button is dead
     // until a reload — including through the Enter key, which clicks it.
+    // ⚠️ Only if this attempt still OWNS the control. Resetting unconditionally
+    // re-armed a button belonging to a newer creation that was still in flight,
+    // so a third click fired a duplicate POST for the same name, bumped the
+    // token, and made the creation that actually succeeded return early -- the
+    // person then reads "there is already an agent called X" about an agent
+    // this flow had just made for them.
+    if (attempt !== WATCH) return;
     CREATING = false;
     document.getElementById('create-go').disabled = false;
-    if (attempt !== WATCH) return;
     // The request itself did not complete, so we do not know what happened on
     // the other side — which is not the same as nothing having happened.
     msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + err.message + ')';
     return;
   }
 
+  // Same ownership rule as the error path above: a superseded answer must not
+  // touch a control the current attempt is using. `openCreate` resets both, so
+  // walking away never leaves the button stuck.
+  if (attempt !== WATCH) return;   // they walked away while it was in flight
   CREATING = false;
   document.getElementById('create-go').disabled = false;
-  if (attempt !== WATCH) return;   // they walked away while it was in flight
 
   // A refusal is the caller's to fix, and it belongs beside the field that
   // caused it rather than on a screen that has moved on.
@@ -1583,7 +1609,12 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * built against, and it would have made the person wait half a minute for it.
    */
   if (result.outcome === 'partial') {
-    paintMade(result.steps, null);
+    // ⚠️ The steps are drawn as UNDONE. They were true when the engine reported
+    // them and then the rollback took them back, so a column of ticks above
+    // "Nothing was made" contradicts the sentence beside it -- on the screen
+    // whose stated rule is that every line is something reported or something
+    // watched.
+    paintMade((result.steps || []).map((st) => ({ ...st, undone: st.ok })), null);
     document.getElementById('made-head').textContent = name + ' was not made';
     const warn = document.getElementById('made-warn');
     // The heading and this line have to agree. They did not: "This one is only

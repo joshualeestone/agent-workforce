@@ -408,7 +408,7 @@ function versionOf(exists, buf) {
  * about whether a file can be read. They did, and the card claimed an agent was
  * `current` while the panel said it could not read the file at all.
  */
-function read(agent) {
+function read(agent, exactSession) {
   const seen = inspect(agent);
 
   if (!seen.ok) {
@@ -434,7 +434,7 @@ function read(agent) {
       path: seen.file,
       text: '',
       because: seen.because,
-      staleness: staleness(agent, seen),
+      staleness: staleness(agent, seen, exactSession),
     };
   }
 
@@ -456,7 +456,7 @@ function read(agent) {
     // `editedAt` is reported for display only. The changed-since-read guard
     // keys on `version` above, NOT on this: an mtime is not a version.
     editedAt: iso(seen.stat.mtime.getTime()),
-    staleness: staleness(agent, seen),
+    staleness: staleness(agent, seen, exactSession),
   };
 }
 

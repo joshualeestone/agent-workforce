@@ -1937,14 +1937,28 @@ test('a write another website could send is refused, whatever route it names', a
       'the avatar upload is refused as cross-site, so the guard is stricter than the threat');
 
     // ...and so does a client that is not a browser at all: `curl` and the
-    // board's own tooling send no Origin, and a form cannot produce a request
-    // with no content type, so there is nothing to refuse.
+    // board's own tooling send no Origin. What covers THAT case is the Origin
+    // arm being absent, not the content type -- this used to be commented as
+    // though the content-type arm were doing the work.
     const plain = await req('/api/agents', {
       method: 'POST', body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
       headers: { 'content-type': 'application/json' },
     });
     assert.notEqual(plain.status, 403,
       'a request with no Origin was refused, which breaks every non-browser caller');
+
+    // ⚠️ And a SAME-ORIGIN post with a form content type is allowed, which is
+    // the early return the guard makes for a request whose origin it has
+    // already recognised. Nothing sends one today; without this the line can be
+    // deleted with the suite green, and it is exactly the "trap for the next
+    // route somebody adds" its own comment names.
+    const sameOriginForm = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', origin: new URL(base).origin },
+      body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+    });
+    assert.notEqual(sameOriginForm.status, 403,
+      'the board is refused its own write for a content type, which the Origin has already cleared');
   } finally {
     create.setRunner(null);
   }

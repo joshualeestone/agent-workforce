@@ -138,6 +138,25 @@ function borrowedName(name) {
  * a WRITE, and the strictly stronger one: a name nobody is running is not
  * writable, while its record stays readable.
  */
+/**
+ * The REAL tmux session behind a board name.
+ *
+ * ⚠️ Every reader that resolves a per-session artifact needs this rather than
+ * the displayed name, and the fix reached them one at a time: the model and the
+ * memory ring first, then the card's staleness, and this is the fourth. Until
+ * it did, the panel and the card could date the same agent from two different
+ * conversations -- one fact with two derivations, which is what this whole
+ * branch is about.
+ */
+function sessionOf(name) {
+  try {
+    const card = claimantFor(name);
+    return (card && card.session) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function knownAgent(name) {
   try {
     const card = claimantFor(name);
@@ -682,20 +701,25 @@ const server = http.createServer((req, res) => {
   // ⚠️ The most powerful route here, and the reasoning for shipping it on a
   // server with no login is worth stating rather than assuming.
   //
-  // It does NOT cross a new line. This server already lets any local process
-  // rewrite the file an existing agent boots from — which is remote code
-  // execution by that agent, one restart later, and strictly worse than adding
-  // a new one. Creation is a smaller step than a capability already present.
+  // ⚠️ THIS COMMENT USED TO SAY "it does NOT cross a new line", on the argument
+  // that the server already lets a local process rewrite an agent's boot file.
+  // That was FALSE, and measurably so: every other write is PUT or DELETE, which
+  // a browser always preflights, so this was the first route on this server a
+  // page on another website could actually reach. Running that request created a
+  // worker directory and installed a launchd job on this machine. See
+  // `crossSiteWrite`, which exists because of it.
   //
-  // What it does add is PERSISTENCE: a launchd job outlives the session that
-  // made it. So the containment is in `engine/create`, which validates the name
-  // hard and early, never touches a shell, and reports PARTIAL rather than
-  // claiming success it did not verify.
+  // What it adds beyond the writes that were already here is PERSISTENCE: a
+  // launchd job outlives the session that made it, and starts Claude with
+  // `--dangerously-skip-permissions` at every login. So the containment is in
+  // `engine/create`: the name is validated hard and early, no caller-supplied
+  // path is honoured, every command is `execFile` with an argument array, and
+  // any failure rolls the whole thing back rather than leaving half of it.
   //
-  // ⚠️ It is still behind the same loopback bind and Host allowlist as every
-  // other write, and it should be behind a login the moment one exists. The
-  // honest summary is that it is no worse than what is here, not that it is
-  // safe.
+  // ⚠️ Three things hold this up, not two: the loopback bind, the Host check,
+  // and the cross-site guard. It should be behind a login the moment one
+  // exists. The honest summary is that it is the largest thing here and it is
+  // contained, not that it is safe.
   if (pathname === '/api/agents' && req.method === 'POST') {
     readBody(req)
       .then((buf) => {
@@ -832,7 +856,7 @@ const server = http.createServer((req, res) => {
     // about which names exist.
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
-      sendJson(res, 200, instructions.read(name));
+      sendJson(res, 200, instructions.read(name, sessionOf(name)));
     } catch {
       sendJson(res, 500, { error: 'those instructions could not be read' });
     }

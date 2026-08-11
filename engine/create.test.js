@@ -183,7 +183,7 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   // branch exists to remove, returning on its own after one restart. So the
   // claim now lives in the startup SCRIPT, which is what runs at every start,
   // and that is what this asserts.
-  const calls = recorder();
+  recorder();   // for the side effect: nothing here asserts on the calls
   create.setDryRun(false);
   create.createAgent({ ...BINS, name: 'claimed-one', role: 'pm' });
 

@@ -1249,3 +1249,52 @@ test('a card reads the transcript of ITS OWN session, not of the name it shares'
     setPaneCapture(null);
   }
 });
+
+test('a session name that could walk out of the registry directory reads nothing', () => {
+  // ⚠️ tmux accepts a `/` in a session name -- measured: `tmux new -s 'a/b'`
+  // succeeds. So a local session called `../../whatever-discord` is tied by the
+  // legacy suffix arm, and both the board name and the real session are joined
+  // into a registry FILENAME. `instructions.registryKey` exists to refuse
+  // exactly this shape, and threading the real session through this resolver
+  // routed around it.
+  //
+  // Planted where the traversal would land, so this fails loudly if the guard
+  // goes rather than passing because the file happens not to exist.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  // ⚠️ Planted at EXACTLY the path the traversal would resolve to:
+  // join(root, 'agent-registry', '../outside-the-root-discord_0.0.json') lands
+  // in the root itself. The first version of this fixture planted a differently
+  // named file, so the nulls it asserted were nulls because nothing was there —
+  // a vacuous gate test, which the mutation run caught by staying green with
+  // the guard removed.
+  const outside = nodePath.join(root, 'outside-the-root-discord_0.0.json');
+  fs.writeFileSync(outside, JSON.stringify({ session_id: 'sess-outside' }), 'utf8');
+  const projects = nodePath.join(root, 'projects', 'elsewhere');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-outside.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 50000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => '../outside-the-root-discord\t0.0\t2.1.227\t0\t\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.session === '../outside-the-root-discord');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.model, null,
+      'a session name walked out of the registry directory and read a file outside it');
+    assert.equal(card.context.percent, null, 'the same, for the memory ring');
+
+    // ⚠️ THE CONTROL. The planted file IS readable and DOES produce numbers when
+    // asked for under a name that cannot traverse -- otherwise the nulls above
+    // are nulls because nothing was there, and this test proves nothing.
+    const inside = nodePath.join(root, 'agent-registry', 'plain-name_0.0.json');
+    fs.mkdirSync(nodePath.dirname(inside), { recursive: true });
+    fs.writeFileSync(inside, JSON.stringify({ session_name: 'plain-name', session_id: 'sess-outside' }), 'utf8');
+    setPaneSource(() => 'plain-name\t0.0\t2.1.227\t0\tplain-name\t✳ Claude Code');
+    const ok = snapshot().agents.find((a) => a.sessionName === 'plain-name');
+    assert.equal(ok.model, 'claude-opus-5',
+      'the planted transcript is unreadable anyway, so the assertions above are vacuous');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
