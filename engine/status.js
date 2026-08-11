@@ -906,8 +906,15 @@ function sessionIdsFor(sessionName, exactSession) {
     ? [`${exactSession}_0.0.json`]
     : [`${sessionName}-discord_0.0.json`, `${sessionName}_0.0.json`];
   const found = [];
-  for (const root of configRoots()) {
-    for (const candidate of candidates) {
+  // ⚠️ CANDIDATE-major, not root-major. The comment above promises the suffixed
+  // spelling is preferred, and root-major iteration silently broke that promise
+  // on any machine with more than one config root (this one has two): root 1's
+  // un-suffixed entry would outrank root 2's suffixed one. A stated order of
+  // preference that the loop does not implement is the same class of defect as
+  // a safety comment that overstates its guard.
+  const roots = configRoots();
+  for (const candidate of candidates) {
+    for (const root of roots) {
       try {
         const entry = JSON.parse(fs.readFileSync(path.join(root, 'agent-registry', candidate), 'utf8'));
         const owner = String(entry.session_name || '');

@@ -1497,6 +1497,18 @@ document.getElementById('create-go').addEventListener('click', async () => {
   CREATING = true;
   document.getElementById('create-go').disabled = true;
   msg.textContent = 'Making it…';
+  /**
+   * ⚠️ The token is taken BEFORE the request, not inside the watch.
+   *
+   * Minting it in `watchForAgent` left the fetch itself uncovered: leave the
+   * panel while the POST is in flight, and this handler still called
+   * `cstep('made')` on a hidden panel and then started a fresh watch with a
+   * fresh token — so a thirty-second poll ran against a screen nobody was
+   * looking at, announcing into the live region while the person was back on
+   * the board. That is the failure the back button's own comment says it fixed,
+   * arriving through the earlier window.
+   */
+  const attempt = ++WATCH;
   let result;
   let res;
   try {
@@ -1507,6 +1519,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
     });
     result = await res.json().catch(() => null);
   } catch (err) {
+    if (attempt !== WATCH) return;
     // The request itself did not complete, so we do not know what happened on
     // the other side — which is not the same as nothing having happened.
     msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + err.message + ')';
@@ -1517,6 +1530,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
 
   CREATING = false;
   document.getElementById('create-go').disabled = false;
+  if (attempt !== WATCH) return;   // they walked away while it was in flight
 
   // A refusal is the caller's to fix, and it belongs beside the field that
   // caused it rather than on a screen that has moved on.
@@ -1560,7 +1574,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
     warn.hidden = false;
   }
 
-  await watchForAgent(name, result);
+  await watchForAgent(name, result, attempt);
 });
 
 /**
@@ -1611,8 +1625,10 @@ function boardCanSeeIt(a) {
  * is correct — nothing on its screen says what it is doing yet. So `unknown` is
  * NOT treated as failure here; the structural facts are.
  */
-async function watchForAgent(name, result) {
-  const mine = ++WATCH;
+async function watchForAgent(name, result, attempt) {
+  // The token from before the request, so one creation is one attempt from the
+  // click to the last poll.
+  const mine = attempt;
   const until = Date.now() + 30000;
 
   while (Date.now() < until) {

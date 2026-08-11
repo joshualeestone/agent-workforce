@@ -1949,6 +1949,12 @@ test('the create route answers a real creation with the record the screen is bui
   const roles = require('./engine/roles');
   const calls = [];
   create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  // ⚠️ LEAVE DRY-RUN, or this proves less than it says. `setRunner(null)` in the
+  // previous test's `finally` re-arms it, so without this every write is
+  // suppressed, every step reports ok unconditionally, and the test would stay
+  // green with every filesystem write in `createAgent` broken -- while its own
+  // comment claims the sandbox exists so the writes can happen.
+  create.setDryRun(false);
   status.setPaneSource(() => '');
   try {
     const res = await req('/api/agents', {
@@ -1982,6 +1988,11 @@ test('the create route answers a real creation with the record the screen is bui
     // executable to be launched under launchd forever.
     const started = calls.find((c) => /launchctl$/.test(c[0]));
     assert.ok(started, 'the job was never loaded, so nothing would start');
+
+    // And the files are really there, in the sandbox this file sets up.
+    assert.ok(fs.existsSync(create.instructionFile('route-made')), 'no instruction file was written');
+    assert.ok(fs.existsSync(create.launcherFile('route-made')), 'no startup script was written');
+    assert.ok(fs.existsSync(create.plistPath('route-made')), 'no launchd job was written');
   } finally {
     create.setRunner(null);
     status.setPaneSource(null);

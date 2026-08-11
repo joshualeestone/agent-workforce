@@ -661,3 +661,118 @@ test('a length problem says it is a length problem', () => {
   // And the character rule still answers for a character problem.
   assert.match(create.nameProblem('has space'), /letters, numbers/);
 });
+
+/**
+ * Run the generated startup script for real, against a fake tmux.
+ *
+ * ⚠️ The tests above assert the script's TEXT — that a check appears before a
+ * kill, that a `sleep 5` exists somewhere. That is not the same as asserting
+ * behaviour, and the gap is exactly wide enough to hide the bug: move
+ * `kill-session` out of the ours-branch and into the loop body and the
+ * destroy-a-stranger's-session defect is fully restored with those assertions
+ * green. This is the one generated artifact on this branch that can end a live
+ * agent, so it gets exercised rather than read.
+ *
+ * The fake records every call and answers from a scripted world. `has-session`
+ * answers yes once and no afterwards, so every loop in the script terminates.
+ */
+function runLauncher({ claim, paneCommands }) {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'launcher-'));
+  const log = nodePath.join(dir, 'calls.log');
+  const fake = nodePath.join(dir, 'tmux');
+  fs.writeFileSync(fake, `#!/bin/bash
+echo "$@" >> ${JSON.stringify(log)}
+case "$1" in
+  has-session)
+    # Present the first time only, so both loops terminate.
+    if [ -f ${JSON.stringify(nodePath.join(dir, 'seen'))} ]; then exit 1; fi
+    touch ${JSON.stringify(nodePath.join(dir, 'seen'))}
+    exit 0
+    ;;
+  show-options) echo ${JSON.stringify(claim)}; exit 0 ;;
+  list-panes) printf '%s\\n' ${paneCommands.map((c) => JSON.stringify(c)).join(' ')}; exit 0 ;;
+  *) exit 0 ;;
+esac
+`, { mode: 0o755 });
+
+  const script = nodePath.join(dir, 'start.sh');
+  fs.writeFileSync(script, create.launcherFor('probe', '/bin/echo', fake), { mode: 0o755 });
+  require('node:child_process').execFileSync('/bin/bash', [script], { timeout: 20000, stdio: 'pipe' });
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n');
+  fs.rmSync(dir, { recursive: true, force: true });
+  return calls;
+}
+
+test('the startup script, actually run, never kills a session that is not ours', () => {
+  // Somebody else's session is sitting on the name.
+  const calls = runLauncher({ claim: 'somebody-else', paneCommands: ['zsh'] });
+  assert.ok(!calls.some((c) => c.startsWith('kill-session')),
+    "the script killed a session it could not prove was ours, which is somebody's "
+    + 'work destroyed by a job installed weeks earlier');
+  // ⚠️ The claim must never land on a session we did not create. It is fine for
+  // it to happen AFTER a new-session -- the stranger's session ended, we waited
+  // it out, and the one we then made is ours. What must never happen is a claim
+  // with no creation before it.
+  //
+  // The first version of this assertion said the claim must not appear at all,
+  // which was simply false about correct behaviour: the fake reports the
+  // session gone on the second look, so the script rightly proceeds. A
+  // behavioural test can assert the wrong thing as easily as a textual one, and
+  // this one found that out on its first run.
+  const claimAt = calls.findIndex((c) => c.includes('@kosmos_agent probe'));
+  const createdAt = calls.findIndex((c) => c.startsWith('new-session'));
+  if (claimAt > -1) {
+    assert.ok(createdAt > -1 && createdAt < claimAt,
+      "the script stamped our claim on a session it did not create, which the next "
+      + 'run would then recognise as ours and kill');
+  }
+});
+
+test('the startup script, actually run, adopts a healthy agent instead of restarting it', () => {
+  // Ours, and Claude is running in it. Killing it here throws away the
+  // conversation -- and this file tells people they can run it by hand.
+  const calls = runLauncher({ claim: 'probe', paneCommands: ['2.1.227'] });
+  assert.ok(!calls.some((c) => c.startsWith('kill-session')),
+    'a healthy running agent was killed and restarted, losing everything it remembered');
+  assert.ok(!calls.some((c) => c.startsWith('new-session')),
+    'a second session was started over a healthy one');
+  assert.ok(calls.some((c) => c.includes('@kosmos_agent probe')),
+    'the adopted session was left unclaimed, so the board will not recognise it');
+
+  // ⚠️ And a session where every pane is a shell IS restarted -- otherwise
+  // "adopt" would mean "never recover a crashed agent", which is worse than the
+  // bug it fixes.
+  const crashed = runLauncher({ claim: 'probe', paneCommands: ['zsh', 'bash'] });
+  assert.ok(crashed.some((c) => c.startsWith('kill-session')),
+    'an agent that crashed back to a shell was adopted rather than restarted');
+  assert.ok(crashed.some((c) => c.startsWith('new-session')), 'nothing was restarted');
+
+  // ⚠️ A session with a shell in ONE pane and Claude in another is ALIVE. The
+  // probe read only the current window's first pane, so splitting a window or
+  // opening a second one -- which this script's own header invites -- made a
+  // live agent look crashed.
+  const split = runLauncher({ claim: 'probe', paneCommands: ['zsh', '2.1.227'] });
+  assert.ok(!split.some((c) => c.startsWith('kill-session')),
+    'an agent with a shell open beside it was killed as though it had crashed');
+});
+
+test('every name this module accepts is one the rest of the system can address', () => {
+  // ⚠️ `NAME_RE` is a SECOND encoding of a rule that lives in `store.safeKey`,
+  // and the header of this module cites that rule as the reason it exists. It
+  // is currently strictly stricter, so it holds -- but nothing asserted the
+  // relationship, so a future tightening of `safeKey` would break the invariant
+  // with the whole suite green. Two definitions of one fact, unpinned, is the
+  // defect this codebase keeps paying for.
+  const store = require('./store');
+  const candidates = ['ab', 'a1', 'my_bot', 'casey-2', 'x'.repeat(32),
+    'agent-one', '9lives', 'a-b_c-1'];
+  let accepted = 0;
+  for (const name of candidates) {
+    if (create.nameProblem(name) !== null) continue;
+    accepted += 1;
+    assert.equal(store.safeKey(name), name,
+      `'${name}' is accepted here but is not its own key, so a route naming it `
+      + 'would resolve somewhere else');
+  }
+  assert.ok(accepted > 0, 'nothing was accepted, so the assertions above never ran');
+});

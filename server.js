@@ -367,9 +367,16 @@ function decodeSegment(segment) {
  * JSON requirement would have refused every picture in the product while
  * reading, in review, exactly like the stricter and therefore safer choice.
  *
- * A request with no content type at all is not a browser write — a `fetch`
- * with a body always sets one, and a form can only ever produce the three
- * refused below — so it is left alone rather than broken.
+ * A request with no content type at all is left alone rather than broken,
+ * because refusing it would break every non-browser caller (curl, a script) and
+ * a form cannot produce one.
+ * ⚠️ This used to justify itself with "a `fetch` with a body always sets one",
+ * which is FALSE: `fetch(url, {method:'POST', body: new Blob(['…'])})` with a
+ * typeless Blob sends no content type at all and is still a simple request.
+ * What actually covers that case is the Origin arm above — a browser attaches
+ * `Origin` to every POST — so the guard holds, and the sentence that said why
+ * did not. Correcting it matters because the next person to touch the Origin
+ * arm needs to know it is load-bearing here.
  *
  * Applied to every state-changing method, not only the new route: the others
  * are protected by preflight today, and depending on the browser's method
@@ -638,7 +645,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --- profile: things the machine cannot derive (role, etc.) -------------
   // --- the roles a new agent can be ----------------------------------------
   //
   // Read-only and unkeyed: it is a menu, not an agent. It carries the blurb and
@@ -705,6 +711,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // --- profile: things the machine cannot derive (role, etc.) --------------
   const prof = pathname.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
     const name = decodeSegment(prof[1]);

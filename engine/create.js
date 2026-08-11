@@ -259,6 +259,7 @@ if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
   : > "$LOG"
 fi
 
+# ── the session ──────────────────────────────────────────────────────────────
 warned=0
 while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
   if [ "$("$TMUX_BIN" show-options -t "$TARGET" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
@@ -268,19 +269,29 @@ while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
     # running in there, the agent is alive: adopt it and supervise, which is
     # also the right answer when launchd restarts this script under a session
     # that never stopped.
-    running=$("$TMUX_BIN" list-panes -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null | head -1)
-    case "$running" in
-      ""|sh|bash|zsh|fish|tcsh|ksh|login)
-        # Crashed back to a shell, or unreadable. Replace it.
-        "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
-        break
-        ;;
-      *)
-        echo "$(date): $SESSION is already running ($running) -- leaving it alone and watching it" >&2
-        exec_adopt=1
-        break
-        ;;
-    esac
+    # ⚠️ -s, so this asks about the whole SESSION. Without it tmux resolves the
+    # target as a WINDOW, so this read only the current window -- and with
+    # "head -1", only its first pane. A session where somebody had split the
+    # window or opened a second one with a shell in it (which this file invites,
+    # since it says you can run it yourself) read as "crashed back to a shell"
+    # and the live agent was killed at the next login.
+    alive=0
+    while read -r pane_cmd; do
+      case "$pane_cmd" in
+        ""|sh|bash|zsh|fish|tcsh|ksh|login) ;;
+        *) alive=1 ;;
+      esac
+    done <<EOF
+$("$TMUX_BIN" list-panes -s -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null)
+EOF
+    if [ "$alive" -eq 1 ]; then
+      echo "$(date): $SESSION is already running -- leaving it alone and watching it" >&2
+      exec_adopt=1
+      break
+    fi
+    # Every pane is a shell: it crashed. Replace it.
+    "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
+    break
   fi
   if [ "$warned" -eq 0 ]; then
     echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
@@ -552,7 +563,23 @@ function createAgent(opts) {
     fs.writeFileSync(launcherFile(name), launcherFor(name, claudeBin, tmuxBin), { mode: 0o755 });
   });
 
-  const wroteJob = step('wrote its startup job', () => {
+  /**
+   * ⚠️ THE JOB IS WRITTEN LAST, AND REMOVED IF WE CANNOT FINISH.
+   *
+   * Order matters more here than anywhere else in this function. The plist was
+   * written before the gate below, so a failed instructions or launcher write
+   * left a launchd job on disk pointing at a startup script that does not
+   * exist. Skipping `bootstrap` does not help: launchd loads every plist in
+   * `~/Library/LaunchAgents` at the next login, `bash` exits at once on a
+   * missing file, and `KeepAlive` with `ThrottleInterval 30` respawns it every
+   * thirty seconds for as long as the machine is on.
+   *
+   * That is word for word the harm the gate below says it prevents, arriving
+   * through the file the gate does not clean up. And it compounds: the name is
+   * then permanently refused by the leftover-job branch above, so the person
+   * cannot even retry from the screen.
+   */
+  const wroteJob = (wroteInstructions && wroteLauncher) && step('wrote its startup job', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
@@ -573,9 +600,13 @@ function createAgent(opts) {
    * that produced it.
    */
   if (!wroteInstructions || !wroteLauncher || !wroteJob) {
+    // And take the job back off the machine if it got as far as being written.
+    // Leaving it is the respawn loop described above; removing it is also what
+    // lets the person try the same name again.
+    try { if (!DRY_RUN) fs.rmSync(plistPath(name), { force: true }); } catch { /* best effort */ }
     return {
       outcome: OUTCOME.PARTIAL,
-      because: 'we could not write everything it needs, so we have not started it',
+      because: 'we could not write everything it needs, so we have not started it, and nothing has been left set to start on its own',
       steps,
       folder: workerDir(name),
     };

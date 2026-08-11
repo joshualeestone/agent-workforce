@@ -110,9 +110,16 @@ hand. None requires a human decision beyond the name and the role.
 - [x] ⚠️ **Every role ships a suggested first action.** Without one, a role that
       lands on a working agent and a blank prompt puts the person back in front
       of the box the role library exists to remove.
-- [x] ⚠️ **Legal is NOT in the first set** pending Josh — framing and a
-      disclaimer cover Copyright and Finance; Legal is where a wrong draft costs
-      most.
+- [x] ⚠️ **AMENDED: Legal SHIPS.** It was held out pending Josh, and he decided
+      on 2026-08-10: ship it, "but when they pick it out say that it's not legal
+      advice from a lawyer, same with the other roles we greyed out". So the
+      condition of shipping is a `caution` on the role, served by the roles route
+      and shown in the picker at the moment of choosing — not a disclaimer screen
+      somebody clicks through at setup. Finance carries one too. Both also state
+      the boundary inside their own instructions, because the two cover different
+      moments: one is read by the person before choosing, the other by the agent
+      at every start. (There is no Copyright role; the original note named one
+      that has never existed.)
 
 ## Out of scope, named so it does not sprawl
 
