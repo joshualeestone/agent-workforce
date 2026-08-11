@@ -740,6 +740,38 @@ function classify(pane, paneText) {
   if (/✱|Worked for|Brewed for|Baked for|to save .* tokens/i.test(tail)) {
     return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it finished and is waiting for you' };
   }
+  /**
+   * ⚠️ THE INPUT BOX ITSELF, and it has to be last.
+   *
+   * Every marker above is a trace of something the agent DID, and traces scroll
+   * away. An agent that has been sitting at its prompt long enough fell through
+   * to `unknown` — so the board told the operator "we cannot see this one, so we
+   * are not telling you it is fine" about an agent that was plainly waiting for
+   * them, and a person who had just created their first agent landed on exactly
+   * that card. Measured on a real created agent, and on the fleet: the footer is
+   * frequently the only marker left in the last twenty-five lines.
+   *
+   * The footer is drawn by Claude's own interactive UI, so it is evidence that
+   * Claude is running AND rendering a prompt. It is present while working too,
+   * which is why this sits BELOW every working check rather than above them:
+   * reaching here means nothing said working, nothing said it needs you, and
+   * the prompt is on screen. That is waiting for you.
+   *
+   * ⚠️ Weigh this before extending it, because it moves the board's headline
+   * count: with the footer on almost every live Claude pane, `unknown` stops
+   * being reachable for a RUNNING agent, and this codebase's whole rule is that
+   * "I cannot see it" must never be reported as something healthy. Two things
+   * make it a fair trade rather than a green light. The state it produces is
+   * "waiting for you", not "fine" — the card says which, and the `because` line
+   * names the evidence. And an agent stuck on a question does not show this
+   * footer at all: the dialog replaces the input box, so it is caught above by
+   * `NEEDS_YOU_MARKERS` rather than swallowed here. If a future Claude draws a
+   * blocking prompt WITH the footer still on screen, this becomes the trap the
+   * module exists to prevent, and it has to be revisited.
+   */
+  if (/⏵⏵|\? for shortcuts/.test(tail)) {
+    return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it is sitting at its prompt' };
+  }
 
   return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'nothing in the pane says what it is doing' };
 }
@@ -823,13 +855,42 @@ function limitFor(model) {
  * named for its session id. That is an exact identity, not a resemblance, so
  * we resolve by it and search every project directory for the file.
  */
+/**
+ * ⚠️ The registry is keyed on the SESSION name, and this function used to
+ * reconstruct that name by appending `-discord`.
+ *
+ * For the existing fleet the two are the same string — the session really is
+ * `angel-discord` — so nothing looked wrong. For an agent Kosmos creates, whose
+ * session is simply `kosmos-demo`, the reconstruction asks for
+ * `kosmos-demo-discord_0.0.json`, which never exists. The entry sitting right
+ * beside it is called `kosmos-demo_0.0.json`.
+ *
+ * The consequence was the last piece of Discord coupling still visible to a
+ * user: a created agent showed on the board with its name and its role and then
+ * `model unknown` and a dashed, unknowable memory ring, permanently, because no
+ * transcript could be found for it. Measured on a real agent created through
+ * the product on 2026-08-10.
+ *
+ * ⚠️ And the entry is now CHECKED rather than trusted by filename. It records
+ * its own `session_name`, so we can confirm the file we found belongs to the
+ * agent we asked about instead of inferring it from what it is called — a file
+ * named for one agent holding another's session id would otherwise produce
+ * confident numbers about the wrong conversation, which is the exact failure
+ * this whole resolution path was written to avoid.
+ */
 function sessionIdFor(sessionName) {
+  // Both spellings, because the roster strips `-discord` without requiring it:
+  // the legacy fleet's file carries the suffix and a created agent's does not.
+  const candidates = [`${sessionName}_0.0.json`, `${sessionName}-discord_0.0.json`];
   for (const root of configRoots()) {
-    const file = path.join(root, 'agent-registry', `${sessionName}-discord_0.0.json`);
-    try {
-      const id = JSON.parse(fs.readFileSync(file, 'utf8')).session_id;
-      if (id) return id;
-    } catch { /* try the next root */ }
+    for (const candidate of candidates) {
+      try {
+        const entry = JSON.parse(fs.readFileSync(path.join(root, 'agent-registry', candidate), 'utf8'));
+        const owner = String(entry.session_name || '');
+        if (owner && owner !== sessionName && owner !== `${sessionName}-discord`) continue;
+        if (entry.session_id) return entry.session_id;
+      } catch { /* try the next candidate */ }
+    }
   }
   return null;
 }

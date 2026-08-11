@@ -1084,3 +1084,114 @@ test('every declared column reaches the parsed pane, not just the ones we rememb
       + 'parsed pane, so everything downstream sees it as absent');
   });
 });
+
+test('an agent with no -discord session gets its model and its memory ring', () => {
+  // ⚠️ THE LAST PIECE OF DISCORD COUPLING A USER COULD SEE. The registry entry
+  // Claude writes is keyed on the SESSION name; this module reconstructed that
+  // name by appending `-discord`, which is right for the existing fleet and
+  // wrong for every agent Kosmos creates. Measured on a real agent created
+  // through the product: name and role read correctly, then `model unknown` and
+  // a dashed memory ring, permanently, with `kosmos-demo_0.0.json` sitting in
+  // the registry directory being asked for under a name it does not have.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  const entry = nodePath.join(dir, 'made-here_0.0.json');
+  fs.writeFileSync(entry, JSON.stringify({
+    session_name: 'made-here',
+    session_id: 'sess-made-here',
+    cwd: '/somewhere',
+  }), 'utf8');
+
+  const projects = nodePath.join(root, 'projects', 'made-here');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-made-here.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n', 'utf8');
+
+  // A session with no suffix, carrying Kosmos's claim: exactly what the product
+  // creates.
+  setPaneSource(() => 'made-here\t0.0\t2.1.227\t0\tmade-here\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'made-here');
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.isNamedOurs, true, 'the claim is not being read, so this tests the wrong thing');
+    assert.equal(card.model, 'claude-opus-5',
+      'a created agent still shows no model, so its card reads "model unknown" forever');
+    assert.ok(card.context.percent !== null,
+      'a created agent still has an unknowable memory ring');
+
+    // ⚠️ THE CONTROL. Without the entry those two must go back to null —
+    // otherwise they are being satisfied by something other than the fix and
+    // the assertions above prove nothing.
+    fs.rmSync(entry);
+    const blind = snapshot().agents.find((a) => a.sessionName === 'made-here');
+    assert.equal(blind.model, null, 'a model appeared with no registry entry to read it from');
+    assert.equal(blind.context.percent, null, 'a memory reading appeared from nowhere');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a registry entry naming a different agent is not read for this one', () => {
+  // ⚠️ Trying a second filename widened what this resolver will open, so it now
+  // checks the entry rather than trusting its name. A file called `borrowed`
+  // holding somebody else's session id would otherwise produce confident
+  // numbers about the wrong conversation — the precise failure the resolution
+  // path was built to avoid, reintroduced by the fix for the previous one.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, 'borrowed_0.0.json'), JSON.stringify({
+    session_name: 'somebody-else',
+    session_id: 'sess-made-here',
+  }), 'utf8');
+
+  const projects = nodePath.join(root, 'projects', 'made-here');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-made-here.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => 'borrowed\t0.0\t2.1.227\t0\tborrowed\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'borrowed');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not exercising a tied card');
+    assert.equal(card.model, null,
+      "another agent's transcript was read because the file was named for this one");
+    assert.equal(card.context.percent, null, "another agent's memory was reported as this one's");
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('an agent sitting at its prompt is idle, not unreadable', () => {
+  // ⚠️ Every other idle marker is a TRACE of something the agent did, and traces
+  // scroll away. An agent left at its prompt long enough fell through to
+  // `unknown`, so the board said "we cannot see this one, so we are not telling
+  // you it is fine" about an agent that was visibly waiting — and that is the
+  // card a person lands on straight after creating their first agent.
+  const at_prompt = ['', '────────────────', '❯ ', '────────────────', '  kosmos-demo',
+    '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents'].join('\n');
+  const pane = { session: 'made-here', name: 'made-here', claim: 'made-here', command: '2.1.227', title: 'Acknowledge readiness' };
+
+  const idle = classify(pane, at_prompt);
+  assert.equal(idle.state, 'idle', 'an agent at its own prompt is reported as unreadable');
+  assert.match(idle.because, /sitting at its prompt/);
+
+  // ⚠️ AND IT MUST NOT OUTRANK THE WORKING CHECKS. The footer is on screen while
+  // the agent is working too, so a marker placed above them would report every
+  // busy agent as idle — a far worse error than the one it fixes, and the exact
+  // shape of "the fix for a finding introduces a worse finding".
+  const working = classify(pane, at_prompt + '\n  esc to interrupt');
+  assert.equal(working.state, 'working', 'a working agent was reported as idle by its own footer');
+
+  const asking = classify(pane, at_prompt + '\n  Do you want to proceed? (y/N)');
+  assert.equal(asking.state, 'needs_you', 'an agent asking a question was reported as idle');
+
+  // And a pane with no footer at all is still honestly unknown.
+  const silent = classify(pane, 'some unrelated output\n');
+  assert.equal(silent.state, 'unknown', 'unknown stopped being reachable, so nothing is honest any more');
+});

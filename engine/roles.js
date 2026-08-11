@@ -15,6 +15,18 @@
  * exact blank box the role library was introduced to remove. A role without a
  * first action is not finished.
  *
+ * ⚠️ EVERY template opens `You are **<name>**, <a role>.` and the emphasis is
+ * not decoration. It is the shape `status.readIdentity` parses to work out who
+ * an agent is, so a template written without it produces an agent the board can
+ * see and cannot NAME: the card falls back to the raw session name, flags it as
+ * a machine name, and shows no role at all. Measured — the first version of
+ * this library wrote the line unemphasised and every agent it created arrived
+ * on the board anonymous.
+ *
+ * The coupling is deliberate and it is tested from both ends: the instruction
+ * file is the source of truth for who an agent is, so the words the creation
+ * writes have to be words the board reads. It must never become two formats.
+ *
  * ⚠️ Deliberately NOT here: Legal. Framing and a disclaimer cover Copyright and
  * Finance -- "drafts contract language for your lawyer to check, not legal
  * advice" is useful and safe. Legal is where a wrong draft costs the most, and
@@ -30,7 +42,7 @@ const ROLES = [
     scope: 'Documents',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
     instructions: [
-      'You are {{NAME}}, a project manager.',
+      'You are **{{NAME}}**, a project manager.',
       '',
       'You keep track of what needs doing, break it into pieces, and brief the',
       'other agents who do it. You are the person the operator talks to when',
@@ -51,7 +63,7 @@ const ROLES = [
     scope: 'Documents',
     firstAction: 'Point me at your inbox or your notes and I will draft the follow-ups.',
     instructions: [
-      'You are {{NAME}}, an executive assistant.',
+      'You are **{{NAME}}**, an executive assistant.',
       '',
       'You handle the correspondence and the follow-ups: drafting replies,',
       'turning notes into actions, and making sure nothing agreed to is quietly',
@@ -71,7 +83,7 @@ const ROLES = [
     scope: 'Documents',
     firstAction: 'Point me at something to write up, or tell me what it needs to say.',
     instructions: [
-      'You are {{NAME}}, a writer.',
+      'You are **{{NAME}}**, a writer.',
       '',
       'You draft and edit. Briefs, posts, documentation, the awkward email',
       'nobody wants to start.',
@@ -91,7 +103,7 @@ const ROLES = [
     scope: 'Documents',
     firstAction: 'Give me a question and I will come back with what I found and how sure I am.',
     instructions: [
-      'You are {{NAME}}, a researcher.',
+      'You are **{{NAME}}**, a researcher.',
       '',
       'You find things out and report them honestly, including how confident',
       'you are and what you could not establish.',
@@ -114,7 +126,7 @@ const ROLES = [
     // agent's own instructions rather than only in a disclaimer the operator
     // sees once at setup.
     instructions: [
-      'You are {{NAME}}, a finance assistant.',
+      'You are **{{NAME}}**, a finance assistant.',
       '',
       'You build and check spreadsheets and models from the operator\'s own',
       'numbers.',

@@ -7,8 +7,15 @@ Claude subscription.
 
 It shows you what the agents on this machine are doing, and it can now change
 some of what they are: their picture, what you call their job, and the
-instruction file each one reads when it starts. It cannot start, stop or
-message any of them yet.
+instruction file each one reads when it starts.
+
+**It can also make one.** Pick what the agent is for, give it a name, and it
+writes the folder, the instructions, a startup script and a launchd job, loads
+the job, and then WATCHES THE BOARD until it can see the agent running before it
+says so. No terminal, and nothing claimed that was not observed: if the board
+cannot see it after thirty seconds, the screen says that instead.
+
+It cannot stop or message an agent yet.
 
 ⚠️ That instruction file is the real thing an agent boots from, not a copy, so
 editing it here changes how that agent behaves the next time it starts. The

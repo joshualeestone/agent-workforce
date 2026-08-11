@@ -1711,3 +1711,92 @@ test('the roles route carries the copy the creation actually uses', async () => 
   }
   assert.ok(!got.some((r) => r.key === 'legal'), 'Legal is being offered before its wording is settled');
 });
+
+/**
+ * Pull one brace-matched function out of the page's script and make it callable.
+ *
+ * The same trick the detail-panel test above uses, and for the same reason: the
+ * page is a single file with no build step, so the only way to test its
+ * behaviour is to run its real source. `prelude` supplies whatever the extracted
+ * function closes over.
+ */
+function pageFunction(name, prelude = '') {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function ' + name);
+  assert.ok(start > -1, name + ' vanished from the page');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of ' + name);
+  // eslint-disable-next-line no-new-func
+  return new Function(`${prelude}\n${script.slice(start, end)}\nreturn ${name};`)();
+}
+
+test('the creation screen only calls an agent made when the board can see it running', () => {
+  const boardCanSeeIt = pageFunction('boardCanSeeIt');
+
+  // ⚠️ THE CONTROL, and it is the assertion that makes the rest mean anything.
+  // A brand-new agent at its first prompt has nothing on screen saying what it
+  // is doing, so it comes back `unknown` — the honest classification, and the
+  // NORMAL state of a healthy thirty-second-old agent. A predicate that
+  // rejected it would fail every successful creation while every negative case
+  // below still passed, which is precisely the shape of a gate test that
+  // passes for the wrong reason.
+  const fresh = { sessionName: 'casey', isFleetSession: true, isNamedOurs: true, state: 'unknown' };
+  assert.equal(boardCanSeeIt(fresh), true,
+    'a healthy new agent sitting at its first prompt is reported as not running');
+  assert.equal(boardCanSeeIt({ ...fresh, state: 'idle' }), true);
+
+  // Each field flipped in turn: a predicate that ignored any one of these would
+  // still pass the control above.
+  assert.equal(boardCanSeeIt({ ...fresh, isFleetSession: false }), false,
+    'a session whose Claude is not running was reported as a working agent');
+  assert.equal(boardCanSeeIt({ ...fresh, isNamedOurs: false }), false,
+    'an agent the board cannot tie to this name was reported as made — that is '
+    + 'the anonymous, unwritable card this branch exists to prevent');
+  assert.equal(boardCanSeeIt({ ...fresh, state: 'stopped' }), false,
+    'nothing is running in it and the screen said it was up');
+  assert.equal(boardCanSeeIt(undefined), false,
+    'an agent absent from the board entirely was reported as made');
+
+  // ⚠️ And the CALL SITE. Proving the predicate is right says nothing about
+  // whether the watch uses it: inlining a looser condition there would leave
+  // every assertion above green with the screen lying again.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const watch = script.slice(script.indexOf('async function watchForAgent'));
+  const body = watch.slice(0, watch.indexOf('\n// Deep-link'));
+  assert.match(body, /boardCanSeeIt\s*\(/,
+    'watchForAgent no longer asks boardCanSeeIt, so the definition of "it is '
+    + 'running" has been forked');
+  assert.ok(!/isNamedOurs/.test(body),
+    'watchForAgent tests the tie itself again — one definition, or the two drift');
+});
+
+test('the creation screen reports a failed step as failed', () => {
+  // ⚠️ A half-made agent is a real outcome, and the step list is the only place
+  // a person can see WHICH half. A renderer that drew every reported step the
+  // same way would turn `PARTIAL` into a screen full of ticks.
+  const paintMade = pageFunction('paintMade', `
+    const el = { innerHTML: '' };
+    const document = { getElementById: () => el };
+    function esc(s) { return String(s); }
+    function tickLine(state, text) { return '[' + state + ':' + text + ']'; }
+    globalThis.__el = el;
+  `);
+  paintMade([
+    { label: 'made its folder', ok: true },
+    { label: 'started it', ok: false },
+  ], { state: 'waiting', text: 'Waiting for the board to see it running' });
+
+  const out = globalThis.__el.innerHTML;
+  assert.match(out, /\[done:made its folder\]/, 'a step that worked was not shown as done');
+  assert.match(out, /\[fail:started it\]/,
+    'a step the engine reported as FAILED was drawn as a success, which is the '
+    + 'whole failure mode the step list exists to prevent');
+  assert.match(out, /\[waiting:Waiting for the board/,
+    'the one line that is about the agent rather than about us went missing');
+});

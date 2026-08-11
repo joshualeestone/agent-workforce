@@ -27,6 +27,7 @@ process.on('exit', () => {
 
 const create = require('./create');
 const roles = require('./roles');
+const status = require('./status');
 
 /**
  * A runner that records instead of executing.
@@ -40,7 +41,18 @@ function recorder() {
   create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
   return calls;
 }
-test.afterEach(() => { create.setRunner(null); });
+/**
+ * ⚠️ And the ROSTER is sandboxed too, for the same reason the directories are.
+ *
+ * `createAgent` now asks the board which names are already running, and the
+ * real answer on this machine is thirteen live agents. Left unsandboxed, every
+ * test here would depend on which agents happen to be up while somebody runs
+ * the suite — and a fixture name that collided with a real one would be refused
+ * for a reason no assertion mentions. An EMPTY board is the default; the tests
+ * that are about the roster set their own.
+ */
+test.beforeEach(() => { status.setPaneSource(() => ''); });
+test.afterEach(() => { create.setRunner(null); status.setPaneSource(null); });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Names
@@ -102,7 +114,7 @@ test('creating an agent writes its folder, its instructions and its startup job'
 
   assert.ok(fs.existsSync(create.instructionFile('fixture-agent')), 'no instruction file');
   const text = fs.readFileSync(create.instructionFile('fixture-agent'), 'utf8');
-  assert.match(text, /You are fixture-agent, a project manager/,
+  assert.match(text, /You are \*\*fixture-agent\*\*, a project manager/,
     'the instructions were not written for this agent by name');
 
   assert.ok(fs.existsSync(create.plistPath('fixture-agent')), 'no launchd job');
@@ -126,7 +138,7 @@ test('the launchd job carries PATH and LANG, or the board reports nothing or non
   assert.match(plist, /<key>RunAtLoad<\/key>/, 'the agent will not survive a reboot');
 });
 
-test('the session is claimed for Kosmos, and claimed as ITSELF', () => {
+test('the session is claimed for Kosmos, and claimed as ITSELF, at every start', () => {
   // ⚠️ A NAME OF ITS OWN. These tests share one sandbox, so reusing `casey`
   // meant the second creation was refused as a duplicate -- and the assertion
   // then failed for a reason that has nothing to do with claims. A test whose
@@ -134,19 +146,69 @@ test('the session is claimed for Kosmos, and claimed as ITSELF', () => {
   // ⚠️ The claim is what makes an agent Kosmos creates recognisable without a
   // Discord naming convention. `status.isNamedOurs` requires the claim to match
   // the pane's own name -- a claim naming something else is somebody else's.
+  //
+  // ⚠️ This used to assert a `set-option` COMMAND, run once at creation. That
+  // was not enough and the test's own subject was the reason: the claim is a
+  // tmux user option, so it dies with the session. Set once, it survived until
+  // the first reboot and then the agent came back anonymous -- no role, no
+  // model, no editable instructions -- which is precisely the blocker this
+  // branch exists to remove, returning on its own after one restart. So the
+  // claim now lives in the startup SCRIPT, which is what runs at every start,
+  // and that is what this asserts.
   const calls = recorder();
   create.setDryRun(false);
   create.createAgent({ name: 'claimed-one', role: 'pm' });
 
-  const claim = calls.find((c) => c[1] && c[1][0] === 'set-option');
-  assert.ok(claim, 'the session was never claimed, so the board will not recognise it');
-  assert.deepEqual(claim[1], ['set-option', '-t', 'claimed-one', '@kosmos_agent', 'claimed-one'],
-    'the claim does not name this agent as itself');
+  const script = fs.readFileSync(create.launcherFile('claimed-one'), 'utf8');
+  assert.match(script, /set-option -t "\$SESSION" @kosmos_agent "\$SESSION"/,
+    'the startup script does not claim the session, so the board will stop '
+    + 'recognising this agent the first time it restarts');
+  assert.match(script, /SESSION='claimed-one'/, 'the script does not name this agent as itself');
 
-  // And the board agrees.
-  const status = require('./status');
+  // And the board agrees that this is a claim.
   assert.equal(status.isNamedOurs({ session: 'claimed-one', name: 'claimed-one', claim: 'claimed-one' }), true,
     'the claim this writes is not the claim the board reads');
+
+  // ⚠️ And the script must OUTLIVE the command that starts the session.
+  // `tmux new-session -d` exits in a tenth of a second; with KeepAlive that
+  // makes launchd restart the job forever, each restart failing on the session
+  // the last one made, while the agent looks fine because the first attempt
+  // worked. Measured against the thirteen agents already running on this
+  // machine, whose own launcher carries this loop and says why.
+  assert.match(script, /while .*has-session/,
+    'nothing keeps the job alive, so launchd will respawn it in a loop forever');
+  assert.match(script, /kill-session/,
+    'a restart will collide with the session the previous run made');
+  assert.match(script, /--dangerously-skip-permissions/,
+    'the agent will start, look healthy, and freeze on its first permission prompt');
+
+  // The job has to RUN that script, not the thing it replaced.
+  const plist = fs.readFileSync(create.plistPath('claimed-one'), 'utf8');
+  assert.match(plist, /start\.sh/, 'the job does not run the startup script');
+  assert.doesNotMatch(plist, /new-session/,
+    'the job still starts tmux itself, which is the respawn loop this replaced');
+
+  // Executable, or "a real file you can run" is true only for us.
+  assert.ok(fs.statSync(create.launcherFile('claimed-one')).mode & 0o100,
+    'the startup script is not executable');
+});
+
+test('the agent is started the same way it will be started every time after', () => {
+  // ⚠️ ONE PATH. The previous version ran tmux itself and left the launchd job
+  // on disk unloaded: the agent ran now and was gone after a reboot, and the
+  // session a person got at creation was set up by different code from the one
+  // they would have for the rest of the agent's life. Starting it any other way
+  // means the first run is the only one anybody ever tested.
+  const calls = recorder();
+  create.setDryRun(false);
+  const r = create.createAgent({ name: 'one-path', role: 'pm' });
+
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  assert.equal(calls.length, 1, 'creation ran more than the one command that starts the agent');
+  const [file, args] = calls[0];
+  assert.match(file, /launchctl$/, 'the agent was started by something other than its own job');
+  assert.equal(args[0], 'bootstrap', 'the job was not loaded, so the agent will not survive a reboot');
+  assert.match(args[2], /com\.kosmos\.agent\.one-path\.plist$/, 'a different job was loaded');
 });
 
 test('nothing reaches a shell', () => {
@@ -174,7 +236,7 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
   // not given the person an agent, and saying so is the whole difference
   // between this product and a wizard that always says Done.
   create.setRunner((file, args) => {
-    if (args && args[0] === 'new-session') return { ok: false, stderr: 'no server running' };
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'Load failed: 5: Input/output error' };
     return { ok: true };
   });
   create.setDryRun(false);
@@ -184,22 +246,24 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
   assert.match(r.because, /could not start/);
   assert.ok(r.steps.some((s) => s.label === 'started it' && !s.ok),
     'the failing step is not visible in the record');
+
+  // ⚠️ And the files it DID write are still reported as written. A person whose
+  // agent did not start needs to know what is on their computer -- "it all
+  // failed" would be as untrue as "it all worked".
+  assert.ok(r.steps.some((s) => s.label === 'wrote its instructions' && s.ok),
+    'the steps that succeeded were erased by the one that failed');
 });
 
-test('a session that starts but cannot be claimed is PARTIAL too', () => {
-  // Because an unclaimed session is one the board will not recognise as ours --
-  // it will render anonymous and refuse its own write routes. Reporting that as
-  // success would hand someone an agent the product cannot manage.
-  create.setRunner((file, args) => {
-    if (args && args[0] === 'set-option') return { ok: false };
-    return { ok: true };
-  });
-  create.setDryRun(false);
-
-  const r = create.createAgent({ name: 'unclaimed', role: 'writer' });
-  assert.equal(r.outcome, create.OUTCOME.PARTIAL);
-  assert.match(r.because, /mark the session as ours/);
-});
+// ⚠️ REMOVED: 'a session that starts but cannot be claimed is PARTIAL too'.
+// It pinned an outcome that no longer exists rather than one that stopped being
+// checked. The claim used to be a command Kosmos ran after starting the session,
+// so it could fail on its own; it is now a line in the startup script, run by
+// the job, after this function has returned. There is no moment at which we
+// have a started session and a failed claim to report. What replaces it is
+// stronger and lives in the claim test above: the line must be IN the script,
+// so it runs at every start rather than once. The board seeing the agent as
+// ours is what confirms it worked, and the creation screen watches for exactly
+// that before it says the agent is up.
 
 test('an existing agent is never quietly overwritten', () => {
   const calls = recorder();
@@ -247,7 +311,145 @@ test('Legal is deliberately absent, and the advice-shaped roles say so themselve
 
 test('the instructions name the agent, and carry no template language', () => {
   const text = roles.instructionsFor('pm', 'fixture-agent');
-  assert.match(text, /You are fixture-agent/);
+  assert.match(text, /You are \*\*fixture-agent\*\*/,
+    'the agent is not named the way the board reads names — see the identity '
+    + 'test below, which is what this emphasis is for');
   assert.doesNotMatch(text, /\{\{/, 'an unsubstituted placeholder shipped into an agent’s boot file');
   assert.equal(roles.instructionsFor('nosuch', 'fixture-agent'), null);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The name has to be free on the BOARD, not only on disk
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a name a live session already answers to is refused, even with no folder', () => {
+  const calls = recorder();
+
+  // ⚠️ The session is `casey-discord`; the board calls that agent `casey`,
+  // because the roster STRIPS the suffix without requiring it. So creating
+  // `casey` here makes two sessions with one name — the collision
+  // `onePanePerSession` exists to survive, manufactured by us.
+  //
+  // Measured before this gate existed: the creation screen watched for a
+  // session called `casey`, found the fleet's existing one, and reported
+  // "casey is running" over a creation that had done nothing whatsoever.
+  status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\tidle');
+  const taken = create.createAgent({ name: 'casey', role: 'pm' });
+
+  assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
+  assert.match(taken.because, /already an agent called casey/);
+  assert.equal(calls.length, 0, 'a refused name still started a session');
+  assert.ok(!fs.existsSync(create.workerDir('casey')), 'a refused name still made a folder');
+
+  // ⚠️ THE CONTROL. Same name, same runner, same everything except an empty
+  // board. Without it, a `createAgent` that refused `casey` for some unrelated
+  // reason — or refused everything — would pass every assertion above.
+  status.setPaneSource(() => '');
+  const free = create.createAgent({ name: 'casey', role: 'pm' });
+  assert.equal(free.outcome, create.OUTCOME.CREATED,
+    'the refusal above was not caused by the roster, so this test proves nothing about it');
+});
+
+test('a machine we cannot ask about running agents is refused, not risked', () => {
+  // ⚠️ FAIL CLOSED. "We could not check" is not "the name is free", and this is
+  // the one place where guessing wrong makes a second agent under a live name.
+  //
+  // Both real shapes of the failure are exercised: `sh()` swallows a dead or
+  // missing tmux and returns NULL, which `paneRoster` turns into a throw, and a
+  // source that throws outright. The null one is the shape production actually
+  // takes — a guard whose closed path only an injected throw can reach is not a
+  // guard, which is exactly how the board's own tmux gate was found wrong.
+  for (const [label, source] of [
+    ['tmux answered nothing', () => null],
+    ['tmux could not be run at all', () => { throw new Error('spawn ENOENT'); }],
+  ]) {
+    const calls = recorder();
+    status.setPaneSource(source);
+    const r = create.createAgent({ name: 'fixture-blind', role: 'pm' });
+
+    assert.equal(r.outcome, create.OUTCOME.REFUSED, `${label}: created an agent anyway`);
+    assert.match(r.because, /could not check which agents are already running/);
+    assert.equal(calls.length, 0, `${label}: ran a command despite refusing`);
+    assert.ok(!fs.existsSync(create.workerDir('fixture-blind')),
+      `${label}: made a folder despite refusing`);
+    create.setRunner(null);
+  }
+
+  // The control again: the same name goes through the moment the board answers.
+  const calls = recorder();
+  status.setPaneSource(() => '');
+  assert.equal(create.createAgent({ name: 'fixture-blind', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED,
+    'this name is refused whatever tmux says, so the assertions above are about nothing');
+  assert.ok(calls.length > 0, 'a creation that reported success ran no commands');
+});
+
+test('the one place a name becomes shell text cannot carry anything a shell would read', () => {
+  // ⚠️ NEW SURFACE, and it is worth being explicit about. Every command this
+  // module runs is still `execFile` with an argument array, but it now GENERATES
+  // a bash script with the agent's name in it, and a generated script is text a
+  // shell will read. There is no supervising the agent without one: launchd
+  // must run something that outlives `tmux new-session -d`.
+  //
+  // So the safety is the validator, and this pins it as a PROPERTY rather than
+  // as a list of attacks I happened to think of: anything `nameProblem` accepts
+  // is made only of lower-case letters, digits, hyphen and underscore — a set
+  // with no quote, no space, no metacharacter, no newline.
+  const alphabet = ' \t\n\'"`$();|&<>*?![]{}\\/#~^%+=:,.@abzAZ09_-';
+  let accepted = 0;
+  for (const ch of alphabet) {
+    for (const candidate of [`a${ch}b`, `${ch}ab`, `ab${ch}`]) {
+      if (create.nameProblem(candidate) === null) {
+        accepted += 1;
+        // ⚠️ The property is about the name that gets USED, not the one that was
+        // typed. The first version compared the raw candidate and failed on
+        // ' ab' — which was a real finding, not a bad assertion: `nameProblem`
+        // trimmed privately and `createAgent` trimmed again, so the validator
+        // was answering about a string nobody would use and safety rested on
+        // every caller happening to trim the same way. `cleanName` is now the
+        // one trim, and this asserts the thing that actually matters.
+        assert.match(create.cleanName(candidate), /^[a-z0-9][a-z0-9_-]*$/,
+          `'${candidate}' was accepted as a name and would reach the startup script as shell text`);
+      }
+    }
+  }
+  // ⚠️ The anti-vacuity check. If the loop above accepted NOTHING the assertions
+  // inside it never ran, and a `nameProblem` that refused everything would pass
+  // this test while breaking the product.
+  assert.ok(accepted > 0, 'no candidate was accepted, so the assertions above never ran');
+
+  // And it is quoted anyway, on top of a validator that has already made the
+  // quoting unnecessary.
+  assert.match(create.launcherFor('safe-name', '/bin/claude', '/opt/homebrew/bin/tmux'),
+    /SESSION='safe-name'/, 'the name is not quoted in the generated script');
+});
+
+test('the board can read the identity the creation writes, for every role', () => {
+  // ⚠️ THE COUPLING, tested from both ends and for every role rather than for
+  // the one I happened to try. `roles` writes the instruction file; `status`
+  // parses it to answer "who is this agent". Nothing but this test connects
+  // them, and when they disagreed every created agent arrived on the board as
+  // an anonymous machine name with no role — the product's own first-run
+  // outcome, broken by a missing pair of asterisks in a template.
+  //
+  // Asserting the PROPERTY (the board derives a name and a role) rather than
+  // the format: a template may be reworded freely, and a rewording that makes
+  // the agent unreadable has to fail here.
+  const calls = recorder();
+  create.setDryRun(false);
+
+  for (const role of roles.ROLES) {
+    const name = `ident-${role.key}`;
+    const made = create.createAgent({ name, role: role.key });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+
+    const identity = status.readIdentity(name);
+    assert.equal(identity.derived, true,
+      `${role.key}: the board cannot work out who this agent is, so its card will `
+      + 'show a raw session name flagged as a machine name');
+    assert.equal(identity.displayName, name, `${role.key}: the board reads a different name`);
+    assert.ok(identity.role && identity.role.length > 2,
+      `${role.key}: the board reads no role from the file this role wrote`);
+  }
+  assert.ok(calls.length >= roles.ROLES.length, 'no agent was actually created, so this proves nothing');
 });
