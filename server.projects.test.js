@@ -410,3 +410,44 @@ test('an unreadable store answers 500, never an empty list', async () => {
     assert.ok(!('projects' in json(res)), '"you have none" is not something we know');
   });
 });
+
+test('taking an agent off returns the verdict for the instruction write too', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Verdicts', folder: folder('verdicts'), agents: ['nobody-here'] })).project;
+  const res = await req(`/api/project/${made.id}/agent/nobody-here`, {
+    method: 'DELETE', headers: { origin: base },
+  });
+  assert.equal(res.status, 200);
+  // ⚠️ Removing an agent also takes the block back OUT of its instruction file,
+  // and that write can fail for every reason the add can. The page used to
+  // check only `res.ok` and repaint as success, leaving a block naming a
+  // project the agent is no longer on, silently. The route has to hand the
+  // verdict over or the page cannot say so.
+  assert.ok(json(res).told, 'the route reports what happened to the instruction file');
+  assert.equal(json(res).told.state, projects.TOLD.COULD_NOT);
+  assert.ok(json(res).told.because);
+});
+
+test('removing a project reports which members it could not re-tell', async () => {
+  reset();
+  const made = json(await post('/api/projects', {
+    name: 'Leaving', folder: folder('leaving-route'), agents: ['nobody-here', 'nor-here'],
+  })).project;
+
+  const res = await req(`/api/project/${made.id}`, { method: 'DELETE', headers: { origin: base } });
+  assert.equal(res.status, 200);
+  const told = json(res).told;
+  assert.equal(told.length, 2, 'one verdict per member, not a single summary');
+  assert.ok(told.every((t) => t.state === projects.TOLD.COULD_NOT && t.because));
+  assert.deepEqual(told.map((t) => t.agent).sort(), ['nobody-here', 'nor-here']);
+});
+
+test('creating a project reports the instruction-write verdicts as well', async () => {
+  reset();
+  const res = await post('/api/projects', {
+    name: 'Made', folder: folder('made-route'), agents: ['nobody-here'],
+  });
+  assert.equal(res.status, 200);
+  assert.equal(json(res).told[0].state, projects.TOLD.COULD_NOT);
+  assert.equal(json(res).told[0].agent, 'nobody-here');
+});

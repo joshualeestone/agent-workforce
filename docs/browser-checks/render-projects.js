@@ -261,9 +261,11 @@ async function main() {
 
   // 7. A folder that went away AFTER the project was made. The state this whole
   //    screen exists to render honestly.
+  //    ⚠️ LEFT missing through the contrast pass below, so the warn-coloured
+  //    copy is actually on screen to be measured. It used to be recreated
+  //    immediately, which is why those selectors could never match.
   fs.rmSync(path.join(demo, 'reed-handover'), { recursive: true, force: true });
   await shot('7-folder-missing');
-  fs.mkdirSync(path.join(demo, 'reed-handover'), { recursive: true });
 
   // 7. Contrast, on the list where every text token on this screen appears.
   let contrastFails = 0;
@@ -279,6 +281,32 @@ async function main() {
     // silently skipped, and the run printed a pass anyway. Another measurement
     // that could not fail, in the very check written because the last one
     // could not fail.
+    // The list carries `.pj-warn` (the missing folder, left missing above); the
+    // one-project view carries the member and told copy. Both are needed, so
+    // the members are read first and the list rules are read before the click.
+    const listEls = await page.evaluate(() => {
+      const bgOf = (el) => {
+        let n = el;
+        while (n) {
+          const c = getComputedStyle(n).backgroundColor;
+          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          n = n.parentElement;
+        }
+        return 'rgb(255, 255, 255)';
+      };
+      const out = [];
+      for (const sel of ['#panel-projects .pj-warn']) {
+        const el = document.querySelector(sel);
+        if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
+        const cs = getComputedStyle(el);
+        out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      }
+      return out;
+    });
+    await page.click('[data-project="reedhandover"]');
+    await page.waitForTimeout(300);
+    await page.click('#pj-back');
+    await page.waitForTimeout(200);
     await page.click('[data-project="hendersonlease"]');
     await page.waitForTimeout(400);
     const els = await page.evaluate(() => {
@@ -296,6 +324,12 @@ async function main() {
       // matched the FIRST one in the document -- inside a hidden panel -- and
       // the stricter miss-reporting above caught it on the first run, which is
       // the check working rather than the check being wrong.
+      // ⚠️ `.pj-warn` and `.pj-folder-state.bad` are IN this list. They are the
+      // only two rules in the new CSS whose whole job is to look different from
+      // a healthy row, and the previous version's comment claimed to cover the
+      // folder warning while its selector list did not contain it -- narration
+      // outrunning the check, in the file written because the last check could
+      // not fail. They are measured on the project whose folder is missing.
       for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
         '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel']) {
@@ -308,7 +342,7 @@ async function main() {
       }
       return out;
     });
-    for (const e of els) {
+    for (const e of [...listEls, ...els]) {
       if (e.missing) {
         contrastFails += 1;
         console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);
@@ -331,8 +365,6 @@ async function main() {
   // test. That makes cleaning them up part of the run rather than an
   // afterthought -- a check that litters the operator's home every time it is
   // run is a check people stop running.
-  fs.rmSync(demo, { recursive: true, force: true });
-
   await browser.close();
 
   const withErrors = shots.filter((s) => s.errors.length);
@@ -343,4 +375,15 @@ async function main() {
   if (withErrors.length || contrastFails) process.exitCode = 1;
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+// ⚠️ In a `finally`. The fixture tree lives in the operator's REAL home
+// (the folder browser is rooted there, so a fixture in /tmp could not be
+// reached by the thing under test), and a throw anywhere in the run used to
+// leave it behind -- after which the guard that refuses to reuse a folder it
+// did not create rejected every subsequent run until somebody deleted it by
+// hand. `assertSandboxed` cleans its own probe in a finally; this is the same
+// obligation for the bigger tree.
+main()
+  .catch((err) => { console.error(err); process.exitCode = 1; })
+  .finally(() => {
+    try { fs.rmSync(path.join(process.env.HOME, 'kosmos-demo'), { recursive: true, force: true }); } catch { /* nothing to clean */ }
+  });

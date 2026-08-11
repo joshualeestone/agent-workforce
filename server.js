@@ -1159,9 +1159,21 @@ const server = http.createServer((req, res) => {
         // ⚠️ ONE roster read for the whole request, threaded into every sync.
         // `syncAgent` REFUSES to write without an exact match in it, so passing
         // it is not an optimisation -- it is the permission.
+        // ⚠️ The record is written; from here the project EXISTS. A throw while
+        // telling its members must not come back as "we could not create that
+        // project" -- DELETE was split into two try blocks for exactly this
+        // ("the person was told their removal failed for a removal that
+        // happened") and create had the same shape.
         const roster = safeRoster();
-        for (const a of made.agents) projects.syncAgent(a, roster);
-        sendJson(res, 200, { project: projects.get(made.id, safeRoster()) });
+        let told = [];
+        try {
+          told = made.agents.map((a) => ({ agent: a, ...projects.syncAgent(a, roster) }));
+        } catch (err) {
+          told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err && err.message) || 'we could not reach the agents you put on it') }];
+        }
+        let project = null;
+        try { project = projects.get(made.id, roster); } catch { project = null; }
+        sendJson(res, 200, { project, told, id: made.id });
       })
       .catch((err) => sendJson(res, (err && err.code === 'UNREADABLE') ? 500 : 400,
         { error: String((err && err.message) || 'we could not read that request') }));
@@ -1221,7 +1233,11 @@ const server = http.createServer((req, res) => {
         // raw TypeError went out as the person's error message.
         const renamed = projects.readAll().find((p) => p.id === id);
         const roster = safeRoster();
-        for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
+        // Same reason as create and delete: the rename HAPPENED. A failure
+        // re-telling the members is a different fact from a failed rename.
+        try {
+          for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
+        } catch { /* reported by the row's own told verdict on the next read */ }
         sendJson(res, 200, { project: projects.get(id, safeRoster()) });
       })
       .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400), { error: String((err && err.message) || 'we could not read that request') }));

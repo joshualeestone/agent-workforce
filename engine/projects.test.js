@@ -703,3 +703,38 @@ test('findBlock is the one rule both writers use', () => {
     assert.equal(spliced.split(projects.BLOCK_END).length - 1, text.split(projects.BLOCK_END).length - 1);
   }
 });
+
+test('two stranded markers together still do not eat the words between them', () => {
+  // ⚠️ The case the previous two versions of the pair-finder each missed, in
+  // turn: a stray START followed by a stray END is a well-formed pair by any
+  // local rule, and the user's text was sitting inside it. Measured before the
+  // fix: '## House rules' and the sentence under it deleted on the next write.
+  // Scanning ends from the RIGHT gets all three damaged shapes at once, rather
+  // than one per round.
+  const S = projects.BLOCK_START;
+  const E = projects.BLOCK_END;
+  const damaged = `# A\n\n${S}\nstranded\n\n## House rules\n\nKEEPME\n\n${E}\n\n## More\n\n${S}\nreal\n${E}`;
+
+  let text = damaged;
+  for (let i = 0; i < 6; i += 1) text = projects.spliceBlock(text, `ROUND ${i}`);
+  assert.ok(text.includes('KEEPME'), 'six writes must not eat it');
+  assert.ok(text.includes('ROUND 5') && !text.includes('ROUND 4'), 'and each one replaces the last');
+  assert.ok(projects.removeBlock(damaged).includes('KEEPME'), 'nor may removal');
+});
+
+test('seeing an agent upgrades a "never seen" record rather than leaving it wrong', () => {
+  reset();
+  // ⚠️ `everSeen` was written once at add time. An agent added while the roster
+  // could not be read was stamped false FOREVER, so a real agent that later
+  // stopped got "we have never seen an agent by this name on this computer" --
+  // a strictly stronger claim than the record supports, about an agent we had
+  // since seen with our own eyes.
+  const p = projects.create({ name: 'Later', folder: folder('later'), agents: ['mara'], roster: [] });
+  assert.equal(projects.readAll()[0].everSeen.mara, false, 'the control: it starts unseen');
+
+  projects.get(p.id, ROSTER); // a read where mara IS present
+  assert.equal(projects.readAll()[0].everSeen.mara, true, 'the record is upgraded by the evidence');
+
+  const gone = projects.get(p.id, []).agents[0];
+  assert.match(gone.because, /cannot see this agent .* right now/, 'and it no longer claims we never have');
+});

@@ -239,6 +239,26 @@ function folderState(folder) {
  */
 function describe(project, roster) {
   const cards = Array.isArray(roster) ? roster : [];
+  // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
+  // and never revisited -- so an agent added while tmux could not be read was
+  // stamped "never seen" permanently, and said so about an agent we later saw
+  // with our own eyes. Upgrading here, on the read, keeps the claim as weak as
+  // the evidence: `false` survives only while nothing has ever contradicted it.
+  let upgraded = null;
+  for (const name of project.agents || []) {
+    if (project.everSeen && project.everSeen[name] === false && cards.some((a) => a && a.sessionName === name)) {
+      upgraded = upgraded || { ...(project.everSeen || {}) };
+      upgraded[name] = true;
+    }
+  }
+  if (upgraded) {
+    try {
+      const all = readAll();
+      const at = all.findIndex((p) => p.id === project.id);
+      if (at >= 0) { all[at].everSeen = { ...(all[at].everSeen || {}), ...upgraded }; writeAll(all); }
+    } catch { /* a record we cannot update is not a reason to fail a read */ }
+    project = { ...project, everSeen: { ...(project.everSeen || {}), ...upgraded } };
+  }
   const members = (project.agents || []).map((sessionName) => {
     const card = cards.find((a) => a && a.sessionName === sessionName) || null;
     return {
@@ -249,6 +269,13 @@ function describe(project, roster) {
       name: card && card.name ? card.name : sessionName,
       present: Boolean(card),
       state: card ? card.state : 'unknown',
+      // ⚠️ "Never seen" is only said when we have never seen it. The flag is
+      // written once at add time, and an agent added while the roster was
+      // unreadable was stamped `false` forever -- so a real agent that stopped
+      // later got "we have never seen an agent by this name", which is a
+      // strictly stronger claim than the record supports. `describe` upgrades
+      // the flag the moment a live card proves otherwise (see below), so this
+      // can only fire for a name we genuinely have never resolved.
       because: card ? card.because : (
         (project.everSeen && project.everSeen[sessionName] === false)
           // Said plainly, because it is almost always a typed name that never
@@ -472,12 +499,25 @@ function remove(id) {
  */
 function findBlock(text) {
   const original = String(text == null ? '' : text);
-  for (let from = 0; ;) {
-    const end = original.indexOf(BLOCK_END, from);
+  // ⚠️ SCANS ENDS FROM THE RIGHT, and that direction is the fix. Left to right,
+  // a file carrying BOTH a stranded start and a stranded end read the span
+  // between them as the block -- measured: '## House rules' and the sentence
+  // under it deleted on the next write, because a stray START followed by a
+  // stray END is a well-formed pair by any local rule, and the user's words
+  // were sitting inside it.
+  //
+  // Our block is always the LAST complete pair, because we only ever append.
+  // Taking the last end with a start before it gets every damaged case right at
+  // once -- stranded start, stranded end, or both -- instead of one at a time,
+  // which is how the previous two versions of this function each fixed the case
+  // in front of them and left the next one.
+  for (let from = original.length; ;) {
+    const end = original.lastIndexOf(BLOCK_END, from);
     if (end < 0) return null;
     const start = original.lastIndexOf(BLOCK_START, end);
     if (start >= 0) return { start, end: end + BLOCK_END.length };
-    from = end + BLOCK_END.length;
+    if (end === 0) return null;
+    from = end - 1;
   }
 }
 
@@ -639,9 +679,16 @@ function tellAgent(sessionName, projects, roster) {
     instructions.write(sessionName, next, current.version);
     return { state: TOLD.TOLD, because: null };
   } catch (err) {
+    // ⚠️ A length refusal is OUR doing here, not the person's. Taking our block
+    // back out can push a file under the editor's minimum, and forwarding that
+    // module's sentence verbatim told somebody to "say what this agent is for
+    // in at least 20 characters" about a shortening they did not perform.
+    const raw = (err && err.message) || '';
     return {
       state: TOLD.COULD_NOT,
-      because: (err && err.message) || 'we could not write to this agent’s instructions',
+      because: /cannot be this short/.test(raw)
+        ? 'taking this out would leave its instructions almost empty, so we left them alone'
+        : (raw || 'we could not write to this agent’s instructions'),
     };
   }
 }

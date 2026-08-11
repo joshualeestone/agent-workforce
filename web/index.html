@@ -689,7 +689,8 @@ svg { display: block; }
     </div>
     <p class="pj-lede">A project is a folder you already have on this computer,
        and the agents you have put on it.</p>
-    <div id="pj-list" class="pj-list" aria-live="polite"></div>
+    <p class="fmsg" id="pj-list-msg" aria-live="polite"></p>
+    <div id="pj-list" class="pj-list"></div>
   </div>
 
   <!-- One project. -->
@@ -772,7 +773,12 @@ svg { display: block; }
     <div class="field">
       <span class="flabel">What do you call it?</span>
       <div class="frow">
-        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease">
+        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
+             disappears the moment somebody types. Its sibling below already had
+             an aria-label, so this was an omission rather than a house
+             pattern. -->
+        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
+               aria-label="What you call this project">
       </div>
     </div>
 
@@ -3065,18 +3071,17 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance. `#pj-list` carries `aria-live="polite"`, so an unconditional
- * repaint every 5 seconds read the entire project list aloud to a screen-reader
- * user every 5 seconds; and `#pj-one-agents` holds the Take-off buttons, so it
- * threw keyboard focus back to the body on the same clock. This file already
- * had both guards -- `setLive` and the `REMOVED_HTML` compare -- and neither
- * new painter used one. Same fix, same reason.
+ * performance. These regions are `aria-live`, so an unconditional repaint every
+ * 5 seconds read the whole project list aloud every 5 seconds; and the member
+ * list holds the Take-off buttons, so it threw keyboard focus back to the body
+ * on the same clock.
+ *
+ * ⚠️ It is `setLive` -- the one this file already had, for the removed-agents
+ * list, for the same reason. A second identical helper under a second name was
+ * exactly the two-derivations-of-one-question habit this codebase keeps paying
+ * for, written into the fix for it.
  */
-function setIfChanged(el, html) {
-  if (!el || el.innerHTML === html) return false;
-  el.innerHTML = html;
-  return true;
-}
+const setIfChanged = setLive;
 
 function paintProjects() {
   const list = document.getElementById('pj-list');
@@ -3125,6 +3130,10 @@ async function loadProjects() {
     const res = await fetch('/api/projects');
     const body = await res.json();
     if (mine !== PJ_GEN) return;
+    // ⚠️ Checked BEFORE anything is assigned. The first version of this fix
+    // assigned PROJECTS and then threw, so the comment claiming "PROJECTS is
+    // not clobbered on failure" described a guard that was not there -- a
+    // half-applied fix reads exactly like a whole one.
     // ⚠️ An unreadable projects FILE is an error, not an empty list. The route
     // answers 500 with `projectsUnreadable` rather than `{projects: []}`, and
     // painting [] here would put "No projects yet" in front of somebody who
@@ -3141,11 +3150,18 @@ async function loadProjects() {
     // A screen asserting a state nobody checked is the failure this whole app
     // is built against, and it had crept back in through an error path.
     const note = 'We cannot read your projects right now. This is not saying you have none, it is saying we cannot see them.';
-    document.getElementById('pj-list').innerHTML =
+    // ⚠️ Through the SAME change-guard as the success path. The poll re-enters
+    // here every 5 seconds while the store stays unreadable, and these are
+    // aria-live regions -- so an unguarded write read the same sentence aloud
+    // every 5 seconds, forever. The error path was the one caller that skipped
+    // the guard written for exactly this.
+    setIfChanged(document.getElementById('pj-list'),
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
-      + 'This is not saying you have none, it is saying we cannot see them.</div>';
-    if (!document.getElementById('pj-one-view').hidden) document.getElementById('pj-one-msg').textContent = note;
-    if (!document.getElementById('pj-add-view').hidden) document.getElementById('pj-add-msg').textContent = note;
+      + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    const one = document.getElementById('pj-one-msg');
+    const add = document.getElementById('pj-add-msg');
+    if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
+    if (!document.getElementById('pj-add-view').hidden && add.textContent !== note) add.textContent = note;
     // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
     // open project as "there is no project by that name" on a transient
     // network failure -- turning "we could not look" into "it is gone".
@@ -3313,10 +3329,15 @@ document.getElementById('pj-add-agents').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-pick]');
   if (!btn) return;
   const key = btn.dataset.pick;
-  PJ_ADD_AGENTS = PJ_ADD_AGENTS.includes(key)
-    ? PJ_ADD_AGENTS.filter((k) => k !== key)
-    : [...PJ_ADD_AGENTS, key];
-  paintAddAgents();
+  const on = PJ_ADD_AGENTS.includes(key);
+  PJ_ADD_AGENTS = on ? PJ_ADD_AGENTS.filter((k) => k !== key) : [...PJ_ADD_AGENTS, key];
+  // ⚠️ Updates the button IN PLACE rather than rebuilding the list. A repaint
+  // destroys the very control that was just activated: keyboard focus drops to
+  // the body after every pick, so Space-then-Tab cannot walk the list, and
+  // because the element is replaced rather than changed, no `aria-checked`
+  // update is announced -- a keyboard user gets no confirmation the pick
+  // registered at all.
+  btn.setAttribute('aria-checked', String(!on));
 });
 
 document.getElementById('pj-use').addEventListener('click', () => {
@@ -3388,6 +3409,18 @@ document.getElementById('pj-one-agents').addEventListener('click', async (e) => 
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not change that project');
     await loadProjects();
+    // ⚠️ THE VERDICT IS READ, not discarded. Taking an agent off also takes the
+    // block back OUT of its instruction file, and that write can fail for every
+    // reason the add can -- the agent stopped, has no folder, keeps its
+    // instructions somewhere we will not touch. The route says which; this
+    // handler used to check only `res.ok` and repaint as plain success, leaving
+    // a block in a file an agent boots from naming a project it is no longer
+    // on, with nothing on screen. Worse than nobody checking: we checked, we
+    // were told, and we dropped the answer.
+    if (body.told && body.told.state === 'could_not') {
+      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts — '
+        + body.told.because + '.';
+    }
   } catch (err) {
     msg.textContent = err.message;
   }
@@ -3426,6 +3459,17 @@ document.getElementById('pj-one-remove-go').addEventListener('click', async () =
     PJ_CURRENT = null;
     await loadProjects();
     pjView('list');
+    // ⚠️ Removal has no member row left to carry the verdict, so it gets its own
+    // line on the list. Every agent whose instruction file could not be cleared
+    // still has a block naming a project that no longer exists, and the person
+    // is the only one who can do anything about it.
+    const failed = (body.told || []).filter((t) => t && t.state === 'could_not');
+    const note = document.getElementById('pj-list-msg');
+    note.textContent = failed.length
+      ? 'Removed ' + body.name + '. ' + failed.length + (failed.length === 1 ? ' agent' : ' agents')
+        + ' still mention it in their instructions and we could not change that: '
+        + failed.map((t) => (t.agent || 'one of them') + ' (' + t.because + ')').join('; ') + '.'
+      : '';
   } catch (err) {
     msg.textContent = err.message;
   }

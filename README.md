@@ -139,10 +139,15 @@ whose instructions live somewhere this app will not touch — the membership is
 still recorded and the row says we could not tell it, and why.
 
 What removal does, in both directions: removing an agent from a project, or
-removing the project itself, takes our record away and takes the block back out
-of the affected agents' instruction files. **Nothing in the folder is ever
-deleted**, and a project can be added again — though the name you gave it and
-the agents you put on it are not kept.
+removing the project itself, takes our record away and **tries** to take the
+block back out of the affected agents' instruction files. ⚠️ **That second half
+can fail, for every reason the first write can** — the agent has stopped, has no
+folder on this machine, or keeps its instructions somewhere this app will not
+touch. When it does, the record is still gone and the screen says which agents
+still mention the project and why, because a block left in a file naming a
+project that no longer exists is something only you can clear. **Nothing in the
+folder is ever deleted**, and a project can be added again — though the name you
+gave it and the agents you put on it are not kept.
 
 ## The rule this codebase is built around
 
