@@ -504,3 +504,262 @@ test('a removed name cannot be created into invisibility', () => {
     status.setPaneSource(null);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Act on the session name, SPEAK the display name
+//
+// ⚠️ These two names are the same string for every agent Kosmos creates -- the
+// only kind most of the fixtures above use -- and differ for exactly the
+// pre-existing agents this feature was rebuilt to support. On the real fleet
+// the pair is `claudebot` / `Splinter`. The split has now produced a defect
+// pointing EACH way: the board once filtered on the display name while a
+// removal recorded the session name, and later the confirmation asked about the
+// session name on a screen showing the display name. Every test below uses a
+// fixture where the two genuinely differ, because one where they agree passes
+// against code that has the rule backwards.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A pre-existing agent whose card says one thing and whose session says another. */
+function twoNamedAgent(session, shown) {
+  foreignAgent(session);
+  fs.writeFileSync(
+    nodePath.join(create.workerDir(session), 'CLAUDE.md'),
+    `You are **${shown}**, a project manager.\n`,
+    'utf8',
+  );
+  return session;
+}
+
+test('every sentence about a removal speaks the name on the card, not the one on the machine', () => {
+  const name = twoNamedAgent('spoken-session', 'Spoken');
+  // ⚠️ THE CONTROL: prove the fixture actually has two different names before
+  // asserting anything about which one is used. Without this the whole test
+  // passes against an agent whose names agree, which is every other fixture here.
+  assert.equal(status.readIdentity(name).displayName, 'Spoken', 'the fixture does not have two names');
+  assert.notEqual(status.readIdentity(name).displayName, name);
+
+  boardShows(name, `${name}-discord`);
+  world();
+  remove.setDryRun(false);
+
+  const ask = remove.plan(name);
+  assert.match(ask.question, /Spoken/, 'the question does not use the name on the card');
+  assert.doesNotMatch(ask.question, /spoken-session/, 'the question uses the machine name');
+  assert.equal(ask.label, 'Spoken', 'the buttons have nothing to name the agent with');
+  assert.equal(ask.name, 'spoken-session', 'the machine name did not reach the field the removal acts on');
+
+  const gone = remove.remove(name);
+  assert.equal(gone.outcome, remove.OUTCOME.REMOVED, gone.because);
+  // ⚠️ The ANSWER, not just the question. This is the half that was missed: the
+  // confirmation said "Remove Spoken" and the outcome came back about
+  // `spoken-session`, so one dialog showed two names for one agent.
+  assert.match(gone.because, /Spoken/, 'the outcome message uses the machine name');
+  assert.doesNotMatch(gone.because, /spoken-session/, 'the outcome message uses the machine name');
+
+  // ⚠️ And the record carries it, so the removed LIST can show a recognisable
+  // row. That list is the one screen where the agent has no card to read it off.
+  const rec = remove.removedAgents().find((r) => r.name === name);
+  assert.equal(rec.shownAs, 'Spoken', 'the removed list has nothing recognisable to show');
+  assert.equal(rec.name, 'spoken-session', 'the record lost the name Restore has to act on');
+
+  const back = remove.restore(name);
+  assert.equal(back.outcome, remove.OUTCOME.RESTORED, back.because);
+  assert.match(back.because, /Spoken/, 'the restore message uses the machine name');
+  assert.doesNotMatch(back.because, /spoken-session/, 'the restore message uses the machine name');
+});
+
+test('a removed agent is still named recognisably after its instruction file changes', () => {
+  // ⚠️ Why `shownAs` is CAPTURED at removal rather than re-derived when the list
+  // is drawn. The agent is off the board for as long as somebody leaves it
+  // there, and its folder stays editable the whole time -- so re-deriving would
+  // silently rename the row, or fall back to the machine name, in exactly the
+  // situation where the person is trying to recognise something they removed.
+  const name = twoNamedAgent('drifted-session', 'Drifted');
+  boardShows(name, `${name}-discord`);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'no name line at all\n', 'utf8');
+  assert.equal(status.readIdentity(name).displayName, name,
+    'the control failed: re-deriving still finds the old name, so this test proves nothing');
+
+  const rec = remove.removedAgents().find((r) => r.name === name);
+  assert.equal(rec.shownAs, 'Drifted', 'the row would now show a name the person never saw');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The paths that leave an agent stopped
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a removed list that cannot be written reports a partial rather than crashing', () => {
+  /**
+   * ⚠️ THE ONE STATE WITH NO WAY BACK, reached by an exception rather than by a
+   * decision. By the time the record is written the job is already disabled and
+   * booted out, so a throw escaping here leaves the agent stopped, disabled and
+   * on no removed list: no Restore button, and the only route back is the
+   * manual launchctl recipe this product exists to spare people.
+   *
+   * ⚠️ IT HAS TO BE A **PARTIAL** PATH, and the first version of this test was
+   * not. It removed cleanly, so the only `recordRemoval` it reached was the one
+   * already inside `step()` -- which catches throws by construction. The test
+   * passed identically with the fix reverted: it proved that `step` works,
+   * which nobody doubted, while the four calls the fix is about sit OUTSIDE it.
+   * Caught by reverting the fix and watching nothing fail.
+   *
+   * So: `bootout` refuses. That is the earliest partial, it is reached with the
+   * job already disabled, and its `recordRemoval` is one of the bare four.
+   */
+  const name = madeAgent('unwritable-record');
+  boardShows(name, name);
+  remove.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+
+  // A directory where the file goes: the write lands, the rename cannot.
+  fs.rmSync(remove.REMOVED_FILE, { force: true });
+  fs.mkdirSync(remove.REMOVED_FILE, { recursive: true });
+  try {
+    // ⚠️ CONTROL: prove the write really is impossible before believing the
+    // outcome. A misjudged fixture makes a crashing path look handled.
+    assert.throws(() => fs.renameSync(__filename, remove.REMOVED_FILE),
+      'the fixture did not actually block the write, so this proves nothing');
+
+    const gone = remove.remove(name);
+    assert.equal(gone.outcome, remove.OUTCOME.PARTIAL,
+      'an unwritable removed list crashed the removal instead of reporting it');
+
+    // ⚠️ And it must NOT promise a Restore button that will not be there. A
+    // contained failure still telling somebody to "put it back from the removed
+    // list" is the same lie in a quieter voice.
+    assert.doesNotMatch(gone.because, /put it back from the removed list/,
+      'it sends them to a list that has no row for this agent');
+    assert.match(gone.because, /will not appear there/,
+      'it does not say the agent is missing from the removed list');
+    assert.match(gone.because, /com\.kosmos\.agent\.unwritable-record/,
+      'it does not name the startup job, which is the only remaining way back');
+  } finally {
+    fs.rmSync(remove.REMOVED_FILE, { recursive: true, force: true });
+  }
+});
+
+test('a partial that DID record still points at the removed list', () => {
+  // ⚠️ The control for the test above. "It does not promise Restore" passes
+  // just as well against code that never promises it, so the ordinary partial
+  // has to be shown still saying the helpful thing.
+  const name = madeAgent('recorded-partial');
+  boardShows(name, name);
+  remove.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+
+  const gone = remove.remove(name);
+  assert.equal(gone.outcome, remove.OUTCOME.PARTIAL);
+  assert.match(gone.because, /put it back from the removed list/,
+    'an ordinary partial stopped telling people how to undo it');
+  assert.equal(remove.isRemoved(name), true, 'the partial was not recorded at all');
+  assert.equal(remove.removedAgents().find((r) => r.name === name).stopped, false,
+    'a half-removed agent was recorded as stopped, which takes a possibly-running agent off the board');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Restore, on the paths that are not the happy one
+//
+// Restore is what makes a single light confirmation honest, so its failures
+// matter more than most. Only its success and its refusal were covered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('restore says so when the startup file has gone, rather than claiming it started it', () => {
+  // Somebody deleted the plist by hand while the agent was off the board. The
+  // `enable` still stands, so their own tooling can start it -- but bootstrap
+  // has nothing to load, and saying "it is back" would assert something nobody
+  // checked.
+  const name = foreignAgent('plist-vanished');
+  boardShows(name, `${name}-discord`);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const plist = remove.removedAgents().find((r) => r.name === name).plist;
+  assert.ok(fs.existsSync(plist), 'the control failed: the fixture never had a plist to delete');
+  fs.rmSync(plist, { force: true });
+
+  const calls = world();
+  remove.setDryRun(false);
+  const r = remove.restore(name);
+
+  assert.equal(r.outcome, remove.OUTCOME.RESTORED, r.because);
+  assert.ok(calls.some(([, a]) => a && a[0] === 'enable'),
+    'it did not re-enable the job, which is the half that still works');
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'),
+    'it tried to load a startup file that is not there');
+});
+
+test('a job that will not re-enable is reported, not reported as restored', () => {
+  const name = madeAgent('stuck-enable');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  // launchctl refuses the enable. The record still has to come off the list --
+  // leaving it would hide an agent nobody is hiding -- but the person must be
+  // told it may need starting by hand.
+  remove.setRunner((file, args) => (args && args[0] === 'enable'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  const r = remove.restore(name);
+
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'a failed re-enable was reported as a completed restore');
+  assert.match(r.because, /back on the board/);
+  assert.match(r.because, /starting by hand/,
+    'it does not tell them the agent may not come back on its own');
+  assert.equal(remove.isRemoved(name), false,
+    'it stayed on the removed list, so the board hides an agent Kosmos is no longer hiding');
+});
+
+test('an already-loaded job is a success, not a failure', () => {
+  // launchctl answers 5 for "already loaded", which is the end state wanted.
+  // Reading it as a failure would report a PARTIAL over a working restore.
+  const name = madeAgent('already-loaded');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  remove.setRunner((file, args) => (args && args[0] === 'bootstrap'
+    ? { ok: false, code: 5 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  assert.equal(remove.restore(name).outcome, remove.OUTCOME.RESTORED,
+    'launchd saying the job is already loaded was read as a failure to load it');
+});
+
+test('an agent that had no startup job is not told one was turned back on', () => {
+  // ⚠️ Two sentences exist for this. Telling somebody an agent is "set to start
+  // again" when there is no job to start is a claim about something that does
+  // not exist -- the same shape as every other unchecked assertion this
+  // codebase catalogues, in the one message meant to reassure them.
+  const name = 'jobless';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  assert.equal(remove.jobFor(name), null, 'the control failed: the fixture has a job after all');
+
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const calls = world();
+  remove.setDryRun(false);
+  const r = remove.restore(name);
+  assert.equal(r.outcome, remove.OUTCOME.RESTORED, r.because);
+  assert.match(r.because, /nothing to turn back on/,
+    'it claims a startup job was re-enabled for an agent that never had one');
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'enable'),
+    'it tried to enable a job that does not exist');
+});

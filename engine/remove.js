@@ -193,8 +193,24 @@ function sessionFor(name) {
   try {
     const card = status.paneRoster().find((p) => p.sessionName === clean);
     if (!card) return { kind: FOUND.NONE, session: null };
-    if (!card.isNamedOurs) return { kind: FOUND.UNTIED, session: card.session || clean };
-    return { kind: FOUND.OURS, session: card.session || clean };
+    /**
+     * ⚠️ NO FALLBACK TO THE AGENT'S NAME, and this is the one place in the
+     * module that used to have one (`card.session || clean`).
+     *
+     * `session` is what gets killed. Falling back to `clean` means that if the
+     * roster ever hands back a card without one, the kill targets a session
+     * NAMED after the agent rather than the session the board tied to it -- and
+     * because `kill-session` exit 1 and `has-session` exit 1 both read as
+     * "gone", the removal would then report REMOVED over an agent still
+     * running, or end something that merely shares the name. `paneRoster`
+     * always sets `session` today, so the fallback was unreachable; it was also
+     * the only spot here that failed OPEN, and an unreachable fail-open is
+     * exactly the kind that becomes reachable later without anyone noticing.
+     * An unknown is an unknown.
+     */
+    if (!card.session) return { kind: FOUND.UNKNOWN, session: null };
+    if (!card.isNamedOurs) return { kind: FOUND.UNTIED, session: card.session };
+    return { kind: FOUND.OURS, session: card.session };
   } catch {
     // ⚠️ Cannot ask tmux. That is NOT "nothing is running" — it is an unknown,
     // and the caller must treat it as one rather than proceeding as if the
@@ -213,11 +229,25 @@ function sessionFor(name) {
  * second copy of this for the partial path would have been the obvious way to
  * write it, and the obvious way for the two to drift.
  */
-function recordRemoval(clean, job, stopped) {
+function recordRemoval(clean, job, stopped, shownAs) {
   if (DRY_RUN && !runner) return true;
   const list = readRemoved().filter((r) => r.name !== clean);
   list.push({
     name: clean,
+    /**
+     * ⚠️ WHAT THE BOARD CALLED IT, captured HERE rather than re-derived when
+     * the removed list is drawn.
+     *
+     * The list is the one screen showing agents that have no card, so a row
+     * reading `claudebot` for the agent the confirmation called `Splinter` is
+     * an undo path the person cannot recognise -- for exactly the pre-existing
+     * agents this feature was rebuilt to support. Re-deriving it at draw time
+     * would not work either: the display name is parsed out of the agent's
+     * instruction file, which is still on disk but may have been edited, or
+     * the folder renamed, in the days since. What was on the card when they
+     * pressed the button is the thing that makes the row recognisable.
+     */
+    shownAs: shownAs || clean,
     removedAt: new Date().toISOString(),
     /**
      * ⚠️ WHETHER THE AGENT ACTUALLY STOPPED, and the board reads it.
@@ -242,7 +272,26 @@ function recordRemoval(clean, job, stopped) {
     plist: job ? job.plist : null,
     ours: job ? job.ours : null,
   });
-  writeRemoved(list);
+  /**
+   * ⚠️ CANNOT THROW OUT OF HERE, and this is the one call in `remove` that is
+   * not already inside `step`.
+   *
+   * `writeRemoved` does mkdir + write + rename, any of which can fail
+   * (permissions, a full disk, a `removed.json` that is somehow a directory).
+   * On the partial paths this is called AFTER the job has been disabled and
+   * booted out -- so a throw escaping here leaves the agent stopped, disabled,
+   * and with no record: no row on the removed list, so no Restore button, so
+   * the only way back is the manual launchctl recipe this product exists to
+   * spare people. That is the single state with no way out, reached by an
+   * exception rather than by any decision.
+   *
+   * Answering `false` instead lets each caller report a PARTIAL that says so.
+   */
+  try {
+    writeRemoved(list);
+  } catch {
+    return false;
+  }
   return isRemoved(clean);
 }
 
@@ -379,9 +428,45 @@ function remove(name, { tmuxBin } = {}) {
   if (!intent.ok) return { outcome: OUTCOME.REFUSED, because: intent.because, steps: [] };
 
   const clean = intent.name;
+  /**
+   * ⚠️ WHAT TO CALL IT IN EVERY SENTENCE BELOW, and it is the DISPLAY name.
+   *
+   * `plan` already resolved this for the question the person was asked, and
+   * the answers have to match it. Without this, the confirmation said "Remove
+   * Splinter" and the outcome that came back said "we stopped claudebot from
+   * starting again" -- one dialog, two names, and the second one a name they
+   * have never seen on the board they clicked from. Same display-versus-session
+   * split as everywhere else in this feature: act on `clean`, speak `shown`.
+   */
+  const shown = intent.label || intent.name;
   const tmux = tmuxBin || process.env.AGENT_WORKFORCE_TMUX_BIN || '/opt/homebrew/bin/tmux';
   const steps = [];
   const job = jobFor(clean);
+
+  /**
+   * ⚠️ THE PARTIALS' LAST SENTENCE, and it has to be EARNED rather than
+   * appended.
+   *
+   * Every partial below ends by telling the person they can put the agent back
+   * from the removed list. That is only true if the record was actually
+   * written. `recordRemoval` can fail -- the write is mkdir + write + rename,
+   * and disks fill, permissions change -- and it used to be able to THROW,
+   * which escaped `remove` entirely and took the process with it, leaving an
+   * agent stopped, disabled and unrecoverable by an exception rather than by
+   * any decision.
+   *
+   * Containing the throw is not enough on its own: a contained failure that
+   * still printed "you can put it back from the removed list" would send
+   * somebody to a screen with no row for them, which is the same lie in a
+   * quieter voice. So the sentence is chosen from what actually happened.
+   */
+  function recordAndSay(stopped) {
+    const kept = recordRemoval(clean, job, stopped, shown);
+    return kept
+      ? 'You can put it back from the removed list.'
+      : 'We could not add it to the removed list either, so it will not appear there to be put back. '
+        + `Its startup job is ${job ? job.label : 'not present'}, and re-enabling that is what undoes this.`;
+  }
 
   function step(label, fn) {
     try {
@@ -425,7 +510,7 @@ function remove(name, { tmuxBin } = {}) {
       // Nothing was changed here, so this sentence is true.
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we could not stop ${clean} from starting again, so we have left it alone. Nothing has changed.`,
+        because: `we could not stop ${shown} from starting again, so we have left it alone. Nothing has changed.`,
         steps,
       };
     }
@@ -441,11 +526,10 @@ function remove(name, { tmuxBin } = {}) {
        * removal with no record is the one state with no way back. Recording it
        * puts the Restore button on screen, which re-enables exactly this label.
        */
-      recordRemoval(clean, job, false);
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we stopped ${clean} from starting again, but could not stop it right now, so it is still running. `
-          + 'You can put it back from the removed list.',
+        because: `we stopped ${shown} from starting again, but could not stop it right now, so it is still running. `
+          + recordAndSay(false),
         steps,
       };
     }
@@ -470,11 +554,10 @@ function remove(name, { tmuxBin } = {}) {
     // exists to spare people. The bootout partial above learnt this; these
     // three returns were left behind, and they are the ones a person actually
     // hits, because an unreachable tmux and an untied session are ordinary.
-    recordRemoval(clean, job, false);
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we stopped ${clean} from starting again, but could not ask tmux whether it is still running, so it may still be going. `
-        + 'You can put it back from the removed list.',
+      because: `we stopped ${shown} from starting again, but could not ask tmux whether it is still running, so it may still be going. `
+        + recordAndSay(false),
       steps,
     };
   }
@@ -488,12 +571,11 @@ function remove(name, { tmuxBin } = {}) {
    * and leave the session alone.
    */
   if (found.kind === FOUND.UNTIED) {
-    recordRemoval(clean, job, false);
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we stopped ${clean} from starting again, but something is running in a session called ${found.session} `
+      because: `we stopped ${shown} from starting again, but something is running in a session called ${found.session} `
         + 'that we cannot confirm is this agent, so we have left it alone. It may still be going. '
-        + 'You can put it back from the removed list.',
+        + recordAndSay(false),
       steps,
     };
   }
@@ -509,11 +591,10 @@ function remove(name, { tmuxBin } = {}) {
       return Boolean(still && still.ok === false && still.code === 1);
     });
     if (!ended) {
-      recordRemoval(clean, job, false);
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we stopped ${clean} from starting again, but could not end the session it is running in, so it is still going. `
-          + 'You can put it back from the removed list.',
+        because: `we stopped ${shown} from starting again, but could not end the session it is running in, so it is still going. `
+          + recordAndSay(false),
         steps,
       };
     }
@@ -522,18 +603,18 @@ function remove(name, { tmuxBin } = {}) {
   }
 
   // Only now is it true that this agent is stopped and will stay stopped.
-  const recorded = step('took it off the board', () => recordRemoval(clean, job));
+  const recorded = step('took it off the board', () => recordRemoval(clean, job, true, shown));
   if (!recorded) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${clean} has been stopped, but we could not record it as removed, so it will still appear on the board.`,
+      because: `${shown} has been stopped, but we could not record it as removed, so it will still appear on the board.`,
       steps,
     };
   }
 
   return {
     outcome: OUTCOME.REMOVED,
-    because: `${clean} has been removed from Kosmos. Its folder and everything in it is still on your computer.`,
+    because: `${shown} has been removed from Kosmos. Its folder and everything in it is still on your computer.`,
     steps,
   };
 }
@@ -543,8 +624,22 @@ function remove(name, { tmuxBin } = {}) {
 function restore(name) {
   const clean = create.cleanName(name);
   const record = readRemoved().find((r) => r.name === clean);
+  /**
+   * ⚠️ SPOKEN NAME, same rule as `remove` and `plan`: act on `clean`, say
+   * `shown`. Restore is reached from the removed list, which is the ONE screen
+   * where a person may be looking at an agent they cannot currently see a card
+   * for -- so a machine name here is even less recognisable than elsewhere.
+   *
+   * ⚠️ Falls back through the RECORD before the session name. A removed agent's
+   * folder may have been renamed or emptied since, in which case `readIdentity`
+   * has nothing to read and would answer with the session name; the label
+   * captured at removal is what the person was actually shown at the time.
+   */
+  const shown = (record && record.shownAs)
+    || status.readIdentity(clean).displayName
+    || clean;
   if (!record) {
-    return { outcome: OUTCOME.REFUSED, because: `${clean} is not on the removed list.`, steps: [] };
+    return { outcome: OUTCOME.REFUSED, because: `${shown} is not on the removed list.`, steps: [] };
   }
 
   const steps = [];
@@ -589,14 +684,14 @@ function restore(name) {
   if (!forgotten) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we started ${clean} again, but could not take it off the removed list, so it may still be hidden.`,
+      because: `we started ${shown} again, but could not take it off the removed list, so it may still be hidden.`,
       steps,
     };
   }
   if (!started) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${clean} is back on the board, but we could not start it again. It may need starting by hand.`,
+      because: `${shown} is back on the board, but we could not start it again. It may need starting by hand.`,
       steps,
     };
   }
@@ -618,8 +713,8 @@ function restore(name) {
     // it had no startup job has nothing to re-enable, and telling somebody it
     // is "set to start again" would be a claim about a job that does not exist.
     because: record.label
-      ? `${clean} is back on the board and set to start again.`
-      : `${clean} is back on the board. It had no startup job, so there was nothing to turn back on.`,
+      ? `${shown} is back on the board and set to start again.`
+      : `${shown} is back on the board. It had no startup job, so there was nothing to turn back on.`,
     steps,
   };
 }

@@ -2198,7 +2198,25 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
   // it ever having been there — which passes against a board that never
   // filtered anything, and passed against one that filtered everything. The
   // control below is the assertion that gives the two after it their meaning.
+  /**
+   * ⚠️ Stub the pane CAPTURE as well as the pane SOURCE.
+   *
+   * Overriding only the source makes the roster synthetic and then lets
+   * `/api/status` run real `tmux capture-pane` against every fixture name --
+   * which printed `can't find session: route-removable` to stderr on each run, and made this
+   * test depend on the machine's tmux (it would read differently on a box with
+   * no tmux server, or one where a session happened to share the fixture's
+   * name). `null` is exactly what real tmux answered for a session that does
+   * not exist, so nothing else about the test changes.
+   *
+   * ⚠️ Deliberately per-test rather than at file load: several older tests call
+   * `setPaneCapture(null)` in their own `finally`, which would clear a
+   * file-level stub for everything running after it. And a few of them let the
+   * roster fall through to the REAL fleet on purpose, so a global stub would
+   * quietly change what those are measuring.
+   */
   status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneCapture(() => null);
   try {
     const before = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
     assert.ok(before.includes('route-removable'),
@@ -2243,6 +2261,9 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
     removal.setRunner(null);
     create.setRunner(null);
     status.setPaneSource(null);
+    // ⚠️ Put the capture back too, or this test's stub leaks onto every test
+    // that runs after it -- including the ones that read the real fleet.
+    status.setPaneCapture(null);
   }
 
   // ⚠️ AND BOTH WRITES ARE COVERED BY THE CROSS-SITE GUARD. They are
@@ -2433,7 +2454,25 @@ test('an agent whose card shows a different name than its session still leaves t
   fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(session)), `com.${session}.discord.plist`), '<plist/>', 'utf8');
   // The `-discord` session is how a real legacy agent appears: the board files
   // it under the bare name and reads its display name from its instructions.
+  /**
+   * ⚠️ Stub the pane CAPTURE as well as the pane SOURCE.
+   *
+   * Overriding only the source makes the roster synthetic and then lets
+   * `/api/status` run real `tmux capture-pane` against every fixture name --
+   * which printed `can't find session: two-named-discord` to stderr on each run, and made this
+   * test depend on the machine's tmux (it would read differently on a box with
+   * no tmux server, or one where a session happened to share the fixture's
+   * name). `null` is exactly what real tmux answered for a session that does
+   * not exist, so nothing else about the test changes.
+   *
+   * ⚠️ Deliberately per-test rather than at file load: several older tests call
+   * `setPaneCapture(null)` in their own `finally`, which would clear a
+   * file-level stub for everything running after it. And a few of them let the
+   * roster fall through to the REAL fleet on purpose, so a global stub would
+   * quietly change what those are measuring.
+   */
   status.setPaneSource(() => `${session}-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
   removal.setRunner((f, a) => (a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
   removal.setDryRun(false);
   try {
@@ -2468,6 +2507,9 @@ test('an agent whose card shows a different name than its session still leaves t
     await req(`/api/agent/${session}/restore`, { method: 'POST' }).catch(() => {});
     removal.setRunner(null);
     status.setPaneSource(null);
+    // ⚠️ Put the capture back too, or this test's stub leaks onto every test
+    // that runs after it -- including the ones that read the real fleet.
+    status.setPaneCapture(null);
   }
 });
 

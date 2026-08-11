@@ -385,19 +385,6 @@ function createAgent(opts) {
   if (!role) {
     return { outcome: OUTCOME.REFUSED, because: 'pick what this agent is for', steps };
   }
-  /* ⚠️ WHAT IS ALREADY HERE, and the refusal has to name the RIGHT half.
-   *
-   * Three states, not one, because removing an agent is still manual and the
-   * README says so: a folder can outlive its job, and a job can outlive its
-   * folder. Checking only the folder meant a leftover launchd job was
-   * discovered as a FAILED BOOTSTRAP -- "we set it up but could not start it",
-   * which is true and about the wrong thing, on the one screen built to tell
-   * somebody which half failed. Checking only the job inverted it.
-   *
-   * The half-made case matters most in practice: a PARTIAL leaves both on disk,
-   * the screen offers Start over, and the person needs to be told what is in
-   * the way rather than that an agent they can see is not running exists.
-   */
   /**
    * ⚠️ A NAME ON THE REMOVED LIST IS TAKEN, and refusing it here is what stops
    * a new agent being born invisible.
@@ -411,11 +398,14 @@ function createAgent(opts) {
    * Restoring is almost always what they actually want, so the refusal says so
    * rather than sending them to a manual recipe.
    *
-   * Required lazily: `remove` requires THIS module, and a top-level require
-   * would close the cycle. By the time an agent is being created, both are
-   * loaded and this resolves from cache.
+   * ⚠️ Required LAZILY, and it has to stay that way: `remove` requires THIS
+   * module at its top, so a top-level require here closes the cycle. By the
+   * time an agent is being created both are loaded, so this resolves from
+   * cache. (An `eslint-disable-next-line global-require` used to sit on the
+   * line below, implying a linter enforced something here. There is no eslint
+   * config, no eslint dependency and no lint script in this repo, so it was
+   * decoration that read as a rule.)
    */
-  // eslint-disable-next-line global-require
   const removedList = require('./remove');
   if (removedList.isRemoved(name)) {
     return {
@@ -425,6 +415,21 @@ function createAgent(opts) {
     };
   }
 
+  /* ⚠️ WHAT IS ALREADY HERE, and the refusal has to name the RIGHT half.
+   *
+   * Three states, not one: a folder can outlive its job, and a job can outlive
+   * its folder. (This used to say "because removing an agent is still manual
+   * and the README says so". Remove exists now -- but it deliberately deletes
+   * NOTHING, so the halves can still come apart, and every reason below still
+   * holds.) Checking only the folder meant a leftover launchd job was
+   * discovered as a FAILED BOOTSTRAP -- "we set it up but could not start it",
+   * which is true and about the wrong thing, on the one screen built to tell
+   * somebody which half failed. Checking only the job inverted it.
+   *
+   * The half-made case matters most in practice: a PARTIAL leaves both on disk,
+   * the screen offers Start over, and the person needs to be told what is in
+   * the way rather than that an agent they can see is not running exists.
+   */
   const hasFolder = fs.existsSync(workerDir(name));
   const hasJob = fs.existsSync(plistPath(name));
   if (hasFolder && hasJob) {

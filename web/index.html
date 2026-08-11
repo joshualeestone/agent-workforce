@@ -280,8 +280,17 @@ svg { display: block; }
 }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
 
-/* Removing an agent. Set apart by a rule and by weight, never by hue alone --
-   the board reads identically in greyscale and this control must too. */
+/* Removing an agent. Set apart by a rule and by position -- last on the screen,
+   under a heavier divider.
+
+   ⚠️ An earlier version of this comment claimed the control is distinguished
+   "never by hue alone ... reads identically in greyscale". MEASURED, and it is
+   not true: `--warn-border` over `--bg-elevated` composites to ~204 grey and
+   the ordinary `--border-strong` to ~199, which no eye separates. The amber
+   border is decoration; what actually distinguishes these buttons in greyscale
+   is their TEXT ("Remove casey" / "Keep casey") and their placement. Said
+   accurately rather than left as a contrast claim nobody had measured, in a
+   file whose whole discipline is that a claim on screen has to be checked. */
 .danger { border-top: 1.5px solid var(--border-strong); margin-top: var(--space-8); }
 .danger .flabel { color: var(--label); }
 .danger-btn { border-color: var(--warn-border); }
@@ -335,7 +344,6 @@ svg { display: block; }
 .rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
-.rm-back[hidden] { display: none; }
 .rm-box { background: var(--bg-elevated); border: 1px solid var(--border-strong);
           border-radius: 12px; padding: var(--space-8); max-width: 30rem;
           width: 100%; box-shadow: 0 18px 48px rgba(17, 20, 24, 0.28); }
@@ -385,7 +393,11 @@ svg { display: block; }
 </head>
 <body>
 <header>
-  <h1>Agent Workforce</h1>
+  <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED programmatically without joining
+       the tab order. Without it `h1.focus()` is a silent no-op, and the fallback
+       that sends the keyboard here after a removal would do nothing at all --
+       an accessibility fix that only appears to work is worse than none. -->
+  <h1 tabindex="-1">Agent Workforce</h1>
   <div class="headright">
     <button class="btn" id="new-agent" type="button">New agent</button>
     <div class="checked" id="checked"></div>
@@ -1337,7 +1349,27 @@ function renderStale(s) {
   // on. its instruction file is not UTF-8 text".
   const why = String(s.because || '');
   const sentence = why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}${/[.!?]$/.test(why) ? '' : '.'}` : '';
-  setLive(el, `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`);
+  /**
+   * ⚠️ REWORDED 2026-08-11 after Josh read it on screen and could not parse it.
+   * It said "We cannot tell whether this is what it is running on", which is
+   * three pronouns deep and asks the reader to hold two nouns the sentence
+   * never names.
+   *
+   * ⚠️ The STATE stays exactly as it was, and that is the point of the change
+   * rather than a caveat on it. This is the honest "we cannot see" that this
+   * whole codebase exists to keep — the alternative is a screen implying the
+   * agent is running what you are looking at when nobody checked. Only the
+   * words changed.
+   *
+   * What it has to convey, and what the old wording assumed you already knew:
+   * an agent reads this file ONCE, when it starts. So the text on screen and
+   * the text the agent is actually running can differ, and here we could not
+   * work out which. Saying "agents read this file when they start" is what
+   * makes the reason that follows mean anything — without it, "we cannot tell
+   * when this agent last started" reads as an unrelated complaint.
+   */
+  setLive(el, '<b>This might not be what the agent is actually running.</b> '
+    + `Agents read this file when they start. ${esc(sentence)}`);
   el.hidden = false;
 }
 
@@ -1682,6 +1714,24 @@ document.getElementById('rm-go').addEventListener('click', async () => {
     showTab('agents');
     await tick();
     await paintRemoved();
+    /**
+     * ⚠️ PUT THE KEYBOARD SOMEWHERE DELIBERATE.
+     *
+     * `closeRemoveModal` returns focus to the button that opened it — correct
+     * everywhere except here, because the very next thing this path does is
+     * hide the panel that button lives in. Focus then falls to `<body>`, so a
+     * keyboard user's next Tab restarts from the top of the document with no
+     * indication of what happened.
+     *
+     * The removed-agents toggle is the right landing spot rather than a
+     * neutral one: it is where the agent they just removed now IS, and it is
+     * the undo. It only exists once something has been removed, which by this
+     * line is true — but `paintRemoved` decides that, so this has to run after
+     * it, and it still falls back rather than assuming.
+     */
+    const undo = document.getElementById('removed-toggle');
+    if (undo && !document.getElementById('removed-wrap').hidden) undo.focus();
+    else document.querySelector('h1').focus();
   } catch (err) {
     if (RM_FOR !== forAgent) return;
     msg.textContent = 'We could not reach the board, so we cannot tell you whether it was removed. (' + err.message + ')';
@@ -1721,8 +1771,21 @@ async function paintRemoved() {
   toggle.textContent = (REMOVED_OPEN ? 'Hide' : 'Show') + ' removed agents (' + gone.length + ')';
   toggle.setAttribute('aria-expanded', String(REMOVED_OPEN));
   list.hidden = !REMOVED_OPEN;
+  /**
+   * ⚠️ THE ROW SHOWS `shownAs`; THE BUTTON CARRIES `name`. Same rule as the
+   * confirmation: act on the session name, speak the display name.
+   *
+   * This is the one screen listing agents that have no card, so a row reading
+   * `claudebot` for the agent the board and the confirmation both called
+   * `Splinter` makes the undo path unrecognisable for exactly the pre-existing
+   * agents this feature was rebuilt to support. `data-restore` stays the
+   * session name because that is what the restore route resolves.
+   *
+   * `shownAs` is captured at removal time; records written before it existed
+   * do not carry one, hence the fallback.
+   */
   list.innerHTML = gone.map((a) => '<div class="removed-row">'
-    + '<span class="who">' + esc(a.name) + '</span>'
+    + '<span class="who">' + esc(a.shownAs || a.name) + '</span>'
     + '<span class="when">' + esc(whenRemoved(a)) + '</span>'
     + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
     + '</div>').join('');

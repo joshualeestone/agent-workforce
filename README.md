@@ -121,7 +121,15 @@ correspondence.
 
 - Fixtures are synthetic or redacted. Never a captured slice of live state.
 - Anything captured from a real machine stays out of this repo.
-- Screenshots of live data do not belong here either. Agent names plus task
-  lines are already a disclosure.
+- Screenshots are held to the same rule, and the rule is about **where the text
+  came from**, not about which words it contains. A shot of the running board
+  ships whatever the fleet happened to be doing that minute, and those task
+  lines have carried client names and financial work.
+- So: a board fed by a **fake tmux with invented task lines** is fine, and the
+  names on the cards are not the sensitive part -- a name grants nobody
+  anything. `docs/screenshots/remove-*.png` are exactly that. Clarified
+  2026-08-11 because the earlier wording ("agent names plus task lines are
+  already a disclosure") read as a ban on the names, and a rule stricter than
+  its reason gets worked around rather than followed.
 
 This repo is private now and public later, so treat every commit as public.
