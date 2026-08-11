@@ -6,14 +6,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const nodePath = require('node:path');
 
-// ⚠️ SANDBOX BEFORE REQUIRING, all four roots. The module under test DESTROYS
-// things: it boots out launchd jobs, kills tmux sessions, and deletes
-// directories. An unsandboxed run does not litter the machine, it takes things
-// off it.
+// ⚠️ SANDBOX BEFORE REQUIRING, all four roots. This module STOPS agents, and on
+// the machine it was written on the board includes the ones the operator is
+// talking to. An unsandboxed run does not litter anything — it takes somebody's
+// project manager off the air.
 //
-// ⚠️ `AGENT_WORKFORCE_DATA` is here because `create` installs the shared
-// supervisor under it, and the sibling suite learned this the hard way: it
-// sandboxed two roots of three and overwrote the operator's live supervisor.
+// `AGENT_WORKFORCE_DATA` matters twice: `create` installs the shared supervisor
+// under it, and this module keeps its removed-list there.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'remove-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
@@ -28,40 +27,30 @@ const status = require('./status');
 
 const BINS = { claudeBin: '/bin/echo', tmuxBin: '/bin/echo' };
 
-// Arm dry-run at load, so nothing here can reach the real machine before a
-// recorder is installed.
+// Arm dry-run at load, before any test can run.
 remove.setRunner(null);
 create.setRunner(null);
 
-function recorder(mod) {
-  const calls = [];
-  mod.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
-  return calls;
-}
-
 /**
- * A runner for a world where the session IS ours: `show-options` answers with
- * the agent's own name, which is the claim `bin/agent-supervisor.sh` sets.
+ * A launchd and tmux world, described rather than assumed.
  *
- * ⚠️ Needed because removal will not kill a session it cannot tie to us. The
- * plain recorder answers every command with empty output, which correctly reads
- * as "nothing of ours is running under that name" — so a test using it exercises
- * the skip path, not the kill path.
+ * ⚠️ Every command's answer is stated, because the module reads exit codes and
+ * treats "already gone" differently from "it failed". A recorder that answered
+ * everything with success would describe a world that cannot occur.
  */
-function recorderForOurSession(name) {
+function world({ killWorks = true } = {}) {
   const calls = [];
-  let asked = 0;
   remove.setRunner((file, args) => {
     calls.push([file, args]);
-    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
-    if (args && args[0] === 'has-session') {
-      // ⚠️ Present the FIRST time (there is a session to end) and absent
-      // afterwards (the kill worked). The removal asks twice on purpose, and a
-      // fixture that always answered "gone" exercised neither the kill nor the
-      // look-again.
-      asked += 1;
-      return asked === 1 ? { ok: true, stdout: '' } : { ok: false, code: 1 };
-    }
+    const cmd = args && args[0];
+    // ⚠️ `has-session` here is the LOOK-AGAIN after the kill, and only that.
+    // Whether a session exists at all is answered by the ROSTER, through
+    // `status.setPaneSource` — the module asks the board which pane is this
+    // agent rather than asking tmux twice. An earlier version of this helper
+    // modelled a pre-kill probe that does not exist, so the first answer landed
+    // on the post-kill check and every removal read as "still running".
+    if (cmd === 'has-session') return killWorks ? { ok: false, code: 1 } : { ok: true, stdout: '' };
+    if (cmd === 'kill-session') return killWorks ? { ok: true, stdout: '' } : { ok: false, code: 2 };
     return { ok: true, stdout: '' };
   });
   return calls;
@@ -69,582 +58,302 @@ function recorderForOurSession(name) {
 
 /** An agent that really exists in the sandbox, made the way the product makes them. */
 function madeAgent(name) {
-  recorder(create);
+  create.setRunner(() => ({ ok: true, stdout: '' }));
   create.setDryRun(false);
   status.setPaneSource(() => '');
   const r = create.createAgent({ ...BINS, name, role: 'pm' });
-  assert.equal(r.outcome, create.OUTCOME.CREATED, `fixture agent ${name} was not created: ${r.because}`);
+  assert.equal(r.outcome, create.OUTCOME.CREATED, `fixture ${name} was not created: ${r.because}`);
   create.setRunner(null);
   status.setPaneSource(null);
   return name;
 }
 
-test.afterEach(() => { remove.setRunner(null); create.setRunner(null); status.setPaneSource(null); });
+/** An agent another tool created: a worker folder and a `com.<name>.discord` job. */
+function foreignAgent(name) {
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  const dir = nodePath.dirname(create.plistPath(name));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, `com.${name}.discord.plist`), '<plist/>', 'utf8');
+  return name;
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// What it will not touch
-// ─────────────────────────────────────────────────────────────────────────────
+/** The board sees this agent running in this session. */
+function boardShows(name, session) {
+  const claim = session.endsWith('-discord') ? '' : name;
+  status.setPaneSource(() => `${session}\t0.0\t2.1.212\t0\t${claim}\t✳ Claude Code`);
+}
 
-test('an agent this app did not create is refused, and the refusal says why', () => {
-  // ⚠️ THE MOST IMPORTANT TEST IN THIS FILE. The board shows every agent on the
-  // machine, including thirteen this product did not create, whose launchd jobs
-  // belong to somebody else's tooling and whose sessions somebody is talking to
-  // right now. A remove that can reach those is a worse defect than having no
-  // remove at all.
-  const calls = recorder(remove);
-  remove.setDryRun(false);
-
-  const r = remove.remove('angel');   // a real fleet agent, not ours
-  assert.equal(r.outcome, remove.OUTCOME.REFUSED, 'it agreed to remove an agent it did not create');
-  assert.match(r.because, /not created by this app/);
-  assert.equal(calls.length, 0, 'it ran a command against an agent it does not own');
-
-  // ⚠️ AND THE REFUSAL MUST BE ABOUT OWNERSHIP, NOT ABSENCE. The first version
-  // of this test proved nothing: in the sandbox `angel` has no plist AND no
-  // folder, so the refusal was over-determined. Swapping `isOurs` to check the
-  // FOLDER instead of the plist left all ten tests green — and a folder is
-  // precisely the wrong key, because every one of the thirteen fleet agents has
-  // `~/work/workers/<name>`. The guard that matters more than the feature could
-  // be broken in the exact direction that reaches live agents.
-  //
-  // So the fixture is a foreign agent as it actually appears on this machine:
-  // a worker folder with the person's instructions in it, and NO plist of ours.
-  const foreign = 'foreign-agent';
-  fs.mkdirSync(create.workerDir(foreign), { recursive: true });
-  fs.writeFileSync(nodePath.join(create.workerDir(foreign), 'CLAUDE.md'), 'You are **Foreign**, somebody else\'s agent.\n', 'utf8');
-  // What its launchd job looks like: another tool's label, not ours.
-  fs.mkdirSync(nodePath.dirname(create.plistPath(foreign)), { recursive: true });
-  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(foreign)), `com.${foreign}.discord.plist`), '<plist/>', 'utf8');
-
-  assert.equal(remove.isOurs(foreign), false,
-    'an agent with a worker folder but no job of ours is treated as ours to delete');
-  const foreignPlan = remove.plan(foreign);
-  assert.equal(foreignPlan.ok, false, 'it offered to remove an agent another tool created');
-  assert.match(foreignPlan.because, /not created by this app/);
-  assert.ok(fs.existsSync(create.workerDir(foreign)), 'it touched a foreign agent while refusing it');
-
-  assert.equal(remove.isOurs('angel'), false,
-    'a fleet agent is treated as ours to delete because the board recognises it');
-
-  // THE CONTROL: an agent we DID make is ours, and the ONLY difference between
-  // it and the fixture above is the plist we wrote.
-  const mine = madeAgent('ours-to-remove');
-  assert.equal(remove.isOurs(mine), true,
-    'nothing is ever ours, so the refusal above proves nothing');
-  assert.ok(fs.existsSync(create.plistPath(mine)), 'the control has no job of ours, so it differs in more than one way');
-});
-
-test('a name that could not have been made here is refused before anything runs', () => {
-  const calls = recorder(remove);
-  remove.setDryRun(false);
-  // ⚠️ Asserts the REASON, not just the enum. Every one of these is also
-  // refused by the ownership check, so the outcome alone is satisfied whether
-  // or not the name rule exists at all — deleting the `nameProblem` gate left
-  // the first version of this test green. It matters more than usual here:
-  // `../../etc` reaching `workerDir()` would put a recursive delete outside the
-  // workers root, and this is the only test standing over that.
-  for (const [bad, why] of [
-    ['', /give the agent a name/],
-    ['Angel', /lower case/],
-    ['../../etc', /letters, numbers/],
-    ['has space', /letters, numbers/],
-    ['x'.repeat(40), /32 characters/],
-  ]) {
-    const r = remove.remove(bad);
-    assert.equal(r.outcome, remove.OUTCOME.REFUSED, `'${bad}' was accepted`);
-    assert.match(r.because, why,
-      `'${bad}' was refused for the wrong reason, so the name rule may not be running at all`);
-  }
-  assert.equal(calls.length, 0, 'a refused name still ran a command');
+test.afterEach(() => {
+  remove.setRunner(null);
+  create.setRunner(null);
+  status.setPaneSource(null);
+  try { fs.rmSync(remove.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Saying what will happen, before it happens
+// Remove is not delete
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('the plan names every step, and says what is permanent', () => {
-  // ⚠️ The screen renders THIS. If the plan and the removal can disagree, the
-  // confirmation is decoration — so the same function that describes the work is
-  // the one the engine performs.
-  const name = madeAgent('planned');
-  const keep = remove.plan(name);
+test('removing an agent deletes nothing at all', () => {
+  // ⚠️ THE RULE THE WHOLE MODULE IS SHAPED BY. Remove means: stop it, do not let
+  // it come back, take it off the board. The folder, the instructions somebody
+  // wrote, the log — none of it is touched, which is what makes the action
+  // reversible and the confirmation light rather than frightening.
+  const name = madeAgent('keeps-everything');
+  const folderBefore = fs.readdirSync(create.workerDir(name)).sort();
+  const instructions = fs.readFileSync(create.instructionFile(name), 'utf8');
 
-  assert.equal(keep.ok, true, keep.because);
-  assert.ok(keep.steps.length >= 3, 'the plan does not say what it will do');
-  // ⚠️ EVERY destructive step is announced, not just the obvious ones. `remove`
-  // also clears the picture, the job title and the commitment record -- and the
-  // commitment text can name real work. A step the plan does not mention is a
-  // thing destroyed without being shown, and `steps.length >= 3` would not
-  // have noticed a fifth one being added tomorrow.
-  assert.ok(keep.steps.some((s) => /picture/.test(s) && /working on/.test(s)),
-    'the plan does not mention that the app forgets what it remembered, which it always does');
-  assert.ok(keep.steps.some((s) => /startup job/.test(s)),
-    'the plan does not mention the job, which is the part that makes it stick');
-  assert.match(keep.warning, /cannot be undone/,
-    'the confirmation does not say the thing a person cannot take back');
-
-  // ⚠️ THE FOLDER IS KEPT BY DEFAULT, and the plan says so in words. It holds
-  // the instruction file the PERSON wrote, which is the whole of what made this
-  // agent theirs. "Remove this agent" does not imply "delete what I wrote".
-  assert.equal(keep.keepsFolder, true, 'removing an agent deletes what the person wrote, by default');
-  assert.match(keep.warning, /folder stays/);
-  assert.ok(!keep.steps.some((s) => /delete its folder/.test(s)));
-
-  // And with the box ticked, it says exactly what is inside rather than "files".
-  const wipe = remove.plan(name, { alsoDeleteFolder: true });
-  assert.ok(wipe.steps.some((s) => /delete its folder/.test(s)));
-  assert.match(wipe.warning, /instructions, the ones you wrote/,
-    'the destructive version does not name what is being destroyed');
-  assert.ok(wipe.folderContents.includes('CLAUDE.md'),
-    'the plan does not know what is in the folder it offers to delete');
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Doing it
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('removing an agent stops the job BEFORE it ends the session', () => {
-  // ⚠️ ORDER, and it is the one thing that cannot be got wrong quietly. While
-  // the job is loaded, `KeepAlive` restarts the agent the moment its session
-  // ends — so killing the session first makes launchd put it straight back, and
-  // the person watches the agent they just removed reappear on the board.
-  const name = madeAgent('order-matters');
-  const calls = recorderForOurSession(name);
-  remove.setDryRun(false);
-  remove.remove(name);
-
-  const bootout = calls.findIndex(([, a]) => a && a[0] === 'bootout');
-  const kill = calls.findIndex(([, a]) => a && a[0] === 'kill-session');
-  assert.ok(bootout > -1, 'the launchd job was never stopped');
-  assert.ok(kill > -1, 'the session was never ended');
-  assert.ok(bootout < kill,
-    'the session is killed before the job is stopped, so KeepAlive restarts the agent');
-});
-
-test('the session is ended by exact name, never by prefix', () => {
-  // `kill-session -t sam` prefix-matches and will happily end
-  // `samantha-discord`. Measured on this machine, by doing it.
-  const name = madeAgent('exact-target');
-  const calls = recorderForOurSession(name);
-  remove.setDryRun(false);
-  remove.remove(name);
-
-  const kill = calls.find(([, a]) => a && a[0] === 'kill-session');
-  assert.equal(kill[1][2], `=${name}`,
-    'the kill target is not anchored, so it can end a different session whose name starts the same way');
-});
-
-test('a removed agent leaves no job behind, and keeps its folder unless asked', () => {
-  const name = madeAgent('goodbye');
-  assert.ok(fs.existsSync(create.plistPath(name)), 'the fixture has no job to remove');
-
-  recorder(remove);
+  boardShows(name, name);
+  world();
   remove.setDryRun(false);
   const r = remove.remove(name);
 
   assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
-  assert.ok(!fs.existsSync(create.plistPath(name)),
-    'the startup job survived, so the agent comes back at the next login');
-  assert.ok(fs.existsSync(create.instructionFile(name)),
-    'the instruction file the person wrote was deleted without being asked for');
-  assert.match(r.because, /folder is still on your computer/);
-});
-
-test('deleting the folder is possible, and only when it is asked for', () => {
-  const name = madeAgent('wipe-me');
-  recorder(remove);
-  remove.setDryRun(false);
-  const r = remove.remove(name, { alsoDeleteFolder: true });
-
-  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
-  assert.ok(!fs.existsSync(create.workerDir(name)), 'the folder was kept despite being asked for');
-  // ⚠️ `.label`, not the step object. `plan()` returns step STRINGS and
-  // `remove()` returns `{label, ok}` records -- two shapes for what a reader
-  // thinks of as one thing, and testing the object stringifies it to
-  // "[object Object]" and quietly matches nothing.
-  assert.ok(r.steps.some((s) => /deleted its folder/.test(s.label) && s.ok),
-    'the folder deletion is not in the record, so the screen cannot show which half happened');
-});
-
-test('a job that will not go is PARTIAL, and says the agent will come back', () => {
-  // ⚠️ The job is what makes a removal STICK. A screen saying "removed" over a
-  // surviving plist is the same lie as a board reporting an agent it cannot see
-  // as healthy: at the next login the agent returns, and the person has no idea
-  // why. Everything else failing here is recoverable by hand; this is not.
-  const name = madeAgent('sticky');
-  recorder(remove);
-  remove.setDryRun(false);
-
-  const realRm = fs.rmSync;
-  try {
-    fs.rmSync = (p, ...rest) => {
-      if (String(p).endsWith('.plist')) throw new Error('read-only');
-      return realRm(p, ...rest);
-    };
-    const r = remove.remove(name);
-    assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a surviving startup job was reported as removed');
-    assert.match(r.because, /come back when you next log in/,
-      'the person is not told the agent will return');
-  } finally {
-    fs.rmSync = realRm;
-  }
-
-  // THE CONTROL: with the write working, the same agent removes cleanly.
-  recorder(remove);
-  remove.setDryRun(false);
-  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED,
-    'this agent cannot be removed at all, so the assertion above is about nothing');
-});
-
-test('dry-run cannot be left without a runner in place', () => {
-  // The same interlock `create` uses, for a stronger reason: a test that
-  // reaches the real machine here does not litter it, it kills a live agent.
-  remove.setRunner(null);
-  assert.throws(() => remove.setDryRun(false), /refusing to leave dry-run/);
-  recorder(remove);
-  remove.setDryRun(false);
-  assert.equal(remove.DRY_RUN, false);
-  remove.setRunner(null);
-  assert.equal(remove.DRY_RUN, true, 'clearing the runner left the real one armed');
-});
-
-test('the module does not start in dry-run, or the product silently does nothing', () => {
-  // ⚠️ THE BUG THIS PINS, found by removing an agent through the real UI and
-  // then looking at the machine: the board said "gone", the session was killed,
-  // and the launchd job and its plist were still there -- so the agent would
-  // have come back at the next login. Every filesystem step short-circuits on
-  // `DRY_RUN && !runner`, and this module defaulted that to true because it
-  // looked like the careful choice.
-  //
-  // A default that makes the product do nothing while reporting success is not
-  // a safe default. The safety lives at the top of THIS file instead, which
-  // arms dry-run before any test runs.
-  //
-  // Checked in a child process, because this file has already armed dry-run by
-  // the time any test executes -- asking the loaded module would answer about
-  // the test harness rather than about the default.
-  const { execFileSync } = require('node:child_process');
-  const out = execFileSync(process.execPath, ['-e',
-    "console.log(require('./engine/remove').DRY_RUN)"],
-  { cwd: nodePath.join(__dirname, '..'), encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '' } });
-  assert.equal(out.trim(), 'false',
-    'the module starts in dry-run, so the server removes nothing and says it did');
-
-  // And the env var still arms it, which is what a sandboxed run relies on.
-  const armed = execFileSync(process.execPath, ['-e',
-    "console.log(require('./engine/remove').DRY_RUN)"],
-  { cwd: nodePath.join(__dirname, '..'), encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '1' } });
-  assert.equal(armed.trim(), 'true', 'AGENT_WORKFORCE_DRY_RUN no longer arms dry-run');
-});
-
-test('a bootout that fails stops everything, rather than reporting success over it', () => {
-  // ⚠️ THE WORST DEFECT THIS FILE HAS HAD. The bootout result was discarded, so
-  // a genuine failure was recorded as done; the session was then killed, which
-  // KeepAlive instantly undoes because the job is still loaded; and the plist
-  // was deleted on top of it. That leaves a loaded service with nothing on disk
-  // explaining it -- the one state `create` refuses to clean up -- so the NAME
-  // IS PERMANENTLY UNUSABLE, while the person is told the agent is gone and
-  // watches it come back.
-  const name = madeAgent('bootout-fails');
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'bootout') return { ok: false, code: 5 };   // a real failure
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-
-  const r = remove.remove(name);
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a failed bootout was reported as a removal');
-  assert.match(r.because, /still running, and nothing has been removed/);
+  assert.deepEqual(fs.readdirSync(create.workerDir(name)).sort(), folderBefore,
+    'removing an agent changed what is in its folder');
+  assert.equal(fs.readFileSync(create.instructionFile(name), 'utf8'), instructions,
+    'the instructions somebody wrote were altered by a removal');
   assert.ok(fs.existsSync(create.plistPath(name)),
-    'the plist was deleted after the job could not be stopped, which is the state that '
-    + 'makes the name unusable forever');
-  assert.ok(!r.steps.some((s) => /ended its session/.test(s.label)),
-    'it went on to kill the session, which KeepAlive would immediately undo');
-
-  // ⚠️ EXIT 3 IS NOT A FAILURE. launchd answers 3 for a job that is not loaded,
-  // which is the end state we wanted. Without this the common case -- removing
-  // an agent whose job is already stopped -- would refuse to proceed.
-  remove.setRunner((file, args) => (args && args[0] === 'bootout'
-    ? { ok: false, code: 3 } : { ok: true, stdout: '' }));
-  remove.setDryRun(false);
-  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED,
-    'a job that was already not loaded is treated as a failure, so nothing can be removed');
+    'the startup job file was deleted, which makes restoring it guesswork');
+  assert.match(r.because, /still on your computer/);
 });
 
-test('a session that cannot be killed is not reported as ended', () => {
-  // On a machine where tmux is not at the Homebrew path and the override is
-  // unset -- the Intel-Mac case the README names -- every removal recorded
-  // "ended its session" over a session somebody can still talk to.
-  const name = madeAgent('kill-fails');
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
-    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
-    // ⚠️ A kill that fails for a reason that is NOT "already gone". The first
-    // version of this fixture used 127 and called it the missing-tmux case,
-    // which cannot happen: a missing binary fails EVERY call, not just this
-    // one. That world is covered by its own test below.
-    if (args && args[0] === 'kill-session') return { ok: false, code: 2 };
-    return { ok: true, stdout: '' };
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// It manages the whole fleet, not only what it made
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('an agent another tool created can be removed, and ITS job is the one stopped', () => {
+  // ⚠️ Reversed from an earlier design that refused these. Kosmos manages a
+  // fleet; a fleet agent it cannot manage is a hole rather than a safeguard.
+  // What it must not do is destroy anything of theirs — so the job is DISABLED,
+  // never deleted, and the exact label is recorded so Restore can undo it.
+  const name = foreignAgent('legacy-bot');
+  boardShows(name, `${name}-discord`);
+  const calls = world();
   remove.setDryRun(false);
 
   const r = remove.remove(name);
-  assert.ok(r.steps.some((s) => /ended its session/.test(s.label) && !s.ok),
-    'a session that could not be killed is recorded as ended');
-  // ⚠️ AND THE OUTCOME, which is what the person is actually told. Asserting
-  // only the step record left the verdict unpinned: `remove` returned REMOVED
-  // from this very call, so the screen said "gone" over a live agent — and with
-  // the folder box ticked, deleted its working directory underneath it.
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
-    'a session that is still running was reported as a completed removal');
-  assert.match(r.because, /could not end the session/);
-  assert.ok(fs.existsSync(create.workerDir(name)),
-    'it went on to delete the folder of an agent that is still running');
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
 
-  // Exit 1 IS fine: the session was already gone.
-  const name2 = madeAgent('already-gone');
-  let seen = 0;
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'show-options') return { ok: true, stdout: name2 + '\n' };
-    if (args && args[0] === 'kill-session') return { ok: false, code: 1 };
-    if (args && args[0] === 'has-session') { seen += 1; return seen === 1 ? { ok: true, stdout: '' } : { ok: false, code: 1 }; }
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-  assert.ok(remove.remove(name2).steps.some((s) => /ended its session/.test(s.label) && s.ok),
-    'a session that was already gone is treated as a failure');
+  const disable = calls.find(([, a]) => a && a[0] === 'disable');
+  assert.ok(disable, 'nothing was disabled, so it comes back at the next login');
+  assert.match(disable[1][1], /com\.legacy-bot\.discord$/,
+    'it disabled the wrong job — ours rather than the one that actually starts this agent');
+  assert.ok(fs.existsSync(nodePath.join(nodePath.dirname(create.plistPath(name)), `com.${name}.discord.plist`)),
+    "another tool's job file was deleted rather than disabled");
+
+  // The kill targets the session the BOARD ties to this agent, which for a
+  // legacy agent is the `-discord` one and not the bare name.
+  const kill = calls.find(([, a]) => a && a[0] === 'kill-session');
+  assert.ok(kill, 'the session was never ended');
+  assert.equal(kill[1][2], `=${name}-discord`,
+    'it killed the wrong session, or fell back to the board name');
 });
 
-test('a job still registered afterwards is PARTIAL, not a removal', () => {
-  // ⚠️ Creating an agent WATCHES the board before saying it is running. Removing
-  // one was claiming its outcome from commands whose answers it had not read.
-  // The same rule both ways, and this is the direction where being wrong means
-  // the agent comes back.
-  const name = madeAgent('still-there');
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'print') return { ok: true, stdout: 'com.kosmos.agent.still-there = { ... }' };
-    return { ok: true, stdout: '' };
-  });
+test('the job label is recorded at removal, so restoring cannot guess wrong', () => {
+  const name = foreignAgent('recorded-label');
+  boardShows(name, `${name}-discord`);
+  world();
   remove.setDryRun(false);
+  remove.remove(name);
 
-  const r = remove.remove(name);
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a job still registered afterwards was called removed');
-  assert.match(r.because, /still registered as a startup job/);
-
-  // THE CONTROL: with launchctl describing nothing, the same agent is removed.
-  const name2 = madeAgent('really-gone');
-  recorder(remove);
-  remove.setDryRun(false);
-  assert.equal(remove.remove(name2).outcome, remove.OUTCOME.REMOVED,
-    'nothing can ever be removed, so the assertion above is about nothing');
+  const [record] = remove.removedAgents().filter((r) => r.name === name);
+  assert.ok(record, 'nothing was recorded, so the agent is stopped and invisible with no way back');
+  assert.equal(record.label, `com.${name}.discord`, 'the recorded label is not the one that was disabled');
+  assert.equal(record.ours, false, 'a foreign agent was recorded as one of ours');
+  assert.ok(record.removedAt, 'no time was recorded, so the removed list cannot be ordered');
 });
 
-test('it will not kill a session it cannot prove is ours', () => {
-  // ⚠️ Owning the plist is a fact about DISK. It says this product made an agent
-  // by this name; it does not say the session holding that name RIGHT NOW is
-  // that agent. Ours can die and something else can take the name before the
-  // person gets round to removing the stale card.
+// ─────────────────────────────────────────────────────────────────────────────
+// The round trip
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('restore re-enables exactly the job that was disabled, and puts the agent back', () => {
+  // ⚠️ "Reversible by design" is only true if the implementation reverses. This
+  // is the assertion that makes the claim honest, and it matters most for an
+  // agent another tool created, where getting it wrong leaves somebody's real
+  // bot disabled with no sign of why.
+  const name = foreignAgent('round-trip');
+  boardShows(name, `${name}-discord`);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+  assert.equal(remove.isRemoved(name), true, 'it was not recorded as removed');
+
+  const back = world();
+  remove.setDryRun(false);
+  const r = remove.restore(name);
+
+  assert.equal(r.outcome, remove.OUTCOME.RESTORED, r.because);
+  assert.equal(remove.isRemoved(name), false, 'it is still hidden after being restored');
+  const enable = back.find(([, a]) => a && a[0] === 'enable');
+  assert.ok(enable, 'nothing was re-enabled, so it stays disabled at the next login');
+  assert.match(enable[1][1], /com\.round-trip\.discord$/, 'it re-enabled the wrong job');
+  assert.ok(back.some(([, a]) => a && a[0] === 'bootstrap'),
+    'the job was enabled but never started, so the agent does not come back until a reboot');
+});
+
+test('restoring something that was never removed is refused', () => {
+  const r = remove.restore('never-removed');
+  assert.equal(r.outcome, remove.OUTCOME.REFUSED);
+  assert.match(r.because, /not on the removed list/);
+});
+
+test('a removed agent is refused a second removal, and says why', () => {
+  const name = madeAgent('twice-removed');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const again = remove.plan(name);
+  assert.equal(again.ok, false);
+  assert.match(again.because, /already been removed/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What the person is asked
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the confirmation names the agent, and answers the only fear it should', () => {
+  // ⚠️ NOT a list of consequences. An earlier version enumerated the job, the
+  // session and the startup entry; every line of that describes our
+  // implementation rather than their decision.
   //
-  // `bin/agent-supervisor.sh` already refuses to touch a session it cannot tie
-  // to @kosmos_agent, and the README advertises that. Removal held a lower bar
-  // than the product's own startup script, which is the wrong way round for the
-  // destructive half.
-  const name = madeAgent('stranger-took-it');
+  // ⚠️ And it NAMES the agent, because this board includes the ones the operator
+  // is talking to. An unnamed "are you sure?" is the same dialog for a demo
+  // agent and for their project manager.
+  const name = madeAgent('asked-about');
+  const p = remove.plan(name);
+
+  assert.equal(p.ok, true, p.because);
+  assert.match(p.question, new RegExp(`remove ${name} from Kosmos`),
+    'the question does not name the agent, so every agent gets the same dialog');
+  assert.match(p.reassurance, /will not be deleted/,
+    'the one thing a person might fear is not answered');
+  assert.ok(!/startup job|tmux|session|launchd/i.test(`${p.question} ${p.reassurance}`),
+    'the confirmation describes our implementation rather than their decision');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Failing honestly
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a job that will not stop leaves everything alone', () => {
+  const name = madeAgent('wont-stop');
+  boardShows(name, name);
   const calls = [];
   remove.setRunner((file, args) => {
     calls.push([file, args]);
-    // A session of that name EXISTS, and it is somebody else's.
-    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
-    if (args && args[0] === 'show-options') return { ok: true, stdout: 'not-ours\n' };
+    if (args && args[0] === 'disable') return { ok: false, code: 1 };
     return { ok: true, stdout: '' };
   });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a job that could not be stopped was reported as removed');
+  assert.match(r.because, /Nothing has changed/);
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
+    'it ended the session anyway, which KeepAlive would immediately undo');
+  assert.equal(remove.isRemoved(name), false,
+    'it was hidden from the board while still running and still able to restart');
+});
+
+test('a tmux we cannot ask stops the removal, rather than reading as "nothing is running"', () => {
+  // ⚠️ THE INVERSION THIS CODEBASE IS WRITTEN AGAINST, in the one place that
+  // stops things. "Nothing running", "not this agent's session" and "we could
+  // not ask" are three different answers; treating the third as the first
+  // reports a removal over an agent that is still going.
+  const name = madeAgent('tmux-missing');
+  status.setPaneSource(() => { throw new Error('tmux is not where we thought'); });
+  remove.setRunner(() => ({ ok: true, stdout: '' }));
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a removal that could not ask tmux reported success');
+  assert.match(r.because, /could not ask tmux/);
+  assert.equal(remove.isRemoved(name), false, 'it was hidden while possibly still running');
+
+  // THE CONTROL: "nothing is running" IS an answer, and proceeds.
+  status.setPaneSource(() => '');
+  remove.setRunner(() => ({ ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED,
+    'an agent that is not running cannot be removed at all');
+});
+
+test('a session that survives the kill is not reported as removed', () => {
+  const name = madeAgent('survives');
+  boardShows(name, name);
+  world({ killWorks: false });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a surviving session was reported as removed');
+  assert.match(r.because, /still going/);
+  assert.equal(remove.isRemoved(name), false, 'it was taken off the board while still running');
+});
+
+test('a session the board does not tie to this agent is left alone', () => {
+  // Owning the job is a fact about disk. It does not say the session holding
+  // that name right now is this agent, and `bin/agent-supervisor.sh` already
+  // refuses to touch a session it cannot tie to us.
+  const name = madeAgent('name-taken');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`);
+  const calls = world();
   remove.setDryRun(false);
 
   const r = remove.remove(name);
   assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
-    "it killed a session it could not tie to the agent it was removing");
-  // Our files still go: the agent IS ours, and leaving its job behind is what
-  // makes a name unusable. It is the session we must not touch.
+    'it killed a session the board does not tie to this agent');
   assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
-  assert.ok(!fs.existsSync(create.plistPath(name)), 'our own job was left behind');
-
-  // THE CONTROL: when the session IS ours, it is killed.
-  const mine = madeAgent('mine-to-kill');
-  const ourCalls = recorderForOurSession(mine);
-  remove.setDryRun(false);
-  remove.remove(mine);
-  assert.ok(ourCalls.some(([, a]) => a && a[0] === 'kill-session'),
-    'it never kills anything, so the refusal above proves nothing');
 });
 
-test('a failed job removal does not take the folder with it', () => {
-  // ⚠️ ORDER. The folder delete used to run BEFORE the job-removal check, so a
-  // failed plist removal destroyed the person's instructions anyway -- and then
-  // told them the agent "will come back when you next log in", which understated
-  // it: the job would respawn every thirty seconds forever against a working
-  // directory that no longer existed. Deleting what somebody wrote during a run
-  // that FAILED is the one mistake here with nothing behind it.
-  const name = madeAgent('keep-my-words');
-  recorderForOurSession(name);
+test('dry-run cannot be left without a runner, and is not the default', () => {
+  remove.setRunner(null);
+  assert.throws(() => remove.setDryRun(false), /refusing to leave dry-run/);
+  remove.setRunner(() => ({ ok: true, stdout: '' }));
   remove.setDryRun(false);
+  assert.equal(remove.DRY_RUN, false);
+  remove.setRunner(null);
+  assert.equal(remove.DRY_RUN, true, 'clearing the runner left the real one armed');
 
-  const realRm = fs.rmSync;
-  try {
-    fs.rmSync = (p, ...rest) => {
-      if (String(p).endsWith('.plist')) throw new Error('read-only');
-      return realRm(p, ...rest);
-    };
-    const r = remove.remove(name, { alsoDeleteFolder: true });
-    assert.equal(r.outcome, remove.OUTCOME.PARTIAL);
-    assert.ok(fs.existsSync(create.instructionFile(name)),
-      'the instructions were deleted during a removal that failed');
-    assert.ok(!r.steps.some((s) => /deleted its folder/.test(s.label)),
-      'it attempted the irreversible step after the recoverable one had already failed');
-  } finally {
-    fs.rmSync = realRm;
-  }
+  // ⚠️ And the module does NOT start in dry-run. Defaulting it on made the
+  // server silently do nothing while reporting success — an invisible default,
+  // not a safe one. Asked of a fresh process, because this file arms it at load.
+  const { execFileSync } = require('node:child_process');
+  const out = execFileSync(process.execPath, ['-e', "console.log(require('./engine/remove').DRY_RUN)"],
+    { cwd: nodePath.join(__dirname, '..'), encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '' } });
+  assert.equal(out.trim(), 'false', 'the module starts inert, so the product removes nothing and says it did');
 });
 
-test('what the app remembered about an agent goes with it', () => {
-  // ⚠️ The avatar, the role label and the commitment record live under the app's
-  // OWN data directory, keyed by name, nowhere near the agent's folder. Leaving
-  // them meant a new agent made with the same name later wore the dead agent's
-  // face, carried its job title and held its promises. The commitment text can
-  // carry real work, so it is a privacy question as well as a correctness one --
-  // and the folder checkbox, which reads as "everything", does not cover it.
-  const name = madeAgent('remembered');
-  const store = require('./store');
-  const commitments = require('./commitments');
-
-  store.saveAvatar(name, 'image/png', Buffer.from('not-a-real-png'));
-  store.writeProfile(name, { role: 'Bookkeeper' });
-  commitments.report(name, [{ what: 'the quarterly numbers for a client' }]);
-  assert.ok(fs.existsSync(store.avatarPath(name)), 'the fixture wrote no avatar');
-  assert.ok(fs.existsSync(store.profilePath(name)), 'the fixture wrote no profile');
-  assert.ok(fs.existsSync(commitments.recordPath(name)), 'the fixture wrote no commitments');
-
-  recorderForOurSession(name);
-  remove.setDryRun(false);
-  const r = remove.remove(name);
-  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
-
-  assert.ok(!fs.existsSync(store.avatarPath(name)),
-    "a new agent with this name would wear the dead agent's face");
-  assert.ok(!fs.existsSync(store.profilePath(name)),
-    "a new agent with this name would carry the dead agent's job title");
-  assert.ok(!fs.existsSync(commitments.recordPath(name)),
-    "the dead agent's promises survived it, and they can name real work");
-});
-
-test('keeping the folder is said to cost the name, because it does', () => {
-  // Creation refuses a name whose worker folder exists. So the DEFAULT path --
-  // the one that protects what the person wrote -- quietly makes the name
-  // unusable, and the only way back is a terminal, in a product whose pitch is
-  // that you never need one.
-  const name = madeAgent('name-burned');
-  recorderForOurSession(name);
-  remove.setDryRun(false);
-  const kept = remove.remove(name);
-  assert.match(kept.because, /cannot make another agent called name-burned/,
-    'the person is not told that keeping the folder costs them the name');
-
-  // And creation really does refuse it, which is what makes that sentence true.
+test('a name that could not be an agent is refused before anything runs', () => {
   const calls = [];
-  create.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
-  create.setDryRun(false);
-  status.setPaneSource(() => '');
-  try {
-    const again = create.createAgent({ ...BINS, name, role: 'pm' });
-    assert.equal(again.outcome, create.OUTCOME.REFUSED,
-      'the name is reusable after all, so the warning above is false');
-    assert.match(again.because, /already a folder/);
-  } finally {
-    create.setRunner(null);
-    status.setPaneSource(null);
+  remove.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
+  remove.setDryRun(false);
+  for (const [bad, why] of [
+    ['', /give the agent a name/],
+    ['Angel', /lower case/],
+    ['../../etc', /letters, numbers/],
+    ['x'.repeat(40), /32 characters/],
+  ]) {
+    const r = remove.remove(bad);
+    assert.equal(r.outcome, remove.OUTCOME.REFUSED, `'${bad}' was accepted`);
+    // ⚠️ The REASON, not just the enum: every one of these would also be refused
+    // for having no job, so asserting the outcome alone leaves the name rule
+    // free to be deleted.
+    assert.match(r.because, why, `'${bad}' was refused for the wrong reason`);
   }
+  assert.equal(calls.length, 0, 'a refused name still ran a command');
 });
 
-test('a tmux we cannot reach stops the removal, rather than reading as "nothing is there"', () => {
-  // ⚠️ THE BLOCKER THIS PINS, and it is the failure this whole codebase is
-  // written against, in the one place where it destroys something.
-  //
-  // "Is this session ours?" answered false for THREE different worlds: no
-  // session, somebody else's session, and TMUX WE COULD NOT ASK. The third read
-  // as "nothing to end", so the step recorded "ended its session", the removal
-  // deleted the folder, and the agent carried on running out of a directory
-  // that no longer existed. It was then neither removable (no plist, so not
-  // ours) nor recreatable (the session still holds the name).
-  //
-  // Reachable with nothing exotic: tmux not at the path we expect, which is the
-  // Intel-Mac case the README documents and `create` refuses up front. A missing
-  // binary fails EVERY tmux call, which is what this fixture describes.
-  const name = madeAgent('tmux-missing');
-  remove.setRunner((file, args) => {
-    if (file !== '/bin/launchctl') return { ok: false, code: null };   // ENOENT: no status
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-
-  const r = remove.remove(name, { alsoDeleteFolder: true });
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
-    'a removal that could not ask tmux anything reported the agent gone');
-  assert.match(r.because, /could not ask tmux/);
-  assert.ok(fs.existsSync(create.workerDir(name)),
-    "it deleted the folder out from under an agent it never confirmed had stopped");
-  assert.ok(r.steps.some((s) => /looked for its session/.test(s.label) && !s.ok),
-    'the record does not show that the question was never answered');
-
-  // ⚠️ THE CONTROL. Exit 1 from `has-session` means "no such session", which IS
-  // an answer, and must proceed — otherwise nothing could ever be removed once
-  // its session had already ended.
-  const gone = madeAgent('already-stopped');
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'has-session') return { ok: false, code: 1 };
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-  assert.equal(remove.remove(gone).outcome, remove.OUTCOME.REMOVED,
-    'an agent whose session had already ended cannot be removed at all');
-});
-
-test('a session that survives the kill is not reported as ended', () => {
-  // ⚠️ The look-again after the kill had no test at all: replacing it with
-  // `return true` left every test green. A kill can report success and leave the
-  // session up — and this is the check that stops the folder being deleted
-  // under it.
-  const name = madeAgent('survives-kill');
-  remove.setRunner((file, args) => {
-    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };   // still there, always
-    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
-    if (args && args[0] === 'kill-session') return { ok: true, stdout: '' };  // claims success
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-
-  const r = remove.remove(name, { alsoDeleteFolder: true });
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
-    'a kill that reported success over a surviving session was believed');
-  assert.match(r.because, /could not end the session/);
-  assert.ok(fs.existsSync(create.workerDir(name)), 'the folder went while the agent was still running');
-});
-
-test('a session we cannot identify is left alone, and the removal stops', () => {
-  // Proving a session is NOT ours is different from failing to prove it IS.
-  // The first lets us leave it and carry on; the second must stop, because
-  // whatever is running might be the agent being removed.
-  const name = madeAgent('unreadable-claim');
-  const calls = [];
-  remove.setRunner((file, args) => {
-    calls.push([file, args]);
-    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
-    if (args && args[0] === 'show-options') return { ok: false, code: 3 };   // cannot read it
-    return { ok: true, stdout: '' };
-  });
-  remove.setDryRun(false);
-
-  const r = remove.remove(name, { alsoDeleteFolder: true });
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL);
-  assert.match(r.because, /could not check whether it is the agent we made/);
-  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'), 'it killed what it could not identify');
-  assert.ok(fs.existsSync(create.workerDir(name)), 'it deleted the folder anyway');
+test('an unreadable removed-list hides nothing, rather than hiding everything', () => {
+  // A list we cannot read must not become a board that hides agents for reasons
+  // nobody can inspect. The honest answer to "which agents are removed" when
+  // the record is unreadable is "none that we can tell you about".
+  fs.mkdirSync(nodePath.dirname(remove.REMOVED_FILE), { recursive: true });
+  fs.writeFileSync(remove.REMOVED_FILE, 'not json at all', 'utf8');
+  assert.deepEqual(remove.removedAgents(), []);
+  assert.equal(remove.isRemoved('anything'), false);
 });

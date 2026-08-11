@@ -532,7 +532,20 @@ const server = http.createServer((req, res) => {
       // It also reinstates the measured wrong-card-cost failure: the restart
       // dialog reads these, so the cost shown would be the real agent's while
       // the pane acted on is a stranger's.
-      const agents = snap.agents.map((a) => ({
+      // ⚠️ REMOVED AGENTS COME OFF THE BOARD HERE, and this filter is the whole
+      // user-visible half of a removal. Everything else the engine does is
+      // invisible: the launchd job is disabled, the session ended. If a removed
+      // agent still appeared in this list, the person who removed it would have
+      // clear evidence the product ignored them, and no way to tell that
+      // anything had happened at all.
+      //
+      // Filtering the SNAPSHOT rather than the pane source is deliberate: a
+      // removed agent's session is gone, but a foreign agent whose session was
+      // not ours to end can still be running, and it must vanish from the board
+      // regardless. "Removed" is a fact this product keeps, not something it
+      // infers from what tmux happens to show.
+      const gone = new Set(removal.removedAgents().map((r) => r.name));
+      const agents = snap.agents.filter((a) => !gone.has(a.name)).map((a) => ({
         ...a,
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
@@ -758,38 +771,68 @@ const server = http.createServer((req, res) => {
   /**
    * --- removing an agent ---------------------------------------------------
    *
-   * ⚠️ TWO ROUTES, and the split is the point. `GET` returns the PLAN — what
-   * would happen, in the words the confirmation shows — and `DELETE` performs
-   * exactly that plan. A screen that described the work itself could drift from
-   * what the engine does, and the one place that must never happen is the
-   * screen a person reads before destroying something.
+   * ⚠️ REMOVE IS NOT DELETE, and every route here is shaped by that. Removing
+   * takes an agent off this board and stops it coming back; it does not touch
+   * one byte of what is on disk. That is what makes RESTORE possible, and
+   * restore is the reason the removal is safe to offer at all.
    *
-   * ⚠️ The engine refuses an agent this product did not create, and it refuses
-   * INDEPENDENTLY of this route. The board lists thirteen agents whose launchd
-   * jobs belong to somebody else's tooling; a delete that can reach those is
-   * worse than having no delete at all, so the guard does not live in the
-   * caller.
+   * ⚠️ `GET` returns the QUESTION the confirmation asks — not a list of steps.
+   * Josh's wording, deliberately: a person removing an agent does not want to
+   * read that a launchd job will be disabled. They want to be asked once, by
+   * name, and told nothing of theirs is being destroyed. The screen must not
+   * compose that sentence itself, because a screen that writes its own
+   * description of the work can drift from the work.
+   *
+   * ⚠️ It removes agents this product did NOT create, on purpose. An earlier
+   * design refused them, reasoning that whatever set an agent up is what should
+   * take it away. Josh reversed it: managing the fleet you actually have is the
+   * point of the product, and an agent it cannot manage is a hole, not a
+   * safeguard. What survives from that caution is that nothing of theirs is
+   * deleted — a foreign job is DISABLED and its exact label recorded, so
+   * restore puts back precisely what was taken away.
    */
   const rm = pathname.match(/^\/api\/agent\/([^/]+)\/removal$/);
   if (rm && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(rm[1]);
     if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
-    const wipe = new URLSearchParams((req.url.split('?')[1] || '')).get('folder') === 'delete';
-    const plan = removal.plan(name, { alsoDeleteFolder: wipe });
+    const plan = removal.plan(name);
     sendJson(res, plan.ok ? 200 : 400, plan);
     return;
   }
   if (rm && req.method === 'DELETE') {
     const name = decodeSegment(rm[1]);
     if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
-    const wipe = new URLSearchParams((req.url.split('?')[1] || '')).get('folder') === 'delete';
-    const done = removal.remove(name, { alsoDeleteFolder: wipe });
+    const done = removal.remove(name);
     // ⚠️ A PARTIAL answers 200, deliberately: the request was understood and
     // acted on, and what happened is in the body, which is where a removal's
     // outcome has to be read anyway (a removal that half-worked is not an
     // error, it is a state). The screen branches on `outcome` rather than on
     // status for exactly that reason.
     sendJson(res, done.outcome === removal.OUTCOME.REFUSED ? 400 : 200, done);
+    return;
+  }
+
+  // --- putting one back ------------------------------------------------------
+  //
+  // ⚠️ This route is the whole reason the removal is allowed to be casual. If
+  // restore did not genuinely work, "remove" would be a destructive act wearing
+  // a light confirmation, which is the exact defect this codebase keeps
+  // cataloguing. It re-enables the SPECIFIC label that was disabled — read back
+  // from the record, never re-derived — so a foreign agent goes back onto the
+  // job that actually starts it.
+  const rs = pathname.match(/^\/api\/agent\/([^/]+)\/restore$/);
+  if (rs && req.method === 'POST') {
+    const name = decodeSegment(rs[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    const back = removal.restore(name);
+    sendJson(res, back.outcome === removal.OUTCOME.REFUSED ? 400 : 200, back);
+    return;
+  }
+
+  // The removed ones, for the list at the bottom of the agents tab. Removing
+  // something must never mean losing track of it.
+  if (pathname === '/api/removed' && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendJson(res, 200, { agents: removal.removedAgents() });
     return;
   }
 

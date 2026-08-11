@@ -2106,15 +2106,16 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
 });
 
-test('the removal routes refuse what the engine refuses, and answer what it plans', async () => {
+test('the removal routes ask, remove, and put back, over the wire', async () => {
   // ⚠️ The engine was well covered and the surface a browser talks to was not.
-  // These routes are how the only destructive action in the product is reached.
+  // These routes are how the fleet is managed, and the restore route is what
+  // makes the removal safe to offer.
   const create = require('./engine/create');
   const status = require('./engine/status');
+  const removal = require('./engine/remove');
 
   // An agent that exists, made the way the product makes them.
-  const calls = [];
-  create.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
+  create.setRunner(() => ({ ok: true, stdout: '' }));
   create.setDryRun(false);
   status.setPaneSource(() => '');
   try {
@@ -2125,41 +2126,37 @@ test('the removal routes refuse what the engine refuses, and answer what it plan
     status.setPaneSource(null);
   }
 
-  // The PLAN, which is what the confirmation renders.
-  const plan = await req('/api/agent/route-removable/removal');
-  assert.equal(plan.status, 200);
-  const body = JSON.parse(plan.body);
+  // ⚠️ THE QUESTION, which is what the confirmation renders. It is fetched
+  // rather than composed in the browser so the words a person is asked cannot
+  // drift from what the engine will actually do.
+  const asked = await req('/api/agent/route-removable/removal');
+  assert.equal(asked.status, 200);
+  const body = JSON.parse(asked.body);
   assert.equal(body.ok, true);
-  assert.equal(body.keepsFolder, true, 'the route defaults to destroying the folder');
-  assert.ok(body.steps.length >= 3, 'the plan carries no steps for the screen to show');
-
-  // ⚠️ `?folder=delete` is the flag the screen actually sends, so it is the flag
-  // that gets tested rather than one this test invented.
-  const wipePlan = JSON.parse((await req('/api/agent/route-removable/removal?folder=delete')).body);
-  assert.equal(wipePlan.keepsFolder, false, 'the folder flag is not read from the query string');
+  assert.match(body.question, /route-removable/,
+    'the confirmation does not name the agent, so a misclick reads the same as the right click');
+  assert.match(body.reassurance, /not be deleted/i,
+    'the screen never tells them their files are safe, which is the one thing they want to know');
+  assert.equal(body.steps, undefined,
+    'the route is back to reciting launchd steps at a person who does not want them');
 
   /**
-   * ⚠️ AN AGENT ANOTHER TOOL CREATED, built as one rather than named as one.
-   *
-   * Using `angel` here would have been over-determined: in this sandbox it has
-   * no plist AND no folder, so the refusal fires for absence, and any
-   * nonsense name produces the identical result. The fixture below differs from
-   * an owned agent in exactly one way — the plist is another tool's label, not
-   * ours — which is the property the guard is supposed to key on.
+   * ⚠️ AN AGENT ANOTHER TOOL CREATED — now REMOVABLE, reversing an earlier
+   * design that refused these. Josh: managing the fleet you actually have is
+   * the point, so an agent Kosmos cannot remove is a hole rather than a
+   * safeguard. Built as one rather than named as one, so the fixture differs
+   * from an owned agent in exactly the property that matters: its job is
+   * another tool's label, not ours.
    */
   const foreignName = 'route-foreign';
   fs.mkdirSync(create.workerDir(foreignName), { recursive: true });
   fs.writeFileSync(nodePath.join(create.workerDir(foreignName), 'CLAUDE.md'), 'You are **Foreign**.\n', 'utf8');
-  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(foreignName)), `com.${foreignName}.discord.plist`), '<plist/>', 'utf8');
+  const foreignPlist = nodePath.join(nodePath.dirname(create.plistPath(foreignName)), `com.${foreignName}.discord.plist`);
+  fs.writeFileSync(foreignPlist, '<plist/>', 'utf8');
 
   const foreign = await req(`/api/agent/${foreignName}/removal`);
-  assert.notEqual(foreign.status, 200, 'the route offered a plan for an agent we did not create');
-  assert.match(JSON.parse(foreign.body).because, /not created by this app/);
-
-  const foreignDelete = await req(`/api/agent/${foreignName}/removal`, { method: 'DELETE' });
-  assert.notEqual(foreignDelete.status, 200, 'DELETE was accepted for an agent we did not create');
-  assert.ok(fs.existsSync(create.workerDir(foreignName)),
-    "the route touched a foreign agent's folder while refusing it");
+  assert.equal(foreign.status, 200, 'the route still refuses an agent another tool created');
+  assert.match(JSON.parse(foreign.body).question, /route-foreign/);
 
   // A malformed name answers rather than crashing the process.
   const bad = await req('/api/agent/%/removal', { method: 'DELETE' });
@@ -2167,56 +2164,108 @@ test('the removal routes refuse what the engine refuses, and answer what it plan
   const alive = await req('/api/status');
   assert.match(alive.type, /application\/json/, 'the server died on a malformed name');
 
-  /**
-   * ⚠️ THE SUCCESS PATH, AND THE FLAG IT CARRIES. Everything above is a
-   * refusal, so `?folder=delete` reaching `remove()` on DELETE was unpinned:
-   * inverting that flag in the route, or dropping the option from the call,
-   * left this suite green while the browser's checkbox stopped meaning
-   * anything.
-   */
-  const removal = require('./engine/remove');
-  removal.setRunner(() => ({ ok: true, stdout: '' }));
+  const seenRemoved = [];
+  removal.setRunner((f, a) => { seenRemoved.push([f, a]); return a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }; });
   removal.setDryRun(false);
+  // ⚠️ THE AGENT HAS TO BE ON THE BOARD BEFORE ANY OF THIS MEANS ANYTHING. An
+  // earlier version of this test asserted "it is gone from the board" without
+  // it ever having been there — which passes against a board that never
+  // filtered anything, and passed against one that filtered everything. The
+  // control below is the assertion that gives the two after it their meaning.
+  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
   try {
+    const before = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(before.includes('route-removable'),
+      'the agent is not on the board to begin with, so nothing below about removing it from the board can fail');
+
     const gone = await req('/api/agent/route-removable/removal', {
       method: 'DELETE', headers: { 'content-type': 'application/json' },
     });
     assert.equal(gone.status, 200, 'a legitimate removal was refused: ' + gone.body);
     assert.equal(JSON.parse(gone.body).outcome, 'removed');
-    assert.ok(!fs.existsSync(create.plistPath('route-removable')), 'the job survived the route');
-    // The DEFAULT keeps the folder, which is what the flag test below proves is
-    // actually being read rather than assumed.
-    assert.ok(fs.existsSync(create.instructionFile('route-removable')),
-      'the route deleted the folder without being asked to');
 
-    // And with the flag, it goes.
-    //
-    // ⚠️ `create` has to be armed again for this fixture. The earlier block's
-    // `finally` cleared its runner, which re-arms dry-run — and a dry-run
-    // creation still answers CREATED while writing nothing, so the fixture
-    // looked fine and the removal then refused it for having no job on disk.
-    create.setRunner(() => ({ ok: true, stdout: '' }));
-    create.setDryRun(false);
-    const made = create.createAgent({ name: 'route-wipe', role: 'pm' });
-    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
-    assert.ok(fs.existsSync(create.plistPath('route-wipe')),
-      'the fixture agent has no job on disk, so removing it would be refused for the wrong reason');
-    const wiped = await req('/api/agent/route-wipe/removal?folder=delete', {
-      method: 'DELETE', headers: { 'content-type': 'application/json' },
+    // ⚠️ REMOVE IS NOT DELETE, asserted at the route rather than only in the
+    // engine: this is the layer the browser reaches, and a route that passed a
+    // wipe flag through would satisfy every engine test.
+    assert.ok(fs.existsSync(create.plistPath('route-removable')), 'the route deleted the startup job');
+    assert.ok(fs.existsSync(create.instructionFile('route-removable')),
+      "the route deleted the agent's instructions");
+
+    // ⚠️ AND IT COMES OFF THE BOARD. The engine cannot assert this — the board
+    // is assembled here — and it is the only part of a removal the person who
+    // asked for it can actually see.
+    const listed = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(!listed.includes('route-removable'),
+      'a removed agent is still on the board, so nothing appeared to happen');
+
+    const removedList = JSON.parse((await req('/api/removed')).body).agents.map((a) => a.name);
+    assert.ok(removedList.includes('route-removable'),
+      'a removed agent is on no list at all, so it is stopped, invisible, and unrecoverable');
+
+    // ⚠️ THE ROUND TRIP. Restore must genuinely put it back — this route is the
+    // reason the confirmation is allowed to be a single light question.
+    const back = await req('/api/agent/route-removable/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
     });
-    assert.equal(wiped.status, 200);
-    assert.ok(!fs.existsSync(create.workerDir('route-wipe')),
-      'the folder flag does not reach the engine on DELETE, so the checkbox means nothing');
+    assert.equal(back.status, 200, 'restore was refused: ' + back.body);
+    assert.equal(JSON.parse(back.body).outcome, 'restored');
+    assert.ok(seenRemoved.some(([, a]) => a && a[0] === 'enable'),
+      'nothing was re-enabled, so the agent is "restored" but will not start again');
+    const after = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(after.includes('route-removable'), 'a restored agent never came back to the board');
   } finally {
     removal.setRunner(null);
     create.setRunner(null);
+    status.setPaneSource(null);
   }
 
-  // ⚠️ AND DELETE IS COVERED BY THE CROSS-SITE GUARD. It is a state-changing
-  // method on the most destructive route in the product; a page on another site
-  // must not be able to reach it.
+  // ⚠️ AND BOTH WRITES ARE COVERED BY THE CROSS-SITE GUARD. They are
+  // state-changing methods that stop and start real jobs; a page on another
+  // site must not be able to reach either one.
   const crossSite = await req('/api/agent/route-removable/removal', {
     method: 'DELETE', headers: { origin: 'https://evil.example' },
   });
-  assert.equal(crossSite.status, 403, 'another website can delete an agent');
+  assert.equal(crossSite.status, 403, 'another website can remove an agent');
+  const crossSiteBack = await req('/api/agent/route-removable/restore', {
+    method: 'POST', headers: { origin: 'https://evil.example' },
+  });
+  assert.equal(crossSiteBack.status, 403, 'another website can restore an agent');
+});
+
+test('the confirmation asks by name, defaults to keeping, and never writes its own words', () => {
+  /**
+   * ⚠️ THIS IS A SOURCE TEST AND SOURCE TESTS ARE WEAK. There is no DOM here —
+   * the product ships zero dependencies, so nothing in this suite can click the
+   * button. What follows checks that the browser file is WIRED the stated way;
+   * it cannot prove the modal behaves that way when a person uses it, and a
+   * mutation that moves one of these lines inside a conditional keeps it green.
+   *
+   * It is worth having anyway for one property no other test can reach: that
+   * this file does not COMPOSE the confirmation. Everything the person is asked
+   * comes from the engine, which IS executed, and is covered by the route test
+   * above. The live round trip in the proof file is what checks the behaviour.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  // The words come from the engine's answer, not from here.
+  assert.match(raw, /rm-title'\)\.textContent = ask\.question/,
+    'the browser writes its own confirmation heading, so it can drift from what removal actually does');
+  assert.match(raw, /rm-small'\)\.textContent = ask\.reassurance/,
+    'the reassurance is composed in the browser rather than served with the question');
+  assert.doesNotMatch(raw, /Are you sure you want to remove/,
+    'the confirmation sentence is hardcoded in the page, which is the drift this split exists to prevent');
+
+  // ⚠️ BOTH buttons name the agent. A bare "Yes"/"No" beside a half-read
+  // heading is how the wrong agent gets removed.
+  assert.match(raw, /'Remove ' \+ name/, 'the destructive button does not name the agent');
+  assert.match(raw, /'Keep ' \+ name/, 'the safe button does not name the agent');
+
+  // Keeping it is the default answer to every accident.
+  assert.match(raw, /keep\.focus\(\)/, 'the modal opens with the destructive button reachable by Enter');
+  assert.match(raw, /Escape/, 'Escape does not dismiss the modal');
+  assert.match(raw, /aria-modal="true"/, 'the dialog is not announced as modal');
+
+  // A partial must not close it — see the engine tests for what partial means.
+  assert.match(raw, /partial[\s\S]{0,400}?return;/,
+    'a half-finished removal closes the confirmation, so nobody reads that the agent is still running');
 });
