@@ -2,7 +2,7 @@
 pre_challenge: true
 method: challenge-loop
 branch: reject-mangled-panes
-diff_hash: 9d5b0e1d30b7ce0cfa4e33c5deb7eba007d1c85ce7ad5a831bc25b522c6b064c
+diff_hash: b67e13f030b362e96b6ceff3b2f2fe63cec154fd27dd5754e5c211af8b155571
 subdir_audit: n/a
 timestamp: 2026-08-11T06:16:41Z
 iterations: 1
@@ -16,6 +16,10 @@ converged: false
 WARNINGs, all fixed. A small, contained change on clean `main`; stopped after
 one round rather than looping to convergence, and the state is recorded here
 rather than claimed.
+⚠️ **Recomputed a second time after merging `main`** (which by then carried #24
+and #25). Any rebase or merge changes the diff a hash certifies, so it is
+checked at each one rather than assumed to survive.
+
 ⚠️ **The hash in this file was stale on its first write.** It was computed
 before the fixes it certifies were committed, so it covered the previous commit
 and would have been rejected at PR time. Caught by comparing it against the
