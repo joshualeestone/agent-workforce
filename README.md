@@ -43,6 +43,13 @@ can rewrite the file any of your agents boots from.
 
     node server.js      # then open http://127.0.0.1:4317
 
+If Claude or tmux is not where this expects (an Intel Mac keeps Homebrew at
+`/usr/local`; an npm-global Claude is not in `~/.local/bin`), creation refuses
+and says so. Name them instead of editing the code:
+
+    AGENT_WORKFORCE_CLAUDE_BIN=/usr/local/bin/claude \
+    AGENT_WORKFORCE_TMUX_BIN=/usr/local/bin/tmux node server.js
+
 ## The rule this codebase is built around
 
 An agent we cannot read is shown as **unknown**, never as something healthy.

@@ -1082,6 +1082,16 @@ test('every declared column reaches the parsed pane, not just the ones we rememb
     assert.ok(c.key in got,
       `the column '${c.key}' is declared in PANE_COLUMNS and never reaches the `
       + 'parsed pane, so everything downstream sees it as absent');
+    // ⚠️ And the VALUE, not just the key. Asserting presence alone let a column
+    // hardcoded to a constant (`claim: ''` rather than `raw.claim`) pass while
+    // dropping what tmux actually said — a narrower version of the very defect
+    // this test was written for. `session` and `pane` are excluded because the
+    // parser deliberately transforms them (the suffix is stripped, the target
+    // is composed), and `command`/`inMode` are normalised.
+    if (['session', 'pane', 'command', 'inMode'].includes(c.key)) return;
+    assert.equal(got[c.key], values[c.key],
+      `the column '${c.key}' reaches the parsed pane as a constant rather than `
+      + 'as what tmux reported, so its value is silently dropped');
   });
 });
 

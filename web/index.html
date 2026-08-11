@@ -1640,7 +1640,13 @@ async function watchForAgent(name, result) {
   } else {
     warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
       + 'The folder and the instructions are on your computer either way. It may still '
-      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.';
+      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
+      // ⚠️ Removing an agent is still a manual job, and this is the screen where
+      // somebody is most likely to want one gone. Saying "it is set to keep
+      // trying" without saying where is how a person ends up with a job they
+      // cannot find.
+      + '<br>It is set to keep trying at every login. Its folder is <code>~/work/workers/'
+      + esc(name) + '</code>, and removing it for good is written up in the README.';
   }
   warn.hidden = false;
   document.getElementById('made-done').hidden = false;

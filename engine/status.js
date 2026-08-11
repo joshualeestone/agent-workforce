@@ -458,9 +458,19 @@ function isNamedOurs(pane) {
   // a different agent is somebody else's claim, and reading "has a claim" as
   // "is ours" would be the borrowed-name hole rebuilt out of new parts.
   //
-  // ⚠️ KOSMOS writes this, never the agent. An agent setting its own option
-  // would let any process claim any name, which is the same hole through a
-  // different door.
+  // ⚠️ KOSMOS writes this, never the agent, and that is a CONVENTION rather
+  // than an enforcement — worth stating precisely, because the sentence used to
+  // read as a guarantee the mechanism does not provide. Any local process can
+  // run `tmux set-option -t <name> @kosmos_agent <name>` and be treated as
+  // ours, exactly as any local process can open a session called
+  // `<name>-discord` and be treated as ours by the legacy arm below. So this
+  // arm is no weaker than the one it extends, and neither is a defence against
+  // a process already running as you — which could rewrite the instruction file
+  // directly anyway.
+  //
+  // What the claim actually buys is that it DIES WITH THE SESSION: there is no
+  // stale record for a stranger to inherit later, which is the failure a claims
+  // file on disk would have had.
   const claim = String(pane.claim || '').trim();
   if (claim && claim === String(pane.name || '')) return true;
 

@@ -5,8 +5,9 @@
  *
  * Binds to localhost only, and it WRITES: it stores avatars, roles, the
  * commitments each agent says it is holding, and the instruction file each
- * agent reads at startup. It does not yet send input to an
- * agent or start or stop one.
+ * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
+ * worker directory, a startup script and a launchd job, and loads that job.
+ * It cannot yet send input to an agent, or stop or remove one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -390,14 +391,43 @@ function crossSiteWrite(req) {
   // `null` is what a sandboxed iframe or a `file://` page sends, and it is
   // never this board.
   if (origin && origin !== 'null') {
-    let host;
+    let parsed;
     try {
-      host = new URL(origin).hostname.replace(/\.$/, '').toLowerCase();
+      parsed = new URL(origin);
     } catch {
       return 'that request came from somewhere this board does not answer';
     }
+    const host = parsed.hostname.replace(/\.$/, '').toLowerCase();
     if (!LOOPBACK_HOSTS.has(host) && !ALLOWED_HOSTS.has(host)) {
       return 'that request came from another website, so we will not act on it';
+    }
+    /**
+     * ⚠️ AND THE PORT, for a loopback origin.
+     *
+     * Comparing the hostname alone made every other page on this machine
+     * same-site: a dev server on `http://127.0.0.1:3000` rendering somebody
+     * else's content, or an XSS in any other local app, could POST here and
+     * install a launchd job. "A page on another website" is the threat this
+     * guard names, and a page on another local port is one.
+     *
+     * The port is deliberately NOT compared for an `ALLOWED_HOSTS` name: that
+     * list is the explicit opt-in for a reverse proxy, and a proxy legitimately
+     * renumbers ports — the same reasoning the `Host` check gives. The
+     * difference is that a loopback origin has an exact right answer, which is
+     * this server's own.
+     */
+    // Compared against the `Host` the browser actually used, NOT against the
+    // module's `PORT` constant: this server can be started on any port, and a
+    // guard that tests a configured default refuses legitimate writes on every
+    // other one. Origin and Host being the same host:port is precisely what
+    // same-origin means, so this asks the real question.
+    const sentHost = String((req.headers && req.headers.host) || '')
+      .toLowerCase().replace(/\.(?=:|$)/, '');
+    const originHost = `${host}${parsed.port ? `:${parsed.port}` : ''}`;
+    // ALLOWED_HOSTS is the explicit reverse-proxy opt-in, and a proxy
+    // legitimately renumbers ports — the same exception the `Host` check makes.
+    if (sentHost && originHost !== sentHost && !ALLOWED_HOSTS.has(host)) {
+      return 'that request came from another program on this computer, so we will not act on it';
     }
   } else if (origin === 'null') {
     return 'that request came from somewhere this board does not answer';
@@ -646,9 +676,9 @@ const server = http.createServer((req, res) => {
         try {
           body = JSON.parse(buf.toString('utf8') || '{}') || {};
         } catch {
-          const err = new Error('we could not read that request');
-          err.code = 'SAY_WHAT';
-          throw err;
+          // No error code: the catch below answers in our own words whatever
+          // this is, and a code nothing reads is a hint that something does.
+          throw new Error('we could not read that request');
         }
 
         const result = create.createAgent({ name: body.name, role: body.role });
@@ -851,10 +881,19 @@ const server = http.createServer((req, res) => {
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
  * It sets roles, stores avatars, records the commitments the restart
- * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. Restart is
- * next. There is no authentication of any kind.
+ * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. There is no
+ * authentication of any kind.
  *
- * Two ways that protection is lost, and only the first is obvious:
+ * ⚠️ AND IT CREATES AGENTS, which is the most powerful thing behind this bind
+ * and was missing from this list while it was true. `POST /api/agents` installs
+ * a launchd job with RunAtLoad and KeepAlive that starts Claude with
+ * `--dangerously-skip-permissions` at every login, and whose instruction file
+ * any subsequent write here can rewrite. This paragraph is what README points
+ * a reader at for "what protects it, and what does not", so leaving the newest
+ * and largest capability out of it made the canonical statement of the posture
+ * the least accurate thing about it.
+ *
+ * THREE ways that protection is lost, and only the first is obvious:
  *
  *   1. Changing this to '0.0.0.0'. A one-line edit that looks harmless and
  *      exposes every write endpoint to whatever network the machine is on.
@@ -865,6 +904,14 @@ const server = http.createServer((req, res) => {
  *      it is already enabled on the mini this was built on, publishing three
  *      localhost ports. Adding a route for this one would publish it too,
  *      without touching a line of this file.
+ *
+ *   3. ⚠️ A page on ANOTHER SITE, which needs no misconfiguration at all. A
+ *      POST with a form content type is a CORS simple request: no preflight,
+ *      and the loopback `Host` a legitimate request carries. Measured against
+ *      this server before `crossSiteWrite` existed — a page on any origin
+ *      created a worker directory and installed a launchd job. That guard is
+ *      now the third thing holding this up, and it is the only one that
+ *      protects a machine whose owner did nothing wrong.
  *
  * So localhost is a *default*, not a guarantee. Reachability and login arrive
  * together or not at all.

@@ -131,6 +131,13 @@ function nameProblem(raw) {
   const name = cleanName(raw);
   if (!name) return 'give the agent a name';
   if (name.toLowerCase() !== name) return 'use lower case, so the name is the same everywhere it appears';
+  // ⚠️ Length gets its OWN sentence. `NAME_RE` enforces 2 to 32 characters, and
+  // a person who typed `a` was told to use letters, numbers, hyphens and
+  // underscores -- a rule they had not broken, with no way to work out what was
+  // actually wrong. A refusal that names the wrong rule is worse than a vague
+  // one.
+  if (name.length < 2) return 'use at least two characters, so the name is something you can pick out';
+  if (name.length > 32) return 'keep it to 32 characters or fewer';
   if (!NAME_RE.test(name)) {
     return 'use letters, numbers, hyphens and underscores, starting with a letter or number';
   }
@@ -209,6 +216,16 @@ function launcherFor(name, claudeBin, tmuxBin) {
 # agent's session ends.
 
 SESSION='${name}'
+LOG='${logFile(name)}'
+# ⚠️ EVERY -t target below uses "=$SESSION", not "$SESSION". tmux's default
+# target resolution falls back to a PREFIX MATCH: with only angel-discord
+# running, 'tmux has-session -t ang' succeeds. So an agent named sam beside a
+# samantha-discord session would find the wrong session, see a claim that can
+# never equal its own name, and wait here forever -- and after the agent's own
+# session ended, the supervision loop at the bottom would never exit either, so
+# launchd would never restart it. Both silent. The leading equals sign means
+# exactly this name and nothing else.
+TARGET="=${name}"
 # ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
 # socket path of the server you are inside -- and bash keeps the export
 # attribute, so assigning it here hands every child a malformed $TMUX. Run this
@@ -229,17 +246,23 @@ WORKDIR='${dir}'
 # The claim is the tie. If something else holds the name we WAIT rather than
 # exit: exiting would have launchd restart us every 30 seconds, and waiting
 # recovers on its own the moment that session ends.
+# launchd appends to this log forever, and a persistently failing start writes
+# a line every 30 seconds for as long as the machine is on. Keep it bounded.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
+  : > "$LOG"
+fi
+
 warned=0
-while "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; do
-  if [ "$("$TMUX_BIN" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
-    "$TMUX_BIN" kill-session -t "$SESSION" 2>/dev/null
+while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
+  if [ "$("$TMUX_BIN" show-options -t "$TARGET" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
+    "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
     break
   fi
   if [ "$warned" -eq 0 ]; then
     echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
     warned=1
   fi
-  sleep 30
+  sleep 5
 done
 
 # --dangerously-skip-permissions is not optional for an unattended agent.
@@ -257,11 +280,11 @@ done
 
 # The claim. Without it this agent is anonymous on the board after every
 # restart, whatever it was when it was created.
-"$TMUX_BIN" set-option -t "$SESSION" @kosmos_agent "$SESSION"
+"$TMUX_BIN" set-option -t "$TARGET" @kosmos_agent "$SESSION"
 
 # Stay alive while the session does, so launchd supervises the AGENT rather
 # than a command that exits in a tenth of a second.
-while "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null; do
+while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
   sleep 10
 done
 `;
@@ -401,6 +424,24 @@ function createAgent(opts) {
     return {
       outcome: OUTCOME.REFUSED,
       because: `there is already an agent called ${name}`,
+      steps,
+    };
+  }
+
+  /* ⚠️ AND AN EXISTING STARTUP JOB, which is neither a folder nor a session.
+   *
+   * "Folder gone, job still loaded" is a state the README actively tells people
+   * to expect, because removing an agent is still manual and deleting the
+   * folder is explicitly not enough. Landing in it, this function used to
+   * overwrite the plist on disk -- diverging it from the job launchd has
+   * already loaded -- and then fail at `bootstrap`, reporting "we set it up but
+   * could not start it". True, and about the wrong thing, on the one screen
+   * built to tell somebody which half failed.
+   */
+  if (fs.existsSync(plistPath(name))) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is still set to start on this computer, even though there is no agent by that name. It has to be removed before the name can be used again.`,
       steps,
     };
   }

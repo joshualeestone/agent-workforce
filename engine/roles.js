@@ -3,7 +3,7 @@
 /**
  * The starter roles.
  *
- * ⚠️ A role is NOT just an instruction file. It is three things, and the third
+ * ⚠️ A role is NOT just an instruction file. It is two things, and the second
  * is the one that keeps getting forgotten:
  *
  *   1. `instructions` — what the agent is, written as the agent's own file.

@@ -1867,13 +1867,38 @@ test('a write another website could send is refused, whatever route it names', a
       assert.equal(calls.length, 0, `${label}: a command ran for a request from another website`);
     }
 
-    // ⚠️ THE CONTROL, in two halves, because a guard that refuses everything
+    // ⚠️ AND ON A ROUTE THAT IS NOT THE NEW ONE. This test is named "whatever
+    // route it names", and every case above targets /api/agents — so a
+    // regression scoping the guard to that one path would leave it green.
+    const otherRoute = await req('/api/agent/angel/profile', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ role: 'theirs' }),
+    });
+    assert.equal(otherRoute.status, 403, 'the guard only covers the route it was written for');
+
+    // ⚠️ ANOTHER PROGRAM ON THIS COMPUTER is not this board. Comparing the
+    // hostname alone made every other loopback port same-site: a dev server
+    // rendering somebody else's content, or an XSS in any other local app,
+    // could have installed a launchd job from 127.0.0.1:3000.
+    const otherPort = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:3000' },
+      body: JSON.stringify({ name: 'csrf-fixture', role: 'pm' }),
+    });
+    assert.equal(otherPort.status, 403, 'a page on another local port was treated as this board');
+    assert.equal(calls.length, 0, 'a command ran for a page on another local port');
+
+    // ⚠️ THE CONTROL, in three parts, because a guard that refuses everything
     // passes every assertion above while breaking the product.
     //
-    // The board's own write still goes through...
+    // The board's own write still goes through. The origin is built from the
+    // ACTUAL base, not a hardcoded port: this server binds wherever it is told,
+    // and a guard compared against a configured default would refuse every
+    // legitimate write on every other port.
     const ours = await req('/api/agents', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:4317' },
+      headers: { 'content-type': 'application/json', origin: new URL(base).origin },
       body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
     });
     assert.equal(ours.status, 400,
@@ -1888,6 +1913,16 @@ test('a write another website could send is refused, whatever route it names', a
     });
     assert.notEqual(avatar.status, 403,
       'the avatar upload is refused as cross-site, so the guard is stricter than the threat');
+
+    // ...and so does a client that is not a browser at all: `curl` and the
+    // board's own tooling send no Origin, and a form cannot produce a request
+    // with no content type, so there is nothing to refuse.
+    const plain = await req('/api/agents', {
+      method: 'POST', body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.notEqual(plain.status, 403,
+      'a request with no Origin was refused, which breaks every non-browser caller');
   } finally {
     create.setRunner(null);
   }

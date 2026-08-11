@@ -188,7 +188,7 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   create.createAgent({ ...BINS, name: 'claimed-one', role: 'pm' });
 
   const script = fs.readFileSync(create.launcherFile('claimed-one'), 'utf8');
-  assert.match(script, /set-option -t "\$SESSION" @kosmos_agent "\$SESSION"/,
+  assert.match(script, /set-option -t "\$TARGET" @kosmos_agent "\$SESSION"/,
     'the startup script does not claim the session, so the board will stop '
     + 'recognising this agent the first time it restarts');
   assert.match(script, /SESSION='claimed-one'/, 'the script does not name this agent as itself');
@@ -468,7 +468,7 @@ test('the board can read the identity the creation writes, for every role', () =
 
   for (const role of roles.ROLES) {
     const name = `ident-${role.key}`;
-    const made = create.createAgent({ name, role: role.key });
+    const made = create.createAgent({ ...BINS, name, role: role.key });
     assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
 
     const identity = status.readIdentity(name);
@@ -566,7 +566,37 @@ test('the startup script will not kill a session it cannot prove is ours', () =>
   assert.ok(check < kill, 'the kill happens before the check, so the check cannot stop it');
 
   // And it WAITS rather than exiting: exiting would have launchd restart it
-  // every thirty seconds against a session it must not touch.
-  assert.match(script, /sleep 30/, 'nothing waits for the other session to end');
+  // every thirty seconds against a session it must not touch. The poll is short
+  // because the screen only waits thirty seconds in total, so a name that frees
+  // up must not cost more than that before the agent starts.
+  assert.match(script, /sleep 5\n/, 'nothing waits for the other session to end');
   assert.match(script, /waiting rather than killing it/, 'nothing says why the agent has not started');
+});
+
+test('the startup script names its session exactly, not by prefix', () => {
+  // ⚠️ tmux's default target resolution falls back to a PREFIX MATCH. Measured
+  // on this machine: with only `angel-discord` running, `tmux has-session -t
+  // ang` exits 0 and `-t "=ang"` correctly fails. So an agent named `sam`
+  // created beside a `samantha-discord` session would find the WRONG session in
+  // its wait loop, read a claim that can never equal its own name, and sleep
+  // forever -- and once its own session ended, the supervision loop would never
+  // exit, so launchd would never bring it back. Two silent hangs, both invisible
+  // to the screen, which can only say "it has not come up".
+  //
+  // The creation-time roster check cannot catch this: it compares exact names in
+  // JavaScript, and the prefix match happens later, inside tmux.
+  const script = create.launcherFor('sam', '/bin/echo', '/bin/echo');
+  assert.match(script, /TARGET="=sam"/, 'the script does not build an exact-match target');
+
+  for (const line of script.split('\n')) {
+    // Commands only. A comment mentioning the hazard is not one.
+    if (line.trim().startsWith('#') || !/-t /.test(line)) continue;
+    assert.match(line, /-t "\$TARGET"/,
+      `a tmux target is resolved by prefix rather than exactly: ${line.trim()}`);
+  }
+
+  // The session is CREATED with the plain name -- `new-session -s` takes a
+  // literal, and an `=` there would become part of the name.
+  assert.match(script, /new-session -d -s "\$SESSION"/,
+    'the session is created with the match syntax in its name');
 });

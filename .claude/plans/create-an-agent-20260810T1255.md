@@ -62,13 +62,13 @@ created before that fix came back anonymous after its first restart.
 
 - [x] A tmux session option set by Kosmos, not a file. (Superseded:
       `~/.../claims/<key>.json` holding `{ sessionName, createdAt, createdBy }`.)
-- [ ] `isNamedOurs` becomes `hasClaim(pane) || /-discord$/`, with the suffix kept
+- [x] `isNamedOurs` becomes `hasClaim(pane) || /-discord$/`, with the suffix kept
       as the legacy arm so the existing fleet keeps working unchanged.
-- [ ] ⚠️ **The claim is written by KOSMOS, not by the agent.** An agent writing
+- [x] ⚠️ **The claim is written by KOSMOS, not by the agent.** An agent writing
       its own claim would let any process claim any name — the same borrowed-name
       hole, through a different door. Kosmos creates the session and the claim in
       one operation, and only it writes there.
-- [ ] ⚠️ **A claim without a live session is not a tie.** The pane must still
+- [x] ⚠️ **A claim without a live session is not a tie.** The pane must still
       exist and still be ours; the claim only says *whose* it is.
 
 ## What creating an agent actually does
@@ -76,31 +76,41 @@ created before that fix came back anonymous after its first restart.
 Each of these is a file or a command that exists on this machine today, done by
 hand. None requires a human decision beyond the name and the role.
 
-- [ ] **The working directory** — `~/work/workers/<key>/`.
-- [ ] **The instruction file** — `CLAUDE.md`, from the chosen role's template.
-- [ ] **The claim** — as above.
-- [ ] **The tmux session**, started in that directory with the model and
-      `--dangerously-skip-permissions`.
+- [x] **The working directory** — `~/work/workers/<key>/`.
+- [x] **The instruction file** — `CLAUDE.md`, from the chosen role's template.
+- [x] **The claim** — as above.
+- [x] **The tmux session**, started in that directory with
+      `--dangerously-skip-permissions`. ⚠️ AMENDED: no model selection exists,
+      here or anywhere in the product — the picker shows the open-weight models
+      as coming and does not choose between the Claude ones. The agent starts on
+      whatever `claude` defaults to.
+      ⚠️ AMENDED: it is not started by us at all any more. The launchd job
+      starts it, at creation and at every login after, so the session a person
+      gets on day one is built by the same code that rebuilds it forever.
       ⚠️ That flag is the single worst step in the manual path: without it the
       agent starts, looks healthy, and freezes forever on its first permission
       prompt. **A user must never meet it.**
-- [ ] **A launchd job**, so it survives a reboot and restarts if it dies.
+- [x] **A launchd job**, so it survives a reboot and restarts if it dies.
       ⚠️ It needs `PATH` **and `LANG`** — see issue #23. Without `LANG`, tmux
       sanitises its own format output and the board reports an agent whose name
       is the entire raw line. Found the hard way this morning.
-- [ ] **Verification** — the session exists, Claude is running in it, and the
+- [x] **Verification** — the session exists, Claude is running in it, and the
       board can read it. **"Started" is a claim about us; "it answered" is a
       claim about the agent**, and only the second is worth showing.
 
 ## Roles
 
-- [ ] A small library of role templates: instruction text, a suggested first
-      action, and a default folder scope.
-- [ ] **Project manager is the suggested default.**
-- [ ] ⚠️ **Every role ships a suggested first action.** Without one, a role that
+- [x] A small library of role templates: instruction text and a suggested first
+      action. ⚠️ AMENDED: the "default folder scope" was built and then removed —
+      nothing read it. Every agent works in `~/work/workers/<name>`, which is
+      what both the job and the session use, so a `scope` field only looked
+      implemented. It returns when agents get a working folder the creation
+      actually reads.
+- [x] **Project manager is the suggested default.**
+- [x] ⚠️ **Every role ships a suggested first action.** Without one, a role that
       lands on a working agent and a blank prompt puts the person back in front
       of the box the role library exists to remove.
-- [ ] ⚠️ **Legal is NOT in the first set** pending Josh — framing and a
+- [x] ⚠️ **Legal is NOT in the first set** pending Josh — framing and a
       disclaimer cover Copyright and Finance; Legal is where a wrong draft costs
       most.
 
