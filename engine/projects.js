@@ -125,11 +125,6 @@ function readAll() {
   throw damaged;
 }
 
-/** The list, or an empty one, for callers that only need to iterate. */
-function readAllOrEmpty() {
-  try { return readAll(); } catch { return []; }
-}
-
 function writeAll(list) {
   // ⚠️ REFUSES rather than clobbers. A `projects.json` that could not be read or
   // parsed was silently replaced by the next write, and every record in it was
@@ -451,39 +446,80 @@ function remove(id) {
  * the surviving marker onward eaten. Losing text is worse than a duplicate
  * heading somebody can see and delete.
  */
+/**
+ * Where the managed block IS, or null.
+ *
+ * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
+ * idea of where the block starts — `indexOf(BLOCK_START)` from zero — and it
+ * was WRONG in exactly the case `spliceBlock` had already been hardened
+ * against. Measured: an instruction file carrying a stranded start marker plus
+ * a real block lost the user's whole "## House rules" section on removal, and
+ * `syncAgent` still answered `told`, so the screen said "Kosmos told it where
+ * this folder is" about a write that had just eaten somebody's words. Two
+ * derivations of one question is this codebase's worst habit and it grew back
+ * inside the fix for the last instance of it.
+ *
+ * BOTH single-marker cases are reachable from a hand edit or an interrupted
+ * write, and each breaks a different naive rule:
+ *   a stranded START before a real block — first-start-to-first-end spans them
+ *     and eats everything between;
+ *   a stranded END before a real block — first-end-then-look-backwards finds no
+ *     start, so a block is appended EVERY time and the file grows without bound
+ *     until it outgrows the write limit and every save fails, including the
+ *     person's own.
+ * So: scan ends left to right, and take the first one that has a start before
+ * it.
+ */
+function findBlock(text) {
+  const original = String(text == null ? '' : text);
+  for (let from = 0; ;) {
+    const end = original.indexOf(BLOCK_END, from);
+    if (end < 0) return null;
+    const start = original.lastIndexOf(BLOCK_START, end);
+    if (start >= 0) return { start, end: end + BLOCK_END.length };
+    from = end + BLOCK_END.length;
+  }
+}
+
+/**
+ * Replace the managed block in some instruction text, leaving everything else
+ * exactly as it was.
+ *
+ * PURE and separately tested, because this is the function that can eat
+ * somebody's words. The instruction file is described in its own module as
+ * "the most powerful write in the product", and a projects feature has no
+ * business being the thing that truncates one.
+ */
 function spliceBlock(text, body) {
   const original = String(text == null ? '' : text);
   const block = `${BLOCK_START}\n${body}\n${BLOCK_END}`;
-  // ⚠️ THE END MARKER IS FOUND FIRST, THEN THE NEAREST START BEFORE IT, and
-  // that order is the whole fix. Taking the FIRST start and the FIRST end
-  // destroyed user text on the SECOND write: a file with a stranded start
-  // marker gets a new block appended (correct), which leaves the stranded
-  // marker sitting BEFORE the new block's end marker — so the next write
-  // spanned from the stranded marker all the way to the real end and sliced
-  // out everything in between. Measured: "keep me" survived one splice and
-  // was gone after two. The single-splice test could not see it.
-  // ⚠️ SCANS for a well-formed pair rather than trusting the first marker of
-  // each kind, because BOTH single-marker cases are reachable by a hand edit
-  // and each one breaks a different naive rule:
-  //   a stranded START before a real block -- first-start-to-first-end spans
-  //     them and eats everything between (measured: text gone on write two);
-  //   a stranded END before a real block -- taking the first end and looking
-  //     backwards finds no start, so a block is appended EVERY time and the
-  //     file grows without bound (measured: 4 writes, 5 blocks, nothing ever
-  //     replaced) until it outgrows the write limit and every instruction save
-  //     fails permanently, including the person's own.
-  for (let from = 0; ;) {
-    const end = original.indexOf(BLOCK_END, from);
-    if (end < 0) break;
-    const start = original.lastIndexOf(BLOCK_START, end);
-    if (start >= 0) {
-      return original.slice(0, start) + block + original.slice(end + BLOCK_END.length);
-    }
-    from = end + BLOCK_END.length;
-  }
+  const at = findBlock(original);
+  if (at) return original.slice(0, at.start) + block + original.slice(at.end);
   if (!original.trim()) return block + '\n';
   const sep = original.endsWith('\n') ? '\n' : '\n\n';
   return original + sep + block + '\n';
+}
+
+/**
+ * Take the managed block out, leaving everything else exactly as it was.
+ *
+ * ⚠️ Returns the input UNCHANGED when there is no block, byte for byte. It used
+ * to append a newline and collapse trailing blank lines even when it removed
+ * nothing — and `tellAgent` only skips the write on exact equality, so a
+ * no-op removal still rewrote `CLAUDE.md`. That rotates the one-deep
+ * `.previous` backup `instructions.write` keeps (destroying the person's undo
+ * of their OWN last edit) and flips the agent to "running on older
+ * instructions" for a change that was not a change.
+ */
+function removeBlock(text) {
+  const original = String(text == null ? '' : text);
+  const at = findBlock(original);
+  if (!at) return original;
+  const before = original.slice(0, at.start);
+  const after = original.slice(at.end);
+  // The block was written with a blank line in front of it; take that back out
+  // rather than leaving a growing gap where it used to be.
+  return (before.replace(/\n{2,}$/, '\n') + after.replace(/^\n+/, '')) || '';
 }
 
 /**
@@ -512,26 +548,6 @@ function oneLine(value) {
     .split(BLOCK_START).join('(kosmos marker)')
     .split(BLOCK_END).join('(kosmos marker)')
     .trim();
-}
-
-/**
- * Take the managed block out, leaving everything else exactly as it was.
- *
- * Shares `spliceBlock`'s pair-finding by going through it: splicing in a
- * sentinel and then cutting the sentinel out means there is ONE rule for
- * "where is the block", not two that can drift.
- */
-function removeBlock(text) {
-  const original = String(text == null ? '' : text);
-  const spliced = spliceBlock(original, '\u0000SENTINEL\u0000');
-  const at = spliced.indexOf(BLOCK_START);
-  if (at < 0) return original;
-  const end = spliced.indexOf(BLOCK_END, at);
-  if (end < 0) return original;
-  // Only remove a block we actually put a sentinel in; otherwise leave it.
-  if (!spliced.slice(at, end).includes('\u0000SENTINEL\u0000')) return original;
-  const cut = spliced.slice(0, at) + spliced.slice(end + BLOCK_END.length);
-  return cut.replace(/\n{3,}$/, '\n');
 }
 
 function blockBody(projects) {
@@ -653,7 +669,7 @@ function syncAgent(sessionName, roster) {
 
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
-  file, readAll, readAllOrEmpty, writeAll, idFor, folderState, describe,
+  file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
-  spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
+  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
 };

@@ -93,12 +93,32 @@ const post = (p, body) => api(p, {
  * a requirement that gets skipped exactly once.
  */
 async function assertSandboxed() {
-  const { projects } = await api('/api/projects');
   if (!SANDBOX) {
     throw new Error('pass the server\'s sandbox root as the 4th argument; this check deletes every project on the server it is pointed at');
   }
-  if (projects.length) {
-    console.log(`  note: clearing ${projects.length} existing project(s) from the sandboxed server`);
+  // ⚠️ PROVES it, rather than taking the argument's word for it. The first
+  // version only checked that argv[4] was a non-empty string -- so any string
+  // at all satisfied a guard whose own comment said "a documented requirement
+  // that nothing checks is a requirement that gets skipped exactly once", while
+  // `clearProjects` below deletes every project on whatever server it is
+  // pointed at and rewrites those members' real instruction files.
+  //
+  // The probe is a real project through the real route, and it passes only if
+  // the record lands INSIDE the sandbox we were handed.
+  const probe = path.join(SANDBOX, 'sandbox-probe');
+  fs.mkdirSync(probe, { recursive: true });
+  const made = await post('/api/projects', { name: 'kosmos sandbox probe', folder: probe });
+  try {
+    const store = path.join(SANDBOX, 'data', 'AgentWorkforce', 'projects.json');
+    if (!fs.existsSync(store)) {
+      throw new Error(`the server at ${BASE} did not write to ${store} -- it is NOT running against the sandbox you passed. Refusing to touch it.`);
+    }
+    if (!fs.readFileSync(store, 'utf8').includes('kosmos sandbox probe')) {
+      throw new Error(`the server at ${BASE} wrote somewhere other than ${store} -- refusing to touch it.`);
+    }
+  } finally {
+    await api('/api/project/' + encodeURIComponent(made.project.id), { method: 'DELETE' });
+    fs.rmSync(probe, { recursive: true, force: true });
   }
 }
 
@@ -252,6 +272,15 @@ async function main() {
     const page = await ctx.newPage();
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.waitForTimeout(600);
+    // ⚠️ MEASURED FROM THE ONE-PROJECT VIEW, not the list. On a freshly loaded
+    // list view `#pj-one-agents` is empty and `#pj-one-view` is hidden, so four
+    // of the nine selectors -- including the told-line and the folder warning,
+    // the copy carrying this feature's honesty claims -- never matched, were
+    // silently skipped, and the run printed a pass anyway. Another measurement
+    // that could not fail, in the very check written because the last one
+    // could not fail.
+    await page.click('[data-project="hendersonlease"]');
+    await page.waitForTimeout(400);
     const els = await page.evaluate(() => {
       const bgOf = (el) => {
         let n = el;
@@ -263,16 +292,28 @@ async function main() {
         return 'rgb(255, 255, 255)';
       };
       const out = [];
-      for (const sel of ['.pj-row b', '.pj-row .pj-path', '.pj-row .pj-who', '.pj-lede',
-        '.pj-warn', '.pj-member b', '.pj-member small', '.pj-member .pj-told', '.pj-crumbs']) {
+      // ⚠️ SCOPED to the projects panel. Unscoped, `.fhint` and `.flabel`
+      // matched the FIRST one in the document -- inside a hidden panel -- and
+      // the stricter miss-reporting above caught it on the first run, which is
+      // the check working rather than the check being wrong.
+      for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
+        '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
+        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel']) {
         const el = document.querySelector(sel);
-        if (!el) continue;
+        // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
+        // went unmeasured under a printed pass.
+        if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
         out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
       }
       return out;
     });
     for (const e of els) {
+      if (e.missing) {
+        contrastFails += 1;
+        console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);
+        continue;
+      }
       const cr = contrast(e.fg, e.bg);
       const large = e.size >= 24 || (e.size >= 18.66 && Number(e.weight) >= 700);
       const need = large ? 3 : 4.5;

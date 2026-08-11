@@ -441,7 +441,6 @@ test('a corrupt projects file is refused, NOT reported as no projects', () => {
   // Kosmos at a folder you already have" -- a positive claim about a state
   // nobody checked. "We cannot read it" is not "there is nothing".
   assert.throws(() => projects.readAll(), /cannot make sense of it/);
-  assert.deepEqual(projects.readAllOrEmpty(), [], 'callers that only iterate still get a list');
 });
 
 test('a projects file we cannot read is never overwritten', () => {
@@ -656,4 +655,51 @@ test('an agent with no instruction file is not given one', () => {
   assert.equal(verdict.state, projects.TOLD.COULD_NOT);
   assert.match(verdict.because, /no instructions file yet/);
   assert.ok(!fs.existsSync(path.join(dir, 'CLAUDE.md')), 'and none was created');
+});
+
+test('removing the block does not eat the user’s own words around a stranded marker', () => {
+  // ⚠️ MEASURED. `removeBlock` located the block with `indexOf(BLOCK_START)`
+  // from zero — its own rule, not the one `spliceBlock` had already been
+  // hardened to — so a file carrying a stranded marker lost everything between
+  // that marker and the real block's end. The user's "## House rules" section
+  // was gone and `syncAgent` still answered `told`, so the screen said "Kosmos
+  // told it where this folder is" about a write that had just destroyed text.
+  // Two derivations of one question, grown back INSIDE the fix for the last
+  // instance of it.
+  const stranded = `# Mara\n\nYou are the executive assistant.\n\n${projects.BLOCK_START}\n\n## House rules\n\nNever send an email without asking.\n`;
+  const withBlock = projects.spliceBlock(stranded, '- **Henderson**');
+  assert.ok(withBlock.includes('## House rules'), 'the control: it was there after the add');
+
+  const after = projects.removeBlock(withBlock);
+  assert.ok(after.includes('## House rules'), 'and it is still there after the removal');
+  assert.ok(after.includes('Never send an email without asking.'));
+  assert.ok(!after.includes('Henderson'), 'while the block itself really is gone');
+});
+
+test('removing a block that is not there changes nothing, byte for byte', () => {
+  // `tellAgent` skips the write only on exact equality, so a no-op that is not
+  // byte-exact still rewrites CLAUDE.md — rotating the one-deep `.previous`
+  // backup (the person's undo of their OWN last edit) and flipping the agent to
+  // "running on older instructions" for a change that was not a change.
+  for (const text of ['# A\n\nplain\n', '# A\n\nno trailing newline', '', 'x\n\n\n\n']) {
+    assert.equal(projects.removeBlock(text), text, JSON.stringify(text));
+  }
+});
+
+test('findBlock is the one rule both writers use', () => {
+  // If these ever disagree again, this is the test that says so.
+  const cases = [
+    `${projects.BLOCK_START}\nx\n${projects.BLOCK_END}`,
+    `pre\n${projects.BLOCK_START}\nstranded\n\n${projects.BLOCK_START}\nx\n${projects.BLOCK_END}\npost`,
+    `pre\n${projects.BLOCK_END}\n${projects.BLOCK_START}\nx\n${projects.BLOCK_END}\npost`,
+  ];
+  for (const text of cases) {
+    const at = projects.findBlock(text);
+    assert.ok(at, JSON.stringify(text));
+    const spliced = projects.spliceBlock(text, 'NEW');
+    const removed = projects.removeBlock(text);
+    assert.equal(spliced.slice(0, at.start), text.slice(0, at.start), 'splice keeps everything before');
+    assert.equal(removed.length < text.length, true, 'remove takes the same span out');
+    assert.equal(spliced.split(projects.BLOCK_END).length - 1, text.split(projects.BLOCK_END).length - 1);
+  }
 });

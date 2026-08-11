@@ -199,8 +199,13 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
 .pj-member.unseen { border-style: dashed; }
+/* ⚠️ 24px minimum, because this is the only destructive control on the row and
+   WCAG 2.2 SC 2.5.8 (Target Size Minimum) is a Level AA criterion — and AA is
+   this project's floor, not its aspiration. It was a 10px underlined caption
+   with no padding: about a 13px-tall target. */
 .pj-member .drop { margin-left: auto; background: none; border: 0; cursor: pointer;
-  font: var(--text-caption) var(--font-ui); color: var(--label-2); text-decoration: underline; }
+  font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
+  min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
 .pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
 .pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
   border-radius: var(--radius-control); }
@@ -1390,6 +1395,15 @@ async function paintAgentProjects(sessionName) {
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
+    PROJECTS = body.projects || [];
+    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+    // ⚠️ `res.ok` is checked, and PROJECTS is not clobbered on failure. A 500
+    // answered `{error, projectsUnreadable}` with no `projects` key, so
+    // `body.projects || []` made an agent whose list we COULD NOT READ render
+    // identically to one that is on none -- this function's own docstring says
+    // "we have not looked" must not render as "it is on none", and the 500 path
+    // was exactly that failure.
+    if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'unreadable');
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
   } catch {
@@ -3029,9 +3043,14 @@ function pjMember(m, projectId) {
   }
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
     + '<b>' + esc(m.name) + '</b>'
+    // ⚠️ An `unknown` state carries its REASON here. A bare "Can't tell" sat
+    // directly above "Kosmos told it where this folder is", and the two read as
+    // a contradiction on one row -- the same juxtaposition the engine calls out
+    // as a shipped defect. Everywhere else in this app an unknown says why.
     + (m.present
-      ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label) + '</small>'
-      : '<small>We cannot see this agent on this computer right now.</small>')
+      ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
+        + (m.state === 'unknown' && m.because ? ' — ' + esc(m.because) : '') + '</small>'
+      : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
     + (projectId ? '<button class="drop" type="button" aria-label="Take ' + esc(m.name)
       + ' off this project" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
@@ -3270,7 +3289,12 @@ function openAddProject() {
 /* --- wiring ------------------------------------------------------------ */
 
 document.getElementById('pj-new').addEventListener('click', openAddProject);
-document.getElementById('pj-back').addEventListener('click', () => { PJ_CURRENT = null; pjView('list'); });
+// ⚠️ Closes the confirmation on the way out. Leaving it open inside a hidden
+// view left the 5-second refresh permanently switched off (the poll bails while
+// a question is open, on purpose) -- so the screen whose whole honesty argument
+// is "it keeps re-reading" quietly stopped, for the rest of the session, and
+// nothing said so.
+document.getElementById('pj-back').addEventListener('click', () => { pjCloseConfirm(); PJ_CURRENT = null; pjView('list'); });
 document.getElementById('pj-add-back').addEventListener('click', () => pjView('list'));
 
 document.getElementById('pj-list').addEventListener('click', (e) => {

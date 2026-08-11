@@ -50,7 +50,19 @@ const os = require('node:os');
  * question about the RECORD.
  */
 function safeRoster() {
-  try { return paneRoster(); } catch { return []; }
+  // ⚠️ RETURNS NULL, NOT []. It used to return an empty array, and an empty
+  // array is a claim: it says we looked and there was nobody. Measured
+  // consequence — creating a project while tmux could not be read recorded
+  // `everSeen[agent] = false` for a real agent, and NOTHING ever recomputes
+  // that, so the screen said "we have never seen an agent by this name on this
+  // computer" about a running agent, permanently. `tellAgent` likewise blamed
+  // the name instead of saying we could not check.
+  //
+  // The engine already knew the difference: every consumer treats a non-array
+  // roster as "we could not look" and says so. Returning [] meant no route ever
+  // reached that path, so the honest branch was dead code in production while
+  // its tests passed.
+  try { return paneRoster(); } catch { return null; }
 }
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
@@ -1117,8 +1129,11 @@ const server = http.createServer((req, res) => {
       // The record is still readable when the roster is not, so the projects
       // themselves are served with every member marked unseen rather than the
       // whole page failing. `describe` already says `present: false` for each.
+      // `readAll` was already proven readable above, so this cannot throw for
+      // that reason — but it is the roster that failed, not the record, and the
+      // record is what this answers.
       sendJson(res, 200, {
-        projects: projects.list([]),
+        projects: projects.list(null),
         agentsUnreadable: true,
         because: 'we cannot read the agents on this computer right now, so we are not saying anything about how they are doing',
       });
@@ -1148,7 +1163,8 @@ const server = http.createServer((req, res) => {
         for (const a of made.agents) projects.syncAgent(a, roster);
         sendJson(res, 200, { project: projects.get(made.id, safeRoster()) });
       })
-      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not read that request') }));
+      .catch((err) => sendJson(res, (err && err.code === 'UNREADABLE') ? 500 : 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
 
@@ -1156,9 +1172,24 @@ const server = http.createServer((req, res) => {
   if (proj && (req.method === 'GET' || req.method === 'HEAD')) {
     const id = decodeSegment(proj[1]);
     if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
-    const found = projects.get(id, safeRoster());
+    // ⚠️ WRAPPED, because `readAll` THROWS on a store it cannot read and this
+    // was the one read that did not catch it. Measured: with a corrupt
+    // projects.json the list route answered its honest 500 and the very next
+    // request for one project took the whole board process down — exit 9,
+    // nothing serving. The app that watches the fleet dying on a plain read is
+    // worse than every state the guard family around it protects.
+    let found;
+    try {
+      found = projects.get(id, safeRoster());
+    } catch (err) {
+      sendJson(res, 500, {
+        error: String((err && err.message) || 'we cannot read your projects right now'),
+        projectsUnreadable: true,
+      });
+      return;
+    }
     if (!found) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
-    sendJson(res, 200, { project: found });
+    sendJson(res, 200, { project: found, agentsUnreadable: safeRoster() === null });
     return;
   }
 
@@ -1193,7 +1224,7 @@ const server = http.createServer((req, res) => {
         for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
         sendJson(res, 200, { project: projects.get(id, safeRoster()) });
       })
-      .catch((err) => sendJson(res, (err && err.status) || 400, { error: String((err && err.message) || 'we could not read that request') }));
+      .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400), { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
 
@@ -1238,7 +1269,15 @@ const server = http.createServer((req, res) => {
       const verdict = projects.syncAgent(name, roster);
       sendJson(res, 200, { project: projects.get(id, safeRoster()), told: verdict });
     } catch (err) {
-      sendJson(res, 400, { error: String((err && err.message) || 'we could not change that project') });
+      // ⚠️ Three different answers, because they are three different facts. A
+      // store we cannot read is ours (500), a project that is not there is a
+      // 404 like every sibling route, and only a genuinely bad request is a
+      // 400. Answering 400 for an unreadable store put "we will not overwrite
+      // your projects file while we cannot read it" in front of somebody as if
+      // it were a complaint about what they had typed.
+      const code = (err && err.code === 'UNREADABLE') ? 500
+        : (/no project by that name/.test(String(err && err.message)) ? 404 : 400);
+      sendJson(res, code, { error: String((err && err.message) || 'we could not change that project') });
     }
     return;
   }

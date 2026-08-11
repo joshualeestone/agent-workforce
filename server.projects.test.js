@@ -361,3 +361,52 @@ test('a name that cannot be decoded is refused rather than guessed at', async ()
   assert.equal(res.status, 400);
   assert.ok(res.type.includes('application/json'));
 });
+
+// ---------------------------------------------------------------------------
+// A store we cannot read. Every route has to survive it, and none may pretend.
+// ---------------------------------------------------------------------------
+
+async function withCorruptStore(fn) {
+  const f = projects.file();
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const had = fs.existsSync(f) ? fs.readFileSync(f) : null;
+  fs.writeFileSync(f, '{corrupt');
+  try { await fn(); } finally {
+    if (had === null) { try { fs.rmSync(f); } catch { /* nothing to restore */ } }
+    else fs.writeFileSync(f, had);
+  }
+}
+
+test('a corrupt store does not kill the board, on any projects route', async () => {
+  // ⚠️ MEASURED before the fix: the list route answered its honest 500 and the
+  // very next request for ONE project took the whole process down (exit 9).
+  // The app that watches the fleet dying on a plain read is worse than every
+  // state the guards around it protect.
+  await withCorruptStore(async () => {
+    const routes = [
+      ['/api/projects', undefined],
+      ['/api/project/anything', undefined],
+      ['/api/project/anything/agent/mara', { method: 'POST', headers: { origin: base } }],
+      ['/api/project/anything/agent/mara', { method: 'DELETE', headers: { origin: base } }],
+      ['/api/project/anything', { method: 'DELETE', headers: { origin: base } }],
+    ];
+    for (const [p, opts] of routes) {
+      const res = await req(p, opts);
+      assert.ok(res.status >= 400, `${p} answered ${res.status}`);
+      assert.ok(res.type.includes('application/json'), `${p} must still answer as JSON`);
+      assert.ok(!/"projects":\s*\[\]/.test(res.body), `${p} must not report an empty list for a store it cannot read`);
+    }
+    // The control that matters: the server is STILL SERVING afterwards.
+    const alive = await req('/api/status');
+    assert.ok(alive.status < 500 || alive.type.includes('application/json'), 'the board is still up');
+  });
+});
+
+test('an unreadable store answers 500, never an empty list', async () => {
+  await withCorruptStore(async () => {
+    const res = await req('/api/projects');
+    assert.equal(res.status, 500);
+    assert.equal(json(res).projectsUnreadable, true);
+    assert.ok(!('projects' in json(res)), '"you have none" is not something we know');
+  });
+});
