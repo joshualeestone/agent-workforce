@@ -398,10 +398,20 @@ function exists(clean) {
   // ⚠️ Exact spelling again. Without it `exists('CASEY')` is true because
   // `casey`'s folder answers, and the removal proceeds under the wrong name.
   if (existsExactly(create.workerDir(clean))) return true;
-  // ⚠️ An unreachable tmux is UNKNOWN, and the caller says so in those words.
-  // Returning a bare false here made `plan` answer "we cannot find an agent
-  // called X" — an assertion of absence derived from a question that was never
-  // asked, under a comment claiming it did the opposite.
+  /**
+   * ⚠️ An unreachable tmux is UNKNOWN, and the caller says so in those words.
+   * Returning a bare false here made `plan` answer "we cannot find an agent
+   * called X" — an assertion of absence derived from a question that was never
+   * asked, under a comment claiming it did the opposite.
+   *
+   * ⚠️ MOSTLY PRE-EMPTED NOW, and the comment above would otherwise read as
+   * live. `plan` asks the roster for the ownership tie BEFORE calling this and
+   * refuses on a throw there, so in practice an unreachable tmux is caught one
+   * step earlier. What reaches here is the narrow race where the roster
+   * answered once and then stopped. Kept because it fails closed and the race
+   * is real; described accurately rather than left implying it is the main
+   * path.
+   */
   const found = sessionFor(clean);
   if (found.kind === FOUND.OURS || found.kind === FOUND.UNTIED) return true;
   return found.kind === FOUND.UNKNOWN ? UNKNOWN : false;

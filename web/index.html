@@ -2053,8 +2053,26 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
         }
         note.textContent = back.because || 'The restore did not finish.';
       }
-      REMOVED_HTML = null;
-      await tick();
+      /**
+       * ⚠️ THE CACHE IS LEFT ALONE, AND `tick()` IS NOT CALLED. The first
+       * version of this branch did both, and between them they erased the note
+       * it had just written.
+       *
+       * `REMOVED_HTML = null` makes the next `html !== REMOVED_HTML` trivially
+       * true, so `paintRemoved` rewrites the list and destroys the row -- and
+       * `tick()` calls `paintRemoved` on its way past, so the message survived
+       * for the length of two fetches and was never read by anyone. Exactly the
+       * defect the comment above claims to fix.
+       *
+       * And the reasoning was backwards: by this line the row has ALREADY been
+       * put back into a usable state by hand (button re-enabled, note added),
+       * so keeping the cache is what preserves it. The cache exists to stop the
+       * poll overwriting deliberate row state, and this is deliberate row
+       * state.
+       *
+       * The board itself still refreshes on its own five-second tick; what is
+       * skipped here is only the immediate repaint that would wipe the row.
+       */
       return;
     }
     await tick();

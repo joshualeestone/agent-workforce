@@ -38,7 +38,22 @@ create.setRunner(null);
  * treats "already gone" differently from "it failed". A recorder that answered
  * everything with success would describe a world that cannot occur.
  */
-function world({ killWorks = true } = {}) {
+/**
+ * ⚠️ TWO INDEPENDENT KNOBS, and collapsing them into one made a whole guard
+ * untestable.
+ *
+ * `killWorks` used to control BOTH the kill's exit code and the look-again's
+ * answer, so the only two worlds it could describe were "kill succeeded and the
+ * session is gone" and "kill failed". The case the look-again exists for --
+ * **the kill reported success and the session is still there** -- could not be
+ * expressed at all: with `killWorks: false` the caller short-circuits on the
+ * kill's own exit code one line earlier, so the `has-session` arm never ran.
+ * Proven by collapsing that arm to a constant, with nothing failing.
+ *
+ * That is the arm that stops a removal being reported over a live agent, which
+ * is the single worst thing this module can do.
+ */
+function world({ killWorks = true, sessionSurvives = false } = {}) {
   const calls = [];
   remove.setRunner((file, args) => {
     calls.push([file, args]);
@@ -49,7 +64,12 @@ function world({ killWorks = true } = {}) {
     // agent rather than asking tmux twice. An earlier version of this helper
     // modelled a pre-kill probe that does not exist, so the first answer landed
     // on the post-kill check and every removal read as "still running".
-    if (cmd === 'has-session') return killWorks ? { ok: false, code: 1 } : { ok: true, stdout: '' };
+    //
+    // Exit 1 from `has-session` means "no such session", i.e. the kill worked.
+    // Exit 0 means it is still there.
+    if (cmd === 'has-session') {
+      return sessionSurvives ? { ok: true, stdout: '' } : { ok: false, code: 1 };
+    }
     if (cmd === 'kill-session') return killWorks ? { ok: true, stdout: '' } : { ok: false, code: 2 };
     return { ok: true, stdout: '' };
   });
@@ -1110,4 +1130,222 @@ test('the env var alone arms dry-run, not just a cleared runner', () => {
   // dry-run by the time any test in it runs.
   assert.equal(withEnv, 'true', 'AGENT_WORKFORCE_DRY_RUN=1 does not arm dry-run, so a dev run does real work');
   assert.equal(without, 'false', 'dry-run is the default, which makes the product silently do nothing');
+});
+
+test('an unreadable removed list is refused, not used as an empty starting point', () => {
+  /**
+   * ⚠️ THE INVARIANT WITH THE LONGEST COMMENT IN THE MODULE, AND NOTHING HELD
+   * IT. Reverting `if (existing === UNREADABLE) return false;` to fall back to
+   * `[]` left the whole suite green.
+   *
+   * What that revert actually costs, measured rather than argued: with a
+   * transiently unreadable `removed.json`, a removal of ONE agent rewrites the
+   * list from an empty base and **destroys every other removed agent's
+   * `label`, `plist` and `shownAs`** -- the three fields that are the entire
+   * reason Restore can work. The fail-open read then hides the damage by
+   * putting them all back on the board as though nothing happened.
+   *
+   * `readRemoved` failing open is right for the QUERY (a list we cannot read
+   * must not become a board that hides agents for reasons nobody can inspect)
+   * and wrong as the base of a read-modify-write. This test is the difference.
+   */
+  const keep = madeAgent('keep-me');
+  const other = madeAgent('remove-me');
+  boardShows(keep, keep);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(keep).outcome, remove.OUTCOME.REMOVED);
+
+  // ⚠️ CONTROL: the record we are protecting is really there, with the fields
+  // that make Restore possible, before anything is made unreadable.
+  const before = remove.removedAgents().find((r) => r.name === keep);
+  assert.ok(before && before.label && before.shownAs,
+    'the control failed: there is no populated record to lose, so this proves nothing');
+
+  const raw = fs.readFileSync(remove.REMOVED_FILE, 'utf8');
+  fs.chmodSync(remove.REMOVED_FILE, 0o000);
+  try {
+    // ⚠️ CONTROL: it really is unreadable now. On a machine running as root
+    // chmod 000 does not deny the owner, and this test would silently stop
+    // covering anything.
+    let readable = true;
+    try { fs.readFileSync(remove.REMOVED_FILE, 'utf8'); } catch { readable = false; }
+    assert.equal(readable, false, 'the list is still readable, so the refusal under test cannot fire');
+
+    boardShows(other, other);
+    world();
+    remove.setDryRun(false);
+    const second = remove.remove(other);
+    assert.equal(second.outcome, remove.OUTCOME.PARTIAL,
+      'it removed an agent while unable to read the list, so it was about to rewrite the list from nothing');
+    assert.match(second.because, /will not appear there/);
+  } finally {
+    fs.chmodSync(remove.REMOVED_FILE, 0o600);
+  }
+
+  // ⚠️ THE ASSERTION THAT MATTERS: the other agent's way back is still intact.
+  assert.equal(fs.readFileSync(remove.REMOVED_FILE, 'utf8'), raw,
+    'the removed list was rewritten from an unreadable base, destroying every other agent\'s label and plist');
+  const after = remove.removedAgents().find((r) => r.name === keep);
+  assert.equal(after.label, before.label, 'the surviving record lost the label Restore has to re-enable');
+  assert.equal(after.shownAs, before.shownAs, 'the surviving record lost the name the removed list shows');
+});
+
+test('a removed list that parses to something that is not a list is corrupt, not empty', () => {
+  // ⚠️ The sibling of the guard above, and equally unheld: `if
+  // (!Array.isArray(parsed)) return UNREADABLE`. A file that parses to an
+  // object is not an empty list, and treating it as one is the same overwrite
+  // by another route. The existing "unreadable removed-list hides nothing"
+  // test asserts only the READ side, which fails open by design.
+  const name = madeAgent('corrupt-base');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+
+  fs.mkdirSync(nodePath.dirname(remove.REMOVED_FILE), { recursive: true });
+  fs.writeFileSync(remove.REMOVED_FILE, '{"not":"a list"}\n', 'utf8');
+  // ⚠️ CONTROL: it really does parse. A file that fails JSON.parse would take
+  // the other branch and this would prove nothing about the Array check.
+  assert.doesNotThrow(() => JSON.parse(fs.readFileSync(remove.REMOVED_FILE, 'utf8')),
+    'the fixture is unparseable, so it exercises the wrong branch');
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'it overwrote a file it could not understand, which is how a corrupt list becomes a silent data loss');
+  assert.equal(fs.readFileSync(remove.REMOVED_FILE, 'utf8').trim(), '{"not":"a list"}',
+    'the corrupt file was replaced rather than left for somebody to look at');
+});
+
+test('a kill that reports success over a session that is STILL THERE is not a removal', () => {
+  /**
+   * ⚠️ THE WORST THING THIS MODULE CAN DO, and until now no fixture could even
+   * describe it.
+   *
+   * `kill-session` answering 0 is not evidence the session has gone -- that is
+   * the entire reason the look-again exists. Replacing the look-again with
+   * `return true` left the suite green, because the only "kill" failure the old
+   * fixture could model was the kill command itself failing, which
+   * short-circuits one line earlier and never reaches this check.
+   *
+   * The case that matters is the quiet one: tmux says fine, the session is
+   * still running, and without this the board reports an agent removed while it
+   * is still working.
+   */
+  const name = madeAgent('kill-lied');
+  boardShows(name, name);
+  const calls = world({ killWorks: true, sessionSurvives: true });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+
+  // ⚠️ CONTROL: the kill really was attempted and really did report success,
+  // or this is the kill-failed path in disguise.
+  const kill = calls.find(([, a]) => a && a[0] === 'kill-session');
+  assert.ok(kill, 'no kill was attempted, so the look-again was never reached');
+  assert.ok(calls.some(([, a]) => a && a[0] === 'has-session'),
+    'it never looked again, so it took the kill command at its word');
+
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'a session that outlived a successful-looking kill was reported as removed');
+  assert.match(r.because, /could not end the session/);
+  assert.equal(remove.isHidden(name), false,
+    'the agent was hidden from the board while still running, which is the one thing it must never do');
+  assert.equal(remove.isRemoved(name), true,
+    'it is on no removed list, so a half-removal has no Restore button');
+});
+
+test('bootout answering "no such service" is the end state we wanted, not a failure', () => {
+  // ⚠️ launchd answers 3 for a job that is not loaded. Reading that as a
+  // failure reports a PARTIAL over a removal that fully worked, and sends
+  // somebody to the manual recipe for nothing. Its counterpart --
+  // `bootstrap`'s code 5 on restore -- has a test; this one did not.
+  const name = madeAgent('already-unloaded');
+  boardShows(name, name);
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'bootout') return { ok: false, code: 3 };
+    if (args && args[0] === 'has-session') return { ok: false, code: 1 };
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED,
+    'a job that was already unloaded was treated as a job that would not unload');
+  assert.equal(remove.isHidden(name), true);
+});
+
+test('what the detail screen is told about removing an agent comes from here, and fits the agent', () => {
+  /**
+   * ⚠️ `plan().hint` HAD NO TEST AT ALL -- grepping either test file for `hint`
+   * returned nothing, so the whole field could be deleted or made wrong for
+   * free. It was moved into the engine precisely because the browser composing
+   * it produced a sentence that was false for a jobless agent, and then the fix
+   * shipped without the coverage its siblings got.
+   */
+  const withJob = madeAgent('has-a-job');
+  boardShows(withJob, withJob);
+  // ⚠️ CONTROL: the two fixtures really do differ in the property under test.
+  assert.ok(remove.jobFor(withJob), 'the control failed: the with-job fixture has no job');
+  const jobless = 'no-job-at-all';
+  fs.mkdirSync(create.workerDir(jobless), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(jobless), 'CLAUDE.md'), 'You are **Jobless**.\n', 'utf8');
+  assert.equal(remove.jobFor(jobless), null, 'the control failed: the jobless fixture has a job');
+
+  const a = remove.plan(withJob);
+  assert.ok(a.hint, 'the detail screen is given nothing to say about what removing does');
+  assert.match(a.hint, /stops it starting again/);
+  assert.match(a.hint, /Nothing on your computer is deleted/,
+    'it does not answer the one thing they might fear');
+
+  boardShows(jobless, jobless);
+  const b = remove.plan(jobless);
+  assert.match(b.hint, /no startup job/,
+    'it promises to stop something starting again for an agent that nothing was going to start');
+  assert.doesNotMatch(b.hint, /stops it starting again/,
+    'the jobless hint still describes work that will not happen');
+});
+
+test('a partial about an agent with no startup job does not claim one was turned off', () => {
+  // ⚠️ `didToJob`'s jobless arm was untested, so the sentence it exists to
+  // prevent -- "we stopped X from starting again" about an agent that has
+  // nothing to stop -- could come back for free.
+  const name = 'jobless-partial';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  assert.equal(remove.jobFor(name), null, 'the control failed: this fixture has a startup job');
+
+  boardShows(name, name);
+  // The kill reports success and the session is still there: a partial, reached
+  // with no job in the picture at all.
+  world({ killWorks: true, sessionSurvives: true });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
+  assert.doesNotMatch(r.because, /we stopped .* from starting again/,
+    'it reported stopping a startup job that does not exist');
+  assert.match(r.because, /has no startup job to turn off/,
+    'it does not say what was actually true of the job');
+});
+
+test('an agent with no folder is not reassured about a folder', () => {
+  // ⚠️ The success sentence's folder branch was the one sibling missed when the
+  // other three were fixed, and its own comment says so. `exists()` admits an
+  // agent on a startup job alone, so this is reachable.
+  const name = 'plist-only';
+  fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  // ⚠️ CONTROL: no folder, and there IS something to remove.
+  assert.equal(fs.existsSync(create.workerDir(name)), false, 'the control failed: this fixture has a folder');
+  assert.ok(remove.jobFor(name), 'the control failed: nothing exists to remove');
+
+  status.setPaneSource(() => '');
+  world();
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+  assert.doesNotMatch(r.because, /Its folder/,
+    'it reassured somebody about a folder the agent never had');
+  assert.match(r.because, /Nothing on your computer was deleted/);
 });

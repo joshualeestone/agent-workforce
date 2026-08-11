@@ -120,13 +120,16 @@ function writeProfile(name, patch) {
   return next;
 }
 
-// ⚠️ `profilePath` is exported for symmetry with `avatarPath`, and currently
-// has no caller outside this file.
-//
-// It was exported for an earlier design in which removing an agent DELETED what
-// this module remembers about it. That design is gone: removing an agent now
-// deletes nothing at all, on purpose, which is what makes it reversible — so a
-// profile deliberately survives its agent's removal and is there again when the
-// agent is restored. Nothing here needs clearing, and the previous version of
-// this comment described that clearing as a live requirement.
-module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, profilePath, saveAvatar, removeAvatar, readProfile, writeProfile };
+/**
+ * ⚠️ `profilePath` is NOT exported, and the reason belongs here because this
+ * branch exported it and then justified it by saying it had no caller.
+ *
+ * It was needed for an earlier design in which removing an agent DELETED what
+ * this module remembers about it. That design is gone: removing an agent now
+ * deletes nothing at all, on purpose, which is what makes it reversible — so a
+ * profile deliberately survives its agent's removal and is there again when the
+ * agent is restored. Nothing outside this file needs the path, so nothing gets
+ * it. A symbol whose only justification is symmetry is a symbol somebody will
+ * eventually use for the deletion this feature exists not to do.
+ */
+module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, saveAvatar, removeAvatar, readProfile, writeProfile };

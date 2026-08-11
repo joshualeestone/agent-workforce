@@ -2177,7 +2177,20 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
    * that is the control, and the point becomes the real one: the step list is
    * for the outcome, and the QUESTION must not recite it.
    */
+  /**
+   * ⚠️ Stub the roster before ACTING, not only before asserting. This ran with
+   * `setPaneSource(null)`, so `plan()` shelled out to the operator's real tmux
+   * and the branch this assertion depends on was decided by whatever the live
+   * fleet happened to be doing -- a real session under this name would change
+   * the outcome. Dry-run, so nothing was stopped; machine-dependent all the
+   * same, in a file that spends two paragraphs elsewhere insisting on exactly
+   * this.
+   */
+  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneCapture(() => null);
   const acted = removal.remove('route-removable');
+  status.setPaneSource(null);
+  status.setPaneCapture(null);
   assert.ok(Array.isArray(acted.steps) && acted.steps.length > 0,
     'the control failed: nothing produces a step list, so hiding it from the question proves nothing');
   assert.equal(body.steps, undefined,
@@ -2472,6 +2485,66 @@ test('the removed list gives the browser only what it draws', async () => {
     status.setPaneSource(null);
     status.setPaneCapture(null);
     try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
+/**
+ * The six browser-layer fixes on this branch, pinned so they cannot regress
+ * silently.
+ *
+ * ⚠️ THIS IS A WEAKER INSTRUMENT THAN IT LOOKS, and saying so is the point.
+ * These assert the SHAPE OF THE SOURCE, not behaviour: nothing here runs the
+ * page. A rewrite that keeps the shape and loses the behaviour passes, and the
+ * transparent-modal defect earlier on this branch is proof that source
+ * assertions can be green while the screen is broken.
+ *
+ * It is here because the alternative was nothing. Every one of these is a
+ * defect this branch measured, fixed, and could not otherwise notice being
+ * undone -- all of them were reverted in a sandbox and the whole suite stayed
+ * green. Making them fail noisily is worth more than the purity of admitting
+ * the repo has no DOM, and the honesty lives in this comment rather than in
+ * skipping the test.
+ *
+ * ⚠️ The real fix is rendering the page in the suite, which this repo cannot
+ * do without taking a dependency it has deliberately never taken. That is a
+ * decision for somebody, not something to sneak in here.
+ */
+test('the browser-layer fixes on this branch cannot be undone silently', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  const pins = [
+    // A record written by an older version has no timestamp, and this read the
+    // wrong field, so the date never appeared for anybody.
+    [/a\.removedAt/, 'the removed-list date reads a field the engine does not write'],
+    // The change guard, whose absence wipes a "Restore failed" row every five
+    // seconds and drops keyboard focus with it.
+    [/if \(html !== REMOVED_HTML\)/, 'the removed list repaints unconditionally on every poll'],
+    // Cleared when the list empties, or a stale "Restoring…" row comes back.
+    [/REMOVED_HTML = null;/, 'the change-guard cache is never cleared, so a stale row can return'],
+    // A server failure is not "nothing has been removed".
+    [/if \(!res\.ok\) return;/, 'a failed /api/removed read renders as an empty removed list'],
+    // A 5xx is not a fact about this agent.
+    [/res\.status >= 500/, 'a server error is reported as "we cannot remove this agent"'],
+    // Shift+Tab into the modal must not land on the destructive button.
+    [/\(inside \? ends\[1\] : keep\)\.focus\(\)/, 'tabbing into the modal backwards lands on Remove'],
+    // The removed list is part of the board, so it refreshes with it.
+    [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
+     'the removed list no longer refreshes on the poll, so its count goes stale'],
+  ];
+
+  /**
+   * ⚠️ CONTROL, and it is not decoration: every pattern is checked against a
+   * string that CANNOT contain it, so a pattern matching nothing anywhere -- a
+   * typo, an over-escaped regex -- is caught here rather than passing as
+   * coverage forever.
+   */
+  for (const [re] of pins) {
+    assert.doesNotMatch('nothing at all', re, `pattern ${re} matches empty prose, so it asserts nothing`);
+  }
+
+  for (const [re, why] of pins) {
+    assert.match(raw, re, why);
   }
 });
 
