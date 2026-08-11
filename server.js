@@ -30,6 +30,28 @@ const create = require('./engine/create');
 const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
+const projects = require('./engine/projects');
+const os = require('node:os');
+
+/**
+ * The live agents, or none, without ever failing a projects request.
+ *
+ * ⚠️ `paneRoster` fails CLOSED by design — it throws when tmux cannot be asked,
+ * because the realistic failure used to arrive as an empty roster and get
+ * served as fact. That is right for the board, whose whole job is to say how
+ * agents are. It is wrong for a project's own record, which is readable either
+ * way: the members are still ours to list, and `describe` already marks every
+ * one of them `present: false` with a reason when the roster is empty. So this
+ * degrades to "we could not see them" rather than to "you have no projects".
+ *
+ * ⚠️ It is NOT a way of pretending the roster is empty. The one route that
+ * reports fleet state alongside the list says so explicitly with
+ * `agentsUnreadable`; this helper exists for the routes that are answering a
+ * question about the RECORD.
+ */
+function safeRoster() {
+  try { return paneRoster(); } catch { return []; }
+}
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
 // server is still a way to fill someone's memory by accident.
@@ -1053,6 +1075,197 @@ const server = http.createServer((req, res) => {
         // status to 400.
         sendJson(res, err.code === 'CONFLICT' ? 409 : 400, { error: String(err.message) });
       });
+    return;
+  }
+
+  /**
+   * --- projects ------------------------------------------------------------
+   *
+   * A project is a folder the person already has, plus the agents they have put
+   * on it. Both halves are read against reality on every request rather than
+   * reported from the record: the folder is stat'd, and the members are joined
+   * to the live roster so one we cannot see comes back as unknown instead of
+   * being quietly dropped from its own project.
+   *
+   * ⚠️ NOTHING HERE IS A PERMISSION. Membership is an organising fact and never
+   * a boundary (§4, 2026-08-11). No response carries an access level, because
+   * there are none, and a level that is not enforced is worse than none.
+   *
+   * ⚠️ `paneRoster` THROWS when tmux cannot be asked, and that is deliberate
+   * upstream — the realistic failure used to arrive as an empty roster, which
+   * here would mean answering "none of your agents are there" when the truth is
+   * "we could not look". So it is caught and reported as a failure to see.
+   */
+  if (pathname === '/api/projects' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try {
+      sendJson(res, 200, { projects: projects.list(paneRoster()) });
+    } catch {
+      // The record is still readable when the roster is not, so the projects
+      // themselves are served with every member marked unseen rather than the
+      // whole page failing. `describe` already says `present: false` for each.
+      sendJson(res, 200, {
+        projects: projects.list([]),
+        agentsUnreadable: true,
+        because: 'we cannot read the agents on this computer right now, so we are not saying anything about how they are doing',
+      });
+    }
+    return;
+  }
+
+  if (pathname === '/api/projects' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        const made = projects.create({ name: body.name, folder: body.folder, agents: body.agents });
+        // ⚠️ Told AFTER the record is written, never before. If announcing it
+        // failed first, a membership the person asked for would not exist at
+        // all -- and the whole point of the three-valued verdict is that a
+        // recorded membership we could not announce is a real, reportable
+        // state rather than a reason to refuse the request.
+        for (const a of made.agents) projects.syncAgent(a);
+        sendJson(res, 200, { project: projects.get(made.id, safeRoster()) });
+      })
+      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  const proj = pathname.match(/^\/api\/project\/([^/]+)$/);
+  if (proj && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(proj[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    const found = projects.get(id, safeRoster());
+    if (!found) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    sendJson(res, 200, { project: found });
+    return;
+  }
+
+  if (proj && req.method === 'PUT') {
+    const id = decodeSegment(proj[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        projects.rename(id, body.name);
+        // The block names the project, so a rename has to reach the agents that
+        // were told the old name -- otherwise their instructions describe a
+        // project that no longer goes by that.
+        for (const a of projects.readAll().find((p) => p.id === id).agents) projects.syncAgent(a);
+        sendJson(res, 200, { project: projects.get(id, safeRoster()) });
+      })
+      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  if (proj && req.method === 'DELETE') {
+    const id = decodeSegment(proj[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    try {
+      const gone = projects.remove(id);
+      // ⚠️ The members are re-told AFTER the project is gone, so the block in
+      // their instructions stops naming a project that no longer exists. This
+      // is the same shape as the removal record: the visible half of the work
+      // is the half that has to actually happen.
+      const told = gone.agents.map((a) => ({ agent: a, ...projects.syncAgent(a) }));
+      sendJson(res, 200, { removed: gone.id, name: gone.name, told });
+    } catch (err) {
+      sendJson(res, 404, { error: String((err && err.message) || 'there is no project by that name') });
+    }
+    return;
+  }
+
+  const member = pathname.match(/^\/api\/project\/([^/]+)\/agent\/([^/]+)$/);
+  if (member && (req.method === 'POST' || req.method === 'DELETE')) {
+    const id = decodeSegment(member[1]);
+    const name = decodeSegment(member[2]);
+    if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    try {
+      if (req.method === 'POST') projects.addAgent(id, name);
+      else projects.removeAgent(id, name);
+      const verdict = projects.syncAgent(name);
+      sendJson(res, 200, { project: projects.get(id, safeRoster()), told: verdict });
+    } catch (err) {
+      sendJson(res, 400, { error: String((err && err.message) || 'we could not change that project') });
+    }
+    return;
+  }
+
+  /**
+   * --- choosing a folder ---------------------------------------------------
+   *
+   * A browser cannot hand back a real path. `<input webkitdirectory>` withholds
+   * it deliberately, so the only options are "make the person type a path" or
+   * "let the server list folders" — and typing a path is exactly the wall §0
+   * exists to remove for a non-technical person. Hence this: read-only,
+   * directories only, one level at a time, rooted at the home folder.
+   *
+   * ⚠️ THIS IS NEW SAFETY CODE, WHICH IS THE LEAST TRUSTWORTHY CODE IN ANY DIFF
+   * OF MINE. Five of nine blockers in a previous challenge loop were in guards
+   * added during that loop. So containment is asserted on the RESOLVED path and
+   * nowhere else: `..` is not stripped, spelling is not inspected, and no
+   * prefix is compared before `realpathSync` has run. A symlink inside the home
+   * folder pointing outside it is the case every string-level check misses.
+   */
+  if (pathname === '/api/folders' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const home = os.homedir();
+    // Parsed here rather than threaded down from `pathOf`, which deliberately
+    // returns the path alone -- routing on anything that carries a query string
+    // is the bug that function exists to have fixed.
+    let asked = null;
+    try { asked = new URL(req.url, ROUTING_BASE).searchParams.get('path'); } catch { asked = null; }
+    let real;
+    try {
+      const target = asked ? String(asked) : home;
+      // A null byte throws out of `realpathSync` rather than truncating the
+      // path somewhere the check no longer applies.
+      if (target.includes('\0')) throw new Error('bad path');
+      real = fs.realpathSync(target);
+    } catch {
+      sendJson(res, 400, { error: 'we cannot see a folder there' });
+      return;
+    }
+    // ⚠️ Containment on the RESOLVED path, expressed as "the relative route
+    // from home does not climb". `startsWith(home)` is the wrong test twice
+    // over: `/Users/agentine` starts with `/Users/agent1`... only by accident of
+    // spelling, and it says nothing about a symlink.
+    const rel = path.relative(home, real);
+    if (real !== home && (rel.startsWith('..') || path.isAbsolute(rel))) {
+      sendJson(res, 403, { error: 'we only look inside your home folder' });
+      return;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(real, { withFileTypes: true });
+    } catch {
+      sendJson(res, 400, { error: 'we cannot read that folder' });
+      return;
+    }
+    const folders = entries
+      // Directories the person would recognise: no dotfiles, and a symlinked
+      // directory is offered because it is a perfectly ordinary way to keep
+      // work — it just gets resolved again when it is opened or chosen.
+      .filter((e) => !e.name.startsWith('.') && (e.isDirectory() || e.isSymbolicLink()))
+      .map((e) => ({ name: e.name, path: path.join(real, e.name) }))
+      .filter((e) => { try { return fs.statSync(e.path).isDirectory(); } catch { return false; } })
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 500);
+    sendJson(res, 200, {
+      path: real,
+      home,
+      // Null AT home rather than at the filesystem root, so "up" can never walk
+      // out of the only place this route will serve.
+      parent: real === home ? null : path.dirname(real),
+      folders,
+    });
     return;
   }
 
