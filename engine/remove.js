@@ -896,7 +896,14 @@ function removeInner(name, { tmuxBin } = {}) {
      * it never had. Its three siblings (`hint`, `didToJob`, restore's two) were
      * each branched for the same reason; this one was missed.
      */
-    because: fs.existsSync(create.workerDir(clean))
+    // ⚠️ `existsExactly`, NOT `existsSync` -- this module's own note says
+    // `existsSync` is not an answer to this question on a case-insensitive
+    // volume, and `exists()` uses the exact form for the identical path. Left
+    // as `existsSync` here, removing `CASEY` (exact plist, no CASEY folder,
+    // a real `casey` folder) promises "its folder is still on your computer"
+    // about a folder that agent never had. The hazard was fixed in two places
+    // and this third one kept the old call.
+    because: existsExactly(create.workerDir(clean))
       ? `${shown} has been removed from Kosmos. Its folder and everything in it is still on your computer.`
       : `${shown} has been removed from Kosmos. Nothing on your computer was deleted.`,
     steps,

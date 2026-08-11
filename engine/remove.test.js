@@ -1435,3 +1435,101 @@ test('the startup job is disabled BEFORE it is booted out', () => {
   assert.ok(iDisable < iBootout,
     'it unloaded the job before disabling it, leaving a window where a login brings the agent back');
 });
+
+test('a partial for an agent with no startup job does not name a job that is not there', () => {
+  /**
+   * ⚠️ `recoveryRoute`'s no-job branch was unheld. Replacing the whole function
+   * with the unconditional job sentence left the suite at 346 green -- so the
+   * suite could not see the product telling somebody *"Its startup job is null,
+   * and re-enabling that is what undoes this."*
+   *
+   * Its three named siblings (`hint`, `didToJob`, restore's endings) are all
+   * held. This one is the same family and was not on the plan's list of
+   * deliberately-unheld guards either, which is the part worth fixing rather
+   * than documenting.
+   */
+  const name = 'no-job-recovery';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  assert.equal(remove.jobFor(name), null, 'the control failed: this fixture has a startup job');
+
+  boardShows(name, name);
+  world({ killWorks: true, sessionSurvives: true });
+  remove.setDryRun(false);
+
+  // Make the record fail, so the recovery sentence is the one that renders.
+  const dir = nodePath.dirname(remove.REMOVED_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.rmSync(remove.REMOVED_FILE, { recursive: true, force: true });
+  fs.writeFileSync(remove.REMOVED_FILE, '[]\n', 'utf8');
+  fs.chmodSync(dir, 0o500);
+  try {
+    const r = remove.remove(name);
+    assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
+    // ⚠️ CONTROL: it really is the recovery sentence being rendered.
+    assert.match(r.because, /will not appear there/, 'the record succeeded, so no recovery route is offered');
+
+    assert.doesNotMatch(r.because, /Its startup job is/,
+      'it named a startup job for an agent that has none');
+    assert.doesNotMatch(r.because, /null|undefined/,
+      'it printed a missing value straight onto the screen');
+    assert.match(r.because, /no startup job, so nothing will restart it/,
+      'it does not say what is actually true, which is that nothing will bring it back');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(remove.REMOVED_FILE, { force: true });
+  }
+});
+
+test('the steps report what was done, including when nothing was', () => {
+  // ⚠️ The no-startup-job step label was unheld: mutating it back to "stopped
+  // it starting again" -- the exact wrong label its own comment names -- kept
+  // the suite green. The browser ignores `steps`, but the route ships them, so
+  // it is a sentence on the wire asserting work nobody did.
+  const name = 'jobless-steps';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), `You are **${name}**.\n`, 'utf8');
+  assert.equal(remove.jobFor(name), null, 'the control failed: this fixture has a startup job');
+
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+
+  const labels = r.steps.map((s) => s.label);
+  // ⚠️ CONTROL: there really are steps to inspect.
+  assert.ok(labels.length > 0, 'no steps were reported at all, so this asserts nothing');
+  assert.ok(!labels.includes('stopped it starting again'),
+    'it reported stopping a startup job for an agent that never had one');
+  assert.ok(labels.some((l) => /no startup job/.test(l)),
+    'it does not say what was actually true of the job');
+});
+
+test('the removed list is newest first, so the thing you just removed is at the top', () => {
+  /**
+   * ⚠️ Unheld: removing the sort passed. Small, but it is the ordering somebody
+   * relies on the moment they have removed two agents and want the recent one.
+   *
+   * ⚠️ Seeded directly rather than by removing two agents, because two real
+   * removals land in the same MILLISECOND and get identical ISO timestamps --
+   * so the first version of this test could not distinguish any ordering at
+   * all. Its own control caught that, which is the only reason this is a
+   * fixture change rather than a test that passes for no reason.
+   */
+  fs.mkdirSync(nodePath.dirname(remove.REMOVED_FILE), { recursive: true });
+  fs.writeFileSync(remove.REMOVED_FILE, JSON.stringify([
+    { name: 'seeded-oldest', removedAt: '2026-08-09T10:00:00.000Z', stopped: true },
+    { name: 'seeded-newest', removedAt: '2026-08-11T10:00:00.000Z', stopped: true },
+    { name: 'seeded-middle', removedAt: '2026-08-10T10:00:00.000Z', stopped: true },
+  ]), 'utf8');
+
+  const list = remove.removedAgents();
+  // ⚠️ CONTROL: the file really is in a different order than the answer, or
+  // "it sorts" is true of a function that returns its input untouched.
+  assert.equal(JSON.parse(fs.readFileSync(remove.REMOVED_FILE, 'utf8'))[0].name, 'seeded-oldest',
+    'the fixture is already sorted, so this proves nothing');
+
+  assert.deepEqual(list.map((r) => r.name), ['seeded-newest', 'seeded-middle', 'seeded-oldest'],
+    'the undo list is not newest-first, so the agent somebody just removed is not where they look');
+});

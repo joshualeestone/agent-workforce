@@ -640,14 +640,27 @@ svg { display: block; }
   <button class="linkish" id="removed-toggle" type="button"
           aria-expanded="false" aria-controls="removed-list"></button>
   <div class="removed-list" id="removed-list" hidden></div>
-  <!-- ⚠️ OUTSIDE the list, and that is the whole point. `paintRemoved`
-       regenerates `#removed-list` wholesale, so anything written INTO a row is
-       destroyed the moment the answer from /api/removed changes -- which is
-       exactly what happens on the restore-partial where the record was cleared
-       and only the start failed. A message about a half-finished restore has to
-       outlive the list it is about. -->
-  <p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
 </div>
+<!-- ⚠️ OUTSIDE `#removed-wrap`, NOT MERELY OUTSIDE `#removed-list`, and the
+     difference is the whole fix.
+     
+     The previous version sat inside the wrap. `paintRemoved` hides the WHOLE
+     wrap when the list comes back empty -- which is precisely the case this
+     message exists for: the restore-partial where the record was cleared and
+     only the start failed, on the last removed agent. The message vanished with
+     the section, leaving an agent on no list, with no card, still stopped, and
+     nothing on screen saying so. Its own comment claimed to have fixed exactly
+     that.
+     
+     ⚠️ AND MY VERIFICATION MISSED IT because I checked the mechanism I had in
+     mind rather than the failure. I asserted `#removed-list` does not contain
+     it and forced a repaint -- both true, both irrelevant to a parent being
+     hidden. A control has to be aimed at the way the thing breaks, not at the
+     way you think you fixed it.
+     
+     `role="alert"` also announces nothing from inside a hidden subtree, so the
+     screen-reader half was silently gone too. -->
+<p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
 
 <script>
 'use strict';
@@ -882,6 +895,25 @@ async function tick() {
       gone.textContent = 'This agent is no longer on the board. It may have been removed somewhere else, '
         + 'or it may have stopped. Nothing here can change it until it is back.';
     }
+    PANEL_WITHDRAWN = true;
+  } else if (fresh && PANEL_WITHDRAWN) {
+    /**
+     * ⚠️ AND BACK AGAIN, because the branch above was ONE-WAY.
+     *
+     * It withdrew the panel and nothing ever undid it. Meanwhile the next
+     * poll's `setWritesOffered(fresh, …)` re-enables the picture, role and
+     * instruction controls — so the panel ended up with live, working write
+     * controls sitting under a sentence saying nothing here can change it.
+     * Reachable by an ordinary KeepAlive bounce or a restore in another tab.
+     *
+     * This is the same defect already documented for the sibling controls a few
+     * lines up ("the inverse stuck too: an agent that came back stayed
+     * withdrawn behind a now-false sentence"), reintroduced in the newer
+     * section. A guard that only fires in one direction is half a guard, and
+     * the half it is missing is the one that leaves a false sentence on screen.
+     */
+    PANEL_WITHDRAWN = false;
+    loadRemoval(fresh.sessionName);
   }
   if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
 
@@ -1709,6 +1741,10 @@ async function loadRemoval(sessionName) {
    say.
    ========================================================================== */
 
+// Whether the poll has withdrawn this panel because its agent left the board.
+// Tracked so the branch that withdraws it can be undone when the agent returns.
+let PANEL_WITHDRAWN = false;
+
 let RM_FOR = null;      // which agent the open modal is about
 let RM_RETURN = null;   // what to focus when it closes
 
@@ -1783,7 +1819,19 @@ document.addEventListener('keydown', (e) => {
   if (document.getElementById('rm-modal').hidden) return;
   const keep = document.getElementById('rm-keep');
   const go = document.getElementById('rm-go');
-  const ends = e.shiftKey ? [keep, go] : [go, keep];
+  /**
+   * ⚠️ A DISABLED BUTTON IS NOT IN THE TAB ORDER, so treating it as an end of
+   * the trap leaks a Tab to the page behind the dialog.
+   *
+   * While a removal is in flight `rm-go` is disabled. With focus on Keep and
+   * `ends[0]` set to the disabled Go, no `preventDefault` fires, native Tab
+   * walks out past `aria-modal="true"`, and the next Tab pulls it back via the
+   * `!inside` arm. One stray stop outside a modal that is meant to hold focus.
+   * The ends are the buttons that can actually take focus.
+   */
+  const reachable = [keep, go].filter((el) => !el.disabled);
+  const order = e.shiftKey ? reachable.slice().reverse() : reachable;
+  const ends = order.length ? [order[0], order[order.length - 1]] : [keep, keep];
   const inside = document.getElementById('rm-modal').contains(document.activeElement);
   if (document.activeElement === ends[0] || !inside) {
     e.preventDefault();
@@ -1931,10 +1979,24 @@ function reportDiscarded(done, forAgent) {
 
 let REMOVED_OPEN = false;
 
+/**
+ * ⚠️ A GENERATION TOKEN, like every other async path in this file.
+ *
+ * This was the only fetch here without one, and it is now fired from three
+ * places at once: the unawaited five-second poll, the toggle click, and the
+ * awaited calls after a remove or a restore. An older response landing last
+ * repaints a stale list AND caches that stale markup in `REMOVED_HTML` -- so a
+ * just-restored row reappears, or a just-removed one is missing from the undo
+ * list, for up to a poll. `REMOVE_TOKEN`, `INSTR_LOAD` and `WATCH` all exist
+ * for exactly this.
+ */
+let REMOVED_TOKEN = 0;
+
 async function paintRemoved() {
   const wrap = document.getElementById('removed-wrap');
   const list = document.getElementById('removed-list');
   const toggle = document.getElementById('removed-toggle');
+  const mine = ++REMOVED_TOKEN;
   let gone = null;
   try {
     const res = await fetch('/api/removed', { cache: 'no-store' });
@@ -1958,6 +2020,10 @@ async function paintRemoved() {
     // opposite of what this section exists to promise.
     return;
   }
+  // ⚠️ A newer paint has started since this one asked. Its answer is the
+  // current one; ours is not, and painting it would also cache it.
+  if (mine !== REMOVED_TOKEN) return;
+
   if (gone.length === 0) {
     wrap.hidden = true;
     /**

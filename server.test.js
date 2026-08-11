@@ -2510,6 +2510,102 @@ test('the removed list gives the browser only what it draws', async () => {
  * do without taking a dependency it has deliberately never taken. That is a
  * decision for somebody, not something to sneak in here.
  */
+test('a throwing removal engine answers an error instead of killing the board', async () => {
+  /**
+   * ⚠️ NONE OF THE FOUR REMOVAL ROUTES' try/catch GUARDS WAS HELD. Deleting any
+   * one of them individually left the suite green, despite each carrying a
+   * paragraph explaining that an uncaught throw does not fail the request -- it
+   * EXITS THE PROCESS. The board goes down at the moment somebody is halfway
+   * through removing an agent, with nothing on screen to say what happened.
+   *
+   * Driven through the real server with the engine made to throw, because a
+   * unit test on the engine cannot show that a route survives it.
+   */
+  const removal = require('./engine/remove');
+  const realPlan = removal.plan;
+  const realRemove = removal.remove;
+  const realRestore = removal.restore;
+  const realList = removal.removedAgents;
+
+  const boom = () => { throw new Error('the engine exploded'); };
+  try {
+    removal.plan = boom;
+    removal.remove = boom;
+    removal.restore = boom;
+    removal.removedAgents = boom;
+
+    for (const [method, path] of [
+      ['GET', '/api/agent/anything/removal'],
+      ['DELETE', '/api/agent/anything/removal'],
+      ['POST', '/api/agent/anything/restore'],
+      ['GET', '/api/removed'],
+    ]) {
+      const res = await req(path, method === 'GET' ? undefined : { method });
+      assert.equal(res.status, 500, `${method} ${path} did not answer at all, which means it took the process with it`);
+      assert.match(res.type, /application\/json/, `${method} ${path} answered but not as JSON`);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error, `${method} ${path} answered 500 with nothing to say`);
+    }
+
+    // ⚠️ CONTROL: the server is still up and still serving everything else. If
+    // it had died, every assertion above would have failed on the request
+    // rather than on the status -- but this makes the property explicit.
+    const alive = await req('/api/status');
+    assert.match(alive.type, /application\/json/, 'the board died despite the routes answering');
+  } finally {
+    removal.plan = realPlan;
+    removal.remove = realRemove;
+    removal.restore = realRestore;
+    removal.removedAgents = realList;
+  }
+});
+
+
+test('a half-finished removal answers 200, because it is a state and not an error', async () => {
+  /**
+   * ⚠️ A DELIBERATE DECISION THAT NOTHING HELD. Inverting it to
+   * `outcome === REMOVED ? 200 : 400` passed 346/346 -- and that inversion
+   * routes a PARTIAL into the browser's failure branch, which skips the
+   * `paintRemoved()` refresh the partial path performs and shows a generic
+   * failure instead of the sentence saying the agent may still be running.
+   *
+   * The request was understood and acted on. What happened is in the body,
+   * which is where a removal's outcome has to be read anyway.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'partial-status';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Partial**.\n', 'utf8');
+  fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // bootout refuses: disabled but not stopped, which is a partial.
+  removal.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    const res = await req(`/api/agent/${name}/removal`, { method: 'DELETE' });
+    const body = JSON.parse(res.body);
+    // ⚠️ CONTROL: it really is a partial, or "partials answer 200" is being
+    // asserted about a clean removal.
+    assert.equal(body.outcome, 'partial', `this is a ${body.outcome}, so the status code proves nothing`);
+    assert.equal(res.status, 200,
+      'a half-finished removal answers as an error, so the screen shows a generic failure instead of what happened');
+    assert.match(body.because, /still running|still be going|could not/,
+      'the body does not say what half-happened, which is the only reason 200 is defensible');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
 test('the browser-layer fixes on this branch cannot be undone silently', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
