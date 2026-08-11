@@ -10,10 +10,21 @@ some of what they are: their picture, what you call their job, and the
 instruction file each one reads when it starts.
 
 **It can also make one.** Pick what the agent is for, give it a name, and it
-writes the folder, the instructions, a startup script and a launchd job, loads
-the job, and then WATCHES THE BOARD until it can see the agent running before it
-says so. No terminal, and nothing claimed that was not observed: if the board
-cannot see it after thirty seconds, the screen says that instead.
+writes the folder and the instructions, installs a launchd job, loads it, and
+then WATCHES THE BOARD until it can see the agent running before it says so.
+
+Every agent's job runs the same supervisor, `bin/agent-supervisor.sh`, with its
+own name as an argument. One file rather than a copy per agent, so a change to
+it reaches agents that already exist: it is reinstalled whenever an agent is
+created, and each running agent picks it up at its next start.
+
+No terminal, and nothing claimed that was not observed: if the board cannot see
+the agent after thirty seconds, the screen says that instead.
+
+⚠️ Two conditions on "reaches agents that already exist", worth stating rather
+than implying. On a machine where no further agent is ever created, nothing
+reinstalls it. And an agent made by a version before this one has its own copy
+of the old script and keeps it: nothing migrates those.
 
 It cannot stop, remove or message an agent yet.
 

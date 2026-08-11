@@ -2018,7 +2018,7 @@ test('the create route answers a real creation with the record the screen is bui
 
     // And the files are really there, in the sandbox this file sets up.
     assert.ok(fs.existsSync(create.instructionFile('route-made')), 'no instruction file was written');
-    assert.ok(fs.existsSync(create.launcherFile('route-made')), 'no startup script was written');
+    assert.ok(fs.existsSync(create.supervisorPath()), 'the shared supervisor was not installed');
     assert.ok(fs.existsSync(create.plistPath('route-made')), 'no launchd job was written');
   } finally {
     create.setRunner(null);
