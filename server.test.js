@@ -2911,3 +2911,72 @@ test('a job that is disabled but will not unload is recorded, not reported as un
     removal.setRunner(null);
   }
 });
+
+test('a different spelling of an agent name cannot write to the real agent', async () => {
+  /**
+   * ⚠️ A LIVE DEFECT ON `main` WHEN THIS WAS WRITTEN, measured through the real
+   * routes with one agent called `casey` on the board:
+   *
+   *     PUT /api/agent/CASEY/profile   -> 200
+   *     PUT /api/agent/casey./profile  -> 200
+   *     casey's profile afterwards:  { "role": "OVERWRITTEN" }
+   *
+   * `claimantFor` falls back to matching on `store.safeKey`, which STRIPS
+   * illegal characters and folds case. That generosity exists so `borrowedName`
+   * can SEE an alias spelling and refuse it on a read -- and the same function
+   * was being used to PERMIT writes. So a typo or a stale link edited the real
+   * agent's role, picture and boot file.
+   *
+   * ⚠️ Found by porting `add-restart-with-consequences`, which had invented its
+   * own resolver specifically to prevent this. Replacing that with main's gate
+   * was right; main's gate was weaker in exactly the respect that branch had
+   * guarded.
+   *
+   * ⚠️ THE SUITE PASSED WITH THE BUG. It passed before the fix and after, which
+   * is why this test exists rather than a note.
+   */
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  const name = 'aliastarget';
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  try {
+    // ⚠️ CONTROL 1: the aliases really do collapse to the same key, or the
+    // hazard under test does not exist and this asserts nothing.
+    for (const alias of ['ALIASTARGET', 'alias.target']) {
+      assert.equal(store.safeKey(alias), store.safeKey(name),
+        `${alias} does not collapse onto ${name}, so this fixture cannot show the defect`);
+    }
+
+    // ⚠️ CONTROL 2: the real name WORKS, or "the aliases are refused" is true
+    // of a gate that refuses everything.
+    const real = await req(`/api/agent/${name}/profile`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'the real one' }),
+    });
+    assert.equal(real.status, 200, 'the agent became uneditable under its own name, so the gate refuses everything');
+
+    for (const alias of ['ALIASTARGET', 'alias.target', 'Alias.Target']) {
+      const res = await req(`/api/agent/${encodeURIComponent(alias)}/profile`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'OVERWRITTEN' }),
+      });
+      assert.notEqual(res.status, 200,
+        `${alias} was accepted, so a different spelling writes to the real agent`);
+    }
+
+    // ⚠️ THE ASSERTION THAT MATTERS: the real agent's record is untouched.
+    const after = JSON.parse((await req(`/api/agent/${name}/profile`)).body || '{}');
+    const stored = store.readProfile(name);
+    assert.equal(stored.role, 'the real one',
+      'an alias spelling overwrote the real agent\'s role');
+
+    // And the READ refusal still notices an alias, which is what the loose
+    // match is FOR -- the fix must not have removed that.
+    const read = await req(`/api/agent/${encodeURIComponent('ALIASTARGET')}/avatar`);
+    assert.equal(read.status, 404, 'the read gate stopped noticing alias spellings');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});

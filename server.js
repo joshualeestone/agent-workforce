@@ -169,7 +169,40 @@ function sessionOf(name) {
 function knownAgent(name) {
   try {
     const card = claimantFor(name);
-    return Boolean(card) && card.isNamedOurs === true;
+    if (!card || card.isNamedOurs !== true) return false;
+    /**
+     * ⚠️ THE SPELLING HAS TO BE EXACT, AND THIS IS THE HALF THAT WAS MISSING.
+     *
+     * `claimantFor` is generous ON PURPOSE: it falls back to matching on
+     * `store.safeKey`, which STRIPS illegal characters and folds case, so that
+     * `borrowedName` can SEE an alias spelling and refuse it on a read. That
+     * generosity is right for detecting a borrowed name. It is wrong for
+     * PERMITTING a write, and the same function was doing both.
+     *
+     * Measured on this code, with one real agent called `casey` on the board:
+     *
+     *     PUT /api/agent/CASEY/profile   -> 200
+     *     PUT /api/agent/casey./profile  -> 200
+     *     casey's profile afterwards:  { "role": "OVERWRITTEN" }
+     *
+     * So a different spelling of an agent's name wrote to the real agent --
+     * its role, its picture, and the file it boots from. Not remotely
+     * exploitable (the board is loopback-only and `crossSiteWrite` already
+     * answers 403 to a foreign Origin), so the realistic harm is a typo or a
+     * stale link quietly editing the wrong agent. That is still the wrong
+     * agent.
+     *
+     * ⚠️ Found by porting the `add-restart-with-consequences` branch, which had
+     * invented its own resolver SPECIFICALLY to prevent this and written tests
+     * for it. Replacing that with this gate was right -- two definitions of
+     * identity is this codebase's most-shipped defect -- but this one was
+     * weaker in exactly the respect that branch had guarded, and its tests are
+     * what caught it.
+     *
+     * The asymmetry, stated so nobody "simplifies" it back: LOOSE to notice a
+     * borrowed name, EXACT to permit a write.
+     */
+    return card.sessionName === String(name);
   } catch {
     return false;
   }
