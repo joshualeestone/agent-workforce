@@ -17,6 +17,7 @@ const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
 const { snapshot, paneRoster } = require('./engine/status');
+const removal = require('./engine/remove');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -751,6 +752,39 @@ const server = http.createServer((req, res) => {
       // green because nothing exercised it. A route's error path needs a test as
       // much as its happy path does.
       .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
+  /**
+   * --- removing an agent ---------------------------------------------------
+   *
+   * ⚠️ TWO ROUTES, and the split is the point. `GET` returns the PLAN — what
+   * would happen, in the words the confirmation shows — and `DELETE` performs
+   * exactly that plan. A screen that described the work itself could drift from
+   * what the engine does, and the one place that must never happen is the
+   * screen a person reads before destroying something.
+   *
+   * ⚠️ The engine refuses an agent this product did not create, and it refuses
+   * INDEPENDENTLY of this route. The board lists thirteen agents whose launchd
+   * jobs belong to somebody else's tooling; a delete that can reach those is
+   * worse than having no delete at all, so the guard does not live in the
+   * caller.
+   */
+  const rm = pathname.match(/^\/api\/agent\/([^/]+)\/removal$/);
+  if (rm && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(rm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    const wipe = new URLSearchParams((req.url.split('?')[1] || '')).get('folder') === 'delete';
+    const plan = removal.plan(name, { alsoDeleteFolder: wipe });
+    sendJson(res, plan.ok ? 200 : 400, plan);
+    return;
+  }
+  if (rm && req.method === 'DELETE') {
+    const name = decodeSegment(rm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    const wipe = new URLSearchParams((req.url.split('?')[1] || '')).get('folder') === 'delete';
+    const done = removal.remove(name, { alsoDeleteFolder: wipe });
+    sendJson(res, done.outcome === removal.OUTCOME.REFUSED ? 400 : 200, done);
     return;
   }
 

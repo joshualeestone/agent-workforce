@@ -276,6 +276,16 @@ svg { display: block; }
   border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
 }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
+
+/* Removing an agent. Set apart by a rule and by weight, never by hue alone --
+   the board reads identically in greyscale and this control must too. */
+.danger { border-top: 1.5px solid var(--border-strong); margin-top: var(--space-8); }
+.danger .flabel { color: var(--label); }
+.danger-btn { border-color: var(--warn-border); }
+.danger-btn:hover { background: var(--warn-bg); }
+.remove-steps { margin: 0 0 var(--space-4) var(--space-6); padding: 0; }
+.remove-steps li { font: var(--text-body) var(--font-ui); color: var(--label);
+                   margin-bottom: var(--space-2); }
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
@@ -383,6 +393,35 @@ svg { display: block; }
     </div>
     <div class="fpath" id="d-instr-prev" hidden>An earlier version is kept beside it as <code>CLAUDE.md.previous</code>.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
+  </div>
+
+  <!-- ⚠️ THE ONLY DESTRUCTIVE CONTROL IN THE PRODUCT, and it is here rather
+       than on the card deliberately: at the bottom of the one screen you have
+       to open on purpose, after everything else. Nothing about removing an
+       agent should be reachable in passing. -->
+  <div class="field danger" id="d-remove-agent" hidden>
+    <label class="flabel">Remove this agent</label>
+    <div class="fhint" id="d-remove-hint"></div>
+    <div class="frow">
+      <button class="btn danger-btn" id="d-remove-start" type="button">Remove this agent…</button>
+    </div>
+
+    <!-- The confirmation. It renders the engine's own plan, so the words a
+         person reads are the work that will actually be done. -->
+    <div id="d-remove-confirm" hidden>
+      <div class="stale-note" id="d-remove-warning" role="alert"></div>
+      <p class="fhint" style="margin-bottom: var(--space-3);">This will:</p>
+      <ul id="d-remove-steps" class="remove-steps"></ul>
+      <label class="frow" style="gap: var(--space-3); margin: var(--space-5) 0;">
+        <input type="checkbox" id="d-remove-folder">
+        <span id="d-remove-folder-label"></span>
+      </label>
+      <div class="frow">
+        <button class="btn danger-btn" id="d-remove-go" type="button">Yes, remove it</button>
+        <button class="btn" id="d-remove-cancel" type="button">Keep it</button>
+      </div>
+    </div>
+    <div class="fmsg" id="d-remove-msg" role="status" aria-live="polite"></div>
   </div>
 </section>
 
@@ -892,6 +931,10 @@ function openDetail(sessionName) {
   const tied = a.isNamedOurs === true;
   setWritesOffered(a, tied);
   if (tied) loadInstructions(a.sessionName);
+  // ⚠️ Asked EVERY time the panel opens, and asked of the engine. Whether an
+  // agent can be removed here is a fact about what created it, and this screen
+  // must not carry its own opinion about that.
+  loadRemoval(a.sessionName);
   showTab('detail');
 }
 
@@ -1339,6 +1382,126 @@ document.getElementById('d-remove').addEventListener('click', async () => {
   msg.textContent = 'Removed.';
   await tick();
   refreshAvatar();
+});
+
+/* ===========================================================================
+   REMOVING AN AGENT
+   ---------------------------------------------------------------------------
+   ⚠️ The only destructive thing this product does, and the rules it follows:
+
+   1. **The screen never describes the work.** It renders the ENGINE's plan, so
+      what a person reads before confirming is what will actually happen. A
+      screen that wrote its own list could drift from the engine, and the one
+      place that must never happen is a confirmation.
+   2. **It is not offered for agents this app did not create.** The board shows
+      every agent on the machine; most of them belong to other tooling. The
+      engine refuses those independently, and the screen does not tempt anyone.
+   3. **The folder is kept unless it is explicitly asked for.** It holds the
+      instructions the PERSON wrote. "Remove this agent" does not mean "delete
+      what I wrote."
+========================================================================== */
+
+let REMOVE_PLAN = null;
+
+async function loadRemoval(sessionName) {
+  const box = document.getElementById('d-remove-agent');
+  const hint = document.getElementById('d-remove-hint');
+  box.hidden = true;
+  document.getElementById('d-remove-confirm').hidden = true;
+  document.getElementById('d-remove-msg').textContent = '';
+  document.getElementById('d-remove-folder').checked = false;
+  REMOVE_PLAN = null;
+
+  let plan = null;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/removal', { cache: 'no-store' });
+    plan = await res.json().catch(() => null);
+  } catch { /* leave it hidden rather than offering something we cannot do */ }
+  if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+
+  box.hidden = false;
+  if (plan && plan.ok) {
+    REMOVE_PLAN = plan;
+    hint.textContent = 'This agent was created here, so it can be removed here.';
+    document.getElementById('d-remove-start').hidden = false;
+  } else {
+    // ⚠️ Says WHY rather than simply not being there. Somebody looking for this
+    // on one of their own long-running agents deserves an answer, and "we did
+    // not make it, so it is not ours to end" is the true one.
+    hint.textContent = (plan && plan.because)
+      || 'This agent was not created here, so it cannot be removed here.';
+    document.getElementById('d-remove-start').hidden = true;
+  }
+}
+
+function paintRemovePlan() {
+  const plan = REMOVE_PLAN;
+  if (!plan) return;
+  document.getElementById('d-remove-warning').innerHTML = '<b>' + esc(plan.warning) + '</b>';
+  document.getElementById('d-remove-steps').innerHTML =
+    plan.steps.map((s) => '<li>' + esc(s) + '</li>').join('');
+  const n = plan.folderContents ? plan.folderContents.length : 0;
+  document.getElementById('d-remove-folder-label').textContent =
+    'Also delete its folder, and the ' + n + ' file' + (n === 1 ? '' : 's') + ' in it, including the instructions you wrote';
+}
+
+document.getElementById('d-remove-start').addEventListener('click', () => {
+  document.getElementById('d-remove-confirm').hidden = false;
+  paintRemovePlan();
+});
+
+document.getElementById('d-remove-cancel').addEventListener('click', () => {
+  document.getElementById('d-remove-confirm').hidden = true;
+  document.getElementById('d-remove-folder').checked = false;
+});
+
+// Ticking the box changes what will happen, so it re-asks the ENGINE rather
+// than the screen rewording its own warning.
+document.getElementById('d-remove-folder').addEventListener('change', async (e) => {
+  if (!CURRENT) return;
+  const forAgent = CURRENT.sessionName;
+  const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal'
+    + (e.target.checked ? '?folder=delete' : ''), { cache: 'no-store' });
+  const plan = await res.json().catch(() => null);
+  if (!CURRENT || CURRENT.sessionName !== forAgent || !plan || !plan.ok) return;
+  REMOVE_PLAN = plan;
+  paintRemovePlan();
+});
+
+document.getElementById('d-remove-go').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const forAgent = CURRENT.sessionName;
+  const wipe = document.getElementById('d-remove-folder').checked;
+  const msg = document.getElementById('d-remove-msg');
+  const go = document.getElementById('d-remove-go');
+  go.disabled = true;
+  msg.textContent = 'Removing…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal'
+      + (wipe ? '?folder=delete' : ''), { method: 'DELETE' });
+    const done = await res.json().catch(() => null);
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    if (!res.ok || !done || done.outcome === 'refused') {
+      msg.textContent = (done && done.because) || 'we could not remove it, and we cannot tell you why';
+      go.disabled = false;
+      return;
+    }
+    // ⚠️ PARTIAL is not success and does not leave the panel. "It will come back
+    // when you next log in" is the one thing a person must not walk away from
+    // without reading.
+    if (done.outcome === 'partial') {
+      msg.textContent = done.because;
+      go.disabled = false;
+      await tick();
+      return;
+    }
+    showTab('agents');
+    await tick();
+  } catch (err) {
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    msg.textContent = 'We could not reach the board, so we cannot tell you whether it was removed. (' + err.message + ')';
+    go.disabled = false;
+  }
 });
 
 document.getElementById('d-save').addEventListener('click', async () => {
