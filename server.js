@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
+const lifecycle = require('./engine/lifecycle');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -172,6 +173,69 @@ function knownAgent(name) {
   } catch {
     return false;
   }
+}
+
+/**
+ * A stable fingerprint of what an agent is holding.
+ *
+ * ⚠️ Includes the STATE, not just the items. `unknown` with three items and
+ * `holding` with the same three are different situations: the first means we
+ * cannot vouch for the list. A token built from the items alone would let a
+ * dialog that said "we cannot tell" be approved against a later moment when we
+ * could, which is the two-things-one-token conflation the instruction editor
+ * had to fix between `absent` and `unreadable`.
+ */
+function holdingToken(seen) {
+  // ⚠️ The TEXT, not just the ids. A commitment can keep its id and change what
+  // it says: `resolve(agent, id)` requires ids to be stable across reports, so
+  // an agent re-reporting the same item with new wording is ordinary, not
+  // exotic. Measured: the dialog showed "Draft the internal memo", the agent
+  // re-reported that id as "Wire the 40k payment to the vendor", and the
+  // original token was still accepted. The operator approved destroying one
+  // thing and destroyed another.
+  const items = (seen.commitments || [])
+    .map((c) => `${c.id}\u0000${c.what}`)
+    .sort()
+    .join('\u0001');
+  const digest = require('node:crypto').createHash('sha256').update(items, 'utf8').digest('hex').slice(0, 32);
+  return `${seen.state}:${digest}`;
+}
+
+/** The commitment block, with the fingerprint the confirmation compares. */
+function withToken(seen) {
+  return { ...seen, token: holdingToken(seen) };
+}
+
+/**
+ * Turn a thrown error into what the operator is told.
+ *
+ * ⚠️ Only messages we WROTE are echoed back. Everything in the fresh-start
+ * chain that throws deliberately does so with a sentence composed for a person,
+ * and those all set `code`. Anything else arriving here is an unexpected throw
+ * — and `snapshot()` is in that chain, shelling out to tmux and reading
+ * transcripts, so it surfaces filesystem errnos and absolute home directory
+ * paths. Passing `err.message` through verbatim put those on screen, against
+ * the rule stated on `safeTarget` and plan item 1.5.
+ *
+ * Keyed on a `code` WE set, not on pattern-matching the text, for the same
+ * reason `editable` is a structured field rather than a regex over English.
+ *
+ * Extracted rather than left inline for the same reason `mayTypeInto` was: the
+ * inline version could not be pinned, because provoking a genuine unexpected
+ * throw from the route means breaking tmux or the filesystem under a live
+ * fleet. As a function the refusal is testable directly.
+ */
+const OUR_ERRORS = new Set(['CONFLICT', 'SAY_WHAT']);
+
+function errorAnswer(err) {
+  const code = err && err.code;
+  if (!OUR_ERRORS.has(code)) {
+    return { status: 500, error: 'something went wrong here, and we could not tell what' };
+  }
+  return {
+    status: code === 'CONFLICT' ? 409 : 400,
+    error: String(err.message),
+  };
 }
 
 function sendJson(res, code, obj) {
@@ -570,6 +634,29 @@ const server = http.createServer((req, res) => {
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
           : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
+        /**
+         * ⚠️ WHAT EACH FRESH-START ACTION WOULD DO TO THIS AGENT, decided in
+         * the engine so the dialog cannot describe one differently from the
+         * code that performs it. The instruction editor shipped a version of
+         * that bug and it took two review passes to find.
+         *
+         * ⚠️ AND the route's own gate, or `may` promises what the action route
+         * then refuses -- the offer-an-action-that-cannot-work state this field
+         * exists to remove. On the original branch that gate was `findAgent`'s
+         * name rule; here it is `knownAgent`, which is the gate every other
+         * write route on this server already uses.
+         */
+        may: ['compact', 'clear', 'restart'].reduce((acc, action) => {
+          // ⚠️ ONE call. The three gates live in `lifecycle.verdictFor` so the
+          // screenshot fixture renders the same buttons this does -- it held a
+          // partial copy under a comment claiming otherwise.
+          const verdict = knownAgent(a.sessionName)
+            ? lifecycle.verdictFor(action, a)
+            : { ok: false, because: 'we cannot confirm this card is the agent it is filed under' };
+          acc[action] = { ok: verdict.ok, because: verdict.because || null };
+          return acc;
+        }, {}),
+
         // Staleness only, NOT the instruction text. The board polls this every
         // five seconds for every agent, and the real files run to several
         // kilobytes each -- carrying them here would put ~90KB on the wire per
@@ -874,6 +961,252 @@ const server = http.createServer((req, res) => {
     try { back = removal.restore(name); }
     catch (err) { sendJson(res, 500, { error: 'we could not put this agent back', detail: String(err && err.message || err) }); return; }
     sendJson(res, back.outcome === removal.OUTCOME.REFUSED ? 400 : 200, back);
+    return;
+  }
+
+const life = pathname.match(/^\/api\/agent\/([^/]+)\/(restart|clear|compact)$/);
+  if (life && req.method === 'POST') {
+    const name = decodeSegment(life[1]);
+    const action = life[2];
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+
+    // ⚠️ ONE snapshot for the gate AND the action, and one shared definition of
+    // which agent that is.
+    //
+    // This route asked twice: `knownAgent` took a snapshot to decide the agent
+    // exists, and the body handler took another to find the record it acts on.
+    // Two shell-outs to `tmux list-panes` plus a transcript read per agent, per
+    // click — but the reason to fix it was never the cost. Two reads of one fact
+    // opened a window where the agent was present for the gate and gone for the
+    // lookup, so `agent` reached `mayTypeInto` as undefined after the route had
+    // already decided it was real.
+    //
+    // Through `findAgent`, which `knownAgent` is now also built on: the first
+    // attempt at this fix inlined the lookup here and left the other five routes
+    // on `knownAgent`, which solved the double snapshot by creating a second
+    // definition of identity — trading this codebase's most common defect for
+    // its most common defect.
+    /**
+     * ⚠️ THE ONE PLACE THIS PORT HAD TO CHANGE, and it is the seam worth
+     * reading twice.
+     *
+     * The original branch resolved the agent with its own `findAgent`, which
+     * required an exact, addressable name because `store.safeKey` STRIPS
+     * illegal characters rather than rejecting them -- so `my.bot` and `mybot`
+     * collapse to one key, and on these routes that means `/clear` typed into a
+     * different agent's pane and a restart aimed at a different agent's
+     * service.
+     *
+     * Main solved the same problem differently and more thoroughly while this
+     * branch sat unmerged: `claimantFor` asks which CARD answers for a spelling,
+     * and `knownAgent` is that plus "the board vouches this card is the agent it
+     * is filed under". Every other write route on this server is already behind
+     * it, and this branch's own reasoning is why that gate exists.
+     *
+     * So these routes use main's gate rather than reintroducing a second
+     * definition of identity -- which is this codebase's most-shipped defect,
+     * and the exact thing the removal routes were caught doing earlier today.
+     */
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    const agent = claimantFor(name);
+    if (!agent) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+
+    readBody(req)
+      .then((buf) => {
+        let patch;
+        try {
+          patch = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          // ⚠️ Carries a code. `errorAnswer` only echoes messages we wrote, and
+          // this one had none — so the clearest error on the route came back as
+          // 500 "something went wrong here, and we could not tell what". The
+          // comment on `errorAnswer` asserted every deliberate throw in this
+          // chain sets a code; this was the one that did not, which is exactly
+          // how a claim in a comment stops being true.
+          const err = new Error('send the request as JSON');
+          err.code = 'SAY_WHAT';
+          throw err;
+        }
+
+        // ⚠️ The caller must say what the dialog SHOWED it was about to
+        // destroy, and this refuses if that is no longer true.
+        //
+        // Same shape as the instruction editor's changed-since-read guard, and
+        // for a sharper reason: a dialog listing three commitments, approved
+        // twenty minutes later, must not quietly destroy a fourth that arrived
+        // in between. The whole point of this screen is that you saw the cost
+        // before you paid it, and a cost that changed underneath you was never
+        // shown.
+        //
+        // ⚠️ ALL THREE require it now, compact included.
+        //
+        // Compact was exempt on the grounds that it loses nothing and that
+        // requiring confirmation for a harmless action trains people to click
+        // through. The first half was wrong: `/compact` replaces the older
+        // conversation with a summary, which is lossy by construction, and this
+        // card's premise is that commitments live in the conversation. An
+        // action that can lose something must not be the one action that can
+        // fire with no evidence the operator saw anything.
+        // ⚠️ ONE identity, derived once, used for the check AND the action.
+        //
+        // This read the RAW name while `perform` acted on the sanitised key, so
+        // any alias spelling defeated the confirmation entirely: `/api/agent/
+        // PROBE/clear` was refused under `probe` and then cleared `probe`
+        // anyway, and the answer reported `holding: {state:"unknown",
+        // commitments:[]}` — "a record of the cost actually paid" saying nothing
+        // was at stake while three commitments were destroyed. `knownAgent`
+        // used to document that `ANGEL`, `an.gel` and `ang!el` all reach this
+        // route. They no longer do — `findAgent` refuses any spelling that is
+        // not already its own `safeKey`. The two-derivations point below still
+        // stands and is the reason this line exists.
+        //
+        // Two derivations of "which agent" is the defect this codebase has now
+        // found in six other places. One here.
+        const key = store.safeKey(name);
+        const seen = commitments.read(key);
+        {
+          if (typeof patch.holding !== 'string') {
+            const err = new Error('say what you were shown this would lose');
+            err.code = 'SAY_WHAT';
+            throw err;
+          }
+          if (patch.holding !== holdingToken(seen)) {
+            const err = new Error('what this agent is holding changed since you were shown it, look again before going ahead');
+            err.code = 'CONFLICT';
+            throw err;
+          }
+        }
+
+        // ⚠️ A pane we are willing to type into. The roster comes from
+        // `tmux list-panes -a`, which is EVERY pane on the machine, so without
+        // this `/clear` and Enter could be typed into a plain shell or an
+        // editor, where the text is executed rather than read as a command.
+        // ⚠️ `verdictFor`, the same function `/api/status` publishes `may` from.
+        // The route asked `mayTypeInto` — gate 3 of three — while `verdictFor`'s
+        // docstring claimed all three ran "in the order the route applies
+        // them". They did not: a name `canReach` refuses reached `perform` and
+        // was stopped there instead, safely but by a different mechanism than
+        // the comment described. One function decides for both surfaces now, so
+        // the button and the route cannot disagree by construction.
+        const allowed = lifecycle.verdictFor(action, agent);
+        if (!allowed.ok) {
+          sendJson(res, 409, {
+            action,
+            outcome: lifecycle.OUTCOME.REFUSED,
+            because: allowed.because,
+            holding: withToken(seen),
+          });
+          return;
+        }
+
+        const result = lifecycle.perform(action, key, agent && agent.target);
+
+        // ⚠️ Reconcile the record with what we just did to it.
+        //
+        // `clear` and `restart` destroy the conversation, which is where the
+        // agent's memory of its own commitments lives. Leaving the record
+        // standing made the board go on asserting those commitments at FULL
+        // confidence ("it reported these itself") for the next thirty minutes,
+        // about work that no longer exists anywhere. A cleared agent will never
+        // correct it either, because it has forgotten it ever said them.
+        //
+        // Forgotten rather than reported-empty: `report(name, [])` would record
+        // the agent saying it holds nothing, and it said no such thing. Removing
+        // the record leaves `unknown`, which is the true state — we destroyed
+        // what it knew, and we cannot know what it holds until it speaks again.
+        // ⚠️ The return value is not discarded. `markDestroyed` returns false
+        // rather than throwing, so a tombstone that could not be written failed
+        // SILENTLY: the conversation destroyed, the record left standing, and
+        // the board serving "it reported these itself" at full confidence for
+        // the next thirty minutes with nothing anywhere saying so.
+        let reconciled = null;
+        // Set when we deliberately left the record alone because this pane is
+        // not tied to the name it is filed under. Distinct from a failed write.
+        let untied = false;
+        if (lifecycle.invalidatesCommitments(action, result)) {
+          // ⚠️ Only meaningful when there was a record to reconcile.
+          // `markDestroyed` also returns false for an agent that never reported,
+          // and warning "we could not update our record" when there was nothing
+          // to update makes the sentence useless as a signal for the times it
+          // matters.
+          const hadRecord = (seen.commitments || []).length > 0 || seen.reportedAt;
+
+          // ⚠️ Only tombstone a record we can tie to the pane we just typed
+          // into. The commitment record belongs to whoever owns the NAME; the
+          // pane is whatever won that name in the roster. When the winner is a
+          // pane we merely INFERRED is an agent (a Claude process in a session
+          // whose name does not carry the suffix), those two can be different
+          // agents entirely — the real one dead, a stranger's session standing
+          // in for it.
+          //
+          // Marking anyway produces the worst output this board can produce: a
+          // confident, false claim that the named agent's commitments were
+          // destroyed, while that agent is untouched and still holding them.
+          // Leaving the record alone is not a missed cleanup — it is the honest
+          // answer, because we did not clear that agent.
+          // ⚠️ THREE outcomes, not two, and collapsing the third into `false`
+          // made the board say something untrue about itself. `false` means "we
+          // tried to write the tombstone and could not", and the sentence built
+          // from it says "We could not update our record". Here we did not try,
+          // deliberately, because the record is not this pane's to speak for.
+          // Reporting a considered refusal as a failed write is the same class
+          // of defect as the rest of this branch: a confident sentence about
+          // something that did not happen the way it says.
+          if (!agent.isNamedOurs) {
+            // ⚠️ `hadRecord`, for the same reason the `reconciled === false`
+            // path six lines down applies it: saying "we left our record alone"
+            // when there is no record asserts one exists. An inferred pane
+            // under a name that never reported would otherwise be told about
+            // the careful handling of something that was never there.
+            // Boolean, not the ISO date `hadRecord` can be — it is serialised now.
+            untied = Boolean(hadRecord);
+          } else {
+            const marked = commitments.markDestroyed(key);
+            reconciled = hadRecord ? marked : null;
+          }
+        }
+
+        // A reconciliation we could not perform is said out loud, appended to
+        // the engine's own sentence rather than replacing it: what we did still
+        // happened, and this is an additional thing the operator needs to know.
+        const because = untied
+          // `key`, not `name`: `name` is the raw URL segment, so /WREN/clear
+          // would answer "what WREN was holding" about a record filed as `wren`.
+          // The route collapsed its identity derivations to one for exactly this
+          // reason and this line reintroduced a second.
+          ? `${result.because}. We left our record of what ${key} was holding alone, because this session is not the one that agent's own session runs in and we cannot say the record is this pane's to destroy.`
+          : reconciled === false
+            ? `${result.because}. We could not update our record of what it was holding, so the board may still show it for a while.`
+            : result.because;
+
+        sendJson(res, result.outcome === lifecycle.OUTCOME.REFUSED ? 409 : 200, {
+          // ⚠️ A FIELD, not only a sentence. This outcome existed solely inside
+          // the English composed below, so the only way to pin it was to match
+          // that prose — the exact anti-pattern this file condemns elsewhere,
+          // because rewording the sentence silently unpins the guard. The
+          // browser can also render it now instead of parsing a paragraph.
+          untied: Boolean(untied),
+          action,
+          ...result,
+          because,
+          reconciled,
+          // What it was holding when we acted, so the answer is a record of the
+          // cost actually paid rather than of the cost quoted.
+          holding: withToken(seen),
+        });
+      })
+      .catch((err) => {
+        const answer = errorAnswer(err);
+        sendJson(res, answer.status, { error: answer.error });
+      });
+    return;
+  }
+
+  // The engine's own description of each action, so the dialog cannot describe
+  // one differently from the code that performs it. The instruction editor
+  // shipped a version of that bug and it took two review passes to find.
+  if (pathname === '/api/actions' && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendJson(res, 200, lifecycle.ACTIONS);
     return;
   }
 

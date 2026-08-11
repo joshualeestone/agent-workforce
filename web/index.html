@@ -332,6 +332,129 @@ svg { display: block; }
    request, no dependency, and identical on every machine.
    A local-first product must not fetch a remote asset to draw a pencil, and it
    has to keep working on a machine with no internet at all. */
+/* The fresh-start button under the staleness note. It reads as part of that
+   note, so it sits tight under it and keeps its distance from the editor below
+   — otherwise it looks like a control belonging to the textarea it is touching,
+   which is the one thing it must not be mistaken for. */
+#d-instr-fresh { margin: calc(-1 * var(--space-3)) 0 var(--space-4); }
+.card-stale {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
+}
+.card-stale svg { width: 13px; height: 13px; }
+
+/* Present to a screen reader, absent to the eye. Used where a finding is
+   carried by a glyph, which on its own says nothing to anyone not looking at
+   it. `clip-path` rather than `display:none`, which would remove it from the
+   accessibility tree along with everything else. */
+.fresh { position: absolute; top: var(--space-4); right: 38px;
+        width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+        border: 0.5px solid var(--separator); background: var(--bg-elevated);
+        color: var(--label-2); display: flex; align-items: center; justify-content: center; }
+.fresh:hover { background: var(--attn-bg); color: var(--label); }
+.fresh svg { width: 13px; height: 13px; }
+
+/* The fresh-start dialog. Modal because the whole point is that you read the
+   cost before you pay it, and a non-modal panel can be ignored. */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+         display: flex; align-items: center; justify-content: center; padding: var(--space-6); z-index: 50; }
+.modal { background: var(--bg-elevated); border-radius: var(--radius-card);
+         box-shadow: 0 8px 40px rgba(0,0,0,0.25); max-width: 620px; width: 100%;
+         max-height: 90vh; overflow-y: auto; padding: var(--space-8); }
+.modal h2 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; margin-bottom: var(--space-3); }
+.modal .lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+.modal h3 { font: 600 var(--text-subhead) var(--font-ui); text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--label-3); margin-bottom: var(--space-4); }
+.holding { border: 1px solid var(--separator); border-radius: var(--radius-control);
+           background: var(--bg-sunken); padding: var(--space-5); margin-bottom: var(--space-7); }
+
+.opt.refused { background: var(--bg-sunken); }
+.opt.refused h4, .opt.refused p { color: var(--label-2); }
+.why-not { margin-top: 4px; font: var(--text-caption) var(--font-ui); color: var(--label); }
+.instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
+.fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+
+/* Running on older instructions. A STATE, not a toast: it survives a reload,
+   and it is still right when the file was edited outside this app entirely. */
+.stale-note {
+  margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-control); border: 0.5px solid var(--warn-border);
+  background: var(--warn-bg); color: var(--label);
+  font: var(--text-callout) var(--font-ui); line-height: 1.45;
+}
+/* The fresh-start button under the staleness note. It reads as part of that
+   note, so it sits tight under it and keeps its distance from the editor below
+   — otherwise it looks like a control belonging to the textarea it is touching,
+   which is the one thing it must not be mistaken for. */
+#d-instr-fresh { margin: calc(-1 * var(--space-3)) 0 var(--space-4); }
+.card-stale {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
+}
+.card-stale svg { width: 13px; height: 13px; }
+
+/* Present to a screen reader, absent to the eye. Used where a finding is
+   carried by a glyph, which on its own says nothing to anyone not looking at
+   it. `clip-path` rather than `display:none`, which would remove it from the
+   accessibility tree along with everything else. */
+.fresh { position: absolute; top: var(--space-4); right: 38px;
+        width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+        border: 0.5px solid var(--separator); background: var(--bg-elevated);
+        color: var(--label-2); display: flex; align-items: center; justify-content: center; }
+.fresh:hover { background: var(--attn-bg); color: var(--label); }
+.fresh svg { width: 13px; height: 13px; }
+
+/* The fresh-start dialog. Modal because the whole point is that you read the
+   cost before you pay it, and a non-modal panel can be ignored. */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+         display: flex; align-items: center; justify-content: center; padding: var(--space-6); z-index: 50; }
+.modal { background: var(--bg-elevated); border-radius: var(--radius-card);
+         box-shadow: 0 8px 40px rgba(0,0,0,0.25); max-width: 620px; width: 100%;
+         max-height: 90vh; overflow-y: auto; padding: var(--space-8); }
+.modal h2 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; margin-bottom: var(--space-3); }
+.modal .lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+.modal h3 { font: 600 var(--text-subhead) var(--font-ui); text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--label-3); margin-bottom: var(--space-4); }
+.holding { border: 1px solid var(--separator); border-radius: var(--radius-control);
+           background: var(--bg-sunken); padding: var(--space-5); margin-bottom: var(--space-7); }
+/* ⚠️ `list-style: none` removes LIST SEMANTICS in WebKit/VoiceOver, not just the
+   bullets, so this stopped being announced as "list, 3 items" — on the one
+   element whose whole job is telling you how many things you are about to
+   destroy. The explicit `role="list"` on the markup puts it back; the two must
+   stay together. */
+.holding ul { list-style: none; margin: 0; padding: 0; }
+.holding li { display: flex; gap: var(--space-4); align-items: baseline; margin-bottom: var(--space-3);
+              font: var(--text-body) var(--font-ui); }
+/* ⚠️ An EXPLICIT colour, because inheriting the sibling badge's ink failed AA
+   in both themes and I did not compute it when I added this an hour ago.
+   Measured on #6b6b66: the inherited light ink is 2.65:1 and the inherited dark
+   ink 3.16:1, against a 4.5:1 requirement for 11px caption text with no
+   large-text exemption. Pure white on the same chip is 5.36:1.
+   This is the DESTROYED badge specifically — the one label whose whole job is
+   telling the operator an item is already gone. */
+.holding .badge.gone { background: #6b6b66; color: #fff; text-decoration: line-through; }
+.holding .badge { flex: none; font: 600 var(--text-caption) var(--font-ui); text-transform: uppercase;
+                  letter-spacing: 0.04em; border: 1px solid var(--border-strong);
+                  border-radius: var(--radius-control); padding: 1px 5px; color: var(--label-2); }
+.holding .danger { border-top: 0.5px solid var(--separator); margin-top: var(--space-5);
+                   padding-top: var(--space-4); font: var(--text-callout) var(--font-ui); color: var(--label); }
+.holding .cannot { font: var(--text-body) var(--font-ui); color: var(--label); }
+.opt { border: 1px solid var(--separator); border-radius: var(--radius-control);
+       padding: var(--space-5); margin-bottom: var(--space-4); position: relative;
+       display: flex; gap: var(--space-5); align-items: flex-start; justify-content: space-between; }
+.opt.gentlest { border: 2px solid var(--label); }
+.opt .tag { position: absolute; top: -9px; left: var(--space-5); background: var(--label);
+            color: var(--bg-elevated); font: 600 var(--text-caption) var(--font-ui);
+            text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; }
+.opt h4 { font: 600 var(--text-body) var(--font-ui); margin-bottom: 2px; }
+.opt p { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-3); }
+.opt .cost { font: 600 var(--text-callout) var(--font-ui); color: var(--label); }
+.btn.primary { background: var(--label); color: var(--bg-elevated); border-color: var(--label); }
+.btn.primary:hover { opacity: 0.85; background: var(--label); }
+.modal-foot { border-top: 0.5px solid var(--separator); margin-top: var(--space-6);
+              padding-top: var(--space-5); display: flex; justify-content: space-between;
+              align-items: center; gap: var(--space-5); }
+
 /* The removal modal. It covers the board on purpose.
 
    ⚠️ EVERY COLOUR AND SIZE HERE COMES FROM A TOKEN DEFINED IN `:root` ABOVE.
@@ -463,6 +586,10 @@ svg { display: block; }
     <label class="flabel" for="d-instr">What they should focus on</label>
     <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
+    <!-- ⚠️ Hidden independently of the note above it: the button belongs to
+         `stale`, and the `unknown` state must not offer a fix for a problem it
+         cannot confirm. -->
+    <button class="btn" id="d-instr-fresh" type="button" hidden></button>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
          never calls that function at all and renders a permanently enabled,
@@ -517,6 +644,24 @@ svg { display: block; }
 
      Keeping it is the default: it holds focus, Escape takes it, and clicking
      the backdrop takes it. Every accident lands on the harmless answer. -->
+<!-- The fresh-start dialog. Modal on purpose: the whole point is that the cost
+     is read before it is paid, and a non-modal panel can be ignored. -->
+<div class="scrim" id="fresh-scrim" hidden>
+  <div class="modal" id="fresh-modal" role="dialog" aria-modal="true" aria-labelledby="fresh-title">
+    <h2 id="fresh-title"></h2>
+    <p class="lede" id="fresh-lede"></p>
+    <h3>What it is holding right now</h3>
+    <div id="fresh-holding"></div>
+    <h3>How to give it a fresh start</h3>
+    <div id="fresh-options"></div>
+    <div class="modal-foot">
+      <div class="fine">If its commitments cannot be read, this says so rather than telling you it is safe.</div>
+      <button class="btn" id="fresh-cancel" type="button">Cancel</button>
+    </div>
+    <div class="fmsg" id="fresh-msg" role="status" aria-live="polite"></div>
+  </div>
+</div>
+
 <div class="rm-back" id="rm-modal" hidden>
   <div class="rm-box" role="alertdialog" aria-modal="true"
        aria-labelledby="rm-title" aria-describedby="rm-small">
@@ -707,6 +852,9 @@ const ICONS = {
   // for. The old control was the text character U+270E, whose exact shape is
   // chosen by the operating system and differs per machine -- flipping a glyph
   // would have fixed the direction and not the cause.
+  // Lucide `rotate-ccw`. The fresh-start affordance, on the card rather than
+  // buried in the detail panel: it is the control this fleet reaches for most.
+  refresh: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   pencil: '<g transform="translate(24 0) scale(-1 1)"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>',
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
@@ -812,6 +960,7 @@ function card(a) {
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
     <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
+    <button class="fresh" data-fresh="${esc(a.sessionName)}" title="Give ${esc(a.name)} a fresh start" aria-label="Give ${esc(a.name)} a fresh start">${icon('refresh')}</button>
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
@@ -2762,6 +2911,724 @@ async function watchForAgent(name, result, attempt) {
 }
 
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
+// The fresh-start dialog
+//
+// ⚠️ The point of this screen is NOT "are you sure". It is that you see what
+// you are about to destroy before you destroy it, read from the commitment
+// store rather than from process state.
+//
+// The dangerous case is the agent that is BETWEEN things: nothing visibly
+// running, so a dialog that only checked whether it was busy would have told
+// you it was safe, and the commitments would die silently.
+// ---------------------------------------------------------------------------
+
+let FRESH_FOR = null;      // the agent the dialog is open for
+// ⚠️ True from the click until the action settles. The poll must not repaint
+// the option buttons while one is in flight: doing so replaces the disabled
+// buttons with enabled ones and detaches the nodes the `finally` re-enables.
+let FRESH_BUSY = false;
+/**
+ * ⚠️ The agent an action is CURRENTLY running for, or null. Deliberately NOT
+ * the same flag as `FRESH_BUSY`, and deliberately not cleared by `closeFresh`.
+ *
+ * `FRESH_BUSY` is about the DIALOG (suppress the live refresh while it is
+ * mid-action), so closing the dialog must clear it or the next dialog opens
+ * frozen. But the ACTION does not stop when the dialog closes: `restart-bot.sh`
+ * sleeps about eight seconds. So: click Restart on A, press Escape, reopen A —
+ * `renderFresh` paints freshly enabled buttons and a second Restart fires two
+ * overlapping `launchctl stop`/`start` cycles at one service. The first
+ * script's has-session check then races the second's restart, and a healthy
+ * agent gets reported as "it has not come back yet".
+ *
+ * This flag tracks the action, so it survives the dialog being closed and
+ * reopened, and is cleared only when the request actually settles.
+ */
+let FRESH_INFLIGHT = null;
+// Bumped on every action and on every open, so a response that arrives after
+// the operator moved on cannot repaint a dialog that is now about someone else.
+let FRESH_EPOCH = 0;
+let FRESH_TOKEN = null;    // what it was holding when we showed you
+let FRESH_RETURN = null;   // the control to give focus back to
+
+/**
+ * A stable fingerprint of what an agent is holding, matching the server's.
+ *
+ * ⚠️ Includes the STATE, not just the ids. `unknown` with three items and
+ * `holding` with the same three are different situations, and approving one
+ * against the other is exactly the mistake this token exists to catch.
+ */
+/**
+ * The fingerprint the server compares against.
+ *
+ * ⚠️ Handed DOWN with the data, not recomputed here. The browser version used
+ * `crypto.subtle`, which is undefined outside a secure context, so on the very
+ * proxy deployment the server's allowlist exists to support the token was never
+ * produced: every action answered "say what you were shown this would lose"
+ * with nothing on screen explaining why. It was also async, so the dialog
+ * rendered enabled buttons before the token existed.
+ *
+ * Taking it from the payload is not weaker. The token describes exactly the
+ * data this dialog was drawn from, which is the property that matters.
+ */
+function holdingToken(h) {
+  return (h && h.token) || null;
+}
+
+function holdingBlock(a) {
+  const h = a.commitments || { state: 'unknown', commitments: [] };
+  const items = h.commitments || [];
+
+  // ⚠️ `unknown` never renders as an empty list. An empty list reads as
+  // "nothing to lose", which is the precise lie this card exists to prevent.
+  // The store decays a stale report to `unknown` while still returning the
+  // items, so we can say "these were pending, and we cannot vouch for that now".
+  /* ⚠️ BEFORE the action, not after it.
+     The commitment record is filed under the agent's NAME. When the card's pane
+     was only INFERRED to be an agent (`isNamedOurs === false`), the name and the
+     pane can belong to different agents entirely — the real one dead, a
+     stranger's session standing in for it. Everything else on this card is
+     dressed as the real agent, because `readIdentity` reads that name's own
+     files: the title, the role, the avatar, and this list of commitments.
+     The server already refuses to tombstone the record for exactly this reason
+     and returns `untied`, but it says so in the RESPONSE — after the clear has
+     been sent. The operator would have read one agent's cost and paid it with
+     another's conversation, which is the single failure this whole screen
+     exists to prevent. */
+  // ⚠️ `!== true`, not `=== false`. A payload missing the field must render the
+  // WARNING, not skip it. Reading an absent value as the reassuring answer is
+  // the inverse of the rule applied to the same class of question elsewhere in
+  // this codebase (`isAgentPane` uses `=== '0'` as an allowlist precisely so an
+  // absent value is not read as safe), and this is the most consequential
+  // warning on the most dangerous screen.
+  if (a.isNamedOurs !== true) {
+    const listed = items.length
+      ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>`
+      : '';
+    return `<div class="holding">${listed}
+      <div class="danger"><b>This may not be ${esc(a.name)}'s conversation.</b>
+      We found a session with this name, but not the one ${esc(a.name)}'s own
+      session runs in.${items.length
+        ? ` Anything listed above belongs to the NAME, and we have not been able
+          to tie it to the pane on this card, so clearing`
+        : ' So clearing'}
+      here may empty a different conversation and leave ${esc(a.name)}'s work
+      untouched.</div>
+    </div>`;
+  }
+
+  if (h.state === 'unknown') {
+    const aged = items.length
+      ? `<ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>
+         <div class="danger">${
+           items.every((c) => c.destroyed)
+             ? 'We already destroyed all of these'
+             : items.some((c) => c.destroyed)
+               ? 'Some of these we already destroyed; the rest are the last thing it told us, and we cannot vouch for those now'
+               : 'These are the last thing it told us, and we cannot vouch for them now'
+         }: ${esc(h.because || 'we cannot tell')}.</div>`
+      : `<div class="cannot"><b>We cannot tell what ${esc(a.name)} is holding.</b>
+         ${esc(h.because || '')}</div>`;
+    return `<div class="holding">${aged}</div>`;
+  }
+
+  if (!items.length) {
+    return `<div class="holding"><div class="cannot">${esc(a.name)} reported that it is
+      holding nothing.</div></div>`;
+  }
+
+  // The wireframe's callout, DERIVED rather than hardcoded: it names the items
+  // the agent is not visibly working on, which are the ones a busy-check would
+  // have missed.
+  const quiet = items.filter((c) => !visiblyDoing(c, a.task));
+  // ⚠️ Worded from what is actually true. When SOME items are quiet the
+  // contrast is the point ("the second and third are the dangerous ones").
+  // When ALL of them are, there is no contrast to draw and claiming one would
+  // be the screen inventing a distinction, so it says the simpler true thing.
+  let callout = '';
+  if (quiet.length && quiet.length < items.length) {
+    callout = `<div class="danger"><b>${quiet.length === 1 ? 'One of these is' : `${quiet.length} of these are`}
+      more dangerous than ${quiet.length === 1 ? 'it looks' : 'they look'}.</b>
+      ${esc(a.name)} is not visibly working on ${quiet.length === 1 ? 'it' : 'them'}, so a dialog that only
+      checked whether it was busy would have told you this was safe.</div>`;
+  } else if (quiet.length === items.length) {
+    callout = `<div class="danger"><b>${esc(a.name)} is not visibly working on any of these.</b>
+      A dialog that only checked whether it was busy would have told you this was safe.</div>`;
+  }
+
+  return `<div class="holding"><ul role="list">${items.map((c) => li(c, a.task)).join('')}</ul>${callout}</div>`;
+}
+
+/**
+ * Is the agent visibly working on this one right now?
+ *
+ * ⚠️ DERIVED, because the commitment store does not carry it. The store records
+ * what an agent said it is holding; it has no doing-versus-promised field, and
+ * an earlier version of this dialog printed a DOING NOW / PROMISED badge as
+ * though it did. That badge was decoration: everything rendered as PROMISED and
+ * the callout beneath it then claimed a contrast that did not exist.
+ *
+ * "Visibly working on it" is exactly what the wireframe means, and the board
+ * already knows it: the task line scraped from the agent's pane. So the badge
+ * compares the two, and DEFAULTS TO PROMISED on anything less than a clear
+ * match. That default is the safe direction: `promised` is the one the dialog
+ * calls dangerous, so an uncertain match errs toward warning rather than
+ * reassuring.
+ */
+function visiblyDoing(c, task) {
+  if (!task) return false;
+  const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 3);
+  const a = new Set(norm(c.what));
+  const b = norm(task);
+  if (!a.size || !b.length) return false;
+  const shared = b.filter((w) => a.has(w)).length;
+  // ⚠️ Every word of the task line must appear in the commitment, not merely
+  // two of them.
+  //
+  // Two shared words was measured to err the WRONG WAY, which is the direction
+  // that matters here: the pane's task line is often a branch name rather than
+  // a description of work, so `add-editable-agent-detail` matched an unrelated
+  // commitment about "Detail the agent handover notes" on "detail" and "agent",
+  // badged it DOING NOW, and quietly removed it from the count of dangerous
+  // items. `promised` is the state this dialog calls dangerous, so a false
+  // DOING NOW suppresses the warning while a false PROMISED merely over-warns.
+  // Distinct words: counting duplicates let a task line of "Detail: detail"
+  // satisfy `>= 2` on a single real match, re-opening the false DOING NOW this
+  // is written to prevent.
+  const distinct = new Set(b);
+  const hit = [...distinct].filter((w) => a.has(w)).length;
+  return hit === distinct.size && hit >= 2;
+}
+
+function li(c, task) {
+  const doing = visiblyDoing(c, task);
+  // ⚠️ DESTROYED is its own badge, and it is the whole reason `markDestroyed`
+  // marks individual items rather than stamping the record. The store works to
+  // keep "we already destroyed this" distinguishable from "the agent told us
+  // this afterwards", and the screen threw that away: after a clear followed by
+  // a fresh report, all four items rendered identically under "the last thing
+  // it told us". Understating what the store knows is as misleading to someone
+  // deciding as overstating it.
+  const badge = c.destroyed ? 'DESTROYED' : (doing ? 'DOING NOW' : 'PROMISED');
+  return `<li><span class="badge${c.destroyed ? ' gone' : ''}">${badge}</span><span>${esc(c.what)}</span></li>`;
+}
+
+function optionBlock(id, act, losesAll, may) {
+  // The cost comes from the ENGINE, not from copy written beside the button,
+  // so the screen cannot describe an action differently from the thing that
+  // performs it.
+  // The cost comes from the engine verbatim where it is not a count, and from
+  // the counted form where it is. Compact deliberately does NOT say "loses
+  // nothing": it summarises, which is lossy, and claiming otherwise on this
+  // screen would be the one overstatement of safety in the product.
+  // ⚠️ The engine's own words in EVERY case, not just the gentlest one.
+  //
+  // This rendered `act.loses` only when `act.gentlest`, and composed the other
+  // two in the browser. So `ACTIONS.clear.loses` and `ACTIONS.restart.loses`
+  // were dead data: the engine could reword the cost of the two destructive
+  // actions and nothing on screen would change, and no test would notice —
+  // while the comment directly above claimed the cost comes from the engine so
+  // the screen cannot describe an action differently from the thing performing
+  // it. That held for one of three, and not for either of the two that destroy
+  // a conversation.
+  //
+  // The count is a QUALIFIER on the engine's sentence now, rather than a
+  // replacement for it, so both facts survive.
+  const cost = act.gentlest
+    ? `Loses ${act.loses}.`
+    : `Loses ${act.loses}${losesAll || '.'}`;
+  // ⚠️ An action the server would refuse is shown REFUSED, with the server's
+  // own sentence, rather than offered and then 409'd on click.
+  // ⚠️ Absent means REFUSED, not allowed. A payload without `may` used to
+  // render all three destructive buttons enabled with no explanation — safety
+  // asserted from the absence of an answer, on the screen where that is least
+  // affordable. The server always sends it; this is about what happens when it
+  // one day does not.
+  const refused = !may || may.ok !== true;
+  return `<div class="opt ${act.gentlest ? 'gentlest' : ''} ${refused ? 'refused' : ''}">
+    ${act.gentlest ? '<span class="tag">Gentlest</span>' : ''}
+    <div>
+      <h4>${esc(act.label)}</h4>
+      <p>${esc(act.what)}</p>
+      <div class="cost">${esc(cost)}</div>
+      ${refused ? `<div class="why-not">Not available: ${esc((may && may.because) || 'we cannot do this right now')}.</div>` : ''}
+    </div>
+    <button class="btn ${act.gentlest ? 'primary' : ''}" data-act="${id}"${refused ? ' disabled' : ''}>${esc(act.label)}</button>
+  </div>`;
+}
+
+/**
+ * Render the list AND the costs together.
+ *
+ * ⚠️ These must never be rendered separately, and separating them was a real
+ * defect: the 409 recovery re-rendered the corrected list while the option
+ * buttons went on quoting the count captured when the dialog opened. The
+ * operator was shown nine items and "Loses all 3 items above", and the token
+ * had already been refreshed to the nine, so the next click destroyed nine.
+ *
+ * That is exactly the "a dialog listing three commitments, approved later, must
+ * not quietly destroy a fourth" guarantee the token exists for, defeated by the
+ * recovery path added to enforce it. One function, so a caller cannot update
+ * half the truth.
+ */
+function renderFresh(a) {
+  const h = a.commitments || {};
+  const n = (h.commitments || []).length;
+  // The qualifier appended to the engine's cost sentence. Three states, three
+  // different true things, and the third is the one that used to be wrong.
+  //
+  // ⚠️ `clear` is NOT the same as `unknown`. The store CAN vouch for an agent
+  // that reported it is holding nothing, and saying "we cannot list it with
+  // confidence" there was the dialog understating its own knowledge on the one
+  // state it is certain about — the mirror of the overstatement this screen
+  // exists to prevent, and just as misleading to someone deciding.
+  // ⚠️ Each qualifier carries its own separator, because they do not join to
+  // the engine's sentence the same way. Composing them all with a colon
+  // produced "Loses everything it is holding: and it reported it is holding
+  // nothing." — ungrammatical, and self-contradictory on the state it was
+  // added to describe correctly.
+  let losesAll;
+  // ⚠️ FIRST, and it overrides every state below. On an untied pane the items
+  // belong to the NAME and this pane has not been tied to it, so "all 3 items
+  // above" is a claim we cannot honour — the server proves it by refusing to
+  // tombstone them. Without this the dialog carried two contradictory costs at
+  // once: the danger block saying the items may not be this pane's, and the
+  // decision text directly beneath promising to destroy exactly those items.
+  // The primary decision text was the one that was wrong, on the screen whose
+  // entire thesis is honest cost.
+  if (a.isNamedOurs !== true) {
+    losesAll = ', and we cannot tell you what — this may not be that agent’s conversation.';
+  } else if (h.state === 'holding' && n) {
+    // "all 1 item above" is what the naive plural gives, and it reads as a
+    // machine talking. One item does not need the word "all".
+    losesAll = n === 1 ? ': the one item above.' : `: all ${n} items above.`;
+  } else if (h.state === 'clear') {
+    losesAll = ', and it reported that is nothing.';
+  } else if (n) {
+    // "we cannot list it" was untrue while the list sits directly above. The
+    // uncertainty is about vouching for the items, not about having them.
+    losesAll = ', and we cannot vouch for the list above.';
+  } else {
+    // ⚠️ And with NO items there is no list to point at — the state of every
+    // agent that has never reported, i.e. the default on a fresh install and so
+    // the most common fresh-start dialog there is. The previous wording was
+    // right for this shape and the fix for the items-present shape broke it.
+    losesAll = ', and we cannot tell what that is.';
+  }
+
+  document.getElementById('fresh-holding').innerHTML = holdingBlock(a);
+  document.getElementById('fresh-options').innerHTML =
+    optionBlock('compact', ACTIONS.compact, losesAll, (a.may || {}).compact)
+    + optionBlock('clear', ACTIONS.clear, losesAll, (a.may || {}).clear)
+    + optionBlock('restart', ACTIONS.restart, losesAll, (a.may || {}).restart);
+}
+
+function openFresh(sessionName, returnTo) {
+  const a = LAST.find((x) => x.sessionName === sessionName);
+  if (!a) return;
+  // Any in-flight action's response now belongs to a decision the operator has
+  // moved on from, including one for this same agent.
+  FRESH_EPOCH += 1;
+  FRESH_FOR = a;
+  FRESH_TOKEN = holdingToken(a.commitments);
+  // A SELECTOR, not the button element: the grid is replaced on every poll.
+  // It has to be a selector rather than the agent name because there are now
+  // two ways in — the grid card's ↺ and the staleness note's button on the
+  // detail panel — and the detail panel is not showing the grid, so resolving
+  // the name back to `.fresh[data-fresh=…]` would find nothing and focus would
+  // silently land on <body> for everyone who came in the second way.
+  FRESH_RETURN = returnTo || null;
+
+  const nearlyFull = a.context && a.context.percent !== null && a.context.percent >= 80;
+  const title = nearlyFull
+    ? `${esc(a.name)}'s memory is nearly full`
+    : `Give ${esc(a.name)} a fresh start`;
+
+  document.getElementById('fresh-title').innerHTML = title;
+  document.getElementById('fresh-lede').textContent = nearlyFull
+    ? 'You can give it a fresh start. The three ways of doing that cost you different things, so here is what it is carrying first.'
+    : 'The three ways of doing this cost you different things, so here is what it is carrying first.';
+  renderFresh(a);
+  document.getElementById('fresh-msg').textContent = '';
+
+  document.getElementById('fresh-scrim').hidden = false;
+  // Focus lands on Cancel, not on an action: the default answer to a
+  // destructive dialog is no.
+  document.getElementById('fresh-cancel').focus();
+}
+
+function closeFresh() {
+  document.getElementById('fresh-scrim').hidden = true;
+  // Escaping out of an in-flight action left this true until the first
+  // dialog's `finally` ran, which suppressed the live refresh for whatever
+  // dialog was opened next.
+  FRESH_BUSY = false;
+  FRESH_FOR = null;
+  FRESH_TOKEN = null;
+  // ⚠️ Re-find the button rather than holding the ELEMENT. `tick` replaces the
+  // whole grid every five seconds, so the node captured on open is detached
+  // from the document by the first poll and focus was silently never restored
+  // for any dialog open longer than that.
+  if (FRESH_RETURN) {
+    // Guarded: FRESH_RETURN is a selector now, and a malformed one throws out
+    // of `querySelector` rather than returning null. Failing to restore focus
+    // is a defect; throwing on the way out of a dialog leaves the scrim state
+    // half-torn-down, which is worse.
+    let live = null;
+    try { live = document.querySelector(FRESH_RETURN); } catch { live = null; }
+    // ⚠️ The trigger can legitimately be GONE by the time we close, and the
+    // commonest case is the one that matters: restart from the staleness note
+    // succeeds, the instructions stop being stale, `renderStale` hides the very
+    // button that opened this, and focus would land on <body>. So fall back to
+    // something real and in the same place rather than accepting that.
+    // ⚠️ `offsetParent`, not `.hidden`. The fallback targeted `#detail-back`,
+    // which lives inside a `hidden` section: on the grid entry path after a
+    // restart the card is gone, `live` is null, and focusing a button inside a
+    // display:none ancestor is a no-op — focus lands on <body>, which is the
+    // WCAG 2.4.3 failure this block exists to prevent, on the path the comment
+    // above calls the ordinary restart path. `.hidden` inspects the element;
+    // `offsetParent` is null whenever any ancestor is hidden too.
+    const visible = (el) => el && (el.offsetParent !== null || el === document.body);
+    if (visible(live)) {
+      live.focus();
+    } else {
+      const candidates = [
+        document.getElementById('detail-back'),
+        document.querySelector('.fresh'),
+        document.querySelector('#grid .card'),
+        document.querySelector('nav button, .tabs button'),
+      ];
+      const target = candidates.find(visible);
+      if (target) target.focus();
+    }
+  }
+  FRESH_RETURN = null;
+}
+
+/** The engine's own descriptions, fetched once so the screen cannot drift. */
+// ⚠️ These fall back to the SAME wording the engine uses, not to a terser
+// paraphrase. The first version said `loses: 'nothing'` for compact, which is
+// the one claim `engine/lifecycle.js` was reworded to stop making and that its
+// test asserts against — and it rendered whenever `/api/actions` had not
+// resolved yet, which includes every `?fresh=` deep link. A comment beside it
+// claimed the fallbacks were "honest about cost, just terser". They were not.
+let ACTIONS = {
+  compact: { label: 'Compact', gentlest: true, loses: 'detail, but not usually the things it is holding',
+    what: 'Summarises the older part of the conversation instead of deleting it. It keeps running, and what it is holding should survive the summary.' },
+  clear: { label: 'Clear', gentlest: false, loses: 'everything it is holding',
+    what: 'Empties the conversation. It keeps running but forgets what was said.' },
+  restart: { label: 'Restart', gentlest: false, loses: 'everything it is holding',
+    what: 'Stops it and starts it again. The only option that re-reads its instructions, so a change there needs this one.' },
+};
+fetch('/api/actions', { cache: 'no-store' })
+  .then((r) => r.json())
+  .then((a) => {
+    // ⚠️ ALL THREE, not just `compact`. Validating one key and then replacing
+    // the whole object would leave `ACTIONS.clear` undefined on a partial
+    // payload, and `optionBlock` dereferences `act.gentlest` unguarded — a
+    // throw inside `renderFresh`, which runs BEFORE the dialog is unhidden, so
+    // the button would silently do nothing. Same shape as the missing-`may`
+    // throw fixed earlier; the fallback exists precisely so a bad payload
+    // degrades instead of breaking.
+    if (a && a.compact && a.clear && a.restart) ACTIONS = a;
+  })
+  .catch(() => { /* the fallbacks above carry the engine's own wording */ });
+
+document.getElementById('grid').addEventListener('click', (e) => {
+  const fresh = e.target.closest('.fresh');
+  if (fresh) {
+    e.stopPropagation();   // do not also open the detail panel
+    openFresh(fresh.dataset.fresh, `.fresh[data-fresh="${CSS.escape(fresh.dataset.fresh)}"]`);
+  }
+}, true);
+
+// The second way in: the staleness note on the detail panel. Reads CURRENT
+// rather than a captured name, because the panel can be showing a different
+// agent by the time this fires, and the whole dialog is about destroying the
+// right one's conversation.
+document.getElementById('d-instr-fresh').addEventListener('click', () => {
+  if (!CURRENT) return;
+  openFresh(CURRENT.sessionName, '#d-instr-fresh');
+});
+
+document.getElementById('fresh-cancel').addEventListener('click', closeFresh);
+document.getElementById('fresh-scrim').addEventListener('click', (e) => {
+  if (e.target.id === 'fresh-scrim') closeFresh();
+});
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('fresh-scrim').hidden) return;
+  if (e.key === 'Escape') { closeFresh(); return; }
+  // Trap focus in the dialog: tabbing out of a modal leaves you operating a
+  // page you cannot see.
+  if (e.key !== 'Tab') return;
+  const modal = document.getElementById('fresh-modal');
+  const focusable = [...modal.querySelectorAll('button')].filter((b) => !b.disabled);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  // ⚠️ Recover focus that has ALREADY left the dialog, before the wrap check.
+  //
+  // The trap only ever fired when `activeElement` was exactly `first` or
+  // `last`, which silently assumed focus was still inside. It routinely is not:
+  // clicking an action disables every option button, so the element that had
+  // focus becomes disabled and the browser drops `activeElement` to `<body>`.
+  // Same on the restart path, which empties `#fresh-options` outright. From
+  // there, neither branch matched and the next Tab landed on the "Agents" tab
+  // BEHIND the scrim, with `aria-modal="true"` still set — the operator now
+  // driving a page they cannot see, which is the exact failure a trap exists to
+  // prevent, reached through the most ordinary interaction in the dialog.
+  if (!modal.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+    return;
+  }
+
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+document.getElementById('fresh-options').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn || !FRESH_FOR) return;
+  // An action for this agent is already running and the dialog was merely
+  // reopened. Say so rather than firing a second one silently.
+  if (FRESH_INFLIGHT) {
+    const msg = document.getElementById('fresh-msg');
+    if (msg) {
+      msg.textContent = FRESH_INFLIGHT === FRESH_FOR.sessionName
+        ? 'That is still running. Give it a moment.'
+        : `Still finishing an action for ${FRESH_INFLIGHT}.`;
+    }
+    return;
+  }
+  const action = btn.dataset.act;
+  const forAgent = FRESH_FOR.sessionName;
+  const msg = document.getElementById('fresh-msg');
+  const buttons = [...document.querySelectorAll('#fresh-options button')];
+  FRESH_BUSY = true;
+  FRESH_INFLIGHT = forAgent;
+  buttons.forEach((b) => { b.disabled = true; });
+  // ⚠️ Move focus BEFORE the browser drops it. Disabling the button that was
+  // just activated makes `activeElement` fall back to `<body>`, which strands a
+  // keyboard or screen-reader user outside the dialog with no announcement —
+  // and leaves them there until they press Tab, which is the only moment the
+  // trap could otherwise recover it. Cancel is the right landing place: it is
+  // the one control still enabled, and it is the default answer.
+  if (!document.getElementById('fresh-cancel').disabled) {
+    document.getElementById('fresh-cancel').focus();
+  }
+  msg.textContent = 'Working…';
+
+  // ⚠️ Which dialog session this belongs to. Every OTHER async handler on this
+  // page re-checks after its awaits that the panel is still showing the agent
+  // it started on; this one, the only one that DESTROYS something, did not.
+  //
+  // The reachable sequence: open the dialog for A, click Restart (the script
+  // sleeps about eight seconds, and this handler has just moved focus to
+  // Cancel), press Escape, open the dialog for B. A's response lands and the
+  // success branch reassigns `FRESH_FOR` and `FRESH_TOKEN` to A and repaints
+  // the option list with A's data — while `#fresh-title` still reads "Give B a
+  // fresh start", because the title is only written by `openFresh`. The next
+  // click posts to A. The operator opened a dialog for B and destroyed A.
+  //
+  // An epoch rather than a name comparison: reopening the dialog for the SAME
+  // agent is also a new decision, and the stale response must not repaint that
+  // one either.
+  FRESH_EPOCH += 1;
+  const forEpoch = FRESH_EPOCH;
+  const stillMine = () => FRESH_EPOCH === forEpoch
+    && FRESH_FOR && FRESH_FOR.sessionName === forAgent
+    && !document.getElementById('fresh-scrim').hidden;
+
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/' + action,
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ holding: FRESH_TOKEN }) })
+      .catch(() => { throw new Error('That did not go through. The board may have stopped.'); });
+    // ⚠️ Wrapped. `res.json()` on a non-JSON body throws a raw
+    // `SyntaxError: Unexpected token '<'`, and the catch below writes
+    // `err.message` straight into the dialog. `loadInstructions` states the
+    // rule for this surface ("Never the raw exception") and obeys it; this path
+    // considered the same failure — the comment in the catch names "a non-JSON
+    // body" — and handled only its epoch consequence, not what the person sees.
+    //
+    // Not hypothetical here: this codebase's headline routing bug was an API
+    // path answering with the HTML page at status 200, which is exactly the
+    // body that reaches this line.
+    const data = await res.json().catch(() => {
+      throw new Error('the board answered with something we could not read. Close this and open it again.');
+    });
+    // ⚠️ `because` FIRST, on both paths. A refusal answers with `because` and
+    // never `error`, so `data.error || 'that did not work'` threw away every
+    // carefully-written reason the engine produces — the missing restart
+    // script, the unreachable pane, the unusable target — and showed "that did
+    // not work" instead. The one comment claiming this screen reports what the
+    // engine said was true only when nothing went wrong.
+    //
+    // ⚠️ Before anything is written to the dialog. The action itself is already
+    // done and cannot be recalled, but the SCREEN must not be repainted with
+    // this agent's answer if it is now showing somebody else.
+    if (!stillMine()) return;
+    if (!res.ok) {
+      const e = new Error(data.because || data.error || 'that did not work');
+      // A stale view answers 409 with an `error` and no `outcome`; an engine
+      // refusal answers 409 with `outcome: 'refused'`. The difference decides
+      // whether re-rendering the list is the right response.
+      e.conflict = res.status === 409 && data.outcome !== 'refused';
+      // ⚠️ And whether the SERVER changed the record, which `outcome` no longer
+      // tells us. A half-sent clear answers `refused` and still tombstones,
+      // because the command may be sitting in the composer and destroy the
+      // conversation at end of turn. Keying the re-render on `outcome` left the
+      // dialog showing all three items as current, with the callout and "Loses
+      // all 3 items above" beside a live Restart, about work the server had
+      // just recorded as destroyed.
+      e.reconciled = data.reconciled === true;
+      throw e;
+    }
+    // Including "we asked and cannot confirm". Saying "Done" for a keystroke we
+    // cannot verify would be the screen asserting something it does not know.
+    msg.textContent = data.because || 'Done.';
+
+    // ⚠️ Re-read from the SERVER, not from `data.holding`.
+    //
+    // `data.holding` is the snapshot taken BEFORE the action, so rendering it
+    // put the list that was just destroyed back on screen under the heading
+    // "What it is holding right now", callout and all, with Clear and Restart
+    // live beside it. The comment here previously claimed to prevent exactly
+    // that.
+    // ⚠️ The poll's RESULT is checked. `tick` swallows its own failure and
+    // returns false with `LAST` untouched, so on a failed poll `LAST.find`
+    // returns the PRE-action object — and re-rendering that paints the list
+    // just destroyed back under "What it is holding right now", callout and
+    // all, beside live Clear and Restart. Exactly what the comment above says
+    // this code prevents, reached by the one path it did not check.
+    //
+    // The 409 branch below already took `const polled = await tick()` for this
+    // reason. Same fact, two places, one of them guarded.
+    const polled = await tick();
+    if (!stillMine()) return;
+    const fresh = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
+    if (!polled) {
+      document.getElementById('fresh-holding').innerHTML =
+        '<div class="holding"><div class="cannot"><b>We could not re-read what it is holding.</b> '
+        + 'The action above went through; this is only our view of it. Close this and open it again.</div></div>';
+      document.getElementById('fresh-options').innerHTML = '';
+    } else if (fresh) {
+      FRESH_FOR = fresh;
+      FRESH_TOKEN = holdingToken(fresh.commitments);
+      renderFresh(fresh);
+    } else {
+      // ⚠️ Not a corner case: this is the ordinary restart path. The agent is
+      // expected to be missing from the very next poll, and skipping the
+      // re-render left the list of just-destroyed work on screen under "What it
+      // is holding right now", callout and all, with Clear and Restart live
+      // beside it.
+      document.getElementById('fresh-holding').innerHTML =
+        '<div class="holding"><div class="cannot"><b>It is not on the board at the moment.</b> '
+        + 'That is expected right after a restart. Whatever it was holding is gone with the conversation.</div></div>';
+      document.getElementById('fresh-options').innerHTML = '';
+      FRESH_TOKEN = null;
+    }
+  } catch (err) {
+    // ⚠️ Before writing anything. Two rejection paths throw BEFORE the first
+    // `stillMine()` inside the try: the fetch's own `.catch` (board stopped,
+    // request aborted) and a non-JSON body. `msg` was captured at click time,
+    // so without this the sentence "That did not go through. The board may have
+    // stopped." lands in whatever dialog is open now, about a different agent.
+    // Not destructive, since the POST target and token are captured before any
+    // await, but it is the same class the epoch guard exists for.
+    //
+    // (The first attempt at this fix went into `tick()`'s catch instead, where
+    // `stillMine` is not even in scope. Caught by the test below, which is the
+    // only reason it is not still there.)
+    if (!stillMine()) return;
+    msg.textContent = err.message;
+    // ⚠️ Keyed on a CODE, not on the wording.
+    //
+    // This matched the server's English, which is the anti-pattern the
+    // instruction editor had to fix twice: rewording one sentence there would
+    // have silently stopped this recovery firing and restored the infinite-409
+    // dead end it exists to prevent. Two different things answer 409 — a stale
+    // view, and an engine refusal — so the discriminator has to be structured.
+    // The record changed underneath us even though the action was refused, so
+    // what is on screen is no longer true whatever else happened.
+    if (err.reconciled) {
+      // ⚠️ Checked, for the same reason as the success path: a failed poll
+      // leaves `LAST` holding the PRE-action object, and re-rendering it puts
+      // commitments the server has already recorded as destroyed back on screen
+      // as though they were current.
+      const polled = await tick();
+      if (!stillMine()) return;
+      const after = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
+      if (after) { FRESH_FOR = after; FRESH_TOKEN = holdingToken(after.commitments); renderFresh(after); }
+    }
+
+    if (err.conflict) {
+      // ⚠️ Re-read from the SERVER first. `LAST` is only refreshed by the
+      // five-second poll, and a 409 is precisely the case where the client's
+      // copy is known to be wrong, so re-rendering from it announced "the list
+      // above has been updated" while showing the same stale list and
+      // recomputing the same stale token. Measured: the screen showed three
+      // items the server no longer held, and a second click reproduced it.
+      //
+      // The success path already awaited a poll before re-rendering. This one,
+      // which needs it more, did not.
+      // ⚠️ `tick` swallows its own failure and leaves LAST untouched, so a poll
+      // that broke would have this announcing "the list above has been updated"
+      // over the identical stale list, recomputing the identical stale token.
+      // The modal covers the grid, so the board's own error banner is not
+      // visible behind it either.
+      const polled = await tick();
+      if (!stillMine()) return;
+      const fresh = polled ? LAST.find((x) => x.sessionName === forAgent) : null;
+      if (!polled) {
+        msg.textContent = 'What it is holding changed, and we could not re-read it just now. Close this and open it again.';
+      } else if (fresh) {
+        FRESH_FOR = fresh;
+        FRESH_TOKEN = holdingToken(fresh.commitments);
+        renderFresh(fresh);
+        msg.textContent = 'What it is holding changed, so the list above has been updated. Look again before going ahead.';
+      } else {
+        // The agent has left the roster. Saying nothing here left the operator
+        // clicking into the same 409 forever with no way out but Cancel.
+        msg.textContent = 'What it is holding changed, and this agent is no longer on the board. Close this and open it again.';
+      }
+    }
+  } finally {
+    // ⚠️ BEHIND the guard, like every other state write in this handler.
+    //
+    // Clearing it unconditionally meant a stale response from an abandoned
+    // dialog cleared the busy flag of a DIFFERENT action still in flight:
+    // start on A, Escape, open B, click Restart (the script sleeps about eight
+    // seconds), A's response lands and unsets the flag, and the next poll
+    // repaints B's options with freshly enabled buttons mid-action. That is
+    // the double-submit the flag exists to prevent, reached through the
+    // `closeFresh` reset added to fix the mirror-image "flag stuck true" bug.
+    // ⚠️ Cleared BEFORE the `stillMine` bail, and unconditionally. This tracks
+    // the action, not the dialog: the action has settled whichever dialog is on
+    // screen now, and returning early without clearing it would wedge every
+    // future action behind an "already running" that never ends.
+    FRESH_INFLIGHT = null;
+    if (!stillMine()) return;
+    FRESH_BUSY = false;
+    // Re-enable whatever is on screen NOW, not the nodes captured at click
+    // time: several paths above replace `#fresh-options` wholesale, and the
+    // captured list is then detached from the document.
+    //
+    // ⚠️ EXCEPT the ones the server said it would refuse. A blanket re-enable
+    // put a live, clickable button next to "Not available: …" — re-opening the
+    // click-through the `may` field was added to prevent, introduced by the fix
+    // for the detached-node bug. Two fixes in a row, each breaking the other's
+    // case.
+    [...document.querySelectorAll('#fresh-options .opt')].forEach((opt) => {
+      if (opt.classList.contains('refused')) return;
+      opt.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    });
+  }
+});
+
+// Deep-link straight to one agent, so a page can be shared or bookmarked.
+
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
 const BOOT_TAB = PARAMS.get('tab') || 'agents';
