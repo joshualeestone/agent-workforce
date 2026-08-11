@@ -150,6 +150,19 @@ function check() {
    * all. This list will still go out of date; it now goes out of date in the
    * direction that costs one click instead of a customer.
    */
+  /**
+   * ⚠️ THE ONE NEGATIVE WE ASSERT FROM AN ACCOUNT: a plan we positively
+   * recognise as unsubscribed. Everything else about an account that exists
+   * falls through to `unknown` below.
+   */
+  if (org && UNSUBSCRIBED_ORG_TYPES.includes(org)) {
+    return {
+      state: STATE.NONE,
+      plan: null,
+      because: 'no Claude subscription is connected on this computer yet.',
+    };
+  }
+
   if (org && !UNSUBSCRIBED_ORG_TYPES.includes(org)) {
     return {
       state: STATE.UNKNOWN,
@@ -158,18 +171,34 @@ function check() {
     };
   }
 
-  if (billing) {
-    return {
-      state: STATE.UNKNOWN,
-      plan: null,
-      because: 'this computer has a Claude account we do not recognise the plan of (no plan named)',
-    };
-  }
-
+  /**
+   * ⚠️ AN ACCOUNT IS HERE, AND IT NAMES NO PLAN. THAT IS `unknown`.
+   *
+   * This used to fall through to the flat negative, and it is reachable on a
+   * real machine: measured, a config whose `oauthAccount` carries
+   * `accountUuid` / `emailAddress` / `organizationUuid` but none of the profile
+   * fields — a shape this product has already been bitten by once, since
+   * `authMethod` and `apiProvider` are documented as evidence and are absent
+   * here too.
+   *
+   * The result was that somebody SIGNED IN was shown "No Claude subscription is
+   * connected yet. Get a subscription at claude.ai, then sign in to Claude on
+   * this computer." That is the sentence this whole module exists to avoid, said
+   * to the person least able to make sense of it.
+   *
+   * ⚠️ And the asymmetry was backwards: the branch above already answers
+   * `unknown` for STRICTLY WEAKER evidence — no account block at all — so
+   * having an account was being treated as more damning than having none.
+   *
+   * `none` is now asserted only where a plan is named and recognised as
+   * unsubscribed, or where Claude has never run here at all (no config file),
+   * which is the one genuinely negative fact available.
+   */
   return {
-    state: STATE.NONE,
+    state: STATE.UNKNOWN,
     plan: null,
-    because: 'no Claude subscription is connected on this computer yet.',
+    because: 'this computer has a Claude account, but the settings do not say which plan '
+      + (billing ? 'it is on' : 'it is on or whether it is paid'),
   };
 }
 

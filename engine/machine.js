@@ -382,7 +382,8 @@ function installedCheck(opts) {
     parts_.push('We looked for ' + missing.map((m) => `${m.label} at ${m.bin}`).join(', and ') + '.');
   }
   if (unusable.length) {
-    parts_.push(unusable.map((u) => `The path set for ${u.label} is ${u.bin}`).join(', and ')
+    parts_.push('The path set for '
+      + unusable.map((u) => `${u.label} is ${u.bin}`).join(', and the one for ')
       + ' — a quote, a backslash or a line break in a path is something we will not pass on to '
       + 'the parts of macOS that start an agent, whatever is at the end of it.');
   }
