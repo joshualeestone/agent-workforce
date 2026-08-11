@@ -51,7 +51,7 @@ could stop the wrong thing. The screen says so where the Remove control would
 otherwise be. Every agent Kosmos made, and every one another tool set up
 properly, is removable; a card the board cannot vouch for is not.
 
-It cannot stop or message an agent yet.
+It cannot message an agent yet.
 
 ⚠️ **If you need to remove one by hand** — because it was made before this
 existed, or because a removal reported that it could not finish — a created

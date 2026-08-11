@@ -398,8 +398,9 @@ svg { display: block; }
                      margin-right: auto; }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
-.removed-row .rowmsg { flex-basis: 100%; font: var(--text-callout) var(--font-ui);
-                       color: var(--label); }
+.removed-msg { margin-top: var(--space-4); font: var(--text-callout) var(--font-ui);
+               color: var(--label); min-height: 1em; }
+.removed-msg:empty { display: none; }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .edit .icon { width: 15px; height: 15px; }
@@ -639,6 +640,13 @@ svg { display: block; }
   <button class="linkish" id="removed-toggle" type="button"
           aria-expanded="false" aria-controls="removed-list"></button>
   <div class="removed-list" id="removed-list" hidden></div>
+  <!-- ⚠️ OUTSIDE the list, and that is the whole point. `paintRemoved`
+       regenerates `#removed-list` wholesale, so anything written INTO a row is
+       destroyed the moment the answer from /api/removed changes -- which is
+       exactly what happens on the restore-partial where the record was cleared
+       and only the start failed. A message about a half-finished restore has to
+       outlive the list it is about. -->
+  <p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
 </div>
 
 <script>
@@ -841,7 +849,41 @@ async function tick() {
          picture and role controls or the explanation.
          The inverse stuck too: an agent that came back stayed withdrawn behind
          a now-false sentence until the panel was reopened. */
-      if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
+      /**
+   * ⚠️ AND IF IT IS NO LONGER ON THE BOARD, STOP OFFERING TO WRITE TO IT.
+   *
+   * Without the else, an agent removed from a second tab -- or one whose
+   * half-removal later completed -- leaves this panel open with stale data, live
+   * write controls and a stale `REMOVE_ASK`. The engine refuses the retry
+   * cleanly, so nothing breaks; what is wrong is a screen that has quietly
+   * stopped being about anything on the board while still offering to change it.
+   */
+  if (!fresh && CURRENT) {
+    /**
+     * ⚠️ NOT `setWritesOffered`, and I tried it first. That function takes
+     * `(agent, tied)` and, when `tied` is false, builds a sentence out of
+     * `a.sessionName` — so passing `null` throws, and passing `CURRENT` renders
+     * the UNTIED explanation ("this session is called X but it is not the one an
+     * agent named X would run in"), which is a different and wrong reason. Read
+     * the function rather than trusting its name.
+     *
+     * The honest thing to say here is smaller: this agent is not on the board
+     * any more, so nothing on this screen should offer to change it.
+     */
+    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    }
+    REMOVE_ASK = null;
+    const start = document.getElementById('d-remove-start');
+    if (start) start.hidden = true;
+    const gone = document.getElementById('d-remove-hint');
+    if (gone) {
+      gone.textContent = 'This agent is no longer on the board. It may have been removed somewhere else, '
+        + 'or it may have stopped. Nothing here can change it until it is back.';
+    }
+  }
+  if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
 
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
@@ -1774,7 +1816,20 @@ document.getElementById('rm-go').addEventListener('click', async () => {
     // either; see `reportDiscarded`.
     if (RM_FOR !== forAgent) { reportDiscarded(done, forAgent); return; }
     if (!res.ok || !done || done.outcome === 'refused') {
-      msg.textContent = (done && done.because) || 'we could not remove it, and we cannot tell you why';
+      /**
+       * ⚠️ `error` AS WELL AS `because`, and the difference matters most here.
+       *
+       * The route answers a THROWN removal with `{ error: 'the removal failed
+       * partway and we cannot tell you how far it got' }` -- worded that way on
+       * purpose, because the job may already be disabled. Reading only
+       * `because` threw that away and fell back to "we could not remove it, and
+       * we cannot tell you why", which a person reads as *nothing happened*.
+       * That is the opposite of what the server just said, on the one path
+       * where the agent may be half-removed. `loadRemoval` gets this right for
+       * its own 5xx; this handler did not.
+       */
+      msg.textContent = (done && (done.because || done.error))
+        || 'we could not remove it, and we cannot tell you why';
       go.disabled = false;
       return;
     }
@@ -1846,6 +1901,12 @@ document.getElementById('rm-go').addEventListener('click', async () => {
 function reportDiscarded(done, forAgent) {
   const back = document.getElementById('d-remove-msg');
   if (!back || !done) return;
+  // Same reason as the handler above: a thrown removal answers with `error`,
+  // not `because`, and it is the message that says the agent may be half gone.
+  if (done.error && !done.because) { 
+    if (CURRENT && CURRENT.sessionName === forAgent) back.textContent = done.error;
+    return;
+  }
   /**
    * ⚠️ Only onto the screen it is ABOUT. If the person dismissed A's modal and
    * has since opened B's detail panel, `#d-remove-msg` now belongs to B --
@@ -2042,17 +2103,32 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
     if (back.outcome === 'partial') {
       btn.disabled = false;
       btn.textContent = 'Restore';
-      const row = btn.closest('.removed-row');
-      if (row) {
-        let note = row.querySelector('.rowmsg');
-        if (!note) {
-          note = document.createElement('span');
-          note.className = 'rowmsg';
-          note.setAttribute('role', 'alert');
-          row.appendChild(note);
-        }
-        note.textContent = back.because || 'The restore did not finish.';
-      }
+      /**
+       * ⚠️ THE MESSAGE GOES OUTSIDE THE LIST, because which of the two partials
+       * happened decides whether the row survives, and it must not decide
+       * whether the person is told.
+       *
+       * `restore` fails partially in two independent directions:
+       *
+       *   the LIST-WRITE failed -> the record stays, so /api/removed is
+       *     unchanged, so the markup is identical and the change-guard skips the
+       *     repaint. A note written into the row survives.
+       *
+       *   the START failed -> the record was cleared, so within one five-second
+       *     tick the markup DOES change, the list is rewritten and the row and
+       *     its note are destroyed. If it was the only removed agent the whole
+       *     section hides. The agent is then on no list, has no card because
+       *     nothing restarted its session, and the one sentence saying so has
+       *     silently deleted itself.
+       *
+       * The previous version put the note in the row and reasoned about only the
+       * first case -- reproducing, on the sibling path and with a five-second
+       * fuse, the exact failure its own comment claimed to have fixed. Writing
+       * it somewhere `paintRemoved` never touches makes the distinction stop
+       * mattering, which is better than getting the distinction right.
+       */
+      const say = document.getElementById('removed-msg');
+      if (say) say.textContent = back.because || 'The restore did not finish.';
       /**
        * ⚠️ THE CACHE IS LEFT ALONE, AND `tick()` IS NOT CALLED. The first
        * version of this branch did both, and between them they erased the note
@@ -2075,6 +2151,10 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
        */
       return;
     }
+    // ⚠️ Cleared on the way out, or a message about a restore that has since
+    // been retried successfully sits under a list that no longer shows it.
+    const say = document.getElementById('removed-msg');
+    if (say) say.textContent = '';
     await tick();
     await paintRemoved();
   } catch {
@@ -2521,10 +2601,11 @@ async function watchForAgent(name, result, attempt) {
     warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
       + 'The folder and the instructions are on your computer either way. It may still '
       + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
-      // ⚠️ Removing an agent is still a manual job, and this is the screen where
-      // somebody is most likely to want one gone. Saying "it is set to keep
-      // trying" without saying where is how a person ends up with a job they
-      // cannot find.
+      // ⚠️ This is the screen where somebody is most likely to want an agent
+      // gone, and saying "it is set to keep trying" without saying where is how
+      // a person ends up with a job they cannot find. (This used to add "because
+      // removing an agent is still a manual job" -- Remove exists now. What is
+      // still manual is DELETE, which is why the README recipe stays.)
       // ⚠️ The folder comes from the ANSWER, not from a path built here. This
       // page guessed `~/work/workers/<name>`, which is wrong on any machine
       // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a

@@ -95,7 +95,24 @@ test in it runs.
 
 ## How it is verified
 
-- **Unit and route tests** — `node --test`, the whole validation story for this repo (no build step, no linter). The count has moved with each review round; the branch does not claim a number that goes stale, only that the suite is green and that every fix on it is mutation-verified.
+- **Unit and route tests** — `node --test`, the whole validation story for this
+  repo (no build step, no linter). The count moves with each review round, so
+  the claim here is that the suite is green rather than a number that goes
+  stale.
+
+⚠️ **"Every fix is mutation-verified" was written here and it was not true.**
+Round seven reverted guards one at a time and found several that the suite did
+not hold — two of the four partial paths' record calls, and the
+`disable`-before-`bootout` ordering whose only defence was a comment. Those now
+have tests. What remains deliberately unheld is the handful of guards that are
+**unreachable today** and documented as such: `restore`'s name gate,
+`sessionFor`'s removed fallback, and `recordRemoval`'s read-back. They fail
+closed and they are cheap; they are kept as defence against a future caller,
+not as live paths, and a test would be asserting a state nothing can produce.
+
+The honest version of the claim: **every fix that can be reached is
+mutation-verified, and the ones that cannot are named.** The blanket version is
+the kind of sentence this branch keeps catching in the code.
 - **A live round trip against real launchd and real tmux**, on a throwaway
   `zz-*` agent, sandboxed at every root the engine writes to (`WORKERS`,
   `LAUNCH`, `DATA`). 20/20 checks: created and running → removed → session

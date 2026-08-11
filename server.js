@@ -7,7 +7,8 @@
  * commitments each agent says it is holding, and the instruction file each
  * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
  * worker directory, a startup script and a launchd job, and loads that job.
- * It cannot yet send input to an agent, or stop or remove one.
+ * It can now stop and remove an agent, and put one back. It cannot yet send
+ * input to one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */

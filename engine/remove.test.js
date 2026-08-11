@@ -1349,3 +1349,89 @@ test('an agent with no folder is not reassured about a folder', () => {
     'it reassured somebody about a folder the agent never had');
   assert.match(r.because, /Nothing on your computer was deleted/);
 });
+
+test('the two partials a person actually hits still record, so Restore is there', () => {
+  /**
+   * ⚠️ NEITHER OF THESE WAS HELD. Deleting `recordAndSay(false)` from the
+   * unreachable-tmux partial or from the untied-session partial left all 344
+   * tests green -- and those are the two the module's own comment singles out:
+   * *"these three returns were left behind, and they are the ones a person
+   * actually hits, because an unreachable tmux and an untied session are
+   * ordinary."*
+   *
+   * Losing the record on either one puts the agent back in the state this whole
+   * module is shaped around avoiding: job disabled and booted out, no row on the
+   * removed list, no Restore button, and only the manual launchctl recipe left.
+   * Their kill-failed sibling had a test; these did not.
+   */
+
+  // (1) tmux cannot be asked at all, AFTER the job work has happened.
+  const a = madeAgent('tmux-gone-midway');
+  boardShows(a, a);
+  world();
+  remove.setDryRun(false);
+  // ⚠️ Tied when `plan` looks, unaskable by the time the session is checked --
+  // the only way to reach this partial, since `plan` refuses up front otherwise.
+  let asked = 0;
+  status.setPaneSource(() => {
+    asked += 1;
+    if (asked <= 1) return `${a}\t0.0\t2.1.212\t0\t${a}\t✳ Claude Code`;
+    throw new Error('tmux went away');
+  });
+  const r1 = remove.remove(a);
+  assert.equal(r1.outcome, remove.OUTCOME.PARTIAL, r1.because);
+  assert.match(r1.because, /could not ask tmux/, 'this is a different partial than the one under test');
+  assert.equal(remove.isRemoved(a), true,
+    'it disabled and stopped the job and then filed no record, so there is no Restore button');
+  assert.equal(remove.isHidden(a), false,
+    'it hid an agent it could not confirm had stopped');
+  assert.match(r1.because, /put it back from the removed list/,
+    'it does not tell them the undo exists');
+
+  // (2) something is running under this name that the board will not vouch for,
+  // discovered after the job work.
+  const b = madeAgent('untied-midway');
+  let asked2 = 0;
+  status.setPaneSource(() => {
+    asked2 += 1;
+    return asked2 <= 1
+      ? `${b}\t0.0\t2.1.212\t0\t${b}\t✳ Claude Code`
+      : `${b}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`;
+  });
+  world();
+  remove.setDryRun(false);
+  const r2 = remove.remove(b);
+  assert.equal(r2.outcome, remove.OUTCOME.PARTIAL, r2.because);
+  assert.match(r2.because, /cannot confirm is this agent/, 'this is a different partial than the one under test');
+  assert.equal(remove.isRemoved(b), true,
+    'it disabled and stopped the job and then filed no record, so there is no Restore button');
+  assert.equal(remove.isHidden(b), false, 'it hid an agent that may still be running');
+});
+
+test('the startup job is disabled BEFORE it is booted out', () => {
+  /**
+   * ⚠️ LOAD-BEARING ORDER, DOCUMENTED AND UNHELD. Swapping the two -- with both
+   * still checked -- left the suite green.
+   *
+   * The reason is in the module: between `bootout` and `disable` there is a
+   * window where the job is unloaded but still enabled, and a login in that
+   * window brings the agent straight back. Disabling first closes it. An
+   * ordering whose only defence is a comment is an ordering somebody will
+   * tidy.
+   */
+  const name = madeAgent('order-matters');
+  boardShows(name, name);
+  const calls = world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const seq = calls.map(([, a]) => a && a[0]);
+  const iDisable = seq.indexOf('disable');
+  const iBootout = seq.indexOf('bootout');
+  // ⚠️ CONTROL: both really ran, or "disable came first" is true of a run that
+  // never booted anything out.
+  assert.ok(iDisable !== -1, 'nothing was disabled, so the order proves nothing');
+  assert.ok(iBootout !== -1, 'nothing was booted out, so the order proves nothing');
+  assert.ok(iDisable < iBootout,
+    'it unloaded the job before disabling it, leaving a window where a login brings the agent back');
+});

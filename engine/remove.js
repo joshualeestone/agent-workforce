@@ -785,7 +785,12 @@ function removeInner(name, { tmuxBin } = {}) {
       };
     }
   } else {
-    steps.push({ label: 'stopped it starting again', ok: true, note: 'it had no startup job' });
+    // ⚠️ The LABEL does not claim work nobody did. Its three siblings (`hint`,
+    // `didToJob`, restore's two endings) were each branched for exactly this
+    // reason and this one was missed. Not visible in the browser today, which
+    // ignores `steps` -- but the route ships them, so it is a sentence on the
+    // wire asserting a job was stopped when there was none.
+    steps.push({ label: 'it had no startup job to stop', ok: true });
   }
 
   /**
