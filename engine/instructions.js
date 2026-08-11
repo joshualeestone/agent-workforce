@@ -135,13 +135,13 @@ function registryKey(agent) {
  * Returns null when it cannot be determined, and callers must treat null as
  * "cannot tell" rather than "not stale".
  */
-function sessionStartedAt(agent) {
+function sessionStartedAt(agent, exactSession) {
   const name = registryKey(agent);
   if (!name) return null;
 
   let file;
   try {
-    file = transcriptFor(name);
+    file = transcriptFor(name, exactSession);
   } catch {
     return null;
   }
@@ -242,7 +242,7 @@ function inspect(agent) {
  * `seen` lets a caller that has already inspected the file pass it in, so `read`
  * does not do the work twice.
  */
-function staleness(agent, seen) {
+function staleness(agent, seen, exactSession) {
   const file = seen || inspect(agent);
   if (!file.ok) {
     // ⚠️ Carries `editable`, because the status poll is the ONLY instruction
@@ -297,7 +297,7 @@ function staleness(agent, seen) {
     };
   }
 
-  const startedAt = sessionStartedAt(agent);
+  const startedAt = sessionStartedAt(agent, exactSession);
   if (!startedAt) {
     return {
       state: STALENESS.UNKNOWN,
@@ -408,7 +408,7 @@ function versionOf(exists, buf) {
  * about whether a file can be read. They did, and the card claimed an agent was
  * `current` while the panel said it could not read the file at all.
  */
-function read(agent) {
+function read(agent, exactSession) {
   const seen = inspect(agent);
 
   if (!seen.ok) {
@@ -434,7 +434,7 @@ function read(agent) {
       path: seen.file,
       text: '',
       because: seen.because,
-      staleness: staleness(agent, seen),
+      staleness: staleness(agent, seen, exactSession),
     };
   }
 
@@ -456,7 +456,7 @@ function read(agent) {
     // `editedAt` is reported for display only. The changed-since-read guard
     // keys on `version` above, NOT on this: an mtime is not a version.
     editedAt: iso(seen.stat.mtime.getTime()),
-    staleness: staleness(agent, seen),
+    staleness: staleness(agent, seen, exactSession),
   };
 }
 
@@ -471,7 +471,12 @@ function read(agent) {
  * overwritten. `absent` is a version like any other, so "there was no file when
  * I opened this and there is one now" is a conflict, not a free pass.
  */
-function write(agent, text, expectedVersion) {
+// ⚠️ `exactSession` threads through to the staleness verdict in the answer,
+// which the panel repaints from. Without it the SAVE response derives its
+// verdict from a different transcript than the poll does, so the panel and the
+// card can disagree about the same agent the moment you press Save. Fifth
+// reader of one fact; they were fixed one at a time and this was the last.
+function write(agent, text, expectedVersion, exactSession) {
   const file = fileFor(agent);
   if (!file) throw new Error('that is not a name we can look up');
 
@@ -717,7 +722,7 @@ function write(agent, text, expectedVersion) {
   // The answer carries whether the backup ACTUALLY happened, rather than
   // letting the caller infer it from a file that might be a directory, a stale
   // copy from two saves ago, or a link we refused to follow.
-  return { ...read(agent), keptPrevious };
+  return { ...read(agent, exactSession), keptPrevious };
 }
 
 module.exports = {

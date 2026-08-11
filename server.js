@@ -5,8 +5,9 @@
  *
  * Binds to localhost only, and it WRITES: it stores avatars, roles, the
  * commitments each agent says it is holding, and the instruction file each
- * agent reads at startup. It does not yet send input to an
- * agent or start or stop one.
+ * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
+ * worker directory, a startup script and a launchd job, and loads that job.
+ * It cannot yet send input to an agent, or stop or remove one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -23,6 +24,8 @@ const { snapshot, paneRoster } = require('./engine/status');
 // that drifts.
 const { version } = require('./package.json');
 const store = require('./engine/store');
+const create = require('./engine/create');
+const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
 
@@ -135,6 +138,31 @@ function borrowedName(name) {
  * a WRITE, and the strictly stronger one: a name nobody is running is not
  * writable, while its record stays readable.
  */
+/**
+ * The REAL tmux session behind a board name.
+ *
+ * ⚠️ Every reader that resolves a per-session artifact needs this rather than
+ * the displayed name, and the fix reached them one at a time: the model and the
+ * memory ring first, then the card's staleness, and this is the fourth. Until
+ * it did, the panel and the card could date the same agent from two different
+ * conversations -- one fact with two derivations, which is what this whole
+ * branch is about.
+ */
+function sessionOf(name) {
+  try {
+    const card = claimantFor(name);
+    return (card && card.session) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+// ⚠️ Two roster reads per request is two SNAPSHOTS: the gate can be decided
+// against one and the session resolved against another, which is the same
+// one-fact-two-derivations problem one level up. Both callers below run
+// `knownAgent` first, so this is noted rather than fixed here — the shape that
+// removes it is a single `claimantFor` whose card both the gate and the session
+// come from, and that is a change to how every name-keyed route resolves.
+
 function knownAgent(name) {
   try {
     const card = claimantFor(name);
@@ -318,12 +346,165 @@ function decodeSegment(segment) {
   }
 }
 
+/**
+ * Is this write coming from a page on some OTHER website?
+ *
+ * ⚠️ THE HOST CHECK DOES NOT COVER THIS, and the create route's own comment
+ * said it did. Measured, against the real server: a page on any site can run
+ *
+ *     fetch('http://127.0.0.1:4317/api/agents',
+ *           { method: 'POST', headers: { 'content-type': 'text/plain' },
+ *             body: '{"name":"theirs","role":"pm"}' })
+ *
+ * and that is a CORS *simple request* — POST with a `text/plain` body needs no
+ * preflight. `Host` is `127.0.0.1:4317`, which is exactly what a legitimate
+ * request looks like, so the Host check passes. The attacker cannot READ the
+ * answer, and does not need to: the side effect is the attack. A real worker
+ * directory and a real launchd job were created on this machine by that
+ * request while this was being written.
+ *
+ * It is worse than a drive-by write because of what the job is: `RunAtLoad`,
+ * `KeepAlive`, and an agent started with `--dangerously-skip-permissions` that
+ * comes back on every reboot, whose instruction file any subsequent write can
+ * rewrite.
+ *
+ * ⚠️ Why the EXISTING writes were not reachable this way, which is the thing
+ * the old comment got wrong: they are all `PUT` and `DELETE`, and those are
+ * never simple requests, so a browser preflights them, this server answers the
+ * `OPTIONS` with a 404 carrying no CORS headers, and the browser drops the real
+ * request. `POST /api/agents` was the first route on this server a stranger's
+ * page could actually reach. "No worse than what is here" was false, and it was
+ * false in the direction that matters.
+ *
+ * Two checks, because either alone leaves a gap:
+ *
+ *   1. `Origin`, when present, must be loopback. A browser attaches it to every
+ *      cross-origin request and to same-origin POSTs, so this is the direct
+ *      signal — but a non-browser client sends none at all.
+ *   2. The `content-type` must NOT be one a form can produce. Those three types
+ *      are the whole simple-request set, and being outside it is what forces
+ *      the preflight this server does not answer — so a page that manages to
+ *      omit `Origin` still cannot get a write through.
+ *
+ * ⚠️ The rule is "not a simple type", NOT "must be JSON", and the difference is
+ * a real one this nearly shipped wrong: the avatar upload PUTs an IMAGE, and
+ * `store.saveAvatar` reads that content type to decide the format. A blanket
+ * JSON requirement would have refused every picture in the product while
+ * reading, in review, exactly like the stricter and therefore safer choice.
+ *
+ * A request with no content type at all is left alone rather than broken,
+ * because refusing it would break every non-browser caller (curl, a script) and
+ * a form cannot produce one.
+ * ⚠️ This used to justify itself with "a `fetch` with a body always sets one",
+ * which is FALSE: `fetch(url, {method:'POST', body: new Blob(['…'])})` with a
+ * typeless Blob sends no content type at all and is still a simple request.
+ * What actually covers that case is the Origin arm above — a browser attaches
+ * `Origin` to every POST — so the guard holds, and the sentence that said why
+ * did not. Correcting it matters because the next person to touch the Origin
+ * arm needs to know it is load-bearing here.
+ *
+ * Applied to every state-changing method, not only the new route: the others
+ * are protected by preflight today, and depending on the browser's method
+ * classification rather than saying so ourselves is how this was missed once.
+ */
+const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+// The CORS simple-request set, in full. Anything outside it is preflighted.
+const FORM_TYPES = new Set([
+  'application/x-www-form-urlencoded',
+  'multipart/form-data',
+  'text/plain',
+]);
+
+function crossSiteWrite(req) {
+  if (!req || !WRITE_METHODS.has(req.method)) return null;
+
+  const origin = req.headers && req.headers.origin;
+  // `null` is what a sandboxed iframe or a `file://` page sends, and it is
+  // never this board.
+  if (origin && origin !== 'null') {
+    let parsed;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      return 'that request came from somewhere this board does not answer';
+    }
+    const host = parsed.hostname.replace(/\.$/, '').toLowerCase();
+    if (!LOOPBACK_HOSTS.has(host) && !ALLOWED_HOSTS.has(host)) {
+      return 'that request came from another website, so we will not act on it';
+    }
+    /**
+     * ⚠️ AND THE PORT, for a loopback origin.
+     *
+     * Comparing the hostname alone made every other page on this machine
+     * same-site: a dev server on `http://127.0.0.1:3000` rendering somebody
+     * else's content, or an XSS in any other local app, could POST here and
+     * install a launchd job. "A page on another website" is the threat this
+     * guard names, and a page on another local port is one.
+     *
+     * The port is deliberately NOT compared for an `ALLOWED_HOSTS` name: that
+     * list is the explicit opt-in for a reverse proxy, and a proxy legitimately
+     * renumbers ports — the same reasoning the `Host` check gives. The
+     * difference is that a loopback origin has an exact right answer, which is
+     * this server's own.
+     */
+    // Compared against the `Host` the browser actually used, NOT against the
+    // module's `PORT` constant: this server can be started on any port, and a
+    // guard that tests a configured default refuses legitimate writes on every
+    // other one. Origin and Host being the same host:port is precisely what
+    // same-origin means, so this asks the real question.
+    const sentHost = String((req.headers && req.headers.host) || '')
+      .toLowerCase().replace(/\.(?=:|$)/, '');
+    const originHost = `${host}${parsed.port ? `:${parsed.port}` : ''}`;
+    // ALLOWED_HOSTS is the explicit reverse-proxy opt-in, and a proxy
+    // legitimately renumbers ports — the same exception the `Host` check makes.
+    // ⚠️ A missing `Host` alongside an `Origin` FAILS CLOSED. No browser omits
+    // Host, so this is not a live bypass — but the alternative is the strongest
+    // arm of this guard degrading silently, which is the posture everything
+    // else in this file refuses.
+    if (originHost !== sentHost && !ALLOWED_HOSTS.has(host)) {
+      return 'that request came from another program on this computer, so we will not act on it';
+    }
+  } else if (origin === 'null') {
+    return 'that request came from somewhere this board does not answer';
+  }
+
+  // ⚠️ A request whose Origin we have already recognised as our own does not
+  // need the content-type arm: that arm exists to catch a page that sent no
+  // Origin at all. Refusing a same-origin POST for its content type is a trap
+  // for the next route somebody adds here.
+  if (req.headers && req.headers.origin && req.headers.origin !== 'null') return null;
+
+  // ⚠️ POST ONLY. A simple request is a METHOD and a content type together —
+  // `PUT`, `DELETE` and `PATCH` are never simple whatever body they carry, so
+  // they are already preflighted and refusing them on their content type buys
+  // nothing. The first version applied this to every write and broke
+  // `PUT /avatar` with a plain-text body, which an existing test caught: a
+  // guard stricter than the threat is still a guard that breaks the product.
+  if (req.method !== 'POST') return null;
+
+  const type = String((req.headers && req.headers['content-type']) || '').split(';')[0].trim().toLowerCase();
+  if (type && FORM_TYPES.has(type)) {
+    return 'that request is shaped like one another website could send, so we will not act on it';
+  }
+  return null;
+}
+
 const server = http.createServer((req, res) => {
   const pathname = pathOf(req);
   if (pathname === null) {
     // Not addressed to us. Saying so is better than handing back the index,
     // which would look like a successful page load.
     sendJson(res, 400, { error: 'that request was not addressed to this server' });
+    return;
+  }
+
+  // ⚠️ BEFORE every route, so a write added later is covered by default rather
+  // than by whoever adds it remembering. The one that was missed was the one
+  // written last.
+  const refusal = crossSiteWrite(req);
+  if (refusal) {
+    sendJson(res, 403, { error: refusal });
     return;
   }
 
@@ -365,7 +546,14 @@ const server = http.createServer((req, res) => {
         // gating this left the card ADVERTISING an edit the route then 404s —
         // offer-an-action-that-cannot-work, which is worse than refusing plainly.
         instructions: a.isNamedOurs
-          ? instructions.staleness(a.sessionName)
+          // ⚠️ The pane's REAL session, so the staleness verdict resolves the
+          // same transcript the model and the memory ring did. Without it this
+          // reader falls back to preferring the `-discord` spelling, and a
+          // lingering registry entry for a long-gone `<name>-discord` dates the
+          // card from one conversation while its other numbers come from
+          // another. The fix reached two of the three readers and stopped one
+          // short.
+          ? instructions.staleness(a.sessionName, undefined, a.session)
           : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
       }));
       body = JSON.stringify({ ...snap, agents, version });
@@ -495,7 +683,78 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --- profile: things the machine cannot derive (role, etc.) -------------
+  // --- the roles a new agent can be ----------------------------------------
+  //
+  // Read-only and unkeyed: it is a menu, not an agent. It carries the blurb and
+  // the suggested first action so the screen cannot invent either — the copy a
+  // person reads while choosing has to be the copy the agent is actually
+  // created from.
+  if (pathname === '/api/roles' && (req.method === 'GET' || req.method === 'HEAD')) {
+    sendJson(res, 200, {
+      roles: roles.ROLES.map((r) => ({
+        key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+        // ⚠️ The limit travels WITH the role. A caution that lives only in the
+        // agent's instruction file is read after the person has chosen, which
+        // is exactly too late for the two roles that have one.
+        caution: r.caution || null,
+      })),
+    });
+    return;
+  }
+
+  // --- create an agent -----------------------------------------------------
+  //
+  // ⚠️ The most powerful route here, and the reasoning for shipping it on a
+  // server with no login is worth stating rather than assuming.
+  //
+  // ⚠️ THIS COMMENT USED TO SAY "it does NOT cross a new line", on the argument
+  // that the server already lets a local process rewrite an agent's boot file.
+  // That was FALSE, and measurably so: every other write is PUT or DELETE, which
+  // a browser always preflights, so this was the first route on this server a
+  // page on another website could actually reach. Running that request created a
+  // worker directory and installed a launchd job on this machine. See
+  // `crossSiteWrite`, which exists because of it.
+  //
+  // What it adds beyond the writes that were already here is PERSISTENCE: a
+  // launchd job outlives the session that made it, and starts Claude with
+  // `--dangerously-skip-permissions` at every login. So the containment is in
+  // `engine/create`: the name is validated hard and early, no caller-supplied
+  // path is honoured, every command is `execFile` with an argument array, and
+  // any failure rolls the whole thing back rather than leaving half of it.
+  //
+  // ⚠️ Three things hold this up, not two: the loopback bind, the Host check,
+  // and the cross-site guard. It should be behind a login the moment one
+  // exists. The honest summary is that it is the largest thing here and it is
+  // contained, not that it is safe.
+  if (pathname === '/api/agents' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          // No error code: the catch below answers in our own words whatever
+          // this is, and a code nothing reads is a hint that something does.
+          throw new Error('we could not read that request');
+        }
+
+        const result = create.createAgent({ name: body.name, role: body.role });
+        // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
+        // ours, and it is a 200 because the thing half-happened and the caller
+        // needs the detail rather than an error.
+        const code = result.outcome === create.OUTCOME.REFUSED ? 400 : 200;
+        sendJson(res, code, result);
+      })
+      // ⚠️ OUR sentence, never the raw message. The first version called
+      // `errorAnswer`, which does not exist on this branch — it is from another
+      // one — so the catch path would have thrown at runtime, and the suite went
+      // green because nothing exercised it. A route's error path needs a test as
+      // much as its happy path does.
+      .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
+  // --- profile: things the machine cannot derive (role, etc.) --------------
   const prof = pathname.match(/^\/api\/agent\/([^/]+)\/profile$/);
   if (prof && req.method === 'PUT') {
     const name = decodeSegment(prof[1]);
@@ -603,7 +862,7 @@ const server = http.createServer((req, res) => {
     // about which names exist.
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
-      sendJson(res, 200, instructions.read(name));
+      sendJson(res, 200, instructions.read(name, sessionOf(name)));
     } catch {
       sendJson(res, 500, { error: 'those instructions could not be read' });
     }
@@ -632,7 +891,7 @@ const server = http.createServer((req, res) => {
         // `version` is the sha256 the editor was last shown. Passing it through lets
         // the engine refuse a save that would overwrite an edit made since,
         // rather than silently picking the version in the textarea.
-        sendJson(res, 200, instructions.write(name, patch.text, patch.version));
+        sendJson(res, 200, instructions.write(name, patch.text, patch.version, sessionOf(name)));
       })
       // The message reaches the person verbatim, so it says what to do rather
       // than naming an exception.
@@ -680,10 +939,19 @@ const server = http.createServer((req, res) => {
  * ⚠️ Bound to localhost deliberately. This server writes and has no auth.
  *
  * It sets roles, stores avatars, records the commitments the restart
- * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. Restart is
- * next. There is no authentication of any kind.
+ * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. There is no
+ * authentication of any kind.
  *
- * Two ways that protection is lost, and only the first is obvious:
+ * ⚠️ AND IT CREATES AGENTS, which is the most powerful thing behind this bind
+ * and was missing from this list while it was true. `POST /api/agents` installs
+ * a launchd job with RunAtLoad and KeepAlive that starts Claude with
+ * `--dangerously-skip-permissions` at every login, and whose instruction file
+ * any subsequent write here can rewrite. This paragraph is what README points
+ * a reader at for "what protects it, and what does not", so leaving the newest
+ * and largest capability out of it made the canonical statement of the posture
+ * the least accurate thing about it.
+ *
+ * THREE ways that protection is lost, and only the first is obvious:
  *
  *   1. Changing this to '0.0.0.0'. A one-line edit that looks harmless and
  *      exposes every write endpoint to whatever network the machine is on.
@@ -694,6 +962,14 @@ const server = http.createServer((req, res) => {
  *      it is already enabled on the mini this was built on, publishing three
  *      localhost ports. Adding a route for this one would publish it too,
  *      without touching a line of this file.
+ *
+ *   3. ⚠️ A page on ANOTHER SITE, which needs no misconfiguration at all. A
+ *      POST with a form content type is a CORS simple request: no preflight,
+ *      and the loopback `Host` a legitimate request carries. Measured against
+ *      this server before `crossSiteWrite` existed — a page on any origin
+ *      created a worker directory and installed a launchd job. That guard is
+ *      now the third thing holding this up, and it is the only one that
+ *      protects a machine whose owner did nothing wrong.
  *
  * So localhost is a *default*, not a guarantee. Reachability and login arrive
  * together or not at all.

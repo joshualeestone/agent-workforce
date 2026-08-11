@@ -72,6 +72,18 @@ const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
+// ⚠️ AND THE LAUNCH AGENTS DIRECTORY, which this file did not sandbox while it
+// now drives the create route. Both cases here are refused before anything is
+// written, so nothing has leaked — but the first happy-path route test somebody
+// adds would install a REAL launchd job in the operator's `~/Library/
+// LaunchAgents`, and it would then start an agent on their next login. The
+// sandbox has to be in place before the hazard arrives, not after.
+process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-launch-'));
+// And the two programs an agent is made of, so a route test does not depend on
+// whether the machine running the suite happens to have Claude installed where
+// this one does.
+process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
+process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1146,7 +1158,7 @@ test('a session that merely borrows an agent name cannot rewrite its instruction
   //
   // Deleting the `isNamedOurs === true` clause in `knownAgent` fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1183,7 +1195,7 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   //
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1224,7 +1236,7 @@ test('GET /commitments refuses a name a stranger is currently claiming, but not 
   const status = require('./engine/status');
 
   // Half one: a stranger claiming the name. Must refuse.
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const res = await req('/api/agent/angel/commitments');
@@ -1346,7 +1358,7 @@ test('the gate checks do not capture every pane on every request', async () => {
   // gate to `snapshot()` left it green.
   const status = require('./engine/status');
   let captures = 0;
-  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tx');
+  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\t\tx');
   status.setPaneCapture(() => { captures += 1; return 'Worked for 1m\n> \n'; });
   try {
     captures = 0;
@@ -1383,7 +1395,7 @@ test('a live agent is not taken offline by a stranger holding an alias of its na
   const status = require('./engine/status');
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1422,8 +1434,8 @@ test('/api/status reads the store for a tied agent and not for an untied one', a
     return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${name}` }], reportedAt: new Date().toISOString(), because: 'stubbed for this test' };
   };
   status.setPaneSource(() => [
-    'tied-discord\t0.0\t2.1.212\t0\tworking',
-    'untied\t0.0\t2.1.212\t0\tworking',
+    'tied-discord\t0.0\t2.1.212\t0\t\tworking',
+    'untied\t0.0\t2.1.212\t0\t\tworking',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1465,7 +1477,7 @@ test('a stranger cannot fetch the real agent’s picture under the stranger’s 
 
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1630,7 +1642,7 @@ test('every write route refuses the untied card’s own spelling while the real 
   const status = require('./engine/status');
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1661,6 +1673,379 @@ test('every write route refuses the untied card’s own spelling while the real 
     status.setPaneSource(null);
     status.setPaneCapture(null);
   }
+});
+
+test('the create route refuses a name it could not address, and answers a bad body cleanly', async () => {
+  // ⚠️ Driven through the ROUTE, because engine tests do not prove a route is
+  // wired — and this route's catch path called a function from a different
+  // branch, which would have thrown at runtime while the suite stayed green.
+  const create = require('./engine/create');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  try {
+    create.setDryRun(false);
+
+    const bad = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '_nope', role: 'pm' }),
+    });
+    assert.equal(bad.status, 400, 'a name the routes cannot address was accepted');
+    assert.match(JSON.parse(bad.body).because, /letters, numbers/);
+    assert.equal(calls.length, 0, 'a refused name still ran a command');
+
+    // ⚠️ And the ERROR path, which is the one that would have thrown.
+    const broken = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    assert.equal(broken.status, 400, 'a malformed body did not answer cleanly');
+    assert.ok(JSON.parse(broken.body).error, 'no readable error came back');
+  } finally {
+    create.setRunner(null);
+  }
+});
+
+test('the roles route carries the copy the creation actually uses', async () => {
+  // ⚠️ The screen must not invent its own blurb or first action. The words
+  // someone reads while choosing have to be the words the agent is created
+  // from, or the picker is describing something the product does not build.
+  const roles = require('./engine/roles');
+  const res = await req('/api/roles');
+  assert.equal(res.status, 200);
+  const got = JSON.parse(res.body).roles;
+
+  assert.equal(got.length, roles.ROLES.length, 'the route drops or invents roles');
+  for (const r of got) {
+    const real = roles.byKey(r.key);
+    assert.ok(real, `the route served a role '${r.key}' that cannot be created`);
+    assert.equal(r.blurb, real.blurb);
+    assert.equal(r.firstAction, real.firstAction, 'the picker would show a first action the agent never gets');
+    // ⚠️ And the CAUTION, which is the whole condition of Legal shipping: the
+    // limit has to be readable at the moment of choosing, so it has to survive
+    // the route. Served as null rather than omitted, so the screen never has to
+    // guess whether a role has one.
+    assert.equal(r.caution, real.caution || null,
+      `the picker would show a different limit for ${r.key} than the role carries`);
+  }
+  const legal = got.find((r) => r.key === 'legal');
+  assert.ok(legal, 'Legal is not being offered at all');
+  assert.match(legal.caution, /not a lawyer|not legal advice/i,
+    'Legal is offered without the sentence that made it shippable');
+});
+
+/**
+ * Pull one brace-matched function out of the page's script and make it callable.
+ *
+ * The same trick the detail-panel test above uses, and for the same reason: the
+ * page is a single file with no build step, so the only way to test its
+ * behaviour is to run its real source. `prelude` supplies whatever the extracted
+ * function closes over.
+ */
+function pageFunction(name, prelude = '') {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function ' + name);
+  assert.ok(start > -1, name + ' vanished from the page');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of ' + name);
+  // eslint-disable-next-line no-new-func
+  return new Function(`${prelude}\n${script.slice(start, end)}\nreturn ${name};`)();
+}
+
+test('the creation screen only calls an agent made when the board can see it running', () => {
+  const boardCanSeeIt = pageFunction('boardCanSeeIt');
+
+  // ⚠️ THE CONTROL, and it is the assertion that makes the rest mean anything.
+  // A brand-new agent at its first prompt has nothing on screen saying what it
+  // is doing, so it comes back `unknown` — the honest classification, and the
+  // NORMAL state of a healthy thirty-second-old agent. A predicate that
+  // rejected it would fail every successful creation while every negative case
+  // below still passed, which is precisely the shape of a gate test that
+  // passes for the wrong reason.
+  const fresh = { sessionName: 'casey', isAgentSession: true, isNamedOurs: true, state: 'unknown' };
+  assert.equal(boardCanSeeIt(fresh), true,
+    'a healthy new agent sitting at its first prompt is reported as not running');
+  assert.equal(boardCanSeeIt({ ...fresh, state: 'idle' }), true);
+
+  // Each field flipped in turn: a predicate that ignored any one of these would
+  // still pass the control above.
+  // ⚠️ `isAgentSession`, NOT `isFleetSession`. This asserted the latter, which
+  // `status.isFleetSession` returns true for whenever `isNamedOurs` is true —
+  // so the combination being pinned here (named ours, not a fleet session) is
+  // one the API cannot produce, and this assertion controlled for NOTHING while
+  // reading as coverage of the died-immediately case. `isAgentSession`
+  // additionally requires a live Claude process, which is the real question,
+  // and a claimed pane whose command tmux could not report does reach it.
+  assert.equal(boardCanSeeIt({ ...fresh, isAgentSession: false }), false,
+    'a session whose Claude is not running was reported as a working agent');
+  assert.equal(boardCanSeeIt({ ...fresh, isNamedOurs: false }), false,
+    'an agent the board cannot tie to this name was reported as made — that is '
+    + 'the anonymous, unwritable card this branch exists to prevent');
+  assert.equal(boardCanSeeIt({ ...fresh, state: 'stopped' }), false,
+    'nothing is running in it and the screen said it was up');
+  assert.equal(boardCanSeeIt(undefined), false,
+    'an agent absent from the board entirely was reported as made');
+
+  // ⚠️ And the CALL SITE. Proving the predicate is right says nothing about
+  // whether the watch uses it: inlining a looser condition there would leave
+  // every assertion above green with the screen lying again.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // Brace-matched, like `pageFunction` above: slicing to a comment further down
+  // the file meant that inserting any function between the two silently widened
+  // the slice and weakened both assertions without failing anything.
+  const watchStart = script.indexOf('async function watchForAgent');
+  assert.ok(watchStart > -1, 'watchForAgent vanished');
+  let d = 0; let watchEnd = -1;
+  for (let k = script.indexOf('{', watchStart); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { watchEnd = k + 1; break; } }
+  }
+  assert.ok(watchEnd > -1, 'could not find the end of watchForAgent');
+  const body = script.slice(watchStart, watchEnd);
+  assert.match(body, /boardCanSeeIt\s*\(/,
+    'watchForAgent no longer asks boardCanSeeIt, so the definition of "it is '
+    + 'running" has been forked');
+  assert.ok(!/isNamedOurs/.test(body),
+    'watchForAgent tests the tie itself again — one definition, or the two drift');
+});
+
+test('the creation screen reports a failed step as failed', () => {
+  // ⚠️ A half-made agent is a real outcome, and the step list is the only place
+  // a person can see WHICH half. A renderer that drew every reported step the
+  // same way would turn `PARTIAL` into a screen full of ticks.
+  // ⚠️ The REAL `tickLine`, not a stub. Stubbing it meant the words it adds for
+  // a screen reader ("done: " / "failed: ") -- which exist precisely because the
+  // glyph is aria-hidden and both states render in the same colour -- were
+  // asserted nowhere, on the one screen whose job is showing WHICH half failed.
+  const realTickLine = pageFunction('tickLine', 'function esc(s) { return String(s); }');
+  const paintMade = pageFunction('paintMade', `
+    const el = { innerHTML: '', textContent: '' };
+    const document = { getElementById: () => el };
+    function esc(s) { return String(s); }
+    const tickLine = ${realTickLine.toString()};
+    globalThis.__el = el;
+  `);
+  paintMade([
+    { label: 'made its folder', ok: true },
+    { label: 'started it', ok: false },
+  ], { state: 'waiting', text: 'Waiting for the board to see it running' });
+
+  const out = globalThis.__el.innerHTML;
+  assert.match(out, /class="tick done".*made its folder/,
+    'a step that worked was not shown as done');
+  assert.match(out, /class="tick fail".*started it/,
+    'a step the engine reported as FAILED was drawn as a success, which is the '
+    + 'whole failure mode the step list exists to prevent');
+  assert.match(out, /class="tick waiting".*Waiting for the board/,
+    'the one line that is about the agent rather than about us went missing');
+
+  // ⚠️ And in WORDS. The tick and the cross are aria-hidden and both states use
+  // the same colour, so without these a screen reader hears "made its folder"
+  // and "started it" identically whether or not they worked.
+  assert.match(out, /done: <\/span>made its folder/, 'a successful step says nothing aloud');
+  assert.match(out, /failed: <\/span>started it/,
+    'a FAILED step is indistinguishable from a successful one to a screen reader');
+});
+
+test('a write another website could send is refused, whatever route it names', async () => {
+  // ⚠️ MEASURED, not theorised. Before this guard, a page on any site could run
+  //
+  //     fetch('http://127.0.0.1:4317/api/agents', { method: 'POST',
+  //       headers: { 'content-type': 'text/plain' },
+  //       body: '{"name":"theirs","role":"pm"}' })
+  //
+  // and it worked: a POST with a text/plain body is a CORS *simple request*, so
+  // no preflight is involved, and `Host` is the loopback address a legitimate
+  // request also carries. Running exactly that against the real server created a
+  // worker directory and installed a launchd job on this machine — an agent that
+  // starts on every reboot with --dangerously-skip-permissions, planted by a
+  // page the user merely visited.
+  //
+  // The create route's own comment claimed it "does not cross a new line"
+  // because the server already had writes. It was wrong: every other write is
+  // PUT or DELETE, which a browser always preflights, and this server answers
+  // the preflight with a 404 carrying no CORS headers. POST was the first route
+  // a stranger's page could reach.
+  const create = require('./engine/create');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  try {
+    for (const [label, headers] of [
+      ['a form content type', { 'content-type': 'text/plain' }],
+      ['a form post', { 'content-type': 'application/x-www-form-urlencoded' }],
+      ['a multipart form', { 'content-type': 'multipart/form-data' }],
+      ['another site as its origin', { 'content-type': 'application/json', origin: 'https://evil.example' }],
+      ['a sandboxed page', { 'content-type': 'application/json', origin: 'null' }],
+    ]) {
+      const res = await req('/api/agents', {
+        method: 'POST', headers, body: JSON.stringify({ name: 'csrf-fixture', role: 'pm' }),
+      });
+      assert.equal(res.status, 403, `${label}: the write was accepted`);
+      assert.equal(calls.length, 0, `${label}: a command ran for a request from another website`);
+    }
+
+    // ⚠️ AND ON A ROUTE THAT IS NOT THE NEW ONE. This test is named "whatever
+    // route it names", and every case above targets /api/agents — so a
+    // regression scoping the guard to that one path would leave it green.
+    const otherRoute = await req('/api/agent/angel/profile', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ role: 'theirs' }),
+    });
+    assert.equal(otherRoute.status, 403, 'the guard only covers the route it was written for');
+
+    // ⚠️ ANOTHER PROGRAM ON THIS COMPUTER is not this board. Comparing the
+    // hostname alone made every other loopback port same-site: a dev server
+    // rendering somebody else's content, or an XSS in any other local app,
+    // could have installed a launchd job from 127.0.0.1:3000.
+    const otherPort = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:3000' },
+      body: JSON.stringify({ name: 'csrf-fixture', role: 'pm' }),
+    });
+    assert.equal(otherPort.status, 403, 'a page on another local port was treated as this board');
+    assert.equal(calls.length, 0, 'a command ran for a page on another local port');
+
+    // ⚠️ THE CONTROL, in three parts, because a guard that refuses everything
+    // passes every assertion above while breaking the product.
+    //
+    // The board's own write still goes through. The origin is built from the
+    // ACTUAL base, not a hardcoded port: this server binds wherever it is told,
+    // and a guard compared against a configured default would refuse every
+    // legitimate write on every other port.
+    const ours = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: new URL(base).origin },
+      body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+    });
+    assert.equal(ours.status, 400,
+      'the board can no longer write to itself, so this guard has broken the product');
+
+    // ...and so does the one write that is NOT JSON. The avatar upload PUTs an
+    // IMAGE, and `saveAvatar` reads that content type to know the format, so a
+    // guard written as "must be application/json" would have refused every
+    // picture in the product while reading in review like the safer choice.
+    const avatar = await req('/api/agent/angel/avatar', {
+      method: 'PUT', headers: { 'content-type': 'image/png' }, body: 'not-a-real-png',
+    });
+    assert.notEqual(avatar.status, 403,
+      'the avatar upload is refused as cross-site, so the guard is stricter than the threat');
+
+    // ...and so does a client that is not a browser at all: `curl` and the
+    // board's own tooling send no Origin. What covers THAT case is the Origin
+    // arm being absent, not the content type -- this used to be commented as
+    // though the content-type arm were doing the work.
+    const plain = await req('/api/agents', {
+      method: 'POST', body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.notEqual(plain.status, 403,
+      'a request with no Origin was refused, which breaks every non-browser caller');
+
+    // ⚠️ And a SAME-ORIGIN post with a form content type is allowed, which is
+    // the early return the guard makes for a request whose origin it has
+    // already recognised. Nothing sends one today; without this the line can be
+    // deleted with the suite green, and it is exactly the "trap for the next
+    // route somebody adds" its own comment names.
+    const sameOriginForm = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', origin: new URL(base).origin },
+      body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+    });
+    assert.notEqual(sameOriginForm.status, 403,
+      'the board is refused its own write for a content type, which the Origin has already cleared');
+  } finally {
+    create.setRunner(null);
+  }
+});
+
+test('the create route answers a real creation with the record the screen is built on', async () => {
+  // ⚠️ The route test beside this one is named "makes an agent" and never makes
+  // one — both its cases assert 400. So the 200 answer, which is the ENTIRE
+  // contract the creation screen consumes (`outcome`, the ordered `steps` list
+  // it draws, and the `firstAction` it offers), had no end-to-end coverage at
+  // all. It was unsafe to write until this file sandboxed the LaunchAgents
+  // directory; it is safe now, so it exists.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const roles = require('./engine/roles');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  // ⚠️ LEAVE DRY-RUN, or this proves less than it says. `setRunner(null)` in the
+  // previous test's `finally` re-arms it, so without this every write is
+  // suppressed, every step reports ok unconditionally, and the test would stay
+  // green with every filesystem write in `createAgent` broken -- while its own
+  // comment claims the sandbox exists so the writes can happen.
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const res = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      // ⚠️ `claudeBin` here is a probe: the route must IGNORE it. If it were
+      // passed through, this creation would be refused for a missing program,
+      // so the 200 below is what proves a caller cannot choose the executable
+      // that launchd will run on every reboot.
+      body: JSON.stringify({ name: 'route-made', role: 'writer', claudeBin: '/nope/claude' }),
+    });
+    assert.equal(res.status, 200, 'a legitimate creation was refused');
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, 'created', body.because);
+
+    // The screen draws exactly this list, in this order, and marks each one.
+    assert.ok(Array.isArray(body.steps) && body.steps.length >= 4, 'no step record came back');
+    for (const s of body.steps) {
+      assert.equal(typeof s.label, 'string', 'a step with no label would draw as a blank line');
+      assert.equal(typeof s.ok, 'boolean', 'a step with no verdict cannot be drawn as done or failed');
+    }
+    assert.ok(body.steps.some((s) => /startup job/.test(s.label)), 'the job step is missing from the record');
+
+    // ⚠️ And the first action is the ROLE's own words, not something the screen
+    // invented — the whole point of serving it from the same library the agent
+    // is created from.
+    assert.equal(body.firstAction, roles.byKey('writer').firstAction,
+      'the screen would offer a first action this agent was not created with');
+
+    // ⚠️ The route must NOT let a caller choose the programs. `claudeBin` in the
+    // body above is ignored: honouring it would let any local page name any
+    // executable to be launched under launchd forever.
+    const started = calls.find((c) => /launchctl$/.test(c[0]));
+    assert.ok(started, 'the job was never loaded, so nothing would start');
+
+    // And the files are really there, in the sandbox this file sets up.
+    assert.ok(fs.existsSync(create.instructionFile('route-made')), 'no instruction file was written');
+    assert.ok(fs.existsSync(create.supervisorPath()), 'the shared supervisor was not installed');
+    assert.ok(fs.existsSync(create.plistPath('route-made')), 'no launchd job was written');
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
+test('the suggested default role is the project manager, by name and not by position', () => {
+  // ⚠️ The plan says "Project manager is the suggested default", and the screen
+  // implemented it POSITIONALLY: the first row, and `ROLES[0]` on a second
+  // visit. Reordering `engine/roles.js` -- an edit nobody would connect to a
+  // product decision -- silently changes what a person accepts by pressing
+  // Continue, and could make it Legal or Finance: the two roles whose limits
+  // are carefully stated in two places are exactly the two that must never be
+  // the silent default.
+  const roles = require('./engine/roles');
+  assert.equal(roles.ROLES[0].key, 'pm',
+    'the role library no longer starts with the project manager, so the screen '
+    + 'now preselects something else for everyone');
+
+  // And the screen still takes its default from the top of that list rather
+  // than from a second copy of the decision.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.match(script, /pickRole\(ROLES\[0\]\.key\)/,
+    'the screen picks its default some other way than the first role, which is a '
+    + 'second place for that decision to live');
 });
 
 test('the board SAYS part of the fleet could not be read, in words on the screen', () => {

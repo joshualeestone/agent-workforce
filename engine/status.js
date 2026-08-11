@@ -316,6 +316,13 @@ const PANE_COLUMNS = [
   { key: 'pane', fmt: '#{window_index}.#{pane_index}' },
   { key: 'command', fmt: '#{pane_current_command}' },
   { key: 'inMode', fmt: '#{pane_in_mode}' },
+  // ⚠️ The CLAIM, and it must sit before `title` — `title` is `rest: true`, so
+  // it absorbs every remaining tab and anything after it would be swallowed.
+  //
+  // This is a tmux user option Kosmos sets on the session it creates. It reports
+  // empty for every session that does not have one, which is what makes it
+  // evidence rather than a naming convention.
+  { key: 'claim', fmt: '#{@kosmos_agent}' },
   { key: 'title', fmt: '#{pane_title}', rest: true },
 ];
 
@@ -451,6 +458,20 @@ function parsePanes(out) {
       // mode, safe to type" — asserting the safe answer from an absence of
       // information, which is the one thing this codebase refuses to do.
       inMode: raw.inMode === undefined || raw.inMode === '' ? '1' : raw.inMode,
+      // ⚠️ Kosmos's claim on the session. Empty for every session it did not
+      // create, which is what makes it evidence rather than a convention.
+      //
+      // ⚠️ AND THE LESSON: this field existed in `PANE_COLUMNS` and was parsed
+      // into `raw` and then **silently dropped**, because this return builds its
+      // object by hand. `PANE_COLUMNS` was introduced so the format and the
+      // parser could not drift — and the drift moved one step downstream, to
+      // the parser and the object it returns. The round-trip test did not catch
+      // it because it asserted the fields it already knew about.
+      //
+      // Adding a column is therefore TWO edits, and the test below now asserts
+      // that every column reaches the output so the next one cannot be lost the
+      // same way.
+      claim: raw.claim || '',
       title: raw.title || '',
     };
   });
@@ -529,7 +550,45 @@ function listPanes() {
  * Claude is running there.
  */
 function isNamedOurs(pane) {
-  return Boolean(pane) && /-discord$/.test(String(pane.session || ''));
+  if (!pane) return false;
+
+  // ⚠️ THE CLAIM ARM, and it is what makes an agent Kosmos creates recognisable.
+  //
+  // Before this, the only evidence a pane belonged to the name it is filed under
+  // was a `-discord` suffix — so an agent Kosmos created itself came back
+  // anonymous and unwritable, because it has no reason to carry a naming
+  // convention from our dev environment. The gate was right and its only
+  // evidence was wrong.
+  //
+  // The claim is a tmux user option Kosmos sets on the session at creation, and
+  // it beats a file on disk in the way that matters: **it dies with the
+  // session**. A stranger opening a session with the same name does not inherit
+  // it, and there is no stale record to reconcile — the two failure modes a
+  // claims file on disk would have had.
+  //
+  // ⚠️ It must match the pane's own NAME, not merely be present. A claim naming
+  // a different agent is somebody else's claim, and reading "has a claim" as
+  // "is ours" would be the borrowed-name hole rebuilt out of new parts.
+  //
+  // ⚠️ KOSMOS writes this, never the agent, and that is a CONVENTION rather
+  // than an enforcement — worth stating precisely, because the sentence used to
+  // read as a guarantee the mechanism does not provide. Any local process can
+  // run `tmux set-option -t <name> @kosmos_agent <name>` and be treated as
+  // ours, exactly as any local process can open a session called
+  // `<name>-discord` and be treated as ours by the legacy arm below. So this
+  // arm is no weaker than the one it extends, and neither is a defence against
+  // a process already running as you — which could rewrite the instruction file
+  // directly anyway.
+  //
+  // What the claim actually buys is that it DIES WITH THE SESSION: there is no
+  // stale record for a stranger to inherit later, which is the failure a claims
+  // file on disk would have had.
+  const claim = String(pane.claim || '').trim();
+  if (claim && claim === String(pane.name || '')) return true;
+
+  // The legacy arm: the existing fleet carries the suffix and no claim, and
+  // must keep working untouched.
+  return /-discord$/.test(String(pane.session || ''));
 }
 
 /**
@@ -613,11 +672,53 @@ function isNamedOurs(pane) {
 const RANK_NAMED_RUNNING = 0;   // ours by name, unambiguously Claude
 const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
 const RANK_NAMED_LEGACY = 2;    // ours by name, AMBIGUOUS process — `node` only
-const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
-const RANK_NONE = 4;
+/**
+ * ⚠️ Everything ours by CLAIM sits below everything ours by SUFFIX, whatever is
+ * running in either.
+ *
+ * The first version of this tie-break only preferred a suffixed pane that was
+ * running unambiguous Claude, which left the hole one step along: a real
+ * `angel-discord` CRASHED to a shell ranks `NAMED_CRASHED`, and a claimed
+ * impostor running Claude ranks `NAMED_RUNNING`, so the impostor still won the
+ * name. Measured — the roster came back with the impostor alone, and the real
+ * agent was off the board.
+ *
+ * That case is the worst one available: the crash is hidden on the very card
+ * whose Restart button exists for it, and `knownAgent` is satisfied through the
+ * impostor, so a write still reaches the REAL agent's boot file while the
+ * screen shows somebody else's pane. Under `main`'s ladder the crashed real
+ * agent kept its card; the claim arm is what put it at risk, so the offset is
+ * unconditional rather than conditional on what the impostor happens to run.
+ *
+ * Within either group the order is unchanged, and a claimed agent with no
+ * suffixed twin — every agent this product creates — is unaffected, because the
+ * offset applies uniformly to every pane in its name group.
+ */
+const RANK_CLAIM_ONLY = 3;      // added to any named-ours pane with no suffix
+const RANK_INFERRED = 7;        // not ours by name; a Claude process says maybe
+const RANK_NONE = 8;
 
 function rank(pane) {
   if (isNamedOurs(pane)) {
+    /* ⚠️ THE SUFFIXED PANE WINS A TIE, and adding the claim arm is what made
+     * that necessary.
+     *
+     * `onePanePerSession` keys on the board NAME, and `angel` and
+     * `angel-discord` are one name. Before the claim existed only the suffixed
+     * session could be "ours", so the tie could not arise. Now any local
+     * process can run `tmux new -s angel` and `set-option @kosmos_agent angel`,
+     * and both panes rank identically at pane 0.0 — so the winner was whichever
+     * tmux happened to list first. Measured on this code: the roster came back
+     * with ONE entry, the impostor's, and the real agent was not on the board
+     * at all. Everything keyed on the name then followed it: the instruction
+     * reads and writes, and the name-keyed gates.
+     *
+     * A claim is set by us but is not unforgeable — any process running as this
+     * user can set the same option. The suffix is the fleet's own convention
+     * and is the older, established tie. So when both say "ours", the suffixed
+     * one is the agent, and the claim is what recognises the agents WE create,
+     * which by construction have no suffixed twin.
+     */
     // ⚠️ `claude` and `claude.exe` belong UP HERE with the version string, not
     // down with `node`. Demoting the whole legacy set below a crashed shell
     // over-corrected: `node` is ambiguous because a dev server looks identical,
@@ -627,12 +728,17 @@ function rank(pane) {
     // agent was reported dead and Clear and Compact were refused for it — and
     // `classify` disagreed, reporting `claude` as running. One fact, two
     // answers, in the two functions this file most recently unified.
-    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
+    // The suffix is the fleet's own convention and cannot be taken by setting
+    // an option; a claim can. So a pane claiming a name it does not carry sits
+    // below every pane that carries it, whatever either is running.
+    const byClaimOnly = /-discord$/.test(String(pane.session || '')) ? 0 : RANK_CLAIM_ONLY;
+
+    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING + byClaimOnly;
     // `isAgentSession` accepts these too, but they are weaker: `node` is what a
     // dev server looks like, and inside our own session it must not outrank the
     // pane that is unambiguously Claude.
-    if (isAgentSession(pane)) return RANK_NAMED_LEGACY;
-    return RANK_NAMED_CRASHED;
+    if (isAgentSession(pane)) return RANK_NAMED_LEGACY + byClaimOnly;
+    return RANK_NAMED_CRASHED + byClaimOnly;
   }
 
   if (isAgentSession(pane)) return RANK_INFERRED;
@@ -803,6 +909,44 @@ function classify(pane, paneText) {
   if (/✱|Worked for|Brewed for|Baked for|to save .* tokens/i.test(tail)) {
     return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it finished and is waiting for you' };
   }
+  /**
+   * ⚠️ THE INPUT BOX ITSELF, and it has to be last.
+   *
+   * Every marker above is a trace of something the agent DID, and traces scroll
+   * away. An agent that has been sitting at its prompt long enough fell through
+   * to `unknown` — so the board told the operator "we cannot see this one, so we
+   * are not telling you it is fine" about an agent that was plainly waiting for
+   * them, and a person who had just created their first agent landed on exactly
+   * that card. Measured on a real created agent, and on the fleet: the footer is
+   * frequently the only marker left in the last twenty-five lines.
+   *
+   * The footer is drawn by Claude's own interactive UI, so it is evidence that
+   * Claude is running AND rendering a prompt. It is present while working too,
+   * which is why this sits BELOW every working check rather than above them:
+   * reaching here means nothing said working, nothing said it needs you, and
+   * the prompt is on screen. That is waiting for you.
+   *
+   * ⚠️ Weigh this before extending it, because it moves the board's headline
+   * count: with the footer on almost every live Claude pane, `unknown` stops
+   * being reachable for a RUNNING agent, and this codebase's whole rule is that
+   * "I cannot see it" must never be reported as something healthy. Two things
+   * make it a fair trade rather than a green light. The state it produces is
+   * "waiting for you", not "fine" — the card says which, and the `because` line
+   * names the evidence. And an agent stuck on a question does not show this
+   * footer at all: the dialog replaces the input box, so it is caught above by
+   * `NEEDS_YOU_MARKERS` rather than swallowed here. If a future Claude draws a
+   * blocking prompt WITH the footer still on screen, this becomes the trap the
+   * module exists to prevent, and it has to be revisited.
+   *
+   * ⚠️ And that premise is ASSERTED, not measured. It is a claim about a user
+   * interface this repo does not control, so no test here can hold it: the
+   * ordering below is pinned, the premise is not, and nothing would notice the
+   * day it stops being true. Said plainly rather than left for a reader to
+   * assume the tests cover it.
+   */
+  if (/⏵⏵|\? for shortcuts/.test(tail)) {
+    return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it is sitting at its prompt' };
+  }
 
   return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'nothing in the pane says what it is doing' };
 }
@@ -886,32 +1030,124 @@ function limitFor(model) {
  * named for its session id. That is an exact identity, not a resemblance, so
  * we resolve by it and search every project directory for the file.
  */
-function sessionIdFor(sessionName) {
-  for (const root of configRoots()) {
-    const file = path.join(root, 'agent-registry', `${sessionName}-discord_0.0.json`);
-    try {
-      const id = JSON.parse(fs.readFileSync(file, 'utf8')).session_id;
-      if (id) return id;
-    } catch { /* try the next root */ }
-  }
-  return null;
+/**
+ * ⚠️ The registry is keyed on the SESSION name, and this function used to
+ * reconstruct that name by appending `-discord`.
+ *
+ * For the existing fleet the two are the same string — the session really is
+ * `angel-discord` — so nothing looked wrong. For an agent Kosmos creates, whose
+ * session is simply `kosmos-demo`, the reconstruction asks for
+ * `kosmos-demo-discord_0.0.json`, which never exists. The entry sitting right
+ * beside it is called `kosmos-demo_0.0.json`.
+ *
+ * The consequence was the last piece of Discord coupling still visible to a
+ * user: a created agent showed on the board with its name and its role and then
+ * `model unknown` and a dashed, unknowable memory ring, permanently, because no
+ * transcript could be found for it. Measured on a real agent created through
+ * the product on 2026-08-10.
+ *
+ * ⚠️ And an entry that says whose it is is CHECKED rather than trusted by its
+ * filename. It records its own `session_name`, so we confirm the file belongs to
+ * the agent we asked about instead of inferring it from what it is called. An
+ * entry with no `session_name` at all cannot be checked and is still taken on
+ * its filename, which is the pre-existing behaviour and is said here so the
+ * guarantee is not read as broader than it is — a file
+ * named for one agent holding another's session id would otherwise produce
+ * confident numbers about the wrong conversation, which is the exact failure
+ * this whole resolution path was written to avoid.
+ */
+/**
+ * ⚠️ A NAME THAT CANNOT WALK OUT OF THE REGISTRY DIRECTORY.
+ *
+ * Both arguments below are joined into a filename, and both arrive from tmux —
+ * which accepts a `/` in a session name (measured: `tmux new -s 'a/b'`
+ * succeeds). So a local session called `../../something-discord` is tied by the
+ * legacy suffix arm and would have this function read a JSON file outside the
+ * root and take a session id from it.
+ *
+ * `instructions.registryKey` exists to refuse exactly that, and threading the
+ * real session through here routed around it. Rather than import across
+ * modules for four lines, the same rule is applied at the point the value
+ * becomes a path, which is where it can be checked against what it is about to
+ * do.
+ */
+function registrySafe(value) {
+  const name = String(value == null ? '' : value);
+  if (!name || name === '.' || name === '..') return null;
+  if (/[/\\\0]/.test(name) || name.includes('..')) return null;
+  return name;
 }
 
-function transcriptFor(agentName) {
-  const sessionId = sessionIdFor(agentName);
-  if (!sessionId) return null;
-
-  for (const root of configRoots()) {
-    const projects = path.join(root, 'projects');
-    let dirs;
-    try {
-      dirs = fs.readdirSync(projects);
-    } catch {
-      continue;
+function sessionIdsFor(sessionName, exactSession) {
+  // ⚠️ When the caller knows the REAL session name, only that spelling is
+  // tried. The board's name is the session with `-discord` stripped, so `foo`
+  // and `foo-discord` are one name and two sessions — and trying both spellings
+  // for a name means the surviving card of that collision can show the OTHER
+  // agent's model and memory at structured confidence. `snapshot` holds the
+  // pane, so it passes the session itself and this ambiguity never arises
+  // there; the fallback below is for callers that have only a name.
+  // ⚠️ The fallback tries the SUFFIXED spelling FIRST. Callers that hold only a
+  // name (`instructions.sessionStartedAt`) used to try that spelling and no
+  // other, so leading with the un-suffixed one silently changed which session
+  // they resolve when a machine has both — the staleness verdict would then be
+  // computed from the wrong agent's transcript. New capability, same order of
+  // preference as before.
+  const safeExact = exactSession === undefined ? undefined : registrySafe(exactSession);
+  const safeName = registrySafe(sessionName);
+  // A name we would refuse to build a path from resolves to nothing at all,
+  // rather than to a path we then hope is harmless.
+  if (exactSession !== undefined && !safeExact) return [];
+  if (!safeName) return [];
+  const candidates = safeExact
+    ? [`${safeExact}_0.0.json`]
+    : [`${safeName}-discord_0.0.json`, `${safeName}_0.0.json`];
+  const found = [];
+  // ⚠️ CANDIDATE-major, not root-major. The comment above promises the suffixed
+  // spelling is preferred, and root-major iteration silently broke that promise
+  // on any machine with more than one config root (this one has two): root 1's
+  // un-suffixed entry would outrank root 2's suffixed one. A stated order of
+  // preference that the loop does not implement is the same class of defect as
+  // a safety comment that overstates its guard.
+  const roots = configRoots();
+  for (const candidate of candidates) {
+    for (const root of roots) {
+      try {
+        const entry = JSON.parse(fs.readFileSync(path.join(root, 'agent-registry', candidate), 'utf8'));
+        const owner = String(entry.session_name || '');
+        const wanted = exactSession
+          ? [exactSession]
+          : [sessionName, `${sessionName}-discord`];
+        if (owner && !wanted.includes(owner)) continue;
+        if (entry.session_id) found.push(entry.session_id);
+      } catch { /* try the next candidate */ }
     }
-    for (const d of dirs) {
-      const candidate = path.join(projects, d, `${sessionId}.jsonl`);
-      if (fs.existsSync(candidate)) return candidate;
+  }
+  // ⚠️ ALL of them, in preference order, rather than the first one found.
+  // Returning the first meant a caller with only a name (the staleness check)
+  // could be handed a session id whose transcript no longer exists, and stop —
+  // reporting "no transcript" for an agent whose own transcript was sitting
+  // under the other spelling. Registry entries outlive their sessions, so the
+  // first match is not necessarily the live one.
+  return found;
+}
+
+function transcriptFor(agentName, exactSession) {
+  const sessionIds = sessionIdsFor(agentName, exactSession);
+  if (!sessionIds.length) return null;
+
+  for (const sessionId of sessionIds) {
+    for (const root of configRoots()) {
+      const projects = path.join(root, 'projects');
+      let dirs;
+      try {
+        dirs = fs.readdirSync(projects);
+      } catch {
+        continue;
+      }
+      for (const d of dirs) {
+        const candidate = path.join(projects, d, `${sessionId}.jsonl`);
+        if (fs.existsSync(candidate)) return candidate;
+      }
     }
   }
 
@@ -938,8 +1174,8 @@ function tailBytes(file, bytes = 262144) {
   }
 }
 
-function readContext(agentName, model) {
-  const file = transcriptFor(agentName);
+function readContext(agentName, model, exactSession) {
+  const file = transcriptFor(agentName, exactSession);
   if (!file) {
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no transcript found' };
   }
@@ -1028,8 +1264,8 @@ function modelDisplayName(id) {
   return id;
 }
 
-function readModel(agentName) {
-  const file = transcriptFor(agentName);
+function readModel(agentName, exactSession) {
+  const file = transcriptFor(agentName, exactSession);
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
   const text = tailBytes(file, 65536);
   if (!text) return { model: null, confidence: CONFIDENCE.NONE };
@@ -1224,6 +1460,10 @@ function paneRoster() {
   }
   return onePanePerSession(panes).map((pane) => ({
     sessionName: pane.name,
+    // The real tmux session beside the board name, for the same reason
+    // `snapshot` publishes it: anything that resolves a per-session artifact
+    // needs the name tmux knows, not the one we display.
+    session: pane.session,
     isNamedOurs: isNamedOurs(pane),
   }));
 }
@@ -1251,9 +1491,9 @@ function snapshot() {
     // underived, and carries no model and no context — which is the honest
     // answer, because we do not know whose conversation it is.
     const tied = isNamedOurs(pane);
-    const { model } = tied ? readModel(pane.name) : { model: null };
+    const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
-      ? readContext(pane.name, model)
+      ? readContext(pane.name, model, pane.session)
       : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tie this pane to an agent by name, so we will not read another agent\u2019s transcript for it' };
     const identity = tied
       ? readIdentity(pane.name)
@@ -1261,6 +1501,12 @@ function snapshot() {
     return {
       name: identity.displayName,
       sessionName: pane.name,
+      // ⚠️ The REAL tmux session, beside the board name it is filed under. They
+      // differ for every legacy agent (`angel-discord` vs `angel`), and any
+      // reader that resolves a per-session artifact -- a transcript, a registry
+      // entry -- needs the one tmux knows, not the one we display. Publishing
+      // it is what lets a consumer stop guessing between the two spellings.
+      session: pane.session,
       nameDerived: identity.derived,
       role: identity.role,
       target: pane.target,

@@ -277,8 +277,12 @@ test('the pane format and the pane parser cannot drift apart', () => {
   assert.equal(PANE_FORMAT, PANE_COLUMNS.map((c) => c.fmt).join('\t'));
   assert.ok(PANE_FORMAT.includes('#{pane_in_mode}'), 'copy-mode is no longer being asked for');
 
-  // Round-trip a line built from the format's own column order.
-  const line = ['zeta-discord', '0.0', '2.1.212', '0', 'Idle'].join('\t');
+  // ⚠️ Built FROM the column list rather than hardcoded, so adding a column
+  // cannot make this test wrong while the product is right. The hardcoded
+  // version failed the moment the claim column landed — correctly, but for the
+  // wrong reason: it was asserting the column COUNT, not the round-trip.
+  const values = { session: 'zeta-discord', pane: '0.0', command: '2.1.212', inMode: '0', claim: '', title: 'Idle' };
+  const line = PANE_COLUMNS.map((c) => values[c.key]).join('\t');
   const [got] = parsePanes(line);
   assert.equal(got.session, 'zeta-discord');
   assert.equal(got.name, 'zeta');
@@ -286,6 +290,14 @@ test('the pane format and the pane parser cannot drift apart', () => {
   assert.equal(got.command, '2.1.212');
   assert.equal(got.inMode, '0');
   assert.equal(got.title, 'Idle');
+
+  // ⚠️ And the claim column must come BEFORE the title, or `rest: true`
+  // swallows it. Asserting the ORDER, because that is the property that breaks.
+  const keys = PANE_COLUMNS.map((c) => c.key);
+  assert.ok(keys.indexOf('claim') < keys.indexOf('title'),
+    'the claim column sits after the title, which absorbs the remainder, so it '
+    + 'will always parse empty and every agent will read as unclaimed');
+  assert.equal(keys[keys.length - 1], 'title', 'the rest-column is no longer last');
 });
 
 test('a pane title containing a tab does not shift every other column', () => {
@@ -293,7 +305,8 @@ test('a pane title containing a tab does not shift every other column', () => {
   // and absorbs the remainder. If it were not, a title with a tab would push
   // real values into the wrong fields — and the field it would corrupt first is
   // whichever came after it.
-  const line = ['yara-discord', '1.2', 'node', '1', 'Working\ton\tthe thing'].join('\t');
+  const vals = { session: 'yara-discord', pane: '1.2', command: 'node', inMode: '1', claim: '', title: 'Working\ton\tthe thing' };
+  const line = PANE_COLUMNS.map((c) => vals[c.key]).join('\t');
   const [got] = parsePanes(line);
   assert.equal(got.command, 'node');
   assert.equal(got.inMode, '1');
@@ -985,6 +998,373 @@ test('a non-Discord agent still classifies to a real state', () => {
     'a non-Discord agent running Claude was refused a state, which re-couples '
     + 'the engine to the session-name convention this branch decoupled');
   assert.equal(r.confidence, CONFIDENCE.SCRAPED);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The claim: how Kosmos recognises an agent it created itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a session Kosmos claimed is ours, without carrying a Discord name', () => {
+  // ⚠️ The whole point. Before the claim, the ONLY evidence a pane belonged to
+  // the name it is filed under was a `-discord` suffix — so an agent Kosmos
+  // created came back anonymous and unwritable, because it has no reason to
+  // carry a naming convention from our dev environment. The gate was right and
+  // its only evidence was wrong.
+  const claimed = { session: 'casey', name: 'casey', claim: 'casey' };
+  assert.equal(isNamedOurs(claimed), true,
+    'an agent Kosmos created is still not recognised as its own');
+
+  // And it gets everything a suffixed agent gets.
+  setPaneSource(() => 'casey\t0.0\t2.1.212\t0\tcasey\tworking');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const [card] = snapshot().agents;
+    assert.equal(card.isNamedOurs, true, 'the claim did not survive into the snapshot');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a claim naming a DIFFERENT agent does not make a pane ours', () => {
+  // ⚠️ Reading "has a claim" as "is ours" would rebuild the borrowed-name hole
+  // out of new parts: a session carrying somebody else's claim would speak for
+  // a name it has no relationship to. The claim must match the pane's own name.
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey', claim: 'angel' }), false,
+    'a pane claiming to be a different agent was treated as that agent');
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey', claim: '' }), false);
+  assert.equal(isNamedOurs({ session: 'casey', name: 'casey' }), false,
+    'a pane with no claim at all was treated as claimed');
+});
+
+test('a stranger opening a session with the same name inherits no claim', () => {
+  // ⚠️ The property that makes a tmux session option beat a file on disk: it
+  // DIES WITH THE SESSION. Kosmos creates `casey` and claims it; that session
+  // ends; someone else runs `tmux new -s casey`. A claims FILE would still be
+  // sitting there naming `casey` as ours, and the stranger would inherit it.
+  // The option does not survive, so the stranger's pane reports no claim.
+  const kosmosMade = { session: 'casey', name: 'casey', claim: 'casey' };
+  const strangerLater = { session: 'casey', name: 'casey', claim: '' };
+
+  assert.equal(isNamedOurs(kosmosMade), true);
+  assert.equal(isNamedOurs(strangerLater), false,
+    'a session that merely reuses the name was treated as the agent Kosmos made');
+});
+
+test('the existing Discord fleet keeps working with no claim at all', () => {
+  // ⚠️ The legacy arm is not decoration: thirteen agents on this machine carry
+  // the suffix and no claim, and none of them may stop being recognised because
+  // a new mechanism arrived.
+  assert.equal(isNamedOurs({ session: 'angel-discord', name: 'angel', claim: '' }), true,
+    'the existing fleet stopped being recognised');
+  assert.equal(isNamedOurs({ session: 'angel-discord', name: 'angel' }), true);
+});
+
+test('every declared column reaches the parsed pane, not just the ones we remember', () => {
+  // ⚠️ `PANE_COLUMNS` was introduced so the tmux format and the parser could not
+  // drift apart. The drift moved one step downstream instead: the claim column
+  // was declared, parsed into the intermediate object, and then **silently
+  // dropped**, because the return statement builds its result by hand.
+  //
+  // The round-trip test did not catch it — it asserted the fields it already
+  // knew about, which is precisely the shape of test that cannot notice a
+  // missing one. This asserts the PROPERTY: whatever the column list says,
+  // comes out.
+  const values = {};
+  PANE_COLUMNS.forEach(function (c, i) { values[c.key] = 'v' + i; });
+  values.session = 'zeta-discord';
+  values.pane = '0.0';
+
+  const line = PANE_COLUMNS.map((c) => values[c.key]).join('\t');
+  const [got] = parsePanes(line);
+
+  PANE_COLUMNS.forEach(function (c) {
+    assert.ok(c.key in got,
+      `the column '${c.key}' is declared in PANE_COLUMNS and never reaches the `
+      + 'parsed pane, so everything downstream sees it as absent');
+    // ⚠️ And the VALUE, not just the key. Asserting presence alone let a column
+    // hardcoded to a constant (`claim: ''` rather than `raw.claim`) pass while
+    // dropping what tmux actually said — a narrower version of the very defect
+    // this test was written for. `session` and `pane` are excluded because the
+    // parser deliberately transforms them (the suffix is stripped, the target
+    // is composed), and `command`/`inMode` are normalised.
+    if (['session', 'pane', 'command', 'inMode'].includes(c.key)) return;
+    assert.equal(got[c.key], values[c.key],
+      `the column '${c.key}' reaches the parsed pane as a constant rather than `
+      + 'as what tmux reported, so its value is silently dropped');
+  });
+});
+
+test('an agent with no -discord session gets its model and its memory ring', () => {
+  // ⚠️ THE LAST PIECE OF DISCORD COUPLING A USER COULD SEE. The registry entry
+  // Claude writes is keyed on the SESSION name; this module reconstructed that
+  // name by appending `-discord`, which is right for the existing fleet and
+  // wrong for every agent Kosmos creates. Measured on a real agent created
+  // through the product: name and role read correctly, then `model unknown` and
+  // a dashed memory ring, permanently, with `kosmos-demo_0.0.json` sitting in
+  // the registry directory being asked for under a name it does not have.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  const entry = nodePath.join(dir, 'made-here_0.0.json');
+  fs.writeFileSync(entry, JSON.stringify({
+    session_name: 'made-here',
+    session_id: 'sess-made-here',
+    cwd: '/somewhere',
+  }), 'utf8');
+
+  const projects = nodePath.join(root, 'projects', 'made-here');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-made-here.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n', 'utf8');
+
+  // A session with no suffix, carrying Kosmos's claim: exactly what the product
+  // creates.
+  setPaneSource(() => 'made-here\t0.0\t2.1.227\t0\tmade-here\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'made-here');
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.isNamedOurs, true, 'the claim is not being read, so this tests the wrong thing');
+    assert.equal(card.model, 'claude-opus-5',
+      'a created agent still shows no model, so its card reads "model unknown" forever');
+    assert.ok(card.context.percent !== null,
+      'a created agent still has an unknowable memory ring');
+
+    // ⚠️ THE CONTROL. Without the entry those two must go back to null —
+    // otherwise they are being satisfied by something other than the fix and
+    // the assertions above prove nothing.
+    fs.rmSync(entry);
+    const blind = snapshot().agents.find((a) => a.sessionName === 'made-here');
+    assert.equal(blind.model, null, 'a model appeared with no registry entry to read it from');
+    assert.equal(blind.context.percent, null, 'a memory reading appeared from nowhere');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a registry entry naming a different agent is not read for this one', () => {
+  // ⚠️ Trying a second filename widened what this resolver will open, so it now
+  // checks the entry rather than trusting its name. A file called `borrowed`
+  // holding somebody else's session id would otherwise produce confident
+  // numbers about the wrong conversation — the precise failure the resolution
+  // path was built to avoid, reintroduced by the fix for the previous one.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, 'borrowed_0.0.json'), JSON.stringify({
+    session_name: 'somebody-else',
+    session_id: 'sess-made-here',
+  }), 'utf8');
+
+  const projects = nodePath.join(root, 'projects', 'made-here');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-made-here.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => 'borrowed\t0.0\t2.1.227\t0\tborrowed\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'borrowed');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not exercising a tied card');
+    assert.equal(card.model, null,
+      "another agent's transcript was read because the file was named for this one");
+    assert.equal(card.context.percent, null, "another agent's memory was reported as this one's");
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('an agent sitting at its prompt is idle, not unreadable', () => {
+  // ⚠️ Every other idle marker is a TRACE of something the agent did, and traces
+  // scroll away. An agent left at its prompt long enough fell through to
+  // `unknown`, so the board said "we cannot see this one, so we are not telling
+  // you it is fine" about an agent that was visibly waiting — and that is the
+  // card a person lands on straight after creating their first agent.
+  const at_prompt = ['', '────────────────', '❯ ', '────────────────', '  kosmos-demo',
+    '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents'].join('\n');
+  const pane = { session: 'made-here', name: 'made-here', claim: 'made-here', command: '2.1.227', title: 'Acknowledge readiness' };
+
+  const idle = classify(pane, at_prompt);
+  assert.equal(idle.state, 'idle', 'an agent at its own prompt is reported as unreadable');
+  assert.match(idle.because, /sitting at its prompt/);
+
+  // ⚠️ AND IT MUST NOT OUTRANK THE WORKING CHECKS. The footer is on screen while
+  // the agent is working too, so a marker placed above them would report every
+  // busy agent as idle — a far worse error than the one it fixes, and the exact
+  // shape of "the fix for a finding introduces a worse finding".
+  const working = classify(pane, at_prompt + '\n  esc to interrupt');
+  assert.equal(working.state, 'working', 'a working agent was reported as idle by its own footer');
+
+  // ⚠️ This pins the ORDERING and nothing else, and saying so matters. It
+  // passes because `NEEDS_YOU_MARKERS` is checked before the footer rule, and
+  // it would pass identically whether or not a real blocking dialog keeps the
+  // footer on screen. The premise the footer rule actually rests on -- that a
+  // dialog REPLACES the input box -- is asserted in `classify`'s comment and is
+  // not measured anywhere, because it is a claim about a UI this repo does not
+  // control. A prompt worded outside those five patterns, with the footer still
+  // drawn, would classify as idle. That is the known limit of this rule.
+  const asking = classify(pane, at_prompt + '\n  Do you want to proceed? (y/N)');
+  assert.equal(asking.state, 'needs_you',
+    'a question is not caught before the footer rule, so any blocking prompt would read as idle');
+
+  // And a pane with no footer at all is still honestly unknown.
+  const silent = classify(pane, 'some unrelated output\n');
+  assert.equal(silent.state, 'unknown', 'unknown stopped being reachable, so nothing is honest any more');
+});
+
+test('a card reads the transcript of ITS OWN session, not of the name it shares', () => {
+  // ⚠️ The board's name is the session with `-discord` stripped, so `foo` and
+  // `foo-discord` are one name and two sessions — the collision this module
+  // already says it exists to survive. Trying both registry spellings for a
+  // NAME reopened it one level down: the surviving card could show the other
+  // agent's model and memory at structured confidence, which is the "confident
+  // numbers about the wrong conversation" this whole resolution path was built
+  // to prevent. The caller holds the pane, so it passes the real session.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  // The DECOY: a registry entry for the un-suffixed session `twin`, which is a
+  // different agent that happens to share the board name.
+  fs.writeFileSync(nodePath.join(dir, 'twin_0.0.json'),
+    JSON.stringify({ session_name: 'twin', session_id: 'sess-twin' }), 'utf8');
+  const projects = nodePath.join(root, 'projects', 'twin');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-twin.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 90000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => 'twin-discord\t0.0\t2.1.227\t0\t\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'twin');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not a tied card, so this tests the wrong thing');
+    assert.equal(card.model, null,
+      "the card read the OTHER twin's transcript because they share a board name");
+    assert.equal(card.context.percent, null, "the card reported the other twin's memory as its own");
+
+    // ⚠️ THE CONTROL. Rename the decoy to this session's own spelling and the
+    // same numbers must appear — otherwise the nulls above are nulls for some
+    // unrelated reason and this test would pass with the fix reverted.
+    fs.writeFileSync(nodePath.join(dir, 'twin-discord_0.0.json'),
+      JSON.stringify({ session_name: 'twin-discord', session_id: 'sess-twin' }), 'utf8');
+    const own = snapshot().agents.find((a) => a.sessionName === 'twin');
+    assert.equal(own.model, 'claude-opus-5',
+      'the card cannot read its own session either, so the nulls above prove nothing');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a session name that could walk out of the registry directory reads nothing', () => {
+  // ⚠️ tmux accepts a `/` in a session name -- measured: `tmux new -s 'a/b'`
+  // succeeds. So a local session called `../../whatever-discord` is tied by the
+  // legacy suffix arm, and both the board name and the real session are joined
+  // into a registry FILENAME. `instructions.registryKey` exists to refuse
+  // exactly this shape, and threading the real session through this resolver
+  // routed around it.
+  //
+  // Planted where the traversal would land, so this fails loudly if the guard
+  // goes rather than passing because the file happens not to exist.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  // ⚠️ Planted at EXACTLY the path the traversal would resolve to:
+  // join(root, 'agent-registry', '../outside-the-root-discord_0.0.json') lands
+  // in the root itself. The first version of this fixture planted a differently
+  // named file, so the nulls it asserted were nulls because nothing was there —
+  // a vacuous gate test, which the mutation run caught by staying green with
+  // the guard removed.
+  const outside = nodePath.join(root, 'outside-the-root-discord_0.0.json');
+  fs.writeFileSync(outside, JSON.stringify({ session_id: 'sess-outside' }), 'utf8');
+  const projects = nodePath.join(root, 'projects', 'elsewhere');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-outside.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 50000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => '../outside-the-root-discord\t0.0\t2.1.227\t0\t\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.session === '../outside-the-root-discord');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.model, null,
+      'a session name walked out of the registry directory and read a file outside it');
+    assert.equal(card.context.percent, null, 'the same, for the memory ring');
+
+    // ⚠️ THE CONTROL. The planted file IS readable and DOES produce numbers when
+    // asked for under a name that cannot traverse -- otherwise the nulls above
+    // are nulls because nothing was there, and this test proves nothing.
+    const inside = nodePath.join(root, 'agent-registry', 'plain-name_0.0.json');
+    fs.mkdirSync(nodePath.dirname(inside), { recursive: true });
+    fs.writeFileSync(inside, JSON.stringify({ session_name: 'plain-name', session_id: 'sess-outside' }), 'utf8');
+    setPaneSource(() => 'plain-name\t0.0\t2.1.227\t0\tplain-name\t✳ Claude Code');
+    const ok = snapshot().agents.find((a) => a.sessionName === 'plain-name');
+    assert.equal(ok.model, 'claude-opus-5',
+      'the planted transcript is unreadable anyway, so the assertions above are vacuous');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('a claimed session cannot displace the real agent that shares its name', () => {
+  // ⚠️ THE COLLISION THE CLAIM ARM CREATED. `onePanePerSession` keys on the
+  // board NAME, and `angel` and `angel-discord` are one name. Before the claim
+  // existed only the suffixed session could be "ours", so this tie could not
+  // arise. Now any local process can run
+  //
+  //     tmux new -s angel && tmux set-option -t angel @kosmos_agent angel
+  //
+  // and both panes rank identically -- so the winner was whichever tmux listed
+  // first. Measured before the fix: the roster came back with ONE entry, the
+  // impostor's, and the real agent was not on the board at all. Everything
+  // keyed on the name followed it: instruction reads and writes, and the
+  // name-keyed gates.
+  setPaneSource(() => [
+    'angel\t0.0\t2.1.212\t0\tangel\t✳ Claude Code',
+    'angel-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code',
+  ].join('\n'));
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const roster = require('./status').paneRoster();
+    const angels = roster.filter((a) => a.sessionName === 'angel');
+    assert.equal(angels.length, 1, 'the collision produced two entries under one name');
+    assert.equal(angels[0].session, 'angel-discord',
+      'a session that merely claims the name displaced the real agent, and every '
+      + 'name-keyed read and write follows it');
+
+    // ⚠️ THE CONTROL. With no impostor, the same fixture must still resolve --
+    // otherwise this passes because nothing resolves at all.
+    setPaneSource(() => 'angel-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code');
+    assert.equal(require('./status').paneRoster().filter((a) => a.sessionName === 'angel').length, 1,
+      'the real agent does not resolve on its own, so the assertion above is vacuous');
+
+    // ⚠️ AND WHATEVER EACH IS RUNNING. The first version of this tie-break only
+    // preferred a suffixed pane that was running unambiguous Claude, so a real
+    // agent CRASHED to a shell still lost its name to a claimed impostor that
+    // was running -- the worst available case, because the crash is then hidden
+    // on the very card whose Restart button exists for it, while a write still
+    // reaches the real agent's boot file.
+    setPaneSource(() => [
+      'angel\t0.0\t2.1.212\t0\tangel\t✳ Claude Code',
+      'angel-discord\t0.0\t-zsh\t0\t\tzsh',
+    ].join('\n'));
+    const crashed = require('./status').paneRoster().filter((a) => a.sessionName === 'angel');
+    assert.equal(crashed.length, 1);
+    assert.equal(crashed[0].session, 'angel-discord',
+      'a claimed impostor took the name of a real agent that had crashed to a shell');
+
+    // ⚠️ AND THE OTHER CONTROL: a claimed session with NO suffixed twin is
+    // still ours. That is the whole point of the claim, and a tie-break that
+    // took it away would break every agent this product creates.
+    setPaneSource(() => 'made-by-kosmos\t0.0\t2.1.212\t0\tmade-by-kosmos\t✳ Claude Code');
+    const mine = require('./status').paneRoster().find((a) => a.sessionName === 'made-by-kosmos');
+    assert.ok(mine && mine.isNamedOurs, 'a created agent stopped being recognised as ours');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
 });
 
 test('a line with no separator is not an agent, and losing the whole answer is not an empty machine', () => {
