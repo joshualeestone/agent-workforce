@@ -321,10 +321,73 @@ const PANE_COLUMNS = [
 
 const PANE_FORMAT = PANE_COLUMNS.map((c) => c.fmt).join('\t');
 
+/**
+ * Is this line actually a pane, or something we cannot read?
+ *
+ * ⚠️ `PANE_FORMAT` is TAB-separated, and when the separator is absent every
+ * field but the first is missing — so the whole line landed in `session` and
+ * the rest defaulted, producing a syntactically valid agent whose name was the
+ * entire raw line and whose target was `<whole line>:undefined`.
+ *
+ * That is not hypothetical. It happened on this machine: without a UTF-8
+ * locale, **tmux sanitises its own format output** and replaces the tabs with
+ * underscores (bisected: `PATH` alone gives mangled output, `PATH`+`LANG`
+ * gives correct). The board then showed thirteen agents named
+ * `angel-discord_0.0_2.1.223_0__ …` — populated, confident, and wrong, with
+ * those entries carrying a name, a rank and a target into everything
+ * downstream, where `safeKey` would happily sanitise one into a collision with
+ * a real agent's key.
+ *
+ * ⚠️ THE RULE IS "IS THE SESSION A FIELD", NOT "ARE ALL THE FIELDS THERE", and
+ * the difference is a decision, not an oversight.
+ *
+ * Requiring every column would also reject a TRUNCATED line — and this module
+ * deliberately keeps those. A short line still names a session we can identify,
+ * and the missing fields default to the UNSAFE answer (`inMode` defaults to in
+ * copy-mode, a missing `command` classifies `unknown` rather than `stopped`),
+ * which is handled and tested. Dropping them would hide a running agent from
+ * the board, which is the same class of harm as showing a garbage one, pointed
+ * the other way.
+ *
+ * What makes the mangled line different is that NOTHING about it can be
+ * identified: with no separator at all, `session` is the whole line, so there is
+ * no agent to be conservative about. One separator is what distinguishes "a
+ * field we can read" from "the entire answer landed in the first column".
+ *
+ * A future format edit that drops one `\t` from `PANE_FORMAT` is a real second
+ * way to lose a separator, and it is NOT caught here — it would merge two
+ * columns while leaving the rest delimited. It is caught at development time
+ * instead, by the round-trip test asserting that every column declared in
+ * `PANE_COLUMNS` reaches the parsed pane with the value tmux reported. That is
+ * the right place for a mistake in our own format string.
+ */
+function isParseable(line) {
+  return String(line).includes('\t');
+}
+
+/**
+ * Parse `list-panes -F PANE_FORMAT` output, and say what could not be read.
+ *
+ * ⚠️ REJECTING IS ONLY HALF THE FIX, and the missing half is the one that cost
+ * fourteen hours. Dropping unreadable lines silently turns "tmux told us
+ * something we cannot understand" into "there are no agents" — which is exactly
+ * what the board displayed, all night, while thirteen agents were running. An
+ * empty board and an unreadable one look identical and mean opposite things.
+ *
+ * So the count travels with the panes, and `listPanes` refuses rather than
+ * serving an empty fleet it cannot vouch for.
+ */
+function readPanes(out) {
+  if (!out) return { panes: [], rejected: 0 };
+  const lines = out.trim().split('\n').filter(Boolean);
+  const good = lines.filter(isParseable);
+  return { panes: parsePanes(good.join('\n')), rejected: lines.length - good.length };
+}
+
 /** Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested. */
 function parsePanes(out) {
   if (!out) return [];
-  return out.trim().split('\n').filter(Boolean).map((line) => {
+  return out.trim().split('\n').filter(Boolean).filter(isParseable).map((line) => {
     const parts = line.split('\t');
     const raw = {};
     PANE_COLUMNS.forEach((col, i) => {
@@ -379,6 +442,10 @@ function parsePanes(out) {
  * done with it, so it cannot be used to reach a real agent.
  */
 let paneSource = null;
+// How many lines of the last tmux answer we could not read. Module state
+// because `listPanes` has to reach `snapshot` past `onePanePerSession`, and a
+// second parse to recompute it would be a second derivation of one fact.
+let UNREADABLE_LINES = 0;
 
 function setPaneSource(fn) { paneSource = typeof fn === 'function' ? fn : null; }
 
@@ -386,7 +453,25 @@ function listPanes() {
   const out = paneSource
     ? paneSource()
     : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
-  return parsePanes(out);
+  const { panes, rejected } = readPanes(out);
+
+  /**
+   * ⚠️ TMUX SPOKE AND WE UNDERSTOOD NONE OF IT. That is not an empty machine,
+   * and the difference is the whole reason this module exists.
+   *
+   * Refusing here reaches the board as its "we cannot read the agents right
+   * now" state, which says plainly that it is not claiming they are fine.
+   * Returning an empty list instead would render as a machine with no agents —
+   * which is what this board showed for fourteen hours while thirteen were
+   * running, because a mangled answer and no answer were indistinguishable.
+   */
+  if (rejected > 0 && panes.length === 0) {
+    throw new Error('tmux answered with something we could not read');
+  }
+  // Some read, some did not: the fleet is shown, and the gap is carried
+  // alongside it rather than quietly closed. `snapshot` puts it in the counts.
+  UNREADABLE_LINES = rejected;
+  return panes;
 }
 
 /**
@@ -1079,7 +1164,25 @@ function paneRoster() {
   if (out === null || out === undefined) {
     throw new Error('could not ask tmux which panes exist');
   }
-  return onePanePerSession(parsePanes(out)).map((pane) => ({
+  /**
+   * ⚠️ AND THE SAME POSTURE FOR AN ANSWER WE CANNOT READ.
+   *
+   * "We could not ask" and "we asked and understood none of it" are the same
+   * thing to a gate: in both, the roster is not evidence that a name is free or
+   * that a pane is a stranger's. This function is what decides whether a write
+   * reaches an agent, so an unreadable answer has to fail CLOSED here rather
+   * than become an empty roster — which every caller reads as "nobody is
+   * claiming this name".
+   *
+   * `listPanes` refuses on the same condition for the board. Two readers, one
+   * rule, and the reason they are not one function is that this one is
+   * deliberately stricter than `snapshot` about being asked at all.
+   */
+  const { panes, rejected } = readPanes(out);
+  if (rejected > 0 && panes.length === 0) {
+    throw new Error('tmux answered with something we could not read');
+  }
+  return onePanePerSession(panes).map((pane) => ({
     sessionName: pane.name,
     isNamedOurs: isNamedOurs(pane),
   }));
@@ -1181,6 +1284,11 @@ function snapshot() {
       unknown: agents.filter((a) => a.state === STATE.UNKNOWN).length,
       unreadableTokens: agents.filter((a) => a.context.tokens === null).length,
       unknownFullness: agents.filter((a) => a.context.percent === null).length,
+      // ⚠️ Lines tmux gave us that were not panes. Zero is the normal answer;
+      // anything else means part of the fleet is missing from this board and
+      // the board has to say so rather than presenting what is left as all of
+      // it.
+      unreadableLines: UNREADABLE_LINES,
     },
     agents,
   };
@@ -1192,7 +1300,7 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, paneRoster, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = { snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

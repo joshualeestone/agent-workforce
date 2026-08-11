@@ -1662,3 +1662,21 @@ test('every write route refuses the untied card’s own spelling while the real 
     status.setPaneCapture(null);
   }
 });
+
+test('the board says when part of the fleet could not be read', () => {
+  // ⚠️ A count nobody displays is not a safeguard. The engine counts lines it
+  // could not parse; if the screen does not show it, the board still presents
+  // what it managed to parse as the whole machine -- which is the fourteen-hour
+  // failure with extra steps.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.match(script, /c\.unreadableLines/,
+    'the summary never mentions lines the engine could not read, so a partial '
+    + 'fleet is shown as the whole one');
+
+  // And it is CONDITIONAL, like every other count on that line: a normal
+  // machine must not carry a permanent warning, which is how a warning stops
+  // being read.
+  assert.match(script, /if \(c\.unreadableLines\)/,
+    'the notice is unconditional, so it appears when nothing is wrong');
+});

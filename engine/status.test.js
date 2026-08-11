@@ -986,3 +986,74 @@ test('a non-Discord agent still classifies to a real state', () => {
     + 'the engine to the session-name convention this branch decoupled');
   assert.equal(r.confidence, CONFIDENCE.SCRAPED);
 });
+
+test('a line with no separator is not an agent, and losing the whole answer is not an empty machine', () => {
+  // ⚠️ BOTH HALVES, because the second one is what actually cost fourteen hours.
+  //
+  // Measured on this machine: without a UTF-8 locale, tmux SANITISES its own
+  // format output and replaces the tab separators with underscores. The board
+  // then showed thirteen agents named `angel-discord_0.0_2.1.223_0__ …` --
+  // populated, confident, and wrong, with each garbage entry carrying a name, a
+  // rank and a target into everything downstream.
+  const mangled = 'angel-discord_0.0_2.1.223_0__ add-editable-agent-detail';
+  assert.deepEqual(parsePanes(mangled), [],
+    'a line with no separator became an agent whose name is the entire line');
+
+  // ⚠️ And it must not become "no agents". Before the LANG fix the board served
+  // 200 with an empty fleet for fourteen hours while thirteen agents ran,
+  // because a mangled answer and no answer are indistinguishable once the bad
+  // lines are dropped. Dropping them silently would rebuild that exact state.
+  setPaneSource(() => mangled);
+  setPaneCapture(() => '');
+  try {
+    // The GATE, which decides whether a write reaches an agent.
+    assert.throws(() => require('./status').paneRoster(), /could not read/,
+      'the gate read an unreadable answer as "nobody is claiming this name"');
+
+    // ⚠️ AND THE BOARD. This one was missing, and a mutation run found it:
+    // removing the refusal from `listPanes` left the whole suite green while
+    // the board went back to showing an empty machine -- the exact fourteen-hour
+    // state this test is named after. A guarantee claimed in a comment and
+    // pinned nowhere is the shape this codebase keeps paying for.
+    assert.throws(() => snapshot(), /could not read/,
+      'the board was handed an empty fleet for an answer nothing in it could be read from');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+
+  // ⚠️ THE CONTROL, in two parts. A TRUNCATED line is still an agent -- it
+  // names a session we can identify, and its missing fields default to the
+  // unsafe answer -- so this must not have become "drop anything imperfect",
+  // which would hide a running agent instead of showing a garbage one.
+  assert.equal(parsePanes('zeta-discord\t0.0\t2.1.212').length, 1,
+    'a truncated line was dropped, which hides a real agent rather than showing it carefully');
+  assert.equal(parsePanes('zeta-discord\t0.0\t2.1.212\t0\ttitle').length, 1,
+    'a well-formed line was dropped, so the rule refuses everything');
+});
+
+test('a fleet that is partly unreadable is shown with the gap counted, not quietly trimmed', () => {
+  // ⚠️ One readable line and one mangled one is the state where silence is most
+  // tempting and most wrong: the board can show SOMETHING, so it does, and the
+  // missing agent simply is not there. The count is what lets the screen say
+  // that part of the fleet could not be read rather than presenting what is
+  // left as all of it.
+  setPaneSource(() => ['angel-discord\t0.0\t2.1.212\t0\t✳ Claude Code',
+    'mikey-discord_0.0_2.1.223_0__ mangled'].join('\n'));
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const snap = snapshot();
+    assert.equal(snap.agents.length, 1, 'the readable agent was lost along with the garbage one');
+    assert.equal(snap.counts.unreadableLines, 1,
+      'the board was handed a partial fleet with nothing saying part of it is missing');
+
+    // THE CONTROL: a wholly readable answer reports no gap, so the count is not
+    // just always one.
+    setPaneSource(() => 'angel-discord\t0.0\t2.1.212\t0\t✳ Claude Code');
+    assert.equal(snapshot().counts.unreadableLines, 0,
+      'a clean answer still reports unreadable lines, so the count means nothing');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
