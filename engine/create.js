@@ -350,6 +350,20 @@ function plistFor(name, claudeBin, tmuxBin) {
 /* ── the steps ───────────────────────────────────────────────────────────── */
 
 /**
+ * A path we will not use, whatever is at the end of it.
+ *
+ * ⚠️ EXPORTED FOR THE SAME REASON `binPaths` IS. Creation refuses these outright
+ * and answers "we could not find Claude on this computer, so an agent made now
+ * would never start" — so a first-run check that asked only whether the file
+ * exists reported "Everything it needs to run is installed" for a path creation
+ * was always going to reject two screens later. That is the same drift the
+ * extraction below exists to end, one rule further along.
+ */
+function unusablePath(bin) {
+  return /['"\n\r\\$`]/.test(String(bin));
+}
+
+/**
  * Where the two things an agent needs actually live on this computer.
  *
  * ⚠️ Overridable by environment, because these two defaults are ONE machine's
@@ -586,7 +600,7 @@ function createAgent(opts) {
   // carrying a quote or a newline is one nothing good comes of passing
   // anywhere, and the guard that matters for the plist is the XML escaping.
   for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin], ['the agents folder', workerDir(name)]]) {
-    if (/['"\n\r\\$`]/.test(bin)) {
+    if (unusablePath(bin)) {
       return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
     }
     if (what === 'the agents folder') continue;
@@ -796,6 +810,7 @@ function createAgent(opts) {
 module.exports = {
   createAgent,
   binPaths,
+  unusablePath,
   nameProblem,
   cleanName,
   plistFor,
