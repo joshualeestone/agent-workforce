@@ -236,6 +236,13 @@ async function main() {
   }
   console.log(contrastFails ? `✖ ${contrastFails} contrast failures` : '✔ 7-contrast (WCAG AA, light and dark)');
 
+  // ⚠️ The fixture folders live in the REAL home, because the folder browser is
+  // rooted there and a fixture in /tmp could not be reached by the thing under
+  // test. That makes cleaning them up part of the run rather than an
+  // afterthought -- a check that litters the operator's home every time it is
+  // run is a check people stop running.
+  fs.rmSync(demo, { recursive: true, force: true });
+
   await browser.close();
 
   const withErrors = shots.filter((s) => s.errors.length);

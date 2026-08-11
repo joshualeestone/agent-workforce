@@ -1121,7 +1121,7 @@ const server = http.createServer((req, res) => {
         } catch {
           throw new Error('we could not read that request');
         }
-        const made = projects.create({ name: body.name, folder: body.folder, agents: body.agents });
+        const made = projects.create({ name: body.name, folder: body.folder, agents: body.agents, roster: safeRoster() });
         // ⚠️ Told AFTER the record is written, never before. If announcing it
         // failed first, a membership the person asked for would not exist at
         // all -- and the whole point of the three-valued verdict is that a
@@ -1155,6 +1155,14 @@ const server = http.createServer((req, res) => {
         } catch {
           throw new Error('we could not read that request');
         }
+        // ⚠️ A missing project is a 404 here as it is on GET and DELETE. It
+        // used to be a 400 for the identical condition, which told a caller
+        // its request was malformed when the request was fine.
+        if (!projects.readAll().some((p) => p.id === id)) {
+          const missing = new Error('there is no project by that name');
+          missing.status = 404;
+          throw missing;
+        }
         projects.rename(id, body.name);
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
@@ -1162,7 +1170,7 @@ const server = http.createServer((req, res) => {
         for (const a of projects.readAll().find((p) => p.id === id).agents) projects.syncAgent(a);
         sendJson(res, 200, { project: projects.get(id, safeRoster()) });
       })
-      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not read that request') }));
+      .catch((err) => sendJson(res, (err && err.status) || 400, { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
 
@@ -1189,7 +1197,7 @@ const server = http.createServer((req, res) => {
     const name = decodeSegment(member[2]);
     if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     try {
-      if (req.method === 'POST') projects.addAgent(id, name);
+      if (req.method === 'POST') projects.addAgent(id, name, safeRoster());
       else projects.removeAgent(id, name);
       const verdict = projects.syncAgent(name);
       sendJson(res, 200, { project: projects.get(id, safeRoster()), told: verdict });
@@ -1216,7 +1224,14 @@ const server = http.createServer((req, res) => {
    * folder pointing outside it is the case every string-level check misses.
    */
   if (pathname === '/api/folders' && (req.method === 'GET' || req.method === 'HEAD')) {
-    const home = os.homedir();
+    // ⚠️ RESOLVED, because `real` below is resolved and the two are compared.
+    // With an un-resolved `home`, a machine whose home directory is reached
+    // through a symlink (which is ordinary) failed its OWN containment check:
+    // the browser refused the home folder it had just been asked for, and the
+    // whole add-project flow was dead. The route's test compared against
+    // `realpathSync(homedir())` too, so it could only pass.
+    let home;
+    try { home = fs.realpathSync(os.homedir()); } catch { home = os.homedir(); }
     // Parsed here rather than threaded down from `pathOf`, which deliberately
     // returns the path alone -- routing on anything that carries a query string
     // is the bug that function exists to have fixed.
@@ -1238,7 +1253,10 @@ const server = http.createServer((req, res) => {
     // over: `/Users/agentine` starts with `/Users/agent1`... only by accident of
     // spelling, and it says nothing about a symlink.
     const rel = path.relative(home, real);
-    if (real !== home && (rel.startsWith('..') || path.isAbsolute(rel))) {
+    // `rel.startsWith('..')` alone also refuses a folder legitimately named
+    // `..archive`. The climb is the segment `..`, not the two characters.
+    const climbs = rel === '..' || rel.startsWith('..' + path.sep);
+    if (real !== home && (climbs || path.isAbsolute(rel))) {
       sendJson(res, 403, { error: 'we only look inside your home folder' });
       return;
     }
@@ -1256,15 +1274,22 @@ const server = http.createServer((req, res) => {
       .filter((e) => !e.name.startsWith('.') && (e.isDirectory() || e.isSymbolicLink()))
       .map((e) => ({ name: e.name, path: path.join(real, e.name) }))
       .filter((e) => { try { return fs.statSync(e.path).isDirectory(); } catch { return false; } })
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 500);
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const LIMIT = 500;
+    const shown = folders.slice(0, LIMIT);
     sendJson(res, 200, {
       path: real,
       home,
+      // ⚠️ Said out loud. A silent cut made a folder that exists but sorts past
+      // the limit indistinguishable from one that is not there — the page's
+      // "nothing else in here" would be a claim nobody checked.
+      truncated: folders.length > LIMIT,
+      showing: shown.length,
+      total: folders.length,
       // Null AT home rather than at the filesystem root, so "up" can never walk
       // out of the only place this route will serve.
       parent: real === home ? null : path.dirname(real),
-      folders,
+      folders: shown,
     });
     return;
   }

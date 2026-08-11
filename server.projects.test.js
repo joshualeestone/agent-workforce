@@ -22,6 +22,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-projects-'));
+// ⚠️ HOME IS SANDBOXED TOO, and it is not a nicety. `/api/folders` is rooted at
+// `os.homedir()`, which on POSIX reads `$HOME` — so without this the folder
+// tests built their fixtures in the OPERATOR'S REAL HOME, including a symlink
+// pointing at `/etc`. A crash between creating that and the `finally` would
+// leave it sitting there. The plan's own rule is to sandbox every root the
+// code writes to, and this route reads one the others do not.
+const HOME = path.join(SANDBOX, 'home');
+fs.mkdirSync(HOME, { recursive: true });
+process.env.HOME = HOME;
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
@@ -207,51 +216,79 @@ test('a write from another site is refused before it reaches the engine', async 
 // ---------------------------------------------------------------------------
 
 test('the folder list starts at home and offers only folders', async () => {
+  fs.mkdirSync(path.join(HOME, 'work'), { recursive: true });
+  fs.mkdirSync(path.join(HOME, '.hidden'), { recursive: true });
   const res = await req('/api/folders');
   assert.equal(res.status, 200);
   const body = json(res);
-  assert.equal(body.path, fs.realpathSync(os.homedir()));
+  assert.equal(body.path, fs.realpathSync(HOME));
   assert.equal(body.parent, null, 'there is no "up" from home, so there is no way out of it');
-  assert.ok(Array.isArray(body.folders));
-  assert.ok(body.folders.every((f) => fs.statSync(f.path).isDirectory()), 'every entry offered is really a folder');
-  assert.ok(body.folders.every((f) => !f.name.startsWith('.')), 'no dotfiles');
+  assert.ok(body.folders.some((f) => f.name === 'work'), 'the control: a real folder IS offered');
+  assert.ok(!body.folders.some((f) => f.name === '.hidden'), 'no dotfiles');
 });
 
 test('only real folders are offered, and a link to a FILE is not one', async () => {
-  // ⚠️ Aimed at the failure rather than at the mechanism. The first version of
-  // this test asserted "everything offered is a directory" against the real
-  // home folder, which contains no link-to-a-file — so it could not fail, and a
-  // mutation that dropped the directory check passed it. A test needs the thing
-  // it is looking for to actually be there.
-  const root = fs.mkdtempSync(path.join(os.homedir(), 'kosmos-test-browse-'));
-  try {
-    fs.mkdirSync(path.join(root, 'a-real-folder'));
-    fs.writeFileSync(path.join(root, 'a-file.txt'), 'x');
-    fs.symlinkSync(path.join(root, 'a-file.txt'), path.join(root, 'link-to-a-file'));
-    fs.symlinkSync(path.join(root, 'a-real-folder'), path.join(root, 'link-to-a-folder'));
+  // ⚠️ Aimed at the failure rather than at the mechanism. An earlier version
+  // asserted "everything offered is a directory" against a folder that
+  // contained no link-to-a-file, so it could not fail, and a mutation that
+  // dropped the directory check passed it.
+  const root = path.join(HOME, 'browse-fixture');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(path.join(root, 'a-real-folder'));
+  fs.writeFileSync(path.join(root, 'a-file.txt'), 'x');
+  fs.symlinkSync(path.join(root, 'a-file.txt'), path.join(root, 'link-to-a-file'));
+  fs.symlinkSync(path.join(root, 'a-real-folder'), path.join(root, 'link-to-a-folder'));
 
-    const body = json(await req(`/api/folders?path=${encodeURIComponent(root)}`));
-    const names = body.folders.map((f) => f.name).sort();
+  const body = json(await req(`/api/folders?path=${encodeURIComponent(root)}`));
+  assert.deepEqual(body.folders.map((f) => f.name).sort(), ['a-real-folder', 'link-to-a-folder'],
+    'a link to a folder is an ordinary way to keep work; a link to a file is not a folder');
+  assert.equal(body.truncated, false, 'and a short listing is not reported as cut');
+});
 
-    // The control: the two things that ARE folders are offered.
-    assert.deepEqual(names, ['a-real-folder', 'link-to-a-folder'],
-      'a link to a folder is a perfectly ordinary way to keep work; a link to a file is not a folder');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+test('a listing longer than the limit says it was cut', async () => {
+  // A silent cut makes a folder that exists but sorts past the limit
+  // indistinguishable from one that is not there.
+  const root = path.join(HOME, 'many');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(root, { recursive: true });
+  for (let i = 0; i < 520; i += 1) fs.mkdirSync(path.join(root, `f${String(i).padStart(4, '0')}`));
+
+  const body = json(await req(`/api/folders?path=${encodeURIComponent(root)}`));
+  assert.equal(body.truncated, true);
+  assert.equal(body.total, 520);
+  assert.equal(body.showing, 500);
+});
+
+test('home reached through a SYMLINK still browses, rather than refusing itself', async () => {
+  // ⚠️ The regression this exists for: `home` was compared un-resolved against
+  // a resolved path, so on a machine whose home is behind a symlink the route
+  // 403'd its own home folder and the add-project flow was dead. The old test
+  // compared against `realpathSync(homedir())`, so it could only ever pass.
+  const realHome = fs.realpathSync(HOME);
+  const res = await req('/api/folders');
+  assert.equal(res.status, 200, res.body);
+  assert.equal(json(res).path, realHome);
+  assert.notEqual(json(res).folders.length, 0);
 });
 
 test('a folder inside home can be opened', async () => {
-  const inside = path.join(os.homedir(), 'work');
-  if (!fs.existsSync(inside)) return;
+  const inside = path.join(HOME, 'work');
+  fs.mkdirSync(inside, { recursive: true });
   const res = await req(`/api/folders?path=${encodeURIComponent(inside)}`);
   assert.equal(res.status, 200, 'the control: an allowed path really is allowed');
-  assert.equal(json(res).path, fs.realpathSync(inside));
   assert.ok(json(res).parent, 'and below home there IS an up');
 });
 
+test('a folder named ..something inside home is not mistaken for a climb', async () => {
+  const odd = path.join(HOME, '..archive');
+  fs.mkdirSync(odd, { recursive: true });
+  const res = await req(`/api/folders?path=${encodeURIComponent(odd)}`);
+  assert.equal(res.status, 200, 'the climb is the segment "..", not the two characters');
+});
+
 test('climbing out of home with .. is refused', async () => {
-  const res = await req(`/api/folders?path=${encodeURIComponent(path.join(os.homedir(), '..', '..'))}`);
+  const res = await req(`/api/folders?path=${encodeURIComponent(path.join(HOME, '..', '..'))}`);
   assert.equal(res.status, 403, res.body);
   assert.match(json(res).error, /only look inside your home folder/);
 });
@@ -266,44 +303,57 @@ test('an absolute path outside home is refused', async () => {
 
 test('a SYMLINK inside home pointing outside it is refused', async () => {
   // ⚠️ The case every string-level check misses, and the reason containment is
-  // asserted on the resolved path rather than on the spelling of the one asked
-  // for. This link is inside home by every prefix test there is.
-  const link = path.join(os.homedir(), '.kosmos-test-escape');
-  try { fs.rmSync(link); } catch { /* first run */ }
+  // asserted on the resolved path rather than on the spelling asked for. This
+  // link is inside home by every prefix test there is.
+  const link = path.join(HOME, 'escape-hatch');
+  fs.rmSync(link, { force: true });
   fs.symlinkSync('/etc', link);
-  try {
-    const res = await req(`/api/folders?path=${encodeURIComponent(link)}`);
-    assert.equal(res.status, 403, res.body);
-    assert.ok(!/"folders"/.test(res.body), 'and nothing outside home was listed');
-  } finally {
-    fs.rmSync(link, { force: true });
-  }
+  const res = await req(`/api/folders?path=${encodeURIComponent(link)}`);
+  assert.equal(res.status, 403, res.body);
+  assert.ok(!/"folders"/.test(res.body), 'and nothing outside home was listed');
 });
 
 test('a path with a null byte is refused rather than truncated', async () => {
-  // ⚠️ A REAL null byte, written as an ESCAPE. The first version of this file
-  // carried the byte literally in the source, which made the whole test file
-  // register as binary -- `grep` stopped matching it and `file` reported
-  // `data`. The test was right and unreadable, which is its own defect.
-  const res = await req(`/api/folders?path=${encodeURIComponent(os.homedir() + '\0/etc')}`);
+  // ⚠️ A REAL null byte, written as an ESCAPE. An earlier version carried the
+  // byte literally in the source, which made the whole test file register as
+  // binary -- `grep` stopped matching it and `file` reported `data`.
+  const res = await req(`/api/folders?path=${encodeURIComponent(HOME + '\0/etc')}`);
   assert.ok(res.status === 400 || res.status === 403, `answered ${res.status}`);
   assert.ok(!/"folders"/.test(res.body));
 });
 
 test('a path that does not exist is refused', async () => {
-  const res = await req(`/api/folders?path=${encodeURIComponent(path.join(os.homedir(), 'definitely-not-a-real-folder-xyz'))}`);
+  const res = await req(`/api/folders?path=${encodeURIComponent(path.join(HOME, 'definitely-not-real-xyz'))}`);
   assert.equal(res.status, 400);
 });
 
 test('a file is refused as somewhere to browse', async () => {
-  const f = path.join(os.homedir(), '.kosmos-test-file');
+  const f = path.join(HOME, 'a-plain-file');
   fs.writeFileSync(f, 'x');
-  try {
-    const res = await req(`/api/folders?path=${encodeURIComponent(f)}`);
-    assert.equal(res.status, 400, res.body);
-  } finally {
-    fs.rmSync(f, { force: true });
-  }
+  const res = await req(`/api/folders?path=${encodeURIComponent(f)}`);
+  assert.equal(res.status, 400, res.body);
+});
+
+test('renaming a project that does not exist answers 404, like GET and DELETE', async () => {
+  const res = await req('/api/project/no-such-project', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Whatever' }),
+  });
+  assert.equal(res.status, 404, res.body);
+});
+
+test('renaming a project keeps its id, and reaches its members', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Before', folder: folder('renaming'), agents: ['nobody-here'] })).project;
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'After' }),
+  });
+  assert.equal(res.status, 200, res.body);
+  assert.equal(json(res).project.name, 'After');
+  assert.equal(json(res).project.id, made.id, 'the id is what membership points at');
 });
 
 test('a name that cannot be decoded is refused rather than guessed at', async () => {

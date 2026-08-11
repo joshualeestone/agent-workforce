@@ -718,6 +718,16 @@ svg { display: block; }
       <p class="fhint">Takes it off this list. <b>Nothing in the folder is
          deleted</b>, ever, and you can add it again.</p>
       <button class="btn" id="pj-one-remove" type="button">Remove from Kosmos</button>
+      <!-- ⚠️ It asks, and it names the project in the question and in BOTH
+           buttons. Removing an agent next to this has a full confirmation and a
+           Restore; removing a project had neither, and while nothing on disk is
+           touched, the name and the whole membership list go with it and cannot
+           be got back by re-adding the folder. Same friction, same reason. -->
+      <div class="frow" id="pj-one-confirm" hidden style="margin-top: var(--space-4)">
+        <span class="fhint" id="pj-one-confirm-q" style="flex-basis: 100%; margin: 0"></span>
+        <button class="btn" id="pj-one-remove-go" type="button"></button>
+        <button class="btn" id="pj-one-remove-keep" type="button"></button>
+      </div>
     </div>
   </div>
 
@@ -735,6 +745,17 @@ svg { display: block; }
         <button class="btn" id="pj-use" type="button">Use this folder</button>
       </div>
       <div id="pj-browse" class="pj-browse"></div>
+      <!-- ⚠️ Both ways in, and the plan said so. Browsing is for the person who
+           would not know what a path is; typing is for the person whose work
+           lives somewhere this browser will not go (it is rooted at the home
+           folder on purpose). Shipping only the browser meant a project outside
+           home could not be made at all, and there was no way through if the
+           browser itself refused. -->
+      <div class="frow" style="margin-top: var(--space-4)">
+        <input type="text" id="pj-path" placeholder="or type the full path to a folder"
+               aria-label="The full path to a folder">
+        <button class="btn" id="pj-path-go" type="button">Use that path</button>
+      </div>
       <p class="pj-chosen" id="pj-chosen">No folder chosen yet.</p>
     </div>
 
@@ -3006,7 +3027,8 @@ function pjMember(m, projectId) {
     + (m.present
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label) + '</small>'
       : '<small>We cannot see this agent on this computer right now.</small>')
-    + (projectId ? '<button class="drop" type="button" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
+    + (projectId ? '<button class="drop" type="button" aria-label="Take ' + esc(m.name)
+      + ' off this project" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }
@@ -3059,10 +3081,21 @@ async function loadProjects() {
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
   } catch {
-    PROJECTS = [];
+    // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
+    // add-member and remove-member paths call this from the one-project view,
+    // where `#pj-list` is hidden -- so a failed refresh left the member list
+    // showing the state from before the change with no error anywhere visible.
+    // A screen asserting a state nobody checked is the failure this whole app
+    // is built against, and it had crept back in through an error path.
+    const note = 'We cannot read your projects right now. This is not saying you have none, it is saying we cannot see them.';
     document.getElementById('pj-list').innerHTML =
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
       + 'This is not saying you have none, it is saying we cannot see them.</div>';
+    if (!document.getElementById('pj-one-view').hidden) document.getElementById('pj-one-msg').textContent = note;
+    if (!document.getElementById('pj-add-view').hidden) document.getElementById('pj-add-msg').textContent = note;
+    // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
+    // open project as "there is no project by that name" on a transient
+    // network failure -- turning "we could not look" into "it is gone".
     return;
   }
   paintProjects();
@@ -3099,6 +3132,7 @@ function paintOneProject() {
 function openProject(id) {
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
+  pjCloseConfirm();
   paintOneProject();
   pjView('one');
 }
@@ -3127,6 +3161,13 @@ async function pjBrowse(at) {
     rows.push('<button type="button" data-into="' + esc(f.path) + '">' + esc(f.name) + '</button>');
   }
   if (!(body.folders || []).length) rows.push('<button type="button" disabled>Nothing else in here.</button>');
+  // ⚠️ A cut list says it was cut. Otherwise a folder that exists but sorts
+  // past the limit is indistinguishable from one that is not there, and
+  // "nothing else in here" becomes a claim nobody checked.
+  if (body.truncated) {
+    rows.push('<button type="button" disabled>Showing the first ' + body.showing
+      + ' of ' + body.total + '. Type the path below to reach the rest.</button>');
+  }
   box.innerHTML = rows.join('');
   // ⚠️ Walking INTO a folder does not choose it, and this is the whole reason
   // there is a separate button. The first version chose whatever you were
@@ -3214,6 +3255,17 @@ document.getElementById('pj-use').addEventListener('click', () => {
   if (PJ_HERE) pjChoose(PJ_HERE);
 });
 
+document.getElementById('pj-path-go').addEventListener('click', () => {
+  const typed = document.getElementById('pj-path').value.trim();
+  if (!typed) return;
+  // ⚠️ NOT validated here. The server refuses a path that is not a readable
+  // folder and says why in its own words, and a second opinion in the browser
+  // is a second derivation of one question -- which is how this codebase's
+  // worst defects have started. Choosing it is enough; Add is where it is
+  // judged, once.
+  pjChoose(typed);
+});
+
 document.getElementById('pj-name').addEventListener('input', (e) => { e.target.dataset.auto = '0'; });
 
 document.getElementById('pj-create').addEventListener('click', async () => {
@@ -3273,11 +3325,32 @@ document.getElementById('pj-one-agents').addEventListener('click', async (e) => 
   }
 });
 
-document.getElementById('pj-one-remove').addEventListener('click', async () => {
+function pjCloseConfirm() {
+  document.getElementById('pj-one-confirm').hidden = true;
+  document.getElementById('pj-one-remove').hidden = false;
+}
+
+document.getElementById('pj-one-remove').addEventListener('click', () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  document.getElementById('pj-one-confirm-q').textContent =
+    'Remove "' + p.name + '" from Kosmos? Nothing in the folder is deleted, but the '
+    + 'agents you put on it and the name you gave it are not kept.';
+  document.getElementById('pj-one-remove-go').textContent = 'Remove ' + p.name;
+  document.getElementById('pj-one-remove-keep').textContent = 'Keep ' + p.name;
+  document.getElementById('pj-one-confirm').hidden = false;
+  document.getElementById('pj-one-remove').hidden = true;
+  document.getElementById('pj-one-remove-keep').focus();
+});
+
+document.getElementById('pj-one-remove-keep').addEventListener('click', pjCloseConfirm);
+
+document.getElementById('pj-one-remove-go').addEventListener('click', async () => {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
   const msg = document.getElementById('pj-one-msg');
   msg.textContent = '';
+  pjCloseConfirm();
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(p.id), { method: 'DELETE' });
     const body = await res.json();
@@ -3289,6 +3362,20 @@ document.getElementById('pj-one-remove').addEventListener('click', async () => {
     msg.textContent = err.message;
   }
 });
+
+// ⚠️ Kept up to date while it is open, not painted once on arrival. A project's
+// folder can be moved or deleted and its members' states change constantly, so
+// a list painted at the instant of arrival goes on asserting a world that
+// stopped being true -- beside an Agents board that is updating every 5s.
+// Guarded on the panel being visible so it costs nothing on any other tab, and
+// on the add flow being closed so a refresh cannot repaint the folder browser
+// out from under somebody mid-choice.
+setInterval(() => {
+  const panel = document.getElementById('panel-projects');
+  if (!panel || panel.hidden) return;
+  if (!document.getElementById('pj-add-view').hidden) return;
+  loadProjects();
+}, 5000);
 
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);

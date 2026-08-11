@@ -131,7 +131,12 @@ function idFor(name, taken) {
   try {
     base = store.safeKey(name);
   } catch {
-    throw new Error('give this project a name we can use, with some letters or numbers in it');
+    // ⚠️ NOT an error. `safeKey` keeps `[a-z0-9_-]` only, so it yields nothing
+    // for a name written in Cyrillic, Japanese, or anything else without ASCII
+    // alphanumerics — and refusing there told a person their own language was
+    // not a name we could use. The id is an internal key, not a display value;
+    // when the name cannot supply one, a counter can.
+    base = 'project';
   }
   if (!taken || !taken.has(base)) return base;
   for (let n = 2; n < 1000; n += 1) {
@@ -214,7 +219,13 @@ function describe(project, roster) {
       name: card && card.name ? card.name : sessionName,
       present: Boolean(card),
       state: card ? card.state : 'unknown',
-      because: card ? card.because : 'we cannot see this agent on this computer right now',
+      because: card ? card.because : (
+        (project.everSeen && project.everSeen[sessionName] === false)
+          // Said plainly, because it is almost always a typed name that never
+          // matched anything, and telling somebody an agent is "missing" sends
+          // them looking for something that was never there.
+          ? 'we have never seen an agent by this name on this computer'
+          : 'we cannot see this agent on this computer right now'),
       told: project.told && project.told[sessionName] ? project.told[sessionName] : { state: TOLD.NOT_TRIED, because: null },
     };
   });
@@ -261,10 +272,23 @@ function projectsFor(sessionName, roster) {
     .map((p) => describe(p, roster));
 }
 
-function create({ name, folder, agents } = {}) {
-  const title = String(name == null ? '' : name).trim();
+/**
+ * The one place a project name is judged.
+ *
+ * ⚠️ `rename` used to skip this entirely, so a 5000-character name full of
+ * newlines was refused at creation and accepted on the very next edit — and the
+ * rename route then wrote it into every member's instruction file. Two
+ * derivations of one question always drift; this is the one.
+ */
+function cleanName(name) {
+  const title = oneLine(name);
   if (!title) throw new Error('give this project a name');
   if (title.length > 120) throw new Error('that name is longer than a project name should be');
+  return title;
+}
+
+function create({ name, folder, agents, roster } = {}) {
+  const title = cleanName(name);
 
   const given = String(folder == null ? '' : folder).trim();
   if (!given) throw new Error('choose the folder this project lives in');
@@ -283,12 +307,19 @@ function create({ name, folder, agents } = {}) {
   const already = all.find((p) => folderState(p.folder).real === state.real);
   if (already) throw new Error(`that folder is already the project "${already.name}"`);
 
+  // ⚠️ Coerced, not trusted. A caller handing `agents` a string or an object
+  // put a raw TypeError through the route's catch and out to the person as
+  // their error message.
+  const members = [...new Set((Array.isArray(agents) ? agents : []).map(String).map((a) => a.trim()).filter(Boolean))];
   const now = new Date().toISOString();
   const project = {
     id: idFor(title, new Set(all.map((p) => p.id))),
     name: title,
     folder: given,
-    agents: [...new Set((agents || []).map(String).filter(Boolean))],
+    agents: members,
+    everSeen: Object.fromEntries(members.map((a) => [
+      a, Array.isArray(roster) ? roster.some((c) => c && c.sessionName === a) : null,
+    ])),
     told: {},
     createdAt: now,
     updatedAt: now,
@@ -309,20 +340,30 @@ function mutate(id, fn) {
 }
 
 function rename(id, name) {
-  const title = String(name == null ? '' : name).trim();
-  if (!title) throw new Error('give this project a name');
+  const title = cleanName(name);
   // ⚠️ The id does NOT change with the name. It is what the agents' recorded
   // membership and any open URL point at, and renaming is a display change
   // rather than a new project.
   return mutate(id, (p) => ({ ...p, name: title }));
 }
 
-function addAgent(id, sessionName) {
+function addAgent(id, sessionName, roster) {
   const key = String(sessionName || '').trim();
   if (!key) throw new Error('choose an agent');
+  // ⚠️ Whether we could see this agent AT THE MOMENT IT WAS ADDED is recorded,
+  // because otherwise a typo'd name and a real agent that is temporarily
+  // unreadable produce the identical sentence — "we cannot see this agent
+  // right now" — and that collapses "this never existed" into "this is
+  // missing". It is the same distinction `not_tried` versus `could_not` makes
+  // for the instruction write, and it deserves the same care.
+  const seen = Array.isArray(roster) ? roster.some((a) => a && a.sessionName === key) : null;
   return mutate(id, (p) => {
     if ((p.agents || []).includes(key)) return p;
-    return { ...p, agents: [...(p.agents || []), key] };
+    return {
+      ...p,
+      agents: [...(p.agents || []), key],
+      everSeen: { ...(p.everSeen || {}), [key]: seen },
+    };
   });
 }
 
@@ -378,9 +419,17 @@ function remove(id) {
 function spliceBlock(text, body) {
   const original = String(text == null ? '' : text);
   const block = `${BLOCK_START}\n${body}\n${BLOCK_END}`;
-  const start = original.indexOf(BLOCK_START);
+  // ⚠️ THE END MARKER IS FOUND FIRST, THEN THE NEAREST START BEFORE IT, and
+  // that order is the whole fix. Taking the FIRST start and the FIRST end
+  // destroyed user text on the SECOND write: a file with a stranded start
+  // marker gets a new block appended (correct), which leaves the stranded
+  // marker sitting BEFORE the new block's end marker — so the next write
+  // spanned from the stranded marker all the way to the real end and sliced
+  // out everything in between. Measured: "keep me" survived one splice and
+  // was gone after two. The single-splice test could not see it.
   const end = original.indexOf(BLOCK_END);
-  if (start >= 0 && end > start) {
+  const start = end < 0 ? -1 : original.lastIndexOf(BLOCK_START, end);
+  if (start >= 0) {
     return original.slice(0, start) + block + original.slice(end + BLOCK_END.length);
   }
   if (!original.trim()) return block + '\n';
@@ -388,9 +437,37 @@ function spliceBlock(text, body) {
   return original + sep + block + '\n';
 }
 
+/**
+ * One line of plain text, safe to put inside the managed block.
+ *
+ * ⚠️ THIS IS THE BOUNDARY OF THE MOST DANGEROUS WRITE IN THE PRODUCT, and it
+ * had two holes, both measured:
+ *
+ * 1. A project NAME containing the end marker closed the block early. Everything
+ *    after it landed permanently OUTSIDE the block, where this module can never
+ *    rewrite or remove it — and every later sync appended another copy, growing
+ *    the file until it crossed the size limit and every future write failed.
+ * 2. A name containing newlines wrote arbitrary markdown headings and sentences
+ *    into the file an agent boots from. Every agent runs at full permission, so
+ *    that is instruction injection into the one file that tells it what it is.
+ *
+ * A folder path gets the same treatment: a newline is a legal character in a
+ * macOS path, so the path is untrusted for exactly the same reason the name is.
+ */
+function oneLine(value) {
+  return String(value == null ? '' : value)
+    // Any run of whitespace, newlines included, becomes one space.
+    .replace(/\s+/g, ' ')
+    // Neutralised rather than stripped, so a name that contained one is still
+    // recognisable to the person who typed it instead of silently changing.
+    .split(BLOCK_START).join('(kosmos marker)')
+    .split(BLOCK_END).join('(kosmos marker)')
+    .trim();
+}
+
 function blockBody(projects) {
   if (!projects.length) return 'Kosmos has not put this agent on a project yet.';
-  const lines = projects.map((p) => `- **${p.name}** — \`${p.folder}\``);
+  const lines = projects.map((p) => `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``);
   return [
     '## Your projects',
     '',
