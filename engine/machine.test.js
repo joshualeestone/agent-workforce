@@ -1,0 +1,298 @@
+'use strict';
+
+/**
+ * The "Checking your computer" screen, and the two ways it lies if you write it
+ * the obvious way.
+ *
+ *     node --test engine/machine.test.js
+ */
+
+const test = require('node:test');
+const assert = require('node:assert');
+const machine = require('./machine');
+
+/* ---------------------------------------------------------------------------
+   Fixtures, and where each one came from — because a fixture whose provenance
+   nobody recorded is a guess with a filename.
+--------------------------------------------------------------------------- */
+
+/**
+ * CAPTURED, verbatim, from `pmset -g custom` on the Mac mini this was written
+ * on. A desktop: one section, because there is no battery to print a second one
+ * for. Note `disksleep 10` sitting two lines under `sleep 0` — that pair is the
+ * trap the parser exists to survive.
+ */
+const DESKTOP_AWAKE = `AC Power:
+ Sleep On Power Button 1
+ autorestartatconnect 0
+ lowpowermode         0
+ standby              0
+ ttyskeepawake        1
+ powernap             1
+ displaysleep         0
+ womp                 1
+ networkoversleep     0
+ sleep                0
+ tcpkeepalive         1
+ autorestart          1
+ disksleep            10
+`;
+
+/** The same capture with the one value changed, which is the case it is for. */
+const DESKTOP_SLEEPS = DESKTOP_AWAKE.replace(' sleep                0', ' sleep                10');
+
+/**
+ * ⚠️ RECONSTRUCTED, NOT CAPTURED. This machine is a Mac mini and has no
+ * battery, so it can never print a `Battery Power` section — which is precisely
+ * why the laptop path needs a fixture rather than a live read. The shape is
+ * `pmset -g custom`'s documented two-section output: same keys, printed once
+ * per power source, battery first.
+ *
+ * Said out loud because a fixture presented as measured, that was not, is how a
+ * test ends up pinning the author's idea of a laptop instead of a laptop.
+ */
+const LAPTOP_SLEEPS_ON_BATTERY = `Battery Power:
+ lidwake              1
+ standby              1
+ halfdim              1
+ sleep                10
+ displaysleep         2
+ disksleep            10
+
+AC Power:
+ lidwake              1
+ standby              1
+ halfdim              1
+ sleep                0
+ displaysleep         10
+ disksleep            10
+`;
+
+const LAPTOP_ALWAYS_AWAKE = LAPTOP_SLEEPS_ON_BATTERY.replace(' sleep                10', ' sleep                0');
+
+const okRunner = () => ({ ok: true, stdout: '' });
+const deadRunner = () => ({ ok: false, because: 'command not found' });
+
+/* ---------------------------------------------------------------------------
+   Sleep
+--------------------------------------------------------------------------- */
+
+test('a Mac that never sleeps is reported as never sleeping', () => {
+  const got = machine.sleepCheck(DESKTOP_AWAKE);
+  assert.equal(got.state, 'ok', got.title);
+  assert.match(got.title, /does not go to sleep/);
+});
+
+test('`disksleep 10` is not read as "this Mac sleeps after 10 minutes"', () => {
+  /**
+   * ⚠️ THE ONE THAT WOULD HAVE SHIPPED. `pmset` prints `disksleep`,
+   * `displaysleep` and `sleep` in the same block, so a substring match for
+   * `sleep\\s+(\\d+)` finds the "sleep            10" inside `disksleep 10` — on
+   * a machine set never to sleep at all.
+   *
+   * The control first: the fixture really does contain the trap, so this test
+   * cannot pass by being run against something that never had it.
+   */
+  assert.match(DESKTOP_AWAKE, /disksleep\s+10/,
+    'the fixture no longer contains the trap this test is about');
+  assert.match(DESKTOP_AWAKE, /^ sleep\s+0$/m,
+    'the fixture no longer has a machine that never sleeps');
+
+  const got = machine.sleepCheck(DESKTOP_AWAKE);
+  assert.equal(got.state, 'ok',
+    'a Mac set never to sleep was told its agents stop, because a substring of '
+    + 'disksleep was read as the sleep setting');
+  assert.ok(!/10/.test(got.title), `the disk-sleep value reached the screen: ${got.title}`);
+});
+
+test('`Sleep On Power Button 1` is not read as a sleep setting either', () => {
+  // A three-word key with a number after it, in the same block. The parser takes
+  // two-token lines only, so this one is skipped rather than misread as `sleep 1`.
+  assert.match(DESKTOP_AWAKE, /Sleep On Power Button 1/,
+    'the fixture no longer contains the second trap');
+  assert.equal(machine.sleepCheck(DESKTOP_AWAKE).state, 'ok');
+});
+
+test('a Mac that sleeps after ten minutes says so, with the number', () => {
+  const got = machine.sleepCheck(DESKTOP_SLEEPS);
+  assert.equal(got.state, 'attention');
+  assert.match(got.title, /10 minutes/);
+  assert.match(got.detail, /System Settings/,
+    'told somebody their machine sleeps without telling them where to change it');
+});
+
+test('a laptop that sleeps on battery is a warning, not a pass', () => {
+  /**
+   * ⚠️ THE CASE THE WIREFRAME'S DASHED NOTE IS ABOUT, and the one a check that
+   * reads only the first section it finds gets wrong. Plugged in this machine
+   * never sleeps; the person closes it at five o'clock and everything stops.
+   */
+  const got = machine.sleepCheck(LAPTOP_SLEEPS_ON_BATTERY);
+  assert.equal(got.state, 'attention',
+    'a laptop that stops working the moment it is unplugged was reported as fine, '
+    + 'because its AC section says it never sleeps');
+  assert.match(got.detail, /on battery/i);
+  assert.match(got.detail, /10 minutes/);
+});
+
+test('a laptop set never to sleep on either power source passes', () => {
+  const got = machine.sleepCheck(LAPTOP_ALWAYS_AWAKE);
+  assert.equal(got.state, 'ok', got.title);
+  assert.match(got.detail, /battery/i,
+    'said nothing about the battery on the one kind of machine that has one');
+});
+
+test('output we cannot parse is unknown, never "fine"', () => {
+  for (const junk of ['', 'pmset: command not found', 'AC Power:\n', '{"sleep": 0}']) {
+    const got = machine.sleepCheck(junk);
+    assert.equal(got.state, 'unknown',
+      `unreadable pmset output (${JSON.stringify(junk)}) was reported as a state, not as `
+      + 'us being unable to read it');
+  }
+});
+
+test('a laptop whose battery section we cannot read is unknown, not fine', () => {
+  // ⚠️ The half-answer. AC says never sleep, so the naive read is "ok" — but the
+  // section that decides what happens when they unplug it is the unreadable one.
+  const half = 'Battery Power:\n lidwake              1\n\nAC Power:\n sleep                0\n';
+  const got = machine.sleepCheck(half);
+  assert.equal(got.state, 'unknown',
+    'the half we could read was reported as the whole answer');
+  assert.match(got.detail, /battery/i);
+});
+
+test('a pmset that will not run at all does not become a passing check', () => {
+  const got = machine.check({ runner: deadRunner, claudeBin: __filename, tmuxBin: __filename });
+  const sleep = got.checks.find((c) => c.key === 'sleep');
+  assert.equal(sleep.state, 'unknown');
+  assert.equal(got.unknown >= 1, true);
+});
+
+/* ---------------------------------------------------------------------------
+   Installed
+--------------------------------------------------------------------------- */
+
+test('the installed check asks the same question creation asks', () => {
+  /**
+   * ⚠️ NOT A SECOND DEFINITION. Creation resolves Claude and tmux through
+   * `create.binPaths`; if this check looked them up on PATH instead it would
+   * answer "not installed" on this very machine, where the board runs under
+   * launchd with a PATH that has no `~/.local/bin` in it — while creation works.
+   */
+  const create = require('./create');
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'machine.js'), 'utf8');
+  assert.match(src, /create\.binPaths\(/,
+    'machine.js no longer asks create.binPaths, so "is it installed" has been forked');
+  // ⚠️ Matched against CODE, not prose. The first version of this line forbade
+  // the word "which", which appears in six explanatory comments in that file —
+  // so it failed on the sentence explaining why the rule exists. A test that
+  // reads the commentary is testing the commentary.
+  assert.ok(!/['"]which['"]|process\.env\.PATH|AGENT_WORKFORCE_CLAUDE_BIN/.test(src),
+    'machine.js resolves the binaries itself again instead of asking create.binPaths');
+  assert.equal(typeof create.binPaths, 'function');
+});
+
+test('both present is a pass; a missing one names it and says where we looked', () => {
+  const here = __filename;
+  const nowhere = '/definitely/not/here/claude';
+
+  const good = machine.installedCheck({ claudeBin: here, tmuxBin: here });
+  assert.equal(good.state, 'ok');
+
+  const bad = machine.installedCheck({ claudeBin: nowhere, tmuxBin: here });
+  assert.equal(bad.state, 'attention');
+  assert.match(bad.title, /Claude Code/);
+  assert.match(bad.detail, /\/definitely\/not\/here\/claude/,
+    'told somebody something is missing without saying where it looked, which is the '
+    + 'one piece of information that lets anybody fix it');
+  assert.ok(!/tmux/.test(bad.title), 'named a thing that is present as missing');
+
+  const both = machine.installedCheck({ claudeBin: nowhere, tmuxBin: '/nope/tmux' });
+  assert.equal(both.state, 'attention');
+  assert.match(both.detail, /Claude Code/);
+  assert.match(both.detail, /tmux/);
+});
+
+/* ---------------------------------------------------------------------------
+   Starting themselves
+--------------------------------------------------------------------------- */
+
+test('launchctl answering is a pass, and launchctl failing is not a pass', () => {
+  assert.equal(machine.restartCheck(okRunner).state, 'ok');
+  const dead = machine.restartCheck(deadRunner);
+  assert.equal(dead.state, 'attention');
+  assert.match(dead.detail, /by hand/);
+});
+
+test('the restart check asks launchctl about THIS login session', () => {
+  // gui/<uid>, not the system domain: an agent's job is registered per-login, so
+  // asking about anything else would answer a question nobody has.
+  let asked = null;
+  machine.restartCheck((cmd, args) => { asked = [cmd, args]; return { ok: true, stdout: '' }; });
+  assert.equal(asked[0], '/bin/launchctl');
+  assert.equal(asked[1][0], 'print');
+  assert.match(asked[1][1], new RegExp(`^gui/${process.getuid()}$`));
+});
+
+/* ---------------------------------------------------------------------------
+   The whole screen
+--------------------------------------------------------------------------- */
+
+test('three checks come back, and the two kinds of not-ok are counted apart', () => {
+  const got = machine.check({
+    pmset: DESKTOP_SLEEPS,             // one real problem
+    claudeBin: __filename,
+    tmuxBin: __filename,
+    runner: okRunner,
+  });
+  assert.equal(got.checks.length, 3);
+  assert.deepEqual(got.checks.map((c) => c.key), ['installed', 'sleep', 'restart']);
+  assert.equal(got.attention, 1);
+  assert.equal(got.unknown, 0);
+
+  /**
+   * ⚠️ NOT ADDED TOGETHER. "Two things need your attention" over one real
+   * problem and one thing we could not read is a sentence that is false about
+   * half of what it counts — and it is false in the direction that makes a
+   * person go looking for a problem that does not exist.
+   */
+  const mixed = machine.check({
+    pmset: 'nonsense',
+    claudeBin: '/nope/claude',
+    tmuxBin: __filename,
+    runner: okRunner,
+  });
+  assert.equal(mixed.attention, 1);
+  assert.equal(mixed.unknown, 1);
+});
+
+test('every check reports one of exactly three states, and always says something', () => {
+  // A guard on the shape rather than on any one message: a check that returns a
+  // state the screen has no branch for renders as nothing at all.
+  const runs = [
+    machine.check({ pmset: DESKTOP_AWAKE, claudeBin: __filename, tmuxBin: __filename, runner: okRunner }),
+    machine.check({ pmset: LAPTOP_SLEEPS_ON_BATTERY, claudeBin: '/nope', tmuxBin: '/nope', runner: deadRunner }),
+    machine.check({ pmset: 'junk', claudeBin: __filename, tmuxBin: __filename, runner: deadRunner }),
+  ];
+  for (const got of runs) {
+    for (const c of got.checks) {
+      assert.ok(['ok', 'attention', 'unknown'].includes(c.state), `bad state: ${c.state}`);
+      assert.ok(c.title && c.title.length > 0, `${c.key} has no title`);
+      assert.ok(c.detail && c.detail.length > 0, `${c.key} has no detail`);
+    }
+  }
+});
+
+test('nothing in here changes a setting', () => {
+  /**
+   * ⚠️ The wireframe draws a "Change this for me" button. Doing it needs
+   * `sudo pmset`, which this server cannot ask for — so the button would offer
+   * something it cannot do. This pins the decision: if somebody adds the write
+   * later it has to be a deliberate act, not a quiet one.
+   */
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'machine.js'), 'utf8');
+  assert.ok(!/pmset['"\s,\]]*.*(-a|-b|-c)\b/.test(src.replace(/\*.*$/gm, '')),
+    'machine.js now runs pmset with a setting flag, which writes power settings');
+  assert.ok(!/\bsudo\b/.test(src.replace(/^\s*\*.*$/gm, '')),
+    'machine.js now shells out to sudo');
+});

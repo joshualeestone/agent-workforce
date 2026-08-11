@@ -20,6 +20,7 @@ const path = require('node:path');
 const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
+const machine = require('./engine/machine');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -894,6 +895,39 @@ const server = http.createServer((req, res) => {
       return;
     }
     sendJson(res, 200, state);
+    return;
+  }
+
+  /**
+   * What this computer will and will not do — the "Checking your computer" step.
+   *
+   * ⚠️ ITS OWN ROUTE, not folded into /api/first-run, for two reasons. It shells
+   * out twice, so folding it in would make the decision about which screen to
+   * open wait on two subprocesses; and the screen offers to run it again, which
+   * needs something to call.
+   *
+   * ⚠️ AND IT NEVER 500s. Every check already answers `unknown` when it cannot
+   * look, so an error here would mean the check-runner itself broke -- and a
+   * screen with no answers at all is worse than three that say "we could not
+   * tell". The catch turns that into exactly that.
+   */
+  if (pathname === '/api/machine' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let checks;
+    try { checks = machine.check(); }
+    catch (err) {
+      sendJson(res, 200, {
+        checks: [{
+          key: 'all', state: 'unknown',
+          title: 'We could not check this computer',
+          detail: 'That does not mean anything is wrong with it, only that we could not look. ('
+            + String((err && err.message) || err) + ')',
+        }],
+        attention: 0,
+        unknown: 1,
+      });
+      return;
+    }
+    sendJson(res, 200, checks);
     return;
   }
 
