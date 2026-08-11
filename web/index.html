@@ -3166,6 +3166,15 @@ async function frPaintMachine() {
       + '<div><div class="fr-ctitle">We could not check this computer</div>'
       + '<div class="fr-cdetail">This is not saying anything is wrong with it. It is saying we '
       + 'could not look. (' + esc(err.message) + ')</div></div></div>';
+    /**
+     * ⚠️ AND THE REMEMBERED ANSWER GOES WITH IT. The sibling empty-body path
+     * below clears this and the failure path did not — so pressing "Check
+     * again" on a clean machine and having THAT request fail left `FR_MACHINE`
+     * holding the earlier all-clear. Step 4 then printed the unhedged "It
+     * starts as soon as it is made…" over a screen that had just said it could
+     * not look.
+     */
+    FR_MACHINE = null;
     return;
   } finally {
     // ⚠️ `finally`: the failure path returns early, and leaving the one button

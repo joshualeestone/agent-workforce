@@ -3361,6 +3361,9 @@ test('the first-run routes answer, and the completion route reports what stuck',
    * read-back decision -- the thing that turns "we wrote it" into "it is
    * actually there" -- was exercised nowhere at all.
    */
+  const firstrun = require('./engine/firstrun');
+  const fsExists = (p) => { try { fs.accessSync(p); return true; } catch { return false; } };
+
   const got = await req('/api/first-run');
   assert.match(got.type, /application\/json/);
   const state = JSON.parse(got.body);
@@ -3372,11 +3375,30 @@ test('the first-run routes answer, and the completion route reports what stuck',
   assert.ok(['connected', 'none', 'unknown'].includes(state.subscription.state),
     `the screen has no branch for subscription "${state.subscription.state}"`);
 
-  // ⚠️ A GET must not write the flag. Onboarding disappearing because somebody
-  // loaded a page is the failure this separation exists to prevent.
-  const before = JSON.parse((await req('/api/first-run')).body).done;
+  /**
+   * ⚠️ A GET MUST NOT WRITE THE FLAG, and the first version of this could not
+   * tell. It read `done` on one GET and compared a later GET to it — but never
+   * established that `done` started FALSE. If reading wrote the flag, the very
+   * first GET in this test had already flipped it, so every subsequent read was
+   * `true` and the comparison passed.
+   *
+   * Proven, not argued: with the route changed to call `firstrun.complete()` on
+   * every read — i.e. loading the page switches off onboarding, the exact
+   * failure this comment names — the whole file stayed green.
+   *
+   * So it asserts the control, and it asks the DISK rather than the route.
+   */
+  assert.equal(state.done, false,
+    'this machine has already been through first run, so this test cannot tell whether a '
+    + 'GET writes the flag — the control is gone and everything below it is vacuous');
+  assert.ok(!fsExists(firstrun.FLAG), 'the flag file exists before any write was asked for');
+
   await req('/api/first-run');
-  assert.equal(JSON.parse((await req('/api/first-run')).body).done, before,
+  await req('/api/first-run');
+  assert.ok(!fsExists(firstrun.FLAG),
+    'reading the first-run state WROTE the completion flag, so loading the page switches '
+    + 'off onboarding');
+  assert.equal(JSON.parse((await req('/api/first-run')).body).done, false,
     'reading the first-run state changed it');
 
   // The write, through the real route, against the sandboxed store.
