@@ -135,13 +135,13 @@ function registryKey(agent) {
  * Returns null when it cannot be determined, and callers must treat null as
  * "cannot tell" rather than "not stale".
  */
-function sessionStartedAt(agent) {
+function sessionStartedAt(agent, exactSession) {
   const name = registryKey(agent);
   if (!name) return null;
 
   let file;
   try {
-    file = transcriptFor(name);
+    file = transcriptFor(name, exactSession);
   } catch {
     return null;
   }
@@ -242,7 +242,7 @@ function inspect(agent) {
  * `seen` lets a caller that has already inspected the file pass it in, so `read`
  * does not do the work twice.
  */
-function staleness(agent, seen) {
+function staleness(agent, seen, exactSession) {
   const file = seen || inspect(agent);
   if (!file.ok) {
     // ⚠️ Carries `editable`, because the status poll is the ONLY instruction
@@ -297,7 +297,7 @@ function staleness(agent, seen) {
     };
   }
 
-  const startedAt = sessionStartedAt(agent);
+  const startedAt = sessionStartedAt(agent, exactSession);
   if (!startedAt) {
     return {
       state: STALENESS.UNKNOWN,

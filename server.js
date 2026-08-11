@@ -515,7 +515,14 @@ const server = http.createServer((req, res) => {
         // gating this left the card ADVERTISING an edit the route then 404s —
         // offer-an-action-that-cannot-work, which is worse than refusing plainly.
         instructions: a.isNamedOurs
-          ? instructions.staleness(a.sessionName)
+          // ⚠️ The pane's REAL session, so the staleness verdict resolves the
+          // same transcript the model and the memory ring did. Without it this
+          // reader falls back to preferring the `-discord` spelling, and a
+          // lingering registry entry for a long-gone `<name>-discord` dates the
+          // card from one conversation while its other numbers come from
+          // another. The fix reached two of the three readers and stopped one
+          // short.
+          ? instructions.staleness(a.sessionName, undefined, a.session)
           : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
       }));
       body = JSON.stringify({ ...snap, agents, version });

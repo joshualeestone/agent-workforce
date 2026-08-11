@@ -41,13 +41,18 @@ version it replaces is kept beside it as `CLAUDE.md.previous`.
 
 ⚠️ It answers only on **loopback**, and checks the `Host` header as well as
 the address, so a page on another site cannot reach it by pointing its own DNS
-at your machine. **It also refuses a write that came from another page**, which
-is a different hole: a POST with a form content type needs no CORS preflight,
-so before that guard existed any site you visited could create an agent on your
-machine. Measured, not theorised. That refuses a reverse proxy too, which is deliberate: there is
-no authentication here. If you genuinely want one, name it in
-`AGENT_WORKFORCE_ALLOWED_HOSTS` and understand that anyone who reaches that URL
-can rewrite the file any of your agents boots from.
+at your machine. The `Host` check refuses a reverse proxy too, which is
+deliberate: there is no authentication here.
+
+⚠️ **It also refuses a write that came from another page**, which is a
+different hole and the more dangerous one, because it needs nothing to be
+misconfigured. A POST with a form content type needs no CORS preflight, so
+before that guard existed any site you visited could create an agent on your
+machine. Measured against this server, not theorised.
+
+If you genuinely want to reach this from somewhere else, name that host in
+`AGENT_WORKFORCE_ALLOWED_HOSTS`, and understand that anyone who reaches that URL
+can rewrite the file any of your agents boots from, and make new ones.
 
     node server.js      # then open http://127.0.0.1:4317
 

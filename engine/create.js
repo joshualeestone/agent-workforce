@@ -223,15 +223,23 @@ function launcherFor(name, claudeBin, tmuxBin) {
 
 SESSION='${name}'
 LOG='${logFile(name)}'
-exec_adopt=
-# ⚠️ EVERY -t target below uses "=$SESSION", not "$SESSION". tmux's default
-# target resolution falls back to a PREFIX MATCH: with only angel-discord
-# running, 'tmux has-session -t ang' succeeds. So an agent named sam beside a
-# samantha-discord session would find the wrong session, see a claim that can
-# never equal its own name, and wait here forever -- and after the agent's own
-# session ended, the supervision loop at the bottom would never exit either, so
-# launchd would never restart it. Both silent. The leading equals sign means
-# exactly this name and nothing else.
+adopt=
+# ⚠️ TWO SPELLINGS OF THE SAME SESSION, and which commands take which was
+# MEASURED on tmux 3.6a rather than assumed, because assuming it broke the claim
+# on a real agent:
+#
+#   has-session, kill-session : accept "=name" (exact) -- USE IT. Their default
+#                               resolution falls back to a PREFIX match, so
+#                               "kill-session -t sam" will happily kill
+#                               samantha-discord. Measured, by killing one.
+#   set-option, show-options,
+#   list-panes                : REJECT "=name" outright ("no such session:
+#                               =name"). They take the plain name.
+#
+# The plain-name commands prefix-match too, but every one of them here runs only
+# when an exact session of this name is known to exist -- inside the loop that
+# has-session guarded, or after new-session made it -- and tmux prefers an exact
+# match over a prefix. Also measured.
 TARGET="=${name}"
 # ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
 # socket path of the server you are inside -- and bash keeps the export
@@ -262,7 +270,7 @@ fi
 # ── the session ──────────────────────────────────────────────────────────────
 warned=0
 while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
-  if [ "$("$TMUX_BIN" show-options -t "$TARGET" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
+  if [ "$("$TMUX_BIN" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
     # ⚠️ Ours -- but do not throw away a HEALTHY one. This file says you can run
     # it by hand, and the unconditional kill meant doing so destroyed the live
     # agent and everything it remembered. If something other than a shell is
@@ -275,18 +283,36 @@ while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
     # window or opened a second one with a shell in it (which this file invites,
     # since it says you can run it yourself) read as "crashed back to a shell"
     # and the live agent was killed at the next login.
+    #
+    # ⚠️ IF WE CANNOT SEE INSIDE IT, WE DO NOT TOUCH IT. An empty answer used to
+    # mean "every pane is a shell", so a tmux that failed to answer became a
+    # reason to destroy a session we had just confirmed exists and is ours --
+    # "I cannot see it" converted into "it is dead", which is the one inversion
+    # this whole codebase is written against.
+    panes=$("$TMUX_BIN" list-panes -s -t "$SESSION" -F '#{pane_current_command}' 2>/dev/null)
+    if [ -z "$panes" ]; then
+      echo "$(date): could not read what is running in $SESSION -- leaving it alone" >&2
+      adopt=1
+      break
+    fi
     alive=0
     while read -r pane_cmd; do
-      case "$pane_cmd" in
+      # ⚠️ A LOGIN shell arrives as "-zsh", with the leading dash, and the
+      # status engine uses exactly that spelling as its canonical crashed-pane
+      # value. Without stripping it, a crashed agent read as alive, got adopted,
+      # and then sat inside a supervision loop that keeps the launchd job
+      # "running" forever -- so KeepAlive could never recover it. A permanently
+      # dead agent that looks supervised is worse than one that is simply down.
+      case "\${pane_cmd#-}" in
         ""|sh|bash|zsh|fish|tcsh|ksh|login) ;;
         *) alive=1 ;;
       esac
     done <<EOF
-$("$TMUX_BIN" list-panes -s -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null)
+$panes
 EOF
     if [ "$alive" -eq 1 ]; then
       echo "$(date): $SESSION is already running -- leaving it alone and watching it" >&2
-      exec_adopt=1
+      adopt=1
       break
     fi
     # Every pane is a shell: it crashed. Replace it.
@@ -310,7 +336,7 @@ done
 # this script recognise it as ours and kill it -- the borrowed-name hazard the
 # wait loop exists to prevent, arriving through the one command whose failure
 # was not checked.
-if [ -z "$exec_adopt" ]; then
+if [ -z "$adopt" ]; then
   "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
     "$CLAUDE" --dangerously-skip-permissions || exit 1
 fi
@@ -322,7 +348,7 @@ fi
 # fine and shows on the board with no name, no role, no model and no editable
 # instructions, which is the blocker this whole mechanism exists to remove. If
 # it ever happens, the reason belongs in the log rather than in nothing.
-"$TMUX_BIN" set-option -t "$TARGET" @kosmos_agent "$SESSION" \\
+"$TMUX_BIN" set-option -t "$SESSION" @kosmos_agent "$SESSION" \\
   || echo "$(date): could not claim $SESSION -- the board will not recognise it" >&2
 
 # Stay alive while the session does, so launchd supervises the AGENT rather
@@ -516,10 +542,16 @@ function createAgent(opts) {
    * today — the route passes neither — so this is closing a door before someone
    * opens it, which is cheaper than the alternative.
    */
-  for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin]]) {
+  // ⚠️ The worker folder is checked with them. It is operator-controlled rather
+  // than request-controlled (it comes from AGENT_WORKFORCE_WORKERS), but it
+  // reaches the same generated shell text by the same route, and the stated
+  // reason for checking the binaries -- closing a door before somebody opens it
+  // -- does not distinguish between them.
+  for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin], ['the agents folder', workerDir(name)]]) {
     if (/['"\n\r\\$`]/.test(bin)) {
       return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
     }
+    if (what === 'the agents folder') continue;
     if (!fs.existsSync(bin)) {
       return {
         outcome: OUTCOME.REFUSED,
@@ -529,12 +561,38 @@ function createAgent(opts) {
     }
   }
 
+  /**
+   * ⚠️ PUT THE MACHINE BACK.
+   *
+   * Every failure after this point has to leave nothing behind, and the reason
+   * is not tidiness. Two separate half-states shipped before this existed:
+   *
+   *   - A failed write left the FOLDER, so the very next attempt at the same
+   *     name was refused for the folder's existence -- permanently, from a
+   *     screen whose own button is "Start over". The comment beside it claimed
+   *     the cleanup "lets the person try the same name again", which was false.
+   *   - A failed `bootstrap` left the PLIST, and launchd loads every plist in
+   *     that directory at the next login. So an agent the person was told is
+   *     "not running yet" was in fact installed to start at their next login,
+   *     undisclosed, with `--dangerously-skip-permissions`.
+   *
+   * Nothing here existed before this call: the folder is refused if it is
+   * already there, and so is the job. So removing them takes back only what we
+   * just made. The `steps` list still records which half failed, which is where
+   * the diagnostic value actually lives.
+   */
+  function rollBack() {
+    if (DRY_RUN) return;
+    try { fs.rmSync(plistPath(name), { force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(workerDir(name), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+
   function step(label, fn) {
     try {
       const r = fn();
       steps.push({ label, ok: r !== false });
       return r !== false;
-    } catch (err) {
+    } catch {
       // ⚠️ Never the raw errno: it carries absolute paths and says nothing a
       // person can act on. The step label is what the operator needs.
       steps.push({ label, ok: false });
@@ -547,6 +605,7 @@ function createAgent(opts) {
     fs.mkdirSync(workerDir(name), { recursive: true });
   });
   if (!madeDir) {
+    rollBack();
     return { outcome: OUTCOME.REFUSED, because: 'we could not make a folder for it', steps };
   }
 
@@ -600,15 +659,11 @@ function createAgent(opts) {
    * that produced it.
    */
   if (!wroteInstructions || !wroteLauncher || !wroteJob) {
-    // And take the job back off the machine if it got as far as being written.
-    // Leaving it is the respawn loop described above; removing it is also what
-    // lets the person try the same name again.
-    try { if (!DRY_RUN) fs.rmSync(plistPath(name), { force: true }); } catch { /* best effort */ }
+    rollBack();
     return {
       outcome: OUTCOME.PARTIAL,
-      because: 'we could not write everything it needs, so we have not started it, and nothing has been left set to start on its own',
+      because: 'we could not write everything it needs, so we have not made it. Nothing has been left on your computer, and you can try that name again.',
       steps,
-      folder: workerDir(name),
     };
   }
 
@@ -633,11 +688,14 @@ function createAgent(opts) {
   });
 
   if (!started) {
+    // ⚠️ INCLUDING THE JOB. It was left installed here, so an agent reported as
+    // "not running yet" would have started at the person's next login anyway --
+    // the one outcome nobody would predict from that sentence.
+    rollBack();
     return {
       outcome: OUTCOME.PARTIAL,
-      because: 'we set it up but could not start it, so it is not running yet',
+      because: 'we set it up but could not start it, so we have taken it back off your computer rather than leave something half installed. You can try that name again.',
       steps,
-      folder: workerDir(name),
     };
   }
   // ⚠️ `CREATED` says the job was accepted, and NOT that the agent is up. The

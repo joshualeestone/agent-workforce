@@ -61,8 +61,8 @@ const status = require('./status');
  * A runner that records instead of executing.
  *
  * ⚠️ The DEFAULT is a poison runner that fails loudly, so a test which forgets
- * to install a recorder cannot quietly reach `execFileSync`. `lifecycle` learned
- * this the hard way: a forgotten recorder passed while proving nothing.
+ * to install a recorder cannot quietly reach `execFileSync`. A forgotten
+ * recorder passes while proving nothing, which is how this was learned.
  */
 function recorder() {
   const calls = [];
@@ -188,7 +188,7 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   create.createAgent({ ...BINS, name: 'claimed-one', role: 'pm' });
 
   const script = fs.readFileSync(create.launcherFile('claimed-one'), 'utf8');
-  assert.match(script, /set-option -t "\$TARGET" @kosmos_agent "\$SESSION"/,
+  assert.match(script, /set-option -t "\$SESSION" @kosmos_agent "\$SESSION"/,
     'the startup script does not claim the session, so the board will stop '
     + 'recognising this agent the first time it restarts');
   assert.match(script, /SESSION='claimed-one'/, 'the script does not name this agent as itself');
@@ -580,10 +580,16 @@ test('the startup script will not kill a session it cannot prove is ours', () =>
   // kills one is that rule broken from the outside.
   const script = create.launcherFor('careful', '/bin/echo', '/bin/echo');
 
-  const kill = script.split('\n').findIndex((l) => l.includes('kill-session'));
-  const check = script.split('\n').findIndex((l) => l.includes('@kosmos_agent') && l.includes('show-options'));
-  assert.ok(check > -1, 'the script never checks whose session it is about to kill');
-  assert.ok(check < kill, 'the kill happens before the check, so the check cannot stop it');
+  // ⚠️ The ORDER of these two lines is no longer asserted here, and that is a
+  // correction rather than a loss. Comparing line indexes matched the words
+  // inside a comment the moment one mentioned `kill-session`, and it could
+  // never have caught the thing it was written for anyway: moving the kill out
+  // of the ours-branch keeps the order and restores the bug. The behavioural
+  // test below RUNS this script against a fake tmux and asserts no kill
+  // reaches a session that is not ours, which is the real guarantee. What is
+  // left here is the presence of the parts, which is worth pinning cheaply.
+  assert.ok(script.includes('@kosmos_agent'), 'the script never checks whose session it is');
+  assert.ok(script.includes('kill-session'), 'the script can never replace a crashed agent');
 
   // And it WAITS rather than exiting: exiting would have launchd restart it
   // every thirty seconds against a session it must not touch. The poll is short
@@ -608,12 +614,32 @@ test('the startup script names its session exactly, not by prefix', () => {
   const script = create.launcherFor('sam', '/bin/echo', '/bin/echo');
   assert.match(script, /TARGET="=sam"/, 'the script does not build an exact-match target');
 
+  // ⚠️ MEASURED, not assumed, on tmux 3.6a: `has-session` and `kill-session`
+  // accept the exact-match "=name" form, and `set-option`, `show-options` and
+  // `list-panes` REJECT it ("no such session: =name"). Using it everywhere
+  // looked more careful and broke the claim on a real agent -- the board then
+  // showed a created agent as anonymous, which is the blocker this branch
+  // exists to remove, reintroduced by its own fix.
+  //
+  // So the property is per-command, and it is asserted per-command rather than
+  // as one blanket rule that would be wrong half the time.
+  const EXACT = ['has-session', 'kill-session'];
+  const PLAIN = ['set-option', 'show-options', 'list-panes'];
+  let checked = 0;
   for (const line of script.split('\n')) {
-    // Commands only. A comment mentioning the hazard is not one.
     if (line.trim().startsWith('#') || !/-t /.test(line)) continue;
-    assert.match(line, /-t "\$TARGET"/,
-      `a tmux target is resolved by prefix rather than exactly: ${line.trim()}`);
+    const cmd = (line.match(/"\$TMUX_BIN" ([a-z-]+)/) || [])[1];
+    if (EXACT.includes(cmd)) {
+      checked += 1;
+      assert.match(line, /-t "\$TARGET"/,
+        `${cmd} resolves its target by PREFIX, so it can act on another session: ${line.trim()}`);
+    } else if (PLAIN.includes(cmd)) {
+      checked += 1;
+      assert.match(line, /-t "\$SESSION"/,
+        `${cmd} rejects the "=name" form outright, so this line fails at runtime: ${line.trim()}`);
+    }
   }
+  assert.ok(checked >= 5, 'no tmux target lines were checked, so this proves nothing');
 
   // The session is CREATED with the plain name -- `new-session -s` takes a
   // literal, and an `=` there would become part of the name.
@@ -742,7 +768,13 @@ test('the startup script, actually run, adopts a healthy agent instead of restar
   // ⚠️ And a session where every pane is a shell IS restarted -- otherwise
   // "adopt" would mean "never recover a crashed agent", which is worse than the
   // bug it fixes.
-  const crashed = runLauncher({ claim: 'probe', paneCommands: ['zsh', 'bash'] });
+  // ⚠️ `-zsh` WITH THE DASH is what a login shell reports, and it is the
+  // spelling the status engine uses as its canonical crashed-pane value. A
+  // denylist that missed it adopted a crashed agent instead of restarting it,
+  // and the supervision loop then kept the launchd job "running" forever, so
+  // KeepAlive could never recover it. A permanently dead agent that looks
+  // supervised is worse than one that is plainly down.
+  const crashed = runLauncher({ claim: 'probe', paneCommands: ['-zsh', 'bash'] });
   assert.ok(crashed.some((c) => c.startsWith('kill-session')),
     'an agent that crashed back to a shell was adopted rather than restarted');
   assert.ok(crashed.some((c) => c.startsWith('new-session')), 'nothing was restarted');
@@ -754,6 +786,15 @@ test('the startup script, actually run, adopts a healthy agent instead of restar
   const split = runLauncher({ claim: 'probe', paneCommands: ['zsh', '2.1.227'] });
   assert.ok(!split.some((c) => c.startsWith('kill-session')),
     'an agent with a shell open beside it was killed as though it had crashed');
+
+  // ⚠️ And a tmux that will not say what is running is NOT a reason to destroy
+  // anything. An empty answer read as "every pane is a shell", so a failed
+  // list-panes became grounds for killing a session we had just confirmed is
+  // ours -- "I cannot see it" turned into "it is dead", which is the inversion
+  // this whole codebase exists to prevent.
+  const blind = runLauncher({ claim: 'probe', paneCommands: [] });
+  assert.ok(!blind.some((c) => c.startsWith('kill-session')),
+    'a session was killed because tmux would not say what was running in it');
 });
 
 test('every name this module accepts is one the rest of the system can address', () => {
@@ -775,4 +816,49 @@ test('every name this module accepts is one the rest of the system can address',
       + 'would resolve somewhere else');
   }
   assert.ok(accepted > 0, 'nothing was accepted, so the assertions above never ran');
+});
+
+test('a creation that fails leaves nothing behind, so the same name can be tried again', () => {
+  // ⚠️ TWO half-states shipped before this, and both were worse than the
+  // failure they followed:
+  //
+  //   - a failed write left the FOLDER, so the next attempt at that name was
+  //     refused for the folder's existence -- permanently, from a screen whose
+  //     own button says "Start over".
+  //   - a failed `bootstrap` left the PLIST, and launchd loads every plist in
+  //     that directory at the next login. An agent the person was told is "not
+  //     running yet" was in fact installed to start at their next login, with
+  //     --dangerously-skip-permissions, and nothing said so.
+  const realWrite = fs.writeFileSync;
+  try {
+    recorder();
+    create.setDryRun(false);
+    fs.writeFileSync = (file, ...rest) => {
+      if (String(file).endsWith('start.sh')) throw new Error('disk full');
+      return realWrite(file, ...rest);
+    };
+    const halfWritten = create.createAgent({ ...BINS, name: 'rollback-a', role: 'pm' });
+    assert.equal(halfWritten.outcome, create.OUTCOME.PARTIAL);
+    assert.ok(!fs.existsSync(create.workerDir('rollback-a')), 'the folder was left behind');
+    assert.ok(!fs.existsSync(create.plistPath('rollback-a')), 'the launchd job was left behind');
+  } finally {
+    fs.writeFileSync = realWrite;
+  }
+
+  // The same name goes through afterwards, which is the point.
+  recorder();
+  create.setDryRun(false);
+  assert.equal(create.createAgent({ ...BINS, name: 'rollback-a', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'a failed attempt blocked the name it failed on');
+
+  // And a failed START rolls back too.
+  create.setRunner((file, args) => (args && args[0] === 'bootstrap'
+    ? { ok: false } : { ok: true, stdout: '' }));
+  create.setDryRun(false);
+  const notStarted = create.createAgent({ ...BINS, name: 'rollback-b', role: 'pm' });
+  assert.equal(notStarted.outcome, create.OUTCOME.PARTIAL);
+  assert.ok(!fs.existsSync(create.plistPath('rollback-b')),
+    'a job that could not be started was left installed, so it starts at the next login anyway');
+  assert.ok(!fs.existsSync(create.workerDir('rollback-b')), 'the folder was left behind');
+  assert.match(notStarted.because, /try that name again/);
 });

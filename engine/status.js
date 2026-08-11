@@ -881,9 +881,12 @@ function limitFor(model) {
  * transcript could be found for it. Measured on a real agent created through
  * the product on 2026-08-10.
  *
- * ⚠️ And the entry is now CHECKED rather than trusted by filename. It records
- * its own `session_name`, so we can confirm the file we found belongs to the
- * agent we asked about instead of inferring it from what it is called — a file
+ * ⚠️ And an entry that says whose it is is CHECKED rather than trusted by its
+ * filename. It records its own `session_name`, so we confirm the file belongs to
+ * the agent we asked about instead of inferring it from what it is called. An
+ * entry with no `session_name` at all cannot be checked and is still taken on
+ * its filename, which is the pre-existing behaviour and is said here so the
+ * guarantee is not read as broader than it is — a file
  * named for one agent holding another's session id would otherwise produce
  * confident numbers about the wrong conversation, which is the exact failure
  * this whole resolution path was written to avoid.
@@ -1269,6 +1272,12 @@ function snapshot() {
     return {
       name: identity.displayName,
       sessionName: pane.name,
+      // ⚠️ The REAL tmux session, beside the board name it is filed under. They
+      // differ for every legacy agent (`angel-discord` vs `angel`), and any
+      // reader that resolves a per-session artifact -- a transcript, a registry
+      // entry -- needs the one tmux knows, not the one we display. Publishing
+      // it is what lets a consumer stop guessing between the two spellings.
+      session: pane.session,
       nameDerived: identity.derived,
       role: identity.role,
       target: pane.target,
