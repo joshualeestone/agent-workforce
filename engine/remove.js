@@ -39,18 +39,23 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const create = require('./create');
+const store = require('./store');
 const status = require('./status');
 
 const OUTCOME = { REMOVED: 'removed', RESTORED: 'restored', REFUSED: 'refused', PARTIAL: 'partial' };
 
-const HOME = os.homedir();
-const SUPPORT_DIR = process.env.AGENT_WORKFORCE_DATA
-  ? path.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce')
-  : path.join(HOME, 'Library', 'Application Support', 'AgentWorkforce');
-const REMOVED_FILE = path.join(SUPPORT_DIR, 'removed.json');
+/**
+ * ⚠️ TAKEN FROM THE STORE, not re-derived. `engine/store.js` already owns
+ * "where this product keeps its own data", and this module had a verbatim copy
+ * of the same conditional. Two derivations of one fact is the defect
+ * `engine/status.js` calls the one this codebase has shipped more times than
+ * any other; the two agreed today only because nobody had moved the store yet,
+ * and the day somebody does, the removed list silently stops being found — a
+ * board that quietly un-hides every removed agent, with nothing to explain it.
+ */
+const REMOVED_FILE = path.join(store.ROOT, 'removed.json');
 
 /* ── the runner seam ─────────────────────────────────────────────────────── */
 
@@ -378,9 +383,44 @@ const UNKNOWN = Symbol('unknown');
  * the operator is talking to, an unnamed "are you sure?" is the same dialog for
  * a demo and for their project manager.
  */
+/**
+ * Can this name be acted on SAFELY? Not: would we have let somebody create it.
+ *
+ * ⚠️ `create.nameProblem` is the CREATION rule and it is the wrong test here.
+ * Removal acts on names the product did not choose: the roster admits any tmux
+ * session running Claude, whatever it is called, so a default `tmux new`
+ * session `0`, a session called `Notes`, or one named `orch.main` all draw
+ * cards. Running them through the creation rule refused the removal with advice
+ * nobody can act on — "use lower case, so the name is the same everywhere it
+ * appears", printed under "Remove this agent" about an agent nobody is naming.
+ * That contradicts the one thing the README promises about this feature: the
+ * board shows every agent on this machine, and managing the ones you already
+ * have is the point.
+ *
+ * What removal actually needs is that the name cannot escape a path or bend a
+ * command. It is interpolated into a worker directory, a plist filename, a
+ * launchd label and a tmux target, so those are what this checks — and nothing
+ * else. Every argument goes out through `execFileSync` with an array, so there
+ * is no shell to quote for; the risk is path traversal and a name that reads as
+ * an option.
+ */
+function unsafeToActOn(name) {
+  if (!name) return 'we have no name to look up';
+  // Path separators and NUL would let a name reach outside its own directory.
+  if (/[/\\\0]/.test(name)) return `${name} is not a name we can act on safely`;
+  // `.` and `..` are directories, not agents.
+  if (name === '.' || name === '..') return `${name} is not a name we can act on safely`;
+  // A leading dash reads as a flag to launchctl and tmux alike.
+  if (name.startsWith('-')) return `${name} is not a name we can act on safely`;
+  // Long enough for any real session, short enough not to be a filesystem
+  // problem in its own right.
+  if (name.length > 200) return 'that name is too long for us to act on';
+  return null;
+}
+
 function plan(name) {
   const clean = create.cleanName(name);
-  const problem = create.nameProblem(clean);
+  const problem = unsafeToActOn(clean);
   if (problem) return { ok: false, because: problem };
   /**
    * ⚠️ WHAT TO CALL IT ON SCREEN, resolved once and used by every sentence
@@ -401,6 +441,50 @@ function plan(name) {
    */
   if (isHidden(clean)) {
     return { ok: false, because: `${shown} has already been removed from Kosmos.` };
+  }
+  /**
+   * ⚠️ A CARD WE CANNOT TIE TO THIS NAME MUST NOT HAND OVER THIS NAME'S JOB.
+   *
+   * This is the same defect this branch already fixed for every other
+   * name-keyed write, reopened on the most dangerous one. The removal routes
+   * were added afterwards and were never brought under the gate.
+   *
+   * The harm, measured on the shape of this fleet: the real `claudebot-discord`
+   * is not currently up, and somebody has an ordinary `tmux new -s claudebot`
+   * running Claude — no `-discord` suffix, no claim, so the board draws it as an
+   * UNTIED card named `claudebot`. The detail screen offers "Remove this
+   * agent…", and `jobFor('claudebot')` resolves to the REAL agent's
+   * `com.claudebot.discord.plist`. Removing the bystander's scratch session
+   * would disable and boot out the operator's actual project manager.
+   *
+   * ⚠️ IT HAS TO BE HERE, NOT IN `sessionFor`. That check exists and is right,
+   * but it is not consulted until after `disable` and `bootout` have already
+   * run — so by the time the untied session is noticed, the damage is done. The
+   * question "is this name mine to act on" belongs before the first command.
+   *
+   * ⚠️ AND IT DOES NOT NARROW THE FEATURE. A pre-existing agent is
+   * `isNamedOurs` through the `-discord` arm and a Kosmos-made one through its
+   * claim, so every agent this is meant to manage still passes. What it refuses
+   * is a card the board itself will not vouch for.
+   *
+   * Fails CLOSED: `paneRoster` throws when tmux cannot be asked, and "I could
+   * not check whether this name is yours" is not permission to disable a job.
+   */
+  let tie;
+  try {
+    tie = status.paneRoster().find((c) => c.sessionName === clean) || null;
+  } catch {
+    return {
+      ok: false,
+      because: `we could not check which agent ${shown} refers to right now, so we have not offered to remove it. Try again in a moment.`,
+    };
+  }
+  if (tie && tie.isNamedOurs !== true) {
+    return {
+      ok: false,
+      because: `something is running in a session called ${clean}, and we cannot confirm it is this agent. `
+        + 'Kosmos will not stop it, because doing so could stop the wrong thing.',
+    };
   }
   /**
    * ⚠️ THERE HAS TO BE SOMETHING THERE TO REMOVE.
@@ -471,7 +555,31 @@ function plan(name) {
 
 /* ── doing it ────────────────────────────────────────────────────────────── */
 
-function remove(name, { tmuxBin } = {}) {
+/**
+ * ⚠️ SAYS SO WHEN NOTHING ACTUALLY HAPPENED.
+ *
+ * `AGENT_WORKFORCE_DRY_RUN=1` with no injected runner is exactly the failure
+ * the note on `DRY_RUN` describes -- every command answers success and every
+ * write short-circuits, so a removal reports REMOVED having done nothing at
+ * all. That default was moved out of the module for precisely this reason, and
+ * the env var can still reproduce it. It stays (it is a real dev affordance),
+ * but it no longer looks identical to a real removal: the outcome carries a
+ * marker and the sentence says it out loud, so a screen or a route cannot pass
+ * it off as work.
+ */
+function markDryRun(result) {
+  if (!(DRY_RUN && !runner)) return result;
+  // ⚠️ A refusal is already honest -- nothing was going to happen. Every OTHER
+  // outcome describes work, and in this mode no work occurred.
+  if (!result || result.outcome === OUTCOME.REFUSED) return result;
+  return {
+    ...result,
+    dryRun: true,
+    because: `${result.because} (Nothing actually happened: this board is running in dry-run.)`,
+  };
+}
+
+function removeInner(name, { tmuxBin } = {}) {
   const intent = plan(name);
   if (!intent.ok) return { outcome: OUTCOME.REFUSED, because: intent.because, steps: [] };
 
@@ -687,14 +795,23 @@ function remove(name, { tmuxBin } = {}) {
 
   return {
     outcome: OUTCOME.REMOVED,
-    because: `${shown} has been removed from Kosmos. Its folder and everything in it is still on your computer.`,
+    /**
+     * ⚠️ Only mentions the folder when there IS one. `exists()` deliberately
+     * admits an agent on a startup job alone, so an agent with a plist and no
+     * worker directory removes cleanly and was being reassured about a folder
+     * it never had. Its three siblings (`hint`, `didToJob`, restore's two) were
+     * each branched for the same reason; this one was missed.
+     */
+    because: fs.existsSync(create.workerDir(clean))
+      ? `${shown} has been removed from Kosmos. Its folder and everything in it is still on your computer.`
+      : `${shown} has been removed from Kosmos. Nothing on your computer was deleted.`,
     steps,
   };
 }
 
 /* ── putting it back ─────────────────────────────────────────────────────── */
 
-function restore(name) {
+function restoreInner(name) {
   const clean = create.cleanName(name);
   const record = readRemoved().find((r) => r.name === clean);
   /**
@@ -728,6 +845,14 @@ function restore(name) {
   }
 
   let started = true;
+  // ⚠️ Whether the startup FILE is still there, captured before the step runs.
+  // The step returns true when it is gone (the enable stands, so their own
+  // tooling can start it) -- which is right, but it left the terminal message
+  // claiming the agent was "set to start again" when launchd has nothing to
+  // load and will not start it at the next login either. The comment inside the
+  // step says a missing plist "fails in a way worth reporting rather than
+  // hiding"; nothing reported it.
+  const plistGone = Boolean(record.label) && (!record.plist || !fs.existsSync(record.plist));
   if (record.label) {
     started = step('let it start again', () => {
       const on = run('/bin/launchctl', ['enable', `gui/${process.getuid()}/${record.label}`]);
@@ -802,15 +927,34 @@ function restore(name) {
     // ⚠️ Two sentences, because two things can be true. An agent removed while
     // it had no startup job has nothing to re-enable, and telling somebody it
     // is "set to start again" would be a claim about a job that does not exist.
-    because: record.label
-      ? `${shown} is back on the board and set to start again.`
-      : `${shown} is back on the board. It had no startup job, so there was nothing to turn back on.`,
+    because: (() => {
+      if (!record.label) {
+        return `${shown} is back on the board. It had no startup job, so there was nothing to turn back on.`;
+      }
+      if (plistGone) {
+        return `${shown} is back on the board, and we have turned its startup entry back on. `
+          + 'But the file that starts it is no longer on this computer, so it will not start on its own. '
+          + 'Whatever set this agent up originally is what can put that back.';
+      }
+      return `${shown} is back on the board and set to start again.`;
+    })(),
     steps,
   };
 }
 
+/**
+ * ⚠️ Wrapped at the boundary, not at each return. `remove` has five outcomes
+ * and `restore` four, and the PARTIALS need the marker as much as the successes
+ * do: in env dry-run the post-kill look-again answers "still there" (every
+ * command reports success, including `has-session`), so a dry run actually
+ * lands on a partial whose text describes work that did not happen.
+ */
+function remove(name, opts) { return markDryRun(removeInner(name, opts)); }
+function restore(name) { return markDryRun(restoreInner(name)); }
+
 module.exports = {
   plan,
+  unsafeToActOn,
   isHidden,
   remove,
   restore,

@@ -267,22 +267,24 @@ test('a tmux we cannot ask stops the removal, rather than reading as "nothing is
   // reports a removal over an agent that is still going.
   const name = madeAgent('tmux-missing');
   status.setPaneSource(() => { throw new Error('tmux is not where we thought'); });
-  remove.setRunner(() => ({ ok: true, stdout: '' }));
+  const calls = world();
   remove.setDryRun(false);
 
+  /**
+   * ⚠️ REFUSED OUTRIGHT NOW, and NOTHING RAN — which is stronger than the
+   * partial this used to assert.
+   *
+   * "I could not check which agent this name refers to" is not permission to
+   * disable a launchd job. The tie is asked before the first command rather
+   * than after `disable` and `bootout`, so an unaskable tmux costs the person a
+   * retry instead of leaving an agent half-removed.
+   */
   const r = remove.remove(name);
-  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a removal that could not ask tmux reported success');
-  assert.match(r.because, /could not ask tmux/);
-  // ⚠️ RECORDED BUT NOT HIDDEN, and the pair is the assertion.
-  //
-  // It stays on the board because it may still be running, and hiding a
-  // running agent is the one thing this board must never do. It is on the
-  // removed list anyway, because the job IS disabled — so without a record
-  // there would be no Restore button and no way back short of the manual
-  // launchctl recipe.
-  assert.equal(remove.isHidden(name), false, 'it was hidden while possibly still running');
-  assert.equal(remove.isRemoved(name), true,
-    'a half-removed agent is on no list, so its disabled job cannot be turned back on from the product');
+  assert.equal(r.outcome, remove.OUTCOME.REFUSED, 'a removal ran commands without knowing whose name it was acting on');
+  assert.match(r.because, /could not check which agent/);
+  assert.match(r.because, /Try again in a moment/, 'it does not tell them this is retryable');
+  assert.deepEqual(calls, [], 'it disabled or stopped something while unable to say what');
+  assert.equal(remove.isRemoved(name), false, 'it recorded a removal it never performed');
 
   // THE CONTROL: "nothing is running" IS an answer, and proceeds.
   status.setPaneSource(() => '');
@@ -315,25 +317,60 @@ test('a session the board does not tie to this agent is left alone', () => {
   const calls = world();
   remove.setDryRun(false);
 
-  const r = remove.remove(name);
-  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
-    'it killed a session the board does not tie to this agent');
-
   /**
-   * ⚠️ PARTIAL, NOT REMOVED — and this assertion used to say the opposite.
+   * ⚠️ AND THE JOB IS NOT TOUCHED EITHER, which is the half that used to be
+   * missing.
    *
-   * Leaving the session alone is right; calling that a completed removal is
-   * not. Something is running under this name that we would not vouch for, so
-   * the person is looking at an agent that is still going while the product
-   * says it is gone. Blessing the full-success outcome here also meant the test
-   * encoded the defect: fixing the engine would have broken this test, which is
-   * the wrong way round.
+   * Leaving the session alone was always right. But the tie was not consulted
+   * until AFTER `disable` and `bootout`, so this case still disabled a launchd
+   * job on the strength of a name that the board itself would not vouch for.
+   * On this fleet that is not theoretical: with the real `claudebot-discord`
+   * down and a bystander's `tmux new -s claudebot` up, the untied card offers a
+   * live Remove button and `jobFor('claudebot')` resolves to the REAL agent's
+   * plist. The gate now runs before the first command.
    */
+  const r = remove.remove(name);
+  assert.deepEqual(calls, [],
+    'it disabled, stopped or killed something on the strength of a name the board will not vouch for');
+
+  assert.equal(r.outcome, remove.OUTCOME.REFUSED, r.because);
+  assert.match(r.because, /cannot confirm it is this agent/,
+    'the reason does not say WHY it refused, so it reads as an unexplained failure');
+  assert.match(r.because, /stop the wrong thing/,
+    'it does not say what the refusal is protecting them from');
+  assert.equal(remove.isRemoved(name), false, 'it recorded a removal it never performed');
+});
+
+test('the untied check is still made at the session step, for a roster that changes mid-removal', () => {
+  /**
+   * ⚠️ THE GATE IS NOT A REPLACEMENT FOR THE LATER CHECK, and this pins the
+   * later one so nobody deletes it as unreachable.
+   *
+   * `plan` asks the tie before the first command; `sessionFor` asks again
+   * before the kill. Between them the roster can change — somebody opens a
+   * session under this name in the second it takes launchctl to answer — and
+   * the kill is the irreversible half. Two asks, deliberately.
+   */
+  const name = madeAgent('roster-moved');
+  let asked = 0;
+  status.setPaneSource(() => {
+    asked += 1;
+    // Tied when `plan` looks, untied by the time the session is about to be
+    // ended. `world()` is installed after this, so the count starts at the
+    // plan's own lookup.
+    return asked <= 1
+      ? `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`
+      : `${name}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`;
+  });
+  const calls = world();
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.ok(asked > 1, 'the roster was only consulted once, so the second check does not exist');
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
+    'it killed a session that stopped being this agent between the two checks');
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
-  assert.match(r.because, /cannot confirm is this agent/,
-    'the reason does not say WHY the session was left, so it reads as an unexplained failure');
-  assert.match(r.because, /still be going/,
-    'nothing tells the person the agent may not have stopped');
+  assert.match(r.because, /cannot confirm is this agent/);
 });
 
 test('dry-run cannot be left without a runner, and is not the default', () => {
@@ -354,15 +391,17 @@ test('dry-run cannot be left without a runner, and is not the default', () => {
   assert.equal(out.trim(), 'false', 'the module starts inert, so the product removes nothing and says it did');
 });
 
-test('a name that could not be an agent is refused before anything runs', () => {
+test('a name that could escape a path is refused before anything runs', () => {
   const calls = [];
   remove.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
   remove.setDryRun(false);
   for (const [bad, why] of [
-    ['', /give the agent a name/],
-    ['Angel', /lower case/],
-    ['../../etc', /letters, numbers/],
-    ['x'.repeat(40), /32 characters/],
+    ['', /no name to look up/],
+    ['../../etc', /not a name we can act on safely/],
+    ['a/b', /not a name we can act on safely/],
+    ['..', /not a name we can act on safely/],
+    ['-rf', /not a name we can act on safely/],
+    ['x'.repeat(400), /too long/],
   ]) {
     const r = remove.remove(bad);
     assert.equal(r.outcome, remove.OUTCOME.REFUSED, `'${bad}' was accepted`);
@@ -372,6 +411,29 @@ test('a name that could not be an agent is refused before anything runs', () => 
     assert.match(r.because, why, `'${bad}' was refused for the wrong reason`);
   }
   assert.equal(calls.length, 0, 'a refused name still ran a command');
+});
+
+test('a session the product did not name is still removable', () => {
+  /**
+   * ⚠️ THE OTHER HALF, and without it the test above passes against a rule that
+   * refuses everything.
+   *
+   * Removal acts on names nobody chose: the roster admits any tmux session
+   * running Claude. Running those through the CREATION rule refused `Notes`,
+   * `orch.main`, a default session called `0`, and anything capitalised —
+   * printing "use lower case, so the name is the same everywhere it appears"
+   * under "Remove this agent", about an agent nobody is naming. The README
+   * promises the opposite: the board shows every agent on this machine and
+   * managing the ones you already have is the point.
+   */
+  for (const odd of ['Notes', 'orch.main', '0', 'UPPER', 'has space']) {
+    fs.mkdirSync(create.workerDir(odd), { recursive: true });
+    fs.writeFileSync(nodePath.join(create.workerDir(odd), 'CLAUDE.md'), `You are **${odd}**.\n`, 'utf8');
+    status.setPaneSource(() => `${odd}\t0.0\t2.1.212\t0\t${odd}\t✳ Claude Code`);
+    const ask = remove.plan(odd);
+    assert.equal(ask.ok, true, `'${odd}' cannot be removed: ${ask.because}`);
+    assert.match(ask.question, new RegExp(odd.replace('.', '\\.')), `'${odd}' is not named in its own confirmation`);
+  }
 });
 
 test('an unreadable removed-list hides nothing, rather than hiding everything', () => {
@@ -695,6 +757,17 @@ test('restore says so when the startup file has gone, rather than claiming it st
     'it did not re-enable the job, which is the half that still works');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'),
     'it tried to load a startup file that is not there');
+  /**
+   * ⚠️ AND THE SENTENCE, which is what this test was missing. Asserting the
+   * outcome and the absent `bootstrap` passed against a message reading
+   * "<name> is back on the board and set to start again" -- an assertion that
+   * launchd will start something it has nothing to load. The behaviour was
+   * right and the words were wrong, and only the words reach the person.
+   */
+  assert.match(r.because, /will not start on its own/,
+    'it promises the agent is set to start again when there is no file left to start it');
+  assert.doesNotMatch(r.because, /set to start again\./,
+    'it still claims the startup job will bring the agent back');
 });
 
 test('a job that will not re-enable is reported, not reported as restored', () => {
@@ -762,4 +835,32 @@ test('an agent that had no startup job is not told one was turned back on', () =
     'it claims a startup job was re-enabled for an agent that never had one');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'enable'),
     'it tried to enable a job that does not exist');
+});
+
+test('an env-driven dry run cannot pass itself off as a real removal', () => {
+  /**
+   * ⚠️ The failure this module already shipped once, still reachable through
+   * `AGENT_WORKFORCE_DRY_RUN=1`. Every command answers success and every write
+   * short-circuits, so the removal reports REMOVED having done nothing — the
+   * exact "silently do nothing while claiming success" the default was moved
+   * out of the module to prevent. The env var stays, because it is a real dev
+   * affordance; what it must not do is look identical to work.
+   */
+  const name = madeAgent('dry-marker');
+  boardShows(name, name);
+  remove.setRunner(null);   // re-arms dry-run, with no runner installed
+  const r = remove.remove(name);
+
+  /**
+   * ⚠️ CONTROL: it took a path that DESCRIBES WORK, or "it is marked" is true of
+   * a refusal and proves nothing. It lands on a partial rather than a full
+   * removal, and that is itself worth pinning: every command answers success in
+   * this mode, including the look-again after the kill, so the engine reads the
+   * session as still running.
+   */
+  assert.notEqual(r.outcome, remove.OUTCOME.REFUSED, r.because);
+
+  assert.equal(r.dryRun, true, 'a dry run is indistinguishable from a real removal to any caller');
+  assert.match(r.because, /Nothing actually happened/,
+    'the sentence a person reads claims the agent was removed when nothing was touched');
 });

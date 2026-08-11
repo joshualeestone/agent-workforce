@@ -1669,6 +1669,32 @@ test('every write route refuses the untied card’s own spelling while the real 
         + 'bystander can act on the real agent');
     }
 
+    /**
+     * ⚠️ THE REMOVAL ROUTES, which were added to this server after the gate was
+     * built and were never brought under it.
+     *
+     * They are the most dangerous members of this list, because they do not
+     * merely write a file: `jobFor('Angel')` resolves to the REAL agent's
+     * `com.angel.discord.plist`, and a removal disables and boots it out. So a
+     * bystander's `tmux new -s Angel` would have taken the operator's actual
+     * agent off the air, permanently at the next login, from a screen that
+     * offered them a live button to do it.
+     *
+     * ⚠️ Asserted through the ROUTE rather than only on the engine. An engine
+     * test does not prove a route is wired, and this whole finding is that a
+     * route was never wired to a gate that already existed.
+     */
+    for (const [method, path] of [['GET', '/api/agent/Angel/removal'], ['DELETE', '/api/agent/Angel/removal']]) {
+      const res = await req(path, method === 'GET' ? undefined : { method });
+      assert.notEqual(res.status, 200,
+        `${method} ${path} was accepted under the untied card's own spelling, so a bystander `
+        + "can disable the real agent's startup job");
+      const body = JSON.parse(res.body);
+      assert.ok(!body.ok, 'the removal was offered for a name the board will not vouch for');
+      assert.match(body.because || body.error || '', /cannot confirm it is this agent/,
+        'it refused without saying why, so the refusal reads as a bug rather than a guard');
+    }
+
     // ⚠️ And the real agent stays writable under its own name, or the fix has
     // simply broken the feature — the direction a previous version of this
     // predicate got wrong.
@@ -1677,6 +1703,12 @@ test('every write route refuses the untied card’s own spelling while the real 
       body: JSON.stringify({ role: 'still editable' }),
     });
     assert.equal(ok.status, 200, 'the real agent became uneditable under its own name');
+
+    // ⚠️ And removal still WORKS for the real agent under its own name, or the
+    // gate has quietly deleted the feature instead of protecting it.
+    const offered = await req('/api/agent/angel/removal');
+    assert.equal(offered.status, 200, 'the gate refuses the real agent too, which removes the feature');
+    assert.equal(JSON.parse(offered.body).ok, true, 'the real agent can no longer be removed under its own name');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
@@ -2137,8 +2169,23 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
     'the confirmation does not name the agent, so a misclick reads the same as the right click');
   assert.match(body.reassurance, /not be deleted/i,
     'the screen never tells them their files are safe, which is the one thing they want to know');
+  /**
+   * ⚠️ Was `assert.equal(body.steps, undefined, …)`, which could not fail:
+   * `plan` has never returned `steps` in any revision, so it asserted the
+   * absence of something that was never there. An absence assertion needs a
+   * presence to be measured against -- the removal ITSELF returns `steps`, so
+   * that is the control, and the point becomes the real one: the step list is
+   * for the outcome, and the QUESTION must not recite it.
+   */
+  const acted = removal.remove('route-removable');
+  assert.ok(Array.isArray(acted.steps) && acted.steps.length > 0,
+    'the control failed: nothing produces a step list, so hiding it from the question proves nothing');
   assert.equal(body.steps, undefined,
     'the route is back to reciting launchd steps at a person who does not want them');
+  for (const s of acted.steps) {
+    assert.doesNotMatch(String(body.question) + String(body.reassurance), new RegExp(s.label),
+      'the confirmation recites what the removal will do, which Josh cut for describing our implementation');
+  }
 
   /**
    * ⚠️ AN AGENT ANOTHER TOOL CREATED — now REMOVABLE, reversing an earlier

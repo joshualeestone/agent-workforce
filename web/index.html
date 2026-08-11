@@ -945,8 +945,13 @@ async function tick() {
      * freshness stamp directly above says the board was checked just now, which
      * makes an unrefreshed count beside it a claim this poll did not support.
      *
-     * Cheap: `paintRemoved` is one fetch of a small file and it leaves the DOM
-     * alone when the list is unchanged in length. Deliberately NOT awaited --
+     * Cheap: `paintRemoved` is one fetch of a small file, and it now leaves the
+     * DOM alone when the markup is unchanged -- which it has to, or this poll
+     * would wipe a "Restore failed" row and steal focus every five seconds.
+     * (An earlier version of this comment asserted that check while the code
+     * rewrote unconditionally: the claim came first and the guard did not
+     * exist, which is the defect this file is otherwise written against.)
+     * Deliberately NOT awaited --
      * the removed list failing must never stop the grid or the stamp from
      * painting, and `paintRemoved` already keeps what is on screen when its own
      * fetch fails.
@@ -1859,12 +1864,39 @@ async function paintRemoved() {
    * `shownAs` is captured at removal time; records written before it existed
    * do not carry one, hence the fallback.
    */
-  list.innerHTML = gone.map((a) => '<div class="removed-row">'
+  const html = gone.map((a) => '<div class="removed-row">'
     + '<span class="who">' + esc(a.shownAs || a.name) + '</span>'
     + '<span class="when">' + esc(whenRemoved(a)) + '</span>'
     + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
     + '</div>').join('');
+
+  /**
+   * ⚠️ ONLY REWRITE WHEN THE ANSWER ACTUALLY CHANGED, and this is not an
+   * optimisation. This runs on the five-second poll, and an unconditional
+   * `innerHTML =` breaks three things it has no business touching:
+   *
+   *   1. A row reading "Restore failed — try again" is replaced by a fresh
+   *      "Restore" within five seconds, so a restore that FAILED and one that
+   *      WORKED become indistinguishable — which is exactly what the comment on
+   *      that handler says must never happen.
+   *   2. A button mid-flight ("Restoring…", disabled) is swapped for an enabled
+   *      one, so a second click fires a duplicate restore.
+   *   3. Keyboard focus on any Restore button is dropped to `<body>`, every
+   *      five seconds, for as long as the tab is open.
+   *
+   * ⚠️ Compared against the HTML we LAST GENERATED, not against the live DOM.
+   * The live DOM legitimately diverges — that is cases 1 and 2 — and comparing
+   * to it would rewrite over precisely the states worth keeping.
+   */
+  if (html !== REMOVED_HTML) {
+    REMOVED_HTML = html;
+    list.innerHTML = html;
+  }
 }
+
+// The last markup `paintRemoved` produced. See the note in that function for
+// why the comparison is against this rather than against `list.innerHTML`.
+let REMOVED_HTML = null;
 
 /**
  * ⚠️ Answers "we do not know" rather than inventing a date.
