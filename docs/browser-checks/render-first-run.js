@@ -238,6 +238,21 @@ async function look(page, name) {
       }
       await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(700);
+      /**
+       * ⚠️ THE CLEAR SHOT ASSERTS ITS OWN PREMISE. It is captured against the
+       * LIVE route so it cannot drift from the engine's wording -- which also
+       * means a machine that develops a finding would quietly produce a
+       * screenshot committed under the name "clear". `MACHINE_MIXED` has such a
+       * control; this had none.
+       */
+      if (shot.name === 'firstrun-2-checks-clear') {
+        const rows = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('#fr-checks .fr-check')).map((el) => el.className));
+        if (!rows.length || rows.some((c) => !/\bok\b/.test(c))) {
+          problems.push(`firstrun-2-checks-clear [${scheme}]: this machine is NOT all-clear `
+            + `(${rows.join(' | ') || 'no rows'}), so the shot under that name would be a lie`);
+        }
+      }
       const seen = await look(page, shot.name);
       for (const b of seen.bad) problems.push(`${shot.name} [${scheme}]: ${b}`);
       // Clipped to the card with a margin, rather than a viewport of mostly

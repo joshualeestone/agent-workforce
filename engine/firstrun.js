@@ -64,6 +64,15 @@ function complete() {
     try { fs.unlinkSync(tmp); } catch { /* it was never the point */ }
     throw err;
   }
+  /**
+   * ⚠️ THIS IS WEAKER THAN "we read it back and it is there", and the route
+   * above it should not claim otherwise. `seen()` deliberately answers
+   * `done: true` for an UNREADABLE flag -- because re-running onboarding over
+   * somebody's working board is the worse mistake -- so a write that landed on
+   * a file we then could not parse reports success. What this actually
+   * establishes is "nothing here will make onboarding come back", which is the
+   * thing the screen needs to know, and not the same sentence.
+   */
   return seen().done === true;
 }
 

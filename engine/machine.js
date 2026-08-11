@@ -150,9 +150,16 @@ function sleepCheck(text) {
       key: 'sleep',
       state: STATE.UNKNOWN,
       title: 'We could not tell whether this Mac goes to sleep',
-      detail: 'This is the setting that decides whether your agents keep working when you '
-        + 'walk away, so it is worth knowing. You can see it in System Settings, under '
-        + 'Lock Screen on a desktop or Battery on a laptop.',
+      detail: (battFirst === 0
+        // ⚠️ The half we DID read, for the same reason the branches below say
+        // theirs. Discarding a clean battery reading because the AC section was
+        // unreadable is the same shape, one more time.
+        ? 'It does not go to sleep on battery. What it does while it is plugged in is the part '
+          + 'we could not read. '
+        : 'This is the setting that decides whether your agents keep working when you '
+          + 'walk away, so it is worth knowing. ')
+        + 'You can see it in System Settings, under Lock Screen on a desktop or Battery on '
+        + 'a laptop.',
     };
   }
 
@@ -344,27 +351,7 @@ function installedCheck(opts) {
     }
   }
 
-  /**
-   * ⚠️ A DEFINITE FINDING OUTRANKS A THING WE COULD NOT READ, so `missing` is
-   * tested first. The two used to be one early return, and the unreadable one
-   * won by arriving first — turning "Claude Code is missing" into "we could not
-   * check", which is the safe-sounding answer to the wrong question.
-   */
-  if (unusable.length) {
-    return {
-      key: 'installed',
-      state: STATE.ATTENTION,
-      title: unusable.length === 1
-        ? `We cannot use the path set for ${unusable[0].label}`
-        : 'We cannot use the paths set for the things it needs',
-      detail: 'An agent made now would not start. '
-        + unusable.map((u) => `The path for ${u.label} is ${u.bin}`).join(', and ')
-        + ' — a quote, a backslash or a line break in a path is something we will not pass on '
-        + 'to the parts of macOS that start an agent, whatever is at the end of it.',
-    };
-  }
-
-  if (!missing.length && !unreadable.length) {
+  if (!missing.length && !unreadable.length && !unusable.length) {
     return {
       key: 'installed',
       state: STATE.OK,
@@ -373,7 +360,37 @@ function installedCheck(opts) {
     };
   }
 
-  if (!missing.length) {
+  /**
+   * ⚠️ THREE BUCKETS, AND EVERY ONE OF THEM GETS SAID.
+   *
+   * This is the third time this one function has dropped a finding on the
+   * floor by returning early. `unreadable` beat `missing` first; then
+   * `unusable` was added as its own bucket — with its own early return, ahead
+   * of both — so `installedCheck({claudeBin: '/nowhere/claude', tmuxBin:
+   * "/opt/home'brew/bin/tmux"})` reported ONLY the quoted tmux path and never
+   * mentioned that Claude Code was absent. Measured. Reachable in real life by
+   * a home directory with an apostrophe in it.
+   *
+   * `sleepCheck` above documents fixing this same shape twice. The lesson that
+   * did not travel is that the fix has to be structural: assemble the sentence
+   * from whatever is in each bucket, rather than picking a winner and
+   * returning.
+   */
+  const problems = missing.length || unusable.length;
+  const parts_ = [];
+  if (missing.length) {
+    parts_.push('We looked for ' + missing.map((m) => `${m.label} at ${m.bin}`).join(', and ') + '.');
+  }
+  if (unusable.length) {
+    parts_.push(unusable.map((u) => `The path set for ${u.label} is ${u.bin}`).join(', and ')
+      + ' — a quote, a backslash or a line break in a path is something we will not pass on to '
+      + 'the parts of macOS that start an agent, whatever is at the end of it.');
+  }
+  if (unreadable.length) {
+    parts_.push(`We could not check ${unreadable.map((u) => u.label).join(' or ')} at all.`);
+  }
+
+  if (!problems) {
     return {
       key: 'installed',
       state: STATE.UNKNOWN,
@@ -383,26 +400,14 @@ function installedCheck(opts) {
     };
   }
 
-  /**
-   * ⚠️ NAMES WHAT IS MISSING AND WHERE IT LOOKED. "Something is missing" sends
-   * somebody to a support channel that does not exist; the path is the one piece
-   * of information that lets them, or anyone helping them, fix it. It is also the
-   * path an agent made right now would be started from, so it is the truth.
-   */
+  const named = [...missing, ...unusable].map((x) => x.label);
   return {
     key: 'installed',
     state: STATE.ATTENTION,
-    title: missing.length === 1
-      ? `${missing[0].label} is not where we expected it`
-      : 'Two things it needs are not where we expected them',
-    detail: 'An agent made now would not start. We looked for '
-      + missing.map((m) => `${m.label} at ${m.bin}`).join(', and ')
-      + '.'
-      // ⚠️ And the other half, when there is one. Reporting the definite finding
-      // must not swallow the fact that a second thing could not be read at all.
-      + (unreadable.length
-        ? ` We could not check ${unreadable.map((u) => u.label).join(' or ')} at all.`
-        : ''),
+    title: named.length === 1
+      ? `${named[0]} is not where we can use it`
+      : 'Some of what it needs is not where we can use it',
+    detail: 'An agent made now would not start. ' + parts_.join(' '),
   };
 }
 
