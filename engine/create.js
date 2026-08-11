@@ -67,6 +67,18 @@ const store = require('./store');
 const HOME = os.homedir();
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 const AGENTS_DIR = process.env.AGENT_WORKFORCE_LAUNCH || path.join(HOME, 'Library', 'LaunchAgents');
+/**
+ * Where the product keeps things it installs for itself, as opposed to things
+ * that belong to an agent.
+ *
+ * ⚠️ The same root `engine/store.js` uses, honouring the same variable, so a
+ * sandboxed test sandboxes this too — and so there is one answer to "where does
+ * this product keep its files" rather than a second convention introduced by
+ * whoever needed a directory next.
+ */
+const SUPPORT_DIR = process.env.AGENT_WORKFORCE_DATA
+  ? path.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce')
+  : path.join(HOME, 'Library', 'Application Support', 'AgentWorkforce');
 
 const OUTCOME = { CREATED: 'created', REFUSED: 'refused', PARTIAL: 'partial' };
 
@@ -185,213 +197,54 @@ function nameProblem(raw) {
 
 function workerDir(name) { return path.join(WORKERS_DIR, name); }
 function instructionFile(name) { return path.join(workerDir(name), 'CLAUDE.md'); }
-function launcherFile(name) { return path.join(workerDir(name), 'start.sh'); }
 function logFile(name) { return path.join(workerDir(name), 'start.log'); }
 function serviceLabel(name) { return `com.kosmos.agent.${name}`; }
 function plistPath(name) { return path.join(AGENTS_DIR, `${serviceLabel(name)}.plist`); }
 
 /**
- * The script that actually starts the agent, and keeps starting it.
+ * Where the ONE supervisor lives, and how it gets there.
  *
- * ⚠️ The job CANNOT be `tmux new-session` directly, and the version that was
- * is the reason this exists. `new-session -d` daemonises and exits immediately,
- * so launchd sees the job finish, `KeepAlive` restarts it, and the restart
- * fails because the session it just made already exists — a respawn loop that
- * runs for as long as the machine is on, while the agent looks perfectly
- * healthy because the FIRST attempt worked. Invisible, permanent, and shipped
- * on every agent.
+ * ⚠️ It used to be GENERATED PER AGENT: each got its own 151-line copy under
+ * its own folder. Every defect in it therefore shipped as many times as there
+ * were agents, and every fix reached only the agents created afterwards — the
+ * ones already on the machine kept their copy of the bug forever. It also could
+ * not be reviewed once; it was reviewed per generation, which is how six
+ * separate defects got into it in a single afternoon.
  *
- * So the job runs a script that supervises instead: it clears any session of
- * that name, starts a new one, and then STAYS ALIVE while the session does.
- * This is the pattern the thirteen agents on this machine already run under,
- * and its own comment says why: "keeps launchd happy".
- *
- * ⚠️ AND IT SETS THE CLAIM ITSELF. The claim is a tmux user option, so it dies
- * with the session — which is exactly why it is trustworthy, and exactly why
- * setting it once at creation is not enough. After a reboot launchd starts the
- * agent afresh, and without this line the session comes back unclaimed: the
- * board stops recognising an agent it created, shows it anonymous with no role,
- * no model and no editable instructions, and the whole blocker this branch
- * exists to remove comes back on the first restart.
- *
- * ⚠️ This is still KOSMOS writing the claim, not the agent. The distinction
- * that matters is that nothing an agent does to itself can claim a name: this
- * file is written by the creation, run by the job the creation installed, and
- * lives beside the agent's instructions where a person can read it.
- *
- * ⚠️ The name is interpolated into shell text here, which is the one place this
- * module does that, so it is worth stating why it is safe: `nameProblem`
- * refuses anything outside `^[a-z0-9][a-z0-9_-]{1,31}$` long before this is
- * called, and that set contains no quote, no space and no shell metacharacter.
- * The single quotes are belt and braces on top of a validator that has already
- * made them unnecessary.
+ * ⚠️ INSTALLED, not referenced in place. The job could have pointed at
+ * `bin/agent-supervisor.sh` inside this checkout, which is one fewer moving
+ * part — but then moving or deleting the repository breaks every agent on the
+ * machine at their next login, silently, long after whoever moved it has
+ * forgotten. So it is copied to a stable location outside the checkout, and
+ * refreshed on every creation so a change reaches the agents that already
+ * exist too.
  */
-function launcherFor(name, claudeBin, tmuxBin) {
-  const dir = workerDir(name);
-  return `#!/bin/bash
-# Starts ${name}, and keeps launchd from restarting it in a loop.
-#
-# Written by Kosmos when this agent was created. It is a real file: you can
-# read it, and you can change it. It runs at every login and whenever the
-# agent's session ends.
+function supervisorSource() {
+  return path.join(__dirname, '..', 'bin', 'agent-supervisor.sh');
+}
 
-SESSION='${name}'
-LOG='${logFile(name)}'
-adopt=
+function supervisorPath() {
+  return path.join(SUPPORT_DIR, 'bin', 'agent-supervisor.sh');
+}
 
-# launchd appends to this log forever, and a persistently failing start writes
-# a line every 30 seconds for as long as the machine is on. Keep it bounded.
-if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
-  : > "$LOG"
-fi
-
-# ⚠️ TWO SPELLINGS OF THE SAME SESSION, and which commands take which was
-# MEASURED on tmux 3.6a rather than assumed, because assuming it broke the claim
-# on a real agent:
-#
-#   has-session, kill-session,
-#   list-panes                : accept "=name" (exact) -- USE IT. Their default
-#                               resolution falls back to a PREFIX match, so
-#                               "kill-session -t sam" will happily kill
-#                               samantha-discord. Measured, by killing one.
-#   set-option, show-options  : REJECT "=name" outright ("no such session:
-#                               =name"). They take the plain name.
-#
-# ⚠️ The first version of this note also listed list-panes as rejecting it. That
-# was a MIS-MEASUREMENT, and how it happened is worth keeping: the probe ran
-# against a session that a previous command in the same terminal had already
-# killed, so "can't find" was true for a reason that had nothing to do with the
-# syntax under test. A measured claim taken against the wrong world is worse
-# than an unmeasured one, because it stops the next person checking.
-#
-# The two plain-name commands prefix-match too, but both run only when an exact
-# session of this name is known to exist -- inside the loop that has-session
-# guarded, or after new-session made it -- and tmux prefers an exact match over
-# a prefix. Also measured.
-TARGET="=${name}"
-# ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
-# socket path of the server you are inside -- and bash keeps the export
-# attribute, so assigning it here hands every child a malformed $TMUX. Run this
-# script by hand from inside a tmux pane, which the header invites, and
-# new-session refuses because it thinks it is being asked to nest.
-TMUX_BIN='${tmuxBin}'
-CLAUDE='${claudeBin}'
-WORKDIR='${dir}'
-
-# ⚠️ Only ever clear a session that is OURS.
-#
-# This ran unconditionally, and it runs at every login and after every crash —
-# so a person who happened to have a tmux session of this name would have had it
-# destroyed with no warning, by a job installed weeks earlier. The board refuses
-# to act on any pane it cannot tie to a name; a script that kills one is the
-# same rule broken from the outside.
-#
-# The claim is the tie. If something else holds the name we WAIT rather than
-# exit: exiting would have launchd restart us every 30 seconds, and waiting
-# recovers on its own the moment that session ends.
-# ── the session ──────────────────────────────────────────────────────────────
-warned=0
-while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
-  if [ "$("$TMUX_BIN" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
-    # ⚠️ Ours -- but do not throw away a HEALTHY one. This file says you can run
-    # it by hand, and the unconditional kill meant doing so destroyed the live
-    # agent and everything it remembered. If something other than a shell is
-    # running in there, the agent is alive: adopt it and supervise, which is
-    # also the right answer when launchd restarts this script under a session
-    # that never stopped.
-    # ⚠️ -s, so this asks about the whole SESSION. Without it tmux resolves the
-    # target as a WINDOW, so this read only the current window -- and with
-    # "head -1", only its first pane. A session where somebody had split the
-    # window or opened a second one with a shell in it (which this file invites,
-    # since it says you can run it yourself) read as "crashed back to a shell"
-    # and the live agent was killed at the next login.
-    #
-    # ⚠️ IF WE CANNOT SEE INSIDE IT, WE DO NOT TOUCH IT. An empty answer used to
-    # mean "every pane is a shell", so a tmux that failed to answer became a
-    # reason to destroy a session we had just confirmed exists and is ours --
-    # "I cannot see it" converted into "it is dead", which is the one inversion
-    # this whole codebase is written against.
-    panes=$("$TMUX_BIN" list-panes -s -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null)
-    if [ -z "$panes" ]; then
-      echo "$(date): could not read what is running in $SESSION -- leaving it alone" >&2
-      adopt=1
-      break
-    fi
-    alive=0
-    while read -r pane_cmd; do
-      # ⚠️ AN ALLOWLIST, matching status.js's isClaudeCommand, NOT a
-      # list of shells to exclude. The denylist this replaces is the exact
-      # defect that module documents at length: a crashed agent whose remaining
-      # pane holds vim, less, ssh or python3 is not Claude, but a
-      # denylist of six shell names says it is. Here that reads alive, so the
-      # script adopts a dead agent and sits in the supervision loop forever --
-      # and launchd's KeepAlive can never recover it, because as far as launchd
-      # is concerned the job is running fine.
-      #
-      # Two definitions of "Claude is running" is what the board already paid
-      # for once. This is the same definition, in the one place that acts on it
-      # destructively: a native install reports a bare version (2.1.227), and
-      # the other spellings are claude, claude.exe and node.
-      # ⚠️ A REGEX, not a glob. The glob [0-9]*.[0-9]*.[0-9]* also matches
-      # 1.2.3.4, 1a.2b.3c and 12x.3.4y, while status.isNativeClaude is
-      # ^[0-9]+\.[0-9]+\.[0-9]+$ and deliberately excludes anything else. A
-      # comment claiming parity with a definition, next to a looser copy of it,
-      # is the thing this file keeps correcting -- and here being loose means
-      # adopting a dead agent and supervising it forever.
-      if [[ "$pane_cmd" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] \\
-        || [ "$pane_cmd" = claude ] || [ "$pane_cmd" = claude.exe ] || [ "$pane_cmd" = node ]; then
-        alive=1
-      fi
-    done <<EOF
-$panes
-EOF
-    if [ "$alive" -eq 1 ]; then
-      echo "$(date): $SESSION is already running -- leaving it alone and watching it" >&2
-      adopt=1
-      break
-    fi
-    # Every pane is a shell: it crashed. Replace it.
-    "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
-    break
-  fi
-  if [ "$warned" -eq 0 ]; then
-    echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
-    warned=1
-  fi
-  sleep 5
-done
-
-# --dangerously-skip-permissions is not optional for an unattended agent.
-# Without it the agent starts, looks healthy, and freezes forever on its first
-# permission prompt with nobody there to answer it.
-#
-# ⚠️ Exit on failure, because the claim below must never land on a session we
-# did not make. The name can be taken between the check above and this line, and
-# stamping @kosmos_agent onto somebody else's session would make the NEXT run of
-# this script recognise it as ours and kill it -- the borrowed-name hazard the
-# wait loop exists to prevent, arriving through the one command whose failure
-# was not checked.
-if [ -z "$adopt" ]; then
-  "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
-    "$CLAUDE" --dangerously-skip-permissions || exit 1
-fi
-
-# The claim. Without it this agent is anonymous on the board after every
-# restart, whatever it was when it was created.
-#
-# ⚠️ Its failure is reported rather than swallowed: an unclaimed session runs
-# fine and shows on the board with no name, no role, no model and no editable
-# instructions, which is the blocker this whole mechanism exists to remove. If
-# it ever happens, the reason belongs in the log rather than in nothing.
-"$TMUX_BIN" set-option -t "$SESSION" @kosmos_agent "$SESSION" \\
-  || echo "$(date): could not claim $SESSION -- the board will not recognise it" >&2
-
-# Stay alive while the session does, so launchd supervises the AGENT rather
-# than a command that exits in a tenth of a second.
-while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
-  sleep 10
-done
-`;
+/**
+ * Put the current supervisor where the jobs point, and answer whether it is
+ * there.
+ *
+ * ⚠️ Returns false rather than throwing, and the caller refuses the creation on
+ * a false. An agent whose job points at a script that is not there is the
+ * respawn-loop state: `bash` exits at once and `KeepAlive` retries every thirty
+ * seconds for as long as the machine is on.
+ */
+function installSupervisor() {
+  try {
+    fs.mkdirSync(path.dirname(supervisorPath()), { recursive: true });
+    fs.copyFileSync(supervisorSource(), supervisorPath());
+    fs.chmodSync(supervisorPath(), 0o755);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -432,7 +285,12 @@ function plistFor(name, claudeBin, tmuxBin) {
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>${xml(launcherFile(name))}</string>
+    <string>${xml(supervisorPath())}</string>
+    <string>${xml(name)}</string>
+    <string>${xml(workerDir(name))}</string>
+    <string>${xml(claudeBin)}</string>
+    <string>${xml(tmuxBin)}</string>
+    <string>${xml(logFile(name))}</string>
   </array>
   <key>WorkingDirectory</key><string>${xml(workerDir(name))}</string>
   <key>EnvironmentVariables</key>
@@ -724,9 +582,13 @@ function createAgent(opts) {
   // ⚠️ Executable, and that is not a detail: launchd runs it through
   // `/bin/bash`, but a person told "this is a real file you can run" and met
   // "permission denied" has been handed a file that is real only to us.
-  const wroteLauncher = step('wrote its startup script', () => {
+  // ⚠️ Installed rather than written per agent, and still a STEP: if the shared
+  // supervisor is not in place, the job would point at a script that does not
+  // exist, which is the respawn loop. The gate below stops before the job is
+  // written at all.
+  const wroteLauncher = step('put the startup script in place', () => {
     if (DRY_RUN) return true;
-    fs.writeFileSync(launcherFile(name), launcherFor(name, claudeBin, tmuxBin), { mode: 0o755 });
+    return installSupervisor();
   });
 
   /**
@@ -828,11 +690,12 @@ module.exports = {
   nameProblem,
   cleanName,
   plistFor,
-  launcherFor,
+  supervisorPath,
+  supervisorSource,
+  installSupervisor,
   serviceLabel,
   workerDir,
   instructionFile,
-  launcherFile,
   plistPath,
   setRunner,
   setDryRun,

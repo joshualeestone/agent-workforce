@@ -40,6 +40,19 @@ const create = require('./create');
 const BINS = { claudeBin: '/bin/echo', tmuxBin: '/bin/echo' };
 
 /**
+ * The supervisor as SHIPPED, read from disk.
+ *
+ * ⚠️ These tests used to assert against a string this module generated per
+ * agent. There is no such string any more: there is one file, checked in, that
+ * every agent's job runs with its own arguments. So the tests read the artifact
+ * that actually runs — which is also the only version that can be reviewed
+ * once.
+ */
+function supervisorText() {
+  return fs.readFileSync(create.supervisorSource(), 'utf8');
+}
+
+/**
  * ⚠️ ARM DRY-RUN AT LOAD, before any test can run.
  *
  * The module header used to claim it was "dry-run by default". It is not:
@@ -195,11 +208,15 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   create.setDryRun(false);
   create.createAgent({ ...BINS, name: 'claimed-one', role: 'pm' });
 
-  const script = fs.readFileSync(create.launcherFile('claimed-one'), 'utf8');
+  const script = supervisorText();
   assert.match(script, /set-option -t "\$SESSION" @kosmos_agent "\$SESSION"/,
     'the startup script does not claim the session, so the board will stop '
     + 'recognising this agent the first time it restarts');
-  assert.match(script, /SESSION='claimed-one'/, 'the script does not name this agent as itself');
+  // The AGENT is now an argument rather than baked in, so what pins "as itself"
+  // is the job passing this agent's name and the script claiming "$SESSION".
+  const plist = fs.readFileSync(create.plistPath('claimed-one'), 'utf8');
+  assert.match(plist, /<string>claimed-one<\/string>/,
+    'the job does not tell the supervisor which agent it is for');
 
   // And the board agrees that this is a claim.
   assert.equal(status.isNamedOurs({ session: 'claimed-one', name: 'claimed-one', claim: 'claimed-one' }), true,
@@ -218,15 +235,17 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   assert.match(script, /--dangerously-skip-permissions/,
     'the agent will start, look healthy, and freeze on its first permission prompt');
 
-  // The job has to RUN that script, not the thing it replaced.
-  const plist = fs.readFileSync(create.plistPath('claimed-one'), 'utf8');
-  assert.match(plist, /start\.sh/, 'the job does not run the startup script');
+  // The job has to RUN the shared supervisor, not a per-agent copy.
+  assert.match(plist, /agent-supervisor\.sh/, 'the job does not run the supervisor');
   assert.doesNotMatch(plist, /new-session/,
     'the job still starts tmux itself, which is the respawn loop this replaced');
+  assert.ok(!fs.existsSync(nodePath.join(create.workerDir('claimed-one'), 'start.sh')),
+    'a per-agent copy of the supervisor is still being written, so a fix here '
+    + 'would reach only the agents created afterwards');
 
-  // Executable, or "a real file you can run" is true only for us.
-  assert.ok(fs.statSync(create.launcherFile('claimed-one')).mode & 0o100,
-    'the startup script is not executable');
+  // Installed, in one place, executable.
+  assert.ok(fs.existsSync(create.supervisorPath()), 'the supervisor was never installed');
+  assert.ok(fs.statSync(create.supervisorPath()).mode & 0o100, 'the supervisor is not executable');
 });
 
 test('the agent is started the same way it will be started every time after', () => {
@@ -454,17 +473,17 @@ test('a machine we cannot ask about running agents is refused, not risked', () =
   assert.ok(calls.length > 0, 'a creation that reported success ran no commands');
 });
 
-test('the one place a name becomes shell text cannot carry anything a shell would read', () => {
-  // ⚠️ NEW SURFACE, and it is worth being explicit about. Every command this
-  // module runs is still `execFile` with an argument array, but it now GENERATES
-  // a bash script with the agent's name in it, and a generated script is text a
-  // shell will read. There is no supervising the agent without one: launchd
-  // must run something that outlives `tmux new-session -d`.
+test('a name never becomes shell text, and the validator still holds if it ever does', () => {
+  // ⚠️ THE SURFACE IS GONE, which is the main thing the shared supervisor buys
+  // beyond reviewability. The name used to be interpolated into a generated
+  // bash script; it is now an ARGUMENT, so nothing about it is ever read by a
+  // shell. The assertions at the bottom pin that it stayed gone.
   //
-  // So the safety is the validator, and this pins it as a PROPERTY rather than
-  // as a list of attacks I happened to think of: anything `nameProblem` accepts
-  // is made only of lower-case letters, digits, hyphen and underscore — a set
-  // with no quote, no space, no metacharacter, no newline.
+  // The property below is kept anyway. It is what the safety rested on before,
+  // it costs nothing, and the name still becomes a directory, a service label
+  // and a tmux session: anything `nameProblem` accepts is made only of
+  // lower-case letters, digits, hyphen and underscore — a set with no quote, no
+  // space, no metacharacter, no newline.
   const alphabet = ' \t\n\'"`$();|&<>*?![]{}\\/#~^%+=:,.@abzAZ09_-';
   let accepted = 0;
   for (const ch of alphabet) {
@@ -479,7 +498,8 @@ test('the one place a name becomes shell text cannot carry anything a shell woul
         // every caller happening to trim the same way. `cleanName` is now the
         // one trim, and this asserts the thing that actually matters.
         assert.match(create.cleanName(candidate), /^[a-z0-9][a-z0-9_-]*$/,
-          `'${candidate}' was accepted as a name and would reach the startup script as shell text`);
+          `'${candidate}' was accepted as a name, and it still becomes a directory, `
+          + 'a service label and a tmux session');
       }
     }
   }
@@ -488,10 +508,15 @@ test('the one place a name becomes shell text cannot carry anything a shell woul
   // this test while breaking the product.
   assert.ok(accepted > 0, 'no candidate was accepted, so the assertions above never ran');
 
-  // And it is quoted anyway, on top of a validator that has already made the
-  // quoting unnecessary.
-  assert.match(create.launcherFor('safe-name', '/bin/claude', '/opt/homebrew/bin/tmux'),
-    /SESSION='safe-name'/, 'the name is not quoted in the generated script');
+  // ⚠️ AND THE SURFACE STAYED CLOSED. The supervisor takes its agent as an
+  // argument, so there is nothing to quote and nothing to escape. A future
+  // version that goes back to writing the name into the script would put the
+  // whole class back, and this is what would notice.
+  const script = supervisorText();
+  assert.match(script, /SESSION="\$\{1/, 'the supervisor does not take its agent as an argument');
+  assert.doesNotMatch(script, /SESSION='/,
+    'the supervisor interpolates a name into shell text again, which is the surface '
+    + 'removing the per-agent script was meant to close');
 });
 
 test('the board can read the identity the creation writes, for every role', () => {
@@ -571,14 +596,14 @@ test('a write that fails stops the creation instead of loading a job that cannot
   const realWrite = fs.writeFileSync;
   try {
     fs.writeFileSync = (file, ...rest) => {
-      if (String(file).endsWith('start.sh')) throw new Error('disk full');
+      if (String(file).endsWith('CLAUDE.md')) throw new Error('disk full');
       return realWrite(file, ...rest);
     };
     const r = create.createAgent({ ...BINS, name: 'half-made', role: 'pm' });
 
     assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'a half-written agent was reported as created');
     assert.match(r.because, /could not write everything/);
-    assert.ok(r.steps.some((s) => s.label === 'wrote its startup script' && !s.ok),
+    assert.ok(r.steps.some((s) => s.label === 'wrote its instructions' && !s.ok),
       'the failing step is not visible in the record');
     assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
       'the job was loaded anyway, so launchd now retries a missing script every thirty seconds');
@@ -602,7 +627,7 @@ test('the startup script will not kill a session it cannot prove is ours', () =>
   // have had it destroyed with no warning by a job installed weeks earlier. The
   // board refuses to act on any pane it cannot tie to a name; a script that
   // kills one is that rule broken from the outside.
-  const script = create.launcherFor('careful', '/bin/echo', '/bin/echo');
+  const script = supervisorText();
 
   // ⚠️ The ORDER of these two lines is no longer asserted here, and that is a
   // correction rather than a loss. Comparing line indexes matched the words
@@ -635,8 +660,9 @@ test('the startup script names its session exactly, not by prefix', () => {
   //
   // The creation-time roster check cannot catch this: it compares exact names in
   // JavaScript, and the prefix match happens later, inside tmux.
-  const script = create.launcherFor('sam', '/bin/echo', '/bin/echo');
-  assert.match(script, /TARGET="=sam"/, 'the script does not build an exact-match target');
+  const script = supervisorText();
+  assert.match(script, /TARGET="=\$SESSION"/,
+    'the supervisor does not build an exact-match target from the agent it was given');
 
   // ⚠️ MEASURED, not assumed, on tmux 3.6a: `has-session` and `kill-session`
   // accept the exact-match "=name" form, and `set-option`, `show-options` and
@@ -751,9 +777,13 @@ case "$1" in
 esac
 `, { mode: 0o755 });
 
-  const script = nodePath.join(dir, 'start.sh');
-  fs.writeFileSync(script, create.launcherFor('probe', '/bin/echo', fake), { mode: 0o755 });
-  require('node:child_process').execFileSync('/bin/bash', [script], { timeout: 20000, stdio: 'pipe' });
+  // ⚠️ The SHIPPED script, run with the same arguments the launchd job passes.
+  // Not a copy, not a regenerated string: the file that actually runs.
+  require('node:child_process').execFileSync(
+    '/bin/bash',
+    [create.supervisorSource(), 'probe', nodePath.join(dir, 'work'), '/bin/echo', fake, nodePath.join(dir, 'agent.log')],
+    { timeout: 20000, stdio: 'pipe' },
+  );
   const calls = fs.readFileSync(log, 'utf8').trim().split('\n');
   fs.rmSync(dir, { recursive: true, force: true });
   return calls;
@@ -881,7 +911,7 @@ test('a creation that fails leaves nothing behind, so the same name can be tried
     recorder();
     create.setDryRun(false);
     fs.writeFileSync = (file, ...rest) => {
-      if (String(file).endsWith('start.sh')) throw new Error('disk full');
+      if (String(file).endsWith('CLAUDE.md')) throw new Error('disk full');
       return realWrite(file, ...rest);
     };
     const halfWritten = create.createAgent({ ...BINS, name: 'rollback-a', role: 'pm' });
@@ -1003,4 +1033,65 @@ test('a name that shares a KEY with a live session is refused, not just an ident
   status.setPaneSource(() => 'my.bot-discord\t0.0\t2.1.212\t0\t\tidle');
   assert.equal(create.createAgent({ ...BINS, name: 'other-bot', role: 'pm' }).outcome,
     create.OUTCOME.CREATED, 'every name is refused while that session runs, so the above proves nothing');
+});
+
+test('the supervisor is installed once and shared, not copied per agent', () => {
+  // ⚠️ THE WHOLE POINT OF THE CHANGE. Each agent used to get its own copy of a
+  // 151-line generated script, so every defect in it shipped as many times as
+  // there were agents and every FIX reached only the ones created afterwards --
+  // the agents already on the machine kept their copy of the bug forever.
+  recorder();
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name: 'shared-one', role: 'pm' });
+  create.createAgent({ ...BINS, name: 'shared-two', role: 'writer' });
+
+  for (const name of ['shared-one', 'shared-two']) {
+    assert.ok(!fs.existsSync(nodePath.join(create.workerDir(name), 'start.sh')),
+      `${name} has its own copy of the supervisor`);
+    const plist = fs.readFileSync(create.plistPath(name), 'utf8');
+    assert.match(plist, new RegExp(create.supervisorPath().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${name}'s job does not run the shared supervisor`);
+    assert.match(plist, new RegExp(`<string>${name}</string>`),
+      `${name}'s job does not tell the supervisor which agent it is for`);
+  }
+
+  // ⚠️ AND IT IS REFRESHED. Installing only when absent would mean a fix never
+  // reaches a machine that already has an older copy, which is the same defect
+  // one level up: the file would be shared and still stale.
+  fs.writeFileSync(create.supervisorPath(), '# an older version\n', 'utf8');
+  create.createAgent({ ...BINS, name: 'shared-three', role: 'pm' });
+  assert.equal(fs.readFileSync(create.supervisorPath(), 'utf8'),
+    fs.readFileSync(create.supervisorSource(), 'utf8'),
+    'an older supervisor was left in place, so every agent keeps running it');
+});
+
+test('a supervisor that cannot be installed stops the creation', () => {
+  // ⚠️ A job pointing at a script that is not there IS the respawn loop: bash
+  // exits at once and KeepAlive retries every thirty seconds for as long as the
+  // machine is on. So this refuses before the job is written, and rolls back.
+  const calls = recorder();
+  create.setDryRun(false);
+  const realCopy = fs.copyFileSync;
+  try {
+    fs.copyFileSync = () => { throw new Error('read-only'); };
+    const r = create.createAgent({ ...BINS, name: 'no-supervisor', role: 'pm' });
+    assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'it created an agent with no supervisor to run it');
+    assert.ok(r.steps.some((s) => /startup script/.test(s.label) && !s.ok),
+      'the failing step is not visible in the record');
+    // ⚠️ This holds through the ROLLBACK as much as through the write ordering,
+    // and saying so matters: removing the gate that stops the job being written
+    // leaves this assertion green, because the rollback removes it either way.
+    // The load-bearing assertion is the next one -- nothing was ever STARTED.
+    assert.ok(!fs.existsSync(create.plistPath('no-supervisor')),
+      'a job pointing at a supervisor that is not there was left on the machine');
+    assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0, 'it started something anyway');
+  } finally {
+    fs.copyFileSync = realCopy;
+  }
+
+  // THE CONTROL: with the copy working, the same name goes through.
+  recorder();
+  create.setDryRun(false);
+  assert.equal(create.createAgent({ ...BINS, name: 'no-supervisor', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'this name is refused whatever happens, so the above proves nothing');
 });
