@@ -58,6 +58,15 @@ const STATE = { CONNECTED: 'connected', NONE: 'none', UNKNOWN: 'unknown' };
  */
 const SUBSCRIBED_ORG_TYPES = ['claude_max', 'claude_pro', 'claude_team', 'claude_enterprise'];
 
+/**
+ * The plans we positively recognise as NOT subscribed.
+ *
+ * ⚠️ A SECOND LIST, and it exists so that `none` is something we assert rather
+ * than something we fall through to. Anything named that is on neither list is
+ * a plan we have not seen, and the honest answer for that is `unknown`.
+ */
+const UNSUBSCRIBED_ORG_TYPES = ['claude_free', 'free'];
+
 function readConfig() {
   let raw;
   try {
@@ -94,7 +103,9 @@ function check() {
   }
 
   const acct = got.data && got.data.oauthAccount;
-  if (!acct || typeof acct !== 'object') {
+  // ⚠️ `Array.isArray` too: `typeof [] === 'object'`, so an array slipped past
+  // this guard and fell all the way through to the flat negative.
+  if (!acct || typeof acct !== 'object' || Array.isArray(acct)) {
     /**
      * ⚠️ UNKNOWN, NOT NONE. A config with no account block might mean nobody
      * has signed in — or it might mean a shape we have not seen. The first is
@@ -121,18 +132,37 @@ function check() {
   }
 
   /**
-   * ⚠️ A SUBSCRIPTION WE DO NOT RECOGNISE IS NOT THE ABSENCE OF ONE.
+   * ⚠️ A SUBSCRIPTION WE DO NOT RECOGNISE IS NOT THE ABSENCE OF ONE — AND THAT
+   * RULE WAS GATED ON THE ONE FIELD THIS MODULE DECIDED NOT TO DEPEND ON.
    *
-   * `billingType` says somebody is paying. If the org type is a value this
-   * list has not seen — a new plan, a rename — the honest answer is that we
-   * cannot tell, not that they have nothing. This list WILL go out of date;
-   * the question is which way it fails when it does.
+   * The first version only reached `unknown` when `billingType` was present.
+   * So an account whose `organizationType` we had never seen, with no billing
+   * field in that config shape, fell straight through to "no Claude
+   * subscription is connected on this computer yet" — the exact sentence the
+   * header at the top of this file says loses us a paying customer, reached
+   * through the exact gap the header warns about four lines further down
+   * ("any one of them can be absent in a config shape we have not seen…
+   * absence of a signal is not a negative signal").
+   *
+   * So the DEFAULT for a named-but-unrecognised plan is now `unknown`,
+   * whatever `billingType` says, and `none` is asserted only for plans we
+   * positively recognise as unsubscribed, or for an account naming no plan at
+   * all. This list will still go out of date; it now goes out of date in the
+   * direction that costs one click instead of a customer.
    */
+  if (org && !UNSUBSCRIBED_ORG_TYPES.includes(org)) {
+    return {
+      state: STATE.UNKNOWN,
+      plan: null,
+      because: `this computer has a Claude account we do not recognise the plan of (${org})`,
+    };
+  }
+
   if (billing) {
     return {
       state: STATE.UNKNOWN,
       plan: null,
-      because: `this computer has a Claude account we do not recognise the plan of (${org || 'no plan named'})`,
+      because: 'this computer has a Claude account we do not recognise the plan of (no plan named)',
     };
   }
 

@@ -243,6 +243,102 @@ async function fresh(browser, opts = {}) {
     await ctx.close();
   }
 
+  /* ------------------------------------------------------------------ */
+  console.log('\n11. The keyboard cannot get out of the dialog, in either direction');
+  {
+    const { ctx, page } = await fresh(browser);
+    // ⚠️ The two NEWEST safety mechanisms in this branch -- a Tab-wrap trap and
+    // a focusin backstop -- had no coverage of any kind. They are pure DOM
+    // behaviour, so this harness is the only thing that can exercise them.
+    const inside = () => page.evaluate(() =>
+      document.querySelector('#firstrun').contains(document.activeElement));
+    const where = () => page.evaluate(() => (document.activeElement
+      && (document.activeElement.id || document.activeElement.tagName)) || 'none');
+
+    /**
+     * ⚠️ `inert` IS TURNED OFF FIRST, AND WITHOUT THAT THIS WHOLE SECTION IS
+     * VACUOUS. Measured: with both focus mechanisms deliberately disabled, every
+     * assertion below still passed — because Chromium implements `inert`, and
+     * `inert` alone keeps Tab inside. The section was testing the browser, not
+     * the code.
+     *
+     * The Tab-wrap and the focusin backstop exist precisely FOR engines that do
+     * not implement `inert`, where `el.inert = true` is a property nobody reads.
+     * Clearing the attributes here reproduces exactly that machine, so what is
+     * measured below is the fallback rather than the thing it is a fallback for.
+     */
+    await page.evaluate(() => {
+      document.querySelectorAll('body > *').forEach((el) => { el.inert = false; el.removeAttribute('inert'); });
+    });
+    ok(await page.evaluate(() => !document.querySelector('body > header').inert),
+      'inert really is off, so what follows measures the fallback and not the browser');
+
+    ok(await inside(), 'focus starts inside the dialog (on ' + await where() + ')');
+
+    // Forward, well past the number of stops on any step.
+    let escaped = null;
+    for (let i = 0; i < 25 && escaped === null; i += 1) {
+      await page.keyboard.press('Tab');
+      if (!(await inside())) escaped = 'forward at press ' + (i + 1) + ' onto ' + await where();
+    }
+    ok(escaped === null, escaped || 'Tab never leaves the dialog');
+
+    // And backward, which is the direction the focusin-only version could not do.
+    escaped = null;
+    for (let i = 0; i < 25 && escaped === null; i += 1) {
+      await page.keyboard.press('Shift+Tab');
+      if (!(await inside())) escaped = 'backward at press ' + (i + 1) + ' onto ' + await where();
+    }
+    ok(escaped === null, escaped || 'Shift+Tab never leaves the dialog');
+
+    /**
+     * ⚠️ AND IT IS NOT A DEAD END EITHER. The focusin-only version pulled every
+     * escape back to the heading, so Shift+Tab could never REACH the action
+     * bar -- contained, but unusable. This asserts the buttons are actually
+     * reachable backwards.
+     */
+    const seen = new Set();
+    await page.evaluate(() => document.getElementById('fr-title').focus());
+    for (let i = 0; i < 8; i += 1) { await page.keyboard.press('Shift+Tab'); seen.add(await where()); }
+    ok(seen.has('fr-next'), 'Shift+Tab reaches the primary button (saw: ' + [...seen].join(', ') + ')');
+    ok(seen.has('fr-skip'), 'Shift+Tab reaches the way out');
+
+    // Every step, because the button set changes between them.
+    for (const step of [2, 3, 4]) {
+      await page.goto(`${BASE}/?first-run=1&fr-step=${step}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+      // Same reason as above: a reload restores inert, which would make the rest
+      // of this loop measure the browser again.
+      await page.evaluate(() => {
+        document.querySelectorAll('body > *').forEach((el) => { el.inert = false; el.removeAttribute('inert'); });
+      });
+      let out = null;
+      for (let i = 0; i < 20 && out === null; i += 1) {
+        await page.keyboard.press('Tab');
+        if (!(await inside())) out = await where();
+      }
+      ok(out === null, `step ${step}: Tab stays inside` + (out ? ' (escaped onto ' + out + ')' : ''));
+    }
+    await ctx.close();
+  }
+
+  /* ------------------------------------------------------------------ */
+  console.log('\n12. A machine-check body with nothing in it is not an empty screen');
+  {
+    for (const [what, body] of [['null', null], ['{}', {}], ['[]', []], ['no checks', { attention: 0, unknown: 0 }]]) {
+      const { ctx, page } = await fresh(browser, {
+        route: ['**/api/machine', (r) => r.fulfill({ json: body })],
+      });
+      await page.click('#fr-next');
+      await page.waitForTimeout(700);
+      const text = (await page.locator('#fr-checks').textContent()).trim();
+      ok(text.length > 0, `a ${what} body still says something (${text.slice(0, 40)})`);
+      ok(/could not check/i.test(text), `a ${what} body says we could not check, not nothing`);
+      ok(await page.isEnabled('#fr-next'), `a ${what} body does not strand anybody`);
+      await ctx.close();
+    }
+  }
+
   await browser.close();
   console.log('\n' + (fails.length ? `${fails.length} FAILURES:\n  ` + fails.join('\n  ') : 'all clear'));
   process.exit(fails.length ? 1 : 0);

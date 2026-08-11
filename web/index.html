@@ -683,9 +683,14 @@ svg { display: block; }
            new ones. <b>All of it runs on this computer.</b></p>
         <p>There is no account to make and no email to give. Nothing here signs
            you up for anything.</p>
+        <!-- ⚠️ THE THIRD CLAUSE USED TO BE "so you can always go back and read
+             it", and this app has no way to show anybody a transcript. The first
+             two clauses are the §7b statement the requirements ask to be made
+             here; the third was a capability claim, pointing a non-technical
+             person at a door that is not in the building. -->
         <p>Everything your agents do is written down and kept on this Mac, in
-           full, so you can always go back and read it. It is yours and it stays
-           here.</p>
+           full. It is yours, it stays here, and nothing of it is sent
+           anywhere.</p>
         <p class="fr-next">Next: a quick look at this computer, then Claude,
            then your agents.</p>
       </div>
@@ -3156,12 +3161,29 @@ async function frPaintMachine() {
     // to lose it. Only the LATEST request may hand it back.
     if (wasAgain && mine === FR_CHECKING) again.disabled = false;
   }
-  const checks = (got && got.checks) || [];
+  /**
+   * ⚠️ GUARDED ONCE, PROPERLY. The first version tested `got` for null on this
+   * line and then dereferenced it bare five lines down (`got.attention ||
+   * got.unknown`) -- outside the try, so a 200 whose body is `null` threw an
+   * unhandled rejection and left step 2 saying "Looking…" forever. A body of
+   * `{}` or `[]` rendered a titled, buttoned, empty pane, which is the shape
+   * two other guards in this file were written against.
+   */
+  const checks = (got && Array.isArray(got.checks)) ? got.checks : [];
+  if (!checks.length) {
+    box.innerHTML = '<div class="fr-check unknown"><div class="fr-mark">'
+      + '<span aria-hidden="true">?</span><span class="vh">could not check: </span></div>'
+      + '<div><div class="fr-ctitle">We could not check this computer</div>'
+      + '<div class="fr-cdetail">Nothing came back from the check, so we have nothing to '
+      + 'tell you about this Mac. That is not the same as it being fine.</div></div></div>';
+    FR_MACHINE = null;
+    return;
+  }
   FR_MACHINE = got;
   box.innerHTML = checks.map(frCheckRow).join('')
     // ⚠️ Says what to do about it, and says it is not a wall. §125: guide, do
     // not error — first run never blocks on anything it finds here.
-    + ((got.attention || got.unknown)
+    + (checks.some((c) => c.state !== 'ok')
       ? '<div class="fr-note">You can carry on either way. Nothing here stops you setting up '
         + 'an agent, and you can change any of it later.</div>'
       : '');
@@ -3171,9 +3193,14 @@ async function frPaintMachine() {
    * of what it counts, and false in the direction that sends somebody looking
    * for a problem that is not there.
    */
+  // ⚠️ Counted off the CHECKS we actually rendered, not off two numbers the
+  // payload happened to carry. A body whose `attention` disagreed with its rows
+  // would otherwise put a sentence on screen that the list above it contradicts.
+  const attention = checks.filter((c) => c.state === 'attention').length;
+  const unknown = checks.filter((c) => c.state !== 'attention' && c.state !== 'ok').length;
   const said = [];
-  if (got.attention) said.push(got.attention + (got.attention === 1 ? ' thing needs' : ' things need') + ' your attention');
-  if (got.unknown) said.push(got.unknown + (got.unknown === 1 ? ' thing we' : ' things we') + ' could not check');
+  if (attention) said.push(attention + (attention === 1 ? ' thing needs' : ' things need') + ' your attention');
+  if (unknown) said.push(unknown + (unknown === 1 ? ' thing we' : ' things we') + ' could not check');
   msg.textContent = said.join(', and ');
 }
 
@@ -3191,6 +3218,8 @@ async function frRecheck() {
    * list-panes`. The guard was written one screen away from the button that
    * also needed it.
    */
+  FR_CHECKING += 1;
+  const mine = FR_CHECKING;
   const again = document.getElementById('fr-alt');
   const wasAgain = !again.hidden;
   if (wasAgain) again.disabled = true;
@@ -3218,7 +3247,12 @@ async function frRecheck() {
     // not silently downgrade "connected" to anything.
     msg.textContent = 'We could not check again just now (' + err.message + ').';
   } finally {
-    if (wasAgain) again.disabled = false;
+    // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
+    // `#fr-alt` is one element that both steps relabel. With a token on one side
+    // only, step 2's late response handed the button back while step 3's request
+    // was still running -- and the comment claiming "only the latest request may
+    // hand it back" was true of one caller out of two.
+    if (wasAgain && mine === FR_CHECKING) again.disabled = false;
   }
 }
 
@@ -3439,6 +3473,13 @@ async function frFinish(then) {
   if (FR_FINISHING) return;
   FR_FINISHING = true;
   const next = document.getElementById('fr-next');
+  /**
+   * ⚠️ FOCUS MOVES BEFORE THE BUTTON GOES DEAD. Disabling the element that
+   * currently has focus drops the keyboard to `<body>` -- and `<body>` fires no
+   * `focusin`, so the backstop never recovers it. For up to eight seconds a
+   * keyboard user would be nowhere, behind an inert page.
+   */
+  if (document.activeElement === next) document.getElementById('fr-title').focus();
   next.disabled = true;
   let ok = false;
   let why = '';
