@@ -2,7 +2,7 @@
 pre_challenge: true
 method: challenge-loop
 branch: static-supervisor
-diff_hash: 8de2278c2fe78642f1adb74fb99b287af8d48bdb540510be97852b9def2a58b3
+diff_hash: 8698d8f5ef797ac4e9b441f0aed83649626ec75000a9d22f95f16584f008d9f6
 subdir_audit: n/a
 timestamp: 2026-08-11T05:31:48Z
 iterations: 2
@@ -16,6 +16,11 @@ converged: false
 small, contained follow-up to `create-an-agent` (which took 11 rounds), and the
 operator asked for it as a small PR overnight. The outstanding items are listed
 rather than closed.
+⚠️ **Recomputed after rebasing onto `main`.** The branch was stacked on
+`create-an-agent`, which merged as a squash, so replaying these commits onto the
+new `main` changed the diff this hash certifies. Checked rather than assumed —
+the same stale-hash trap as the sibling branch.
+
 **Total findings:** 20 actionable (3 BLOCKERs, 11 WARNINGs, 3 CONVENTIONs, 3 NITs)
 **Fixed:** 20 | **Deferred:** 0
 
