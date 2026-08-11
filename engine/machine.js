@@ -36,7 +36,15 @@ const STATE = { OK: 'ok', ATTENTION: 'attention', UNKNOWN: 'unknown' };
  */
 function run(cmd, args) {
   try {
-    return { ok: true, stdout: execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }) };
+    /**
+     * ⚠️ `maxBuffer` RAISED. `launchctl print gui/<uid>` emits 107 KB on this
+     * machine against a 1 MB default, and a busier login session can pass it --
+     * at which point `execFileSync` throws and a perfectly healthy machine
+     * reports "we could not tell whether your agents will start themselves".
+     * It fails to the safe side, but it fails for a reason that has nothing to
+     * do with the question.
+     */
+    return { ok: true, stdout: execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }) };
   } catch (err) {
     return { ok: false, because: String((err && err.message) || err) };
   }
@@ -116,7 +124,28 @@ function sleepCheck(text) {
   const battery = sections.get('Battery Power');
 
   const acSleep = sleepMinutes(ac);
+  const battFirst = battery ? sleepMinutes(battery) : null;
+
   if (acSleep === null) {
+    /**
+     * ⚠️ AND THE OTHER HALF, IN THIS DIRECTION TOO. The "report the known half
+     * first" fix was made below for an unreadable BATTERY section and not here
+     * for an unreadable AC one — so a laptop whose battery section says it
+     * sleeps after ten minutes, with an AC section we could not parse, came
+     * back as a flat "we could not tell whether this Mac goes to sleep",
+     * throwing away a measured and actionable finding. The same defect,
+     * mirrored, in the same function.
+     */
+    if (battFirst !== null && battFirst > 0) {
+      return {
+        key: 'sleep',
+        state: STATE.ATTENTION,
+        title: `This Mac goes to sleep on battery after ${battFirst} ${battFirst === 1 ? 'minute' : 'minutes'}`,
+        detail: 'Your agents stop when it sleeps. We could not read what it does while it is '
+          + 'plugged in, which may be different. You can see both in System Settings, under '
+          + 'Battery.',
+      };
+    }
     return {
       key: 'sleep',
       state: STATE.UNKNOWN,
@@ -155,8 +184,14 @@ function sleepCheck(text) {
       detail: 'Your agents stop when it sleeps and start again when you wake it. If you want '
         + 'them getting on with things while you are away, change Sleep to Never in System '
         + 'Settings.'
+        // ⚠️ The other power source, when there is one and it differs. Reporting
+        // only the AC number on a laptop that sleeps after one minute on battery
+        // names the longer of the two intervals and leaves the biting one unsaid.
         + (battery && batterySleep === null
-          ? ' We could not read what it does on battery, which may be different again.' : ''),
+          ? ' We could not read what it does on battery, which may be different again.'
+          : (battery && batterySleep > 0 && batterySleep !== acSleep
+            ? ` On battery it sleeps after ${batterySleep} ${batterySleep === 1 ? 'minute' : 'minutes'}.`
+            : '')),
     };
   }
 
@@ -225,6 +260,7 @@ function installedCheck(opts) {
 
   const missing = [];
   const unreadable = [];
+  const unusable = [];
   for (const [label, bin] of parts) {
     /**
      * ⚠️ `statSync`, NOT `existsSync`, AND THE DIFFERENCE IS THE WHOLE POINT OF
@@ -249,7 +285,14 @@ function installedCheck(opts) {
      * step 2 as "Everything it needs to run is installed" and was refused by
      * creation two screens later.
      */
-    if (create.unusablePath(bin)) { missing.push({ label, bin }); continue; }
+    /**
+     * ⚠️ ITS OWN BUCKET, because "We looked for tmux at <path>" is a sentence
+     * about an action nobody took. We refuse these on sight; if the binary
+     * really is sitting at that path, the person checks, finds it exactly where
+     * the screen says it is not, and the actual cause -- a quote or a newline in
+     * the path -- is never named anywhere.
+     */
+    if (create.unusablePath(bin)) { unusable.push({ label, bin }); continue; }
 
     /**
      * ⚠️ TWO PROBES, BECAUSE `EACCES` MEANS TWO DIFFERENT THINGS HERE and
@@ -307,6 +350,20 @@ function installedCheck(opts) {
    * won by arriving first — turning "Claude Code is missing" into "we could not
    * check", which is the safe-sounding answer to the wrong question.
    */
+  if (unusable.length) {
+    return {
+      key: 'installed',
+      state: STATE.ATTENTION,
+      title: unusable.length === 1
+        ? `We cannot use the path set for ${unusable[0].label}`
+        : 'We cannot use the paths set for the things it needs',
+      detail: 'An agent made now would not start. '
+        + unusable.map((u) => `The path for ${u.label} is ${u.bin}`).join(', and ')
+        + ' — a quote, a backslash or a line break in a path is something we will not pass on '
+        + 'to the parts of macOS that start an agent, whatever is at the end of it.',
+    };
+  }
+
   if (!missing.length && !unreadable.length) {
     return {
       key: 'installed',

@@ -510,3 +510,57 @@ test('nothing in here changes a setting', () => {
   assert.ok(!/\bsudo\b/.test(src.replace(/^\s*\*.*$/gm, '')),
     'machine.js now shells out to sudo');
 });
+
+test('an unreadable AC section does not throw away a readable battery one', () => {
+  /**
+   * ⚠️ THE SAME DEFECT, MIRRORED, IN THE SAME FUNCTION. The "report the known
+   * half first" fix was made for an unreadable BATTERY section and not for an
+   * unreadable AC one, so a laptop whose battery section says it sleeps after
+   * ten minutes came back as a flat "we could not tell whether this Mac goes
+   * to sleep" — discarding a measured, actionable finding because a different
+   * reading failed.
+   */
+  const acJunk = 'Battery Power:\n sleep                10\n\nAC Power:\n sleep                x\n';
+  const got = machine.sleepCheck(acJunk);
+  assert.equal(got.state, 'attention',
+    'a known battery sleep setting was demoted to "we could not tell" by an unreadable AC section');
+  assert.match(got.title, /battery/i);
+  assert.match(got.title, /10 minutes/);
+  assert.match(got.detail, /could not read what it does while it is plugged in/,
+    'said nothing about the half it genuinely could not read');
+
+  // The control: with BOTH unreadable there really is nothing to report.
+  const bothJunk = 'Battery Power:\n sleep                y\n\nAC Power:\n sleep                x\n';
+  assert.equal(machine.sleepCheck(bothJunk).state, 'unknown',
+    'invented a finding out of two unreadable sections');
+});
+
+test('when both power sources sleep, the shorter one is not left unsaid', () => {
+  // ⚠️ Reporting only the AC number on a laptop that sleeps after a minute on
+  // battery names the longer of the two intervals and hides the one that bites.
+  const got = machine.sleepCheck('Battery Power:\n sleep                1\n\nAC Power:\n sleep                5\n');
+  assert.equal(got.state, 'attention');
+  assert.match(got.title, /5 minutes/);
+  assert.match(got.detail, /On battery it sleeps after 1 minute/,
+    'the shorter interval went unmentioned');
+});
+
+test('a path we refuse on sight is not described as a path we looked at', () => {
+  /**
+   * ⚠️ "We looked for tmux at <path>" is a sentence about an action nobody
+   * took. These are refused on sight — so if the binary really is at that path,
+   * the person checks, finds it exactly where the screen says it is not, and
+   * the actual cause (a quote in the path) is named nowhere at all.
+   */
+  const quoted = `/opt/home${String.fromCharCode(39)}brew/bin/tmux`;
+  const create = require('./create');
+  assert.equal(create.unusablePath(quoted), true, 'the fixture is no longer a refused path');
+
+  const got = machine.installedCheck({ claudeBin: REAL_BIN, tmuxBin: quoted });
+  assert.equal(got.state, 'attention');
+  assert.ok(!/We looked for/.test(got.detail),
+    'claimed to have looked at a path it refused on sight');
+  assert.match(got.detail, /quote|backslash|line break/,
+    'never names the character that is actually the problem');
+  assert.match(got.title, /cannot use the path/i);
+});
