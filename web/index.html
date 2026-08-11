@@ -341,8 +341,11 @@ svg { display: block; }
    a transparent confirmation with the page legible through its own words -- and
    `font: var(--text-h2) …` dropped, leaving the heading at 13px normal weight.
    Two review rounds and a full suite passed it, because every test asserted the
-   modal's TEXT and nothing rendered it. `styleTokens` in server.test.js now
-   fails on any var() with no fallback that names a property `:root` lacks.
+   modal's TEXT and nothing rendered it. The test named 'no style rule depends on
+   a custom property that is never defined' now fails on any var() with no
+   fallback naming a property `:root` lacks. (This used to cite `styleTokens`,
+   a symbol that has never existed -- a pointer to a name that is not there, in
+   the file whose stated discipline is that a claim has to be checked.)
 
    Josh asked for this to be "a bit obnoxious so they really understand what
    they are doing", and that is the reason for the size and the weight rather
@@ -393,6 +396,10 @@ svg { display: block; }
 .removed-row .who { font: var(--text-body) var(--font-ui); color: var(--label); }
 .removed-row .when { font: var(--text-callout) var(--font-ui); color: var(--label-2);
                      margin-right: auto; }
+/* A restore that half-worked, said on the row it happened to. Full width so it
+   wraps under the name rather than squeezing the Restore button off the end. */
+.removed-row .rowmsg { flex-basis: 100%; font: var(--text-callout) var(--font-ui);
+                       color: var(--label); }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .edit .icon { width: 15px; height: 15px; }
@@ -1615,7 +1622,23 @@ async function loadRemoval(sessionName) {
    * is built against, in the one place where the answer decides whether
    * something gets taken away.
    */
-  if (!reached) return;
+  if (!reached) {
+    /**
+     * ⚠️ SAYS SO, rather than leaving the section absent.
+     *
+     * Returning silently was right about the important half — a board we could
+     * not reach is not a fact about this agent, and claiming "we cannot remove
+     * this agent" from a failed fetch is the inversion this codebase is built
+     * against. But it made the whole Remove section vanish, and the sibling
+     * branch twelve lines down states the rule it broke: *says WHY rather than
+     * simply not being there. Somebody looking for this deserves an answer.*
+     * Both can be true — say we could not find out, and offer nothing.
+     */
+    box.hidden = false;
+    hint.textContent = 'We could not reach the board just now, so we cannot tell you whether this agent can be removed. It will come back on its own.';
+    document.getElementById('d-remove-start').hidden = true;
+    return;
+  }
 
   box.hidden = false;
   if (ask && ask.ok) {
@@ -1992,6 +2015,46 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
       // failed and a restore that worked must not look the same.
       btn.disabled = false;
       btn.textContent = 'Restore failed — try again';
+      return;
+    }
+    /**
+     * ⚠️ A PARTIAL RESTORE IS NOT A SUCCESS, and this branch is why the sibling
+     * remove handler spends a paragraph on the same point.
+     *
+     * `partial` used to fall straight through to the success path, and it broke
+     * in two different directions depending on WHICH half failed:
+     *
+     *   the list-write failed -> the record is still there, so `/api/removed`
+     *     is unchanged, so the markup `paintRemoved` generates is byte-identical
+     *     and the change guard correctly skips the rewrite -- leaving this row
+     *     showing the disabled "Restoring…" this handler set, with no way back
+     *     until some other agent is removed or the page is reloaded. That is
+     *     the same trap the "AND FORGET WHAT WAS DRAWN" note describes for the
+     *     empty list, reached by a path that note does not cover.
+     *
+     *   the start failed -> the row vanishes as though it restored cleanly, and
+     *     "we could not start it again. It may need starting by hand" is never
+     *     shown anywhere at all.
+     *
+     * ⚠️ `REMOVED_HTML` is cleared, or the guard would skip the repaint that
+     * has to happen after this row is put back into a usable state.
+     */
+    if (back.outcome === 'partial') {
+      btn.disabled = false;
+      btn.textContent = 'Restore';
+      const row = btn.closest('.removed-row');
+      if (row) {
+        let note = row.querySelector('.rowmsg');
+        if (!note) {
+          note = document.createElement('span');
+          note.className = 'rowmsg';
+          note.setAttribute('role', 'alert');
+          row.appendChild(note);
+        }
+        note.textContent = back.because || 'The restore did not finish.';
+      }
+      REMOVED_HTML = null;
+      await tick();
       return;
     }
     await tick();

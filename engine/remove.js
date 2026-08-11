@@ -13,11 +13,18 @@
  * "this cannot be undone", no list of consequences to weigh. The person is
  * deciding whether to see this agent in Kosmos, not whether to destroy it.
  *
- * ⚠️ AND IT WORKS ON EVERY AGENT ON THE BOARD, including ones another tool
- * created. An earlier version refused those because we had not made them. That
- * is wrong for this product: Kosmos manages a fleet, and a fleet agent it
- * cannot manage is a hole rather than a safeguard. What it does not do is
- * destroy anything of theirs — it stops them, and it can start them again.
+ * ⚠️ AND IT WORKS ON EVERY AGENT, including ones another tool created. An
+ * earlier version refused those because we had not made them. That is wrong for
+ * this product: Kosmos manages a fleet, and a fleet agent it cannot manage is a
+ * hole rather than a safeguard. What it does not do is destroy anything of
+ * theirs — it stops them, and it can start them again.
+ *
+ * ⚠️ "EVERY AGENT" IS NOT "EVERY CARD", and the earlier wording of this
+ * sentence said the second. The board draws a card for any pane running Claude,
+ * including a `tmux new -s notes` somebody opened by hand — and `plan` refuses
+ * those, because the board will not vouch that the session belongs to the agent
+ * whose name it is filed under. That refusal is right, so the promise narrows
+ * to match it rather than the other way round.
  *
  * ⚠️ Which puts the weight on RESTORE actually reversing. Removing an agent
  * another tool created disables a launchd job we did not write, so "reversible
@@ -190,6 +197,39 @@ function removedAgents() {
  * neither is reported as having no job rather than as having one we then fail
  * to stop.
  */
+/**
+ * Does this exact path exist, spelled exactly this way?
+ *
+ * ⚠️ `fs.existsSync` IS NOT AN ANSWER TO THAT QUESTION ON THIS PLATFORM. macOS
+ * volumes are case-insensitive by default (verified on this machine), so
+ * `existsSync` happily resolves `.../CASEY` to `casey`'s real file.
+ *
+ * That is not cosmetic here, because every step AFTER the probe keys on the
+ * exact string the caller passed. Measured, in a sandbox, against a real
+ * `casey` agent running in tmux:
+ *
+ *     remove('CASEY') -> "casey has been removed from Kosmos."
+ *     commands run:      disable gui/501/com.kosmos.agent.CASEY
+ *                        bootout gui/501/com.kosmos.agent.CASEY
+ *     isHidden('casey') = false
+ *
+ * So: the screen names a live agent as removed, NOTHING is done to that agent,
+ * and a **persistent disabled override is written into launchd's per-user
+ * database under a label that has never existed** -- with no file anywhere
+ * recording it, which is precisely the invisible state the README's `enable`
+ * paragraph exists to warn about.
+ *
+ * Asking the DIRECTORY for its real entry names is the only way to get a
+ * case-sensitive answer out of a case-insensitive volume.
+ */
+function existsExactly(full) {
+  try {
+    return fs.readdirSync(path.dirname(full)).includes(path.basename(full));
+  } catch {
+    return false;
+  }
+}
+
 function jobFor(name) {
   const clean = create.cleanName(name);
   const candidates = [
@@ -200,9 +240,11 @@ function jobFor(name) {
       ours: false,
     },
   ];
-  return candidates.find((c) => {
-    try { return fs.existsSync(c.plist); } catch { return false; }
-  }) || null;
+  // ⚠️ `existsExactly`, not `existsSync`: see its note. A case-variant spelling
+  // resolves to the REAL agent's plist here and then every step below acts on
+  // the variant, disabling a launchd label that does not exist while the real
+  // agent keeps running.
+  return candidates.find((c) => existsExactly(c.plist)) || null;
 }
 
 /**
@@ -353,9 +395,9 @@ function isHidden(name) {
  */
 function exists(clean) {
   if (jobFor(clean)) return true;
-  try {
-    if (fs.existsSync(create.workerDir(clean))) return true;
-  } catch { /* an unreadable path is not evidence of absence, so fall through */ }
+  // ⚠️ Exact spelling again. Without it `exists('CASEY')` is true because
+  // `casey`'s folder answers, and the removal proceeds under the wrong name.
+  if (existsExactly(create.workerDir(clean))) return true;
   // ⚠️ An unreachable tmux is UNKNOWN, and the caller says so in those words.
   // Returning a bare false here made `plan` answer "we cannot find an agent
   // called X" — an assertion of absence derived from a question that was never
@@ -504,7 +546,16 @@ function plan(name) {
     return { ok: false, because: `we could not check whether ${shown} is still there, so we have not offered to remove it. Try again in a moment.` };
   }
   if (!there) {
-    return { ok: false, because: `we cannot find an agent called ${shown}.` };
+    /**
+     * ⚠️ SAYS THE NAME THEY ASKED FOR, not `shown`. Everywhere else the display
+     * name is the friendlier of two true names for one agent -- but here there
+     * is no agent, so `shown` is whatever `readIdentity` picked up reading a
+     * case-insensitive path, and it would name a DIFFERENT, living agent:
+     * "we cannot find an agent called casey" in answer to a request for CASEY,
+     * while casey is on the board. The one refusal that must use the requested
+     * spelling is the one that says nothing by that name is here.
+     */
+    return { ok: false, because: `we cannot find an agent called ${clean}.` };
   }
   /**
    * ⚠️ THE QUESTION USES THE NAME ON THE CARD, NOT THE NAME ON THE MACHINE.

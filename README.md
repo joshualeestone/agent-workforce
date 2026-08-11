@@ -39,10 +39,17 @@ on the confirmation means, and it is meant literally.
 at the bottom of the Agents tab, each with a Restore button that re-enables the
 same startup job that was disabled.
 
-It removes agents it did not create, too. The board shows every agent on this
-machine, and being able to manage the ones you already have is the point — so
-a startup file another tool wrote is disabled rather than deleted, and Restore
-turns exactly that one back on.
+It removes agents it did not create, too. Being able to manage the ones you
+already have is the point — so a startup file another tool wrote is disabled
+rather than deleted, and Restore turns exactly that one back on.
+
+⚠️ **With one limit, and it is deliberate.** The board also draws a card for any
+tmux session that merely happens to be running Claude — a `tmux new -s notes`
+you opened yourself. Kosmos will not remove one of those: it cannot tell that
+the session belongs to the agent whose name it is filed under, and stopping it
+could stop the wrong thing. The screen says so where the Remove control would
+otherwise be. Every agent Kosmos made, and every one another tool set up
+properly, is removable; a card the board cannot vouch for is not.
 
 It cannot stop or message an agent yet.
 

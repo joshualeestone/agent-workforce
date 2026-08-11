@@ -2493,8 +2493,18 @@ test('no style rule depends on a custom property that is never defined', () => {
      */
     const live = html.replace(/\/\*[\s\S]*?\*\//g, ' ');
     const css = live.slice(live.indexOf('<style'), live.indexOf('</style>'));
-    // Anything declared inside a `:root` block, including the ones nested in
-    // `@media (prefers-color-scheme: dark)` and `(prefers-contrast: more)`.
+    /**
+     * ⚠️ EVERY declaration in the stylesheet, not only the ones inside `:root`
+     * -- and the comment here used to claim the narrower thing while the regex
+     * did the wider one.
+     *
+     * Latent today (checked: every custom property in this file IS declared in
+     * a `:root` block), and it matters the day one is not: a property defined
+     * only inside `.foo {}` would count as globally defined here, so a `var()`
+     * on it elsewhere would pass this check while still resolving to nothing --
+     * exactly the failure the test exists to catch. Said accurately rather than
+     * left as a guard whose comment is stronger than its code.
+     */
     const defined = new Set();
     for (const m of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1]);
     /**
@@ -2623,6 +2633,60 @@ test('an agent whose card shows a different name than its session still leaves t
     status.setPaneCapture(null);
   }
 });
+
+test('a half-removed agent is on the removed list AND still on the board', async () => {
+  /**
+   * ⚠️ THE ONE PREDICATE THAT KEEPS A POSSIBLY-RUNNING AGENT VISIBLE, and until
+   * this test nothing held it: deleting `stopped !== false` from the board
+   * filter (so every removed record hides its card) left the whole suite green.
+   *
+   * That filter is the entire reason `isRemoved` and `isHidden` are separate
+   * questions. A removal that half worked is recorded — so there is a Restore
+   * button — and its agent may still be going, so its card must stay. Hiding a
+   * running agent is the one thing this board must never do.
+   *
+   * The nearest existing test asserts the partial appears in `/api/removed` and
+   * stops there, which is exactly half of the property.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'half-visible';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Half**.\n', 'utf8');
+  fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // `bootout` refuses: disabled, but not stopped. The half-removal.
+  removal.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    // ⚠️ CONTROL: it is on the board BEFORE the removal, or "it is still there
+    // afterwards" is true of a board that never had it.
+    const before = JSON.parse((await req('/api/status')).body).agents;
+    assert.ok(before.some((a) => a.sessionName === name), 'the control failed: it was never on the board');
+
+    const gone = removal.remove(name);
+    assert.equal(gone.outcome, removal.OUTCOME.PARTIAL, gone.because);
+
+    const listed = JSON.parse((await req('/api/removed')).body).agents.find((a) => a.name === name);
+    assert.ok(listed, 'a half-removal is on no list, so it has no Restore button and no way back');
+    assert.equal(listed.stopped, false, 'a half-removal was recorded as stopped');
+
+    const after = JSON.parse((await req('/api/status')).body).agents;
+    assert.ok(after.some((a) => a.sessionName === name),
+      'an agent that may still be running was hidden from the board, which is the one thing it must never do');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 
 test('a job that is disabled but will not unload is recorded, not reported as untouched', async () => {
   /**

@@ -974,3 +974,140 @@ test('an agent stopped but never recorded is told where its way back is', () => 
     fs.rmSync(remove.REMOVED_FILE, { force: true });
   }
 });
+
+test('a case-variant spelling cannot report a live agent removed while touching nothing', () => {
+  /**
+   * ⚠️ macOS VOLUMES ARE CASE-INSENSITIVE BY DEFAULT, so `fs.existsSync` on a
+   * path built from `CASEY` resolves `casey`'s real plist and real folder --
+   * while every step after the probe keys on the exact string. Measured before
+   * the fix, in a sandbox, against a real agent running in tmux:
+   *
+   *     remove('CASEY') -> removed | "casey has been removed from Kosmos."
+   *     commands run:      disable gui/501/com.kosmos.agent.CASEY
+   *                        bootout gui/501/com.kosmos.agent.CASEY
+   *     isHidden('casey') = false
+   *
+   * Three separate harms from one probe: the screen names a LIVE agent as
+   * removed; nothing is done to that agent; and a persistent disabled override
+   * is written into launchd's per-user database under a label that has never
+   * existed, with no file anywhere recording it. That last one is exactly the
+   * invisible state the README's `enable` paragraph warns about.
+   *
+   * ⚠️ Every other fixture in both test files uses the exact spelling, which is
+   * why nothing saw this. The whole point of this test is the spelling.
+   */
+  const name = madeAgent('cased');
+  boardShows(name, name);
+  const calls = world();
+  remove.setDryRun(false);
+
+  /**
+   * ⚠️ CONTROL: the platform really does behave this way, or the test passes
+   * for the wrong reason on a case-SENSITIVE volume and silently stops covering
+   * anything the day the code regresses.
+   */
+  assert.ok(fs.existsSync(create.workerDir('CASED')),
+    'this volume is case-sensitive, so this test is not exercising the hazard it was written for');
+
+  const r = remove.remove('CASED');
+
+  assert.equal(r.outcome, remove.OUTCOME.REFUSED, `an alias spelling was accepted: ${r.because}`);
+  assert.match(r.because, /cannot find an agent called CASED/,
+    'the refusal names a different, living agent than the one that was asked about');
+  assert.deepEqual(calls, [],
+    'it ran launchctl against a label that does not exist, leaving a disabled override nothing records');
+  assert.equal(remove.isRemoved('CASED'), false, 'it filed a removal record for an agent that does not exist');
+  assert.equal(remove.isHidden(name), false, 'the real agent was hidden by a request that never named it');
+  assert.equal(remove.isRemoved(name), false, 'the real agent was recorded as removed');
+});
+
+test('a restore that cannot clear the removed list says so, and says which half failed', () => {
+  /**
+   * ⚠️ THIS BRANCH WAS DEAD TO THE SUITE. Short-circuiting it — so a failed
+   * list-write reported RESTORED — left all 331 tests green, and neither of its
+   * two sentences appeared anywhere in either test file.
+   *
+   * It matters because of what the SCREEN does with the answer: the record is
+   * still on the list, so `/api/removed` is unchanged, so the row's markup is
+   * unchanged, so the poll's change-guard correctly declines to repaint — and
+   * the row keeps the disabled "Restoring…" the click handler set. A restore
+   * reported as successful there is an undo button that is now dead.
+   */
+  const name = madeAgent('stuck-forget');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const dir = nodePath.dirname(remove.REMOVED_FILE);
+  remove.setRunner(() => ({ ok: true, stdout: '' }));   // the enable succeeds
+  remove.setDryRun(false);
+  fs.chmodSync(dir, 0o500);
+  try {
+    // ⚠️ CONTROL: the list really cannot be rewritten, and it really is still
+    // readable — or this is the read-refusal path in disguise.
+    assert.ok(fs.readFileSync(remove.REMOVED_FILE, 'utf8').includes(name),
+      'the record is not there to be cleared, so this proves nothing');
+    assert.throws(() => fs.writeFileSync(nodePath.join(dir, 'probe.tmp'), 'x'),
+      'the directory is writable, so the failure under test cannot occur');
+
+    const r = remove.restore(name);
+    assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+      'a restore that could not clear the removed list reported success, leaving a dead undo button');
+    assert.match(r.because, /may still be hidden/,
+      'it does not say the agent is still hidden, which is the visible symptom');
+    assert.equal(remove.isRemoved(name), true, 'the control failed: the record went away after all');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(remove.REMOVED_FILE, { force: true });
+  }
+});
+
+test('when BOTH halves of a restore fail, it does not claim the agent was started', () => {
+  // ⚠️ The two failures are independent and this branch used to speak for one:
+  // it opened with "we started <name> again" while the enable had just been
+  // watched to fail, and the "may need starting by hand" sentence never
+  // rendered because this return came first.
+  const name = madeAgent('both-failed');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+
+  const dir = nodePath.dirname(remove.REMOVED_FILE);
+  remove.setRunner((file, args) => (args && args[0] === 'enable'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  fs.chmodSync(dir, 0o500);
+  try {
+    const r = remove.restore(name);
+    assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
+    assert.doesNotMatch(r.because, /we started .* again/,
+      'it claims the agent was started by code that had just watched the start fail');
+    assert.match(r.because, /could not start/, 'it does not say the start failed');
+    assert.match(r.because, /stays hidden and stopped/, 'it does not say what state the agent is left in');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(remove.REMOVED_FILE, { force: true });
+  }
+});
+
+test('the env var alone arms dry-run, not just a cleared runner', () => {
+  // ⚠️ The sibling test reaches the same `DRY_RUN && !runner` predicate through
+  // `setRunner(null)`, so the ENV arm — `process.env.AGENT_WORKFORCE_DRY_RUN
+  // === '1'` at module load — was never itself exercised. It is the arm an
+  // operator actually uses, and the one that can make the product report work
+  // it did not do.
+  const { execFileSync } = require('node:child_process');
+  const probe = 'const r = require(process.argv[1]); console.log(JSON.stringify(r.DRY_RUN));';
+  const withEnv = execFileSync(process.execPath, ['-e', probe, nodePath.join(__dirname, 'remove.js')],
+    { encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '1' } }).trim();
+  const without = execFileSync(process.execPath, ['-e', probe, nodePath.join(__dirname, 'remove.js')],
+    { encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '' } }).trim();
+
+  // ⚠️ Both directions in a FRESH process, because this file has already armed
+  // dry-run by the time any test in it runs.
+  assert.equal(withEnv, 'true', 'AGENT_WORKFORCE_DRY_RUN=1 does not arm dry-run, so a dev run does real work');
+  assert.equal(without, 'false', 'dry-run is the default, which makes the product silently do nothing');
+});
