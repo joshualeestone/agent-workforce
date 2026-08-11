@@ -10,6 +10,7 @@ const nodePath = require('node:path');
 // load, and the subscription check reads the operator's real Claude account.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'firstrun-test-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
+process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
 process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ } });
 
@@ -92,4 +93,32 @@ test('the subscription answer is carried through, not re-derived by the screen',
   const s = firstrun.state();
   assert.equal(s.subscription.state, 'connected');
   assert.equal(s.subscription.plan, 'Claude Max');
+});
+
+test('the agents it found are named the way the board names them', () => {
+  /**
+   * ⚠️ This came back as `[null, null, null, null]` on first run of the route:
+   * `paneRoster` cards carry `sessionName`, not a display name. The screen
+   * would have said "We found 4 agents" over four blank rows, and the route
+   * answered 200 throughout.
+   *
+   * The whole point of that screen is somebody recognising their own fleet.
+   * A count with no names is the version of it that proves nothing.
+   */
+  const fs2 = require('node:fs');
+  const create = require('./create');
+  fs2.mkdirSync(create.workerDir('namedagent'), { recursive: true });
+  fs2.writeFileSync(nodePath.join(create.workerDir('namedagent'), 'CLAUDE.md'),
+    'You are **Marcie**, a bookkeeper.\n', 'utf8');
+  status.setPaneSource(() => [pane('namedagent'), pane('unnamedagent')].join('\n'));
+
+  const s = firstrun.state();
+  assert.equal(s.fleetCount, 2);
+  assert.ok(s.fleetNames.every((n) => typeof n === 'string' && n.length),
+    `the screen would show blanks: ${JSON.stringify(s.fleetNames)}`);
+  assert.ok(s.fleetNames.includes('Marcie'),
+    'an agent with a real name is not shown by it, so nobody recognises their own fleet');
+  // ⚠️ And one with no instruction file falls back to something rather than
+  // nothing -- absence of a nice name is not absence of an agent.
+  assert.ok(s.fleetNames.includes('unnamedagent'));
 });

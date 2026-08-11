@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
+const firstrun = require('./engine/firstrun');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -874,6 +875,45 @@ const server = http.createServer((req, res) => {
     try { back = removal.restore(name); }
     catch (err) { sendJson(res, 500, { error: 'we could not put this agent back', detail: String(err && err.message || err) }); return; }
     sendJson(res, back.outcome === removal.OUTCOME.REFUSED ? 400 : 200, back);
+    return;
+  }
+
+  /**
+   * What first run should show, and whether it should show at all.
+   *
+   * ⚠️ One GET, answered by the engine, so the screen cannot disagree with the
+   * code about which path somebody is on or whether they are connected. The
+   * instruction editor shipped a version of that bug and it took two review
+   * passes to find.
+   */
+  if (pathname === '/api/first-run' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let state;
+    try { state = firstrun.state(); }
+    catch (err) {
+      sendJson(res, 500, { error: 'we could not work out whether this machine has been set up yet', detail: String(err && err.message || err) });
+      return;
+    }
+    sendJson(res, 200, state);
+    return;
+  }
+
+  // Marking it done. ⚠️ POST, because it writes -- so it inherits the
+  // cross-site guard above rather than being reachable from any page.
+  if (pathname === '/api/first-run/complete' && req.method === 'POST') {
+    let ok;
+    try { ok = firstrun.complete(); }
+    catch (err) {
+      sendJson(res, 500, { error: 'we could not remember that you have set this up', detail: String(err && err.message || err) });
+      return;
+    }
+    /**
+     * ⚠️ Reports whether it STUCK, read back, rather than whether the write
+     * threw. A flag that did not persist means onboarding reappears on the next
+     * launch, and the screen would rather say so now than surprise them then.
+     */
+    sendJson(res, ok ? 200 : 500, ok
+      ? { done: true }
+      : { error: 'we could not remember that, so this may appear again next time' });
     return;
   }
 
