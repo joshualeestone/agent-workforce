@@ -404,7 +404,7 @@ test('a name a live session already answers to is refused, even with no folder',
   const taken = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
 
   assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
-  assert.match(taken.because, /already an agent called casey/);
+  assert.match(taken.because, /something called casey is already running/);
   assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
     'a refused name still started a session');
   assert.ok(!fs.existsSync(create.workerDir('casey')), 'a refused name still made a folder');
@@ -977,4 +977,30 @@ test('a folder left behind on its own is refused, and says so', () => {
   assert.equal(fs.readFileSync(nodePath.join(create.workerDir('lonely-folder'), 'notes.md'), 'utf8'), 'mine',
     'it wrote into a folder that was already there');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'), 'it started an agent over an existing folder');
+});
+
+test('a name that shares a KEY with a live session is refused, not just an identical one', () => {
+  // ⚠️ Every name-keyed route resolves through `store.safeKey`, so `my.bot` and
+  // `mybot` are two names and ONE key: one instruction file, one avatar, one
+  // profile, one commitment record. Comparing raw session names let this create
+  // `mybot` beside a live `my.bot-discord`, and a write naming either then
+  // reached the other's boot file. This module's header exists to prevent that
+  // exact collision, and the gate was checking the wrong thing to enforce it.
+  const calls = recorder();
+  create.setDryRun(false);
+  status.setPaneSource(() => 'my.bot-discord\t0.0\t2.1.212\t0\t\tidle');
+
+  const r = create.createAgent({ ...BINS, name: 'mybot', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.REFUSED,
+    'a name that resolves to the same key as a live agent was accepted, so both '
+    + 'now share one instruction file');
+  assert.match(r.because, /already running/);
+  assert.match(r.because, /my\.bot-discord/,
+    'the refusal does not say which session it collides with, so the person cannot act on it');
+  assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0, 'it started something anyway');
+
+  // THE CONTROL: a name that shares no key goes through.
+  status.setPaneSource(() => 'my.bot-discord\t0.0\t2.1.212\t0\t\tidle');
+  assert.equal(create.createAgent({ ...BINS, name: 'other-bot', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'every name is refused while that session runs, so the above proves nothing');
 });

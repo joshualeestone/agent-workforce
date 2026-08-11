@@ -70,6 +70,15 @@ Most monitoring bugs are the same shape: the check cannot tell "fine" from
 "I can't see it", and shows green. Every value carries how it was determined,
 and a value we cannot stand behind is left out rather than guessed.
 
+⚠️ One deliberate narrowing, named here rather than left for you to find: an
+agent sitting at its own prompt is reported **idle** rather than unknown, on the
+evidence that Claude's own input box is on screen. That makes `unknown`
+effectively unreachable for a pane where Claude is running. It was worth it
+because an agent left waiting for you otherwise decayed into "we cannot see this
+one" as soon as its last output scrolled away, on the very card you had just
+created. The residual risk is a Claude whose interface has hung: it still draws
+that box. See `classify` in `engine/status.js`.
+
 ## A note on live data
 
 The status engine reads a real fleet doing real work. Pane titles and

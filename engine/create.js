@@ -56,6 +56,13 @@ const roles = require('./roles');
 // one fact. `status` does not require this module, so there is no cycle, and
 // its `setPaneSource` seam is what keeps these tests off the real machine.
 const status = require('./status');
+// ⚠️ The same key every name-keyed route resolves by. Comparing raw names let
+// this create `mybot` beside a live `my.bot-discord`: two names, one key, one
+// instruction file, one avatar, one commitment record -- so a write naming
+// either reached the other. This module's own header exists to prevent exactly
+// that ("a name that sanitises to something else means two names can become
+// one"), and the gate was checking the wrong thing to enforce it.
+const store = require('./store');
 
 const HOME = os.homedir();
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
@@ -94,7 +101,14 @@ function setDryRun(on) {
 function run(file, args) {
   if (runner) return runner(file, args);
   if (DRY_RUN) return { ok: true, stdout: '', dryRun: true };
-  return { ok: true, stdout: execFileSync(file, args, { encoding: 'utf8', timeout: 20000 }) };
+  // ⚠️ `stdio` pipes stderr rather than inheriting it. Without this, the
+  // `launchctl print` probe -- which fails for every FREE name, by design --
+  // printed "Could not find service" to the operator's console immediately
+  // before the board reported a successful creation.
+  return {
+    ok: true,
+    stdout: execFileSync(file, args, { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }),
+  };
 }
 
 /* ── names ───────────────────────────────────────────────────────────────── */
@@ -578,10 +592,26 @@ function createAgent(opts) {
       steps,
     };
   }
-  if (roster.some((p) => p.sessionName === name)) {
+  const wantedKey = (() => { try { return store.safeKey(name); } catch { return null; } })();
+  const clash = roster.find((p) => {
+    if (p.sessionName === name) return true;
+    if (!wantedKey) return false;
+    try { return store.safeKey(p.sessionName) === wantedKey; } catch { return false; }
+  });
+  if (clash) {
+    // ⚠️ Names the SESSION rather than asserting an agent exists. `paneRoster`
+    // covers every pane on the machine, so a person with a shell session called
+    // `notes` was told there was an agent called `notes`, which there is not --
+    // the same "refusal that names the wrong thing" the length rule was split
+    // out to avoid.
+    // Names the REAL tmux session, not the board name: the board name is the
+    // stripped form, so for `my.bot-discord` it would have said "this computer
+    // is running my.bot", which is not a session anybody can find.
+    const running = clash.session || clash.sessionName;
+    const also = running === name ? '' : ` (this computer is running ${running}, which the board files under the same name)`;
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already an agent called ${name}`,
+      because: `something called ${name} is already running on this computer${also}`,
       steps,
     };
   }

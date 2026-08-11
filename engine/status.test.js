@@ -1198,8 +1198,17 @@ test('an agent sitting at its prompt is idle, not unreadable', () => {
   const working = classify(pane, at_prompt + '\n  esc to interrupt');
   assert.equal(working.state, 'working', 'a working agent was reported as idle by its own footer');
 
+  // ⚠️ This pins the ORDERING and nothing else, and saying so matters. It
+  // passes because `NEEDS_YOU_MARKERS` is checked before the footer rule, and
+  // it would pass identically whether or not a real blocking dialog keeps the
+  // footer on screen. The premise the footer rule actually rests on -- that a
+  // dialog REPLACES the input box -- is asserted in `classify`'s comment and is
+  // not measured anywhere, because it is a claim about a UI this repo does not
+  // control. A prompt worded outside those five patterns, with the footer still
+  // drawn, would classify as idle. That is the known limit of this rule.
   const asking = classify(pane, at_prompt + '\n  Do you want to proceed? (y/N)');
-  assert.equal(asking.state, 'needs_you', 'an agent asking a question was reported as idle');
+  assert.equal(asking.state, 'needs_you',
+    'a question is not caught before the footer rule, so any blocking prompt would read as idle');
 
   // And a pane with no footer at all is still honestly unknown.
   const silent = classify(pane, 'some unrelated output\n');
@@ -1330,6 +1339,21 @@ test('a claimed session cannot displace the real agent that shares its name', ()
     setPaneSource(() => 'angel-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code');
     assert.equal(require('./status').paneRoster().filter((a) => a.sessionName === 'angel').length, 1,
       'the real agent does not resolve on its own, so the assertion above is vacuous');
+
+    // ⚠️ AND WHATEVER EACH IS RUNNING. The first version of this tie-break only
+    // preferred a suffixed pane that was running unambiguous Claude, so a real
+    // agent CRASHED to a shell still lost its name to a claimed impostor that
+    // was running -- the worst available case, because the crash is then hidden
+    // on the very card whose Restart button exists for it, while a write still
+    // reaches the real agent's boot file.
+    setPaneSource(() => [
+      'angel\t0.0\t2.1.212\t0\tangel\t✳ Claude Code',
+      'angel-discord\t0.0\t-zsh\t0\t\tzsh',
+    ].join('\n'));
+    const crashed = require('./status').paneRoster().filter((a) => a.sessionName === 'angel');
+    assert.equal(crashed.length, 1);
+    assert.equal(crashed[0].session, 'angel-discord',
+      'a claimed impostor took the name of a real agent that had crashed to a shell');
 
     // ⚠️ AND THE OTHER CONTROL: a claimed session with NO suffixed twin is
     // still ours. That is the whole point of the claim, and a tie-break that

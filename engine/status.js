@@ -557,12 +557,34 @@ function isNamedOurs(pane) {
  * (tier 3), still appears, and is still typeable. The name only settles a TIE
  * against a same-named session that does carry the suffix.
  */
-const RANK_SUFFIXED_RUNNING = 0;  // the fleet's own session name, and Claude
-const RANK_NAMED_RUNNING = 1;   // ours by name, unambiguously Claude
-const RANK_NAMED_CRASHED = 2;   // ours by name, fallen back to a shell
-const RANK_NAMED_LEGACY = 3;    // ours by name, AMBIGUOUS process — `node` only
-const RANK_INFERRED = 4;        // not ours by name; a Claude process says maybe
-const RANK_NONE = 5;
+const RANK_NAMED_RUNNING = 0;   // ours by name, unambiguously Claude
+const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
+const RANK_NAMED_LEGACY = 2;    // ours by name, AMBIGUOUS process — `node` only
+/**
+ * ⚠️ Everything ours by CLAIM sits below everything ours by SUFFIX, whatever is
+ * running in either.
+ *
+ * The first version of this tie-break only preferred a suffixed pane that was
+ * running unambiguous Claude, which left the hole one step along: a real
+ * `angel-discord` CRASHED to a shell ranks `NAMED_CRASHED`, and a claimed
+ * impostor running Claude ranks `NAMED_RUNNING`, so the impostor still won the
+ * name. Measured — the roster came back with the impostor alone, and the real
+ * agent was off the board.
+ *
+ * That case is the worst one available: the crash is hidden on the very card
+ * whose Restart button exists for it, and `knownAgent` is satisfied through the
+ * impostor, so a write still reaches the REAL agent's boot file while the
+ * screen shows somebody else's pane. Under `main`'s ladder the crashed real
+ * agent kept its card; the claim arm is what put it at risk, so the offset is
+ * unconditional rather than conditional on what the impostor happens to run.
+ *
+ * Within either group the order is unchanged, and a claimed agent with no
+ * suffixed twin — every agent this product creates — is unaffected, because the
+ * offset applies uniformly to every pane in its name group.
+ */
+const RANK_CLAIM_ONLY = 3;      // added to any named-ours pane with no suffix
+const RANK_INFERRED = 7;        // not ours by name; a Claude process says maybe
+const RANK_NONE = 8;
 
 function rank(pane) {
   if (isNamedOurs(pane)) {
@@ -585,9 +607,6 @@ function rank(pane) {
      * one is the agent, and the claim is what recognises the agents WE create,
      * which by construction have no suffixed twin.
      */
-    if (/-discord$/.test(String(pane.session || '')) && isUnambiguousClaude(pane && pane.command)) {
-      return RANK_SUFFIXED_RUNNING;
-    }
     // ⚠️ `claude` and `claude.exe` belong UP HERE with the version string, not
     // down with `node`. Demoting the whole legacy set below a crashed shell
     // over-corrected: `node` is ambiguous because a dev server looks identical,
@@ -597,12 +616,17 @@ function rank(pane) {
     // agent was reported dead and Clear and Compact were refused for it — and
     // `classify` disagreed, reporting `claude` as running. One fact, two
     // answers, in the two functions this file most recently unified.
-    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING;
+    // The suffix is the fleet's own convention and cannot be taken by setting
+    // an option; a claim can. So a pane claiming a name it does not carry sits
+    // below every pane that carries it, whatever either is running.
+    const byClaimOnly = /-discord$/.test(String(pane.session || '')) ? 0 : RANK_CLAIM_ONLY;
+
+    if (isUnambiguousClaude(pane && pane.command)) return RANK_NAMED_RUNNING + byClaimOnly;
     // `isAgentSession` accepts these too, but they are weaker: `node` is what a
     // dev server looks like, and inside our own session it must not outrank the
     // pane that is unambiguously Claude.
-    if (isAgentSession(pane)) return RANK_NAMED_LEGACY;
-    return RANK_NAMED_CRASHED;
+    if (isAgentSession(pane)) return RANK_NAMED_LEGACY + byClaimOnly;
+    return RANK_NAMED_CRASHED + byClaimOnly;
   }
 
   if (isAgentSession(pane)) return RANK_INFERRED;
@@ -801,6 +825,12 @@ function classify(pane, paneText) {
    * `NEEDS_YOU_MARKERS` rather than swallowed here. If a future Claude draws a
    * blocking prompt WITH the footer still on screen, this becomes the trap the
    * module exists to prevent, and it has to be revisited.
+   *
+   * ⚠️ And that premise is ASSERTED, not measured. It is a claim about a user
+   * interface this repo does not control, so no test here can hold it: the
+   * ordering below is pinned, the premise is not, and nothing would notice the
+   * day it stops being true. Said plainly rather than left for a reader to
+   * assume the tests cover it.
    */
   if (/⏵⏵|\? for shortcuts/.test(tail)) {
     return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it is sitting at its prompt' };

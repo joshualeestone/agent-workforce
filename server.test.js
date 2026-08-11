@@ -2025,3 +2025,25 @@ test('the create route answers a real creation with the record the screen is bui
     status.setPaneSource(null);
   }
 });
+
+test('the suggested default role is the project manager, by name and not by position', () => {
+  // ⚠️ The plan says "Project manager is the suggested default", and the screen
+  // implemented it POSITIONALLY: the first row, and `ROLES[0]` on a second
+  // visit. Reordering `engine/roles.js` -- an edit nobody would connect to a
+  // product decision -- silently changes what a person accepts by pressing
+  // Continue, and could make it Legal or Finance: the two roles whose limits
+  // are carefully stated in two places are exactly the two that must never be
+  // the silent default.
+  const roles = require('./engine/roles');
+  assert.equal(roles.ROLES[0].key, 'pm',
+    'the role library no longer starts with the project manager, so the screen '
+    + 'now preselects something else for everyone');
+
+  // And the screen still takes its default from the top of that list rather
+  // than from a second copy of the decision.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.match(script, /pickRole\(ROLES\[0\]\.key\)/,
+    'the screen picks its default some other way than the first role, which is a '
+    + 'second place for that decision to live');
+});
