@@ -316,6 +316,10 @@ function parseRecord(agent) {
     // passed the usability check and then threw inside sanitise.
     commitments: clean,
     reportedAt,
+    // Carried through so `read` can tell a record we destroyed from one the
+    // agent simply has not refreshed. Coerced like every other field: a
+    // hand-edited record must not be able to put an object here.
+    destroyedAt: typeof parsed.destroyedAt === 'string' ? parsed.destroyedAt.slice(0, 40) : null,
     ageMs: Date.now() - at,
   };
 }
@@ -330,6 +334,35 @@ function parseRecord(agent) {
 function read(agent) {
   const rec = parseRecord(agent);
   if (!rec.ok) return unknown(rec.because);
+
+  // ⚠️ A record whose conversation we destroyed.
+  //
+  // `unknown`, always, and the items are KEPT. The agent cannot tell us what it
+  // is holding any more because we deleted the conversation it would have told
+  // us from, so it will never correct this record and no later report will
+  // arrive to clear it.
+  //
+  // The first version of this deleted the record outright, which lost the only
+  // surviving list of what had just been destroyed and made `read` answer "this
+  // agent has never reported what it is holding" — false, it reported, and this
+  // code removed it. Keeping the items is what lets the board say what was lost.
+  if (rec.destroyedAt) {
+    return {
+      // ⚠️ Two situations reach here and they now have different sentences,
+      // because `markDestroyed` marks the items it destroyed. A record that is
+      // only a tombstone lists what was destroyed. A record added to since also
+      // holds something the agent said afterwards, and calling that un-tellable
+      // is the store asserting something plainly false about work it can point
+      // at. An earlier attempt keyed this on `commitments.length`, which cannot
+      // tell them apart because both are non-empty.
+      ...unknown(rec.commitments.some((c) => c && c.destroyed !== true)
+        ? 'we cleared its conversation, so anything it has not told us since is lost to us'
+        : 'we cleared its conversation, so it can no longer tell us what it was holding'),
+      reportedAt: rec.reportedAt,
+      destroyedAt: rec.destroyedAt,
+      commitments: rec.commitments,
+    };
+  }
 
   if (rec.ageMs < -FUTURE_TOLERANCE_MS) {
     return {
@@ -408,12 +441,26 @@ function sanitise(commitments) {
     const createdAt = supplied && !Number.isNaN(Date.parse(supplied))
       ? supplied
       : new Date().toISOString();
-    return {
+    const out = {
       id: String((c && c.id) || crypto.randomUUID()).slice(0, 80),
       what: what.slice(0, 300),
       createdAt,
       source: String((c && c.source) || 'agent').slice(0, 40),
     };
+    // ⚠️ `destroyed` is DELIBERATELY NOT carried here, and the comment this
+    // replaces was false in both halves. It claimed "carried through, never
+    // invented: only markDestroyed sets this" — but `markDestroyed` writes the
+    // record directly and never passes through `sanitise`, so the only
+    // reachable input to that line was the untrusted body of
+    // `PUT /api/agent/<name>/commitments`. It made the tombstone marker
+    // FORGEABLE from outside: an agent could report an item already flagged as
+    // destroyed, putting a claim the app never made into the one store whose
+    // job is being the honest account of what we destroyed.
+    //
+    // The load-bearing carry is `capForDisplay` on the READ path, which is
+    // where a marker written by `markDestroyed` has to survive. That one is
+    // pinned by a named test. This one only ever admitted a forgery.
+    return out;
   });
 }
 
@@ -446,7 +493,7 @@ function idsAreUnique(commitments) {
  * answer. That is the exact failure this module exists to prevent, reached
  * through the module's own convenience API.
  */
-function writeRecord(key, rawName, clean, reportedAt) {
+function writeRecord(key, rawName, clean, reportedAt, preserveDestroyed = null) {
   // Capped HERE rather than only in report(). add() and resolve() call this
   // directly on a stale record, and because that branch deliberately preserves
   // the old timestamp the record stays stale, so every later add() takes the
@@ -460,6 +507,31 @@ function writeRecord(key, rawName, clean, reportedAt) {
   // asked about: safeKey STRIPS rather than rejects, so `worker.2` and `worker2`
   // collapse to one key.
   const next = { agent: key, name: String(rawName), reportedAt, commitments: clean };
+
+  // ⚠️ A tombstone survives a rewrite unless the agent itself is reporting
+  // afresh. `add()` and `resolve()` route through here on the EXISTING record,
+  // so without this they erased `destroyedAt` and re-published the destroyed
+  // commitments at full confidence — the same laundering-through-a-convenience-
+  // API shape this file already records once, undoing the one honesty guarantee
+  // `markDestroyed` exists to provide. `report()` clears it deliberately: that
+  // IS the agent speaking again.
+  // ⚠️ The value is PASSED IN, not re-read from disk.
+  //
+  // This used to `JSON.parse(fs.readFileSync(...))` the record again, which
+  // derived `destroyedAt` a second time under different rules from
+  // `parseRecord`: no `lstat`/`isFile` (this file's own comment records that
+  // `readFileSync` on a FIFO blocks the request handler forever), no
+  // `MAX_RECORD_BYTES` check, and no 40-character cap — so a hand-edited
+  // record with a 100KB `destroyedAt` was re-persisted unbounded on every
+  // `add()`. That is the "capped on the way out, uncapped through the
+  // convenience API" shape this file already records as fixed once, for
+  // `createdAt`.
+  //
+  // Both callers already hold the parsed value, so the extra read bought
+  // nothing but a second way to be wrong.
+  if (typeof preserveDestroyed === 'string' && preserveDestroyed) {
+    next.destroyedAt = preserveDestroyed.slice(0, 40);
+  }
 
   // Write-then-rename. Up to thirteen agents write concurrently on this
   // machine, and a half-written file that parses as an empty array is exactly
@@ -513,6 +585,13 @@ function capForDisplay(commitments) {
       what: String(c.what).trim().slice(0, 300),
       createdAt: String(c.createdAt).slice(0, 40),
       source: String(c.source).slice(0, 40),
+      // ⚠️ Carried, not dropped. This function rebuilds each item field by
+      // field on the way OUT, which is right — it is what stops a hand-edited
+      // record serving an unbounded value — and it silently discarded the
+      // tombstone marker, so `markDestroyed` wrote a flag that `read` then
+      // threw away. Exactly one boolean, and only ever true when the record on
+      // disk already said so: never invented here.
+      ...(c.destroyed === true ? { destroyed: true } : {}),
     }));
   } catch {
     return null;
@@ -557,11 +636,22 @@ function add(agent, what) {
   // is sanitised. Re-running sanitise() over the existing list rewrote an
   // unparseable createdAt to `now`, silently reversing the read path's
   // never-invent rule through the convenience API.
+  // ⚠️ Destroyed items are KEPT and the new one simply joins them, because
+  // `markDestroyed` marks each item it destroyed. Two earlier versions of this
+  // line each solved half the problem and broke the other half: merging made
+  // the new item indistinguishable from the destroyed ones (so the read path
+  // called a post-clear commitment un-tellable), and dropping them lost the
+  // only surviving account of what was destroyed — which is the loss this
+  // store exists to prevent, so it was the worse of the two.
+  //
+  // The tombstone stays either way: `add` is not the agent re-asserting what it
+  // holds, only `report` is, and that distinction is what this store is built
+  // on.
   const next = [...rec.commitments, ...sanitise([{ what }])];
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, next, rec.reportedAt, rec.destroyedAt);
   }
-  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString());
+  return writeRecord(store.safeKey(agent), agent, next, new Date().toISOString(), rec.destroyedAt);
 }
 
 /** Convenience: mark one done. */
@@ -579,9 +669,9 @@ function resolve(agent, id) {
   // list is known", which is what made the laundering read as intentional.
   // Same rule: what is already stored is preserved verbatim.
   if (isStale(rec)) {
-    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt);
+    return writeRecord(store.safeKey(agent), agent, remaining, rec.reportedAt, rec.destroyedAt);
   }
-  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString());
+  return writeRecord(store.safeKey(agent), agent, remaining, new Date().toISOString(), rec.destroyedAt);
 }
 
 /**
@@ -616,4 +706,102 @@ function readAll() {
   return out;
 }
 
-module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath };
+/**
+ * Mark what an agent said it was holding as destroyed by us.
+ *
+ * ⚠️ Not the same as reporting nothing, and the difference is the whole point.
+ * `report(agent, [])` records the agent SAYING it holds nothing, which reads
+ * back as `clear` with "it reported that it is holding nothing". After a clear
+ * or a restart that sentence is false: the agent did not tell us anything, we
+ * destroyed the conversation it would have told us from.
+ *
+ * So the record is MARKED rather than removed, and `read` returns `unknown`
+ * with the items still attached. That is the honest state, and it is the one
+ * the first version of this failed to deliver: deleting the record lost the
+ * only surviving list of what had just been destroyed, and made `read` answer
+ * "this agent has never reported what it is holding", which is false. It
+ * reported. We deleted it.
+ *
+ * Without this the board went on asserting the destroyed commitments at full
+ * confidence for the next thirty minutes, on the one screen whose entire thesis
+ * is that it does not lie about cost.
+ */
+function markDestroyed(agent) {
+  let file;
+  try {
+    file = recordPath(agent);
+  } catch {
+    return false;
+  }
+  // Rewrite in place rather than removing: the items are the only record of
+  // what was destroyed, and deleting them is the loss this store exists to
+  // prevent.
+  // ⚠️ Every guard `parseRecord` applies, applied here too.
+  //
+  // This read the file with none of them. A record containing `null` (or `5`,
+  // or `"hi"`) threw a raw TypeError on the assignment below — AFTER the clear
+  // had already been sent — so the operator was shown "Cannot set properties of
+  // null" and told the action failed, while the agent's conversation was in
+  // fact destroyed and the record left un-tombstoned. A FIFO here would block
+  // the request handler forever, and an oversized record that `read` refuses
+  // was still parsed and re-serialised. All three are guarded five functions
+  // above in this same file.
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) return false;
+
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return false; // nothing to mark, which is not a failure worth surfacing
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+
+  // ⚠️ The OWNERSHIP guard too. The comment above claimed "every guard
+  // `parseRecord` applies, applied here too" and this one was missing, which is
+  // worse than not claiming it: the claim is what stops the next reader
+  // checking.
+  //
+  // `parseRecord` refuses a record whose stored `name` is not this agent,
+  // because `safeKey` maps several spellings to one file and two agents could
+  // collide on it (`mybot` / `my.bot`, documented on `knownAgent`). Without the
+  // same check here, that record is refused by `read()` — so the dialog shows
+  // nothing and `hadRecord` is false — and then gets `destroyedAt` stamped onto
+  // it anyway. That writes a claim into ANOTHER agent's record saying its
+  // conversation was destroyed, on a store whose entire purpose is being the
+  // last honest account of what was lost.
+  if (raw.name !== String(agent)) return false;
+
+  raw.destroyedAt = new Date().toISOString();
+  // ⚠️ Mark WHICH items the tombstone is about, rather than relying on
+  // "everything currently in the list".
+  //
+  // Without this the store had to choose between two bad answers when an item
+  // arrived after the clear: merge it (and the read path then says "we cleared
+  // its conversation, so it can no longer tell us what it was holding" about a
+  // commitment made afterwards) or drop the destroyed items (and lose the only
+  // surviving account of what was destroyed, which is the loss this store
+  // exists to prevent). Both were shipped in turn. Marking them costs one
+  // boolean and makes the question answerable.
+  if (Array.isArray(raw.commitments)) {
+    raw.commitments = raw.commitments.map((c) => (
+      c && typeof c === 'object' && !Array.isArray(c) ? { ...c, destroyed: true } : c
+    ));
+  }
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
+    fs.renameSync(tmp, file);
+    return true;
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* nothing more to do */ }
+    return false;
+  }
+}
+
+module.exports = { DIR, STATE, STALE_AFTER_MS, FUTURE_TOLERANCE_MS, MAX_COMMITMENTS, MAX_RECORD_BYTES, read, report, add, resolve, readAll, recordPath, markDestroyed };
