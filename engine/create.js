@@ -224,22 +224,36 @@ function launcherFor(name, claudeBin, tmuxBin) {
 SESSION='${name}'
 LOG='${logFile(name)}'
 adopt=
+
+# launchd appends to this log forever, and a persistently failing start writes
+# a line every 30 seconds for as long as the machine is on. Keep it bounded.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
+  : > "$LOG"
+fi
+
 # ⚠️ TWO SPELLINGS OF THE SAME SESSION, and which commands take which was
 # MEASURED on tmux 3.6a rather than assumed, because assuming it broke the claim
 # on a real agent:
 #
-#   has-session, kill-session : accept "=name" (exact) -- USE IT. Their default
+#   has-session, kill-session,
+#   list-panes                : accept "=name" (exact) -- USE IT. Their default
 #                               resolution falls back to a PREFIX match, so
 #                               "kill-session -t sam" will happily kill
 #                               samantha-discord. Measured, by killing one.
-#   set-option, show-options,
-#   list-panes                : REJECT "=name" outright ("no such session:
+#   set-option, show-options  : REJECT "=name" outright ("no such session:
 #                               =name"). They take the plain name.
 #
-# The plain-name commands prefix-match too, but every one of them here runs only
-# when an exact session of this name is known to exist -- inside the loop that
-# has-session guarded, or after new-session made it -- and tmux prefers an exact
-# match over a prefix. Also measured.
+# ⚠️ The first version of this note also listed list-panes as rejecting it. That
+# was a MIS-MEASUREMENT, and how it happened is worth keeping: the probe ran
+# against a session that a previous command in the same terminal had already
+# killed, so "can't find" was true for a reason that had nothing to do with the
+# syntax under test. A measured claim taken against the wrong world is worse
+# than an unmeasured one, because it stops the next person checking.
+#
+# The two plain-name commands prefix-match too, but both run only when an exact
+# session of this name is known to exist -- inside the loop that has-session
+# guarded, or after new-session made it -- and tmux prefers an exact match over
+# a prefix. Also measured.
 TARGET="=${name}"
 # ⚠️ NOT "TMUX". That name is tmux's own environment variable -- it holds the
 # socket path of the server you are inside -- and bash keeps the export
@@ -261,12 +275,6 @@ WORKDIR='${dir}'
 # The claim is the tie. If something else holds the name we WAIT rather than
 # exit: exiting would have launchd restart us every 30 seconds, and waiting
 # recovers on its own the moment that session ends.
-# launchd appends to this log forever, and a persistently failing start writes
-# a line every 30 seconds for as long as the machine is on. Keep it bounded.
-if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1048576 ]; then
-  : > "$LOG"
-fi
-
 # ── the session ──────────────────────────────────────────────────────────────
 warned=0
 while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
@@ -289,7 +297,7 @@ while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
     # reason to destroy a session we had just confirmed exists and is ours --
     # "I cannot see it" converted into "it is dead", which is the one inversion
     # this whole codebase is written against.
-    panes=$("$TMUX_BIN" list-panes -s -t "$SESSION" -F '#{pane_current_command}' 2>/dev/null)
+    panes=$("$TMUX_BIN" list-panes -s -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null)
     if [ -z "$panes" ]; then
       echo "$(date): could not read what is running in $SESSION -- leaving it alone" >&2
       adopt=1
@@ -487,6 +495,45 @@ function createAgent(opts) {
     return {
       outcome: OUTCOME.REFUSED,
       because: `there is already a folder for an agent called ${name}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
+      steps,
+    };
+  }
+
+  /* ⚠️ AND A SERVICE THAT IS LOADED WITH NO PLIST ON DISK, which is what the
+   * README's own removal recipe produces if the `rm` runs without the
+   * `bootout`, or before it.
+   *
+   * Without this check the creation proceeds, `bootstrap` fails with "service
+   * already bootstrapped", the rollback removes the plist it just wrote, and
+   * the person is told "we have taken it back off your computer. You can try
+   * that name again." Retrying fails identically, forever, against a message
+   * promising the opposite -- while the orphaned job keeps respawning against a
+   * startup script the rollback has just deleted.
+   *
+   * ⚠️ We REFUSE rather than booting the stray service out ourselves. It is a
+   * job this creation did not install, running something we have not looked at,
+   * and unloading somebody else's service to free up a name is exactly the
+   * "act on something we have not tied to us" move the rest of this codebase
+   * refuses to make.
+   */
+  //
+  // ⚠️ Loaded means launchctl actually DESCRIBED the service, not merely that
+  // the command came back. `print` exits non-zero and throws when there is no
+  // such service, and prints a block describing it when there is — so the
+  // presence of output is the signal, and an empty answer is read as "no". That
+  // also keeps the seam honest: a recorder that reports every command as
+  // succeeding does not thereby claim every name is taken.
+  let loaded = false;
+  try {
+    const r = run('/bin/launchctl', ['print', `gui/${process.getuid()}/${serviceLabel(name)}`]);
+    loaded = Boolean(r && r.ok !== false && String(r.stdout || '').trim());
+  } catch {
+    loaded = false;
+  }
+  if (loaded) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is already running as a startup job on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
       steps,
     };
   }

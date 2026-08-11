@@ -1430,6 +1430,7 @@ function openCreate() {
   WATCH += 1;
   document.getElementById('create-name').value = '';
   document.getElementById('create-msg').textContent = '';
+  document.getElementById('create-go').disabled = false;
   document.getElementById('role-next').disabled = true;
   cstep('role');
   showTab('create');
@@ -1519,12 +1520,16 @@ document.getElementById('create-go').addEventListener('click', async () => {
     });
     result = await res.json().catch(() => null);
   } catch (err) {
+    // ⚠️ RE-ENABLE FIRST, then check whether they walked away. Returning before
+    // these two lines left `create-go` disabled for the rest of the page: click
+    // Create, leave the panel before the request fails, and the button is dead
+    // until a reload — including through the Enter key, which clicks it.
+    CREATING = false;
+    document.getElementById('create-go').disabled = false;
     if (attempt !== WATCH) return;
     // The request itself did not complete, so we do not know what happened on
     // the other side — which is not the same as nothing having happened.
     msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + err.message + ')';
-    CREATING = false;
-    document.getElementById('create-go').disabled = false;
     return;
   }
 
@@ -1565,13 +1570,30 @@ document.getElementById('create-go').addEventListener('click', async () => {
   document.getElementById('made-retry').hidden = true;
   paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' });
 
+  /**
+   * ⚠️ A PARTIAL IS NOT WATCHED, because nothing can arrive.
+   *
+   * This used to start the same thirty-second watch, on the reasoning that "we
+   * could not mark the session as ours" and "it is not running" are different
+   * halves the board can tell apart. That outcome no longer exists — the claim
+   * moved into the startup script — and every partial now rolls back, so there
+   * is no job, no folder and nothing that could come up under that name. A
+   * screen that says "waiting for the board to see it running" about something
+   * it knows was never started is the exact overstatement this whole flow is
+   * built against, and it would have made the person wait half a minute for it.
+   */
   if (result.outcome === 'partial') {
-    // Half-made is a real state and it is named as one. We still watch, because
-    // "we could not mark the session as ours" and "it is not running" are very
-    // different halves and the board can tell them apart.
+    paintMade(result.steps, null);
+    document.getElementById('made-head').textContent = name + ' was not made';
     const warn = document.getElementById('made-warn');
-    warn.innerHTML = '<b>This one is only half made.</b> ' + esc(result.because || '');
+    // The heading and this line have to agree. They did not: "This one is only
+    // half made" sat above a sentence saying nothing was left on the computer.
+    warn.innerHTML = '<b>Nothing was made.</b> ' + esc(result.because || '');
     warn.hidden = false;
+    document.getElementById('made-done').hidden = false;
+    document.getElementById('made-retry').hidden = false;
+    tick();
+    return;
   }
 
   await watchForAgent(name, result, attempt);

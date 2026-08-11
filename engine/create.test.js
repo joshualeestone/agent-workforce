@@ -232,14 +232,24 @@ test('the agent is started the same way it will be started every time after', ()
   const r = create.createAgent({ ...BINS, name: 'one-path', role: 'pm' });
 
   assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
-  assert.equal(calls.length, 1, 'creation ran more than the one command that starts the agent');
-  const [file, args] = calls[0];
+  // ⚠️ Exactly ONE command STARTS anything. The other call is the read-only
+  // `launchctl print` probe that asks whether this name already has a service
+  // loaded, so it is excluded by name rather than by count -- counting alone
+  // would have to be edited every time a read is added, which is how a count
+  // assertion stops meaning what it says.
+  const starting = calls.filter(([, a]) => a && a[0] !== 'print');
+  assert.equal(starting.length, 1, 'creation ran more than the one command that starts the agent');
+  const [file, args] = starting[0];
   assert.match(file, /launchctl$/, 'the agent was started by something other than its own job');
   assert.equal(args[0], 'bootstrap', 'the job was not loaded, so the agent will not survive a reboot');
   assert.match(args[2], /com\.kosmos\.agent\.one-path\.plist$/, 'a different job was loaded');
 });
 
-test('nothing reaches a shell', () => {
+test('no COMMAND is handed to a shell to reinterpret', () => {
+  // ⚠️ Renamed from "nothing reaches a shell", which stopped being true when
+  // this module started generating one. What holds here is narrower and still
+  // worth pinning: every command it RUNS goes through execFile with an argument
+  // array. The generated script is covered by the behavioural tests below.
   // ⚠️ Every command is execFile with an argument array, so a name is ONE
   // argument and never text a shell could reinterpret. The name is validated
   // hard as well, which makes this belt and braces -- deliberately, because
@@ -386,7 +396,8 @@ test('a name a live session already answers to is refused, even with no folder',
 
   assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
   assert.match(taken.because, /already an agent called casey/);
-  assert.equal(calls.length, 0, 'a refused name still started a session');
+  assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
+    'a refused name still started a session');
   assert.ok(!fs.existsSync(create.workerDir('casey')), 'a refused name still made a folder');
 
   // ⚠️ THE CONTROL. Same name, same runner, same everything except an empty
@@ -417,7 +428,8 @@ test('a machine we cannot ask about running agents is refused, not risked', () =
 
     assert.equal(r.outcome, create.OUTCOME.REFUSED, `${label}: created an agent anyway`);
     assert.match(r.because, /could not check which agents are already running/);
-    assert.equal(calls.length, 0, `${label}: ran a command despite refusing`);
+    assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
+      `${label}: ran a command despite refusing`);
     assert.ok(!fs.existsSync(create.workerDir('fixture-blind')),
       `${label}: made a folder despite refusing`);
     create.setRunner(null);
@@ -519,7 +531,8 @@ test('an agent is refused when the programs it is made of are not on this machin
     assert.equal(r.outcome, create.OUTCOME.REFUSED, `${what} missing: created anyway`);
     assert.match(r.because, /could not find/);
     assert.ok(!fs.existsSync(create.workerDir('no-binary')), `${what} missing: made a folder anyway`);
-    assert.equal(calls.length, 0, `${what} missing: ran a command anyway`);
+    assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
+      `${what} missing: ran a command anyway`);
   }
 
   // A path that could break out of the shell text it is written into is refused
@@ -557,7 +570,7 @@ test('a write that fails stops the creation instead of loading a job that cannot
     assert.match(r.because, /could not write everything/);
     assert.ok(r.steps.some((s) => s.label === 'wrote its startup script' && !s.ok),
       'the failing step is not visible in the record');
-    assert.equal(calls.length, 0,
+    assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0,
       'the job was loaded anyway, so launchd now retries a missing script every thirty seconds');
   } finally {
     fs.writeFileSync = realWrite;
@@ -569,7 +582,8 @@ test('a write that fails stops the creation instead of loading a job that cannot
   const calls2 = recorder();
   const ok = create.createAgent({ ...BINS, name: 'half-made-2', role: 'pm' });
   assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
-  assert.equal(calls2.length, 1, 'the control did not actually load a job');
+  assert.equal(calls2.filter(([, a]) => a && a[0] !== 'print').length, 1,
+    'the control did not actually load a job');
 });
 
 test('the startup script will not kill a session it cannot prove is ours', () => {
@@ -623,8 +637,13 @@ test('the startup script names its session exactly, not by prefix', () => {
   //
   // So the property is per-command, and it is asserted per-command rather than
   // as one blanket rule that would be wrong half the time.
-  const EXACT = ['has-session', 'kill-session'];
-  const PLAIN = ['set-option', 'show-options', 'list-panes'];
+  // ⚠️ Re-measured after the first version of this list put `list-panes` in the
+  // wrong column. It accepts the exact form; the probe that said otherwise had
+  // been run against an already-dead session, so it failed for a reason
+  // unrelated to the syntax. A test that encodes a wrong measurement fails a
+  // CORRECT change, which is worse than not testing the line at all.
+  const EXACT = ['has-session', 'kill-session', 'list-panes'];
+  const PLAIN = ['set-option', 'show-options'];
   let checked = 0;
   for (const line of script.split('\n')) {
     if (line.trim().startsWith('#') || !/-t /.test(line)) continue;
@@ -636,7 +655,8 @@ test('the startup script names its session exactly, not by prefix', () => {
     } else if (PLAIN.includes(cmd)) {
       checked += 1;
       assert.match(line, /-t "\$SESSION"/,
-        `${cmd} rejects the "=name" form outright, so this line fails at runtime: ${line.trim()}`);
+        `${cmd} rejects the "=name" form outright ("no such session: =name"), so `
+        + `this line would fail at runtime: ${line.trim()}`);
     }
   }
   assert.ok(checked >= 5, 'no tmux target lines were checked, so this proves nothing');
@@ -861,4 +881,59 @@ test('a creation that fails leaves nothing behind, so the same name can be tried
     'a job that could not be started was left installed, so it starts at the next login anyway');
   assert.ok(!fs.existsSync(create.workerDir('rollback-b')), 'the folder was left behind');
   assert.match(notStarted.because, /try that name again/);
+});
+
+test('a name whose startup job is loaded with nothing on disk is refused by name', () => {
+  // ⚠️ This is what the README's own removal recipe produces if the `rm` runs
+  // without the `bootout`, or before it. Without this check the creation goes
+  // ahead, `bootstrap` fails with "service already bootstrapped", the rollback
+  // deletes the plist it just wrote, and the person is told "we have taken it
+  // back off your computer. You can try that name again." Retrying fails the
+  // same way forever, against a message promising the opposite -- while the
+  // orphaned job keeps respawning against a startup script that was just
+  // deleted.
+  //
+  // Loaded means launchctl DESCRIBED the service. A recorder that reports every
+  // command as succeeding must not thereby claim every name is taken, so the
+  // signal is the output rather than the exit.
+  const calls = [];
+  create.setRunner((file, args) => {
+    calls.push([file, args]);
+    if (args && args[0] === 'print') return { ok: true, stdout: 'com.kosmos.agent.ghost = { ... }' };
+    return { ok: true, stdout: '' };
+  });
+  create.setDryRun(false);
+
+  const r = create.createAgent({ ...BINS, name: 'ghost-job', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a name whose service is loaded was accepted');
+  assert.match(r.because, /already running as a startup job/);
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'), 'it tried to load a second job');
+  assert.ok(!fs.existsSync(create.workerDir('ghost-job')), 'it made a folder for a name it refused');
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'bootout'),
+    "it unloaded a service this creation did not install, which is acting on something we have not tied to us");
+
+  // THE CONTROL: the same name goes through when launchctl describes nothing.
+  recorder();
+  create.setDryRun(false);
+  assert.equal(create.createAgent({ ...BINS, name: 'ghost-job', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'this name is refused whatever launchctl says, so the above proves nothing');
+});
+
+test('a folder left behind on its own is refused, and says so', () => {
+  // ⚠️ Untested until now, and `rollBack()` leans on it: its stated premise is
+  // that nothing it removes existed before the call, which is only true because
+  // a pre-existing folder is refused here. Delete this branch and a later
+  // failure would recursively remove a directory the person already had.
+  const calls = recorder();
+  create.setDryRun(false);
+  fs.mkdirSync(create.workerDir('lonely-folder'), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir('lonely-folder'), 'notes.md'), 'mine', 'utf8');
+
+  const r = create.createAgent({ ...BINS, name: 'lonely-folder', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a name with a folder already there was accepted');
+  assert.match(r.because, /already a folder/,
+    'the refusal names an agent rather than the folder, so it points at the wrong thing');
+  assert.equal(fs.readFileSync(nodePath.join(create.workerDir('lonely-folder'), 'notes.md'), 'utf8'), 'mine',
+    'it wrote into a folder that was already there');
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'), 'it started an agent over an existing folder');
 });

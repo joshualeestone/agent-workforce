@@ -444,6 +444,12 @@ function crossSiteWrite(req) {
     return 'that request came from somewhere this board does not answer';
   }
 
+  // ⚠️ A request whose Origin we have already recognised as our own does not
+  // need the content-type arm: that arm exists to catch a page that sent no
+  // Origin at all. Refusing a same-origin POST for its content type is a trap
+  // for the next route somebody adds here.
+  if (req.headers && req.headers.origin && req.headers.origin !== 'null') return null;
+
   // ⚠️ POST ONLY. A simple request is a METHOD and a content type together —
   // `PUT`, `DELETE` and `PATCH` are never simple whatever body they carry, so
   // they are already preflighted and refusing them on their content type buys

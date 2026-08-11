@@ -1818,11 +1818,16 @@ test('the creation screen reports a failed step as failed', () => {
   // ⚠️ A half-made agent is a real outcome, and the step list is the only place
   // a person can see WHICH half. A renderer that drew every reported step the
   // same way would turn `PARTIAL` into a screen full of ticks.
+  // ⚠️ The REAL `tickLine`, not a stub. Stubbing it meant the words it adds for
+  // a screen reader ("done: " / "failed: ") -- which exist precisely because the
+  // glyph is aria-hidden and both states render in the same colour -- were
+  // asserted nowhere, on the one screen whose job is showing WHICH half failed.
+  const realTickLine = pageFunction('tickLine', 'function esc(s) { return String(s); }');
   const paintMade = pageFunction('paintMade', `
-    const el = { innerHTML: '' };
+    const el = { innerHTML: '', textContent: '' };
     const document = { getElementById: () => el };
     function esc(s) { return String(s); }
-    function tickLine(state, text) { return '[' + state + ':' + text + ']'; }
+    const tickLine = ${realTickLine.toString()};
     globalThis.__el = el;
   `);
   paintMade([
@@ -1831,12 +1836,20 @@ test('the creation screen reports a failed step as failed', () => {
   ], { state: 'waiting', text: 'Waiting for the board to see it running' });
 
   const out = globalThis.__el.innerHTML;
-  assert.match(out, /\[done:made its folder\]/, 'a step that worked was not shown as done');
-  assert.match(out, /\[fail:started it\]/,
+  assert.match(out, /class="tick done".*made its folder/,
+    'a step that worked was not shown as done');
+  assert.match(out, /class="tick fail".*started it/,
     'a step the engine reported as FAILED was drawn as a success, which is the '
     + 'whole failure mode the step list exists to prevent');
-  assert.match(out, /\[waiting:Waiting for the board/,
+  assert.match(out, /class="tick waiting".*Waiting for the board/,
     'the one line that is about the agent rather than about us went missing');
+
+  // ⚠️ And in WORDS. The tick and the cross are aria-hidden and both states use
+  // the same colour, so without these a screen reader hears "made its folder"
+  // and "started it" identically whether or not they worked.
+  assert.match(out, /done: <\/span>made its folder/, 'a successful step says nothing aloud');
+  assert.match(out, /failed: <\/span>started it/,
+    'a FAILED step is indistinguishable from a successful one to a screen reader');
 });
 
 test('a write another website could send is refused, whatever route it names', async () => {
