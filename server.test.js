@@ -1675,7 +1675,7 @@ test('every write route refuses the untied card’s own spelling while the real 
   }
 });
 
-test('the create route makes an agent, and refuses a name it could not address', async () => {
+test('the create route refuses a name it could not address, and answers a bad body cleanly', async () => {
   // ⚠️ Driven through the ROUTE, because engine tests do not prove a route is
   // wired — and this route's catch path called a function from a different
   // branch, which would have thrown at runtime while the suite stayed green.

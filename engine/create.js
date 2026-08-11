@@ -305,15 +305,22 @@ while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
     fi
     alive=0
     while read -r pane_cmd; do
-      # ⚠️ A LOGIN shell arrives as "-zsh", with the leading dash, and the
-      # status engine uses exactly that spelling as its canonical crashed-pane
-      # value. Without stripping it, a crashed agent read as alive, got adopted,
-      # and then sat inside a supervision loop that keeps the launchd job
-      # "running" forever -- so KeepAlive could never recover it. A permanently
-      # dead agent that looks supervised is worse than one that is simply down.
-      case "\${pane_cmd#-}" in
-        ""|sh|bash|zsh|fish|tcsh|ksh|login) ;;
-        *) alive=1 ;;
+      # ⚠️ AN ALLOWLIST, matching status.js's isClaudeCommand, NOT a
+      # list of shells to exclude. The denylist this replaces is the exact
+      # defect that module documents at length: a crashed agent whose remaining
+      # pane holds vim, less, ssh or python3 is not Claude, but a
+      # denylist of six shell names says it is. Here that reads alive, so the
+      # script adopts a dead agent and sits in the supervision loop forever --
+      # and launchd's KeepAlive can never recover it, because as far as launchd
+      # is concerned the job is running fine.
+      #
+      # Two definitions of "Claude is running" is what the board already paid
+      # for once. This is the same definition, in the one place that acts on it
+      # destructively: a native install reports a bare version (2.1.227), and
+      # the other spellings are claude, claude.exe and node.
+      case "$pane_cmd" in
+        [0-9]*.[0-9]*.[0-9]*|claude|claude.exe|node) alive=1 ;;
+        *) ;;
       esac
     done <<EOF
 $panes
@@ -628,8 +635,25 @@ function createAgent(opts) {
    * just made. The `steps` list still records which half failed, which is where
    * the diagnostic value actually lives.
    */
-  function rollBack() {
+  function rollBack({ unload = false } = {}) {
+    /* ⚠️ `unload` is for a failed START, and only then.
+     *
+     * `bootstrap` can register a service and still exit non-zero. Removing only
+     * the plist then leaves that job respawning against a `start.sh` this
+     * rollback has just deleted, and every retry of the name hits the
+     * already-loaded refusal above — so the message "you can try that name
+     * again" becomes false forever.
+     *
+     * The refusal above deliberately will NOT unload a stray service, because
+     * it did not install it. This one did, seconds ago, which is exactly the
+     * difference that makes unloading it the right thing rather than an
+     * overreach.
+     */
     if (DRY_RUN) return;
+    if (unload) {
+      try { run('/bin/launchctl', ['bootout', `gui/${process.getuid()}/${serviceLabel(name)}`]); }
+      catch { /* it was probably never registered, which is the common case */ }
+    }
     try { fs.rmSync(plistPath(name), { force: true }); } catch { /* best effort */ }
     try { fs.rmSync(workerDir(name), { recursive: true, force: true }); } catch { /* best effort */ }
   }
@@ -735,10 +759,12 @@ function createAgent(opts) {
   });
 
   if (!started) {
-    // ⚠️ INCLUDING THE JOB. It was left installed here, so an agent reported as
-    // "not running yet" would have started at the person's next login anyway --
-    // the one outcome nobody would predict from that sentence.
-    rollBack();
+    // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
+    // here, so an agent reported as "not running yet" would have started at the
+    // person's next login anyway -- the one outcome nobody would predict from
+    // that sentence. And `bootstrap` can register a service and still fail, so
+    // deleting the plist alone would leave a job nothing on disk explains.
+    rollBack({ unload: true });
     return {
       outcome: OUTCOME.PARTIAL,
       because: 'we set it up but could not start it, so we have taken it back off your computer rather than leave something half installed. You can try that name again.',

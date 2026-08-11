@@ -803,6 +803,18 @@ test('the startup script, actually run, adopts a healthy agent instead of restar
   // probe read only the current window's first pane, so splitting a window or
   // opening a second one -- which this script's own header invites -- made a
   // live agent look crashed.
+  // ⚠️ AN EDITOR IS NOT CLAUDE. The probe used a denylist of shell names, so a
+  // crashed agent whose remaining pane held vim, less, ssh or python3 read as
+  // alive: the script adopted a dead agent and sat in the supervision loop, and
+  // launchd's KeepAlive could never recover it because the job looked healthy.
+  // The status engine already paid for this exact defect and replaced its
+  // denylist with an allowlist; this is that same definition.
+  for (const leftover of ['vim', 'less', 'ssh', 'python3', '-zsh']) {
+    const dead = runLauncher({ claim: 'probe', paneCommands: [leftover] });
+    assert.ok(dead.some((c) => c.startsWith('kill-session')),
+      `a pane running ${leftover} was read as a live agent, so a crashed one is never recovered`);
+  }
+
   const split = runLauncher({ claim: 'probe', paneCommands: ['zsh', '2.1.227'] });
   assert.ok(!split.some((c) => c.startsWith('kill-session')),
     'an agent with a shell open beside it was killed as though it had crashed');
@@ -879,6 +891,20 @@ test('a creation that fails leaves nothing behind, so the same name can be tried
   assert.equal(notStarted.outcome, create.OUTCOME.PARTIAL);
   assert.ok(!fs.existsSync(create.plistPath('rollback-b')),
     'a job that could not be started was left installed, so it starts at the next login anyway');
+  // ⚠️ And UNLOADED, not just deleted. `bootstrap` can register a service and
+  // still exit non-zero; removing the plist alone would leave that job
+  // respawning against a start.sh this rollback just deleted, while every retry
+  // of the name hits the already-loaded refusal -- so "you can try that name
+  // again" would be false forever.
+  const bootouts = [];
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootout') bootouts.push(args[1]);
+    return args && args[0] === 'bootstrap' ? { ok: false } : { ok: true, stdout: '' };
+  });
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name: 'rollback-c', role: 'pm' });
+  assert.ok(bootouts.some((t) => String(t).endsWith('com.kosmos.agent.rollback-c')),
+    'the service this creation installed was left loaded after the start failed');
   assert.ok(!fs.existsSync(create.workerDir('rollback-b')), 'the folder was left behind');
   assert.match(notStarted.because, /try that name again/);
 });

@@ -1427,7 +1427,10 @@ function pickRole(key) {
   if (!role) return;
   PICKED = key;
   document.querySelectorAll('#roles-list .pick').forEach((b) => {
-    b.setAttribute('aria-checked', String(b.dataset.role === key));
+    const on = b.dataset.role === key;
+    b.setAttribute('aria-checked', String(on));
+    // Roving tabindex: the chosen row is the group's single Tab stop.
+    b.tabIndex = on ? 0 : -1;
   });
   document.getElementById('role-next').disabled = false;
 }
@@ -1435,6 +1438,31 @@ function pickRole(key) {
 document.getElementById('roles-list').addEventListener('click', (e) => {
   const btn = e.target.closest('.pick');
   if (btn) pickRole(btn.dataset.role);
+});
+
+/**
+ * ⚠️ The keyboard model the ARIA role PROMISES.
+ *
+ * `role="radiogroup"` tells a screen reader "2 of 6, use the arrows", and only
+ * click was bound — so the arrows did nothing and the promise was false. Not a
+ * hard trap (every option is a Tab stop and Space activates it), but announcing
+ * an interaction the code does not implement is the same defect this branch
+ * corrects everywhere else, in the one place a person cannot see it.
+ *
+ * With a roving tabindex the group is ONE Tab stop, which is also the right
+ * behaviour for a single choice: tabbing past six roles to reach Continue is
+ * the thing the pattern exists to avoid.
+ */
+document.getElementById('roles-list').addEventListener('keydown', (e) => {
+  const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+  const step = keys[e.key];
+  if (!step || !ROLES || !ROLES.length) return;
+  e.preventDefault();
+  const at = ROLES.findIndex((r) => r.key === PICKED);
+  const next = ROLES[((at < 0 ? 0 : at) + step + ROLES.length) % ROLES.length];
+  pickRole(next.key);
+  const el = document.querySelector('#roles-list .pick[data-role="' + next.key + '"]');
+  if (el) el.focus();
 });
 
 function openCreate() {
@@ -1616,6 +1644,13 @@ document.getElementById('create-go').addEventListener('click', async () => {
     // watched.
     paintMade((result.steps || []).map((st) => ({ ...st, undone: st.ok })), null);
     document.getElementById('made-head').textContent = name + ' was not made';
+    // ⚠️ SAY IT OUT LOUD. `paintMade` only writes the live region when there is
+    // a line being watched, and a partial has none -- so the single outcome
+    // this screen exists to communicate was the only one that announced
+    // nothing, while the live region still held "Waiting for the board to see
+    // it running", which had just become false.
+    document.getElementById('made-say').textContent =
+      name + ' was not made. ' + (result.because || '');
     const warn = document.getElementById('made-warn');
     // The heading and this line have to agree. They did not: "This one is only
     // half made" sat above a sentence saying nothing was left on the computer.
