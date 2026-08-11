@@ -172,6 +172,77 @@ async function fresh(browser, opts = {}) {
     await ctx.close();
   }
 
+  /* ------------------------------------------------------------------ */
+  console.log('\n8. A deep link with rubbish in it still renders a step');
+  for (const bad of ['3.7', '2.5', '0', '99', 'banana', '-1', '<script>']) {
+    const { ctx, page } = await fresh(browser, { query: '?first-run=1&fr-step=' + encodeURIComponent(bad) });
+    // ⚠️ The failure this is for drew a titled, buttoned, COMPLETELY EMPTY
+    // dialog: frGo(3.7) matched no pane, so it hid all four and painted step 4
+    // into one it had just hidden.
+    const panes = await page.evaluate(() =>
+      [1, 2, 3, 4].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
+    ok(panes.length === 1, `fr-step=${bad} shows exactly one pane (showed ${panes.length})`);
+    const crumb = await page.locator('#fr-step').textContent();
+    ok(/^Step [1-4] of 4$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
+    ok((await page.locator('#fr-title').textContent()).trim().length > 0, `fr-step=${bad} has a heading`);
+    await ctx.close();
+  }
+
+  /* ------------------------------------------------------------------ */
+  console.log('\n9. Escape during an in-flight completion does not fire two of them');
+  {
+    fs.rmSync(FLAG, { force: true });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
+    let posts = 0;
+    await page.route('**/api/first-run/complete', async (r) => {
+      posts += 1;
+      await new Promise((res) => setTimeout(res, 1200));   // hold it open
+      r.fulfill({ json: { done: true } });
+    });
+    await page.route('**/api/first-run', (r) => r.fulfill({ json: { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max', because: '' } } }));
+    await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
+    await page.click('#fr-next');                 // starts "Make my first agent"
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Escape');          // ...and Escape mid-flight
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(2200);
+    ok(posts === 1, `exactly one completion was written (saw ${posts})`);
+    // ⚠️ And the callback that won is the one they CHOSE. Two completions ran
+    // both callbacks, so openCreate() opened the panel and showTab('agents')
+    // took it straight back off.
+    ok(await page.isVisible('#panel-create'),
+      'the create panel they asked for survived, rather than being closed by a second callback');
+    await ctx.close();
+  }
+
+  /* ------------------------------------------------------------------ */
+  console.log('\n10. A completion POST that never answers does not lock anybody in');
+  {
+    fs.rmSync(FLAG, { force: true });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
+    // Never fulfilled. The overlay must degrade into its could-not-remember
+    // path rather than sitting disabled over an inert page forever.
+    await page.route('**/api/first-run/complete', () => {});
+    await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    await page.click('#fr-skip');
+    await page.waitForTimeout(10000);            // past the 8s abort
+    ok(await page.locator('#fr-forgot').isVisible(), 'a hung POST turned into a message, not a trap');
+    ok(await page.isEnabled('#fr-next'), 'and the way out came back');
+    await page.click('#fr-next');
+    await page.waitForTimeout(400);
+    ok(await page.isHidden('#firstrun'), 'and it actually let them out');
+    ok(await page.evaluate(() => document.querySelector('body > header').inert === false),
+      'and did not leave the board inert');
+    await ctx.close();
+  }
+
   await browser.close();
   console.log('\n' + (fails.length ? `${fails.length} FAILURES:\n  ` + fails.join('\n  ') : 'all clear'));
   process.exit(fails.length ? 1 : 0);
