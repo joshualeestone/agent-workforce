@@ -39,6 +39,26 @@ function recorder(mod) {
   return calls;
 }
 
+/**
+ * A runner for a world where the session IS ours: `show-options` answers with
+ * the agent's own name, which is the claim `bin/agent-supervisor.sh` sets.
+ *
+ * ⚠️ Needed because removal will not kill a session it cannot tie to us. The
+ * plain recorder answers every command with empty output, which correctly reads
+ * as "nothing of ours is running under that name" — so a test using it exercises
+ * the skip path, not the kill path.
+ */
+function recorderForOurSession(name) {
+  const calls = [];
+  remove.setRunner((file, args) => {
+    calls.push([file, args]);
+    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
+    if (args && args[0] === 'has-session') return { ok: false, code: 1 };   // gone after the kill
+    return { ok: true, stdout: '' };
+  });
+  return calls;
+}
+
 /** An agent that really exists in the sandbox, made the way the product makes them. */
 function madeAgent(name) {
   recorder(create);
@@ -174,7 +194,7 @@ test('removing an agent stops the job BEFORE it ends the session', () => {
   // ends — so killing the session first makes launchd put it straight back, and
   // the person watches the agent they just removed reappear on the board.
   const name = madeAgent('order-matters');
-  const calls = recorder(remove);
+  const calls = recorderForOurSession(name);
   remove.setDryRun(false);
   remove.remove(name);
 
@@ -190,7 +210,7 @@ test('the session is ended by exact name, never by prefix', () => {
   // `kill-session -t sam` prefix-matches and will happily end
   // `samantha-discord`. Measured on this machine, by doing it.
   const name = madeAgent('exact-target');
-  const calls = recorder(remove);
+  const calls = recorderForOurSession(name);
   remove.setDryRun(false);
   remove.remove(name);
 
@@ -342,6 +362,7 @@ test('a session that cannot be killed is not reported as ended', () => {
   // "ended its session" over a session somebody can still talk to.
   const name = madeAgent('kill-fails');
   remove.setRunner((file, args) => {
+    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
     if (args && args[0] === 'kill-session') return { ok: false, code: 127 };  // tmux not found
     return { ok: true, stdout: '' };
   });
@@ -350,11 +371,24 @@ test('a session that cannot be killed is not reported as ended', () => {
   const r = remove.remove(name);
   assert.ok(r.steps.some((s) => /ended its session/.test(s.label) && !s.ok),
     'a session that could not be killed is recorded as ended');
+  // ⚠️ AND THE OUTCOME, which is what the person is actually told. Asserting
+  // only the step record left the verdict unpinned: `remove` returned REMOVED
+  // from this very call, so the screen said "gone" over a live agent — and with
+  // the folder box ticked, deleted its working directory underneath it.
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'a session that is still running was reported as a completed removal');
+  assert.match(r.because, /could not end the session/);
+  assert.ok(fs.existsSync(create.workerDir(name)),
+    'it went on to delete the folder of an agent that is still running');
 
   // Exit 1 IS fine: the session was already gone.
   const name2 = madeAgent('already-gone');
-  remove.setRunner((file, args) => (args && args[0] === 'kill-session'
-    ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'show-options') return { ok: true, stdout: name2 + '\n' };
+    if (args && args[0] === 'kill-session') return { ok: false, code: 1 };
+    if (args && args[0] === 'has-session') return { ok: false, code: 1 };
+    return { ok: true, stdout: '' };
+  });
   remove.setDryRun(false);
   assert.ok(remove.remove(name2).steps.some((s) => /ended its session/.test(s.label) && s.ok),
     'a session that was already gone is treated as a failure');
@@ -382,4 +416,128 @@ test('a job still registered afterwards is PARTIAL, not a removal', () => {
   remove.setDryRun(false);
   assert.equal(remove.remove(name2).outcome, remove.OUTCOME.REMOVED,
     'nothing can ever be removed, so the assertion above is about nothing');
+});
+
+test('it will not kill a session it cannot prove is ours', () => {
+  // ⚠️ Owning the plist is a fact about DISK. It says this product made an agent
+  // by this name; it does not say the session holding that name RIGHT NOW is
+  // that agent. Ours can die and something else can take the name before the
+  // person gets round to removing the stale card.
+  //
+  // `bin/agent-supervisor.sh` already refuses to touch a session it cannot tie
+  // to @kosmos_agent, and the README advertises that. Removal held a lower bar
+  // than the product's own startup script, which is the wrong way round for the
+  // destructive half.
+  const name = madeAgent('stranger-took-it');
+  const calls = [];
+  remove.setRunner((file, args) => {
+    calls.push([file, args]);
+    // A session of that name exists, and it is somebody else's.
+    if (args && args[0] === 'show-options') return { ok: true, stdout: 'not-ours\n' };
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
+    "it killed a session it could not tie to the agent it was removing");
+  // Our files still go: the agent IS ours, and leaving its job behind is what
+  // makes a name unusable. It is the session we must not touch.
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+  assert.ok(!fs.existsSync(create.plistPath(name)), 'our own job was left behind');
+
+  // THE CONTROL: when the session IS ours, it is killed.
+  const mine = madeAgent('mine-to-kill');
+  const ourCalls = recorderForOurSession(mine);
+  remove.setDryRun(false);
+  remove.remove(mine);
+  assert.ok(ourCalls.some(([, a]) => a && a[0] === 'kill-session'),
+    'it never kills anything, so the refusal above proves nothing');
+});
+
+test('a failed job removal does not take the folder with it', () => {
+  // ⚠️ ORDER. The folder delete used to run BEFORE the job-removal check, so a
+  // failed plist removal destroyed the person's instructions anyway -- and then
+  // told them the agent "will come back when you next log in", which understated
+  // it: the job would respawn every thirty seconds forever against a working
+  // directory that no longer existed. Deleting what somebody wrote during a run
+  // that FAILED is the one mistake here with nothing behind it.
+  const name = madeAgent('keep-my-words');
+  recorderForOurSession(name);
+  remove.setDryRun(false);
+
+  const realRm = fs.rmSync;
+  try {
+    fs.rmSync = (p, ...rest) => {
+      if (String(p).endsWith('.plist')) throw new Error('read-only');
+      return realRm(p, ...rest);
+    };
+    const r = remove.remove(name, { alsoDeleteFolder: true });
+    assert.equal(r.outcome, remove.OUTCOME.PARTIAL);
+    assert.ok(fs.existsSync(create.instructionFile(name)),
+      'the instructions were deleted during a removal that failed');
+    assert.ok(!r.steps.some((s) => /deleted its folder/.test(s.label)),
+      'it attempted the irreversible step after the recoverable one had already failed');
+  } finally {
+    fs.rmSync = realRm;
+  }
+});
+
+test('what the app remembered about an agent goes with it', () => {
+  // ⚠️ The avatar, the role label and the commitment record live under the app's
+  // OWN data directory, keyed by name, nowhere near the agent's folder. Leaving
+  // them meant a new agent made with the same name later wore the dead agent's
+  // face, carried its job title and held its promises. The commitment text can
+  // carry real work, so it is a privacy question as well as a correctness one --
+  // and the folder checkbox, which reads as "everything", does not cover it.
+  const name = madeAgent('remembered');
+  const store = require('./store');
+  const commitments = require('./commitments');
+
+  store.saveAvatar(name, 'image/png', Buffer.from('not-a-real-png'));
+  store.writeProfile(name, { role: 'Bookkeeper' });
+  commitments.report(name, [{ what: 'the quarterly numbers for a client' }]);
+  assert.ok(fs.existsSync(store.avatarPath(name)), 'the fixture wrote no avatar');
+  assert.ok(fs.existsSync(store.profilePath(name)), 'the fixture wrote no profile');
+  assert.ok(fs.existsSync(commitments.recordPath(name)), 'the fixture wrote no commitments');
+
+  recorderForOurSession(name);
+  remove.setDryRun(false);
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+
+  assert.ok(!fs.existsSync(store.avatarPath(name)),
+    "a new agent with this name would wear the dead agent's face");
+  assert.ok(!fs.existsSync(store.profilePath(name)),
+    "a new agent with this name would carry the dead agent's job title");
+  assert.ok(!fs.existsSync(commitments.recordPath(name)),
+    "the dead agent's promises survived it, and they can name real work");
+});
+
+test('keeping the folder is said to cost the name, because it does', () => {
+  // Creation refuses a name whose worker folder exists. So the DEFAULT path --
+  // the one that protects what the person wrote -- quietly makes the name
+  // unusable, and the only way back is a terminal, in a product whose pitch is
+  // that you never need one.
+  const name = madeAgent('name-burned');
+  recorderForOurSession(name);
+  remove.setDryRun(false);
+  const kept = remove.remove(name);
+  assert.match(kept.because, /cannot make another agent called name-burned/,
+    'the person is not told that keeping the folder costs them the name');
+
+  // And creation really does refuse it, which is what makes that sentence true.
+  const calls = [];
+  create.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const again = create.createAgent({ ...BINS, name, role: 'pm' });
+    assert.equal(again.outcome, create.OUTCOME.REFUSED,
+      'the name is reusable after all, so the warning above is false');
+    assert.match(again.because, /already a folder/);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
 });

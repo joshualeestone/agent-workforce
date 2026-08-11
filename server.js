@@ -784,6 +784,11 @@ const server = http.createServer((req, res) => {
     if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     const wipe = new URLSearchParams((req.url.split('?')[1] || '')).get('folder') === 'delete';
     const done = removal.remove(name, { alsoDeleteFolder: wipe });
+    // ⚠️ A PARTIAL answers 200, deliberately: the request was understood and
+    // acted on, and what happened is in the body, which is where a removal's
+    // outcome has to be read anyway (a removal that half-worked is not an
+    // error, it is a state). The screen branches on `outcome` rather than on
+    // status for exactly that reason.
     sendJson(res, done.outcome === removal.OUTCOME.REFUSED ? 400 : 200, done);
     return;
   }

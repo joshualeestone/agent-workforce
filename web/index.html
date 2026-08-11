@@ -1402,6 +1402,8 @@ document.getElementById('d-remove').addEventListener('click', async () => {
 ========================================================================== */
 
 let REMOVE_PLAN = null;
+// Guards against a slow plan fetch answering after the person has moved on.
+let REMOVE_ASKED = 0;
 
 async function loadRemoval(sessionName) {
   const box = document.getElementById('d-remove-agent');
@@ -1464,18 +1466,37 @@ function paintRemovePlan() {
 }
 
 document.getElementById('d-remove-start').addEventListener('click', () => {
+  // Without a plan there is nothing to confirm, and painting an empty one would
+  // show a confirmation with no warning and no steps.
+  if (!REMOVE_PLAN) return;
   document.getElementById('d-remove-confirm').hidden = false;
   paintRemovePlan();
 });
 
 document.getElementById('d-remove-cancel').addEventListener('click', () => {
+  /**
+   * ⚠️ THE PLAN IS RESET, not just the checkbox.
+   *
+   * Unticking the box while leaving `REMOVE_PLAN` on the delete-the-folder plan
+   * armed a sequence that destroys what somebody wrote with the control that
+   * governs it visibly off: tick the box to read what it says, click Keep it,
+   * open the confirmation again, and the stale wipe plan is repainted and sent.
+   * Cancelling while a plan fetch was in flight reached the same state, because
+   * the late answer installed itself into a hidden panel.
+   *
+   * Bumping the token invalidates any in-flight answer, and reloading gives the
+   * panel the keep-the-folder plan it started with.
+   */
+  REMOVE_ASKED += 1;
+  REMOVE_PLAN = null;
   document.getElementById('d-remove-confirm').hidden = true;
   document.getElementById('d-remove-folder').checked = false;
+  document.getElementById('d-remove-msg').textContent = '';
+  if (CURRENT) loadRemoval(CURRENT.sessionName);
 });
 
 // Ticking the box changes what will happen, so it re-asks the ENGINE rather
 // than the screen rewording its own warning.
-let REMOVE_ASKED = 0;
 document.getElementById('d-remove-folder').addEventListener('change', async (e) => {
   if (!CURRENT) return;
   const forAgent = CURRENT.sessionName;

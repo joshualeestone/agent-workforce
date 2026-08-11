@@ -2101,7 +2101,6 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
 test('the removal routes refuse what the engine refuses, and answer what it plans', async () => {
   // ⚠️ The engine was well covered and the surface a browser talks to was not.
   // These routes are how the only destructive action in the product is reached.
-  const removal = require('./engine/remove');
   const create = require('./engine/create');
   const status = require('./engine/status');
 
@@ -2131,19 +2130,79 @@ test('the removal routes refuse what the engine refuses, and answer what it plan
   const wipePlan = JSON.parse((await req('/api/agent/route-removable/removal?folder=delete')).body);
   assert.equal(wipePlan.keepsFolder, false, 'the folder flag is not read from the query string');
 
-  // ⚠️ AN AGENT THIS APP DID NOT CREATE. `angel` is a real one on this machine.
-  const foreign = await req('/api/agent/angel/removal');
+  /**
+   * ⚠️ AN AGENT ANOTHER TOOL CREATED, built as one rather than named as one.
+   *
+   * Using `angel` here would have been over-determined: in this sandbox it has
+   * no plist AND no folder, so the refusal fires for absence, and any
+   * nonsense name produces the identical result. The fixture below differs from
+   * an owned agent in exactly one way — the plist is another tool's label, not
+   * ours — which is the property the guard is supposed to key on.
+   */
+  const foreignName = 'route-foreign';
+  fs.mkdirSync(create.workerDir(foreignName), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(foreignName), 'CLAUDE.md'), 'You are **Foreign**.\n', 'utf8');
+  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(foreignName)), `com.${foreignName}.discord.plist`), '<plist/>', 'utf8');
+
+  const foreign = await req(`/api/agent/${foreignName}/removal`);
   assert.notEqual(foreign.status, 200, 'the route offered a plan for an agent we did not create');
   assert.match(JSON.parse(foreign.body).because, /not created by this app/);
 
-  const foreignDelete = await req('/api/agent/angel/removal', { method: 'DELETE' });
+  const foreignDelete = await req(`/api/agent/${foreignName}/removal`, { method: 'DELETE' });
   assert.notEqual(foreignDelete.status, 200, 'DELETE was accepted for an agent we did not create');
+  assert.ok(fs.existsSync(create.workerDir(foreignName)),
+    "the route touched a foreign agent's folder while refusing it");
 
   // A malformed name answers rather than crashing the process.
   const bad = await req('/api/agent/%/removal', { method: 'DELETE' });
   assert.equal(bad.status, 400);
   const alive = await req('/api/status');
   assert.match(alive.type, /application\/json/, 'the server died on a malformed name');
+
+  /**
+   * ⚠️ THE SUCCESS PATH, AND THE FLAG IT CARRIES. Everything above is a
+   * refusal, so `?folder=delete` reaching `remove()` on DELETE was unpinned:
+   * inverting that flag in the route, or dropping the option from the call,
+   * left this suite green while the browser's checkbox stopped meaning
+   * anything.
+   */
+  const removal = require('./engine/remove');
+  removal.setRunner(() => ({ ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    const gone = await req('/api/agent/route-removable/removal', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(gone.status, 200, 'a legitimate removal was refused: ' + gone.body);
+    assert.equal(JSON.parse(gone.body).outcome, 'removed');
+    assert.ok(!fs.existsSync(create.plistPath('route-removable')), 'the job survived the route');
+    // The DEFAULT keeps the folder, which is what the flag test below proves is
+    // actually being read rather than assumed.
+    assert.ok(fs.existsSync(create.instructionFile('route-removable')),
+      'the route deleted the folder without being asked to');
+
+    // And with the flag, it goes.
+    //
+    // ⚠️ `create` has to be armed again for this fixture. The earlier block's
+    // `finally` cleared its runner, which re-arms dry-run — and a dry-run
+    // creation still answers CREATED while writing nothing, so the fixture
+    // looked fine and the removal then refused it for having no job on disk.
+    create.setRunner(() => ({ ok: true, stdout: '' }));
+    create.setDryRun(false);
+    const made = create.createAgent({ name: 'route-wipe', role: 'pm' });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+    assert.ok(fs.existsSync(create.plistPath('route-wipe')),
+      'the fixture agent has no job on disk, so removing it would be refused for the wrong reason');
+    const wiped = await req('/api/agent/route-wipe/removal?folder=delete', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(wiped.status, 200);
+    assert.ok(!fs.existsSync(create.workerDir('route-wipe')),
+      'the folder flag does not reach the engine on DELETE, so the checkbox means nothing');
+  } finally {
+    removal.setRunner(null);
+    create.setRunner(null);
+  }
 
   // ⚠️ AND DELETE IS COVERED BY THE CROSS-SITE GUARD. It is a state-changing
   // method on the most destructive route in the product; a page on another site

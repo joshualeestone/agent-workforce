@@ -120,4 +120,8 @@ function writeProfile(name, patch) {
   return next;
 }
 
-module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, saveAvatar, removeAvatar, readProfile, writeProfile };
+// ⚠️ `profilePath` is exported alongside `avatarPath` because removing an agent
+// has to clear what this module remembers about it. It was not, so the removal
+// called an undefined function, the step caught the throw, recorded a failure
+// nothing read, and a reused name inherited the dead agent's job title.
+module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, profilePath, saveAvatar, removeAvatar, readProfile, writeProfile };

@@ -29,19 +29,26 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const create = require('./create');
+// ⚠️ The platform's OWN records about this agent, which live nowhere near its
+// folder: the avatar and the role label in `store`, and the commitment record in
+// `commitments`. All keyed by name. Removal that ignored them meant a REUSED
+// name inherited the dead agent's picture, its job title and its promises —
+// and the commitment text can carry real work, so it is a privacy question as
+// well as a correctness one.
+const store = require('./store');
+const commitments = require('./commitments');
 
 const OUTCOME = { REMOVED: 'removed', REFUSED: 'refused', PARTIAL: 'partial' };
 
 /* ── the runner seam ─────────────────────────────────────────────────────── */
 
 /**
- * ⚠️ The same bidirectional interlock `create` uses, for a stronger reason.
- * A test that reaches the real machine here does not litter it — it KILLS a
- * live agent. `setDryRun(false)` refuses unless a runner is installed, and
- * clearing the runner re-arms dry-run, so neither ordering leaves a test able
- * to stop something real.
- */
-/**
+ * ⚠️ The same bidirectional interlock `create` uses, for a stronger reason: a
+ * test that reaches the real machine here does not litter it, it KILLS a live
+ * agent. `setDryRun(false)` refuses unless a runner is installed, and clearing
+ * the runner re-arms dry-run, so neither ordering leaves a test able to stop
+ * something real.
+ *
  * ⚠️ SAME DEFAULT AS `create`, and defaulting it to `true` here was a real bug
  * that only a live run caught.
  *
@@ -222,19 +229,57 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
     };
   }
 
-  step('ended its session', () => {
+  /**
+   * ⚠️ THE SESSION MUST BE OURS, not merely named ours.
+   *
+   * Owning the plist is a fact about DISK. It says this product created an
+   * agent by this name; it does not say the session holding that name right now
+   * is that agent. Our agent's session can die — a crash, or somebody's
+   * `kill-session` — and something else can take the name before the person
+   * gets round to removing the stale card.
+   *
+   * `bin/agent-supervisor.sh` already refuses to touch a session it cannot tie
+   * to `@kosmos_agent`, and the README advertises that guarantee. Removal held
+   * a lower bar than the product's own startup script, which is the wrong way
+   * round for the destructive half.
+   */
+  const sessionIsOurs = (() => {
+    const r = run(tmux, ['show-options', '-t', clean, '-v', '@kosmos_agent']);
+    if (!r || r.ok === false) return false;    // no such session, or we cannot ask
+    return String(r.stdout || '').trim() === clean;
+  })();
+
+  const endedSession = step('ended its session', () => {
+    if (!sessionIsOurs) {
+      // Nothing of ours is running under that name. That IS the end state we
+      // wanted, and killing whatever is there instead would be the hazard the
+      // supervisor refuses.
+      return true;
+    }
     // The `=` form, exactly: `kill-session -t sam` prefix-matches and will
     // happily end `samantha-discord`. Measured on this machine, by doing it.
-    //
-    // ⚠️ Exit 1 here means the session was already gone, which is the end state
-    // we wanted. A failure for any other reason — tmux not where we expected,
-    // most likely on a machine where it is not at the Homebrew path — must not
-    // be recorded as "ended its session" over a session somebody can still talk
-    // to.
     const r = run(tmux, ['kill-session', '-t', `=${clean}`]);
-    if (r && r.ok !== false) return true;
-    return r && r.code === 1;
+    if (!(r && (r.ok !== false || r.code === 1))) return false;
+    // ⚠️ LOOK AGAIN. The launchd half is verified with `print`; the session half
+    // was asserted from a command whose answer was not re-checked, so a kill
+    // that failed for any reason other than exit 1 — tmux not at the path we
+    // expected, most likely — reported "ended its session" over a session
+    // somebody can still talk to, and then the folder beneath it was deleted.
+    const still = run(tmux, ['has-session', '-t', `=${clean}`]);
+    return !(still && still.ok !== false);
   });
+
+  // ⚠️ STOP if it is still running. Continuing would delete the working
+  // directory out from under a live agent, return the person to a board that
+  // still shows it, and leave a name that can be neither removed (no plist) nor
+  // recreated (the session is still on the roster).
+  if (!endedSession) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we stopped its startup job, but could not end the session it is running in, so it is still going. Nothing else has been removed.',
+      steps,
+    };
+  }
 
   const removedJob = step('removed its startup job', () => {
     if (DRY_RUN && !runner) return true;
@@ -242,14 +287,7 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
     return !fs.existsSync(create.plistPath(clean));
   });
 
-  let removedFolder = true;
-  if (alsoDeleteFolder) {
-    removedFolder = step('deleted its folder', () => {
-      if (DRY_RUN && !runner) return true;
-      fs.rmSync(create.workerDir(clean), { recursive: true, force: true });
-      return !fs.existsSync(create.workerDir(clean));
-    });
-  }
+
 
   /**
    * ⚠️ The job is what makes a removal STICK. If the plist is still there the
@@ -263,6 +301,46 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
       because: 'we stopped it, but could not remove the job that starts it, so it will come back when you next log in. The README says how to remove it by hand.',
       steps,
     };
+  }
+
+  /**
+   * ⚠️ THE IRREVERSIBLE STEP GOES LAST, AFTER EVERYTHING RECOVERABLE HAS
+   * SUCCEEDED.
+   *
+   * It used to run before the check above, so a failed plist removal deleted
+   * the person's instructions anyway — and then told them the agent "will come
+   * back when you next log in", which was worse than it sounded: it would
+   * respawn every thirty seconds forever against a working directory that no
+   * longer existed. Deleting what somebody wrote during a run that FAILED is
+   * the one mistake here with nothing behind it.
+   */
+  /**
+   * ⚠️ WHAT THE PLATFORM ITSELF STORED, which the folder checkbox does not
+   * cover and a person would never think to ask about.
+   *
+   * The avatar, the role label and the commitment record are kept under the
+   * app's own data directory, keyed by name. Leaving them meant that making a
+   * new agent with the same name later produced one wearing the dead agent's
+   * face, carrying its job title, and holding its promises. Always removed —
+   * there is no version of "remove this agent" where keeping its photograph is
+   * what somebody meant.
+   */
+  const clearedRecords = step('cleared what the app remembered about it', () => {
+    if (DRY_RUN && !runner) return true;
+    let ok = true;
+    try { store.removeAvatar(clean); } catch { ok = false; }
+    try { fs.rmSync(store.profilePath(clean), { force: true }); } catch { ok = false; }
+    try { fs.rmSync(commitments.recordPath(clean), { force: true }); } catch { ok = false; }
+    return ok;
+  });
+
+  let removedFolder = true;
+  if (alsoDeleteFolder) {
+    removedFolder = step('deleted its folder', () => {
+      if (DRY_RUN && !runner) return true;
+      fs.rmSync(create.workerDir(clean), { recursive: true, force: true });
+      return !fs.existsSync(create.workerDir(clean));
+    });
   }
   if (!removedFolder) {
     return {
@@ -284,22 +362,41 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
       const r = run('/bin/launchctl', ['print', `gui/${process.getuid()}/${create.serviceLabel(clean)}`]);
       return Boolean(r && r.ok !== false && String(r.stdout || '').trim());
     } catch {
-      return false;   // `print` throws when there is no such service, which is what we want
+      // Unreachable on the real path: `run()` catches the throw and answers
+      // `{ok:false}`, which the test above already reads as "not loaded". Kept
+      // so an injected runner that throws cannot take the process down.
+      return false;
     }
   })();
   if (stillLoaded) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: 'we removed its files, but it is still registered as a startup job, so it may come back. The README says how to clear that by hand.',
+      because: `we removed its files, but ${clean} is still registered as a startup job. It may come back, and the name cannot be used again until that job is cleared: run "launchctl bootout gui/$UID/com.kosmos.agent.${clean}" in a terminal.`,
+      steps,
+    };
+  }
+
+  // ⚠️ A failed clear does not block the removal — the agent IS gone — but it is
+  // not silent either. What survives is a picture, a job title and a commitment
+  // record that can name real work, and a person who reuses the name would meet
+  // them again without knowing why.
+  if (!clearedRecords) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: `${clean} is gone, but we could not clear everything this app remembered about it. If you make another agent with that name, it may pick up the old picture or job title.`,
       steps,
     };
   }
 
   return {
     outcome: OUTCOME.REMOVED,
+    // ⚠️ Says what keeping the folder COSTS. Creation refuses a name whose
+    // worker folder exists, so the recommended path quietly burns the name —
+    // and the only way to reuse it is a terminal, in a product whose whole
+    // pitch is that you never need one. Better said here than discovered later.
     because: alsoDeleteFolder
       ? `${clean} is gone, along with its folder.`
-      : `${clean} is gone. Its folder is still on your computer.`,
+      : `${clean} is gone. Its folder is still on your computer, so you cannot make another agent called ${clean} until you remove it.`,
     steps,
   };
 }
