@@ -153,6 +153,67 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
 .panel p:last-child { margin-bottom: 0; }
+/* --- projects ---------------------------------------------------------- */
+.panel-wide { max-width: 860px; }
+.pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
+.pj-lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin: var(--space-4) 0 var(--space-6); }
+.pj-list { display: flex; flex-direction: column; gap: var(--space-4); }
+/* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
+   failure. A <button> does NOT inherit the page's colour -- it uses the UA's
+   `buttontext`, which is near-black. In light mode that happened to look
+   right, so the row passed by luck; in dark mode the project NAME rendered
+   dark-grey on dark-grey. Every text test passed either way, because the
+   words were all present. Caught by looking at the dark screenshot. */
+.pj-row { display: block; width: 100%; text-align: left; cursor: pointer;
+  color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+  padding: var(--space-5); }
+.pj-row:hover { background: var(--attn-bg); }
+.pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
+/* ⚠️ `display: block` on all three, and it is not cosmetic. These are
+   SPANs inside a button, so without it the folder path and the agents line ran
+   together into one unreadable string -- which every one of the 408 text tests
+   passed, because the words were all present and in order. This is the whole
+   reason a screenshot is part of the work. */
+.pj-row .pj-path { display: block; font: var(--text-subhead) var(--font-ui); color: var(--label-2);
+  margin-top: 2px; word-break: break-all; }
+.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-3); }
+/* ⚠️ A state, not a decoration. A folder we cannot read has to look different
+   from one we can, or the row quietly reports a project that is fine. */
+.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--label);
+  margin-top: var(--space-3); padding-left: var(--space-4);
+  border-left: 2px solid var(--warn-ink); }
+.pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
+  padding: var(--space-7); text-align: center; }
+.pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
+.pj-folder { font: var(--text-callout) var(--font-ui); color: var(--label-2); word-break: break-all; }
+.pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
+.pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
+.pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
+#pj-one-add { font: var(--text-body) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+.pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+  padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
+.pj-member b { font: 600 var(--text-body) var(--font-ui); }
+.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+.pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
+.pj-member.unseen { border-style: dashed; }
+.pj-member .drop { margin-left: auto; background: none; border: 0; cursor: pointer;
+  font: var(--text-caption) var(--font-ui); color: var(--label-2); text-decoration: underline; }
+.pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
+.pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
+  border-radius: var(--radius-control); }
+.pj-browse button { display: block; width: 100%; text-align: left; background: none;
+  border: 0; border-bottom: 0.5px solid var(--separator); cursor: pointer;
+  font: var(--text-body) var(--font-ui); color: var(--label); padding: var(--space-4) var(--space-5); }
+.pj-browse button:hover { background: var(--attn-bg); }
+.pj-browse button:last-child { border-bottom: 0; }
+.pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
+.pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
+  padding: 2px var(--space-3); }
 .panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
                text-transform: uppercase; letter-spacing: .06em; }
 /* --- creating an agent ---------------------------------------------------
@@ -438,6 +499,13 @@ svg { display: block; }
     </div>
   </div>
 
+  <!-- The relationship read from the agent's end. The mock draws three project
+       names under one agent, so it has to be readable both ways on day one. -->
+  <div class="field" id="d-projects-field" hidden>
+    <span class="flabel">Projects it is on</span>
+    <div class="pj-projects" id="d-projects"></div>
+  </div>
+
   <div class="field">
     <p id="d-untied" hidden></p>
     <label class="flabel" for="d-file">Picture</label>
@@ -597,12 +665,98 @@ svg { display: block; }
   </div>
 </section>
 
-<section class="panel" id="panel-projects" hidden>
-  <h2>Talking to your agents isn't built yet.</h2>
-  <p>This is where you'll give them work and read what they say back, the way you
-     would message a person. Each project is a folder on your computer, and the
-     agents you give access to it can work on what's inside.</p>
-  <p class="soon">Next thing being built.</p>
+<!-- ⚠️ THREE VIEWS IN ONE PANEL, because the tab is one destination. `showTab`
+     owns which PANEL is visible; `showProject` owns which of these is. Two
+     mechanisms for one question is this codebase's worst habit, so the second
+     one is deliberately narrow: it only ever moves inside here. -->
+<section class="panel panel-wide" id="panel-projects" hidden>
+
+  <!-- The list, and the empty state, which is the screen first-run hands you. -->
+  <div id="pj-list-view">
+    <div class="pj-head">
+      <h2>My Projects</h2>
+      <button class="btn" id="pj-new" type="button">Add a project</button>
+    </div>
+    <p class="pj-lede">A project is a folder you already have on this computer,
+       and the agents you have put on it.</p>
+    <div id="pj-list" class="pj-list" aria-live="polite"></div>
+  </div>
+
+  <!-- One project. -->
+  <div id="pj-one-view" hidden>
+    <button class="back" id="pj-back" type="button">← All projects</button>
+    <div class="pj-head">
+      <h2 id="pj-one-name"></h2>
+    </div>
+    <p class="pj-folder" id="pj-one-folder"></p>
+    <p class="pj-folder-state" id="pj-one-folder-state"></p>
+
+    <div class="field">
+      <span class="flabel">Agents on this project</span>
+      <p class="fhint">Putting an agent here tells it where this project's folder
+         is. It does not stop it reaching anything else, and it is not a
+         permission.</p>
+      <div id="pj-one-agents" class="pj-members"></div>
+      <div class="frow" style="margin-top: var(--space-5)">
+        <select id="pj-one-add" aria-label="An agent to put on this project"></select>
+        <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
+      </div>
+      <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Talking to them isn't built yet.</span>
+      <p class="fhint">This is where you'll give them work and read what they say
+         back, the way you would message a person. It needs one thing we haven't
+         settled: when five agents are on a project, who answers. Everything
+         answering at once and nothing answering are the same bug, so the room
+         waits until that has a rule.</p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Remove this project</span>
+      <p class="fhint">Takes it off this list. <b>Nothing in the folder is
+         deleted</b>, ever, and you can add it again.</p>
+      <button class="btn" id="pj-one-remove" type="button">Remove from Kosmos</button>
+    </div>
+  </div>
+
+  <!-- Adding one. Two decisions, not a form. -->
+  <div id="pj-add-view" hidden>
+    <button class="back" id="pj-add-back" type="button">← All projects</button>
+    <h2>Add a project</h2>
+
+    <div class="field">
+      <span class="flabel">Which folder is this project's work in?</span>
+      <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
+         own files in it</b> — everything it keeps lives somewhere else.</p>
+      <div class="frow" style="margin-bottom: var(--space-4)">
+        <p class="pj-crumbs" id="pj-crumbs"></p>
+        <button class="btn" id="pj-use" type="button">Use this folder</button>
+      </div>
+      <div id="pj-browse" class="pj-browse"></div>
+      <p class="pj-chosen" id="pj-chosen">No folder chosen yet.</p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">What do you call it?</span>
+      <div class="frow">
+        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease">
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Which agents are on it?</span>
+      <p class="fhint">You can change this later, and you can leave it empty for
+         now.</p>
+      <div id="pj-add-agents" class="pj-members"></div>
+    </div>
+
+    <div class="frow" style="margin-top: var(--space-6)">
+      <button class="btn" id="pj-create" type="button">Add this project</button>
+    </div>
+    <p class="fmsg" id="pj-add-msg" aria-live="polite"></p>
+  </div>
 </section>
 <section class="panel" id="panel-joint" hidden>
   <h2>Working with other people's agents isn't built yet.</h2>
@@ -1101,6 +1255,11 @@ function showTab(tab) {
     if (msg) msg.textContent = '';
   } else paintRemoved();
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
+  // ⚠️ Re-read on every arrival rather than once at boot. A project's folder can
+  // be moved or deleted while this page sits open, and its members' states
+  // change constantly — a list painted once would go on asserting a world that
+  // stopped being true, which is the whole failure this app is built against.
+  if (tab === 'projects') { pjView(PJ_CURRENT ? 'one' : 'list'); loadProjects(); }
 }
 
 document.getElementById('tabs').addEventListener('click', (e) => {
@@ -1182,7 +1341,40 @@ function openDetail(sessionName) {
   // agent can be removed here is a fact about what created it, and this screen
   // must not carry its own opinion about that.
   loadRemoval(a.sessionName);
+  paintAgentProjects(a.sessionName);
   showTab('detail');
+}
+
+/**
+ * Which projects this agent is on.
+ *
+ * ⚠️ HIDDEN when it is on none, rather than showing an empty box captioned
+ * "Projects it is on". An empty list under a heading reads as a checked and
+ * confirmed nothing; the heading only appears when there is something true to
+ * put under it.
+ *
+ * ⚠️ Reads from `PROJECTS`, which is loaded when the Projects tab is opened —
+ * so it can legitimately be empty here having never been fetched. That is why
+ * it fetches rather than trusting what happens to be in memory: "we have not
+ * looked" must not render as "it is on none".
+ */
+async function paintAgentProjects(sessionName) {
+  const field = document.getElementById('d-projects-field');
+  field.hidden = true;
+  try {
+    const res = await fetch('/api/projects');
+    const body = await res.json();
+    PROJECTS = body.projects || [];
+    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+  } catch {
+    return; // Silent: the panel has plenty to say already, and an unread
+            // project list is not a fact about this agent.
+  }
+  const mine = PROJECTS.filter((p) => (p.agents || []).some((a) => a.sessionName === sessionName));
+  if (!mine.length) return;
+  document.getElementById('d-projects').innerHTML =
+    mine.map((p) => '<span class="pj-tag">' + esc(p.name) + '</span>').join('');
+  field.hidden = false;
 }
 
 /**
@@ -2760,6 +2952,343 @@ async function watchForAgent(name, result, attempt) {
   document.getElementById('made-retry').hidden = false;
   tick();
 }
+
+/* --------------------------------------------------------------------------
+ * Projects
+ *
+ * ⚠️ THE RULE THIS SCREEN IS BUILT AROUND. Putting an agent on a project is an
+ * ORGANISING fact and never a boundary. Every agent on this machine runs at
+ * full permission and nothing is enforced, so no word here may imply otherwise:
+ * no locks, no "access", no "restricted", no "can only". A level that is not
+ * enforced is worse than none, because it is believed by somebody with no way
+ * to check.
+ *
+ * ⚠️ AND THE SENTENCE THAT KEEPS IT HONEST. An agent reads its instruction file
+ * ONCE, when it starts. So adding it to a project does not reach an agent that
+ * is already running, and this screen says "will see this the next time it
+ * starts" rather than anything in the present tense. That is merged-is-not-
+ * deployed, arriving inside the product.
+ * ------------------------------------------------------------------------ */
+
+let PROJECTS = [];
+let PJ_AGENTS_UNREADABLE = false;
+let PJ_CURRENT = null;      // the project id being looked at, or null
+let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
+let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
+let PJ_ADD_AGENTS = [];     // the agents ticked in the add flow
+
+function pjView(which) {
+  for (const v of ['list', 'one', 'add']) {
+    document.getElementById('pj-' + v + '-view').hidden = (v !== which);
+  }
+}
+
+/**
+ * How a member reads.
+ *
+ * ⚠️ `present: false` is NOT rendered as anything reassuring and NOT dropped.
+ * The board's rule one level up: an agent we cannot read is shown as unknown,
+ * never as something healthy, and never as nothing at all.
+ */
+function pjMember(m, projectId) {
+  const told = m.told || {};
+  let toldLine = '';
+  if (told.state === 'told') {
+    // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
+    // inform a running agent, and saying we did would be the one claim on this
+    // screen that nobody could check.
+    toldLine = 'Kosmos told it where this folder is. It will see that the next time it starts.';
+  } else if (told.state === 'could_not') {
+    toldLine = 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+  }
+  return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+    + '<b>' + esc(m.name) + '</b>'
+    + (m.present
+      ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label) + '</small>'
+      : '<small>We cannot see this agent on this computer right now.</small>')
+    + (projectId ? '<button class="drop" type="button" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
+    + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + '</div>';
+}
+
+function pjFolderLine(p) {
+  const f = p.folderState || {};
+  if (f.state === 'readable') return { text: '', bad: false };
+  return { text: (f.because || 'we cannot read this folder') + '.', bad: true };
+}
+
+function paintProjects() {
+  const list = document.getElementById('pj-list');
+  if (!PROJECTS.length) {
+    list.innerHTML = '<div class="pj-empty">'
+      + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
+      + 'and put an agent on it.</p>'
+      + '<button class="btn" id="pj-new-empty" type="button">Add a project</button>'
+      + '</div>';
+    return;
+  }
+  list.innerHTML = PROJECTS.map((p) => {
+    const s = p.summary || {};
+    const folder = pjFolderLine(p);
+    // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
+    // A summary that hides its own blind spot is the defect this codebase keeps
+    // finding, and a project row is exactly where it would hide.
+    let who;
+    if (!s.total) who = 'No agents on it yet.';
+    else if (PJ_AGENTS_UNREADABLE) who = s.total + (s.total === 1 ? ' agent' : ' agents') + ' — we cannot see how they are doing right now.';
+    else {
+      const bits = [];
+      if (s.needsYou) bits.push(s.needsYou + ' needs you');
+      if (s.working) bits.push(s.working + ' working');
+      if (s.unseen) bits.push(s.unseen + ' we cannot see');
+      who = (p.agents || []).map((a) => esc(a.name)).join(' · ') + (bits.length ? ' — ' + bits.join(', ') : '');
+    }
+    return '<button class="pj-row" type="button" data-project="' + esc(p.id) + '">'
+      + '<b>' + esc(p.name) + '</b>'
+      + '<span class="pj-path">' + esc(p.folder) + '</span>'
+      + '<span class="pj-who">' + who + '</span>'
+      + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
+      + '</button>';
+  }).join('');
+}
+
+async function loadProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    const body = await res.json();
+    PROJECTS = body.projects || [];
+    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+  } catch {
+    PROJECTS = [];
+    document.getElementById('pj-list').innerHTML =
+      '<div class="err"><b>We cannot read your projects right now.</b><br>'
+      + 'This is not saying you have none, it is saying we cannot see them.</div>';
+    return;
+  }
+  paintProjects();
+  if (PJ_CURRENT) paintOneProject();
+}
+
+function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
+
+function paintOneProject() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) { pjView('list'); PJ_CURRENT = null; return; }
+  document.getElementById('pj-one-name').textContent = p.name;
+  document.getElementById('pj-one-folder').textContent = p.folder;
+  const folder = pjFolderLine(p);
+  const state = document.getElementById('pj-one-folder-state');
+  state.textContent = folder.bad ? folder.text : '';
+  state.className = 'pj-folder-state' + (folder.bad ? ' bad' : '');
+
+  const members = document.getElementById('pj-one-agents');
+  members.innerHTML = (p.agents || []).length
+    ? p.agents.map((m) => pjMember(m, p.id)).join('')
+    : '<p class="fhint">No agents on this project yet.</p>';
+
+  // Only agents that are NOT already on it, and only ones we can actually see.
+  const on = new Set((p.agents || []).map((a) => a.sessionName));
+  const free = LAST.filter((a) => !on.has(a.sessionName));
+  const sel = document.getElementById('pj-one-add');
+  sel.innerHTML = free.length
+    ? free.map((a) => '<option value="' + esc(a.sessionName) + '">' + esc(a.name) + '</option>').join('')
+    : '<option value="">no other agents we can see</option>';
+  document.getElementById('pj-one-add-go').disabled = !free.length;
+}
+
+function openProject(id) {
+  PJ_CURRENT = id;
+  document.getElementById('pj-one-msg').textContent = '';
+  paintOneProject();
+  pjView('one');
+}
+
+/* --- adding one -------------------------------------------------------- */
+
+async function pjBrowse(at) {
+  const box = document.getElementById('pj-browse');
+  let body;
+  try {
+    const res = await fetch('/api/folders' + (at ? '?path=' + encodeURIComponent(at) : ''));
+    body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we cannot look there');
+  } catch (err) {
+    box.innerHTML = '<button type="button" disabled>' + esc(err.message) + '</button>';
+    return;
+  }
+  document.getElementById('pj-crumbs').textContent = body.path;
+  const rows = [];
+  // ⚠️ Offered only when the answer carries one. At home the server returns a
+  // null parent, so there is no "up" to press — the browser cannot be walked
+  // out of the only place it will serve, and the button does not exist rather
+  // than existing and failing.
+  if (body.parent) rows.push('<button type="button" data-up="' + esc(body.parent) + '">← ' + esc(body.parent) + '</button>');
+  for (const f of body.folders || []) {
+    rows.push('<button type="button" data-into="' + esc(f.path) + '">' + esc(f.name) + '</button>');
+  }
+  if (!(body.folders || []).length) rows.push('<button type="button" disabled>Nothing else in here.</button>');
+  box.innerHTML = rows.join('');
+  // ⚠️ Walking INTO a folder does not choose it, and this is the whole reason
+  // there is a separate button. The first version chose whatever you were
+  // looking at — which meant the screen opened with the person's ENTIRE HOME
+  // FOLDER already selected, and one press of Add would have made it a
+  // project. Choosing the folder is the decision this screen exists for, so it
+  // is taken on purpose or not at all.
+  PJ_HERE = body.path;
+}
+
+function pjChoose(p) {
+  PJ_PICKED = p;
+  document.getElementById('pj-chosen').innerHTML =
+    'This project will be <code>' + esc(p) + '</code>. The agents you put on it '
+    + 'will be told that is where its work is.';
+  const name = document.getElementById('pj-name');
+  // A sensible default the person can overwrite, rather than an empty box: the
+  // folder's own name is nearly always what they would have typed.
+  if (!name.value || name.dataset.auto === '1') {
+    name.value = p.split('/').filter(Boolean).pop() || '';
+    name.dataset.auto = '1';
+  }
+}
+
+function paintAddAgents() {
+  const box = document.getElementById('pj-add-agents');
+  if (!LAST.length) {
+    box.innerHTML = '<p class="fhint">We cannot see any agents on this computer right now.</p>';
+    return;
+  }
+  box.innerHTML = LAST.map((a) => {
+    const on = PJ_ADD_AGENTS.includes(a.sessionName);
+    return '<button class="pick" type="button" role="checkbox" aria-checked="' + (on ? 'true' : 'false')
+      + '" data-pick="' + esc(a.sessionName) + '">'
+      + '<span class="pick-mark" aria-hidden="true">✓</span>'
+      + '<span><b>' + esc(a.name) + '</b>'
+      + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
+      + '</button>';
+  }).join('');
+}
+
+function openAddProject() {
+  PJ_PICKED = null;
+  PJ_HERE = null;
+  PJ_ADD_AGENTS = [];
+  const name = document.getElementById('pj-name');
+  name.value = '';
+  name.dataset.auto = '1';
+  document.getElementById('pj-add-msg').textContent = '';
+  document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
+  paintAddAgents();
+  pjView('add');
+  pjBrowse(null);
+}
+
+/* --- wiring ------------------------------------------------------------ */
+
+document.getElementById('pj-new').addEventListener('click', openAddProject);
+document.getElementById('pj-back').addEventListener('click', () => { PJ_CURRENT = null; pjView('list'); });
+document.getElementById('pj-add-back').addEventListener('click', () => pjView('list'));
+
+document.getElementById('pj-list').addEventListener('click', (e) => {
+  if (e.target.closest('#pj-new-empty')) { openAddProject(); return; }
+  const row = e.target.closest('[data-project]');
+  if (row) openProject(row.dataset.project);
+});
+
+document.getElementById('pj-browse').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-into], button[data-up]');
+  if (!btn) return;
+  pjBrowse(btn.dataset.into || btn.dataset.up);
+});
+
+document.getElementById('pj-add-agents').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-pick]');
+  if (!btn) return;
+  const key = btn.dataset.pick;
+  PJ_ADD_AGENTS = PJ_ADD_AGENTS.includes(key)
+    ? PJ_ADD_AGENTS.filter((k) => k !== key)
+    : [...PJ_ADD_AGENTS, key];
+  paintAddAgents();
+});
+
+document.getElementById('pj-use').addEventListener('click', () => {
+  if (PJ_HERE) pjChoose(PJ_HERE);
+});
+
+document.getElementById('pj-name').addEventListener('input', (e) => { e.target.dataset.auto = '0'; });
+
+document.getElementById('pj-create').addEventListener('click', async () => {
+  const msg = document.getElementById('pj-add-msg');
+  const btn = document.getElementById('pj-create');
+  if (!PJ_PICKED) { msg.textContent = 'Choose the folder this project is in first.'; return; }
+  btn.disabled = true;
+  msg.textContent = 'Adding it…';
+  try {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('pj-name').value,
+        folder: PJ_PICKED,
+        agents: PJ_ADD_AGENTS,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not add that project');
+    await loadProjects();
+    openProject(body.project.id);
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('pj-one-add-go').addEventListener('click', async () => {
+  const who = document.getElementById('pj-one-add').value;
+  const msg = document.getElementById('pj-one-msg');
+  if (!who || !PJ_CURRENT) return;
+  msg.textContent = '';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(who), { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not change that project');
+    await loadProjects();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+document.getElementById('pj-one-agents').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-drop]');
+  if (!btn || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-one-msg');
+  msg.textContent = '';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not change that project');
+    await loadProjects();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+document.getElementById('pj-one-remove').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const msg = document.getElementById('pj-one-msg');
+  msg.textContent = '';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id), { method: 'DELETE' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not remove that project');
+    PJ_CURRENT = null;
+    await loadProjects();
+    pjView('list');
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
 
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
