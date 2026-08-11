@@ -351,18 +351,36 @@ const PANE_FORMAT = PANE_COLUMNS.map((c) => c.fmt).join('\t');
  *
  * What makes the mangled line different is that NOTHING about it can be
  * identified: with no separator at all, `session` is the whole line, so there is
- * no agent to be conservative about. One separator is what distinguishes "a
- * field we can read" from "the entire answer landed in the first column".
+ * no agent to be conservative about.
  *
- * A future format edit that drops one `\t` from `PANE_FORMAT` is a real second
- * way to lose a separator, and it is NOT caught here — it would merge two
- * columns while leaving the rest delimited. It is caught at development time
- * instead, by the round-trip test asserting that every column declared in
- * `PANE_COLUMNS` reaches the parsed pane with the value tmux reported. That is
- * the right place for a mistake in our own format string.
+ * ⚠️ "A separator somewhere" is NOT enough, and the first version of this rule
+ * was exactly that. `title` is the one field that can itself contain a tab (see
+ * the format note above, and the test for tab-carrying titles), so a mangled
+ * line whose title happened to hold one sailed through and produced the very
+ * garbage agent this exists to reject — reproduced: a line reading
+ * `angel-discord_0.0_…_ Working<tab>on<tab>the thing` parsed as an agent named
+ * `angel-discord_0.0_…_ Working`, with `rejected: 0`, so nothing refused and
+ * nothing was counted.
+ *
+ * So the second field is CHECKED FOR SHAPE. `#{window_index}.#{pane_index}`
+ * is always two integers separated by a dot, tmux always produces it, and no
+ * mangled line can fake it. A truncated `session<tab>0.0` still passes, which
+ * keeps the deliberate policy above intact.
+ *
+ * ⚠️ A mistake in OUR OWN format string is a different problem and is not
+ * caught here. It is also not constructible in the form the issue imagined:
+ * `PANE_FORMAT` is derived by joining `PANE_COLUMNS` with a tab, so a `\t`
+ * cannot be dropped from it by hand. What can happen is a column being added,
+ * removed or reordered, and the round-trip test over a hand-built line catches a
+ * merge or a reorder — though not an appended column, which nothing currently
+ * would. That is a gap in the tests rather than something this guard should
+ * try to cover.
  */
+const PANE_INDEX_SHAPE = /^\d+\.\d+$/;
+
 function isParseable(line) {
-  return String(line).includes('\t');
+  const parts = String(line).split('\t');
+  return parts.length > 1 && PANE_INDEX_SHAPE.test(parts[1]);
 }
 
 /**
@@ -380,11 +398,21 @@ function isParseable(line) {
 function readPanes(out) {
   if (!out) return { panes: [], rejected: 0 };
   const lines = out.trim().split('\n').filter(Boolean);
-  const good = lines.filter(isParseable);
-  return { panes: parsePanes(good.join('\n')), rejected: lines.length - good.length };
+  // ⚠️ Counted from what actually PARSED, not from a second application of the
+  // filter. Two derivations of "how many did we lose" can drift the moment
+  // `parsePanes` drops a line for any other reason.
+  const panes = parsePanes(out);
+  return { panes, rejected: lines.length - panes.length };
 }
 
-/** Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested. */
+/**
+ * Parse `list-panes -F PANE_FORMAT` output. Pure, so it can be tested.
+ *
+ * ⚠️ It DROPS lines it cannot read (see `isParseable`) and says nothing about
+ * how many. That silence is the fourteen-hour failure in miniature, so anything
+ * that needs to tell "no agents" from "an answer we could not read" must use
+ * `readPanes`, which returns the count alongside.
+ */
 function parsePanes(out) {
   if (!out) return [];
   return out.trim().split('\n').filter(Boolean).filter(isParseable).map((line) => {
@@ -442,10 +470,6 @@ function parsePanes(out) {
  * done with it, so it cannot be used to reach a real agent.
  */
 let paneSource = null;
-// How many lines of the last tmux answer we could not read. Module state
-// because `listPanes` has to reach `snapshot` past `onePanePerSession`, and a
-// second parse to recompute it would be a second derivation of one fact.
-let UNREADABLE_LINES = 0;
 
 function setPaneSource(fn) { paneSource = typeof fn === 'function' ? fn : null; }
 
@@ -468,10 +492,13 @@ function listPanes() {
   if (rejected > 0 && panes.length === 0) {
     throw new Error('tmux answered with something we could not read');
   }
-  // Some read, some did not: the fleet is shown, and the gap is carried
-  // alongside it rather than quietly closed. `snapshot` puts it in the counts.
-  UNREADABLE_LINES = rejected;
-  return panes;
+  // Some read, some did not: the fleet is shown, and the gap is RETURNED
+  // alongside it rather than quietly closed, so `snapshot` can put it in the
+  // counts. Returned rather than stashed in module state — the first version
+  // used a module-level variable and justified it as avoiding a second
+  // derivation, which was not true: threading it costs one destructuring and
+  // cannot go stale.
+  return { panes, rejected };
 }
 
 /**
@@ -1177,6 +1204,19 @@ function paneRoster() {
    * `listPanes` refuses on the same condition for the board. Two readers, one
    * rule, and the reason they are not one function is that this one is
    * deliberately stricter than `snapshot` about being asked at all.
+   *
+   * ⚠️ A PARTIAL answer does NOT refuse here, and that is a decision rather
+   * than an omission. Refusing on any unreadable line would take every
+   * name-keyed read and write away from the whole fleet because one pane's line
+   * was mangled — a machine-wide outage caused by a cosmetic fault in one line.
+   * The gates this feeds are already conservative about a name they cannot
+   * find: `knownAgent` answers false, which fails closed.
+   *
+   * ⚠️ What it costs, said plainly: `borrowedName` also answers false, so a
+   * record stays readable on the strength of a roster this module has just
+   * admitted was incomplete. That is the weaker half of the trade, and it is
+   * bounded — the alternative is refusing every route on the machine for one
+   * bad line, which is a worse failure with a wider blast radius.
    */
   const { panes, rejected } = readPanes(out);
   if (rejected > 0 && panes.length === 0) {
@@ -1189,7 +1229,8 @@ function paneRoster() {
 }
 
 function snapshot() {
-  const panes = onePanePerSession(listPanes());
+  const { panes: read, rejected: unreadableLines } = listPanes();
+  const panes = onePanePerSession(read);
   const agents = panes.map((pane) => {
     const text = capturePane(pane.target);
     const status = classify(pane, text);
@@ -1288,7 +1329,7 @@ function snapshot() {
       // anything else means part of the fleet is missing from this board and
       // the board has to say so rather than presenting what is left as all of
       // it.
-      unreadableLines: UNREADABLE_LINES,
+      unreadableLines,
     },
     agents,
   };

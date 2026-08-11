@@ -1057,3 +1057,32 @@ test('a fleet that is partly unreadable is shown with the gap counted, not quiet
     setPaneCapture(null);
   }
 });
+
+test('one unreadable line does not take the gate away from the whole fleet', () => {
+  // ⚠️ THE PARTIAL CASE, pinned as a DECISION. Refusing here on any unreadable
+  // line would take every name-keyed read and write away from every agent on
+  // the machine because one pane's line was mangled: a machine-wide outage from
+  // a cosmetic fault. So the gate keeps working for the agents it could read,
+  // and the agents it could not are simply absent -- which `knownAgent` answers
+  // false for, failing closed.
+  //
+  // Unpinned, this was free to flip in either direction: a mutation making the
+  // gate refuse on ANY rejected line left the whole suite green.
+  setPaneSource(() => ['angel-discord\t0.0\t2.1.212\t0\t✳ Claude Code',
+    'mikey-discord_0.0_2.1.223_0__ mangled'].join('\n'));
+  try {
+    const roster = require('./status').paneRoster();
+    assert.equal(roster.length, 1, 'the readable agent was lost with the garbage one');
+    assert.equal(roster[0].sessionName, 'angel',
+      'the surviving entry is not the agent whose line was readable');
+
+    // ⚠️ AND THE OTHER DIRECTION. An answer with NOTHING readable still refuses,
+    // so this leniency is scoped to the partial case rather than having quietly
+    // removed the refusal altogether.
+    setPaneSource(() => 'mikey-discord_0.0_2.1.223_0__ mangled');
+    assert.throws(() => require('./status').paneRoster(), /could not read/,
+      'the gate now accepts an answer it could read nothing from');
+  } finally {
+    setPaneSource(null);
+  }
+});

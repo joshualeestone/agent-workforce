@@ -1663,20 +1663,52 @@ test('every write route refuses the untied card’s own spelling while the real 
   }
 });
 
-test('the board says when part of the fleet could not be read', () => {
-  // ⚠️ A count nobody displays is not a safeguard. The engine counts lines it
-  // could not parse; if the screen does not show it, the board still presents
-  // what it managed to parse as the whole machine -- which is the fourteen-hour
-  // failure with extra steps.
+test('the board SAYS part of the fleet could not be read, in words on the screen', () => {
+  // ⚠️ BEHAVIOURAL, not source-shape, and the first version of this test was
+  // the latter: it asserted that `c.unreadableLines` appears in the script.
+  // Mutation-proved that this was worthless -- emptying the `if` body, or
+  // trimming the notice back off the joined summary, left the suite green while
+  // removing the half of this change that the fourteen-hour outage is about.
+  // This file already carries that lesson 150 lines above, with the harness to
+  // avoid it.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  assert.match(script, /c\.unreadableLines/,
-    'the summary never mentions lines the engine could not read, so a partial '
-    + 'fleet is shown as the whole one');
 
-  // And it is CONDITIONAL, like every other count on that line: a normal
-  // machine must not carry a permanent warning, which is how a warning stops
-  // being read.
-  assert.match(script, /if \(c\.unreadableLines\)/,
-    'the notice is unconditional, so it appears when nothing is wrong');
+  // The summary block, run against a fake element, for a counts object that
+  // says one line was unreadable.
+  const summarise = (counts) => {
+    const el = { textContent: '' };
+    const document = { getElementById: () => el };
+    // ⚠️ The slice INCLUDES the line that writes the summary. The first version
+    // stopped just before it and re-implemented the join in the harness -- so a
+    // mutation that trimmed the notice back off that very line stayed green,
+    // because the harness was joining its own way. A test harness that
+    // reconstructs the behaviour it is testing is the same defect as a
+    // source-shape assertion, one level in.
+    const from = script.indexOf('const bits = [');
+    const write = script.indexOf("document.getElementById('summary').textContent");
+    const body = script.slice(from, script.indexOf('\n', write) + 1);
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'c', body)(document, counts);
+    return el.textContent;
+  };
+
+  // ⚠️ Every other count is non-zero on purpose. With them at zero the notice is
+  // one of only two entries, so a mutation that trims the summary to its first
+  // few parts keeps it by accident and this test passes without meaning to. The
+  // notice has to be pinned where it actually sits: LAST, after everything else
+  // the line can carry.
+  const partial = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 });
+  assert.match(partial, /could not read/,
+    'the board shows what it managed to parse as the whole machine, with nothing '
+    + 'on screen saying agents are missing from it');
+  assert.match(partial, /1 /, 'the notice does not say how many lines were lost');
+
+  // ⚠️ THE CONTROL. A clean answer must carry NO such notice: a warning that is
+  // always on screen is one nobody reads, which is how the other counts on this
+  // line are written.
+  const clean = summarise({ total: 12, needsYou: 0, unknown: 0, unknownFullness: 0, unreadableLines: 0 });
+  assert.doesNotMatch(clean, /could not read/,
+    'a healthy board carries a permanent warning about unreadable lines');
+  assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
 });
