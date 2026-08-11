@@ -26,6 +26,12 @@
  *   - **A runner seam with a bidirectional interlock**: leaving dry-run throws
  *     unless a runner is already injected, and clearing the runner re-arms
  *     dry-run, so neither ordering leaves a test able to spawn real agents.
+ *     ⚠️ And dry-run now suppresses the WRITES as well as the commands. It
+ *     guarded them with `DRY_RUN && !runner` — true only in the state where the
+ *     commands are inert anyway — so a test that installed a recorder still
+ *     wrote a real plist into `~/Library/LaunchAgents`, and launchd starts that
+ *     job at the next login whether or not anybody ran `bootstrap`. The
+ *     interlock was covering the quieter half of the danger.
  *     ⚠️ This used to say "dry-run by default", and that was FALSE: the flag
  *     starts at `AGENT_WORKFORCE_DRY_RUN === '1'`, which is false unless
  *     somebody sets it, so a fresh process with no runner installed executes
@@ -217,6 +223,7 @@ function launcherFor(name, claudeBin, tmuxBin) {
 
 SESSION='${name}'
 LOG='${logFile(name)}'
+exec_adopt=
 # ⚠️ EVERY -t target below uses "=$SESSION", not "$SESSION". tmux's default
 # target resolution falls back to a PREFIX MATCH: with only angel-discord
 # running, 'tmux has-session -t ang' succeeds. So an agent named sam beside a
@@ -255,8 +262,25 @@ fi
 warned=0
 while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
   if [ "$("$TMUX_BIN" show-options -t "$TARGET" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
-    "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
-    break
+    # ⚠️ Ours -- but do not throw away a HEALTHY one. This file says you can run
+    # it by hand, and the unconditional kill meant doing so destroyed the live
+    # agent and everything it remembered. If something other than a shell is
+    # running in there, the agent is alive: adopt it and supervise, which is
+    # also the right answer when launchd restarts this script under a session
+    # that never stopped.
+    running=$("$TMUX_BIN" list-panes -t "$TARGET" -F '#{pane_current_command}' 2>/dev/null | head -1)
+    case "$running" in
+      ""|sh|bash|zsh|fish|tcsh|ksh|login)
+        # Crashed back to a shell, or unreadable. Replace it.
+        "$TMUX_BIN" kill-session -t "$TARGET" 2>/dev/null
+        break
+        ;;
+      *)
+        echo "$(date): $SESSION is already running ($running) -- leaving it alone and watching it" >&2
+        exec_adopt=1
+        break
+        ;;
+    esac
   fi
   if [ "$warned" -eq 0 ]; then
     echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
@@ -275,12 +299,20 @@ done
 # this script recognise it as ours and kill it -- the borrowed-name hazard the
 # wait loop exists to prevent, arriving through the one command whose failure
 # was not checked.
-"$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
-  "$CLAUDE" --dangerously-skip-permissions || exit 1
+if [ -z "$exec_adopt" ]; then
+  "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \\
+    "$CLAUDE" --dangerously-skip-permissions || exit 1
+fi
 
 # The claim. Without it this agent is anonymous on the board after every
 # restart, whatever it was when it was created.
-"$TMUX_BIN" set-option -t "$TARGET" @kosmos_agent "$SESSION"
+#
+# ⚠️ Its failure is reported rather than swallowed: an unclaimed session runs
+# fine and shows on the board with no name, no role, no model and no editable
+# instructions, which is the blocker this whole mechanism exists to remove. If
+# it ever happens, the reason belongs in the log rather than in nothing.
+"$TMUX_BIN" set-option -t "$TARGET" @kosmos_agent "$SESSION" \\
+  || echo "$(date): could not claim $SESSION -- the board will not recognise it" >&2
 
 # Stay alive while the session does, so launchd supervises the AGENT rather
 # than a command that exits in a tenth of a second.
@@ -385,10 +417,39 @@ function createAgent(opts) {
   if (!role) {
     return { outcome: OUTCOME.REFUSED, because: 'pick what this agent is for', steps };
   }
-  if (fs.existsSync(workerDir(name))) {
+  /* ⚠️ WHAT IS ALREADY HERE, and the refusal has to name the RIGHT half.
+   *
+   * Three states, not one, because removing an agent is still manual and the
+   * README says so: a folder can outlive its job, and a job can outlive its
+   * folder. Checking only the folder meant a leftover launchd job was
+   * discovered as a FAILED BOOTSTRAP -- "we set it up but could not start it",
+   * which is true and about the wrong thing, on the one screen built to tell
+   * somebody which half failed. Checking only the job inverted it.
+   *
+   * The half-made case matters most in practice: a PARTIAL leaves both on disk,
+   * the screen offers Start over, and the person needs to be told what is in
+   * the way rather than that an agent they can see is not running exists.
+   */
+  const hasFolder = fs.existsSync(workerDir(name));
+  const hasJob = fs.existsSync(plistPath(name));
+  if (hasFolder && hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already an agent called ${name}`,
+      because: `there is already an agent called ${name}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
+      steps,
+    };
+  }
+  if (hasJob) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `something called ${name} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
+      steps,
+    };
+  }
+  if (hasFolder) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `there is already a folder for an agent called ${name}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
       steps,
     };
   }
@@ -424,24 +485,6 @@ function createAgent(opts) {
     return {
       outcome: OUTCOME.REFUSED,
       because: `there is already an agent called ${name}`,
-      steps,
-    };
-  }
-
-  /* ⚠️ AND AN EXISTING STARTUP JOB, which is neither a folder nor a session.
-   *
-   * "Folder gone, job still loaded" is a state the README actively tells people
-   * to expect, because removing an agent is still manual and deleting the
-   * folder is explicitly not enough. Landing in it, this function used to
-   * overwrite the plist on disk -- diverging it from the job launchd has
-   * already loaded -- and then fail at `bootstrap`, reporting "we set it up but
-   * could not start it". True, and about the wrong thing, on the one screen
-   * built to tell somebody which half failed.
-   */
-  if (fs.existsSync(plistPath(name))) {
-    return {
-      outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is still set to start on this computer, even though there is no agent by that name. It has to be removed before the name can be used again.`,
       steps,
     };
   }
@@ -489,7 +532,7 @@ function createAgent(opts) {
   }
 
   const madeDir = step('made its folder', () => {
-    if (DRY_RUN && !runner) return true;
+    if (DRY_RUN) return true;
     fs.mkdirSync(workerDir(name), { recursive: true });
   });
   if (!madeDir) {
@@ -497,7 +540,7 @@ function createAgent(opts) {
   }
 
   const wroteInstructions = step('wrote its instructions', () => {
-    if (DRY_RUN && !runner) return true;
+    if (DRY_RUN) return true;
     fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, name), 'utf8');
   });
 
@@ -505,12 +548,12 @@ function createAgent(opts) {
   // `/bin/bash`, but a person told "this is a real file you can run" and met
   // "permission denied" has been handed a file that is real only to us.
   const wroteLauncher = step('wrote its startup script', () => {
-    if (DRY_RUN && !runner) return true;
+    if (DRY_RUN) return true;
     fs.writeFileSync(launcherFile(name), launcherFor(name, claudeBin, tmuxBin), { mode: 0o755 });
   });
 
   const wroteJob = step('wrote its startup job', () => {
-    if (DRY_RUN && !runner) return true;
+    if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
   });
@@ -534,6 +577,7 @@ function createAgent(opts) {
       outcome: OUTCOME.PARTIAL,
       because: 'we could not write everything it needs, so we have not started it',
       steps,
+      folder: workerDir(name),
     };
   }
 
@@ -562,6 +606,7 @@ function createAgent(opts) {
       outcome: OUTCOME.PARTIAL,
       because: 'we set it up but could not start it, so it is not running yet',
       steps,
+      folder: workerDir(name),
     };
   }
   // ⚠️ `CREATED` says the job was accepted, and NOT that the agent is up. The
@@ -574,6 +619,9 @@ function createAgent(opts) {
     because: `${name} is set up and starting`,
     steps,
     firstAction: role.firstAction,
+    // Where it actually is, so no screen has to rebuild this path and be wrong
+    // about it on a machine with the roots pointed elsewhere.
+    folder: workerDir(name),
   };
 }
 

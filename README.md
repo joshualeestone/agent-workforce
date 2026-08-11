@@ -23,8 +23,13 @@ its folder is not enough — the job would keep trying. Until Remove is built:
 
     launchctl bootout gui/$UID/com.kosmos.agent.<name>
     rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist
-    tmux kill-session -t <name>
+    tmux kill-session -t "=<name>"
     rm -rf ~/work/workers/<name>
+
+The `=` is not a typo. Without it tmux resolves a target by PREFIX, so
+`kill-session -t sam` will happily kill `samantha-discord` if no session is
+called exactly `sam`. If you started the board with `AGENT_WORKFORCE_WORKERS` or
+`AGENT_WORKFORCE_LAUNCH` set, substitute those paths for the two above.
 
 The startup script refuses to touch a session it cannot prove is its own, so a
 leftover job cannot take a name somebody else is using — but it will sit there

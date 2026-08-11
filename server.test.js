@@ -1158,7 +1158,7 @@ test('a session that merely borrows an agent name cannot rewrite its instruction
   //
   // Deleting the `isNamedOurs === true` clause in `knownAgent` fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1195,7 +1195,7 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   //
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1236,7 +1236,7 @@ test('GET /commitments refuses a name a stranger is currently claiming, but not 
   const status = require('./engine/status');
 
   // Half one: a stranger claiming the name. Must refuse.
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\tstranger');
+  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const res = await req('/api/agent/angel/commitments');
@@ -1358,7 +1358,7 @@ test('the gate checks do not capture every pane on every request', async () => {
   // gate to `snapshot()` left it green.
   const status = require('./engine/status');
   let captures = 0;
-  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tx');
+  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\t\tx');
   status.setPaneCapture(() => { captures += 1; return 'Worked for 1m\n> \n'; });
   try {
     captures = 0;
@@ -1395,7 +1395,7 @@ test('a live agent is not taken offline by a stranger holding an alias of its na
   const status = require('./engine/status');
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1434,8 +1434,8 @@ test('/api/status reads the store for a tied agent and not for an untied one', a
     return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${name}` }], reportedAt: new Date().toISOString(), because: 'stubbed for this test' };
   };
   status.setPaneSource(() => [
-    'tied-discord\t0.0\t2.1.212\t0\tworking',
-    'untied\t0.0\t2.1.212\t0\tworking',
+    'tied-discord\t0.0\t2.1.212\t0\t\tworking',
+    'untied\t0.0\t2.1.212\t0\t\tworking',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1477,7 +1477,7 @@ test('a stranger cannot fetch the real agent’s picture under the stranger’s 
 
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1642,7 +1642,7 @@ test('every write route refuses the untied card’s own spelling while the real 
   const status = require('./engine/status');
   status.setPaneSource(() => [
     'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\tthe real one',
+    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1720,8 +1720,17 @@ test('the roles route carries the copy the creation actually uses', async () => 
     assert.ok(real, `the route served a role '${r.key}' that cannot be created`);
     assert.equal(r.blurb, real.blurb);
     assert.equal(r.firstAction, real.firstAction, 'the picker would show a first action the agent never gets');
+    // ⚠️ And the CAUTION, which is the whole condition of Legal shipping: the
+    // limit has to be readable at the moment of choosing, so it has to survive
+    // the route. Served as null rather than omitted, so the screen never has to
+    // guess whether a role has one.
+    assert.equal(r.caution, real.caution || null,
+      `the picker would show a different limit for ${r.key} than the role carries`);
   }
-  assert.ok(!got.some((r) => r.key === 'legal'), 'Legal is being offered before its wording is settled');
+  const legal = got.find((r) => r.key === 'legal');
+  assert.ok(legal, 'Legal is not being offered at all');
+  assert.match(legal.caution, /not a lawyer|not legal advice/i,
+    'Legal is offered without the sentence that made it shippable');
 });
 
 /**

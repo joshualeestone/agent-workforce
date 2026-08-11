@@ -888,7 +888,7 @@ function limitFor(model) {
  * confident numbers about the wrong conversation, which is the exact failure
  * this whole resolution path was written to avoid.
  */
-function sessionIdFor(sessionName, exactSession) {
+function sessionIdsFor(sessionName, exactSession) {
   // ⚠️ When the caller knows the REAL session name, only that spelling is
   // tried. The board's name is the session with `-discord` stripped, so `foo`
   // and `foo-discord` are one name and two sessions — and trying both spellings
@@ -905,6 +905,7 @@ function sessionIdFor(sessionName, exactSession) {
   const candidates = exactSession
     ? [`${exactSession}_0.0.json`]
     : [`${sessionName}-discord_0.0.json`, `${sessionName}_0.0.json`];
+  const found = [];
   for (const root of configRoots()) {
     for (const candidate of candidates) {
       try {
@@ -914,28 +915,36 @@ function sessionIdFor(sessionName, exactSession) {
           ? [exactSession]
           : [sessionName, `${sessionName}-discord`];
         if (owner && !wanted.includes(owner)) continue;
-        if (entry.session_id) return entry.session_id;
+        if (entry.session_id) found.push(entry.session_id);
       } catch { /* try the next candidate */ }
     }
   }
-  return null;
+  // ⚠️ ALL of them, in preference order, rather than the first one found.
+  // Returning the first meant a caller with only a name (the staleness check)
+  // could be handed a session id whose transcript no longer exists, and stop —
+  // reporting "no transcript" for an agent whose own transcript was sitting
+  // under the other spelling. Registry entries outlive their sessions, so the
+  // first match is not necessarily the live one.
+  return found;
 }
 
 function transcriptFor(agentName, exactSession) {
-  const sessionId = sessionIdFor(agentName, exactSession);
-  if (!sessionId) return null;
+  const sessionIds = sessionIdsFor(agentName, exactSession);
+  if (!sessionIds.length) return null;
 
-  for (const root of configRoots()) {
-    const projects = path.join(root, 'projects');
-    let dirs;
-    try {
-      dirs = fs.readdirSync(projects);
-    } catch {
-      continue;
-    }
-    for (const d of dirs) {
-      const candidate = path.join(projects, d, `${sessionId}.jsonl`);
-      if (fs.existsSync(candidate)) return candidate;
+  for (const sessionId of sessionIds) {
+    for (const root of configRoots()) {
+      const projects = path.join(root, 'projects');
+      let dirs;
+      try {
+        dirs = fs.readdirSync(projects);
+      } catch {
+        continue;
+      }
+      for (const d of dirs) {
+        const candidate = path.join(projects, d, `${sessionId}.jsonl`);
+        if (fs.existsSync(candidate)) return candidate;
+      }
     }
   }
 

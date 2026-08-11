@@ -426,7 +426,11 @@ function crossSiteWrite(req) {
     const originHost = `${host}${parsed.port ? `:${parsed.port}` : ''}`;
     // ALLOWED_HOSTS is the explicit reverse-proxy opt-in, and a proxy
     // legitimately renumbers ports — the same exception the `Host` check makes.
-    if (sentHost && originHost !== sentHost && !ALLOWED_HOSTS.has(host)) {
+    // ⚠️ A missing `Host` alongside an `Origin` FAILS CLOSED. No browser omits
+    // Host, so this is not a live bypass — but the alternative is the strongest
+    // arm of this guard degrading silently, which is the posture everything
+    // else in this file refuses.
+    if (originHost !== sentHost && !ALLOWED_HOSTS.has(host)) {
       return 'that request came from another program on this computer, so we will not act on it';
     }
   } else if (origin === 'null') {
@@ -645,6 +649,10 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, {
       roles: roles.ROLES.map((r) => ({
         key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+        // ⚠️ The limit travels WITH the role. A caution that lives only in the
+        // agent's instruction file is read after the person has chosen, which
+        // is exactly too late for the two roles that have one.
+        caution: r.caution || null,
       })),
     });
     return;

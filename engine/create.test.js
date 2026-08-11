@@ -301,7 +301,7 @@ test('an existing agent is never quietly overwritten', () => {
 
   const second = create.createAgent({ ...BINS, name: 'twice', role: 'writer' });
   assert.equal(second.outcome, create.OUTCOME.REFUSED);
-  assert.match(second.because, /already an agent/);
+  assert.match(second.because, /already an agent called twice/);
   assert.equal(fs.readFileSync(create.instructionFile('twice'), 'utf8'), before,
     'creating a second agent with the same name rewrote the first one’s instructions');
 });
@@ -323,18 +323,38 @@ test('every role ships a suggested first action', () => {
   }
 });
 
-test('Legal is deliberately absent, and the advice-shaped roles say so themselves', () => {
-  // ⚠️ Pinned so its absence is a DECISION rather than an oversight someone
-  // helpfully corrects. Framing covers Copyright and Finance; Legal is where a
-  // wrong draft costs most, and it wants somebody with a real opinion on
-  // liability before it ships. Josh has the call and has not made it.
-  assert.equal(roles.byKey('legal'), null,
-    'Legal was added without the liability wording being settled');
+test('the roles where being wrong is expensive carry their limit in BOTH places', () => {
+  // ⚠️ Legal was held out of the first set until the liability wording was
+  // settled. Josh settled it on 2026-08-10: ship it, "but when they pick it out
+  // say that it's not legal advice from a lawyer, same with the other roles we
+  // greyed out". So the condition of shipping is the sentence being visible AT
+  // THE MOMENT OF CHOICE.
+  //
+  // Both places, and each covers what the other cannot. The `caution` is what
+  // the PERSON reads while choosing, before any work exists to be wrong about.
+  // The instruction line is what the AGENT reads, every time it starts, long
+  // after any setup screen has been clicked through. A role with only one of
+  // them has a limit that either nobody sees or nobody follows.
+  for (const [key, mustSay] of [
+    ['legal', /not a lawyer|not legal advice/i],
+    ['finance', /not financial advice/i],
+  ]) {
+    const role = roles.byKey(key);
+    assert.ok(role, `${key} is missing entirely`);
+    assert.ok(role.caution, `${key} has no caution, so its limit is invisible while choosing it`);
+    assert.match(role.caution, mustSay, `${key}'s caution does not say what it is not`);
+    assert.match(role.instructions, /not a lawyer|do not give (financial|legal) advice/i,
+      `${key} does not state its own boundary, so the only thing holding it is a `
+      + 'sentence the operator read once');
+  }
 
-  const finance = roles.byKey('finance');
-  assert.match(finance.instructions, /do not give financial advice/i,
-    'the finance role does not state its own boundary, so the only thing holding '
-    + 'it is a disclaimer the operator saw once during setup');
+  // ⚠️ And the roles that DO NOT need one must not have it. A caution on every
+  // role is a caution nobody reads -- the same reason the provenance marker was
+  // taken off every card.
+  for (const key of ['pm', 'ea', 'writer', 'researcher']) {
+    assert.ok(!roles.byKey(key).caution,
+      `${key} carries a caution, and a warning on everything warns about nothing`);
+  }
 });
 
 test('the instructions name the agent, and carry no template language', () => {
@@ -361,7 +381,7 @@ test('a name a live session already answers to is refused, even with no folder',
   // Measured before this gate existed: the creation screen watched for a
   // session called `casey`, found the fleet's existing one, and reported
   // "casey is running" over a creation that had done nothing whatsoever.
-  status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\tidle');
+  status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\t\tidle');
   const taken = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
 
   assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
@@ -599,4 +619,45 @@ test('the startup script names its session exactly, not by prefix', () => {
   // literal, and an `=` there would become part of the name.
   assert.match(script, /new-session -d -s "\$SESSION"/,
     'the session is created with the match syntax in its name');
+});
+
+test('the refusals that protect a name are each reachable and each tested', () => {
+  // ⚠️ Two of these could have been DELETED with the whole suite green, which
+  // is the same as not having them. A guard nothing exercises is a comment.
+  const calls = recorder();
+  create.setDryRun(false);
+
+  // A name ending in -discord. The board files that agent under the stripped
+  // name, so it collides with a real agent AND its own card is anonymous.
+  assert.match(create.nameProblem('angel-discord') || '', /-discord/,
+    'a name the board would file under somebody else was accepted');
+  assert.equal(create.createAgent({ ...BINS, name: 'angel-discord', role: 'pm' }).outcome,
+    create.OUTCOME.REFUSED);
+
+  // A leftover launchd job with no folder: the exact state the README tells
+  // people to expect, because removing an agent is still manual.
+  const orphan = 'orphan-job';
+  fs.mkdirSync(nodePath.dirname(create.plistPath(orphan)), { recursive: true });
+  fs.writeFileSync(create.plistPath(orphan), '<plist/>', 'utf8');
+  const refused = create.createAgent({ ...BINS, name: orphan, role: 'pm' });
+  assert.equal(refused.outcome, create.OUTCOME.REFUSED,
+    'a name whose launchd job is still installed was accepted, so the plist gets '
+    + 'overwritten and bootstrap then fails with the wrong reason');
+  assert.match(refused.because, /still set to start/);
+  assert.equal(calls.length, 0, 'a refused name still ran a command');
+
+  // THE CONTROL: with the job gone, the same name goes through.
+  fs.rmSync(create.plistPath(orphan));
+  assert.equal(create.createAgent({ ...BINS, name: orphan, role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'this name is refused whatever is on disk, so the above proves nothing');
+});
+
+test('a length problem says it is a length problem', () => {
+  // A person who typed one character was told to use letters, numbers, hyphens
+  // and underscores -- a rule they had not broken, with nothing pointing at the
+  // one they had.
+  assert.match(create.nameProblem('a'), /two characters/);
+  assert.match(create.nameProblem('x'.repeat(33)), /32 characters/);
+  // And the character rule still answers for a character problem.
+  assert.match(create.nameProblem('has space'), /letters, numbers/);
 });

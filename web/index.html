@@ -174,6 +174,12 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pick-mark { flex: none; width: 18px; color: var(--label); font-weight: 600; }
 .pick[aria-checked="false"] .pick-mark { color: transparent; }
 .pick b { font: 600 var(--text-body) var(--font-ui); display: block; }
+/* The limit on a role that has one, read while choosing rather than discovered
+   afterwards. Weight and a rule, never hue: it has to survive greyscale like
+   every other signal on this board. */
+.pick .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
+                 border-left: 2px solid var(--border-strong); color: var(--label);
+                 font: var(--text-callout) var(--font-ui); }
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-2); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
@@ -1383,7 +1389,8 @@ async function loadRoles() {
     msg.textContent = '';
     list.innerHTML = ROLES.map((r) => `<button class="pick" type="button" role="radio" aria-checked="false" data-role="${esc(r.key)}">
       <span class="pick-mark" aria-hidden="true">&#10003;</span>
-      <span><b>${esc(r.label)}</b><small>${esc(r.blurb)}</small></span>
+      <span><b>${esc(r.label)}</b><small>${esc(r.blurb)}</small>${
+        r.caution ? `<small class="caution">${esc(r.caution)}</small>` : ''}</span>
     </button>`).join('');
     // The default is a suggestion, not a decision made for them: it is
     // preselected and visibly so, and any other row replaces it in one click.
@@ -1491,13 +1498,14 @@ document.getElementById('create-go').addEventListener('click', async () => {
   document.getElementById('create-go').disabled = true;
   msg.textContent = 'Making it…';
   let result;
+  let res;
   try {
-    const res = await fetch('/api/agents', {
+    res = await fetch('/api/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, role: PICKED }),
     });
-    result = await res.json();
+    result = await res.json().catch(() => null);
   } catch (err) {
     // The request itself did not complete, so we do not know what happened on
     // the other side — which is not the same as nothing having happened.
@@ -1514,6 +1522,23 @@ document.getElementById('create-go').addEventListener('click', async () => {
   // caused it rather than on a screen that has moved on.
   if (result && result.outcome === 'refused') {
     msg.textContent = result.because || 'that name will not work';
+    return;
+  }
+
+  /**
+   * ⚠️ ANY OTHER ANSWER IS NOT A CREATION.
+   *
+   * This checked `refused` and nothing else, so a 400, a 403 from the
+   * cross-site guard, a 500, or a body with no outcome at all fell straight
+   * through to the made screen — which painted an empty step list, watched for
+   * thirty seconds, and then told the person their folder and instructions were
+   * on their computer and a job was retrying at every login. Nothing had been
+   * created. That is this branch's first rule inverted, in the exact sentence
+   * `engine/create` names as the one not to say.
+   */
+  if (!res.ok || !result || (result.outcome !== 'created' && result.outcome !== 'partial')) {
+    msg.textContent = (result && (result.error || result.because))
+      || 'we could not make it, and we cannot tell you why';
     return;
   }
 
@@ -1645,8 +1670,14 @@ async function watchForAgent(name, result) {
       // somebody is most likely to want one gone. Saying "it is set to keep
       // trying" without saying where is how a person ends up with a job they
       // cannot find.
-      + '<br>It is set to keep trying at every login. Its folder is <code>~/work/workers/'
-      + esc(name) + '</code>, and removing it for good is written up in the README.';
+      // ⚠️ The folder comes from the ANSWER, not from a path built here. This
+      // page guessed `~/work/workers/<name>`, which is wrong on any machine
+      // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a
+      // folder that does not exist.
+      + (result.folder
+        ? '<br>It is set to keep trying at every login. Its folder is <code>' + esc(result.folder)
+          + '</code>, and removing it for good is written up in the README.'
+        : '<br>It is set to keep trying at every login, and removing it for good is written up in the README.');
   }
   warn.hidden = false;
   document.getElementById('made-done').hidden = false;
