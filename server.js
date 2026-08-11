@@ -554,7 +554,11 @@ const server = http.createServer((req, res) => {
       // "Splinter", would have left it on the board and in the removed list at
       // the same time. Every other name-keyed reader in this block already uses
       // `sessionName`; this was the one that did not.
-      const gone = new Set(removal.removedAgents().map((r) => r.name));
+      // ⚠️ Only the ones that actually STOPPED come off the board. A removal
+      // that half-worked is recorded — so there is a Restore button — but its
+      // agent may still be running, and hiding a running agent is the one thing
+      // this board must never do.
+      const gone = new Set(removal.removedAgents().filter((r) => removal.isHidden(r.name)).map((r) => r.name));
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
         commitments: a.isNamedOurs

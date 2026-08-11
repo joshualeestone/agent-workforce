@@ -398,6 +398,33 @@ function createAgent(opts) {
    * the screen offers Start over, and the person needs to be told what is in
    * the way rather than that an agent they can see is not running exists.
    */
+  /**
+   * ⚠️ A NAME ON THE REMOVED LIST IS TAKEN, and refusing it here is what stops
+   * a new agent being born invisible.
+   *
+   * The board hides removed agents by name. Nothing prunes that list, and
+   * `remove` deletes nothing — so a name removed earlier could be created
+   * again, succeed, and then be filtered off the board on every poll: no card,
+   * no error, and nothing on screen to explain where it went. The person who
+   * hit this would have no way at all to work out what happened.
+   *
+   * Restoring is almost always what they actually want, so the refusal says so
+   * rather than sending them to a manual recipe.
+   *
+   * Required lazily: `remove` requires THIS module, and a top-level require
+   * would close the cycle. By the time an agent is being created, both are
+   * loaded and this resolves from cache.
+   */
+  // eslint-disable-next-line global-require
+  const removedList = require('./remove');
+  if (removedList.isRemoved(name)) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `${name} is on your removed list. Put that one back from "Show removed agents" at the bottom of the Agents tab, or pick a different name.`,
+      steps,
+    };
+  }
+
   const hasFolder = fs.existsSync(workerDir(name));
   const hasJob = fs.existsSync(plistPath(name));
   if (hasFolder && hasJob) {

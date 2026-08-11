@@ -2267,7 +2267,21 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
   assert.match(raw, /aria-modal="true"/, 'the dialog is not announced as modal');
 
   // A partial must not close it — see the engine tests for what partial means.
-  assert.match(raw, /partial[\s\S]{0,400}?return;/,
+  /**
+   * ⚠️ SCOPED TO THE MODAL'S OWN HANDLER, not matched against the whole file.
+   *
+   * The earlier form was `/partial[\s\S]{0,400}?return;/` against the entire
+   * page, which binds happily to the CREATE flow's partial handler several
+   * hundred lines away — it passed against a copy of this file with the removal
+   * modal's partial branch deleted outright. Cutting the handler out first is
+   * what makes the two assertions below about THIS code.
+   */
+  const handler = raw.slice(raw.indexOf("getElementById('rm-go').addEventListener"));
+  const body = handler.slice(0, handler.indexOf('\n});'));
+  assert.ok(body.includes("done.outcome === 'partial'"),
+    'the confirmation does not handle a half-finished removal at all');
+  const partialBranch = body.slice(body.indexOf("done.outcome === 'partial'"));
+  assert.ok(!partialBranch.slice(0, partialBranch.indexOf('return;')).includes('closeRemoveModal'),
     'a half-finished removal closes the confirmation, so nobody reads that the agent is still running');
 });
 
@@ -2326,9 +2340,15 @@ test('an agent whose card shows a different name than its session still leaves t
     assert.equal(body.counts.total, body.agents.length,
       'the summary counts an agent the board no longer shows');
   } finally {
+    // ⚠️ RESTORE BEFORE CLEARING THE RUNNER, not after. `setRunner(null)`
+    // re-arms dry-run, and a dry-run restore answers `restored` while never
+    // rewriting the file — so this ran, reported success, and left the record
+    // in place, quietly filtering this name off `/api/status` for every test
+    // added after it. Cleanup that cannot fail and does nothing is worse than
+    // no cleanup, because it looks handled.
+    await req(`/api/agent/${session}/restore`, { method: 'POST' }).catch(() => {});
     removal.setRunner(null);
     status.setPaneSource(null);
-    await req(`/api/agent/${session}/restore`, { method: 'POST' }).catch(() => {});
   }
 });
 
@@ -2381,6 +2401,8 @@ test('a job that is disabled but will not unload is recorded, not reported as un
     assert.ok(listed.includes('wont-unload'),
       'a half-removed agent is on no list, so there is no Restore button and no way back');
   } finally {
+    // Same ordering rule as above: undo while the runner is still armed.
+    await req('/api/agent/wont-unload/restore', { method: 'POST' }).catch(() => {});
     removal.setRunner(null);
   }
 });

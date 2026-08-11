@@ -213,12 +213,28 @@ function sessionFor(name) {
  * second copy of this for the partial path would have been the obvious way to
  * write it, and the obvious way for the two to drift.
  */
-function recordRemoval(clean, job) {
+function recordRemoval(clean, job, stopped) {
   if (DRY_RUN && !runner) return true;
   const list = readRemoved().filter((r) => r.name !== clean);
   list.push({
     name: clean,
     removedAt: new Date().toISOString(),
+    /**
+     * ⚠️ WHETHER THE AGENT ACTUALLY STOPPED, and the board reads it.
+     *
+     * Two requirements pulled in opposite directions here and both were right.
+     * A half-removal needs a RECORD, or there is no Restore button and no way
+     * back. But a half-removal is exactly the case where the agent may still be
+     * running, and hiding a running agent is the thing this codebase refuses to
+     * do above all others.
+     *
+     * They only conflict while "recorded" and "hidden" are the same fact. They
+     * are not: the record says Kosmos was asked to remove this, and this flag
+     * says whether it managed to. A partial is listed as removed — so it can be
+     * put back — and stays ON the board, because it may still be going, which
+     * is precisely what the card is for.
+     */
+    stopped: stopped !== false,
     // ⚠️ What RESTORE needs, captured at removal rather than re-derived later.
     // By then the plist may be gone, or a different one may have taken its
     // place, and restoring the wrong job is worse than not restoring at all.
@@ -231,6 +247,22 @@ function recordRemoval(clean, job) {
 }
 
 /**
+ * Whether the board should hide this agent.
+ *
+ * ⚠️ NOT the same question as `isRemoved`, and keeping them apart is the whole
+ * point. `isRemoved` asks whether Kosmos was asked to remove this agent, which
+ * is what puts a Restore button on screen. This asks whether it actually
+ * stopped, which is what may take a card off the board. A removal that half
+ * worked answers yes to the first and no to the second: it is recoverable AND
+ * still visible, because it may still be running.
+ */
+function isHidden(name) {
+  const clean = create.cleanName(name);
+  const r = readRemoved().find((x) => x.name === clean);
+  return Boolean(r) && r.stopped !== false;
+}
+
+/**
  * Whether there is anything here to remove: a folder, a startup job, or a
  * session on the board. Any one is enough.
  */
@@ -239,12 +271,17 @@ function exists(clean) {
   try {
     if (fs.existsSync(create.workerDir(clean))) return true;
   } catch { /* an unreadable path is not evidence of absence, so fall through */ }
-  // ⚠️ A tmux we cannot reach must not read as "there is no such agent". That
-  // would turn an unreachable board into a refusal, which is the safe
-  // direction here — but say it as the unknown it is rather than as absence.
+  // ⚠️ An unreachable tmux is UNKNOWN, and the caller says so in those words.
+  // Returning a bare false here made `plan` answer "we cannot find an agent
+  // called X" — an assertion of absence derived from a question that was never
+  // asked, under a comment claiming it did the opposite.
   const found = sessionFor(clean);
-  return found.kind === FOUND.OURS || found.kind === FOUND.UNTIED;
+  if (found.kind === FOUND.OURS || found.kind === FOUND.UNTIED) return true;
+  return found.kind === FOUND.UNKNOWN ? UNKNOWN : false;
 }
+
+/** Neither "it is there" nor "it is not": we could not ask. */
+const UNKNOWN = Symbol('unknown');
 
 /* ── what removing would do ──────────────────────────────────────────────── */
 
@@ -265,7 +302,16 @@ function plan(name) {
   const clean = create.cleanName(name);
   const problem = create.nameProblem(clean);
   if (problem) return { ok: false, because: problem };
-  if (isRemoved(clean)) {
+  /**
+   * ⚠️ `isHidden`, NOT `isRemoved`, and the difference is a retry.
+   *
+   * A removal that half worked leaves a record, so keying this on "is there a
+   * record" refused the second attempt — the person is looking at an agent
+   * still running under a message telling them it could not be stopped, and the
+   * only button offered answers "it has already been removed". Refuse when it
+   * is genuinely gone; let them try again when it is not.
+   */
+  if (isHidden(clean)) {
     return { ok: false, because: `${clean} has already been removed from Kosmos.` };
   }
   /**
@@ -281,7 +327,11 @@ function plan(name) {
    * all count. Requiring all three would refuse the half-set-up agents this
    * feature is most useful for.
    */
-  if (!exists(clean)) {
+  const there = exists(clean);
+  if (there === UNKNOWN) {
+    return { ok: false, because: `we could not check whether ${clean} is still there, so we have not offered to remove it. Try again in a moment.` };
+  }
+  if (!there) {
     return { ok: false, because: `we cannot find an agent called ${clean}.` };
   }
   return {
@@ -361,7 +411,7 @@ function remove(name, { tmuxBin } = {}) {
        * removal with no record is the one state with no way back. Recording it
        * puts the Restore button on screen, which re-enables exactly this label.
        */
-      recordRemoval(clean, job);
+      recordRemoval(clean, job, false);
       return {
         outcome: OUTCOME.PARTIAL,
         because: `we stopped ${clean} from starting again, but could not stop it right now, so it is still running. `
@@ -381,9 +431,20 @@ function remove(name, { tmuxBin } = {}) {
    */
   const found = sessionFor(clean);
   if (found.kind === FOUND.UNKNOWN) {
+    // ⚠️ RECORDED FIRST, and the same goes for every partial below.
+    //
+    // By this line the job is disabled AND unloaded, so the agent is
+    // half-removed whatever we say next. A half-removal with no record is the
+    // one state with no way back: no row in the removed list, so no Restore
+    // button, so the only route is the manual launchctl recipe this product
+    // exists to spare people. The bootout partial above learnt this; these
+    // three returns were left behind, and they are the ones a person actually
+    // hits, because an unreachable tmux and an untied session are ordinary.
+    recordRemoval(clean, job, false);
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we stopped ${clean} from starting again, but could not ask tmux whether it is still running, so it may still be going.`,
+      because: `we stopped ${clean} from starting again, but could not ask tmux whether it is still running, so it may still be going. `
+        + 'You can put it back from the removed list.',
       steps,
     };
   }
@@ -397,10 +458,12 @@ function remove(name, { tmuxBin } = {}) {
    * and leave the session alone.
    */
   if (found.kind === FOUND.UNTIED) {
+    recordRemoval(clean, job, false);
     return {
       outcome: OUTCOME.PARTIAL,
       because: `we stopped ${clean} from starting again, but something is running in a session called ${found.session} `
-        + 'that we cannot confirm is this agent, so we have left it alone. It may still be going.',
+        + 'that we cannot confirm is this agent, so we have left it alone. It may still be going. '
+        + 'You can put it back from the removed list.',
       steps,
     };
   }
@@ -416,9 +479,11 @@ function remove(name, { tmuxBin } = {}) {
       return Boolean(still && still.ok === false && still.code === 1);
     });
     if (!ended) {
+      recordRemoval(clean, job, false);
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we stopped ${clean} from starting again, but could not end the session it is running in, so it is still going.`,
+        because: `we stopped ${clean} from starting again, but could not end the session it is running in, so it is still going. `
+          + 'You can put it back from the removed list.',
         steps,
       };
     }
@@ -519,13 +584,19 @@ function restore(name) {
    */
   return {
     outcome: OUTCOME.RESTORED,
-    because: `${clean} is back on the board and set to start again.`,
+    // ⚠️ Two sentences, because two things can be true. An agent removed while
+    // it had no startup job has nothing to re-enable, and telling somebody it
+    // is "set to start again" would be a claim about a job that does not exist.
+    because: record.label
+      ? `${clean} is back on the board and set to start again.`
+      : `${clean} is back on the board. It had no startup job, so there was nothing to turn back on.`,
     steps,
   };
 }
 
 module.exports = {
   plan,
+  isHidden,
   remove,
   restore,
   isRemoved,

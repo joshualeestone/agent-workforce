@@ -273,7 +273,16 @@ test('a tmux we cannot ask stops the removal, rather than reading as "nothing is
   const r = remove.remove(name);
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a removal that could not ask tmux reported success');
   assert.match(r.because, /could not ask tmux/);
-  assert.equal(remove.isRemoved(name), false, 'it was hidden while possibly still running');
+  // ⚠️ RECORDED BUT NOT HIDDEN, and the pair is the assertion.
+  //
+  // It stays on the board because it may still be running, and hiding a
+  // running agent is the one thing this board must never do. It is on the
+  // removed list anyway, because the job IS disabled — so without a record
+  // there would be no Restore button and no way back short of the manual
+  // launchctl recipe.
+  assert.equal(remove.isHidden(name), false, 'it was hidden while possibly still running');
+  assert.equal(remove.isRemoved(name), true,
+    'a half-removed agent is on no list, so its disabled job cannot be turned back on from the product');
 
   // THE CONTROL: "nothing is running" IS an answer, and proceeds.
   status.setPaneSource(() => '');
@@ -292,7 +301,9 @@ test('a session that survives the kill is not reported as removed', () => {
   const r = remove.remove(name);
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a surviving session was reported as removed');
   assert.match(r.because, /still going/);
-  assert.equal(remove.isRemoved(name), false, 'it was taken off the board while still running');
+  assert.equal(remove.isHidden(name), false, 'it was taken off the board while still running');
+  assert.equal(remove.isRemoved(name), true,
+    'the agent is stopped from restarting with no way to undo it');
 });
 
 test('a session the board does not tie to this agent is left alone', () => {
@@ -400,4 +411,96 @@ test('a name that was never an agent cannot be removed', () => {
   // would be satisfied by a guard that refuses everything.
   const real = madeAgent('really-here');
   assert.equal(remove.plan(real).ok, true, 'the guard refuses agents that do exist');
+});
+
+test('a half-removed agent is recoverable, retryable, and still visible', () => {
+  /**
+   * ⚠️ THE STATE WITH NO WAY OUT, which is what this test exists to prevent.
+   *
+   * When the job is disabled but the session survives, three things all have to
+   * be true at once, and each was false at some point in this feature's life:
+   *
+   *   it is RECORDED   — or there is no Restore button, and the only route back
+   *                      is the manual launchctl recipe;
+   *   it is VISIBLE    — or a possibly-running agent has been hidden, which is
+   *                      the one thing this board must never do;
+   *   it is RETRYABLE  — or the person is looking at an agent that did not stop,
+   *                      under a button answering "it has already been removed".
+   */
+  const name = madeAgent('stuck-halfway');
+  boardShows(name, name);
+  world({ killWorks: false });
+  remove.setDryRun(false);
+
+  const first = remove.remove(name);
+  assert.equal(first.outcome, remove.OUTCOME.PARTIAL, first.because);
+  assert.equal(remove.isRemoved(name), true, 'not recorded: there is no way to put it back');
+  assert.equal(remove.isHidden(name), false, 'hidden while it may still be running');
+  assert.match(first.because, /put it back from the removed list/,
+    'nothing tells the person there is a way back');
+
+  // RETRYABLE: the same removal, offered again rather than refused.
+  const again = remove.plan(name);
+  assert.equal(again.ok, true, 'a half-removed agent cannot be removed again, so it is stuck: ' + again.because);
+
+  // And when the kill works the second time, it completes and goes.
+  world({ killWorks: true });
+  remove.setDryRun(false);
+  const second = remove.remove(name);
+  assert.equal(second.outcome, remove.OUTCOME.REMOVED, second.because);
+  assert.equal(remove.isHidden(name), true, 'a completed retry still leaves it on the board');
+
+  // ⚠️ AND RESTORE WORKS FROM THE HALF STATE TOO — the record was written by
+  // the partial, so this is the path a person actually reaches from that row.
+  const back = remove.restore(name);
+  assert.equal(back.outcome, remove.OUTCOME.RESTORED, back.because);
+  assert.equal(remove.isRemoved(name), false, 'restoring left the record behind');
+});
+
+test('a removed name cannot be created into invisibility', () => {
+  /**
+   * ⚠️ THE TRAP WITH NO TELL, which is why this is refused rather than allowed.
+   *
+   * The board hides removed agents BY NAME, nothing prunes the list, and a
+   * removal deletes nothing — so creating a fresh agent under a removed name
+   * used to succeed and then be filtered off the board on every poll. No card,
+   * no error, nothing on screen to explain it. Somebody hitting that has no
+   * route to the answer at all.
+   */
+  const name = madeAgent('reused-name');
+  boardShows(name, name);
+  world();
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED);
+  assert.equal(remove.isHidden(name), true, 'the fixture is not hidden, so nothing below can fail');
+
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const again = create.createAgent({ ...BINS, name, role: 'pm' });
+    assert.equal(again.outcome, create.OUTCOME.REFUSED,
+      'a new agent was created under a removed name, so it exists and the board will never show it');
+    assert.match(again.because, /removed list/,
+      'the refusal does not mention the removed list, so the person cannot act on it');
+    assert.match(again.because, /Show removed agents/,
+      'it refuses without pointing at Restore, which is what they almost certainly want');
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+
+  // ⚠️ THE CONTROL. Putting it back frees the name, or this refusal would be a
+  // permanent tax on every name ever removed.
+  assert.equal(remove.restore(name).outcome, remove.OUTCOME.RESTORED);
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const after = create.createAgent({ ...BINS, name: 'reused-name-2', role: 'pm' });
+    assert.equal(after.outcome, create.OUTCOME.CREATED, after.because);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
 });

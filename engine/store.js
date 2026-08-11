@@ -120,8 +120,13 @@ function writeProfile(name, patch) {
   return next;
 }
 
-// ⚠️ `profilePath` is exported alongside `avatarPath` because removing an agent
-// has to clear what this module remembers about it. It was not, so the removal
-// called an undefined function, the step caught the throw, recorded a failure
-// nothing read, and a reused name inherited the dead agent's job title.
+// ⚠️ `profilePath` is exported for symmetry with `avatarPath`, and currently
+// has no caller outside this file.
+//
+// It was exported for an earlier design in which removing an agent DELETED what
+// this module remembers about it. That design is gone: removing an agent now
+// deletes nothing at all, on purpose, which is what makes it reversible — so a
+// profile deliberately survives its agent's removal and is there again when the
+// agent is restored. Nothing here needs clearing, and the previous version of
+// this comment described that clearing as a live requirement.
 module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, profilePath, saveAvatar, removeAvatar, readProfile, writeProfile };
