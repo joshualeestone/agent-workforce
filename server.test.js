@@ -2926,7 +2926,10 @@ test('a job that is disabled but will not unload is recorded, not reported as un
    as coverage of how it looks.
    =========================================================================== */
 
-test('the machine route answers with three checks and never with an error', async () => {
+test('the machine route always answers, with renderable checks and never an error', async () => {
+  // ⚠️ The bound is `>= 1`, not `=== 3`, and deliberately: the route's own catch
+  // path legitimately answers with a single "we could not check this computer"
+  // row. Asserting three would make the honest degraded answer a test failure.
   const res = await req('/api/machine');
   assert.match(res.type, /application\/json/);
   assert.equal(res.status, 200,

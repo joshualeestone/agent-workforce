@@ -124,6 +124,27 @@ function sleepCheck(text) {
    */
   const batterySleep = battery ? sleepMinutes(battery) : null;
 
+  /**
+   * ⚠️ THE KNOWN HALF IS REPORTED FIRST. This test used to sit BELOW the
+   * unreadable-battery branch, so a laptop set to sleep after ten minutes on AC
+   * whose battery section could not be read said only "we could not tell what
+   * this Mac does on battery" -- dropping a measured, actionable finding
+   * because a *different* reading failed. Half the answer was read and none of
+   * it was reported.
+   */
+  if (acSleep > 0) {
+    return {
+      key: 'sleep',
+      state: STATE.ATTENTION,
+      title: `This Mac goes to sleep after ${acSleep} ${acSleep === 1 ? 'minute' : 'minutes'}`,
+      detail: 'Your agents stop when it sleeps and start again when you wake it. If you want '
+        + 'them getting on with things while you are away, change Sleep to Never in System '
+        + 'Settings.'
+        + (battery && batterySleep === null
+          ? ' We could not read what it does on battery, which may be different again.' : ''),
+    };
+  }
+
   if (battery && batterySleep === null) {
     /**
      * ⚠️ THE REASSURING HALF OF THIS SENTENCE IS ITSELF A CLAIM, AND IT USED TO
@@ -145,17 +166,6 @@ function sleepCheck(text) {
         ? 'It does not go to sleep while it is plugged in. What it does on battery is the '
         : 'What this Mac does on battery is the ')
         + 'part we could not read, and that is the part that matters if you carry it home.',
-    };
-  }
-
-  if (acSleep > 0) {
-    return {
-      key: 'sleep',
-      state: STATE.ATTENTION,
-      title: `This Mac goes to sleep after ${acSleep} ${acSleep === 1 ? 'minute' : 'minutes'}`,
-      detail: 'Your agents stop when it sleeps and start again when you wake it. If you want '
-        + 'them getting on with things while you are away, change Sleep to Never in System '
-        + 'Settings.',
     };
   }
 
@@ -217,8 +227,31 @@ function installedCheck(opts) {
      * `statSync` throws, so the three answers are real: ENOENT is genuinely
      * absent, anything else is us being unable to see.
      */
+    /**
+     * ⚠️ AND THE SAME PATH RULE CREATION USES. `createAgent` refuses a path
+     * carrying a quote or a newline outright; without this, such a path passed
+     * step 2 as "Everything it needs to run is installed" and was refused by
+     * creation two screens later.
+     */
+    if (create.unusablePath(bin)) { missing.push({ label, bin }); continue; }
+
+    /**
+     * ⚠️ TWO PROBES, BECAUSE `EACCES` MEANS TWO DIFFERENT THINGS HERE and
+     * collapsing them puts one of them on the wrong side of the rule.
+     *
+     *   - `EACCES` from the STAT means we could not traverse to the path at all
+     *     — an unreadable parent, a disconnected mount. That is *we could not
+     *     look*, and it must not render as a finding.
+     *   - `EACCES` from the ACCESS means we looked, we found it, and it is not
+     *     runnable. That is a real finding.
+     *
+     * The first version of this ran them in one try and treated every `EACCES`
+     * as "missing", which quietly undid the whole reason the probe moved off
+     * `existsSync` in the first place.
+     */
+    let st;
     try {
-      fs.statSync(bin);
+      st = fs.statSync(bin);
     } catch (err) {
       if (err && err.code === 'ENOENT') { missing.push({ label, bin }); continue; }
       return {
@@ -228,6 +261,21 @@ function installedCheck(opts) {
         detail: `Looking for ${label} on this computer did not work (${String((err && err.message) || err)}). `
           + 'That does not mean it is missing, only that we could not see it.',
       };
+    }
+
+    /**
+     * ⚠️ A FILE WE COULD ACTUALLY RUN, not merely something at that path.
+     * `statSync` alone succeeds for a DIRECTORY named `claude` and for a file
+     * with no execute bit — both of which came back as "There is nothing else
+     * for you to go and find", on the screen whose job is promising the thing
+     * will work. launchd would then start the job and it would fail silently,
+     * which is the worst available outcome: nothing on screen, nothing running.
+     */
+    if (!st.isFile()) { missing.push({ label, bin }); continue; }
+    try {
+      fs.accessSync(bin, fs.constants.X_OK);
+    } catch {
+      missing.push({ label, bin });
     }
   }
 
@@ -294,12 +342,29 @@ function restartCheck(runner) {
      * A safety comment that disagrees with the sentence beside it is worse than
      * neither, because the next reader trusts the comment.
      */
+    /**
+     * ⚠️ IT IS A CLAIM ABOUT WHAT KOSMOS DOES, NOT ABOUT ANYBODY'S AGENTS, and
+     * the difference is not pedantry.
+     *
+     * "Your agents are set to start themselves" was FALSE on the adopt path,
+     * which is the path this machine is on. `firstrun.fleet()` counts agents out
+     * of `tmux list-panes` -- thirteen of them here -- and an agent some other
+     * program started may have no launchd job at all. Nothing in this function
+     * opened a plist, listed a job, or looked at a single one of them. On the
+     * create path it was a claim about zero agents.
+     *
+     * What was actually established is that `launchctl` answers for this login
+     * session, which is exactly enough to say that an agent KOSMOS makes will be
+     * registered. So that is what it says, and it says out loud whose agents it
+     * is not talking about.
+     */
     return {
       key: 'restart',
       state: STATE.OK,
-      title: 'Your agents are set to start themselves',
-      detail: 'They are registered with the part of macOS that starts things at login, and it '
-        + 'is answering, so they should come back on their own after a restart.',
+      title: 'Agents made here will start themselves',
+      detail: 'An agent you set up here is registered with the part of macOS that starts things '
+        + 'at login, so it comes back on its own after a restart. Agents another program set up '
+        + 'are that program\'s business, and we have not looked at them.',
     };
   }
   /**

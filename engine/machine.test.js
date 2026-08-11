@@ -70,6 +70,16 @@ AC Power:
 
 const LAPTOP_ALWAYS_AWAKE = LAPTOP_SLEEPS_ON_BATTERY.replace(' sleep                10', ' sleep                0');
 
+/**
+ * ⚠️ A REAL EXECUTABLE, not this test file. These fixtures used `__filename` —
+ * a `.js` file with no execute bit — as a stand-in for a binary, which passed
+ * for exactly as long as the check only asked whether something existed at the
+ * path. It does not stand in for a binary, and the moment the probe started
+ * asking whether it could be RUN, three tests were pinning a machine where
+ * Claude is a text file.
+ */
+const REAL_BIN = '/bin/sh';
+
 const okRunner = () => ({ ok: true, stdout: '' });
 const deadRunner = () => ({ ok: false, because: 'command not found' });
 
@@ -162,7 +172,7 @@ test('a laptop whose battery section we cannot read is unknown, not fine', () =>
 });
 
 test('a pmset that will not run at all does not become a passing check', () => {
-  const got = machine.check({ runner: deadRunner, claudeBin: __filename, tmuxBin: __filename });
+  const got = machine.check({ runner: deadRunner, claudeBin: REAL_BIN, tmuxBin: REAL_BIN });
   const sleep = got.checks.find((c) => c.key === 'sleep');
   assert.equal(sleep.state, 'unknown');
   assert.equal(got.unknown >= 1, true);
@@ -178,9 +188,22 @@ test('the reassuring half of the battery answer is not asserted unchecked', () =
    */
   const acSleeps = 'Battery Power:\n lidwake              1\n\nAC Power:\n sleep                10\n';
   const got = machine.sleepCheck(acSleeps);
-  assert.equal(got.state, 'unknown');
   assert.doesNotMatch(got.detail, /does not go to sleep while it is plugged in/,
     'told somebody their Mac stays awake on AC when the reading said it sleeps after ten minutes');
+
+  /**
+   * ⚠️ AND THE HALF WE DID READ IS REPORTED. The first correction of this branch
+   * fixed the false sentence but left the answer at `unknown` with nothing but
+   * the battery mentioned -- so a measured, actionable "this sleeps after ten
+   * minutes plugged in" was thrown away because a DIFFERENT reading failed.
+   * Half the answer was read and none of it was said.
+   */
+  assert.equal(got.state, 'attention',
+    'a known, actionable sleep setting was demoted to "we could not tell" because the '
+    + 'battery section was unreadable');
+  assert.match(got.title, /10 minutes/);
+  assert.match(got.detail, /battery/i,
+    'stopped saying that the battery half is still unread');
 
   // The control: when AC really was read as never-sleep, it DOES say so.
   const acFine = 'Battery Power:\n lidwake              1\n\nAC Power:\n sleep                0\n';
@@ -208,6 +231,7 @@ test('a binary we cannot LOOK at is unknown, not "not installed"', () => {
   fs.mkdirSync(inner);
   const hidden = nodePath.join(inner, 'claude');
   fs.writeFileSync(hidden, '#!/bin/sh\n');
+  fs.chmodSync(hidden, 0o755);   // executable, so the ONLY obstacle is the parent dir
   fs.chmodSync(inner, 0o000);
   try {
     // The control: it really is unreadable in a way that is NOT "absent".
@@ -215,7 +239,7 @@ test('a binary we cannot LOOK at is unknown, not "not installed"', () => {
     try { fs.statSync(hidden); } catch (err) { code = err.code; }
     if (code === null || code === 'ENOENT') return;   // running as root; nothing to test
 
-    const got = machine.installedCheck({ claudeBin: hidden, tmuxBin: __filename });
+    const got = machine.installedCheck({ claudeBin: hidden, tmuxBin: REAL_BIN });
     assert.equal(got.state, 'unknown',
       'a path we could not read was reported as a definite "not installed"');
     assert.match(got.detail, /could not see it|did not work/);
@@ -253,10 +277,10 @@ test('both present is a pass; a missing one names it and says where we looked', 
   const here = __filename;
   const nowhere = '/definitely/not/here/claude';
 
-  const good = machine.installedCheck({ claudeBin: here, tmuxBin: here });
+  const good = machine.installedCheck({ claudeBin: REAL_BIN, tmuxBin: REAL_BIN });
   assert.equal(good.state, 'ok');
 
-  const bad = machine.installedCheck({ claudeBin: nowhere, tmuxBin: here });
+  const bad = machine.installedCheck({ claudeBin: nowhere, tmuxBin: REAL_BIN });
   assert.equal(bad.state, 'attention');
   assert.match(bad.title, /Claude Code/);
   assert.match(bad.detail, /\/definitely\/not\/here\/claude/,
@@ -268,6 +292,58 @@ test('both present is a pass; a missing one names it and says where we looked', 
   assert.equal(both.state, 'attention');
   assert.match(both.detail, /Claude Code/);
   assert.match(both.detail, /tmux/);
+});
+
+test('something at the path is not the same as something we could run', () => {
+  /**
+   * ⚠️ BOTH OF THESE PASSED AS "Everything it needs to run is installed" while
+   * the probe only asked whether anything was there. A directory called
+   * `claude`, or a `claude` with no execute bit, produces a launchd job that
+   * starts and fails silently — nothing on screen, nothing running, and a
+   * setup screen that said it would work.
+   */
+  const fs2 = require('node:fs');
+  const nodeOs = require('node:os');
+  const nodePath = require('node:path');
+  const dir = fs2.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'aw-exec-'));
+  try {
+    const asDir = nodePath.join(dir, 'claude');
+    fs2.mkdirSync(asDir);
+    const notExec = nodePath.join(dir, 'tmux');
+    fs2.writeFileSync(notExec, '#!/bin/sh\n');
+    fs2.chmodSync(notExec, 0o644);
+
+    // The controls: both really are present, which is what made them pass.
+    assert.ok(fs2.existsSync(asDir) && fs2.existsSync(notExec),
+      'the fixture no longer contains things that exist but cannot be run');
+
+    const got = machine.installedCheck({ claudeBin: asDir, tmuxBin: notExec });
+    assert.equal(got.state, 'attention',
+      'a directory named claude and a tmux with no execute bit were both reported as installed');
+    assert.match(got.detail, /claude/);
+    assert.match(got.detail, /tmux/);
+  } finally {
+    fs2.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the install check refuses the same paths creation refuses', () => {
+  /**
+   * ⚠️ THE OTHER HALF OF THE SHARED-DEFINITION FIX. `binPaths` made the two
+   * agree about WHERE to look; they still disagreed about which paths are
+   * usable at all. `createAgent` rejects a path carrying a quote or a newline
+   * outright, so such a path passed step 2 as "Everything it needs to run is
+   * installed" and was flatly refused by creation two screens later.
+   */
+  const create = require('./create');
+  const nasty = `/opt/homebrew/bin/tm"ux`;
+  assert.equal(create.unusablePath(nasty), true,
+    'the fixture is no longer a path creation would refuse');
+
+  const got = machine.installedCheck({ claudeBin: REAL_BIN, tmuxBin: nasty });
+  assert.equal(got.state, 'attention',
+    'a path creation will refuse was reported as installed and ready');
+  assert.match(got.title, /tmux/);
 });
 
 /* ---------------------------------------------------------------------------
@@ -284,9 +360,19 @@ test('launchctl answering is a pass, and launchctl NOT answering is unknown', ()
    * will start themselves ... they come back on their own", directly under a
    * comment saying that claim is deliberately weaker than the wireframe's.
    */
-  assert.doesNotMatch(alive.title, /will start themselves/,
-    'the pass asserts a reboot that has not happened');
-  assert.match(alive.title, /set to start themselves/);
+  /**
+   * ⚠️ AND IT IS A CLAIM ABOUT KOSMOS, NOT ABOUT ANYBODY'S AGENTS. "Your agents
+   * are set to start themselves" was FALSE on the adopt path -- the fleet is
+   * counted out of `tmux list-panes`, and an agent some other program started
+   * may have no launchd job at all. Nothing here opens a plist or looks at one
+   * of them, so the sentence is scoped to the agents this app makes, and says
+   * out loud whose it is not talking about.
+   */
+  assert.match(alive.title, /Agents made here/,
+    'the pass claims something about agents nobody looked at');
+  assert.doesNotMatch(alive.title, /^Your agents/, 'the pass speaks for the whole fleet again');
+  assert.match(alive.detail, /another program/,
+    'says nothing about the agents it did NOT check, on the path where most of them are');
 
   /**
    * ⚠️ UNKNOWN, NOT ATTENTION. This test pinned `attention` in its first
@@ -318,8 +404,8 @@ test('the restart check asks launchctl about THIS login session', () => {
 test('three checks come back, and the two kinds of not-ok are counted apart', () => {
   const got = machine.check({
     pmset: DESKTOP_SLEEPS,             // one real problem
-    claudeBin: __filename,
-    tmuxBin: __filename,
+    claudeBin: REAL_BIN,
+    tmuxBin: REAL_BIN,
     runner: okRunner,
   });
   assert.equal(got.checks.length, 3);
@@ -336,7 +422,7 @@ test('three checks come back, and the two kinds of not-ok are counted apart', ()
   const mixed = machine.check({
     pmset: 'nonsense',
     claudeBin: '/nope/claude',
-    tmuxBin: __filename,
+    tmuxBin: REAL_BIN,
     runner: okRunner,
   });
   assert.equal(mixed.attention, 1);
@@ -347,9 +433,9 @@ test('every check reports one of exactly three states, and always says something
   // A guard on the shape rather than on any one message: a check that returns a
   // state the screen has no branch for renders as nothing at all.
   const runs = [
-    machine.check({ pmset: DESKTOP_AWAKE, claudeBin: __filename, tmuxBin: __filename, runner: okRunner }),
+    machine.check({ pmset: DESKTOP_AWAKE, claudeBin: REAL_BIN, tmuxBin: REAL_BIN, runner: okRunner }),
     machine.check({ pmset: LAPTOP_SLEEPS_ON_BATTERY, claudeBin: '/nope', tmuxBin: '/nope', runner: deadRunner }),
-    machine.check({ pmset: 'junk', claudeBin: __filename, tmuxBin: __filename, runner: deadRunner }),
+    machine.check({ pmset: 'junk', claudeBin: REAL_BIN, tmuxBin: REAL_BIN, runner: deadRunner }),
   ];
   for (const got of runs) {
     for (const c of got.checks) {
