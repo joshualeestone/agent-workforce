@@ -679,14 +679,22 @@ test('a removed list that cannot be written reports a partial rather than crashi
     : { ok: true, stdout: '' }));
   remove.setDryRun(false);
 
-  // A directory where the file goes: the write lands, the rename cannot.
+  /**
+   * ⚠️ THIS FIXTURE EXERCISES THE **READ** REFUSAL, not the write. A directory
+   * where the file goes makes `readFileSync` throw EISDIR, so
+   * `readRemovedForWrite` answers UNREADABLE and the write is never attempted.
+   * That is worth pinning on its own -- refusing beats overwriting every other
+   * agent's record -- but the docblock here used to claim it covered the throw
+   * containment around `writeRemoved`, and it did not. The test below this one
+   * does.
+   */
   fs.rmSync(remove.REMOVED_FILE, { force: true });
   fs.mkdirSync(remove.REMOVED_FILE, { recursive: true });
   try {
-    // ⚠️ CONTROL: prove the write really is impossible before believing the
+    // ⚠️ CONTROL: prove the read really is impossible before believing the
     // outcome. A misjudged fixture makes a crashing path look handled.
-    assert.throws(() => fs.renameSync(__filename, remove.REMOVED_FILE),
-      'the fixture did not actually block the write, so this proves nothing');
+    assert.throws(() => fs.readFileSync(remove.REMOVED_FILE, 'utf8'),
+      'the fixture did not actually block the read, so this proves nothing');
 
     const gone = remove.remove(name);
     assert.equal(gone.outcome, remove.OUTCOME.PARTIAL,
@@ -863,4 +871,106 @@ test('an env-driven dry run cannot pass itself off as a real removal', () => {
   assert.equal(r.dryRun, true, 'a dry run is indistinguishable from a real removal to any caller');
   assert.match(r.because, /Nothing actually happened/,
     'the sentence a person reads claims the agent was removed when nothing was touched');
+});
+
+test('a removed list that reads but cannot be WRITTEN is a partial, not a crash', () => {
+  /**
+   * ⚠️ THE PATH THE SIBLING TEST ABOVE DOES NOT REACH, and the one the longest
+   * comment in the module is about.
+   *
+   * `recordRemoval` reads first and refuses on an unreadable list, so a fixture
+   * that blocks the READ never gets as far as `writeRemoved`. To reach the
+   * write the read has to SUCCEED and the write has to fail — so: a perfectly
+   * valid `removed.json` inside a directory with the write bit off. Verified
+   * both ways in the controls below, because a fixture that fails to fail is
+   * how the previous version of this looked like coverage for a year.
+   *
+   * Without the try/catch, this throws out of `remove()`, out of the route and
+   * out of the process — with the agent already disabled and booted out.
+   */
+  const name = madeAgent('unwritable-dir');
+  boardShows(name, name);
+  remove.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+
+  const dir = nodePath.dirname(remove.REMOVED_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.rmSync(remove.REMOVED_FILE, { recursive: true, force: true });
+  fs.writeFileSync(remove.REMOVED_FILE, '[]\n', 'utf8');
+  fs.chmodSync(dir, 0o500);   // r-x: readable, not writable
+  try {
+    // ⚠️ CONTROL 1: the list really is still readable, or this is the sibling
+    // test in disguise and proves nothing new.
+    assert.equal(fs.readFileSync(remove.REMOVED_FILE, 'utf8'), '[]\n',
+      'the fixture blocked the read too, so this exercises the wrong branch');
+    // ⚠️ CONTROL 2: and the write really is impossible.
+    assert.throws(() => fs.writeFileSync(nodePath.join(dir, 'probe.tmp'), 'x'),
+      'the directory is still writable, so the containment is never tested');
+
+    const gone = remove.remove(name);
+    assert.equal(gone.outcome, remove.OUTCOME.PARTIAL,
+      'a write that threw escaped the removal and would take the process with it');
+    assert.match(gone.because, /will not appear there/,
+      'it does not say the agent is missing from the removed list');
+    assert.match(gone.because, /com\.kosmos\.agent\.unwritable-dir/,
+      'it does not name the startup job, which is the only remaining way back');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(remove.REMOVED_FILE, { force: true });
+  }
+});
+
+test('an agent stopped but never recorded is told where its way back is', () => {
+  /**
+   * ⚠️ THE LAST STATE WITH NO WAY BACK, and until this test nothing reached it.
+   *
+   * Everything worked — disabled, booted out, session ended — and only the
+   * record failed. The agent is now stopped, disabled, on no removed list, and
+   * with no card either, because the board is built from live tmux panes and
+   * the session is gone. Invisible in every direction.
+   *
+   * The sentence here used to say it "will still appear on the board", which is
+   * the opposite of true, and it named no way back at all — while every other
+   * partial hands over the launchd label. This is the one path where the person
+   * has nothing else to go on.
+   *
+   * ⚠️ And it is not an exotic path: `readRemoved` fails open, so a `removed.json`
+   * that is corrupt rather than absent sends every otherwise-successful removal
+   * straight here.
+   */
+  const name = madeAgent('stopped-unrecorded');
+  boardShows(name, name);
+  // Everything succeeds; only the record will fail.
+  remove.setRunner((file, args) => (args && args[0] === 'has-session'
+    ? { ok: false, code: 1 }
+    : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+
+  const dir = nodePath.dirname(remove.REMOVED_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.rmSync(remove.REMOVED_FILE, { recursive: true, force: true });
+  fs.writeFileSync(remove.REMOVED_FILE, '[]\n', 'utf8');
+  fs.chmodSync(dir, 0o500);
+  try {
+    const gone = remove.remove(name);
+
+    // ⚠️ CONTROL: it really did get all the way to the record, or this is one
+    // of the earlier partials wearing the same outcome.
+    const labels = gone.steps.map((s) => s.label);
+    assert.ok(labels.includes('ended its session'),
+      'it never reached the session step, so this is an earlier partial and proves nothing');
+    assert.equal(gone.outcome, remove.OUTCOME.PARTIAL, gone.because);
+
+    assert.doesNotMatch(gone.because, /still appear on the board/,
+      'it says the agent is still on the board, and the board is built from sessions it just killed');
+    assert.match(gone.because, /com\.kosmos\.agent\.stopped-unrecorded/,
+      'the one path where the person has nothing else to go on does not name the startup job');
+    assert.match(gone.because, /re-enabling that is what undoes this/,
+      'it names the job without saying what to do with it');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(remove.REMOVED_FILE, { force: true });
+  }
 });

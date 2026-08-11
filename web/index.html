@@ -1719,9 +1719,20 @@ document.addEventListener('keydown', (e) => {
   const keep = document.getElementById('rm-keep');
   const go = document.getElementById('rm-go');
   const ends = e.shiftKey ? [keep, go] : [go, keep];
-  if (document.activeElement === ends[0] || !document.getElementById('rm-modal').contains(document.activeElement)) {
+  const inside = document.getElementById('rm-modal').contains(document.activeElement);
+  if (document.activeElement === ends[0] || !inside) {
     e.preventDefault();
-    ends[1].focus();
+    /**
+     * ⚠️ WRAPPING lands on the far end; ARRIVING lands on Keep.
+     *
+     * These were one case and they are not the same. Wrapping (`activeElement`
+     * IS the end button) should go to the other end, which is what `ends[1]`
+     * gives. But arriving from OUTSIDE the modal also hit `ends[1]`, and on
+     * Shift+Tab that is "Remove <name>" -- so the one gesture that enters the
+     * dialog backwards put the keyboard on the destructive button. Everything
+     * else here is built so an accident lands on Keep; this was the gap.
+     */
+    (inside ? ends[1] : keep).focus();
   }
 });
 
@@ -1738,7 +1749,7 @@ document.getElementById('rm-go').addEventListener('click', async () => {
     // ⚠️ The modal was closed (or reopened for someone else) while this was in
     // flight. The answer must not paint THIS modal -- but it must not vanish
     // either; see `reportDiscarded`.
-    if (RM_FOR !== forAgent) { reportDiscarded(done); return; }
+    if (RM_FOR !== forAgent) { reportDiscarded(done, forAgent); return; }
     if (!res.ok || !done || done.outcome === 'refused') {
       msg.textContent = (done && done.because) || 'we could not remove it, and we cannot tell you why';
       go.disabled = false;
@@ -1809,9 +1820,16 @@ document.getElementById('rm-go').addEventListener('click', async () => {
  * So a discarded outcome is written to the detail screen's own message line,
  * which is a live region and was otherwise unused after the modal opened.
  */
-function reportDiscarded(done) {
+function reportDiscarded(done, forAgent) {
   const back = document.getElementById('d-remove-msg');
   if (!back || !done) return;
+  /**
+   * ⚠️ Only onto the screen it is ABOUT. If the person dismissed A's modal and
+   * has since opened B's detail panel, `#d-remove-msg` now belongs to B --
+   * so A's outcome would appear under B's "Remove this agent" heading. It
+   * names A, so it is not ambiguous, but it is still the wrong screen.
+   */
+  if (!CURRENT || CURRENT.sessionName !== forAgent) return;
   if (done.outcome === 'partial' || done.outcome === 'refused') {
     back.textContent = done.because || 'The removal did not finish.';
   } else if (done.outcome === 'removed') {
@@ -1836,15 +1854,44 @@ async function paintRemoved() {
   let gone = null;
   try {
     const res = await fetch('/api/removed', { cache: 'no-store' });
-    gone = (await res.json()).agents;
+    /**
+     * ⚠️ A SERVER FAILURE IS NOT "NOTHING HAS BEEN REMOVED".
+     *
+     * The route's own 500 body (`{error, detail}`) parses perfectly well, so
+     * `agents` came back `undefined`, fell into the empty branch below, and
+     * HID the whole "Show removed agents" control -- telling somebody their
+     * removed agents do not exist on the evidence of a server error. That is
+     * the same inversion `loadRemoval` fixes twenty lines up, and the `catch`
+     * immediately below states the rule this broke.
+     */
+    if (!res.ok) return;
+    const body = await res.json().catch(() => null);
+    if (!body || !Array.isArray(body.agents)) return;
+    gone = body.agents;
   } catch {
     // ⚠️ Leave whatever is on screen alone. Emptying the list because one poll
     // failed would tell somebody their removed agents are gone, which is the
     // opposite of what this section exists to promise.
     return;
   }
-  if (!Array.isArray(gone) || gone.length === 0) {
+  if (gone.length === 0) {
     wrap.hidden = true;
+    /**
+     * ⚠️ AND FORGET WHAT WAS DRAWN. The cache below is what stops the poll
+     * rewriting a row mid-restore; leaving it set across an empty list turns it
+     * into a trap.
+     *
+     * Measured flow, and it is the ordinary one: remove an agent, press
+     * Restore (the handler replaces that row's button with a disabled
+     * "Restoring…"), the restore succeeds, the list empties and hides -- with
+     * the mutated row and its cached markup both still in hand. Remove the same
+     * agent again the same day and the regenerated markup is byte-identical
+     * (the date is rendered to the day), so the guard skips the rewrite and the
+     * list reappears showing a DISABLED "Restoring…" button. The undo path is
+     * then dead until some other agent is removed or the page is reloaded --
+     * and the undo is the whole reason a single light confirmation is honest.
+     */
+    REMOVED_HTML = null;
     return;
   }
   wrap.hidden = false;
@@ -1864,9 +1911,20 @@ async function paintRemoved() {
    * `shownAs` is captured at removal time; records written before it existed
    * do not carry one, hence the fallback.
    */
+  /**
+   * ⚠️ A HALF-REMOVAL SAYS SO, and it is the only screen that can.
+   *
+   * `stopped: false` means Kosmos was asked to remove this agent and could not
+   * finish -- so it is listed here AND still has a card on the board, both
+   * deliberately (`isRemoved` versus `isHidden`). Drawn identically to a clean
+   * removal, the person sees one agent in two places with nothing on either
+   * explaining why. The split exists to make that legible; this is where it
+   * becomes visible.
+   */
   const html = gone.map((a) => '<div class="removed-row">'
     + '<span class="who">' + esc(a.shownAs || a.name) + '</span>'
-    + '<span class="when">' + esc(whenRemoved(a)) + '</span>'
+    + '<span class="when">' + esc(whenRemoved(a))
+    + (a.stopped === false ? ' · <b>may still be running</b>' : '') + '</span>'
     + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
     + '</div>').join('');
 

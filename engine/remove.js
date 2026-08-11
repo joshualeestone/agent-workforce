@@ -616,6 +616,18 @@ function removeInner(name, { tmuxBin } = {}) {
    * somebody to a screen with no row for them, which is the same lie in a
    * quieter voice. So the sentence is chosen from what actually happened.
    */
+  /**
+   * ⚠️ ONE WRITER for "the record failed, here is the way back". It was two --
+   * `recordAndSay` named the launchd label and the final branch below named
+   * nothing at all, which is how the one path where the agent also loses its
+   * card ended up with the least information.
+   */
+  function recoveryRoute() {
+    return job
+      ? `Its startup job is ${job.label}, and re-enabling that is what undoes this.`
+      : 'It has no startup job, so nothing will restart it -- its folder and everything in it is untouched.';
+  }
+
   function recordAndSay(stopped) {
     const kept = recordRemoval(clean, job, stopped, shown);
     if (kept) return 'You can put it back from the removed list.';
@@ -625,11 +637,8 @@ function removeInner(name, { tmuxBin } = {}) {
      * is what undoes this", a person is being handed a recipe for a thing that
      * does not exist, at the exact moment they need a real one.
      */
-    return job
-      ? 'We could not add it to the removed list either, so it will not appear there to be put back. '
-        + `Its startup job is ${job.label}, and re-enabling that is what undoes this.`
-      : 'We could not add it to the removed list either, so it will not appear there to be put back. '
-        + 'It has no startup job, so nothing will restart it -- but Kosmos will keep showing it.';
+    return 'We could not add it to the removed list either, so it will not appear there to be put back. '
+      + recoveryRoute();
   }
 
   /**
@@ -786,9 +795,28 @@ function removeInner(name, { tmuxBin } = {}) {
   // Only now is it true that this agent is stopped and will stay stopped.
   const recorded = step('took it off the board', () => recordRemoval(clean, job, true, shown));
   if (!recorded) {
+    /**
+     * ⚠️ THE LAST STATE WITH NO WAY BACK, and the sentence here was FALSE.
+     *
+     * It said the agent "will still appear on the board". It will not: the
+     * board is built from live tmux panes, and the session was killed two steps
+     * ago. So the agent is stopped, disabled, on no removed list and with no
+     * card — invisible in every direction — and the one message about it
+     * pointed at a board that would not show it.
+     *
+     * ⚠️ Not exotic, either. `readRemoved` fails OPEN by design, so a
+     * `removed.json` that is corrupt rather than absent sends EVERY otherwise
+     * successful removal down this branch.
+     *
+     * Every other partial hands back the launchd label through `recordAndSay`,
+     * because when the record is what failed, the label is the only way back.
+     * This branch was the one that did not, at the moment it mattered most.
+     */
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${shown} has been stopped, but we could not record it as removed, so it will still appear on the board.`,
+      because: `${shown} has been stopped, but we could not add it to the removed list, `
+        + 'so it will not appear there to be put back, and its card has gone from the board. '
+        + recoveryRoute(),
       steps,
     };
   }
@@ -813,6 +841,16 @@ function removeInner(name, { tmuxBin } = {}) {
 
 function restoreInner(name) {
   const clean = create.cleanName(name);
+  /**
+   * ⚠️ Same gate as `plan`, for symmetry rather than for a live hole. Restore's
+   * launchctl arguments come from the stored RECORD, never from the request, so
+   * a traversal name simply falls through to "is not on the removed list"
+   * today. But `restore` does interpolate the name into the very paths
+   * `unsafeToActOn` exists for, and the asymmetry is the kind that goes live
+   * the day a record is written by a second route.
+   */
+  const unsafe = unsafeToActOn(clean);
+  if (unsafe) return { outcome: OUTCOME.REFUSED, because: unsafe, steps: [] };
   const record = readRemoved().find((r) => r.name === clean);
   /**
    * ⚠️ SPOKEN NAME, same rule as `remove` and `plan`: act on `clean`, say

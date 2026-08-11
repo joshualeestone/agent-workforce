@@ -95,7 +95,7 @@ test in it runs.
 
 ## How it is verified
 
-- **Unit and route tests** — 317, `node --test`.
+- **Unit and route tests** — `node --test`, the whole validation story for this repo (no build step, no linter). The count has moved with each review round; the branch does not claim a number that goes stale, only that the suite is green and that every fix on it is mutation-verified.
 - **A live round trip against real launchd and real tmux**, on a throwaway
   `zz-*` agent, sandboxed at every root the engine writes to (`WORKERS`,
   `LAUNCH`, `DATA`). 20/20 checks: created and running → removed → session
