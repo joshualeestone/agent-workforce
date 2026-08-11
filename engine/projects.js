@@ -92,22 +92,57 @@ function file() {
  * either case for "we checked the folders and they are fine" — which is why
  * every folder is stated separately, on every read, by `describe`.
  */
+let LAST_READ_OK = true;
+
 function readAll() {
   let raw;
   try {
     raw = fs.readFileSync(file(), 'utf8');
-  } catch {
-    return [];
+  } catch (err) {
+    // ⚠️ ENOENT ONLY. No projects yet is a real state the empty screen is built
+    // for; a file we are not allowed to read is NOT that, and a bare catch made
+    // the two identical. Measured: with a real project stored and the file
+    // chmod 000, the page rendered "No projects yet. Point Kosmos at a folder
+    // you already have." -- a positive claim about a state nobody checked,
+    // which is the one defect shape this codebase exists to prevent. The page's
+    // own network-error path already says "this is not saying you have none, it
+    // is saying we cannot see them"; the file read has to be as honest.
+    LAST_READ_OK = err && err.code === 'ENOENT';
+    if (LAST_READ_OK) return [];
+    const unreadable = new Error('we cannot read your projects on this computer right now');
+    unreadable.code = 'UNREADABLE';
+    throw unreadable;
   }
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    LAST_READ_OK = Array.isArray(parsed);
+    if (LAST_READ_OK) return parsed;
   } catch {
-    return [];
+    LAST_READ_OK = false;
   }
+  const damaged = new Error('your projects file is there but we cannot make sense of it');
+  damaged.code = 'UNREADABLE';
+  throw damaged;
+}
+
+/** The list, or an empty one, for callers that only need to iterate. */
+function readAllOrEmpty() {
+  try { return readAll(); } catch { return []; }
 }
 
 function writeAll(list) {
+  // ⚠️ REFUSES rather than clobbers. A `projects.json` that could not be read or
+  // parsed was silently replaced by the next write, and every record in it was
+  // gone -- `syncAgent` was worst, reading `[]` and writing `[]` back, which
+  // truncated the whole store on any route that synced. `instructions.write`
+  // has refused to replace a file its own reader would not show since the day
+  // it shipped, for exactly this reason: "nothing of the user's is ever
+  // deleted" has to hold on the error paths too, or it does not hold.
+  if (!LAST_READ_OK && fs.existsSync(file())) {
+    const err = new Error('we will not overwrite your projects file while we cannot read it');
+    err.code = 'UNREADABLE';
+    throw err;
+  }
   fs.mkdirSync(store.ROOT, { recursive: true });
   // Write-then-rename, the same as `writeProfile`: an interrupted write must not
   // leave a half-written file that parses as no projects and silently loses
@@ -427,10 +462,24 @@ function spliceBlock(text, body) {
   // spanned from the stranded marker all the way to the real end and sliced
   // out everything in between. Measured: "keep me" survived one splice and
   // was gone after two. The single-splice test could not see it.
-  const end = original.indexOf(BLOCK_END);
-  const start = end < 0 ? -1 : original.lastIndexOf(BLOCK_START, end);
-  if (start >= 0) {
-    return original.slice(0, start) + block + original.slice(end + BLOCK_END.length);
+  // ⚠️ SCANS for a well-formed pair rather than trusting the first marker of
+  // each kind, because BOTH single-marker cases are reachable by a hand edit
+  // and each one breaks a different naive rule:
+  //   a stranded START before a real block -- first-start-to-first-end spans
+  //     them and eats everything between (measured: text gone on write two);
+  //   a stranded END before a real block -- taking the first end and looking
+  //     backwards finds no start, so a block is appended EVERY time and the
+  //     file grows without bound (measured: 4 writes, 5 blocks, nothing ever
+  //     replaced) until it outgrows the write limit and every instruction save
+  //     fails permanently, including the person's own.
+  for (let from = 0; ;) {
+    const end = original.indexOf(BLOCK_END, from);
+    if (end < 0) break;
+    const start = original.lastIndexOf(BLOCK_START, end);
+    if (start >= 0) {
+      return original.slice(0, start) + block + original.slice(end + BLOCK_END.length);
+    }
+    from = end + BLOCK_END.length;
   }
   if (!original.trim()) return block + '\n';
   const sep = original.endsWith('\n') ? '\n' : '\n\n';
@@ -465,7 +514,31 @@ function oneLine(value) {
     .trim();
 }
 
+/**
+ * Take the managed block out, leaving everything else exactly as it was.
+ *
+ * Shares `spliceBlock`'s pair-finding by going through it: splicing in a
+ * sentinel and then cutting the sentinel out means there is ONE rule for
+ * "where is the block", not two that can drift.
+ */
+function removeBlock(text) {
+  const original = String(text == null ? '' : text);
+  const spliced = spliceBlock(original, '\u0000SENTINEL\u0000');
+  const at = spliced.indexOf(BLOCK_START);
+  if (at < 0) return original;
+  const end = spliced.indexOf(BLOCK_END, at);
+  if (end < 0) return original;
+  // Only remove a block we actually put a sentinel in; otherwise leave it.
+  if (!spliced.slice(at, end).includes('\u0000SENTINEL\u0000')) return original;
+  const cut = spliced.slice(0, at) + spliced.slice(end + BLOCK_END.length);
+  return cut.replace(/\n{3,}$/, '\n');
+}
+
 function blockBody(projects) {
+  // ⚠️ Never reached with an empty list any more -- `tellAgent` REMOVES the
+  // block instead of writing a placeholder. Kept as a guard rather than
+  // deleted, because a caller that does reach it with nothing should not get
+  // an empty heading.
   if (!projects.length) return 'Kosmos has not put this agent on a project yet.';
   const lines = projects.map((p) => `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``);
   return [
@@ -493,8 +566,28 @@ function blockBody(projects) {
  * rather than fatal. Recording membership and telling the agent are two
  * different acts, and the second one failing must not undo the first.
  */
-function tellAgent(sessionName, projects) {
+function tellAgent(sessionName, projects, roster) {
   try {
+    // ⚠️ EXACT MATCH TO PERMIT, and this gate was MISSING while every sibling
+    // route that touches an instruction file has one. `instructions.fileFor`
+    // resolves through `store.safeKey`, which lowercases and strips everything
+    // outside [a-z0-9_-] -- so ANY spelling that normalises to a real agent
+    // wrote that agent's boot file. Measured: putting `An.gel` on a project
+    // rewrote the real `angel`'s CLAUDE.md, while the screen said "we cannot
+    // see this agent on this computer right now" AND "Kosmos told it where
+    // this folder is" about the same row. This repo has fixed this exact shape
+    // once before, on the profile route: LOOSE TO NOTICE, EXACT TO PERMIT.
+    //
+    // A roster of `null` means the caller could not look, which is not
+    // permission -- it refuses, and says so, rather than writing on a guess.
+    if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName)) {
+      return {
+        state: TOLD.COULD_NOT,
+        because: Array.isArray(roster)
+          ? 'we cannot see an agent by exactly this name on this computer, so we did not write to anything'
+          : 'we could not check which agents are running, so we did not write to anything',
+      };
+    }
     const current = instructions.read(sessionName);
     // ⚠️ Asks the reader's OWN structured verdict rather than re-deriving one.
     // `editable` is false for a file that exists but cannot be safely replaced —
@@ -507,7 +600,26 @@ function tellAgent(sessionName, projects) {
     if (!current.exists && !current.editable) {
       return { state: TOLD.COULD_NOT, because: current.because || 'this agent keeps its instructions somewhere we cannot safely change' };
     }
-    const next = spliceBlock(current.text || '', blockBody(projects));
+    // ⚠️ We do not INVENT a boot file. An agent with no instruction file got
+    // one containing nothing but our block -- so it booted from a file this
+    // product made up, saying nothing about its job, and the instruction editor
+    // flipped from "there is no instruction file for this one yet" to showing
+    // our note as the agent's entire instructions. Writing the most powerful
+    // file in the product for something nobody asked for is not ours to do.
+    if (!current.exists) {
+      return {
+        state: TOLD.COULD_NOT,
+        because: 'this agent has no instructions file yet, and we will not create one for it',
+      };
+    }
+    // ⚠️ An agent on NO projects gets the block REMOVED, not replaced with a
+    // note saying it is on none. Removing a project must not leave residue in
+    // somebody's instruction file, and "Kosmos has not put this agent on a
+    // project yet" sitting in a boot file forever is residue.
+    const next = projects.length
+      ? spliceBlock(current.text || '', blockBody(projects))
+      : removeBlock(current.text || '');
+    if (next === current.text) return { state: TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
     return { state: TOLD.TOLD, because: null };
   } catch (err) {
@@ -526,10 +638,10 @@ function tellAgent(sessionName, projects) {
  * re-writing an instruction file to find out whether we could — the read is
  * cheap, the write is the most dangerous one here.
  */
-function syncAgent(sessionName) {
+function syncAgent(sessionName, roster) {
   const key = String(sessionName || '');
   const mine = readAll().filter((p) => (p.agents || []).includes(key));
-  const verdict = tellAgent(key, mine);
+  const verdict = tellAgent(key, mine, roster);
   const all = readAll();
   for (const p of all) {
     if (!(p.agents || []).includes(key)) continue;
@@ -541,7 +653,7 @@ function syncAgent(sessionName) {
 
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
-  file, readAll, writeAll, idFor, folderState, describe,
+  file, readAll, readAllOrEmpty, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
-  spliceBlock, blockBody, tellAgent, syncAgent,
+  spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
 };

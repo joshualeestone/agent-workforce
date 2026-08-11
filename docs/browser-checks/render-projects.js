@@ -85,6 +85,23 @@ const post = (p, body) => api(p, {
   body: JSON.stringify(body || {}),
 });
 
+/**
+ * ⚠️ REFUSES to run against a server that is not sandboxed. The header has
+ * always SAID to sandbox it; nothing enforced it, and `clearProjects` below
+ * deletes every project on whatever server it is pointed at and rewrites those
+ * members' instruction files. A documented requirement that nothing checks is
+ * a requirement that gets skipped exactly once.
+ */
+async function assertSandboxed() {
+  const { projects } = await api('/api/projects');
+  if (!SANDBOX) {
+    throw new Error('pass the server\'s sandbox root as the 4th argument; this check deletes every project on the server it is pointed at');
+  }
+  if (projects.length) {
+    console.log(`  note: clearing ${projects.length} existing project(s) from the sandboxed server`);
+  }
+}
+
 async function clearProjects() {
   const { projects } = await api('/api/projects');
   for (const p of projects) await api('/api/project/' + encodeURIComponent(p.id), { method: 'DELETE' });
@@ -149,6 +166,7 @@ async function main() {
   }
 
   // 1. Nothing yet — the screen first-run hands you.
+  await assertSandboxed();
   await clearProjects();
   await shot('1-empty');
 
@@ -157,6 +175,14 @@ async function main() {
   const agents = await someAgents(2, SANDBOX);
   const home = process.env.HOME;
   const demo = path.join(home, 'kosmos-demo');
+  // ⚠️ REFUSES to reuse a folder that was already there, because the cleanup at
+  // the end removes this tree recursively -- and `mkdirSync(recursive)`
+  // succeeds silently on an existing directory, so an operator who happens to
+  // keep a `~/kosmos-demo` would have lost it. The check and the delete have to
+  // agree about who owns the folder.
+  if (fs.existsSync(demo)) {
+    throw new Error(`${demo} already exists; this check creates and deletes that folder, so it will not touch yours. Move it aside and re-run.`);
+  }
   for (const d of ['henderson-lease', 'quarter-close', 'reed-handover']) {
     fs.mkdirSync(path.join(demo, d), { recursive: true });
   }
@@ -190,10 +216,33 @@ async function main() {
     await page.waitForTimeout(300);
   });
 
-  // 6. A folder that went away AFTER the project was made. The state this whole
+  // 6a. The removal question. ⚠️ A confirmation is exactly the control that can
+  //     ship invisible -- this repo once had 316 tests and two blind reviews
+  //     pass a fully transparent modal, because nothing had ever rendered it.
+  await shot('6-confirm-remove', async (page) => {
+    await page.click('[data-project="quarterclose"]');
+    await page.waitForTimeout(300);
+    await page.click('#pj-one-remove');
+    await page.waitForTimeout(300);
+    const seen = await page.evaluate(() => {
+      const el = document.getElementById('pj-one-remove-go');
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return { w: r.width, h: r.height, opacity: cs.opacity, visibility: cs.visibility, text: el.textContent };
+    });
+    // Measured in the page, not judged from the picture.
+    if (!seen.w || !seen.h || seen.opacity === '0' || seen.visibility === 'hidden') {
+      throw new Error('the removal confirmation is not actually visible: ' + JSON.stringify(seen));
+    }
+    if (!seen.text.includes('Quarter close')) {
+      throw new Error('the confirmation must name the project in the button: ' + seen.text);
+    }
+  });
+
+  // 7. A folder that went away AFTER the project was made. The state this whole
   //    screen exists to render honestly.
   fs.rmSync(path.join(demo, 'reed-handover'), { recursive: true, force: true });
-  await shot('6-folder-missing');
+  await shot('7-folder-missing');
   fs.mkdirSync(path.join(demo, 'reed-handover'), { recursive: true });
 
   // 7. Contrast, on the list where every text token on this screen appears.

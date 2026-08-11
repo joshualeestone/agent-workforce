@@ -335,7 +335,7 @@ test('telling an agent writes the block into its real instruction file', () => {
   const dir = folder('henderson-2');
   const p = projects.create({ name: 'Henderson lease', folder: dir, agents: ['mara'] });
 
-  const verdict = projects.syncAgent('mara');
+  const verdict = projects.syncAgent('mara', ROSTER);
 
   assert.equal(verdict.state, projects.TOLD.TOLD);
   const written = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'mara', 'CLAUDE.md'), 'utf8');
@@ -350,7 +350,7 @@ test('an agent with no worker folder is recorded as a member we COULD NOT tell',
   // fleet's own PM — has no worker directory, so this is the live case.
   const p = projects.create({ name: 'Fleetwide', folder: folder('fleetwide'), agents: ['claudebot'] });
 
-  const verdict = projects.syncAgent('claudebot');
+  const verdict = projects.syncAgent('claudebot', ROSTER);
 
   assert.equal(verdict.state, projects.TOLD.COULD_NOT);
   assert.ok(verdict.because, 'and it says why, because the screen has to say why');
@@ -370,7 +370,7 @@ test('a write that fails partway is reported, not thrown', () => {
   fs.chmodSync(dir, 0o555);
   try {
     const p = projects.create({ name: 'Readonly', folder: folder('readonly'), agents: ['readonly-agent'] });
-    const verdict = projects.syncAgent('readonly-agent');
+    const verdict = projects.syncAgent('readonly-agent', [{ sessionName: 'readonly-agent', name: 'readonly-agent' }]);
 
     if (verdict.state === projects.TOLD.TOLD && process.getuid && process.getuid() === 0) return;
     assert.equal(verdict.state, projects.TOLD.COULD_NOT);
@@ -395,7 +395,7 @@ test('taking an agent off a project also drops the claim that we told it', () =>
   reset();
   agent('mara', '# Mara\n\nYou are the executive assistant.\n');
   const p = projects.create({ name: 'Leaving', folder: folder('leaving'), agents: ['mara'] });
-  projects.syncAgent('mara');
+  projects.syncAgent('mara', ROSTER);
   assert.equal(projects.readAll()[0].told.mara.state, projects.TOLD.TOLD);
 
   projects.removeAgent(p.id, 'mara');
@@ -411,7 +411,7 @@ test('an agent on two projects is told about both in one block', () => {
   projects.create({ name: 'One', folder: one, agents: ['mara'] });
   projects.create({ name: 'Two', folder: two, agents: ['mara'] });
 
-  projects.syncAgent('mara');
+  projects.syncAgent('mara', ROSTER);
 
   const written = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'mara', 'CLAUDE.md'), 'utf8');
   assert.ok(written.includes(one) && written.includes(two));
@@ -424,7 +424,7 @@ test('nothing is ever written into the user’s project folder', () => {
   const dir = folder('untouched');
   const before = fs.readdirSync(dir);
   projects.create({ name: 'Untouched', folder: dir, agents: ['mara'] });
-  projects.syncAgent('mara');
+  projects.syncAgent('mara', ROSTER);
   assert.deepEqual(fs.readdirSync(dir), before, 'the project folder holds their work and nothing of ours');
 });
 
@@ -433,11 +433,49 @@ test('the store lives under the sandboxed data root, so nothing here reached the
   assert.ok(store.ROOT.startsWith(SANDBOX), store.ROOT);
 });
 
-test('a corrupt projects file reads as empty rather than throwing on every page', () => {
+test('a corrupt projects file is refused, NOT reported as no projects', () => {
   reset();
   fs.mkdirSync(store.ROOT, { recursive: true });
   fs.writeFileSync(projects.file(), '{not json');
-  assert.deepEqual(projects.readAll(), []);
+  // ⚠️ This used to return `[]`, and the page rendered "No projects yet. Point
+  // Kosmos at a folder you already have" -- a positive claim about a state
+  // nobody checked. "We cannot read it" is not "there is nothing".
+  assert.throws(() => projects.readAll(), /cannot make sense of it/);
+  assert.deepEqual(projects.readAllOrEmpty(), [], 'callers that only iterate still get a list');
+});
+
+test('a projects file we cannot read is never overwritten', () => {
+  reset();
+  const dir = folder('precious');
+  projects.create({ name: 'Precious', folder: dir });
+  const before = fs.readFileSync(projects.file(), 'utf8');
+  assert.ok(before.includes('Precious'), 'the control: it really is in there');
+
+  fs.writeFileSync(projects.file(), '{corrupt');
+  assert.throws(() => projects.readAll(), /cannot make sense of it/);
+  // ⚠️ Asserts the OUTCOME, not the wording. `create` refuses at the READ, so
+  // the message is the read's; the write guard behind it is a second line of
+  // defence tested directly below. Pinning the sentence here would have made
+  // this test about which layer refused rather than about the file surviving.
+  assert.throws(() => projects.create({ name: 'New', folder: folder('newone') }));
+  assert.equal(fs.readFileSync(projects.file(), 'utf8'), '{corrupt',
+    'nothing of the user\u2019s is ever deleted, and that has to hold on the error paths too');
+});
+
+test('writeAll itself refuses after a failed read, as the backstop', () => {
+  reset();
+  projects.create({ name: 'Held', folder: folder('held') });
+  fs.writeFileSync(projects.file(), '{corrupt');
+  try { projects.readAll(); } catch { /* this is what puts the guard up */ }
+
+  // The direct call, so the backstop is proven rather than assumed reachable.
+  assert.throws(() => projects.writeAll([]), /will not overwrite/);
+  assert.equal(fs.readFileSync(projects.file(), 'utf8'), '{corrupt');
+
+  // And the control: once the file reads cleanly again, writing works.
+  fs.writeFileSync(projects.file(), '[]');
+  projects.readAll();
+  assert.doesNotThrow(() => projects.writeAll([]));
 });
 
 // ---------------------------------------------------------------------------
@@ -536,4 +574,86 @@ test('an agent that was never on this machine reads differently from one we cann
 
   assert.match(known.because, /cannot see this agent .* right now/, 'one we have seen before');
   assert.match(never.because, /never seen an agent by this name/, 'one we never have');
+});
+
+test('a name that merely NORMALISES to a real agent does not write that agent’s file', () => {
+  reset();
+  // ⚠️ MEASURED, not imagined. `instructions.fileFor` resolves through
+  // `store.safeKey` (lowercase, strip everything outside [a-z0-9_-]), so
+  // `An.gel` resolves to `angel`. Before the gate, putting `An.gel` on a
+  // project rewrote the REAL angel's boot file, while the same row on screen
+  // read "we cannot see this agent on this computer right now" AND "Kosmos
+  // told it where this folder is". LOOSE TO NOTICE, EXACT TO PERMIT.
+  const real = agent('angel', '# Angel\n\nYou are Angel, and this is your job.\n');
+  const file = path.join(real, 'CLAUDE.md');
+  const before = fs.readFileSync(file, 'utf8');
+
+  projects.create({ name: 'Sneak', folder: folder('sneak'), agents: ['An.gel'] });
+  const verdict = projects.syncAgent('An.gel', [{ sessionName: 'angel', name: 'Angel' }]);
+
+  assert.equal(verdict.state, projects.TOLD.COULD_NOT);
+  assert.match(verdict.because, /exactly this name/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the real agent’s boot file is untouched');
+
+  // The control: the EXACT name is permitted, or the gate is just "refuse".
+  projects.addAgent(projects.readAll()[0].id, 'angel', [{ sessionName: 'angel', name: 'Angel' }]);
+  const ok = projects.syncAgent('angel', [{ sessionName: 'angel', name: 'Angel' }]);
+  assert.equal(ok.state, projects.TOLD.TOLD);
+  assert.ok(fs.readFileSync(file, 'utf8').includes('You are Angel, and this is your job.'));
+});
+
+test('a roster we could not read is not permission to write', () => {
+  reset();
+  agent('angel', '# Angel\n\nYou are Angel.\n');
+  projects.create({ name: 'Blind', folder: folder('blind'), agents: ['angel'] });
+  const verdict = projects.syncAgent('angel', null);
+  assert.equal(verdict.state, projects.TOLD.COULD_NOT);
+  assert.match(verdict.because, /could not check which agents are running/);
+});
+
+test('a stranded END marker does not grow the file on every write', () => {
+  // ⚠️ The mirror of the stranded-START case, and it fails a different naive
+  // rule: taking the first END and looking backwards finds no START, so a
+  // block is appended EVERY time. Measured before the fix: 4 writes, 5 blocks,
+  // nothing ever replaced -- ending in a file too large to write at all, after
+  // which even the person's own instruction saves fail.
+  let text = `# A\n\n${projects.BLOCK_END}\n\n## Keep\n\nkeep me\n`;
+  for (let i = 0; i < 4; i += 1) text = projects.spliceBlock(text, `ROUND ${i}`);
+
+  assert.equal(text.split(projects.BLOCK_START).length - 1, 1, 'one block, however many writes');
+  assert.ok(text.includes('ROUND 3') && !text.includes('ROUND 2'), 'and each write REPLACES the last');
+  assert.ok(text.includes('keep me'), 'while the damaged file itself is left alone');
+});
+
+test('an agent on no projects has the block removed, not replaced with a note', () => {
+  reset();
+  const dir = agent('lonely', '# Lonely\n\nYou are a test agent.\n\n## House rules\n\nNo em dashes.\n');
+  const file = path.join(dir, 'CLAUDE.md');
+  const roster = [{ sessionName: 'lonely', name: 'Lonely' }];
+  const p = projects.create({ name: 'Brief', folder: folder('brief'), agents: ['lonely'], roster });
+  projects.syncAgent('lonely', roster);
+  assert.ok(fs.readFileSync(file, 'utf8').includes(projects.BLOCK_START), 'the control: it was there');
+
+  projects.remove(p.id);
+  projects.syncAgent('lonely', roster);
+
+  const after = fs.readFileSync(file, 'utf8');
+  assert.ok(!after.includes(projects.BLOCK_START), 'removing a project leaves no residue');
+  assert.ok(after.includes('You are a test agent.') && after.includes('No em dashes.'),
+    'and every word that was already there survives');
+});
+
+test('an agent with no instruction file is not given one', () => {
+  reset();
+  // A boot file this product invented, saying nothing about the agent's job,
+  // is not a thing to create because somebody added a project.
+  const dir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'bare');
+  fs.mkdirSync(dir, { recursive: true });
+  const roster = [{ sessionName: 'bare', name: 'bare' }];
+  projects.create({ name: 'Bare', folder: folder('bare-project'), agents: ['bare'], roster });
+
+  const verdict = projects.syncAgent('bare', roster);
+  assert.equal(verdict.state, projects.TOLD.COULD_NOT);
+  assert.match(verdict.because, /no instructions file yet/);
+  assert.ok(!fs.existsSync(path.join(dir, 'CLAUDE.md')), 'and none was created');
 });

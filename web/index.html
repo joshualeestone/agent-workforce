@@ -209,6 +209,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
   font: var(--text-body) var(--font-ui); color: var(--label); padding: var(--space-4) var(--space-5); }
 .pj-browse button:hover { background: var(--attn-bg); }
 .pj-browse button:last-child { border-bottom: 0; }
+/* Prose, not a disabled control. A disabled <button> is unfocusable and some
+   assistive tech skips it entirely, so a sentence rendered as one is a
+   sentence some people never get. */
+.pj-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+  padding: var(--space-4) var(--space-5); margin: 0; }
 .pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
 .pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
@@ -3039,17 +3044,32 @@ function pjFolderLine(p) {
   return { text: (f.because || 'we cannot read this folder') + '.', bad: true };
 }
 
+/**
+ * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
+ * performance. `#pj-list` carries `aria-live="polite"`, so an unconditional
+ * repaint every 5 seconds read the entire project list aloud to a screen-reader
+ * user every 5 seconds; and `#pj-one-agents` holds the Take-off buttons, so it
+ * threw keyboard focus back to the body on the same clock. This file already
+ * had both guards -- `setLive` and the `REMOVED_HTML` compare -- and neither
+ * new painter used one. Same fix, same reason.
+ */
+function setIfChanged(el, html) {
+  if (!el || el.innerHTML === html) return false;
+  el.innerHTML = html;
+  return true;
+}
+
 function paintProjects() {
   const list = document.getElementById('pj-list');
   if (!PROJECTS.length) {
-    list.innerHTML = '<div class="pj-empty">'
+    setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
       + 'and put an agent on it.</p>'
       + '<button class="btn" id="pj-new-empty" type="button">Add a project</button>'
-      + '</div>';
+      + '</div>');
     return;
   }
-  list.innerHTML = PROJECTS.map((p) => {
+  setIfChanged(list, PROJECTS.map((p) => {
     const s = p.summary || {};
     const folder = pjFolderLine(p);
     // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
@@ -3071,16 +3091,30 @@ function paintProjects() {
       + '<span class="pj-who">' + who + '</span>'
       + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
       + '</button>';
-  }).join('');
+  }).join(''));
 }
 
+// ⚠️ A generation counter, because the 5-second poll and the click handlers'
+// own `await loadProjects()` can be in flight together and can land out of
+// order. Without it a stale poll response repaints a member that was just
+// removed -- the screen showing a membership the record no longer has.
+let PJ_GEN = 0;
+
 async function loadProjects() {
+  const mine = ++PJ_GEN;
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
+    if (mine !== PJ_GEN) return;
+    // ⚠️ An unreadable projects FILE is an error, not an empty list. The route
+    // answers 500 with `projectsUnreadable` rather than `{projects: []}`, and
+    // painting [] here would put "No projects yet" in front of somebody who
+    // has projects we simply could not read.
+    if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'we cannot read your projects right now');
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
   } catch {
+    if (mine !== PJ_GEN) return;
     // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
     // add-member and remove-member paths call this from the one-project view,
     // where `#pj-list` is hidden -- so a failed refresh left the member list
@@ -3114,18 +3148,28 @@ function paintOneProject() {
   state.textContent = folder.bad ? folder.text : '';
   state.className = 'pj-folder-state' + (folder.bad ? ' bad' : '');
 
-  const members = document.getElementById('pj-one-agents');
-  members.innerHTML = (p.agents || []).length
+  setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
     ? p.agents.map((m) => pjMember(m, p.id)).join('')
-    : '<p class="fhint">No agents on this project yet.</p>';
+    : '<p class="fhint">No agents on this project yet.</p>');
 
   // Only agents that are NOT already on it, and only ones we can actually see.
   const on = new Set((p.agents || []).map((a) => a.sessionName));
   const free = LAST.filter((a) => !on.has(a.sessionName));
   const sel = document.getElementById('pj-one-add');
-  sel.innerHTML = free.length
+  const html = free.length
     ? free.map((a) => '<option value="' + esc(a.sessionName) + '">' + esc(a.name) + '</option>').join('')
     : '<option value="">no other agents we can see</option>';
+  // ⚠️ The person's CHOICE is preserved across a repaint. Rebuilding the
+  // options resets the select to index 0, so somebody who picked an agent and
+  // then paused for five seconds had a DIFFERENT one silently selected -- and
+  // pressing the button would then rewrite the wrong agent's instruction file.
+  // Repainting only on change also stops the native popup being closed
+  // mid-choice.
+  if (sel.innerHTML !== html) {
+    const chosen = sel.value;
+    sel.innerHTML = html;
+    if (chosen && free.some((a) => a.sessionName === chosen)) sel.value = chosen;
+  }
   document.getElementById('pj-one-add-go').disabled = !free.length;
 }
 
@@ -3147,7 +3191,7 @@ async function pjBrowse(at) {
     body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we cannot look there');
   } catch (err) {
-    box.innerHTML = '<button type="button" disabled>' + esc(err.message) + '</button>';
+    box.innerHTML = '<p class="pj-note">' + esc(err.message) + '</p>';
     return;
   }
   document.getElementById('pj-crumbs').textContent = body.path;
@@ -3160,13 +3204,13 @@ async function pjBrowse(at) {
   for (const f of body.folders || []) {
     rows.push('<button type="button" data-into="' + esc(f.path) + '">' + esc(f.name) + '</button>');
   }
-  if (!(body.folders || []).length) rows.push('<button type="button" disabled>Nothing else in here.</button>');
+  if (!(body.folders || []).length) rows.push('<p class="pj-note">Nothing else in here.</p>');
   // ⚠️ A cut list says it was cut. Otherwise a folder that exists but sorts
   // past the limit is indistinguishable from one that is not there, and
   // "nothing else in here" becomes a claim nobody checked.
   if (body.truncated) {
-    rows.push('<button type="button" disabled>Showing the first ' + body.showing
-      + ' of ' + body.total + '. Type the path below to reach the rest.</button>');
+    rows.push('<p class="pj-note">Showing the first ' + body.showing
+      + ' of ' + body.total + '. Type the path below to reach the rest.</p>');
   }
   box.innerHTML = rows.join('');
   // ⚠️ Walking INTO a folder does not choose it, and this is the whole reason
@@ -3374,6 +3418,9 @@ setInterval(() => {
   const panel = document.getElementById('panel-projects');
   if (!panel || panel.hidden) return;
   if (!document.getElementById('pj-add-view').hidden) return;
+  // Nor while a removal is being confirmed: repainting under an open question
+  // is how somebody answers a different question than the one they read.
+  if (!document.getElementById('pj-one-confirm').hidden) return;
   loadProjects();
 }, 5000);
 

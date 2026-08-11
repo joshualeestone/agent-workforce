@@ -1097,6 +1097,20 @@ const server = http.createServer((req, res) => {
    * "we could not look". So it is caught and reported as a failure to see.
    */
   if (pathname === '/api/projects' && (req.method === 'GET' || req.method === 'HEAD')) {
+    // ⚠️ An unreadable projects FILE is answered as an error, never as an empty
+    // list. Serving `{projects: []}` there put "No projects yet. Point Kosmos at
+    // a folder you already have" on screen for somebody who has projects we
+    // simply could not read -- the exact "asserting a state nobody checked"
+    // failure, arriving through the quietest path there is.
+    try {
+      projects.readAll();
+    } catch (err) {
+      sendJson(res, 500, {
+        error: String((err && err.message) || 'we cannot read your projects right now'),
+        projectsUnreadable: true,
+      });
+      return;
+    }
     try {
       sendJson(res, 200, { projects: projects.list(paneRoster()) });
     } catch {
@@ -1127,7 +1141,11 @@ const server = http.createServer((req, res) => {
         // all -- and the whole point of the three-valued verdict is that a
         // recorded membership we could not announce is a real, reportable
         // state rather than a reason to refuse the request.
-        for (const a of made.agents) projects.syncAgent(a);
+        // ⚠️ ONE roster read for the whole request, threaded into every sync.
+        // `syncAgent` REFUSES to write without an exact match in it, so passing
+        // it is not an optimisation -- it is the permission.
+        const roster = safeRoster();
+        for (const a of made.agents) projects.syncAgent(a, roster);
         sendJson(res, 200, { project: projects.get(made.id, safeRoster()) });
       })
       .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not read that request') }));
@@ -1167,7 +1185,12 @@ const server = http.createServer((req, res) => {
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
         // project that no longer goes by that.
-        for (const a of projects.readAll().find((p) => p.id === id).agents) projects.syncAgent(a);
+        // ⚠️ Re-read rather than reusing the row from the existence check: a
+        // record removed in between made this `.agents` of `undefined`, and the
+        // raw TypeError went out as the person's error message.
+        const renamed = projects.readAll().find((p) => p.id === id);
+        const roster = safeRoster();
+        for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
         sendJson(res, 200, { project: projects.get(id, safeRoster()) });
       })
       .catch((err) => sendJson(res, (err && err.status) || 400, { error: String((err && err.message) || 'we could not read that request') }));
@@ -1177,17 +1200,29 @@ const server = http.createServer((req, res) => {
   if (proj && req.method === 'DELETE') {
     const id = decodeSegment(proj[1]);
     if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    // ⚠️ TWO try blocks, because they answer different questions. Removing the
+    // record and re-telling the members were in ONE, so a failure while
+    // re-telling was answered "there is no project by that name" -- 404, after
+    // the project had actually been removed. The person was told their removal
+    // failed for a removal that happened.
+    let gone;
     try {
-      const gone = projects.remove(id);
-      // ⚠️ The members are re-told AFTER the project is gone, so the block in
-      // their instructions stops naming a project that no longer exists. This
-      // is the same shape as the removal record: the visible half of the work
-      // is the half that has to actually happen.
-      const told = gone.agents.map((a) => ({ agent: a, ...projects.syncAgent(a) }));
-      sendJson(res, 200, { removed: gone.id, name: gone.name, told });
+      gone = projects.remove(id);
     } catch (err) {
-      sendJson(res, 404, { error: String((err && err.message) || 'there is no project by that name') });
+      sendJson(res, (err && err.code === 'UNREADABLE') ? 500 : 404,
+        { error: String((err && err.message) || 'there is no project by that name') });
+      return;
     }
+    // The members are re-told AFTER the project is gone, so the block in their
+    // instructions stops naming a project that no longer exists.
+    let told = [];
+    try {
+      const roster = safeRoster();
+      told = gone.agents.map((a) => ({ agent: a, ...projects.syncAgent(a, roster) }));
+    } catch (err) {
+      told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err && err.message) || 'we could not reach the agents that were on it') }];
+    }
+    sendJson(res, 200, { removed: gone.id, name: gone.name, told });
     return;
   }
 
@@ -1197,9 +1232,10 @@ const server = http.createServer((req, res) => {
     const name = decodeSegment(member[2]);
     if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     try {
-      if (req.method === 'POST') projects.addAgent(id, name, safeRoster());
+      const roster = safeRoster();
+      if (req.method === 'POST') projects.addAgent(id, name, roster);
       else projects.removeAgent(id, name);
-      const verdict = projects.syncAgent(name);
+      const verdict = projects.syncAgent(name, roster);
       sendJson(res, 200, { project: projects.get(id, safeRoster()), told: verdict });
     } catch (err) {
       sendJson(res, 400, { error: String((err && err.message) || 'we could not change that project') });
@@ -1272,20 +1308,36 @@ const server = http.createServer((req, res) => {
       // directory is offered because it is a perfectly ordinary way to keep
       // work — it just gets resolved again when it is opened or chosen.
       .filter((e) => !e.name.startsWith('.') && (e.isDirectory() || e.isSymbolicLink()))
-      .map((e) => ({ name: e.name, path: path.join(real, e.name) }))
-      .filter((e) => { try { return fs.statSync(e.path).isDirectory(); } catch { return false; } })
+      .map((e) => ({ name: e.name, path: path.join(real, e.name), sure: e.isDirectory() }))
       .sort((a, b) => a.name.localeCompare(b.name));
     const LIMIT = 500;
-    const shown = folders.slice(0, LIMIT);
+    // ⚠️ Only the entries that will actually be SHOWN get a `stat`, and only
+    // the ones `readdir` could not already type as directories. A synchronous
+    // stat per entry blocked the single-threaded server across the whole
+    // folder, including the thousands past the limit that nobody sees.
+    const shown = [];
+    // ⚠️ Tracked explicitly, not inferred from `folders.length > shown.length`.
+    // That comparison also counts entries dropped for NOT BEING FOLDERS, so a
+    // directory holding one link-to-a-file reported itself as truncated -- a
+    // warning about missing folders when nothing was missing. "We stopped
+    // early" is the fact; "some entries were not folders" is a different one.
+    let hitLimit = false;
+    for (const e of folders) {
+      if (shown.length >= LIMIT) { hitLimit = true; break; }
+      if (!e.sure) {
+        try { if (!fs.statSync(e.path).isDirectory()) continue; } catch { continue; }
+      }
+      shown.push({ name: e.name, path: e.path });
+    }
     sendJson(res, 200, {
       path: real,
       home,
       // ⚠️ Said out loud. A silent cut made a folder that exists but sorts past
       // the limit indistinguishable from one that is not there — the page's
       // "nothing else in here" would be a claim nobody checked.
-      truncated: folders.length > LIMIT,
+      truncated: hitLimit,
       showing: shown.length,
-      total: folders.length,
+      total: hitLimit ? folders.length : shown.length,
       // Null AT home rather than at the filesystem root, so "up" can never walk
       // out of the only place this route will serve.
       parent: real === home ? null : path.dirname(real),
