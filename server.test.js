@@ -2961,8 +2961,14 @@ test('a check row carries its state in a WORD, not only in a glyph and a colour'
     assert.ok(m, n + ' vanished from the page');
     return m[0];
   }).join('\n');
+  // ⚠️ The REAL `esc`, lifted from the page, not a `String(s)` stub. With the
+  // stub this test would have gone on passing after `esc()` was removed from
+  // `frCheckRow` entirely -- and what flows through it is engine prose today,
+  // but the whole point of the machine checks is that they quote paths and
+  // error strings from the machine.
+  const realEsc = pageFunction('esc');
   const frCheckRow = pageFunction('frCheckRow',
-    'function esc(s) { return String(s); }\n' + tables);
+    'const esc = ' + realEsc.toString() + ';\n' + tables);
 
   const good = frCheckRow({ state: 'ok', title: 'Everything is installed', detail: 'Nothing to do.' });
   const bad = frCheckRow({ state: 'attention', title: 'This Mac sleeps', detail: 'They stop.' });
@@ -2987,6 +2993,17 @@ test('a check row carries its state in a WORD, not only in a glyph and a colour'
     'a state this screen does not know was drawn as a tick');
 
   assert.match(bad, /aria-hidden="true">!</, 'the glyph is announced as well as shown');
+
+  // ⚠️ And it actually escapes. The machine checks quote real paths and real
+  // error strings back at the person; a title carrying a `<` must not become
+  // markup on the screen that is meant to be telling them the truth.
+  const nasty = frCheckRow({
+    state: 'attention',
+    title: 'tmux is not at </div><script>x</script>',
+    detail: 'We looked for it at /opt/<b>homebrew</b>/bin/tmux.',
+  });
+  assert.ok(!/<script>/.test(nasty), 'a check title carrying markup reached the page as markup');
+  assert.match(nasty, /&lt;script&gt;|&lt;\/div&gt;/, 'nothing was escaped at all');
 });
 
 test('first run fails CLOSED: an unreadable answer shows no onboarding at all', () => {

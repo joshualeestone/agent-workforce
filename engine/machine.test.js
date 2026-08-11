@@ -168,6 +168,63 @@ test('a pmset that will not run at all does not become a passing check', () => {
   assert.equal(got.unknown >= 1, true);
 });
 
+test('the reassuring half of the battery answer is not asserted unchecked', () => {
+  /**
+   * ⚠️ MEASURED. This branch ran BEFORE the AC value was tested, so a laptop set
+   * to sleep after ten minutes on AC, whose battery section could not be read,
+   * was told "It does not go to sleep while it is plugged in." The verdict was
+   * safely `unknown` the whole time, which is why it went unnoticed for a
+   * while: the false thing was the sentence, not the state.
+   */
+  const acSleeps = 'Battery Power:\n lidwake              1\n\nAC Power:\n sleep                10\n';
+  const got = machine.sleepCheck(acSleeps);
+  assert.equal(got.state, 'unknown');
+  assert.doesNotMatch(got.detail, /does not go to sleep while it is plugged in/,
+    'told somebody their Mac stays awake on AC when the reading said it sleeps after ten minutes');
+
+  // The control: when AC really was read as never-sleep, it DOES say so.
+  const acFine = 'Battery Power:\n lidwake              1\n\nAC Power:\n sleep                0\n';
+  const fine = machine.sleepCheck(acFine);
+  assert.equal(fine.state, 'unknown');
+  assert.match(fine.detail, /does not go to sleep while it is plugged in/,
+    'stopped saying the one true half it had actually checked');
+});
+
+test('a binary we cannot LOOK at is unknown, not "not installed"', () => {
+  /**
+   * ⚠️ THE ARM THAT COULD NEVER FIRE. Written around `fs.existsSync`, which
+   * never throws — it swallows every error and answers false. So an unreadable
+   * parent directory came out as the flat claim "an agent made now would not
+   * start", which is cannot-see rendered as a checked negative.
+   *
+   * A directory with no execute permission is the cheapest real reproduction:
+   * stat through it fails EACCES rather than ENOENT.
+   */
+  const fs = require('node:fs');
+  const nodeOs = require('node:os');
+  const nodePath = require('node:path');
+  const dir = fs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'aw-perm-'));
+  const inner = nodePath.join(dir, 'inner');
+  fs.mkdirSync(inner);
+  const hidden = nodePath.join(inner, 'claude');
+  fs.writeFileSync(hidden, '#!/bin/sh\n');
+  fs.chmodSync(inner, 0o000);
+  try {
+    // The control: it really is unreadable in a way that is NOT "absent".
+    let code = null;
+    try { fs.statSync(hidden); } catch (err) { code = err.code; }
+    if (code === null || code === 'ENOENT') return;   // running as root; nothing to test
+
+    const got = machine.installedCheck({ claudeBin: hidden, tmuxBin: __filename });
+    assert.equal(got.state, 'unknown',
+      'a path we could not read was reported as a definite "not installed"');
+    assert.match(got.detail, /could not see it|did not work/);
+  } finally {
+    fs.chmodSync(inner, 0o755);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /* ---------------------------------------------------------------------------
    Installed
 --------------------------------------------------------------------------- */
@@ -217,11 +274,31 @@ test('both present is a pass; a missing one names it and says where we looked', 
    Starting themselves
 --------------------------------------------------------------------------- */
 
-test('launchctl answering is a pass, and launchctl failing is not a pass', () => {
-  assert.equal(machine.restartCheck(okRunner).state, 'ok');
+test('launchctl answering is a pass, and launchctl NOT answering is unknown', () => {
+  const alive = machine.restartCheck(okRunner);
+  assert.equal(alive.state, 'ok');
+  /**
+   * ⚠️ AND THE PASS DOES NOT OVERCLAIM. All that was established is that
+   * launchctl answers for this login session: no plist was opened, no job was
+   * listed, and no reboot has happened. The first version said "Your agents
+   * will start themselves ... they come back on their own", directly under a
+   * comment saying that claim is deliberately weaker than the wireframe's.
+   */
+  assert.doesNotMatch(alive.title, /will start themselves/,
+    'the pass asserts a reboot that has not happened');
+  assert.match(alive.title, /set to start themselves/);
+
+  /**
+   * ⚠️ UNKNOWN, NOT ATTENTION. This test pinned `attention` in its first
+   * version, which would have kept the wrong behaviour in place: launchctl not
+   * answering means we could not ask, not that something is wrong. Counting it
+   * as attention is exactly the miscount `check()` separates the two counters
+   * to avoid.
+   */
   const dead = machine.restartCheck(deadRunner);
-  assert.equal(dead.state, 'attention');
-  assert.match(dead.detail, /by hand/);
+  assert.equal(dead.state, 'unknown',
+    'a check we could not run was counted as a problem needing action');
+  assert.match(dead.detail, /could not check/);
 });
 
 test('the restart check asks launchctl about THIS login session', () => {

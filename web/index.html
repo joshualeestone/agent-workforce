@@ -661,7 +661,11 @@ svg { display: block; }
     <div class="fr-body">
       <p class="crumb" id="fr-step">Step 1 of 4</p>
       <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
-      <h2 id="fr-title">Welcome</h2>
+      <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED without joining the tab
+           order. Without it `.focus()` here is a silent no-op and the step
+           change is announced to nobody -- the identical fix the `<h1>` at the
+           top of this file already carries, with the identical reason. -->
+      <h2 id="fr-title" tabindex="-1">Welcome</h2>
 
       <!-- 1. What this is. No account, no email, and where the transcripts go —
            the last of which the requirements ask to be stated here rather than
@@ -2972,6 +2976,7 @@ let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
 let FR_FORGOT = false;    // the completion flag did not stick, and we said so
+let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and Continue at once
 
 /**
  * ⚠️ `.onclick`, NOT `addEventListener`. These two buttons change meaning on
@@ -2997,7 +3002,22 @@ function frActions(primary, alt) {
 }
 
 function frGo(step) {
+  /**
+   * ⚠️ CLAMPED TO A WHOLE STEP THAT EXISTS, because `?fr-step=` is a deep link
+   * and deep links arrive with whatever is typed into them. `frGo(3.7)` hid
+   * EVERY pane — the loop asks `i !== step` and 3.7 equals none of them — then
+   * printed "Step 3.7 of 4" and painted step 4 into a pane it had just hidden.
+   * A titled, buttoned, completely empty dialog, which is the one shape this
+   * whole screen exists to avoid.
+   */
+  step = Math.trunc(Number(step));
+  if (!Number.isFinite(step) || step < 1) step = 1;
+  if (step > FR_STEPS) step = FR_STEPS;
   FR_STEP = step;
+  // ⚠️ Cleared on every step change. It is written once when the completion
+  // flag will not stick, and without this it sat on screen for the rest of the
+  // session, describing a failure that happened three screens ago.
+  document.getElementById('fr-forgot').innerHTML = '';
   for (let i = 1; i <= FR_STEPS; i += 1) {
     document.getElementById('fr-pane-' + i).hidden = (i !== step);
   }
@@ -3022,6 +3042,19 @@ function frGo(step) {
   } else {
     frPaintFleet();
   }
+
+  /**
+   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this steps 3
+   * and 4 were announced to nobody at all. Step 2's list is a live region; the
+   * other two are not, and nothing moved the keyboard — so pressing Continue
+   * told a screen-reader user only that a button's label had changed. The
+   * subscription verdict and the fleet list were never spoken.
+   *
+   * Focus rather than more live regions, because a step change is a change of
+   * view, not a status message arriving in place. WCAG 2.1 SC 4.1.3, which is
+   * this project's floor.
+   */
+  document.getElementById('fr-title').focus();
 }
 
 /* --------------------------------------------------------------------------
@@ -3033,7 +3066,12 @@ const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could
 const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?' };
 
 function frCheckRow(c) {
-  const state = FR_SAY[c.state] ? c.state : 'unknown';
+  // ⚠️ `hasOwnProperty`, not a truthiness test on the lookup: `c.state ===
+  // 'toString'` hits Object.prototype and interpolates a whole function body
+  // into the class attribute and the screen-reader text. Not reachable from the
+  // engine today, but the test beside this asserts an unrecognised state falls
+  // back safely, and a truthiness test is exactly how it would not.
+  const state = Object.prototype.hasOwnProperty.call(FR_SAY, c.state) ? c.state : 'unknown';
   return '<div class="fr-check ' + state + '">'
     // ⚠️ The glyph is decorative and the WORD beside it is not. Both states
     // render as one character in a box, and on the machine-check screen two of
@@ -3048,6 +3086,16 @@ function frCheckRow(c) {
 async function frPaintMachine() {
   const box = document.getElementById('fr-checks');
   const msg = document.getElementById('fr-machine-msg');
+  /**
+   * ⚠️ "Check again" IS HELD DOWN WHILE THIS RUNS. The route behind it shells
+   * out twice with a five-second timeout each, on the server's event loop, so a
+   * person tapping the button four times can stall the board for everyone
+   * looking at it -- including the poll behind this overlay. It is also the only
+   * button in the product that costs a subprocess per press.
+   */
+  const again = document.getElementById('fr-alt');
+  const wasAgain = !again.hidden;
+  if (wasAgain) again.disabled = true;
   box.innerHTML = '<p>Looking&hellip;</p>';
   msg.textContent = '';
   let got;
@@ -3068,6 +3116,11 @@ async function frPaintMachine() {
       + '<div class="fr-cdetail">This is not saying anything is wrong with it. It is saying we '
       + 'could not look. (' + esc(err.message) + ')</div></div></div>';
     return;
+  } finally {
+    // ⚠️ `finally`: the failure path returns early, and leaving the one button
+    // that retries permanently disabled by a failure is the worst possible time
+    // to lose it.
+    if (wasAgain) again.disabled = false;
   }
   const checks = (got && got.checks) || [];
   box.innerHTML = checks.map(frCheckRow).join('')
@@ -3267,12 +3320,33 @@ function frClose() {
  * it is not the same as somewhere to be stuck.
  */
 async function frFinish(then) {
+  /**
+   * ⚠️ ONE FLAG, NOT A DISABLED BUTTON. The first version guarded re-entry by
+   * disabling Continue -- which does nothing about Skip or Escape, and both of
+   * those call this too. Clicking "Make my first agent" and then pressing
+   * Escape while the POST was in flight ran TWO completions: two writes, two
+   * closes, and BOTH callbacks, so `openCreate()` opened the create panel and
+   * `showTab('agents')` immediately took it away again.
+   */
+  if (FR_FINISHING) return;
+  FR_FINISHING = true;
   const next = document.getElementById('fr-next');
   next.disabled = true;
   let ok = false;
   let why = '';
   try {
-    const res = await fetch('/api/first-run/complete', { method: 'POST' });
+    /**
+     * ⚠️ IT HAS TO TIME OUT, or the documented "way out on every step" is a
+     * promise this function cannot keep. A POST that never settles leaves
+     * Continue disabled, Skip and Escape doing nothing, and the page inert
+     * behind an opaque overlay: the exact trap the overlay was designed
+     * against, reached through its own exit. A hang now lands in the
+     * could-not-remember path below, which always has a way onward.
+     */
+    const res = await fetch('/api/first-run/complete', {
+      method: 'POST',
+      signal: AbortSignal.timeout(8000),
+    });
     ok = res.ok;
     if (!ok) {
       const back = await res.json().catch(() => null);
@@ -3281,6 +3355,7 @@ async function frFinish(then) {
   } catch (err) {
     why = err.message;
   }
+  FR_FINISHING = false;
   if (ok || FR_FORGOT) { frClose(); then(); return; }
   FR_FORGOT = true;
   next.disabled = false;
@@ -3300,6 +3375,24 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (document.getElementById('firstrun').hidden) return;
   frFinish(() => showTab('agents'));
+});
+
+/**
+ * ⚠️ THE FALLBACK FOR WHEN `inert` IS NOT A THING.
+ *
+ * Containment above is one attribute, and on any engine that does not implement
+ * it `el.inert = true` is not an error -- it is a property nobody reads. The
+ * overlay stays opaque, so nothing looks wrong, and the keyboard tabs straight
+ * onto a board the person cannot see. The removal modal beside this one has
+ * both a real modal role and a way back; this had one mechanism.
+ *
+ * Cheap, and it costs nothing where `inert` works: nothing outside can ever
+ * receive focus there, so this never fires.
+ */
+document.addEventListener('focusin', (e) => {
+  const overlay = document.getElementById('firstrun');
+  if (overlay.hidden || overlay.contains(e.target)) return;
+  document.getElementById('fr-title').focus();
 });
 
 /**

@@ -35,11 +35,16 @@ PORT=4399 \
   node server.js &
 
 # 2. playwright, installed OUTSIDE this repo
-cd "$(mktemp -d)" && npm init -y && npm i playwright && npx playwright install chromium
+PW=$(mktemp -d)
+cd "$PW" && npm init -y && npm i playwright && npx playwright install chromium
 
 # 3. the checks
-node <repo>/docs/browser-checks/render-first-run.js /tmp/frshots
-node <repo>/docs/browser-checks/click-first-run.js "$SB/data/AgentWorkforce/first-run.json"
+#    ⚠️ NODE_PATH is not optional. `require` resolves from the SCRIPT's
+#    directory, not the working directory, so without it these walk
+#    <repo>/docs/browser-checks/node_modules … / and exit MODULE_NOT_FOUND.
+NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/render-first-run.js /tmp/frshots
+NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/click-first-run.js \
+  "$SB/data/AgentWorkforce/first-run.json"
 ```
 
 ⚠️ **Sandbox the roots.** `click-first-run.js` drives the real completion flag

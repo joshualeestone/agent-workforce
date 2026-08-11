@@ -125,11 +125,25 @@ function sleepCheck(text) {
   const batterySleep = battery ? sleepMinutes(battery) : null;
 
   if (battery && batterySleep === null) {
+    /**
+     * ⚠️ THE REASSURING HALF OF THIS SENTENCE IS ITSELF A CLAIM, AND IT USED TO
+     * BE MADE WITHOUT CHECKING.
+     *
+     * This branch ran before `acSleep > 0` was tested, so on a laptop set to
+     * sleep after ten minutes on AC — with an unreadable battery section — it
+     * said "It does not go to sleep while it is plugged in." Measured. The
+     * *state* was safely `unknown` the whole time, which is exactly why it went
+     * unnoticed: the wrong thing was the prose, not the verdict.
+     *
+     * So the plugged-in half is only asserted when it was actually read as zero.
+     */
     return {
       key: 'sleep',
       state: STATE.UNKNOWN,
       title: 'We could not tell what this Mac does on battery',
-      detail: 'It does not go to sleep while it is plugged in. What it does on battery is the '
+      detail: (acSleep === 0
+        ? 'It does not go to sleep while it is plugged in. What it does on battery is the '
+        : 'What this Mac does on battery is the ')
         + 'part we could not read, and that is the part that matters if you carry it home.',
     };
   }
@@ -186,11 +200,27 @@ function installedCheck(opts) {
 
   const missing = [];
   for (const [label, bin] of parts) {
-    let there;
+    /**
+     * ⚠️ `statSync`, NOT `existsSync`, AND THE DIFFERENCE IS THE WHOLE POINT OF
+     * THE CATCH.
+     *
+     * `fs.existsSync` never throws: it swallows every error internally and
+     * answers `false`. So the `unknown` arm written around it was unreachable
+     * code, and an unreadable parent directory — a permissions error, a
+     * disconnected mount — came out of it as the flat claim "Claude Code is not
+     * where we expected it. An agent made now would not start."
+     *
+     * That is *we could not look* rendered as a checked negative, in the module
+     * whose header says that is the one thing not to do. It shipped because the
+     * guard was new code and nothing tested it, which is the other rule.
+     *
+     * `statSync` throws, so the three answers are real: ENOENT is genuinely
+     * absent, anything else is us being unable to see.
+     */
     try {
-      there = fs.existsSync(bin);
+      fs.statSync(bin);
     } catch (err) {
-      // We could not look. That is not the same as it not being there.
+      if (err && err.code === 'ENOENT') { missing.push({ label, bin }); continue; }
       return {
         key: 'installed',
         state: STATE.UNKNOWN,
@@ -199,7 +229,6 @@ function installedCheck(opts) {
           + 'That does not mean it is missing, only that we could not see it.',
       };
     }
-    if (!there) missing.push({ label, bin });
   }
 
   if (!missing.length) {
@@ -254,19 +283,40 @@ function restartCheck(runner) {
   }
   const got = runner('/bin/launchctl', ['print', `gui/${uid}`]);
   if (got.ok) {
+    /**
+     * ⚠️ "SET TO", NOT "WILL". The comment above this function already said this
+     * claim is deliberately weaker than the wireframe's, and then the string
+     * underneath it said "Your agents will start themselves. If this computer
+     * restarts, they come back on their own." What was actually established is
+     * that `launchctl` answers for this login session. No plist was opened, no
+     * job was listed, no agent was inspected, and no reboot has happened.
+     *
+     * A safety comment that disagrees with the sentence beside it is worse than
+     * neither, because the next reader trusts the comment.
+     */
     return {
       key: 'restart',
       state: STATE.OK,
-      title: 'Your agents will start themselves',
-      detail: 'If this computer restarts, they come back on their own.',
+      title: 'Your agents are set to start themselves',
+      detail: 'They are registered with the part of macOS that starts things at login, and it '
+        + 'is answering, so they should come back on their own after a restart.',
     };
   }
+  /**
+   * ⚠️ UNKNOWN, NOT ATTENTION, and this one was miscounted by the module that
+   * documents the miscount. `launchctl` failing to answer does not establish
+   * that anything is wrong with the jobs — it establishes that we could not ask.
+   * Reporting it as `attention` puts a thing-we-could-not-read into the count of
+   * things-that-need-doing, which `check()` keeps separate precisely so that
+   * "two things need your attention" is never half false.
+   */
   return {
     key: 'restart',
-    state: STATE.ATTENTION,
-    title: 'Your agents may not come back on their own',
-    detail: 'We could not reach the part of macOS that starts things at login, so an agent '
-      + 'made now might need starting by hand after a restart.',
+    state: STATE.UNKNOWN,
+    title: 'We could not tell whether your agents will start themselves',
+    detail: 'The part of macOS that starts things at login did not answer, so we could not '
+      + 'check. They are set up to come back after a restart, and nothing here says they '
+      + 'will not.',
   };
 }
 

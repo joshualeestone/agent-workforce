@@ -350,13 +350,6 @@ function plistFor(name, claudeBin, tmuxBin) {
 /* ── the steps ───────────────────────────────────────────────────────────── */
 
 /**
- * Make an agent, and report honestly about how far it got.
- *
- * Returns `{ outcome, because, steps }`. `steps` records each thing attempted
- * and whether it worked, because a half-made agent is a real state and the
- * operator has to be able to see which half.
- */
-/**
  * Where the two things an agent needs actually live on this computer.
  *
  * ⚠️ Overridable by environment, because these two defaults are ONE machine's
@@ -389,6 +382,13 @@ function binPaths(opts) {
   };
 }
 
+/**
+ * Make an agent, and report honestly about how far it got.
+ *
+ * Returns `{ outcome, because, steps }`. `steps` records each thing attempted
+ * and whether it worked, because a half-made agent is a real state and the
+ * operator has to be able to see which half.
+ */
 function createAgent(opts) {
   const name = cleanName(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
