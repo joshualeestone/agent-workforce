@@ -557,14 +557,37 @@ function isNamedOurs(pane) {
  * (tier 3), still appears, and is still typeable. The name only settles a TIE
  * against a same-named session that does carry the suffix.
  */
-const RANK_NAMED_RUNNING = 0;   // ours by name, unambiguously Claude
-const RANK_NAMED_CRASHED = 1;   // ours by name, fallen back to a shell
-const RANK_NAMED_LEGACY = 2;    // ours by name, AMBIGUOUS process — `node` only
-const RANK_INFERRED = 3;        // not ours by name; a Claude process says maybe
-const RANK_NONE = 4;
+const RANK_SUFFIXED_RUNNING = 0;  // the fleet's own session name, and Claude
+const RANK_NAMED_RUNNING = 1;   // ours by name, unambiguously Claude
+const RANK_NAMED_CRASHED = 2;   // ours by name, fallen back to a shell
+const RANK_NAMED_LEGACY = 3;    // ours by name, AMBIGUOUS process — `node` only
+const RANK_INFERRED = 4;        // not ours by name; a Claude process says maybe
+const RANK_NONE = 5;
 
 function rank(pane) {
   if (isNamedOurs(pane)) {
+    /* ⚠️ THE SUFFIXED PANE WINS A TIE, and adding the claim arm is what made
+     * that necessary.
+     *
+     * `onePanePerSession` keys on the board NAME, and `angel` and
+     * `angel-discord` are one name. Before the claim existed only the suffixed
+     * session could be "ours", so the tie could not arise. Now any local
+     * process can run `tmux new -s angel` and `set-option @kosmos_agent angel`,
+     * and both panes rank identically at pane 0.0 — so the winner was whichever
+     * tmux happened to list first. Measured on this code: the roster came back
+     * with ONE entry, the impostor's, and the real agent was not on the board
+     * at all. Everything keyed on the name then followed it: the instruction
+     * reads and writes, and the name-keyed gates.
+     *
+     * A claim is set by us but is not unforgeable — any process running as this
+     * user can set the same option. The suffix is the fleet's own convention
+     * and is the older, established tie. So when both say "ours", the suffixed
+     * one is the agent, and the claim is what recognises the agents WE create,
+     * which by construction have no suffixed twin.
+     */
+    if (/-discord$/.test(String(pane.session || '')) && isUnambiguousClaude(pane && pane.command)) {
+      return RANK_SUFFIXED_RUNNING;
+    }
     // ⚠️ `claude` and `claude.exe` belong UP HERE with the version string, not
     // down with `node`. Demoting the whole legacy set below a crashed shell
     // over-corrected: `node` is ambiguous because a dev server looks identical,

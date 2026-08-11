@@ -1500,7 +1500,7 @@ document.getElementById('create-name').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('create-go').click();
 });
 
-/** One tick line. `state` is 'done' | 'fail' | 'waiting'. */
+/** One tick line. `state` is 'done' | 'fail' | 'undone' | 'waiting'. */
 function tickLine(state, text) {
   const mark = state === 'done' ? '&#10003;'
     : (state === 'fail' ? '&#10007;' : (state === 'undone' ? '&#8722;' : '&#8230;'));

@@ -1298,3 +1298,47 @@ test('a session name that could walk out of the registry directory reads nothing
     setPaneCapture(null);
   }
 });
+
+test('a claimed session cannot displace the real agent that shares its name', () => {
+  // ⚠️ THE COLLISION THE CLAIM ARM CREATED. `onePanePerSession` keys on the
+  // board NAME, and `angel` and `angel-discord` are one name. Before the claim
+  // existed only the suffixed session could be "ours", so this tie could not
+  // arise. Now any local process can run
+  //
+  //     tmux new -s angel && tmux set-option -t angel @kosmos_agent angel
+  //
+  // and both panes rank identically -- so the winner was whichever tmux listed
+  // first. Measured before the fix: the roster came back with ONE entry, the
+  // impostor's, and the real agent was not on the board at all. Everything
+  // keyed on the name followed it: instruction reads and writes, and the
+  // name-keyed gates.
+  setPaneSource(() => [
+    'angel\t0.0\t2.1.212\t0\tangel\t✳ Claude Code',
+    'angel-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code',
+  ].join('\n'));
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const roster = require('./status').paneRoster();
+    const angels = roster.filter((a) => a.sessionName === 'angel');
+    assert.equal(angels.length, 1, 'the collision produced two entries under one name');
+    assert.equal(angels[0].session, 'angel-discord',
+      'a session that merely claims the name displaced the real agent, and every '
+      + 'name-keyed read and write follows it');
+
+    // ⚠️ THE CONTROL. With no impostor, the same fixture must still resolve --
+    // otherwise this passes because nothing resolves at all.
+    setPaneSource(() => 'angel-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code');
+    assert.equal(require('./status').paneRoster().filter((a) => a.sessionName === 'angel').length, 1,
+      'the real agent does not resolve on its own, so the assertion above is vacuous');
+
+    // ⚠️ AND THE OTHER CONTROL: a claimed session with NO suffixed twin is
+    // still ours. That is the whole point of the claim, and a tie-break that
+    // took it away would break every agent this product creates.
+    setPaneSource(() => 'made-by-kosmos\t0.0\t2.1.212\t0\tmade-by-kosmos\t✳ Claude Code');
+    const mine = require('./status').paneRoster().find((a) => a.sessionName === 'made-by-kosmos');
+    assert.ok(mine && mine.isNamedOurs, 'a created agent stopped being recognised as ours');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});

@@ -103,6 +103,14 @@ test('a name that cannot address an agent is refused before anything is made', (
 
 test('a refused name creates nothing at all', () => {
   const calls = recorder();
+  // ⚠️ LEAVE DRY-RUN, or the filesystem half of this test cannot fail.
+  // `afterEach` calls `setRunner(null)`, which re-arms dry-run, and `recorder()`
+  // does not clear it -- so `createAgent` writes nothing even on a fully
+  // successful path, and "a refused name still made a folder" passes whether or
+  // not the refusal fired. It would still pass with the refusal moved to AFTER
+  // the writes. That is the exact self-satisfying shape this file's own
+  // comments condemn elsewhere.
+  create.setDryRun(false);
   const r = create.createAgent({ ...BINS, name: '_bot', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.REFUSED);
   assert.equal(calls.length, 0, 'a refused name still ran a command');
@@ -391,6 +399,7 @@ test('a name a live session already answers to is refused, even with no folder',
   // Measured before this gate existed: the creation screen watched for a
   // session called `casey`, found the fleet's existing one, and reported
   // "casey is running" over a creation that had done nothing whatsoever.
+  create.setDryRun(false);   // or the folder assertion below cannot fail
   status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\t\tidle');
   const taken = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
 
@@ -423,6 +432,7 @@ test('a machine we cannot ask about running agents is refused, not risked', () =
     ['tmux could not be run at all', () => { throw new Error('spawn ENOENT'); }],
   ]) {
     const calls = recorder();
+    create.setDryRun(false);   // or the folder assertion below cannot fail
     status.setPaneSource(source);
     const r = create.createAgent({ ...BINS, name: 'fixture-blind', role: 'pm' });
 
@@ -809,7 +819,12 @@ test('the startup script, actually run, adopts a healthy agent instead of restar
   // launchd's KeepAlive could never recover it because the job looked healthy.
   // The status engine already paid for this exact defect and replaced its
   // denylist with an allowlist; this is that same definition.
-  for (const leftover of ['vim', 'less', 'ssh', 'python3', '-zsh']) {
+  // ⚠️ `1.2.3.4` and `1a.2b.3c` are in this list because the first version
+  // matched with a GLOB, which accepts both, while the definition it claimed
+  // parity with is `^[0-9]+\.[0-9]+\.[0-9]+$`. A looser copy of a definition,
+  // beside a comment asserting they are the same, in the place where being
+  // loose means supervising a dead agent forever.
+  for (const leftover of ['vim', 'less', 'ssh', 'python3', '-zsh', '1.2.3.4', '1a.2b.3c']) {
     const dead = runLauncher({ claim: 'probe', paneCommands: [leftover] });
     assert.ok(dead.some((c) => c.startsWith('kill-session')),
       `a pane running ${leftover} was read as a live agent, so a crashed one is never recovered`);

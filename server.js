@@ -156,6 +156,12 @@ function sessionOf(name) {
     return undefined;
   }
 }
+// ⚠️ Two roster reads per request is two SNAPSHOTS: the gate can be decided
+// against one and the session resolved against another, which is the same
+// one-fact-two-derivations problem one level up. Both callers below run
+// `knownAgent` first, so this is noted rather than fixed here — the shape that
+// removes it is a single `claimantFor` whose card both the gate and the session
+// come from, and that is a change to how every name-keyed route resolves.
 
 function knownAgent(name) {
   try {

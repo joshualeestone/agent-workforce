@@ -318,10 +318,16 @@ while "$TMUX_BIN" has-session -t "$TARGET" 2>/dev/null; do
       # for once. This is the same definition, in the one place that acts on it
       # destructively: a native install reports a bare version (2.1.227), and
       # the other spellings are claude, claude.exe and node.
-      case "$pane_cmd" in
-        [0-9]*.[0-9]*.[0-9]*|claude|claude.exe|node) alive=1 ;;
-        *) ;;
-      esac
+      # ⚠️ A REGEX, not a glob. The glob [0-9]*.[0-9]*.[0-9]* also matches
+      # 1.2.3.4, 1a.2b.3c and 12x.3.4y, while status.isNativeClaude is
+      # ^[0-9]+\.[0-9]+\.[0-9]+$ and deliberately excludes anything else. A
+      # comment claiming parity with a definition, next to a looser copy of it,
+      # is the thing this file keeps correcting -- and here being loose means
+      # adopting a dead agent and supervising it forever.
+      if [[ "$pane_cmd" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] \\
+        || [ "$pane_cmd" = claude ] || [ "$pane_cmd" = claude.exe ] || [ "$pane_cmd" = node ]; then
+        alive=1
+      fi
     done <<EOF
 $panes
 EOF
