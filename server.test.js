@@ -2610,6 +2610,29 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
   const pins = [
+    /* ---- first run -------------------------------------------------------
+       ⚠️ These are here because NOTHING ELSE CAN CATCH THEM. Reverting either
+       one leaves the page working, every other test green, and the browser
+       checks silent -- which is precisely why they need a pin rather than a
+       check. Until they were added, this list held only the previous branch's
+       fixes while its own comment implied it covered the current one. */
+
+    // The flagship "found only by rendering" defect. Written `.fr-next` it
+    // loses to `.fr-body p` on specificity and the rule does NOTHING -- and the
+    // render check cannot see it, because the fallback it lands on happens to
+    // pass AA. Silent in every layer we have.
+    [/\.fr-body p\.fr-next/, 'the first-run caption rule is back to a bare class, which loses to '
+      + '.fr-body p on specificity and applies to nothing at all'],
+    // Without the guard, `AbortSignal.timeout` throws synchronously on Safari
+    // < 16, every completion lands in the could-not-remember path, and first
+    // run reappears on every launch forever. Chromium always satisfies it, so
+    // no browser check on this machine will ever fail.
+    [/typeof AbortSignal !== 'undefined' && AbortSignal\.timeout/,
+      'the AbortSignal.timeout feature guard is gone, so on an engine without it every '
+      + 'completion throws, lands in the could-not-remember path, and onboarding never stops '
+      + 'reappearing'],
+
+    /* ---- the removal flow, from the previous branch ---------------------- */
     // A record written by an older version has no timestamp, and this read the
     // wrong field, so the date never appeared for anybody.
     [/a\.removedAt/, 'the removed-list date reads a field the engine does not write'],
@@ -3260,17 +3283,28 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     null,
     {},
     { path: 'unknown', fleetCount: null, fleetNames: [] },
-    { path: 'adopt' },                                   // count and names missing
+    { path: 'adopt' },                                   // names the path, but no count
+    { path: 'adopt', fleetCount: 'lots', fleetNames: [] },
     { path: 'nonsense', fleetCount: 3, fleetNames: [] },
   ]) {
     const got = firstRunHarness('frPaintFleet', { FR });
     const title = got.els['fr-title'].textContent;
     const body = got.els['fr-fleet'].innerHTML;
-    assert.ok(typeof title === 'string' && title.length > 0,
-      `payload ${JSON.stringify(FR)} rendered a screen with no heading at all`);
+    /**
+     * ⚠️ THE ASSERTION THE COMMENT ALWAYS CLAIMED. This loop used to check only
+     * that SOMETHING rendered -- a non-empty heading, a non-empty body, a
+     * button -- and `{ path: 'adopt' }` satisfied all three while rendering
+     * "You already have undefined agents here". The comment above said every
+     * malformed shape lands on "we could not see"; nothing tested it, and one
+     * of the shapes in its own list did not.
+     */
+    assert.match(title, /could not see/i,
+      `payload ${JSON.stringify(FR)} rendered a fork rather than "we could not see": "${title}"`);
+    assert.ok(!/undefined|NaN|null/.test(title + body),
+      `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
     assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
-    assert.ok(got.actions && got.actions.primary,
-      `payload ${JSON.stringify(FR)} left the person with no button to press`);
+    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+      `payload ${JSON.stringify(FR)} left the person short of a way onward`);
   }
 
   // Both ways out are always offered, whichever path it picked.
@@ -3318,4 +3352,56 @@ test('step 4 does not promise a working agent over a check screen that disagreed
   });
   assert.match(never.els['fr-fleet'].innerHTML, /did not get to look/,
     'a person who never saw the check screen was told everything is in place');
+});
+
+test('the first-run routes answer, and the completion route reports what stuck', async () => {
+  /**
+   * ⚠️ THE ONLY NEW ROUTE THAT WRITES HAD NO SERVER TEST. The browser harness
+   * stubs `/api/first-run/complete`, so the server's own `ok ? 200 : 500`
+   * read-back decision -- the thing that turns "we wrote it" into "it is
+   * actually there" -- was exercised nowhere at all.
+   */
+  const got = await req('/api/first-run');
+  assert.match(got.type, /application\/json/);
+  const state = JSON.parse(got.body);
+  for (const field of ['done', 'fleetKnown', 'path', 'subscription']) {
+    assert.ok(field in state, `/api/first-run stopped answering ${field}, which the screen reads`);
+  }
+  assert.ok(['adopt', 'create', 'unknown'].includes(state.path),
+    `the screen has no branch for path "${state.path}"`);
+  assert.ok(['connected', 'none', 'unknown'].includes(state.subscription.state),
+    `the screen has no branch for subscription "${state.subscription.state}"`);
+
+  // ⚠️ A GET must not write the flag. Onboarding disappearing because somebody
+  // loaded a page is the failure this separation exists to prevent.
+  const before = JSON.parse((await req('/api/first-run')).body).done;
+  await req('/api/first-run');
+  assert.equal(JSON.parse((await req('/api/first-run')).body).done, before,
+    'reading the first-run state changed it');
+
+  // The write, through the real route, against the sandboxed store.
+  const wrote = await req('/api/first-run/complete', {
+    method: 'POST',
+    headers: { origin: base.replace(/\/$/, '') },
+  });
+  assert.match(wrote.type, /application\/json/);
+  assert.equal(wrote.status, 200, `the completion route refused: ${wrote.body}`);
+  assert.equal(JSON.parse(wrote.body).done, true);
+
+  // ⚠️ AND IT STUCK, asked of the route rather than of the write. This is the
+  // whole point of the read-back: a flag that did not persist means onboarding
+  // returns on the next launch over a board somebody has already set up.
+  assert.equal(JSON.parse((await req('/api/first-run')).body).done, true,
+    'the completion route answered 200 for a flag that is not there when you ask again');
+});
+
+test('the completion route is a write, so another website cannot fire it', async () => {
+  // ⚠️ Inherits the cross-site guard by being a POST. Without it, any page you
+  // visit could switch off somebody's onboarding on their own machine.
+  const cross = await req('/api/first-run/complete', {
+    method: 'POST',
+    headers: { origin: 'https://example.com' },
+  });
+  assert.equal(cross.status, 403, 'a cross-site POST was accepted');
+  assert.match(cross.type, /application\/json/);
 });

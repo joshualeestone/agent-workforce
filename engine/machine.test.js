@@ -274,7 +274,6 @@ test('the installed check asks the same question creation asks', () => {
 });
 
 test('both present is a pass; a missing one names it and says where we looked', () => {
-  const here = __filename;
   const nowhere = '/definitely/not/here/claude';
 
   const good = machine.installedCheck({ claudeBin: REAL_BIN, tmuxBin: REAL_BIN });
@@ -562,5 +561,27 @@ test('a path we refuse on sight is not described as a path we looked at', () => 
     'claimed to have looked at a path it refused on sight');
   assert.match(got.detail, /quote|backslash|line break/,
     'never names the character that is actually the problem');
-  assert.match(got.title, /cannot use the path/i);
+  assert.match(got.title, /not where we can use it/i);
+});
+
+test('every bucket gets said, not just the first one that returns', () => {
+  /**
+   * ⚠️ THE THIRD TIME THIS FUNCTION DROPPED A FINDING BY RETURNING EARLY.
+   * `unreadable` beat `missing` first; then `unusable` was added with its own
+   * early return AHEAD of both, so a genuinely absent Claude went unmentioned
+   * whenever the tmux path happened to carry a quote. Measured, and reachable
+   * in real life by a home directory with an apostrophe in it.
+   *
+   * The two earlier fixes were local; this asserts the structural property, so
+   * a fourth bucket added later cannot quietly reintroduce it.
+   */
+  const quoted = `/opt/home${String.fromCharCode(39)}brew/bin/tmux`;
+  const got = machine.installedCheck({ claudeBin: '/definitely/not/here/claude', tmuxBin: quoted });
+  assert.equal(got.state, 'attention');
+  assert.match(got.detail, /\/definitely\/not\/here\/claude/,
+    'a definitely-absent Claude went unmentioned because the OTHER path was refused');
+  assert.match(got.detail, /home.brew\/bin\/tmux/,
+    'the refused path went unmentioned');
+  assert.match(got.title, /Some of what it needs/,
+    'the heading names one problem when there are two');
 });

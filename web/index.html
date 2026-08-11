@@ -683,14 +683,26 @@ svg { display: block; }
            new ones. <b>All of it runs on this computer.</b></p>
         <p>There is no account to make and no email to give. Nothing here signs
            you up for anything.</p>
-        <!-- ⚠️ THE THIRD CLAUSE USED TO BE "so you can always go back and read
-             it", and this app has no way to show anybody a transcript. The first
-             two clauses are the §7b statement the requirements ask to be made
-             here; the third was a capability claim, pointing a non-technical
-             person at a door that is not in the building. -->
-        <p>Everything your agents do is written down and kept on this Mac, in
-           full. It is yours, it stays here, and nothing of it is sent
-           anywhere.</p>
+        <!-- ⚠️ THIS PARAGRAPH HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
+             THE SECOND WRONG VERSION WAS WRITTEN WHILE FIXING THE FIRST.
+
+             It began "so you can always go back and read it" — a capability
+             claim, and this app has no way to show anybody a transcript.
+             Correcting that produced "nothing of it is sent anywhere", which is
+             a PRIVACY claim and flatly false: agents think with Claude, which is
+             the entire reason step 3 exists, so what you ask them goes to
+             Anthropic to be answered. Only the RECORD is local.
+
+             Saying that to a non-technical person on the first screen is the
+             worst version of this defect in the whole flow, and it arrived as
+             the fix for a milder one. So the scope is now stated explicitly: the
+             record stays, the questions go, and there is no account either way.
+             §7b asks for the first sentence; the second is what makes it true. -->
+        <p>The record of everything your agents do is written down and kept on
+           this Mac, in full. It is yours and it stays here.</p>
+        <p>Your agents think with Claude, so what you ask them goes to Claude to
+           be answered. Nothing else about you is sent anywhere, and there is no
+           account here to send it to.</p>
         <p class="fr-next">Next: a quick look at this computer, then Claude,
            then your agents.</p>
       </div>
@@ -3328,9 +3340,18 @@ function frPaintFleet() {
   const path = (FR && FR.path) || 'unknown';
   const title = document.getElementById('fr-title');
 
-  if (path === 'adopt') {
-    const names = (FR.fleetNames || []);
-    const count = FR.fleetCount;
+  const names = (FR && Array.isArray(FR.fleetNames)) ? FR.fleetNames : [];
+  const count = FR && FR.fleetCount;
+
+  /**
+   * ⚠️ THE ADOPT SCREEN NEEDS A REAL COUNT, not just the word "adopt". Without
+   * this, a payload naming the path but not the number rendered the heading
+   * "You already have undefined agents here" -- a count nobody established, on
+   * the one screen whose entire job is proving this app can see somebody's
+   * fleet. Every sibling branch guards its payload; this one took the engine's
+   * word for it.
+   */
+  if (path === 'adopt' && Number.isInteger(count) && count > 0) {
     title.textContent = count === 1 ? 'You already have an agent here' : 'You already have ' + count + ' agents here';
     /**
      * ⚠️ NOT AN IMPORT, AND THIS SCREEN MUST NOT MIME ONE. The board is built
@@ -3390,8 +3411,19 @@ function frPaintFleet() {
       : null;
     box.innerHTML = '<p>There are no agents on this computer yet, so the next thing to do is '
       + 'make one. It takes two questions: what it is for, and what to call it.</p>'
-      + '<p>It starts as soon as it is made, and it is set to start itself again every time '
-      + 'this computer does.</p>'
+      /**
+       * ⚠️ THE FIRST CLAUSE IS HEDGED TOO. The earlier fix softened "it will
+       * start itself again" to "it is set to start itself again" and left "It
+       * starts as soon as it is made" flat -- and that is the clause the check
+       * screen contradicts, sitting directly above a note reading "an agent made
+       * now may not run until that is sorted". One sentence promising and the
+       * next retracting, in that order.
+       */
+      + (checked && !snags.length
+        ? '<p>It starts as soon as it is made, and it is set to start itself again every time '
+          + 'this computer does.</p>'
+        : '<p>Once it is made it is set to start itself again every time this computer '
+          + 'does.</p>')
       + (!checked
         ? '<div class="fr-note">We did not get to look over this computer, so we cannot say '
           + 'in advance whether everything an agent needs is in place. You will find out when '
