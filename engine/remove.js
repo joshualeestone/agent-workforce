@@ -104,15 +104,51 @@ function run(file, args) {
  * state has to live somewhere we control, and it has to carry enough to put the
  * agent back exactly.
  */
+/**
+ * ⚠️ TWO DIFFERENT QUESTIONS, and answering them the same way loses data.
+ *
+ * `readRemoved` fails OPEN — an unreadable list means we are not hiding
+ * anything, because a board that hides agents for a reason nobody can inspect
+ * is worse than one that shows too many. That is right for the QUERY.
+ *
+ * It is wrong as the base of a read-modify-write. `writeRemoved(readRemoved()
+ * ...)` on a transiently unreadable file (EACCES after a permissions change, a
+ * truncated write, an EIO) starts from an empty list and then persists it —
+ * silently discarding every OTHER removed agent's `label`, `plist` and
+ * `shownAs`. Those three fields are the only thing that makes Restore possible,
+ * so one unlucky read turns every other removed agent into the state with no
+ * way back that this whole module is shaped around avoiding. The fail-open then
+ * hides the damage: the board simply shows them again, running or not.
+ *
+ * So writers use `readRemovedForWrite`, which distinguishes "there is no file
+ * yet" (safe to start empty) from "there is a file and I could not read it"
+ * (refuse, and let the caller report a partial).
+ */
 function readRemoved() {
+  const got = readRemovedForWrite();
+  return got === UNREADABLE ? [] : got;
+}
+
+/** Sentinel: the file is there and we could not read it. NOT the same as absent. */
+const UNREADABLE = Symbol('removed-list-unreadable');
+
+function readRemovedForWrite() {
+  let raw;
   try {
-    const parsed = JSON.parse(fs.readFileSync(REMOVED_FILE, 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((r) => r && typeof r.name === 'string') : [];
+    raw = fs.readFileSync(REMOVED_FILE, 'utf8');
+  } catch (err) {
+    // ENOENT is the ordinary first-run case: nothing has ever been removed.
+    if (err && err.code === 'ENOENT') return [];
+    return UNREADABLE;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    // ⚠️ A file that parses to something that is not a list is CORRUPT, not
+    // empty. Treating it as empty is the same overwrite by another route.
+    if (!Array.isArray(parsed)) return UNREADABLE;
+    return parsed.filter((r) => r && typeof r.name === 'string');
   } catch {
-    // No file, or one we cannot read. Either way the honest answer is that we
-    // are not hiding anything: a removed list we cannot read must not become a
-    // board that hides agents for reasons nobody can inspect.
-    return [];
+    return UNREADABLE;
   }
 }
 
@@ -164,16 +200,6 @@ function jobFor(name) {
   }) || null;
 }
 
-/**
- * The tmux session this agent is actually running in, as the BOARD identifies
- * it. `null` means nothing of this agent's is running; `undefined` means we
- * could not ask.
- *
- * ⚠️ Asked of the roster rather than re-derived. The board already owns "which
- * pane is which agent" — the claim for agents we create, the `-discord` suffix
- * for the fleet's. A second definition here is how the two would come to
- * disagree about which session to end, and this is the half that ends things.
- */
 /**
  * Which session, if any, this removal may end.
  *
@@ -231,7 +257,12 @@ function sessionFor(name) {
  */
 function recordRemoval(clean, job, stopped, shownAs) {
   if (DRY_RUN && !runner) return true;
-  const list = readRemoved().filter((r) => r.name !== clean);
+  const existing = readRemovedForWrite();
+  // ⚠️ Refuse rather than overwrite. Answering `false` costs this one agent its
+  // Restore button and says so; overwriting costs every OTHER removed agent
+  // theirs, silently.
+  if (existing === UNREADABLE) return false;
+  const list = existing.filter((r) => r.name !== clean);
   list.push({
     name: clean,
     /**
@@ -418,6 +449,23 @@ function plan(name) {
     label: shown,
     question: `Are you sure you want to remove ${shown} from Kosmos?`,
     reassurance: "The agent's folder and the contents you wrote for it will not be deleted.",
+    /**
+     * ⚠️ THE HINT ON THE DETAIL SCREEN, and it comes from here for the same
+     * reason the question does.
+     *
+     * The browser composed this sentence itself, which contradicts the rule
+     * stated directly above the confirmation code in that file -- and it was
+     * WRONG for an agent with no startup job, promising to stop something
+     * starting again when there is nothing to stop. Any sentence describing
+     * what removal will do has to be written where the code that does it lives,
+     * or the two drift, and this one already had.
+     */
+    hint: jobFor(clean)
+      ? 'Removing it takes it off this board and stops it starting again. '
+        + 'Nothing on your computer is deleted, and you can put it back.'
+      : 'Removing it takes it off this board and ends its session. '
+        + 'It has no startup job, so nothing was going to restart it anyway. '
+        + 'Nothing on your computer is deleted, and you can put it back.',
   };
 }
 
@@ -462,11 +510,36 @@ function remove(name, { tmuxBin } = {}) {
    */
   function recordAndSay(stopped) {
     const kept = recordRemoval(clean, job, stopped, shown);
-    return kept
-      ? 'You can put it back from the removed list.'
+    if (kept) return 'You can put it back from the removed list.';
+    /**
+     * ⚠️ The manual route only exists if there IS a job. Told an agent that
+     * never had one that "its startup job is not present, and re-enabling that
+     * is what undoes this", a person is being handed a recipe for a thing that
+     * does not exist, at the exact moment they need a real one.
+     */
+    return job
+      ? 'We could not add it to the removed list either, so it will not appear there to be put back. '
+        + `Its startup job is ${job.label}, and re-enabling that is what undoes this.`
       : 'We could not add it to the removed list either, so it will not appear there to be put back. '
-        + `Its startup job is ${job ? job.label : 'not present'}, and re-enabling that is what undoes this.`;
+        + 'It has no startup job, so nothing will restart it -- but Kosmos will keep showing it.';
   }
+
+  /**
+   * ⚠️ WHAT WAS ACTUALLY DONE TO THE STARTUP JOB, and every partial below opens
+   * with it.
+   *
+   * All three used to open with a flat "we stopped `<name>` from starting
+   * again". That is true only when there WAS a job to disable. `exists()`
+   * deliberately admits an agent on the strength of a running session alone --
+   * a hand-started one, or one supervised by something that is not launchd --
+   * and for those the branch above ran no command at all. The sentence then
+   * reported an action nobody performed, which is the one defect class this
+   * module's header says it exists to avoid, in the messages a person reads
+   * when something has already half-happened.
+   */
+  const didToJob = job
+    ? `we stopped ${shown} from starting again, but`
+    : `${shown} has no startup job to turn off, and`;
 
   function step(label, fn) {
     try {
@@ -528,7 +601,7 @@ function remove(name, { tmuxBin } = {}) {
        */
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we stopped ${shown} from starting again, but could not stop it right now, so it is still running. `
+        because: `${didToJob} could not stop it right now, so it is still running. `
           + recordAndSay(false),
         steps,
       };
@@ -556,7 +629,7 @@ function remove(name, { tmuxBin } = {}) {
     // hits, because an unreachable tmux and an untied session are ordinary.
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we stopped ${shown} from starting again, but could not ask tmux whether it is still running, so it may still be going. `
+      because: `${didToJob} we could not ask tmux whether it is still running, so it may still be going. `
         + recordAndSay(false),
       steps,
     };
@@ -573,7 +646,7 @@ function remove(name, { tmuxBin } = {}) {
   if (found.kind === FOUND.UNTIED) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we stopped ${shown} from starting again, but something is running in a session called ${found.session} `
+      because: `${didToJob} something is running in a session called ${found.session} `
         + 'that we cannot confirm is this agent, so we have left it alone. It may still be going. '
         + recordAndSay(false),
       steps,
@@ -593,7 +666,7 @@ function remove(name, { tmuxBin } = {}) {
     if (!ended) {
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we stopped ${shown} from starting again, but could not end the session it is running in, so it is still going. `
+        because: `${didToJob} we could not end the session it is running in, so it is still going. `
           + recordAndSay(false),
         steps,
       };
@@ -677,14 +750,31 @@ function restore(name) {
   // and the PARTIAL below says plainly that it may need starting by hand.
   const forgotten = step('put it back on the board', () => {
     if (DRY_RUN && !runner) return true;
-    writeRemoved(readRemoved().filter((r) => r.name !== clean));
+    // ⚠️ Same hazard as `recordRemoval`: rewriting the list from a read that
+    // failed would drop every other removed agent's record while claiming to
+    // have restored this one.
+    const existing = readRemovedForWrite();
+    if (existing === UNREADABLE) return false;
+    writeRemoved(existing.filter((r) => r.name !== clean));
     return !isRemoved(clean);
   });
 
   if (!forgotten) {
+    /**
+     * ⚠️ BOTH HALVES CAN FAIL, and this branch used to speak for only one.
+     *
+     * It opened with "we started `<name>` again" unconditionally -- so when the
+     * enable ALSO failed, the person was told the agent had been started by
+     * code that had just watched that fail, and the "may need starting by hand"
+     * sentence never rendered because this return came first. Two independent
+     * outcomes, reported as two.
+     */
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `we started ${shown} again, but could not take it off the removed list, so it may still be hidden.`,
+      because: started
+        ? `we started ${shown} again, but could not take it off the removed list, so it may still be hidden.`
+        : `we could not start ${shown} again, and could not take it off the removed list either, `
+          + 'so it stays hidden and stopped. Trying again is safe.',
       steps,
     };
   }

@@ -2321,7 +2321,20 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
 
   // Keeping it is the default answer to every accident.
   assert.match(raw, /keep\.focus\(\)/, 'the modal opens with the destructive button reachable by Enter');
-  assert.match(raw, /Escape/, 'Escape does not dismiss the modal');
+  /**
+   * ⚠️ ANCHORED TO THE HANDLER, because the bare `/Escape/` this replaced could
+   * not fail: the word appears in the modal's own HTML comment a thousand lines
+   * away, so deleting the entire keydown handler left the assertion green. A
+   * test that cannot fail is not a weak test, it is a decoration that reads as
+   * coverage -- and this one guarded the gesture that ANSWERS the confirmation
+   * safely.
+   */
+  const esc = raw.slice(raw.indexOf("document.addEventListener('keydown'"));
+  const escBody = esc.slice(0, esc.indexOf('\n});'));
+  assert.ok(escBody.includes("'Escape'"),
+    'the keydown handler does not look at Escape, so it does not dismiss the modal');
+  assert.ok(escBody.includes('closeRemoveModal'),
+    'Escape is read but does not close the modal, so the safe answer has no keyboard route');
   assert.match(raw, /aria-modal="true"/, 'the dialog is not announced as modal');
 
   // A partial must not close it — see the engine tests for what partial means.
@@ -2365,6 +2378,57 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
  * Deliberately whole-file rather than scoped to the modal: the same mistake was
  * already sitting on `main` in `#d-untied`, unnoticed since it shipped.
  */
+test('the removed list gives the browser only what it draws', async () => {
+  /**
+   * ⚠️ Pins an ALLOWLIST, which is the only shape that can catch the regression
+   * that matters. The stored record carries the launchd label, the absolute
+   * plist path and whether the job is ours; the screen draws a name and a date.
+   * Spreading the record straight through would pass every other assertion here
+   * -- the fields the browser reads would all still be present -- while putting
+   * machine detail on the wire that this product's vocabulary rule says a
+   * person is never shown, from a server with no login.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'payload-shape';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Payload**.\n', 'utf8');
+  // A startup job on disk, or there is no label and no plist to withhold and
+  // the control below would be true of nothing.
+  const plistDir = nodePath.dirname(create.plistPath(name));
+  fs.mkdirSync(plistDir, { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // ⚠️ `has-session` must answer "gone" (exit 1) or the look-again after the
+  // kill reads as a session that survived, and the removal is a PARTIAL.
+  removal.setRunner((file, args) => (args && args[0] === 'has-session'
+    ? { ok: false, code: 1 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    assert.equal(removal.remove(name).outcome, removal.OUTCOME.REMOVED);
+
+    // ⚠️ CONTROL: the stored record really does carry the fields being excluded,
+    // or "they are absent from the response" is true of nothing.
+    const stored = removal.removedAgents().find((r) => r.name === name);
+    assert.ok(stored.label && stored.plist, 'the fixture has no machine detail to withhold');
+
+    const res = await req('/api/removed');
+    const row = JSON.parse(res.body).agents.find((a) => a.name === name);
+    assert.deepEqual(Object.keys(row).sort(), ['name', 'removedAt', 'shownAs', 'stopped'],
+      'the removed list ships fields the screen does not draw');
+    assert.equal(row.shownAs, 'Payload', 'the row has nothing recognisable to show');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
 test('no style rule depends on a custom property that is never defined', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 

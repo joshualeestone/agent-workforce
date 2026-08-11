@@ -51,6 +51,7 @@ existed, or because a removal reported that it could not finish — a created
 agent has a launchd job that starts it at every login, and deleting its folder is
 not enough:
 
+    launchctl enable gui/$UID/com.kosmos.agent.<name>
     launchctl bootout gui/$UID/com.kosmos.agent.<name>
     rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist
     tmux kill-session -t "=<name>"
@@ -59,6 +60,15 @@ not enough:
     rm -f ~/Library/Application\ Support/AgentWorkforce/avatars/<name>.*
     rm -f ~/Library/Application\ Support/AgentWorkforce/profiles/<name>.json
     rm -f ~/Library/Application\ Support/AgentWorkforce/commitments/<name>.json
+
+⚠️ **The `enable` line first, and it is the one people will not think of.** A
+removal that got as far as disabling the job and then could not finish leaves a
+**disabled override in launchd's per-user database, keyed on the label** — and
+nothing on disk records it, so deleting the plist and the folder does not clear
+it. Create an agent under that name later and launchd refuses to start it, with
+nothing in the product to explain why. `enable` is what removes the override;
+it is harmless on a label that was never disabled, which is why it is listed
+unconditionally rather than as a special case.
 
 The `=` is not a typo. Without it tmux resolves a target by PREFIX, so
 `kill-session -t sam` will happily kill `samantha-discord` if no session is

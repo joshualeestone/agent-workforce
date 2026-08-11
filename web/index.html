@@ -262,14 +262,21 @@ svg { display: block; }
 #d-untied {
   margin: 0 0 var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--warn, #b8860b);
+  /* ⚠️ `--warn` does not exist either; the fallback kept it valid, so the token
+     check (which exempts anything with a fallback, correctly) could not see it.
+     A hard-coded dark goldenrod stays dark goldenrod in dark mode, where the
+     rest of this note switches. `--warn-border` is the theme-aware one. */
+  border-left: 3px solid var(--warn-border);
   background: var(--bg-sunken);
   color: var(--label);
   /* ⚠️ `--text-small` has never existed. This line was invalid on `main` too,
      so the one sentence explaining why every write vanished has been rendering
-     at inherited size since it shipped. Found by the token check, not by eye. */
-  font-size: 12px;
-  border-radius: var(--radius-sm, 4px);
+     at inherited size since it shipped. Found by the token check, not by eye.
+     `--text-callout` IS 12px/15px, so it is the token rather than a literal --
+     a raw `font-size` would also have dropped the line-height the token carries
+     and left this the one rule in the file that does not use the scale. */
+  font: var(--text-callout) var(--font-ui);
+  border-radius: var(--radius-control);   /* `--radius-sm` does not exist; this is the defined one */
 }
 
 #d-instr {
@@ -927,6 +934,31 @@ async function tick() {
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
     checked.className = 'checked' + (age > 30 ? ' stale' : '');
     checked.innerHTML = 'checked<strong>' + (age < 5 ? 'just now' : age + ' seconds ago') + '</strong>';
+
+    /**
+     * ⚠️ THE REMOVED LIST IS PART OF THE BOARD, so it refreshes with it.
+     *
+     * It was painted only on a tab switch and after this window's own
+     * remove/restore, so "Show removed agents (2)" sat stale against anything
+     * that happened elsewhere: a second browser tab, a partial retried from
+     * another window, or a restore somebody did while this screen was open. The
+     * freshness stamp directly above says the board was checked just now, which
+     * makes an unrefreshed count beside it a claim this poll did not support.
+     *
+     * Cheap: `paintRemoved` is one fetch of a small file and it leaves the DOM
+     * alone when the list is unchanged in length. Deliberately NOT awaited --
+     * the removed list failing must never stop the grid or the stamp from
+     * painting, and `paintRemoved` already keeps what is on screen when its own
+     * fetch fails.
+     */
+    // ⚠️ Gated on the GRID, not on a `panel-agents` element -- there is no such
+    // element. The agents tab is the absence of a panel (`PANELS` lists the
+    // other five), and `showTab` marks it by unhiding the grid. Checked against
+    // the DOM rather than assumed: `getElementById(...).hidden` on a missing id
+    // throws, which would have taken the whole poll down inside this try and
+    // frozen the board on a stale picture -- the exact failure the freshness
+    // stamp four lines up exists to make visible.
+    if (!document.getElementById('grid').hidden) paintRemoved();
   } catch (err) {
     checked.className = 'checked stale';
     checked.innerHTML = 'checked<strong>failed</strong>';
@@ -1551,6 +1583,19 @@ async function loadRemoval(sessionName) {
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/removal', { cache: 'no-store' });
     ask = await res.json().catch(() => null);
+    /**
+     * ⚠️ AN ANSWER THAT ARRIVED IS NOT THE SAME AS AN ANSWER ABOUT THIS AGENT.
+     *
+     * The guard below covered only a THROWN fetch. A response that does not
+     * parse, or the route's own 500 (`{error, detail}`, no `because`), landed
+     * on the else branch and rendered "We cannot remove this agent right now"
+     * -- a claim about the agent derived from a server failure, which is the
+     * same inversion the comment below says it fixed, one branch over. A 5xx or
+     * an unparseable body says we could not find out, so it is treated as not
+     * having reached the board rather than as a fact about the agent.
+     */
+    if (!res.ok && res.status >= 500) reached = false;
+    if (ask === null) reached = false;
   } catch {
     reached = false;
   }
@@ -1570,8 +1615,11 @@ async function loadRemoval(sessionName) {
   box.hidden = false;
   if (ask && ask.ok) {
     REMOVE_ASK = ask;
-    hint.textContent = 'Removing it takes it off this board and stops it starting again. '
-      + 'Nothing on your computer is deleted, and you can put it back.';
+    // ⚠️ From the engine, like the question and the reassurance. This file used
+    // to write its own version, which is the drift the block below forbids --
+    // and it said an agent with no startup job would be "stopped from starting
+    // again", describing work that does not happen.
+    hint.textContent = ask.hint || '';
     document.getElementById('d-remove-start').hidden = false;
   } else {
     // Says WHY rather than simply not being there. Somebody looking for this
@@ -1682,7 +1730,10 @@ document.getElementById('rm-go').addEventListener('click', async () => {
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal', { method: 'DELETE' });
     const done = await res.json().catch(() => null);
-    if (RM_FOR !== forAgent) return;
+    // ⚠️ The modal was closed (or reopened for someone else) while this was in
+    // flight. The answer must not paint THIS modal -- but it must not vanish
+    // either; see `reportDiscarded`.
+    if (RM_FOR !== forAgent) { reportDiscarded(done); return; }
     if (!res.ok || !done || done.outcome === 'refused') {
       msg.textContent = (done && done.because) || 'we could not remove it, and we cannot tell you why';
       go.disabled = false;
@@ -1738,6 +1789,30 @@ document.getElementById('rm-go').addEventListener('click', async () => {
     go.disabled = false;
   }
 });
+
+/**
+ * ⚠️ AN OUTCOME NOBODY IS LOOKING AT STILL HAS TO LAND SOMEWHERE.
+ *
+ * Escape closes the modal while the request is in flight -- only the button is
+ * disabled -- and the `RM_FOR !== forAgent` guard then drops whatever comes
+ * back. That guard is right (a stale answer must not paint a modal now open
+ * about a different agent) but "drop it" is wrong for the one case this file
+ * says a person must not walk away from: a PARTIAL means the agent may still be
+ * running while Kosmos has already half-removed it, and closing the dialog does
+ * not make that untrue.
+ *
+ * So a discarded outcome is written to the detail screen's own message line,
+ * which is a live region and was otherwise unused after the modal opened.
+ */
+function reportDiscarded(done) {
+  const back = document.getElementById('d-remove-msg');
+  if (!back || !done) return;
+  if (done.outcome === 'partial' || done.outcome === 'refused') {
+    back.textContent = done.because || 'The removal did not finish.';
+  } else if (done.outcome === 'removed') {
+    back.textContent = done.because || '';
+  }
+}
 
 /* ==========================================================================
    PUTTING ONE BACK

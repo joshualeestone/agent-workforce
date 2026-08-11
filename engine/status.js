@@ -1603,7 +1603,12 @@ function countAgents(agents, unreadableLines) {
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
 module.exports = {
-  countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+  countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs,
+  rank, paneOrder, modelDisplayName, readIdentity, transcriptFor,
+  isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
+  setPaneSource, setPaneCapture,
+  PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,
+};
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');
