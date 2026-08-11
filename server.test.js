@@ -2911,3 +2911,210 @@ test('a job that is disabled but will not unload is recorded, not reported as un
     removal.setRunner(null);
   }
 });
+
+/* ===========================================================================
+   First run — the screens
+
+   ⚠️ WHAT THESE TESTS CANNOT DO IS SEE THE PAGE, and on this branch that is
+   not a theoretical limit. A rule written `.fr-next` instead of `p.fr-next`
+   lost to `.fr-body p` on specificity and did nothing at all; every assertion
+   in this file passed over it, and fixing it revealed a 3.04:1 contrast failure
+   that had been invisible because the rule was inert. Both were found by
+   rendering the page in a browser and measuring it — `docs/browser-checks/`,
+   run outside this suite because it needs a browser and this repo has no
+   dependencies. Neither could have been found here. Do not treat what follows
+   as coverage of how it looks.
+   =========================================================================== */
+
+test('the machine route answers with three checks and never with an error', async () => {
+  const res = await req('/api/machine');
+  assert.match(res.type, /application\/json/);
+  assert.equal(res.status, 200,
+    'the check screen has no branch for a failed route, because the route is written not to fail');
+  const got = JSON.parse(res.body);
+  assert.ok(Array.isArray(got.checks) && got.checks.length >= 1);
+  for (const c of got.checks) {
+    assert.ok(['ok', 'attention', 'unknown'].includes(c.state), 'unrenderable state: ' + c.state);
+    assert.ok(c.title && c.detail, 'a check with nothing to say renders as an empty box');
+  }
+  assert.equal(typeof got.attention, 'number');
+  assert.equal(typeof got.unknown, 'number');
+});
+
+test('a check row carries its state in a WORD, not only in a glyph and a colour', () => {
+  /**
+   * ⚠️ Three findings, and two of the three glyphs are punctuation. `!` and `?`
+   * are aria-hidden decoration; without the visually-hidden word beside them a
+   * screen reader hears three sentences and cannot tell which one is the
+   * problem — on the screen whose entire job is saying which one is.
+   *
+   * Same defect `tickLine` fixed on the creation screen, arriving on a new one.
+   */
+  // ⚠️ The two lookup tables are LIFTED FROM THE PAGE, not retyped here. A
+  // copy of "ready" / "needs your attention" / "could not check" in this file
+  // is a second set of the exact words under test, and it would go on passing
+  // after the page's own set drifted away from it.
+  const raw0 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script0 = raw0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+    const m = script0.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  const frCheckRow = pageFunction('frCheckRow',
+    'function esc(s) { return String(s); }\n' + tables);
+
+  const good = frCheckRow({ state: 'ok', title: 'Everything is installed', detail: 'Nothing to do.' });
+  const bad = frCheckRow({ state: 'attention', title: 'This Mac sleeps', detail: 'They stop.' });
+  const dunno = frCheckRow({ state: 'unknown', title: 'We could not tell', detail: 'We could not look.' });
+
+  assert.match(good, /class="vh">ready: <\/span>/, 'a passing check says nothing aloud');
+  assert.match(bad, /class="vh">needs your attention: <\/span>/,
+    'a FINDING is indistinguishable from a pass to a screen reader');
+  assert.match(dunno, /class="vh">could not check: <\/span>/,
+    'a check we could not run sounds exactly like one that passed');
+
+  // And the three are visually distinct too, by class rather than by hue alone.
+  assert.match(good, /class="fr-check ok"/);
+  assert.match(bad, /class="fr-check attention"/);
+  assert.match(dunno, /class="fr-check unknown"/);
+
+  // ⚠️ A state the screen has no branch for must not render as a pass. It falls
+  // to `unknown`, which is the only safe direction for an answer we do not
+  // understand — the same rule the engine below it is built on.
+  const weird = frCheckRow({ state: 'probably-fine', title: 'Hmm', detail: 'Hmm.' });
+  assert.match(weird, /class="fr-check unknown"/,
+    'a state this screen does not know was drawn as a tick');
+
+  assert.match(bad, /aria-hidden="true">!</, 'the glyph is announced as well as shown');
+});
+
+test('first run fails CLOSED: an unreadable answer shows no onboarding at all', () => {
+  /**
+   * ⚠️ THE DIRECTION MATTERS AND IT IS THE OPPOSITE OF THE USUAL ONE. Putting a
+   * welcome screen over somebody's working board because one fetch failed is
+   * worse than never showing it — `engine/firstrun.seen()` makes exactly this
+   * call one layer down, and the front door has to make it too or the engine's
+   * care is undone by the page.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('async function firstRunBoot');
+  assert.ok(start > -1, 'firstRunBoot vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /catch\s*(\([^)]*\))?\s*\{\s*return;?\s*\}/,
+    'the fetch failure path no longer returns without opening anything');
+  assert.ok(body.indexOf('catch') < body.indexOf('frOpen'),
+    'frOpen is now reachable before the failure has been ruled out');
+  assert.match(body, /state\.done\s*&&\s*!force/,
+    'the done flag no longer decides whether to show this, so it shows every launch');
+});
+
+test('the first-run buttons are ASSIGNED, not accumulated', () => {
+  /**
+   * ⚠️ Continue means four different things across four steps, and on step 4 it
+   * means one of three. `addEventListener` on a button whose meaning changes
+   * leaves every previous meaning still bound, so Back-then-Continue fires two
+   * of them — measured as "advanced two steps at once" the first time it was
+   * clicked through.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function frActions');
+  assert.ok(start > -1, 'frActions vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /\.onclick\s*=/, 'frActions no longer assigns the handler');
+  assert.ok(!/addEventListener/.test(body),
+    'frActions adds listeners to buttons whose meaning changes on every step');
+});
+
+test('the fleet screen never shows fewer names than the number in its own heading', () => {
+  /**
+   * ⚠️ MEASURED ON THE FIRST LIVE CALL OF THE ROUTE: this machine reports 13
+   * agents and the engine sends the first 12. Twelve chips under the heading
+   * "You already have 13 agents here", with nothing accounting for the
+   * thirteenth, is a screen that does not add up in front of somebody who is
+   * being asked to believe it can see their fleet.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function frPaintFleet');
+  assert.ok(start > -1, 'frPaintFleet vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /count\s*>\s*names\.length/,
+    'the heading count and the list length are no longer reconciled, so a fleet larger '
+    + 'than the twelve names the engine sends renders as a heading nobody can verify');
+  assert.match(body, /and\s*'\s*\+\s*\(count - names\.length\)|more/, 'nothing accounts for the difference');
+
+  // And the fork is only offered when the engine could actually count.
+  assert.match(body, /path === 'adopt'/);
+  assert.match(body, /path === 'create'/);
+  assert.ok(body.indexOf('could not see what is on this computer') > -1,
+    'the unknown path no longer says why it is not choosing, so it quietly picks one');
+});
+
+test('the "we could not remember that" message lives outside the step panes', () => {
+  /**
+   * ⚠️ Skip is on ALL FOUR steps, and this message started inside step 4's pane
+   * — so somebody who skipped from the welcome screen, on a machine where the
+   * flag would not stick, was told nothing at all: the sentence was written into
+   * a hidden div. Found by clicking Skip from step 1 rather than by reading it.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const forgot = raw.indexOf('id="fr-forgot"');
+  assert.ok(forgot > -1, 'the element the failure message is written into vanished');
+
+  /**
+   * ⚠️ TAG-DEPTH SCANNED, NOT INDEX-COMPARED. The first version of this
+   * assertion took the first `</div>` after `id="fr-fleet"` as the end of the
+   * pane -- but that tag closes `fr-fleet` itself, so anything placed after it
+   * and still inside the pane scored as "outside". Mutation-tested by genuinely
+   * moving the element back in: the check passed, which is the whole failure
+   * mode this file keeps finding. It now walks the tags.
+   */
+  const endOf = (openIdx) => {
+    let depth = 0;
+    const tag = /<(\/?)div\b|\/>/g;
+    tag.lastIndex = raw.lastIndexOf('<div', openIdx);
+    let m;
+    while ((m = tag.exec(raw))) {
+      if (m[0] === '/>') continue;
+      depth += m[1] ? -1 : 1;
+      if (depth === 0) return m.index;
+    }
+    return -1;
+  };
+  const pane4 = raw.indexOf('id="fr-pane-4"');
+  const pane4End = endOf(pane4);
+  assert.ok(pane4End > pane4, 'could not find the end of the step-4 pane');
+  assert.ok(forgot < pane4 || forgot > pane4End,
+    'the completion-failure message is back inside a pane that is hidden on three of four '
+    + 'steps, so skipping from step 1 says nothing at all');
+
+  // ⚠️ And it is inside the body it has to be visible in, not floating loose
+  // after the action bar where no step would show it either.
+  const bodyStart = raw.indexOf('class="fr-body"');
+  assert.ok(forgot > bodyStart && forgot < endOf(bodyStart),
+    'the failure message left the panel body');
+  assert.match(raw.slice(forgot - 200, forgot + 200), /role="alert"/,
+    'the one message somebody must not miss is no longer announced');
+
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.match(script, /getElementById\('fr-forgot'\)/,
+    'frFinish no longer writes the failure anywhere');
+});
