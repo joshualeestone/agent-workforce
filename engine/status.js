@@ -1565,19 +1565,34 @@ function snapshot() {
     // and silence from it reads as "all fine". If this poller dies, the UI can
     // show the stamp going stale instead of freezing on a happy picture.
     checkedAt: new Date().toISOString(),
-    counts: {
-      total: agents.length,
-      needsYou: agents.filter((a) => a.state === STATE.NEEDS_YOU).length,
-      unknown: agents.filter((a) => a.state === STATE.UNKNOWN).length,
-      unreadableTokens: agents.filter((a) => a.context.tokens === null).length,
-      unknownFullness: agents.filter((a) => a.context.percent === null).length,
-      // ⚠️ Lines tmux gave us that were not panes. Zero is the normal answer;
-      // anything else means part of the fleet is missing from this board and
-      // the board has to say so rather than presenting what is left as all of
-      // it.
-      unreadableLines,
-    },
+    counts: countAgents(agents, unreadableLines),
     agents,
+  };
+}
+
+/**
+ * The numbers on the summary line, for a given set of cards.
+ *
+ * ⚠️ EXPORTED, and it is exported for one reason: the server FILTERS this
+ * board — removed agents come off it — and counts computed over the unfiltered
+ * set put "12 agents" above 11 cards. The fix is one definition used twice, not
+ * a second copy in the server that starts identical and drifts the first time a
+ * count is added here.
+ *
+ * `unreadableLines` is passed in rather than derived: it is a fact about what
+ * tmux returned, not about the cards, and it survives filtering unchanged.
+ */
+function countAgents(agents, unreadableLines) {
+  return {
+    total: agents.length,
+    needsYou: agents.filter((a) => a.state === STATE.NEEDS_YOU).length,
+    unknown: agents.filter((a) => a.state === STATE.UNKNOWN).length,
+    unreadableTokens: agents.filter((a) => a.context.tokens === null).length,
+    unknownFullness: agents.filter((a) => a.context.percent === null).length,
+    // ⚠️ Lines tmux gave us that were not panes. Zero is the normal answer;
+    // anything else means part of the fleet is missing from this board and the
+    // board has to say so rather than presenting what is left as all of it.
+    unreadableLines,
   };
 }
 
@@ -1587,7 +1602,8 @@ function snapshot() {
 // guess finds *a* transcript every time, so it looks like it worked while
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
-module.exports = { snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
+module.exports = {
+  countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs, rank, paneOrder, modelDisplayName, readIdentity, transcriptFor, isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession, setPaneSource, setPaneCapture, PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify(snapshot(), null, 2) + '\n');

@@ -283,9 +283,6 @@ svg { display: block; }
 .danger .flabel { color: var(--label); }
 .danger-btn { border-color: var(--warn-border); }
 .danger-btn:hover { background: var(--warn-bg); }
-.remove-steps { margin: 0 0 var(--space-4) var(--space-6); padding: 0; }
-.remove-steps li { font: var(--text-body) var(--font-ui); color: var(--label);
-                   margin-bottom: var(--space-2); }
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
@@ -1452,17 +1449,21 @@ document.getElementById('d-remove').addEventListener('click', async () => {
    ---------------------------------------------------------------------------
    ⚠️ The only destructive thing this product does, and the rules it follows:
 
-   1. **The screen never describes the work.** It renders the ENGINE's plan, so
-      what a person reads before confirming is what will actually happen. A
-      screen that wrote its own list could drift from the engine, and the one
-      place that must never happen is a confirmation.
-   2. **It is not offered for agents this app did not create.** The board shows
-      every agent on the machine; most of them belong to other tooling. The
-      engine refuses those independently, and the screen does not tempt anyone.
-   3. **The folder is kept unless it is explicitly asked for.** It holds the
-      instructions the PERSON wrote. "Remove this agent" does not mean "delete
-      what I wrote."
-========================================================================== */
+   1. **The screen never describes the work.** It renders what the ENGINE
+      returns, so the question a person is asked is tied to what will actually
+      happen. A screen that composed its own sentence could drift from the
+      engine, and a confirmation is the one place that must never happen.
+   2. **It is offered for EVERY agent, including ones this app did not create.**
+      An earlier design refused those, reasoning that whatever set an agent up
+      should be what takes it away. Managing the fleet you actually have is the
+      point of the product, so an agent it can show you but not manage is a hole
+      rather than a safeguard.
+   3. **Nothing is deleted, ever.** Remove and Delete are separate things and
+      only Remove exists. The startup job is disabled, not removed; the folder
+      and everything somebody wrote in it is untouched. That is what makes
+      Restore possible, and Restore is what makes a single light question an
+      honest confirmation rather than a trapdoor.
+   ========================================================================== */
 
 let REMOVE_ASK = null;
 // Guards against a slow answer landing after the person has moved on.
@@ -1615,7 +1616,12 @@ document.getElementById('rm-go').addEventListener('click', async () => {
      */
     if (done.outcome === 'partial') {
       msg.textContent = done.because;
+      // ⚠️ Re-enabled. Some partials are a tmux or launchd call that failed
+      // once; leaving the only button dead forces a dismiss-and-reopen to
+      // retry, and the dismiss is the answer that keeps the agent.
+      go.disabled = false;
       await tick();
+      await paintRemoved();
       return;
     }
     closeRemoveModal();
@@ -1679,8 +1685,12 @@ async function paintRemoved() {
  * renders "Invalid Date" on screen.
  */
 function whenRemoved(a) {
-  if (!a || !a.at) return 'removed';
-  const d = new Date(a.at);
+  // ⚠️ `removedAt`, which is what the engine writes. This read `a.at` — a field
+  // that does not exist — so the guard below fired every time and the date
+  // never appeared for any agent, under a comment claiming the guard was for
+  // old records only.
+  if (!a || !a.removedAt) return 'removed';
+  const d = new Date(a.removedAt);
   if (isNaN(d.getTime())) return 'removed';
   return 'removed ' + d.toLocaleDateString();
 }

@@ -27,12 +27,22 @@ reinstalls it. And an agent made by a version before this one has its own copy
 of the old script and keeps it: nothing migrates those.
 
 **It can also remove one**, from the bottom of that agent's own detail screen,
-behind a warning and a confirmation that says exactly what will happen. Its
-folder is kept unless you ask for it to go: that folder holds the instructions
-you wrote, and "remove this agent" does not mean "delete what I wrote".
+behind a confirmation that names the agent.
 
-⚠️ It will only remove agents it created. The board shows every agent on this
-machine, and the ones another tool started are refused by name.
+⚠️ **Remove is not delete, and only Remove exists.** Removing an agent takes it
+off this board and stops it starting again. It does not delete anything: not the
+agent's folder, not the instructions you wrote, not its startup file. That is
+what "The agent's folder and the contents you wrote for it will not be deleted"
+on the confirmation means, and it is meant literally.
+
+**Removed agents can be put back.** They are listed under "Show removed agents"
+at the bottom of the Agents tab, each with a Restore button that re-enables the
+same startup job that was disabled.
+
+It removes agents it did not create, too. The board shows every agent on this
+machine, and being able to manage the ones you already have is the point — so
+a startup file another tool wrote is disabled rather than deleted, and Restore
+turns exactly that one back on.
 
 It cannot stop or message an agent yet.
 

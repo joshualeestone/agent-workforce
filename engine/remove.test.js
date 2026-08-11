@@ -307,7 +307,22 @@ test('a session the board does not tie to this agent is left alone', () => {
   const r = remove.remove(name);
   assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
     'it killed a session the board does not tie to this agent');
-  assert.equal(r.outcome, remove.OUTCOME.REMOVED, r.because);
+
+  /**
+   * ⚠️ PARTIAL, NOT REMOVED — and this assertion used to say the opposite.
+   *
+   * Leaving the session alone is right; calling that a completed removal is
+   * not. Something is running under this name that we would not vouch for, so
+   * the person is looking at an agent that is still going while the product
+   * says it is gone. Blessing the full-success outcome here also meant the test
+   * encoded the defect: fixing the engine would have broken this test, which is
+   * the wrong way round.
+   */
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
+  assert.match(r.because, /cannot confirm is this agent/,
+    'the reason does not say WHY the session was left, so it reads as an unexplained failure');
+  assert.match(r.because, /still be going/,
+    'nothing tells the person the agent may not have stopped');
 });
 
 test('dry-run cannot be left without a runner, and is not the default', () => {
@@ -356,4 +371,33 @@ test('an unreadable removed-list hides nothing, rather than hiding everything', 
   fs.writeFileSync(remove.REMOVED_FILE, 'not json at all', 'utf8');
   assert.deepEqual(remove.removedAgents(), []);
   assert.equal(remove.isRemoved('anything'), false);
+});
+
+test('a name that was never an agent cannot be removed', () => {
+  /**
+   * ⚠️ THE RECORD OUTLIVES THE MISTAKE, which is what makes this worth
+   * refusing rather than allowing harmlessly.
+   *
+   * Any name at all used to produce a completed removal: no folder, no job,
+   * nothing running, and a record written anyway. Nothing prunes that record
+   * and the board FILTERS on it — so a name removed by mistake, or typed into
+   * the address bar, silently hid a real agent created under that name later,
+   * showing no card and nothing on screen to explain where it went.
+   */
+  status.setPaneSource(() => '');
+  const p = remove.plan('never-existed');
+  assert.equal(p.ok, false, 'a name with no folder, no job and no session was offered a removal');
+  assert.match(p.because, /cannot find an agent/);
+
+  world();
+  remove.setDryRun(false);
+  const r = remove.remove('never-existed');
+  assert.equal(r.outcome, remove.OUTCOME.REFUSED, r.because);
+  assert.ok(!remove.removedAgents().some((x) => x.name === 'never-existed'),
+    'a name that was never an agent is now on the removed list, where it will hide a real one later');
+
+  // ⚠️ THE CONTROL. A real agent must still pass the same gate, or this test
+  // would be satisfied by a guard that refuses everything.
+  const real = madeAgent('really-here');
+  assert.equal(remove.plan(real).ok, true, 'the guard refuses agents that do exist');
 });

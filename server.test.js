@@ -2155,7 +2155,8 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
   fs.writeFileSync(foreignPlist, '<plist/>', 'utf8');
 
   const foreign = await req(`/api/agent/${foreignName}/removal`);
-  assert.equal(foreign.status, 200, 'the route still refuses an agent another tool created');
+  assert.equal(foreign.status, 200,
+    'the route refused an agent another tool created, which this rebuild exists to support');
   assert.match(JSON.parse(foreign.body).question, /route-foreign/);
 
   // A malformed name answers rather than crashing the process.
@@ -2268,4 +2269,118 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
   // A partial must not close it — see the engine tests for what partial means.
   assert.match(raw, /partial[\s\S]{0,400}?return;/,
     'a half-finished removal closes the confirmation, so nobody reads that the agent is still running');
+});
+
+
+test('an agent whose card shows a different name than its session still leaves the board', async () => {
+  /**
+   * ⚠️ THE TEST THE FIRST VERSION OF THIS FEATURE DID NOT HAVE, and its absence
+   * is why the board filter shipped keyed on the wrong field.
+   *
+   * A card carries TWO names: `name` is the DISPLAY name, read out of "You are
+   * **X**" in the agent's own instructions, and `sessionName` is what tmux and
+   * launchd know it as. For an agent this app created they are identical —
+   * which is the only kind of agent the earlier tests used, so filtering on
+   * either one passed. They differ for every pre-existing fleet agent
+   * (`claudebot` displays as "Splinter"), which is exactly the population this
+   * rebuild added support for. Removing one of those left it on the board AND
+   * in the removed list at the same time.
+   *
+   * The fixture below differs from the others in one deliberate way: its
+   * instructions name it something its session is not.
+   */
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+
+  const session = 'two-named';
+  fs.mkdirSync(create.workerDir(session), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(session), 'CLAUDE.md'),
+    'You are **Bartholomew**.\n', 'utf8');
+  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(session)), `com.${session}.discord.plist`), '<plist/>', 'utf8');
+  // The `-discord` session is how a real legacy agent appears: the board files
+  // it under the bare name and reads its display name from its instructions.
+  status.setPaneSource(() => `${session}-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code`);
+  removal.setRunner((f, a) => (a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    // ⚠️ THE CONTROL, twice over: it is on the board, and the two names really
+    // do differ. Without the second check this test would pass against a
+    // fixture whose names coincide, which is the hole it exists to close.
+    const before = JSON.parse((await req('/api/status')).body).agents.find((a) => a.sessionName === session);
+    assert.ok(before, 'the fixture is not on the board, so nothing below can fail');
+    assert.notEqual(before.name, before.sessionName,
+      'the fixture displays under its own session name, so it cannot distinguish the two fields');
+
+    const gone = await req(`/api/agent/${session}/removal`, { method: 'DELETE' });
+    assert.equal(gone.status, 200, gone.body);
+    assert.equal(JSON.parse(gone.body).outcome, 'removed');
+
+    const after = JSON.parse((await req('/api/status')).body).agents.map((a) => a.sessionName);
+    assert.ok(!after.includes(session),
+      'a removed agent whose display name differs from its session is still on the board');
+
+    // ⚠️ AND THE COUNT AGREES WITH THE CARDS. A summary reading one more than
+    // the board shows is how somebody hunts for an agent that is not there.
+    const body = JSON.parse((await req('/api/status')).body);
+    assert.equal(body.counts.total, body.agents.length,
+      'the summary counts an agent the board no longer shows');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    await req(`/api/agent/${session}/restore`, { method: 'POST' }).catch(() => {});
+  }
+});
+
+test('a job that is disabled but will not unload is recorded, not reported as untouched', async () => {
+  /**
+   * ⚠️ THE WORST STATE THIS MODULE CAN REACH, and it used to be invisible.
+   *
+   * `disable` and `bootout` were one step. When the first succeeded and the
+   * second failed, the answer was "we have left it alone. Nothing has changed"
+   * — while the job WAS disabled and would not start at the next login — and it
+   * returned before writing the record. No record means no row in the removed
+   * list, no Restore button, and the only way back is the manual launchctl
+   * recipe this product exists to spare people.
+   */
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = create.createAgent({ name: 'wont-unload', role: 'pm' });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+
+  removal.setRunner((f, a) => {
+    const cmd = a && a[0];
+    if (cmd === 'bootout') return { ok: false, code: 9 };   // the failure under test
+    if (cmd === 'has-session') return { ok: false, code: 1 };
+    return { ok: true, stdout: '' };
+  });
+  removal.setDryRun(false);
+  try {
+    const res = await req('/api/agent/wont-unload/removal', { method: 'DELETE' });
+    const done = JSON.parse(res.body);
+    assert.equal(done.outcome, 'partial',
+      'a job that would not unload was reported as a completed removal');
+    assert.doesNotMatch(done.because, /Nothing has changed/,
+      'it says nothing changed while the job is disabled and will not start at the next login');
+    assert.match(done.because, /still running/,
+      'nothing tells the person the agent they removed is still going');
+
+    // ⚠️ AND THERE IS A WAY BACK. This is the half that made the old behaviour
+    // unrecoverable rather than merely mis-worded.
+    const listed = JSON.parse((await req('/api/removed')).body).agents.map((a) => a.name);
+    assert.ok(listed.includes('wont-unload'),
+      'a half-removed agent is on no list, so there is no Restore button and no way back');
+  } finally {
+    removal.setRunner(null);
+  }
 });

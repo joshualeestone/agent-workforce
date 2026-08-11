@@ -174,18 +174,76 @@ function jobFor(name) {
  * for the fleet's. A second definition here is how the two would come to
  * disagree about which session to end, and this is the half that ends things.
  */
+/**
+ * Which session, if any, this removal may end.
+ *
+ * ⚠️ FOUR ANSWERS, and every one of them is a different thing to tell a person.
+ * An earlier version returned `null` for both "nothing is running" and "a
+ * session exists under this name but we cannot tie it to this agent", and the
+ * caller then recorded the step as done with the note "it was not running".
+ * That is this codebase's own defect class — an assertion about a state nobody
+ * checked — sitting in the sentence that tells somebody their agent has been
+ * stopped. A shape with a `kind` on it cannot be collapsed by accident the way
+ * two falsy values can.
+ */
+const FOUND = { NONE: 'none', OURS: 'ours', UNTIED: 'untied', UNKNOWN: 'unknown' };
+
 function sessionFor(name) {
   const clean = create.cleanName(name);
   try {
     const card = status.paneRoster().find((p) => p.sessionName === clean);
-    if (!card) return null;
-    return card.isNamedOurs ? (card.session || clean) : null;
+    if (!card) return { kind: FOUND.NONE, session: null };
+    if (!card.isNamedOurs) return { kind: FOUND.UNTIED, session: card.session || clean };
+    return { kind: FOUND.OURS, session: card.session || clean };
   } catch {
     // ⚠️ Cannot ask tmux. That is NOT "nothing is running" — it is an unknown,
     // and the caller must treat it as one rather than proceeding as if the
     // agent were already stopped.
-    return undefined;
+    return { kind: FOUND.UNKNOWN, session: null };
   }
+}
+
+/**
+ * Files an agent as removed, and answers whether the filing stuck.
+ *
+ * ⚠️ ONE writer, used by the success path AND by the partial where the job was
+ * disabled but not unloaded. A removal with no record is the single state with
+ * no way back — no row in the removed list, so no Restore button, so the only
+ * route is the manual launchctl recipe this product exists to spare people. A
+ * second copy of this for the partial path would have been the obvious way to
+ * write it, and the obvious way for the two to drift.
+ */
+function recordRemoval(clean, job) {
+  if (DRY_RUN && !runner) return true;
+  const list = readRemoved().filter((r) => r.name !== clean);
+  list.push({
+    name: clean,
+    removedAt: new Date().toISOString(),
+    // ⚠️ What RESTORE needs, captured at removal rather than re-derived later.
+    // By then the plist may be gone, or a different one may have taken its
+    // place, and restoring the wrong job is worse than not restoring at all.
+    label: job ? job.label : null,
+    plist: job ? job.plist : null,
+    ours: job ? job.ours : null,
+  });
+  writeRemoved(list);
+  return isRemoved(clean);
+}
+
+/**
+ * Whether there is anything here to remove: a folder, a startup job, or a
+ * session on the board. Any one is enough.
+ */
+function exists(clean) {
+  if (jobFor(clean)) return true;
+  try {
+    if (fs.existsSync(create.workerDir(clean))) return true;
+  } catch { /* an unreadable path is not evidence of absence, so fall through */ }
+  // ⚠️ A tmux we cannot reach must not read as "there is no such agent". That
+  // would turn an unreachable board into a refusal, which is the safe
+  // direction here — but say it as the unknown it is rather than as absence.
+  const found = sessionFor(clean);
+  return found.kind === FOUND.OURS || found.kind === FOUND.UNTIED;
 }
 
 /* ── what removing would do ──────────────────────────────────────────────── */
@@ -209,6 +267,22 @@ function plan(name) {
   if (problem) return { ok: false, because: problem };
   if (isRemoved(clean)) {
     return { ok: false, because: `${clean} has already been removed from Kosmos.` };
+  }
+  /**
+   * ⚠️ THERE HAS TO BE SOMETHING THERE TO REMOVE.
+   *
+   * Without this, any name at all could be "removed": no folder, no job,
+   * nothing running, and the answer was still a completed removal that wrote a
+   * record. Nothing prunes those, and the board filters on them — so a name
+   * removed in error, or typed into the URL, silently hid a REAL agent created
+   * under that name later, with no card and nothing on screen to explain it.
+   *
+   * `exists` is deliberately generous: a folder OR a job OR a running session
+   * all count. Requiring all three would refuse the half-set-up agents this
+   * feature is most useful for.
+   */
+  if (!exists(clean)) {
+    return { ok: false, because: `we cannot find an agent called ${clean}.` };
   }
   return {
     ok: true,
@@ -252,17 +326,46 @@ function remove(name, { tmuxBin } = {}) {
    * back. Disabling first closes it.
    */
   if (job) {
-    const stopped = step('stopped it starting again', () => {
+    /**
+     * ⚠️ TWO STEPS, NOT ONE, because they fail differently and the difference
+     * is what the person is told.
+     *
+     * As one step, a `disable` that succeeded followed by a `bootout` that
+     * failed reported "we have left it alone. Nothing has changed" — while the
+     * job WAS disabled and would not start at the next login. Worse, it
+     * returned before the record was written, so the agent appeared on no
+     * removed list, had no Restore button, and the only way back was the
+     * manual launchctl recipe this product exists to spare people.
+     */
+    const disabled = step('stopped it starting again', () => {
       const off = run('/bin/launchctl', ['disable', `gui/${process.getuid()}/${job.label}`]);
-      if (!(off && off.ok !== false)) return false;
+      return Boolean(off && off.ok !== false);
+    });
+    if (!disabled) {
+      // Nothing was changed here, so this sentence is true.
+      return {
+        outcome: OUTCOME.PARTIAL,
+        because: `we could not stop ${clean} from starting again, so we have left it alone. Nothing has changed.`,
+        steps,
+      };
+    }
+    const unloaded = step('stopped it now', () => {
       const out = run('/bin/launchctl', ['bootout', `gui/${process.getuid()}/${job.label}`]);
       // 3 is launchd for "no such service", which is the end state we wanted.
       return Boolean(out && (out.ok !== false || out.code === 3));
     });
-    if (!stopped) {
+    if (!unloaded) {
+      /**
+       * ⚠️ RECORD IT ANYWAY, then report the partial. The job is disabled, so
+       * this agent IS half-removed and saying otherwise would be a lie — and a
+       * removal with no record is the one state with no way back. Recording it
+       * puts the Restore button on screen, which re-enables exactly this label.
+       */
+      recordRemoval(clean, job);
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `we could not stop ${clean} from starting again, so we have left it alone. Nothing has changed.`,
+        because: `we stopped ${clean} from starting again, but could not stop it right now, so it is still running. `
+          + 'You can put it back from the removed list.',
         steps,
       };
     }
@@ -276,15 +379,33 @@ function remove(name, { tmuxBin } = {}) {
    * the first is how a removal reports success over an agent that is still
    * going.
    */
-  const session = sessionFor(clean);
-  if (session === undefined) {
+  const found = sessionFor(clean);
+  if (found.kind === FOUND.UNKNOWN) {
     return {
       outcome: OUTCOME.PARTIAL,
       because: `we stopped ${clean} from starting again, but could not ask tmux whether it is still running, so it may still be going.`,
       steps,
     };
   }
-  if (session !== null) {
+  /**
+   * ⚠️ A SESSION WE CANNOT TIE TO THIS AGENT IS NOT NOTHING.
+   *
+   * Something is running under this name and the board will not vouch that it
+   * is this agent — so ending it could kill somebody else's work, and NOT
+   * ending it means the removal did not stop what the person was looking at.
+   * Neither is a success, and the only honest answer is to say precisely that
+   * and leave the session alone.
+   */
+  if (found.kind === FOUND.UNTIED) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: `we stopped ${clean} from starting again, but something is running in a session called ${found.session} `
+        + 'that we cannot confirm is this agent, so we have left it alone. It may still be going.',
+      steps,
+    };
+  }
+  const session = found.session;
+  if (found.kind === FOUND.OURS) {
     const ended = step('ended its session', () => {
       const r = run(tmux, ['kill-session', '-t', `=${session}`]);
       if (!(r && (r.ok !== false || r.code === 1))) return false;
@@ -306,22 +427,7 @@ function remove(name, { tmuxBin } = {}) {
   }
 
   // Only now is it true that this agent is stopped and will stay stopped.
-  const recorded = step('took it off the board', () => {
-    if (DRY_RUN && !runner) return true;
-    const list = readRemoved().filter((r) => r.name !== clean);
-    list.push({
-      name: clean,
-      removedAt: new Date().toISOString(),
-      // ⚠️ What RESTORE needs, captured at removal rather than re-derived later.
-      // By then the plist may be gone, or a different one may have taken its
-      // place, and restoring the wrong job is worse than not restoring at all.
-      label: job ? job.label : null,
-      plist: job ? job.plist : null,
-      ours: job ? job.ours : null,
-    });
-    writeRemoved(list);
-    return isRemoved(clean);
-  });
+  const recorded = step('took it off the board', () => recordRemoval(clean, job));
   if (!recorded) {
     return {
       outcome: OUTCOME.PARTIAL,
@@ -400,7 +506,22 @@ function restore(name) {
     };
   }
 
-  return { outcome: OUTCOME.RESTORED, because: `${clean} is back.`, steps };
+  /**
+   * ⚠️ SAYS WHAT WAS CHECKED, WHICH IS THAT THE JOB IS LOADED AND ENABLED.
+   *
+   * `bootstrap` succeeding means launchd accepted the job, NOT that the agent
+   * is running — a plist with `RunAtLoad` off, or one whose program dies
+   * immediately, both load fine. "It is back" asserted the second from evidence
+   * for the first, and restore is the worst place in this module for a claim
+   * nobody verified: it is what makes the removal's single light question an
+   * honest one. The board is the thing that will actually show it running,
+   * within one poll, and it derives that from tmux rather than from us.
+   */
+  return {
+    outcome: OUTCOME.RESTORED,
+    because: `${clean} is back on the board and set to start again.`,
+    steps,
+  };
 }
 
 module.exports = {

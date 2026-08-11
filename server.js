@@ -16,7 +16,7 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot, paneRoster } = require('./engine/status');
+const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
 
 // Single source of truth for the version. With no support function, "what
@@ -544,8 +544,18 @@ const server = http.createServer((req, res) => {
       // not ours to end can still be running, and it must vanish from the board
       // regardless. "Removed" is a fact this product keeps, not something it
       // infers from what tmux happens to show.
+      // ⚠️ `sessionName`, NOT `name`. They are different fields and they differ
+      // for exactly the agents this feature was rebuilt to support. `name` is
+      // the DISPLAY name, parsed out of "You are **Angel**" in the agent's own
+      // instructions or supplied by an override; `sessionName` is what tmux and
+      // launchd know it as, and it is what a removal records. For an agent this
+      // app created the two coincide, which is why filtering on the wrong one
+      // passed every test — and why removing `claudebot`, whose card reads
+      // "Splinter", would have left it on the board and in the removed list at
+      // the same time. Every other name-keyed reader in this block already uses
+      // `sessionName`; this was the one that did not.
       const gone = new Set(removal.removedAgents().map((r) => r.name));
-      const agents = snap.agents.filter((a) => !gone.has(a.name)).map((a) => ({
+      const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
@@ -570,7 +580,13 @@ const server = http.createServer((req, res) => {
           ? instructions.staleness(a.sessionName, undefined, a.session)
           : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
       }));
-      body = JSON.stringify({ ...snap, agents, version });
+      // ⚠️ THE COUNTS DESCRIBE THE CARDS THAT ARE LEFT. Computed over the
+      // unfiltered snapshot they put "12 agents" above 11 cards, and can put
+      // "1 needs you" on screen with no card anywhere to click. Recomputed with
+      // the ENGINE's own counter rather than a copy of its predicates here, so
+      // a count added there cannot quietly stop being recomputed here.
+      const counts = countAgents(agents, snap.counts && snap.counts.unreadableLines);
+      body = JSON.stringify({ ...snap, agents, counts, version });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
