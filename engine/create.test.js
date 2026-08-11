@@ -26,6 +26,34 @@ process.on('exit', () => {
 });
 
 const create = require('./create');
+
+/**
+ * ⚠️ The programs an agent is made of, pinned to something that exists
+ * everywhere.
+ *
+ * `createAgent` now refuses when Claude or tmux is not where it expects — which
+ * is right, and which made this suite depend on the machine running it having
+ * Claude at `~/.local/bin/claude`. A test that passes because of what happens
+ * to be installed is not testing the thing it names. Every creation here passes
+ * its own, and the refusal has a test of its own below.
+ */
+const BINS = { claudeBin: '/bin/echo', tmuxBin: '/bin/echo' };
+
+/**
+ * ⚠️ ARM DRY-RUN AT LOAD, before any test can run.
+ *
+ * The module header used to claim it was "dry-run by default". It is not:
+ * `DRY_RUN` starts from an environment variable nothing sets, so a fresh
+ * process with no runner installed executes for real — which is exactly what
+ * the SERVER needs and exactly what a test must never have. The guarantee this
+ * file depends on was only ever written down, and it happened to hold because
+ * the first test installs a recorder.
+ *
+ * `setRunner(null)` re-arms dry-run, so this one line makes it true by
+ * construction: any creation reaching `execFileSync` before a recorder is
+ * installed is now impossible rather than merely unlikely.
+ */
+create.setRunner(null);
 const roles = require('./roles');
 const status = require('./status');
 
@@ -75,7 +103,7 @@ test('a name that cannot address an agent is refused before anything is made', (
 
 test('a refused name creates nothing at all', () => {
   const calls = recorder();
-  const r = create.createAgent({ name: '_bot', role: 'pm' });
+  const r = create.createAgent({ ...BINS, name: '_bot', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.REFUSED);
   assert.equal(calls.length, 0, 'a refused name still ran a command');
   assert.ok(!fs.existsSync(create.workerDir('_bot')), 'a refused name still made a folder');
@@ -109,7 +137,7 @@ test('creating an agent writes its folder, its instructions and its startup job'
   const calls = recorder();
   create.setDryRun(false);
 
-  const r = create.createAgent({ name: 'fixture-agent', role: 'pm' });
+  const r = create.createAgent({ ...BINS, name: 'fixture-agent', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
 
   assert.ok(fs.existsSync(create.instructionFile('fixture-agent')), 'no instruction file');
@@ -157,7 +185,7 @@ test('the session is claimed for Kosmos, and claimed as ITSELF, at every start',
   // and that is what this asserts.
   const calls = recorder();
   create.setDryRun(false);
-  create.createAgent({ name: 'claimed-one', role: 'pm' });
+  create.createAgent({ ...BINS, name: 'claimed-one', role: 'pm' });
 
   const script = fs.readFileSync(create.launcherFile('claimed-one'), 'utf8');
   assert.match(script, /set-option -t "\$SESSION" @kosmos_agent "\$SESSION"/,
@@ -201,7 +229,7 @@ test('the agent is started the same way it will be started every time after', ()
   // means the first run is the only one anybody ever tested.
   const calls = recorder();
   create.setDryRun(false);
-  const r = create.createAgent({ name: 'one-path', role: 'pm' });
+  const r = create.createAgent({ ...BINS, name: 'one-path', role: 'pm' });
 
   assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
   assert.equal(calls.length, 1, 'creation ran more than the one command that starts the agent');
@@ -218,7 +246,7 @@ test('nothing reaches a shell', () => {
   // this function makes launchd jobs.
   const calls = recorder();
   create.setDryRun(false);
-  create.createAgent({ name: 'shell-probe', role: 'pm' });
+  create.createAgent({ ...BINS, name: 'shell-probe', role: 'pm' });
 
   assert.ok(calls.length > 0, 'nothing ran at all, so this proves nothing');
   for (const [file, args] of calls) {
@@ -241,7 +269,7 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
   });
   create.setDryRun(false);
 
-  const r = create.createAgent({ name: 'dud', role: 'writer' });
+  const r = create.createAgent({ ...BINS, name: 'dud', role: 'writer' });
   assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'a failed start was reported as success');
   assert.match(r.because, /could not start/);
   assert.ok(r.steps.some((s) => s.label === 'started it' && !s.ok),
@@ -268,10 +296,10 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
 test('an existing agent is never quietly overwritten', () => {
   const calls = recorder();
   create.setDryRun(false);
-  create.createAgent({ name: 'twice', role: 'pm' });
+  create.createAgent({ ...BINS, name: 'twice', role: 'pm' });
   const before = fs.readFileSync(create.instructionFile('twice'), 'utf8');
 
-  const second = create.createAgent({ name: 'twice', role: 'writer' });
+  const second = create.createAgent({ ...BINS, name: 'twice', role: 'writer' });
   assert.equal(second.outcome, create.OUTCOME.REFUSED);
   assert.match(second.because, /already an agent/);
   assert.equal(fs.readFileSync(create.instructionFile('twice'), 'utf8'), before,
@@ -334,7 +362,7 @@ test('a name a live session already answers to is refused, even with no folder',
   // session called `casey`, found the fleet's existing one, and reported
   // "casey is running" over a creation that had done nothing whatsoever.
   status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\tidle');
-  const taken = create.createAgent({ name: 'casey', role: 'pm' });
+  const taken = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
 
   assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
   assert.match(taken.because, /already an agent called casey/);
@@ -345,7 +373,7 @@ test('a name a live session already answers to is refused, even with no folder',
   // board. Without it, a `createAgent` that refused `casey` for some unrelated
   // reason — or refused everything — would pass every assertion above.
   status.setPaneSource(() => '');
-  const free = create.createAgent({ name: 'casey', role: 'pm' });
+  const free = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
   assert.equal(free.outcome, create.OUTCOME.CREATED,
     'the refusal above was not caused by the roster, so this test proves nothing about it');
 });
@@ -365,7 +393,7 @@ test('a machine we cannot ask about running agents is refused, not risked', () =
   ]) {
     const calls = recorder();
     status.setPaneSource(source);
-    const r = create.createAgent({ name: 'fixture-blind', role: 'pm' });
+    const r = create.createAgent({ ...BINS, name: 'fixture-blind', role: 'pm' });
 
     assert.equal(r.outcome, create.OUTCOME.REFUSED, `${label}: created an agent anyway`);
     assert.match(r.because, /could not check which agents are already running/);
@@ -378,7 +406,7 @@ test('a machine we cannot ask about running agents is refused, not risked', () =
   // The control again: the same name goes through the moment the board answers.
   const calls = recorder();
   status.setPaneSource(() => '');
-  assert.equal(create.createAgent({ name: 'fixture-blind', role: 'pm' }).outcome,
+  assert.equal(create.createAgent({ ...BINS, name: 'fixture-blind', role: 'pm' }).outcome,
     create.OUTCOME.CREATED,
     'this name is refused whatever tmux says, so the assertions above are about nothing');
   assert.ok(calls.length > 0, 'a creation that reported success ran no commands');
@@ -452,4 +480,93 @@ test('the board can read the identity the creation writes, for every role', () =
       `${role.key}: the board reads no role from the file this role wrote`);
   }
   assert.ok(calls.length >= roles.ROLES.length, 'no agent was actually created, so this proves nothing');
+});
+
+test('an agent is refused when the programs it is made of are not on this machine', () => {
+  // ⚠️ Without this, creation reported CREATED, the screen waited thirty
+  // seconds and then said it did not know why, and launchd was left respawning
+  // an instantly-failing job every thirty seconds for as long as the machine
+  // was on. The defaults are THIS machine's paths -- an npm-global Claude or an
+  // Intel Mac's Homebrew is enough to hit it.
+  const calls = recorder();
+  create.setDryRun(false);
+
+  for (const [what, bins] of [
+    ['Claude', { claudeBin: '/nope/claude', tmuxBin: '/bin/echo' }],
+    ['tmux', { claudeBin: '/bin/echo', tmuxBin: '/nope/tmux' }],
+  ]) {
+    const r = create.createAgent({ ...bins, name: 'no-binary', role: 'pm' });
+    assert.equal(r.outcome, create.OUTCOME.REFUSED, `${what} missing: created anyway`);
+    assert.match(r.because, /could not find/);
+    assert.ok(!fs.existsSync(create.workerDir('no-binary')), `${what} missing: made a folder anyway`);
+    assert.equal(calls.length, 0, `${what} missing: ran a command anyway`);
+  }
+
+  // A path that could break out of the shell text it is written into is refused
+  // on its shape rather than on whether it happens to exist.
+  const nasty = create.createAgent({
+    claudeBin: "/bin/echo';id;'", tmuxBin: '/bin/echo', name: 'no-binary', role: 'pm',
+  });
+  assert.equal(nasty.outcome, create.OUTCOME.REFUSED, 'a path carrying shell syntax was accepted');
+
+  // THE CONTROL: the same name goes through with both programs present.
+  assert.equal(create.createAgent({ ...BINS, name: 'no-binary', role: 'pm' }).outcome,
+    create.OUTCOME.CREATED, 'this name is refused whatever the paths, so the above proves nothing');
+});
+
+test('a write that fails stops the creation instead of loading a job that cannot work', () => {
+  // ⚠️ Only the folder and the start gated the outcome, so a failed write still
+  // returned CREATED -- "set up and starting" over an agent whose startup
+  // script was never written. That is worse than untrue: bash exits at once on
+  // a missing script and KeepAlive restarts it, so the machine gets a job that
+  // fails every thirty seconds forever. And the screen built on this told the
+  // person "the folder and the instructions are on your computer either way",
+  // which is false in exactly the case that produced it.
+  const calls = recorder();
+  create.setDryRun(false);
+
+  const realWrite = fs.writeFileSync;
+  try {
+    fs.writeFileSync = (file, ...rest) => {
+      if (String(file).endsWith('start.sh')) throw new Error('disk full');
+      return realWrite(file, ...rest);
+    };
+    const r = create.createAgent({ ...BINS, name: 'half-made', role: 'pm' });
+
+    assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'a half-written agent was reported as created');
+    assert.match(r.because, /could not write everything/);
+    assert.ok(r.steps.some((s) => s.label === 'wrote its startup script' && !s.ok),
+      'the failing step is not visible in the record');
+    assert.equal(calls.length, 0,
+      'the job was loaded anyway, so launchd now retries a missing script every thirty seconds');
+  } finally {
+    fs.writeFileSync = realWrite;
+  }
+
+  // THE CONTROL: with writing working, the same name is created and the job IS
+  // loaded -- otherwise this test would pass against a createAgent that refused
+  // everything.
+  const calls2 = recorder();
+  const ok = create.createAgent({ ...BINS, name: 'half-made-2', role: 'pm' });
+  assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
+  assert.equal(calls2.length, 1, 'the control did not actually load a job');
+});
+
+test('the startup script will not kill a session it cannot prove is ours', () => {
+  // ⚠️ The kill was unconditional, and it runs at every login and after every
+  // crash -- so a person who happened to have a tmux session of this name would
+  // have had it destroyed with no warning by a job installed weeks earlier. The
+  // board refuses to act on any pane it cannot tie to a name; a script that
+  // kills one is that rule broken from the outside.
+  const script = create.launcherFor('careful', '/bin/echo', '/bin/echo');
+
+  const kill = script.split('\n').findIndex((l) => l.includes('kill-session'));
+  const check = script.split('\n').findIndex((l) => l.includes('@kosmos_agent') && l.includes('show-options'));
+  assert.ok(check > -1, 'the script never checks whose session it is about to kill');
+  assert.ok(check < kill, 'the kill happens before the check, so the check cannot stop it');
+
+  // And it WAITS rather than exiting: exiting would have launchd restart it
+  // every thirty seconds against a session it must not touch.
+  assert.match(script, /sleep 30/, 'nothing waits for the other session to end');
+  assert.match(script, /waiting rather than killing it/, 'nothing says why the agent has not started');
 });

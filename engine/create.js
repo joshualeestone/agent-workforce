@@ -23,9 +23,17 @@
  *     in exactly one place (`launcherFor`), and the safety there is the name
  *     validator rather than the absence of a shell. Leaving the old sentence
  *     standing would have been the more dangerous half of the change.
- *   - **Dry-run by default**, with the same interlock `lifecycle` uses: leaving
- *     dry-run throws unless a runner is already injected, so a test cannot
- *     reach the real machine by forgetting a line.
+ *   - **A runner seam with a bidirectional interlock**: leaving dry-run throws
+ *     unless a runner is already injected, and clearing the runner re-arms
+ *     dry-run, so neither ordering leaves a test able to spawn real agents.
+ *     ⚠️ This used to say "dry-run by default", and that was FALSE: the flag
+ *     starts at `AGENT_WORKFORCE_DRY_RUN === '1'`, which is false unless
+ *     somebody sets it, so a fresh process with no runner installed executes
+ *     for real. The server relies on exactly that. What actually holds the
+ *     tests off the machine is the test file arming dry-run at load, which it
+ *     now does explicitly rather than by inheriting a guarantee that was only
+ *     written down. A safety comment claiming more than the code does is worse
+ *     than none — it is what stops the next reader checking.
  *   - **Nothing is claimed that was not verified.** "Created" is a claim about
  *     us; "it answered" is a claim about the agent, and only the second means
  *     the person has an agent.
@@ -55,11 +63,16 @@ let DRY_RUN = process.env.AGENT_WORKFORCE_DRY_RUN === '1';
 let runner = null;
 
 /**
- * ⚠️ The same bidirectional interlock as `lifecycle`, for the same reason.
- * `setDryRun(false)` refuses unless a runner is installed, and `setRunner(null)`
- * re-arms dry-run — so neither ordering can leave a test able to spawn a real
- * tmux session. A one-directional invariant would depend on every test's
- * `finally` running in the right order.
+ * ⚠️ A BIDIRECTIONAL interlock. `setDryRun(false)` refuses unless a runner is
+ * installed, and `setRunner(null)` re-arms dry-run — so neither ordering can
+ * leave a test able to spawn a real tmux session. A one-directional invariant
+ * would depend on every test's `finally` running in the right order.
+ *
+ * (Earlier comments here cited `engine/lifecycle.js` as the precedent. That
+ * module is on another branch and does not exist beside this one, so a reader
+ * sent to it could not check the invariant being claimed — the same
+ * cross-branch reference that put a call to a nonexistent function in this
+ * file's own route once already.)
  */
 function setRunner(fn) {
   runner = fn || null;
@@ -183,8 +196,29 @@ TMUX='${tmuxBin}'
 CLAUDE='${claudeBin}'
 WORKDIR='${dir}'
 
-# Idempotent: a restart must not collide with the session the last run made.
-"$TMUX" kill-session -t "$SESSION" 2>/dev/null
+# ⚠️ Only ever clear a session that is OURS.
+#
+# This ran unconditionally, and it runs at every login and after every crash —
+# so a person who happened to have a tmux session of this name would have had it
+# destroyed with no warning, by a job installed weeks earlier. The board refuses
+# to act on any pane it cannot tie to a name; a script that kills one is the
+# same rule broken from the outside.
+#
+# The claim is the tie. If something else holds the name we WAIT rather than
+# exit: exiting would have launchd restart us every 30 seconds, and waiting
+# recovers on its own the moment that session ends.
+warned=0
+while "$TMUX" has-session -t "$SESSION" 2>/dev/null; do
+  if [ "$("$TMUX" show-options -t "$SESSION" -v @kosmos_agent 2>/dev/null)" = "$SESSION" ]; then
+    "$TMUX" kill-session -t "$SESSION" 2>/dev/null
+    break
+  fi
+  if [ "$warned" -eq 0 ]; then
+    echo "$(date): a session called $SESSION is already running and is not ours -- waiting rather than killing it" >&2
+    warned=1
+  fi
+  sleep 30
+done
 
 # --dangerously-skip-permissions is not optional for an unattended agent.
 # Without it the agent starts, looks healthy, and freezes forever on its first
@@ -317,6 +351,35 @@ function createAgent(opts) {
     };
   }
 
+  /**
+   * ⚠️ The two programs this agent is made of have to EXIST.
+   *
+   * Both defaults are this machine's paths. On a Mac with an npm-global Claude,
+   * or an Intel Mac where Homebrew lives at `/usr/local`, creation reported
+   * CREATED, the screen waited thirty seconds and then said it did not know
+   * why, and launchd was left respawning an instantly-failing job every thirty
+   * seconds for as long as the machine was on. Refusing up front costs two
+   * lines and names the actual problem.
+   *
+   * ⚠️ And they are checked for SHAPE, not only presence. They are interpolated
+   * into the startup script the same way the name is, and unlike the name they
+   * have never been through `nameProblem`. Not reachable from the HTTP route
+   * today — the route passes neither — so this is closing a door before someone
+   * opens it, which is cheaper than the alternative.
+   */
+  for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin]]) {
+    if (/['"\n\r\\$`]/.test(bin)) {
+      return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
+    }
+    if (!fs.existsSync(bin)) {
+      return {
+        outcome: OUTCOME.REFUSED,
+        because: `we could not find ${what} on this computer, so an agent made now would never start`,
+        steps,
+      };
+    }
+  }
+
   function step(label, fn) {
     try {
       const r = fn();
@@ -338,7 +401,7 @@ function createAgent(opts) {
     return { outcome: OUTCOME.REFUSED, because: 'we could not make a folder for it', steps };
   }
 
-  step('wrote its instructions', () => {
+  const wroteInstructions = step('wrote its instructions', () => {
     if (DRY_RUN && !runner) return true;
     fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, name), 'utf8');
   });
@@ -346,16 +409,38 @@ function createAgent(opts) {
   // ⚠️ Executable, and that is not a detail: launchd runs it through
   // `/bin/bash`, but a person told "this is a real file you can run" and met
   // "permission denied" has been handed a file that is real only to us.
-  step('wrote its startup script', () => {
+  const wroteLauncher = step('wrote its startup script', () => {
     if (DRY_RUN && !runner) return true;
     fs.writeFileSync(launcherFile(name), launcherFor(name, claudeBin, tmuxBin), { mode: 0o755 });
   });
 
-  step('wrote its startup job', () => {
+  const wroteJob = step('wrote its startup job', () => {
     if (DRY_RUN && !runner) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
   });
+
+  /**
+   * ⚠️ STOP BEFORE LOADING A JOB THAT CANNOT WORK.
+   *
+   * Only the folder and the start were gating the outcome, so a failed write
+   * still returned `CREATED` — "set up and starting" over an agent with no
+   * instructions, or with a job pointing at a startup script that was never
+   * written. The second one is actively harmful rather than merely untrue:
+   * `bash` exits immediately on a missing script, `KeepAlive` restarts it,
+   * and the machine gets a job that fails every thirty seconds forever.
+   *
+   * And the screen built on this said "the folder and the instructions are on
+   * your computer either way" — a sentence that is false in exactly the case
+   * that produced it.
+   */
+  if (!wroteInstructions || !wroteLauncher || !wroteJob) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we could not write everything it needs, so we have not started it',
+      steps,
+    };
+  }
 
   /**
    * ⚠️ LOADING the job is what starts the agent, and it is deliberately the

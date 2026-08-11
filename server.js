@@ -320,12 +320,119 @@ function decodeSegment(segment) {
   }
 }
 
+/**
+ * Is this write coming from a page on some OTHER website?
+ *
+ * ⚠️ THE HOST CHECK DOES NOT COVER THIS, and the create route's own comment
+ * said it did. Measured, against the real server: a page on any site can run
+ *
+ *     fetch('http://127.0.0.1:4317/api/agents',
+ *           { method: 'POST', headers: { 'content-type': 'text/plain' },
+ *             body: '{"name":"theirs","role":"pm"}' })
+ *
+ * and that is a CORS *simple request* — POST with a `text/plain` body needs no
+ * preflight. `Host` is `127.0.0.1:4317`, which is exactly what a legitimate
+ * request looks like, so the Host check passes. The attacker cannot READ the
+ * answer, and does not need to: the side effect is the attack. A real worker
+ * directory and a real launchd job were created on this machine by that
+ * request while this was being written.
+ *
+ * It is worse than a drive-by write because of what the job is: `RunAtLoad`,
+ * `KeepAlive`, and an agent started with `--dangerously-skip-permissions` that
+ * comes back on every reboot, whose instruction file any subsequent write can
+ * rewrite.
+ *
+ * ⚠️ Why the EXISTING writes were not reachable this way, which is the thing
+ * the old comment got wrong: they are all `PUT` and `DELETE`, and those are
+ * never simple requests, so a browser preflights them, this server answers the
+ * `OPTIONS` with a 404 carrying no CORS headers, and the browser drops the real
+ * request. `POST /api/agents` was the first route on this server a stranger's
+ * page could actually reach. "No worse than what is here" was false, and it was
+ * false in the direction that matters.
+ *
+ * Two checks, because either alone leaves a gap:
+ *
+ *   1. `Origin`, when present, must be loopback. A browser attaches it to every
+ *      cross-origin request and to same-origin POSTs, so this is the direct
+ *      signal — but a non-browser client sends none at all.
+ *   2. The `content-type` must NOT be one a form can produce. Those three types
+ *      are the whole simple-request set, and being outside it is what forces
+ *      the preflight this server does not answer — so a page that manages to
+ *      omit `Origin` still cannot get a write through.
+ *
+ * ⚠️ The rule is "not a simple type", NOT "must be JSON", and the difference is
+ * a real one this nearly shipped wrong: the avatar upload PUTs an IMAGE, and
+ * `store.saveAvatar` reads that content type to decide the format. A blanket
+ * JSON requirement would have refused every picture in the product while
+ * reading, in review, exactly like the stricter and therefore safer choice.
+ *
+ * A request with no content type at all is not a browser write — a `fetch`
+ * with a body always sets one, and a form can only ever produce the three
+ * refused below — so it is left alone rather than broken.
+ *
+ * Applied to every state-changing method, not only the new route: the others
+ * are protected by preflight today, and depending on the browser's method
+ * classification rather than saying so ourselves is how this was missed once.
+ */
+const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+// The CORS simple-request set, in full. Anything outside it is preflighted.
+const FORM_TYPES = new Set([
+  'application/x-www-form-urlencoded',
+  'multipart/form-data',
+  'text/plain',
+]);
+
+function crossSiteWrite(req) {
+  if (!req || !WRITE_METHODS.has(req.method)) return null;
+
+  const origin = req.headers && req.headers.origin;
+  // `null` is what a sandboxed iframe or a `file://` page sends, and it is
+  // never this board.
+  if (origin && origin !== 'null') {
+    let host;
+    try {
+      host = new URL(origin).hostname.replace(/\.$/, '').toLowerCase();
+    } catch {
+      return 'that request came from somewhere this board does not answer';
+    }
+    if (!LOOPBACK_HOSTS.has(host) && !ALLOWED_HOSTS.has(host)) {
+      return 'that request came from another website, so we will not act on it';
+    }
+  } else if (origin === 'null') {
+    return 'that request came from somewhere this board does not answer';
+  }
+
+  // ⚠️ POST ONLY. A simple request is a METHOD and a content type together —
+  // `PUT`, `DELETE` and `PATCH` are never simple whatever body they carry, so
+  // they are already preflighted and refusing them on their content type buys
+  // nothing. The first version applied this to every write and broke
+  // `PUT /avatar` with a plain-text body, which an existing test caught: a
+  // guard stricter than the threat is still a guard that breaks the product.
+  if (req.method !== 'POST') return null;
+
+  const type = String((req.headers && req.headers['content-type']) || '').split(';')[0].trim().toLowerCase();
+  if (type && FORM_TYPES.has(type)) {
+    return 'that request is shaped like one another website could send, so we will not act on it';
+  }
+  return null;
+}
+
 const server = http.createServer((req, res) => {
   const pathname = pathOf(req);
   if (pathname === null) {
     // Not addressed to us. Saying so is better than handing back the index,
     // which would look like a successful page load.
     sendJson(res, 400, { error: 'that request was not addressed to this server' });
+    return;
+  }
+
+  // ⚠️ BEFORE every route, so a write added later is covered by default rather
+  // than by whoever adds it remembering. The one that was missed was the one
+  // written last.
+  const refusal = crossSiteWrite(req);
+  if (refusal) {
+    sendJson(res, 403, { error: refusal });
     return;
   }
 

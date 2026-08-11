@@ -1195,3 +1195,47 @@ test('an agent sitting at its prompt is idle, not unreadable', () => {
   const silent = classify(pane, 'some unrelated output\n');
   assert.equal(silent.state, 'unknown', 'unknown stopped being reachable, so nothing is honest any more');
 });
+
+test('a card reads the transcript of ITS OWN session, not of the name it shares', () => {
+  // ⚠️ The board's name is the session with `-discord` stripped, so `foo` and
+  // `foo-discord` are one name and two sessions — the collision this module
+  // already says it exists to survive. Trying both registry spellings for a
+  // NAME reopened it one level down: the surviving card could show the other
+  // agent's model and memory at structured confidence, which is the "confident
+  // numbers about the wrong conversation" this whole resolution path was built
+  // to prevent. The caller holds the pane, so it passes the real session.
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const dir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  // The DECOY: a registry entry for the un-suffixed session `twin`, which is a
+  // different agent that happens to share the board name.
+  fs.writeFileSync(nodePath.join(dir, 'twin_0.0.json'),
+    JSON.stringify({ session_name: 'twin', session_id: 'sess-twin' }), 'utf8');
+  const projects = nodePath.join(root, 'projects', 'twin');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-twin.jsonl'),
+    JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 90000 } } }) + '\n', 'utf8');
+
+  setPaneSource(() => 'twin-discord\t0.0\t2.1.227\t0\t\t✳ Claude Code');
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'twin');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not a tied card, so this tests the wrong thing');
+    assert.equal(card.model, null,
+      "the card read the OTHER twin's transcript because they share a board name");
+    assert.equal(card.context.percent, null, "the card reported the other twin's memory as its own");
+
+    // ⚠️ THE CONTROL. Rename the decoy to this session's own spelling and the
+    // same numbers must appear — otherwise the nulls above are nulls for some
+    // unrelated reason and this test would pass with the fix reverted.
+    fs.writeFileSync(nodePath.join(dir, 'twin-discord_0.0.json'),
+      JSON.stringify({ session_name: 'twin-discord', session_id: 'sess-twin' }), 'utf8');
+    const own = snapshot().agents.find((a) => a.sessionName === 'twin');
+    assert.equal(own.model, 'claude-opus-5',
+      'the card cannot read its own session either, so the nulls above prove nothing');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});

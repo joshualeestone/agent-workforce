@@ -15,7 +15,20 @@ the job, and then WATCHES THE BOARD until it can see the agent running before it
 says so. No terminal, and nothing claimed that was not observed: if the board
 cannot see it after thirty seconds, the screen says that instead.
 
-It cannot stop or message an agent yet.
+It cannot stop, remove or message an agent yet.
+
+⚠️ **Removing one is still a manual job, and it matters more than the others**,
+because a created agent has a launchd job that starts it at every login. Deleting
+its folder is not enough — the job would keep trying. Until Remove is built:
+
+    launchctl bootout gui/$UID/com.kosmos.agent.<name>
+    rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist
+    tmux kill-session -t <name>
+    rm -rf ~/work/workers/<name>
+
+The startup script refuses to touch a session it cannot prove is its own, so a
+leftover job cannot take a name somebody else is using — but it will sit there
+waiting, which is its own kind of surprise.
 
 ⚠️ That instruction file is the real thing an agent boots from, not a copy, so
 editing it here changes how that agent behaves the next time it starts. The

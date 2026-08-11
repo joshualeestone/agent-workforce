@@ -72,6 +72,13 @@ const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
+// ⚠️ AND THE LAUNCH AGENTS DIRECTORY, which this file did not sandbox while it
+// now drives the create route. Both cases here are refused before anything is
+// written, so nothing has leaked — but the first happy-path route test somebody
+// adds would install a REAL launchd job in the operator's `~/Library/
+// LaunchAgents`, and it would then start an agent on their next login. The
+// sandbox has to be in place before the hazard arrives, not after.
+process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-launch-'));
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1799,4 +1806,67 @@ test('the creation screen reports a failed step as failed', () => {
     + 'whole failure mode the step list exists to prevent');
   assert.match(out, /\[waiting:Waiting for the board/,
     'the one line that is about the agent rather than about us went missing');
+});
+
+test('a write another website could send is refused, whatever route it names', async () => {
+  // ⚠️ MEASURED, not theorised. Before this guard, a page on any site could run
+  //
+  //     fetch('http://127.0.0.1:4317/api/agents', { method: 'POST',
+  //       headers: { 'content-type': 'text/plain' },
+  //       body: '{"name":"theirs","role":"pm"}' })
+  //
+  // and it worked: a POST with a text/plain body is a CORS *simple request*, so
+  // no preflight is involved, and `Host` is the loopback address a legitimate
+  // request also carries. Running exactly that against the real server created a
+  // worker directory and installed a launchd job on this machine — an agent that
+  // starts on every reboot with --dangerously-skip-permissions, planted by a
+  // page the user merely visited.
+  //
+  // The create route's own comment claimed it "does not cross a new line"
+  // because the server already had writes. It was wrong: every other write is
+  // PUT or DELETE, which a browser always preflights, and this server answers
+  // the preflight with a 404 carrying no CORS headers. POST was the first route
+  // a stranger's page could reach.
+  const create = require('./engine/create');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  try {
+    for (const [label, headers] of [
+      ['a form content type', { 'content-type': 'text/plain' }],
+      ['a form post', { 'content-type': 'application/x-www-form-urlencoded' }],
+      ['a multipart form', { 'content-type': 'multipart/form-data' }],
+      ['another site as its origin', { 'content-type': 'application/json', origin: 'https://evil.example' }],
+      ['a sandboxed page', { 'content-type': 'application/json', origin: 'null' }],
+    ]) {
+      const res = await req('/api/agents', {
+        method: 'POST', headers, body: JSON.stringify({ name: 'csrf-fixture', role: 'pm' }),
+      });
+      assert.equal(res.status, 403, `${label}: the write was accepted`);
+      assert.equal(calls.length, 0, `${label}: a command ran for a request from another website`);
+    }
+
+    // ⚠️ THE CONTROL, in two halves, because a guard that refuses everything
+    // passes every assertion above while breaking the product.
+    //
+    // The board's own write still goes through...
+    const ours = await req('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:4317' },
+      body: JSON.stringify({ name: 'BAD NAME', role: 'pm' }),
+    });
+    assert.equal(ours.status, 400,
+      'the board can no longer write to itself, so this guard has broken the product');
+
+    // ...and so does the one write that is NOT JSON. The avatar upload PUTs an
+    // IMAGE, and `saveAvatar` reads that content type to know the format, so a
+    // guard written as "must be application/json" would have refused every
+    // picture in the product while reading in review like the safer choice.
+    const avatar = await req('/api/agent/angel/avatar', {
+      method: 'PUT', headers: { 'content-type': 'image/png' }, body: 'not-a-real-png',
+    });
+    assert.notEqual(avatar.status, 403,
+      'the avatar upload is refused as cross-site, so the guard is stricter than the threat');
+  } finally {
+    create.setRunner(null);
+  }
 });

@@ -170,9 +170,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pick:hover { background: var(--attn-bg); }
 /* Selection is carried by the border weight and the check, never by hue alone:
    the same greyscale rule the cards follow. */
-.pick[aria-pressed="true"] { border: 1.5px solid var(--label); padding: calc(var(--space-5) - 1px); }
+.pick[aria-checked="true"] { border: 1.5px solid var(--label); padding: calc(var(--space-5) - 1px); }
 .pick-mark { flex: none; width: 18px; color: var(--label); font-weight: 600; }
-.pick[aria-pressed="false"] .pick-mark { color: transparent; }
+.pick[aria-checked="false"] .pick-mark { color: transparent; }
 .pick b { font: 600 var(--text-body) var(--font-ui); display: block; }
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-2); }
 .ticks { margin: var(--space-6) 0 0; }
@@ -390,7 +390,10 @@ svg { display: block; }
     <h2>What should this agent do?</h2>
     <p>Most people start with a project manager. You can change any of this
        afterwards, and nothing here is permanent.</p>
-    <div id="roles-list" role="group" aria-label="Roles"></div>
+    <!-- radiogroup, not group: this is one choice out of five, and
+         `aria-pressed` toggles announce five independent on/off buttons
+         instead of "2 of 5". -->
+    <div id="roles-list" role="radiogroup" aria-label="What this agent is for"></div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
     <div class="frow" style="margin-top: var(--space-6);">
       <button class="btn" id="role-next" type="button" disabled>Continue</button>
@@ -427,7 +430,12 @@ svg { display: block; }
     <h2 id="made-head">Making it</h2>
     <!-- ⚠️ Every line here is either something the engine reported or something
          this page watched happen. Nothing is asserted on a timer. -->
-    <div class="ticks" id="made-ticks" role="status" aria-live="polite"></div>
+    <!-- ⚠️ NOT itself a live region. `paintMade` replaces the whole list on
+         every repaint, so announcing the container re-read all six steps each
+         time the one changing line changed. The live region below carries just
+         that line. -->
+    <div class="ticks" id="made-ticks"></div>
+    <p class="vh" id="made-say" role="status" aria-live="polite"></p>
     <div class="stale-note" id="made-warn" hidden></div>
     <div class="first-action" id="made-first" hidden></div>
     <div class="frow" style="margin-top: var(--space-7);">
@@ -782,7 +790,9 @@ function showTab(tab) {
 
 document.getElementById('tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab');
-  if (btn) showTab(btn.dataset.tab);
+  // Same reason as the back button: a tab click is also walking away from a
+  // creation in flight.
+  if (btn) { WATCH += 1; showTab(btn.dataset.tab); }
 });
 
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
@@ -1371,7 +1381,7 @@ async function loadRoles() {
     ROLES = (data && data.roles) || [];
     if (!ROLES.length) throw new Error('none came back');
     msg.textContent = '';
-    list.innerHTML = ROLES.map((r) => `<button class="pick" type="button" aria-pressed="false" data-role="${esc(r.key)}">
+    list.innerHTML = ROLES.map((r) => `<button class="pick" type="button" role="radio" aria-checked="false" data-role="${esc(r.key)}">
       <span class="pick-mark" aria-hidden="true">&#10003;</span>
       <span><b>${esc(r.label)}</b><small>${esc(r.blurb)}</small></span>
     </button>`).join('');
@@ -1385,7 +1395,9 @@ async function loadRoles() {
     // local copy of the menu is exactly how those two drift apart.
     ROLES = null;
     list.innerHTML = '';
-    msg.textContent = 'We could not read the list of roles, so there is nothing safe to choose from. (' + esc(err.message) + ')';
+    // Not `esc()`: this goes into textContent, which does its own escaping, so
+    // escaping first renders an `&` in the error as a literal `&amp;`.
+    msg.textContent = 'We could not read the list of roles, so there is nothing safe to choose from. (' + err.message + ')';
     document.getElementById('role-next').disabled = true;
   }
 }
@@ -1395,7 +1407,7 @@ function pickRole(key) {
   if (!role) return;
   PICKED = key;
   document.querySelectorAll('#roles-list .pick').forEach((b) => {
-    b.setAttribute('aria-pressed', String(b.dataset.role === key));
+    b.setAttribute('aria-checked', String(b.dataset.role === key));
   });
   document.getElementById('role-next').disabled = false;
 }
@@ -1418,7 +1430,10 @@ function openCreate() {
 }
 
 document.getElementById('new-agent').addEventListener('click', openCreate);
-document.getElementById('create-back').addEventListener('click', () => showTab('agents'));
+// ⚠️ Leaving the panel STOPS THE WATCH. `openCreate` bumps the token and this
+// did not, so walking away mid-creation left the loop polling /api/status every
+// two seconds and repainting a hidden panel for the rest of the thirty seconds.
+document.getElementById('create-back').addEventListener('click', () => { WATCH += 1; showTab('agents'); });
 document.getElementById('create-prev').addEventListener('click', () => cstep('role'));
 document.getElementById('made-done').addEventListener('click', () => { showTab('agents'); tick(); });
 document.getElementById('made-retry').addEventListener('click', openCreate);
@@ -1454,6 +1469,8 @@ function paintMade(steps, watching) {
   const lines = (steps || []).map((s) => tickLine(s.ok ? 'done' : 'fail', s.label));
   if (watching) lines.push(tickLine(watching.state, watching.text));
   document.getElementById('made-ticks').innerHTML = lines.join('');
+  // Only what changed, and only in words -- the glyphs say nothing aloud.
+  if (watching) document.getElementById('made-say').textContent = watching.text;
 }
 
 document.getElementById('create-go').addEventListener('click', async () => {
@@ -1477,7 +1494,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
   } catch (err) {
     // The request itself did not complete, so we do not know what happened on
     // the other side — which is not the same as nothing having happened.
-    msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + esc(err.message) + ')';
+    msg.textContent = 'We could not reach the board to make it, so we cannot tell you whether anything was created. (' + err.message + ')';
     CREATING = false;
     document.getElementById('create-go').disabled = false;
     return;

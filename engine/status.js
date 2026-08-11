@@ -878,16 +878,26 @@ function limitFor(model) {
  * confident numbers about the wrong conversation, which is the exact failure
  * this whole resolution path was written to avoid.
  */
-function sessionIdFor(sessionName) {
-  // Both spellings, because the roster strips `-discord` without requiring it:
-  // the legacy fleet's file carries the suffix and a created agent's does not.
-  const candidates = [`${sessionName}_0.0.json`, `${sessionName}-discord_0.0.json`];
+function sessionIdFor(sessionName, exactSession) {
+  // ⚠️ When the caller knows the REAL session name, only that spelling is
+  // tried. The board's name is the session with `-discord` stripped, so `foo`
+  // and `foo-discord` are one name and two sessions — and trying both spellings
+  // for a name means the surviving card of that collision can show the OTHER
+  // agent's model and memory at structured confidence. `snapshot` holds the
+  // pane, so it passes the session itself and this ambiguity never arises
+  // there; the fallback below is for callers that have only a name.
+  const candidates = exactSession
+    ? [`${exactSession}_0.0.json`]
+    : [`${sessionName}_0.0.json`, `${sessionName}-discord_0.0.json`];
   for (const root of configRoots()) {
     for (const candidate of candidates) {
       try {
         const entry = JSON.parse(fs.readFileSync(path.join(root, 'agent-registry', candidate), 'utf8'));
         const owner = String(entry.session_name || '');
-        if (owner && owner !== sessionName && owner !== `${sessionName}-discord`) continue;
+        const wanted = exactSession
+          ? [exactSession]
+          : [sessionName, `${sessionName}-discord`];
+        if (owner && !wanted.includes(owner)) continue;
         if (entry.session_id) return entry.session_id;
       } catch { /* try the next candidate */ }
     }
@@ -895,8 +905,8 @@ function sessionIdFor(sessionName) {
   return null;
 }
 
-function transcriptFor(agentName) {
-  const sessionId = sessionIdFor(agentName);
+function transcriptFor(agentName, exactSession) {
+  const sessionId = sessionIdFor(agentName, exactSession);
   if (!sessionId) return null;
 
   for (const root of configRoots()) {
@@ -936,8 +946,8 @@ function tailBytes(file, bytes = 262144) {
   }
 }
 
-function readContext(agentName, model) {
-  const file = transcriptFor(agentName);
+function readContext(agentName, model, exactSession) {
+  const file = transcriptFor(agentName, exactSession);
   if (!file) {
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no transcript found' };
   }
@@ -1026,8 +1036,8 @@ function modelDisplayName(id) {
   return id;
 }
 
-function readModel(agentName) {
-  const file = transcriptFor(agentName);
+function readModel(agentName, exactSession) {
+  const file = transcriptFor(agentName, exactSession);
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
   const text = tailBytes(file, 65536);
   if (!text) return { model: null, confidence: CONFIDENCE.NONE };
@@ -1217,9 +1227,9 @@ function snapshot() {
     // underived, and carries no model and no context — which is the honest
     // answer, because we do not know whose conversation it is.
     const tied = isNamedOurs(pane);
-    const { model } = tied ? readModel(pane.name) : { model: null };
+    const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
-      ? readContext(pane.name, model)
+      ? readContext(pane.name, model, pane.session)
       : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tie this pane to an agent by name, so we will not read another agent\u2019s transcript for it' };
     const identity = tied
       ? readIdentity(pane.name)
