@@ -18,13 +18,16 @@
 #
 #   agent-supervisor.sh <session> <workdir> <claude-bin> <tmux-bin> [log]
 #
-# ⚠️ The arguments are NOT validated here, deliberately. `engine/create.js`
-# validates the name once, hard, before anything is written — the same name that
+# ⚠️ The NAME is not re-validated here, deliberately. `engine/create.js`
+# validates it once, hard, before anything is written — the same name that
 # becomes a directory, a service label and a tmux session — and a second, weaker
 # copy of that rule here would be exactly the two-definitions-of-one-fact defect
-# this codebase keeps paying for. What this file must do instead is never
-# interpolate an argument into anything that reinterprets it: every use below is
-# a quoted "$1"-style expansion passed as one argument.
+# this codebase keeps paying for. The paths get a shape check there and nothing
+# more, which is worth knowing if you run this by hand with your own.
+#
+# What this file must do instead, and does throughout, is never interpolate an
+# argument into anything that reinterprets it: every use below is a quoted
+# "$1"-style expansion passed as one argument to one command.
 
 set -u
 

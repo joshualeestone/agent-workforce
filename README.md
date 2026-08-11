@@ -14,8 +14,13 @@ writes the folder and the instructions, installs a launchd job, loads it, and
 then WATCHES THE BOARD until it can see the agent running before it says so.
 
 Every agent's job runs the same supervisor, `bin/agent-supervisor.sh`, with its
-own name as an argument. One file, so a fix to it reaches every agent rather
-than only the ones created afterwards. No terminal, and nothing claimed that was not observed: if the board
+own name as an argument. One file rather than a copy per agent, so a change to
+it reaches agents that already exist: it is reinstalled whenever an agent is
+created, and each running agent picks it up at its next start.
+
+⚠️ Two conditions worth stating rather than implying. On a machine where no
+further agent is ever created, nothing reinstalls it. And an agent made by a
+version before this one has its own copy and keeps it: nothing migrates those. No terminal, and nothing claimed that was not observed: if the board
 cannot see it after thirty seconds, the screen says that instead.
 
 It cannot stop, remove or message an agent yet.

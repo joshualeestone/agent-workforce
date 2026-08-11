@@ -14,15 +14,18 @@
  *     own sanitised form AND start alphanumeric — the two rules the rest of the
  *     system already enforces separately, which have disagreed before.
  *   - **Every command is `execFile` with an argument array**, never a shell
- *     string. A name reaches launchd as one argument, never as text a shell
- *     could reinterpret.
- *     ⚠️ This used to read "no shell, ever", and that sentence stopped being
- *     true the moment the agent needed a supervising startup script — which it
- *     does, because `tmux new-session -d` exits immediately and launchd would
- *     otherwise respawn the job forever. So there IS generated shell text now,
- *     in exactly one place (`launcherFor`), and the safety there is the name
- *     validator rather than the absence of a shell. Leaving the old sentence
- *     standing would have been the more dangerous half of the change.
+ *     string, and **nothing is interpolated into shell text at all**. The agent
+ *     needs a supervising script — `tmux new-session -d` exits immediately, and
+ *     launchd would otherwise respawn the job forever — but that script is
+ *     `bin/agent-supervisor.sh`, shipped and shared, taking the agent as
+ *     ARGUMENTS. So a name reaches launchd, tmux and the script as one argument
+ *     each, never as text a shell could reinterpret.
+ *     ⚠️ This is the second correction of this paragraph. It first read "no
+ *     shell, ever", which stopped being true when a script was generated per
+ *     agent with the name written into it; then it described that generated
+ *     text and named `launcherFor`, which no longer exists. A safety header
+ *     that is wrong about the safety model is the worst place in the file for
+ *     it to be wrong, because it is what stops the next reader checking.
  *   - **A runner seam with a bidirectional interlock**: leaving dry-run throws
  *     unless a runner is already injected, and clearing the runner re-arms
  *     dry-run, so neither ordering leaves a test able to spawn real agents.
@@ -238,9 +241,29 @@ function supervisorPath() {
  */
 function installSupervisor() {
   try {
-    fs.mkdirSync(path.dirname(supervisorPath()), { recursive: true });
-    fs.copyFileSync(supervisorSource(), supervisorPath());
-    fs.chmodSync(supervisorPath(), 0o755);
+    const dest = supervisorPath();
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    /**
+     * ⚠️ WRITE BESIDE IT AND RENAME, never copy over it.
+     *
+     * `copyFileSync` truncates and rewrites the destination in place, same
+     * inode — and every live agent's supervisor is a `bash` process reading
+     * that exact file. Bash reads a script by file offset as it goes, so
+     * rewriting it underneath a running instance can make it execute whatever
+     * now sits at that offset, or fall out of its supervision loop and hand the
+     * agent back to `KeepAlive`.
+     *
+     * This branch makes that the NORMAL case rather than an edge one: the
+     * refresh exists precisely so a change lands while other agents are
+     * running. `rename` is atomic within a filesystem and gives the new file a
+     * new inode, so every running instance keeps reading the one it started
+     * with and picks the new one up at its next start — which is exactly the
+     * update model this change is for.
+     */
+    const staging = `${dest}.new`;
+    fs.copyFileSync(supervisorSource(), staging);
+    fs.chmodSync(staging, 0o755);
+    fs.renameSync(staging, dest);
     return true;
   } catch {
     return false;
@@ -484,11 +507,13 @@ function createAgent(opts) {
    * seconds for as long as the machine was on. Refusing up front costs two
    * lines and names the actual problem.
    *
-   * ⚠️ And they are checked for SHAPE, not only presence. They are interpolated
-   * into the startup script the same way the name is, and unlike the name they
-   * have never been through `nameProblem`. Not reachable from the HTTP route
-   * today — the route passes neither — so this is closing a door before someone
-   * opens it, which is cheaper than the alternative.
+   * ⚠️ And they are checked for SHAPE, not only presence. They are NOT
+   * interpolated into shell text any more — they reach the plist as separate
+   * XML elements and the supervisor as argv — so the original reason for this
+   * check has gone. It is kept because a path carrying a quote or a newline is
+   * a path nothing good comes of passing anywhere, and because the relevant
+   * guard for the plist is now the XML escaping beside it. Said plainly so the
+   * next reader does not have to re-derive which one is load-bearing.
    */
   // ⚠️ The worker folder is checked with them. It is operator-controlled rather
   // than request-controlled (it comes from AGENT_WORKFORCE_WORKERS), but it
@@ -579,14 +604,15 @@ function createAgent(opts) {
     fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, name), 'utf8');
   });
 
-  // ⚠️ Executable, and that is not a detail: launchd runs it through
-  // `/bin/bash`, but a person told "this is a real file you can run" and met
-  // "permission denied" has been handed a file that is real only to us.
+  // ⚠️ Executable, and that is not a detail. launchd runs it through
+  // `/bin/bash` either way, but this file is the one an operator debugging a
+  // stuck agent will run by hand with the same arguments the job passes, and a
+  // "permission denied" at that moment is a file that is real only to us.
   // ⚠️ Installed rather than written per agent, and still a STEP: if the shared
   // supervisor is not in place, the job would point at a script that does not
   // exist, which is the respawn loop. The gate below stops before the job is
   // written at all.
-  const wroteLauncher = step('put the startup script in place', () => {
+  const installedSupervisor = step('put the startup script in place', () => {
     if (DRY_RUN) return true;
     return installSupervisor();
   });
@@ -607,7 +633,7 @@ function createAgent(opts) {
    * then permanently refused by the leftover-job branch above, so the person
    * cannot even retry from the screen.
    */
-  const wroteJob = (wroteInstructions && wroteLauncher) && step('wrote its startup job', () => {
+  const wroteJob = (wroteInstructions && installedSupervisor) && step('wrote its startup job', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
@@ -627,8 +653,20 @@ function createAgent(opts) {
    * your computer either way" — a sentence that is false in exactly the case
    * that produced it.
    */
-  if (!wroteInstructions || !wroteLauncher || !wroteJob) {
+  if (!wroteInstructions || !installedSupervisor || !wroteJob) {
     rollBack();
+    // ⚠️ A missing supervisor gets its OWN sentence. It is not "try again":
+    // `bin/agent-supervisor.sh` is missing from the installation, so retrying
+    // fails identically forever, and the only place the real cause surfaced was
+    // a step label. Naming the wrong cause is the failure the Claude and tmux
+    // checks are careful to avoid.
+    if (!installedSupervisor) {
+      return {
+        outcome: OUTCOME.PARTIAL,
+        because: 'we could not put the script that starts agents in place, so we have not made it. That part of this app is missing or cannot be written, and trying again will not help until it is fixed.',
+        steps,
+      };
+    }
     return {
       outcome: OUTCOME.PARTIAL,
       because: 'we could not write everything it needs, so we have not made it. Nothing has been left on your computer, and you can try that name again.',

@@ -21,6 +21,19 @@ const nodePath = require('node:path');
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'create-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
+// ⚠️ AND THE SUPPORT ROOT, which is where the SHARED supervisor is installed.
+// Without it these tests wrote into the operator's real
+// `~/Library/Application Support/AgentWorkforce`, and the refresh test
+// deliberately overwrote the live supervisor with a one-line comment before
+// putting it back. An interrupted run would have left every created agent's
+// launchd job pointing at a file that is a comment: bash exits at once,
+// KeepAlive respawns it every thirty seconds forever. That is word for word the
+// harm this branch exists to prevent, manufactured by its own test, and nothing
+// cleaned that path up because it was outside the sandbox.
+//
+// It also made two assertions vacuous: `existsSync(supervisorPath())` passed off
+// a PREVIOUS run's leftovers whatever this creation did.
+process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'support');
 process.on('exit', () => {
   try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ }
 });
@@ -50,6 +63,21 @@ const BINS = { claudeBin: '/bin/echo', tmuxBin: '/bin/echo' };
  */
 function supervisorText() {
   return fs.readFileSync(create.supervisorSource(), 'utf8');
+}
+
+/**
+ * The argument vector the launchd job actually passes, read out of the plist.
+ *
+ * ⚠️ Read rather than restated. The order in which `plistFor` writes those
+ * strings and the order `agent-supervisor.sh` reads them are one contract with
+ * two ends, and nothing else in the suite pins it: swapping two of them starts
+ * every real agent with its working directory as its session name, and every
+ * assertion here would still pass.
+ */
+function jobArguments(name) {
+  const plist = create.plistFor(name, '/bin/echo', '/opt/homebrew/bin/tmux');
+  const block = plist.slice(plist.indexOf('<array>'), plist.indexOf('</array>'));
+  return [...block.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]).slice(1);
 }
 
 /**
@@ -777,13 +805,20 @@ case "$1" in
 esac
 `, { mode: 0o755 });
 
-  // ⚠️ The SHIPPED script, run with the same arguments the launchd job passes.
-  // Not a copy, not a regenerated string: the file that actually runs.
-  require('node:child_process').execFileSync(
-    '/bin/bash',
-    [create.supervisorSource(), 'probe', nodePath.join(dir, 'work'), '/bin/echo', fake, nodePath.join(dir, 'agent.log')],
-    { timeout: 20000, stdio: 'pipe' },
-  );
+  // ⚠️ The SHIPPED script, run with the argument vector DERIVED FROM THE JOB.
+  //
+  // Hardcoding the order here would have been two definitions of one fact:
+  // swap `name` and `workerDir` in `plistFor` and every test stays green while
+  // every real agent is started with its working directory as its session name.
+  // So the harness reads the plist the product actually writes, and substitutes
+  // only the two paths it needs to redirect (the fake tmux, and this run's
+  // directory). If the order ever changes, this changes with it or fails.
+  const argv = jobArguments('probe').map((a) => {
+    if (a === create.workerDir('probe')) return nodePath.join(dir, 'work');
+    if (a === '/opt/homebrew/bin/tmux') return fake;
+    return a;
+  });
+  require('node:child_process').execFileSync('/bin/bash', argv, { timeout: 20000, stdio: 'pipe' });
   const calls = fs.readFileSync(log, 'utf8').trim().split('\n');
   fs.rmSync(dir, { recursive: true, force: true });
   return calls;
@@ -1094,4 +1129,29 @@ test('a supervisor that cannot be installed stops the creation', () => {
   create.setDryRun(false);
   assert.equal(create.createAgent({ ...BINS, name: 'no-supervisor', role: 'pm' }).outcome,
     create.OUTCOME.CREATED, 'this name is refused whatever happens, so the above proves nothing');
+});
+
+test('the job passes the supervisor exactly the arguments it reads, in that order', () => {
+  // ⚠️ ONE CONTRACT, TWO ENDS, and nothing else in the suite holds it: the
+  // order `plistFor` writes those strings, and the order the script reads $1..$5.
+  // Swap two and every real agent starts with its working directory as its
+  // session name -- `has-session -t "=/Users/.../workers/x"`, a session created
+  // under that name, and a claim the board can never match -- with the whole
+  // suite green.
+  const args = jobArguments('order-check');
+  assert.deepEqual(args, [
+    create.supervisorPath(),
+    'order-check',
+    create.workerDir('order-check'),
+    '/bin/echo',
+    '/opt/homebrew/bin/tmux',
+    nodePath.join(create.workerDir('order-check'), 'start.log'),
+  ], 'the job no longer passes the supervisor what it reads, in the order it reads it');
+
+  // And the script reads them in that order, by position.
+  const script = supervisorText();
+  for (const [pos, name] of [[1, 'SESSION'], [2, 'WORKDIR'], [3, 'CLAUDE'], [4, 'TMUX_BIN'], [5, 'LOG']]) {
+    assert.ok(script.includes(`${name}="\${${pos}`),
+      `the supervisor does not read ${name} from argument ${pos}`);
+  }
 });
