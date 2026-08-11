@@ -327,6 +327,57 @@ test('something at the path is not the same as something we could run', () => {
   }
 });
 
+test('a definite finding survives the other probe being unreadable', () => {
+  /**
+   * ⚠️ THE SIBLING OF THE SLEEP FIX, UNFIXED FOR A WHILE. With Claude
+   * genuinely absent and tmux unreadable, the early return on the unreadable
+   * one won by arriving first: the whole check came back "We could not check
+   * what is installed", naming only tmux, and `attention` fell to zero — so the
+   * screen said nothing needed doing while Claude Code was definitively not
+   * there. Half the answer was read and none of it was reported.
+   */
+  const fs2 = require('node:fs');
+  const nodeOs = require('node:os');
+  const nodePath = require('node:path');
+  const dir = fs2.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'aw-both-'));
+  const inner = nodePath.join(dir, 'inner');
+  fs2.mkdirSync(inner);
+  const blocked = nodePath.join(inner, 'tmux');
+  fs2.writeFileSync(blocked, '#!/bin/sh\n');
+  fs2.chmodSync(blocked, 0o755);
+  fs2.chmodSync(inner, 0o000);
+  try {
+    // The control: unreadable in a way that is NOT "absent", or there is no test.
+    let code = null;
+    try { fs2.statSync(blocked); } catch (err) { code = err.code; }
+    if (code === null || code === 'ENOENT') return;    // root; nothing to test
+
+    const got = machine.installedCheck({ claudeBin: '/definitely/not/here/claude', tmuxBin: blocked });
+    assert.equal(got.state, 'attention',
+      'a definitely-missing Claude was demoted to "we could not check" because the OTHER '
+      + 'probe was unreadable');
+    assert.match(got.detail, /\/definitely\/not\/here\/claude/,
+      'the definite finding was dropped entirely');
+    assert.match(got.detail, /could not check tmux/,
+      'the unreadable half went unmentioned, so the screen looks like a complete answer');
+  } finally {
+    fs2.chmodSync(inner, 0o755);
+    fs2.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a sleep value we cannot interpret is unknown, not "never sleeps"', () => {
+  // ⚠️ `Number.isFinite` accepted -5, which is neither zero nor greater than
+  // zero, so it fell through every branch into the pass: "This Mac does not go
+  // to sleep". A reading we did not understand became a positive assertion.
+  for (const v of ['-5', '1.5', 'never', '0x10', '+5', '']) {
+    const got = machine.sleepCheck(`AC Power:\n sleep                ${v}\n`);
+    assert.equal(got.state, 'unknown', `sleep=${v} was interpreted rather than refused`);
+  }
+  // The control: a value we DO understand still reads as a pass.
+  assert.equal(machine.sleepCheck('AC Power:\n sleep                0\n').state, 'ok');
+});
+
 test('the install check refuses the same paths creation refuses', () => {
   /**
    * ⚠️ THE OTHER HALF OF THE SHARED-DEFINITION FIX. `binPaths` made the two

@@ -2994,6 +2994,7 @@ let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and 
 // until the check screen has actually answered -- an empty array here would be
 // "we looked and found nothing wrong", which is not the same thing.
 let FR_MACHINE = null;
+let FR_CHECKING = 0;      // which machine-check request is the current one
 
 /**
  * ⚠️ `.onclick`, NOT `addEventListener`. These two buttons change meaning on
@@ -3115,9 +3116,17 @@ async function frPaintMachine() {
    * ⚠️ "Check again" IS HELD DOWN WHILE THIS RUNS. The route behind it shells
    * out twice with a five-second timeout each, on the server's event loop, so a
    * person tapping the button four times can stall the board for everyone
-   * looking at it -- including the poll behind this overlay. It is also the only
-   * button in the product that costs a subprocess per press.
+   * looking at it -- including the poll behind this overlay. (An earlier version
+   * of this comment called it "the only button in the product that costs a
+   * subprocess per press", which was false: step 3's "Check again" runs `tmux
+   * list-panes` and had no guard at all. It has one now.)
    */
+  // ⚠️ A TOKEN, not a boolean. An unconditional re-enable in the `finally` let a
+  // STALE request hand the button back while a newer one was still running: leave
+  // step 2 mid-request, come back, press it again, and request #1 finishing
+  // unlocks the button under request #2.
+  FR_CHECKING += 1;
+  const mine = FR_CHECKING;
   const again = document.getElementById('fr-alt');
   const wasAgain = !again.hidden;
   if (wasAgain) again.disabled = true;
@@ -3144,8 +3153,8 @@ async function frPaintMachine() {
   } finally {
     // ⚠️ `finally`: the failure path returns early, and leaving the one button
     // that retries permanently disabled by a failure is the worst possible time
-    // to lose it.
-    if (wasAgain) again.disabled = false;
+    // to lose it. Only the LATEST request may hand it back.
+    if (wasAgain && mine === FR_CHECKING) again.disabled = false;
   }
   const checks = (got && got.checks) || [];
   FR_MACHINE = got;
@@ -3174,6 +3183,17 @@ async function frPaintMachine() {
 
 async function frRecheck() {
   const msg = document.getElementById('fr-sub-msg');
+  /**
+   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 2's is. A comment used
+   * to claim step 2's was "the only button in the product that costs a
+   * subprocess per press"; it was not. This one calls `/api/first-run`, which
+   * runs `firstrun.state()` -> `fleet()` -> `status.paneRoster()` -> `tmux
+   * list-panes`. The guard was written one screen away from the button that
+   * also needed it.
+   */
+  const again = document.getElementById('fr-alt');
+  const wasAgain = !again.hidden;
+  if (wasAgain) again.disabled = true;
   msg.textContent = 'Looking again…';
   try {
     const res = await fetch('/api/first-run', { cache: 'no-store' });
@@ -3183,12 +3203,22 @@ async function frRecheck() {
     // have changed too while somebody was away signing in, and half-updating it
     // would leave step 4 describing a machine as it was several minutes ago.
     FR = fresh;
+    /**
+     * ⚠️ ONLY REPAINT IF THEY ARE STILL HERE. `/api/first-run` shells out to
+     * `tmux list-panes`, so the window is real: pressing "Check again" and then
+     * Continue landed step 3's buttons on step 4, replacing "Take me to my
+     * agents" with a Continue that just re-ran step 4. The fresh answer is still
+     * kept -- it is the PAINT that is out of date, not the data.
+     */
+    if (FR_STEP !== 3) return;
     msg.textContent = '';
     frPaintSubscription();
   } catch (err) {
     // ⚠️ And the old answer stays on screen, unchanged. A failed re-check must
     // not silently downgrade "connected" to anything.
     msg.textContent = 'We could not check again just now (' + err.message + ').';
+  } finally {
+    if (wasAgain) again.disabled = false;
   }
 }
 
@@ -3308,17 +3338,36 @@ function frPaintFleet() {
      * still outstanding from the check screen is repeated here rather than
      * quietly dropped.
      */
-    const snags = (FR_MACHINE && FR_MACHINE.checks || []).filter((c) => c.state === 'attention');
+    /**
+     * ⚠️ THREE CASES, NOT TWO, and the declaration of `FR_MACHINE` says so while
+     * the first version of this line collapsed them: `(FR_MACHINE && ...) || []`
+     * made "we never checked" identical to "we checked and it was fine". Somebody
+     * who arrived on `?fr-step=4`, or whose check route failed at step 2, got the
+     * unhedged promise.
+     *
+     * ⚠️ AND `unknown` COUNTS. Filtering only `attention` dropped three "we could
+     * not check" rows on the floor and made the same promise over the top of them
+     * -- the third state going missing from the very fix that was written for the
+     * first two.
+     */
+    const checked = FR_MACHINE && Array.isArray(FR_MACHINE.checks);
+    const snags = checked
+      ? FR_MACHINE.checks.filter((c) => c.state === 'attention' || c.state === 'unknown')
+      : null;
     box.innerHTML = '<p>There are no agents on this computer yet, so the next thing to do is '
       + 'make one. It takes two questions: what it is for, and what to call it.</p>'
       + '<p>It starts as soon as it is made, and it is set to start itself again every time '
       + 'this computer does.</p>'
-      + (snags.length
-        ? '<div class="fr-note"><b>' + (snags.length === 1 ? 'One thing' : snags.length + ' things')
-          + ' from the earlier screen still needs sorting.</b> '
-          + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
-          + 'that is done.</div>'
-        : '');
+      + (!checked
+        ? '<div class="fr-note">We did not get to look over this computer, so we cannot say '
+          + 'in advance whether everything an agent needs is in place. You will find out when '
+          + 'you make one, and it will tell you.</div>'
+        : snags.length
+          ? '<div class="fr-note"><b>' + (snags.length === 1 ? 'One thing' : snags.length + ' things')
+            + ' from the earlier screen ' + (snags.length === 1 ? 'is' : 'are') + ' still outstanding.</b> '
+            + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
+            + 'that is sorted.</div>'
+          : '');
     frActions({ label: 'Make my first agent', go: () => frFinish(openCreate) },
       { label: 'Just show me around', go: () => frFinish(() => showTab('agents')) });
     return;
@@ -3458,6 +3507,27 @@ document.addEventListener('keydown', (e) => {
  * Cheap, and it costs nothing where `inert` works: nothing outside can ever
  * receive focus there, so this never fires.
  */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const overlay = document.getElementById('firstrun');
+  if (overlay.hidden) return;
+  /**
+   * ⚠️ WRAPS IN BOTH DIRECTIONS. The `focusin` backstop below always pulled
+   * focus to the heading, which makes Shift+Tab a dead end -- you can never
+   * reach the action bar backwards, because every attempt lands back on the
+   * title. Wrapping here handles the ordinary case properly and leaves the
+   * backstop for anything that gets past it.
+   */
+  const stops = Array.from(overlay.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])'))
+    .filter((el) => !el.hidden && !el.disabled && el.getClientRects().length);
+  if (!stops.length) return;
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && (document.activeElement === first
+    || document.activeElement === document.getElementById('fr-title'))) { e.preventDefault(); last.focus(); }
+});
+
 document.addEventListener('focusin', (e) => {
   const overlay = document.getElementById('firstrun');
   if (overlay.hidden || overlay.contains(e.target)) return;
@@ -3479,6 +3549,11 @@ async function firstRunBoot(force, step) {
     if (!res.ok) throw new Error('status ' + res.status);
     state = await res.json();
   } catch { return; }
+  // ⚠️ Inside the guard, not after it. A 200 whose body is `null` -- or anything
+  // that is not an object -- threw on `state.done` as an unhandled rejection.
+  // The net effect was still "no overlay", but by accident rather than by the
+  // rule three lines up, and an accident is not a fail-closed guarantee.
+  if (!state || typeof state !== 'object') return;
   if (state.done && !force) return;
   FR = state;
   frOpen();

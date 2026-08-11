@@ -55,7 +55,15 @@ function complete() {
   fs.mkdirSync(path.dirname(FLAG), { recursive: true });
   const tmp = `${FLAG}.${process.pid}.new`;
   fs.writeFileSync(tmp, `${JSON.stringify({ completedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8');
-  fs.renameSync(tmp, FLAG);
+  try {
+    fs.renameSync(tmp, FLAG);
+  } catch (err) {
+    // ⚠️ Take the half-written file with us. A full disk or a read-only volume
+    // leaves `first-run.json.<pid>.new` sitting beside the real flag forever,
+    // and the next reader of this directory has to work out which is which.
+    try { fs.unlinkSync(tmp); } catch { /* it was never the point */ }
+    throw err;
+  }
   return seen().done === true;
 }
 

@@ -3079,7 +3079,11 @@ test('the fleet screen never shows fewer names than the number in its own headin
   assert.match(body, /count\s*>\s*names\.length/,
     'the heading count and the list length are no longer reconciled, so a fleet larger '
     + 'than the twelve names the engine sends renders as a heading nobody can verify');
-  assert.match(body, /and\s*'\s*\+\s*\(count - names\.length\)|more/, 'nothing accounts for the difference');
+  // ⚠️ No `|more` alternative here. It used to have one, and `frPaintFleet`
+  // contains the substring "more" in its own `fr-more` class name -- so the
+  // alternation passed even with the reconciliation deleted.
+  assert.match(body, /\(count - names\.length\)/,
+    'nothing computes how many names were not shown, so "and N more" cannot be right');
 
   // And the fork is only offered when the engine could actually count.
   assert.match(body, /path === 'adopt'/);
@@ -3134,7 +3138,184 @@ test('the "we could not remember that" message lives outside the step panes', ()
   assert.match(raw.slice(forgot - 200, forgot + 200), /role="alert"/,
     'the one message somebody must not miss is no longer announced');
 
+  /**
+   * ⚠️ MATCHED AGAINST `frFinish`, NOT AGAINST THE WHOLE SCRIPT. The first
+   * version searched the entire `<script>` body -- and `frGo` also touches
+   * `fr-forgot` (it clears it on every step change), so deleting the write from
+   * `frFinish` outright left this green. Every other assertion in this block
+   * brace-matches the function first; this one did not, which is exactly how a
+   * test ends up guarding nothing.
+   */
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  assert.match(script, /getElementById\('fr-forgot'\)/,
+  const fStart = script.indexOf('async function frFinish');
+  assert.ok(fStart > -1, 'frFinish vanished');
+  let fd = 0; let fEnd = -1;
+  for (let k = script.indexOf('{', fStart); k < script.length; k += 1) {
+    if (script[k] === '{') fd += 1;
+    else if (script[k] === '}') { fd -= 1; if (fd === 0) { fEnd = k + 1; break; } }
+  }
+  assert.ok(fEnd > -1, 'could not find the end of frFinish');
+  assert.match(script.slice(fStart, fEnd), /getElementById\('fr-forgot'\)/,
     'frFinish no longer writes the failure anywhere');
+});
+
+/* ---------------------------------------------------------------------------
+   The two first-run render functions, RUN rather than grepped.
+
+   ⚠️ The plan for this branch promised `pageFunction` tests on the render
+   functions and only `frCheckRow` got one; the rest were regex-over-source
+   assertions, which this file's own header says are not coverage of behaviour.
+   These run the real functions against real payload shapes.
+--------------------------------------------------------------------------- */
+
+/** A fake DOM just big enough for the two painters. */
+function firstRunHarness(name, state) {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+    const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  const realEsc = pageFunction('esc');
+  const realRow = pageFunction('frCheckRow',
+    'const esc = ' + realEsc.toString() + ';\n' + tables);
+
+  const els = {};
+  const prelude = `
+    const esc = ${realEsc.toString()};
+    ${tables}
+    const frCheckRow = ${realRow.toString()};
+    const __els = {};
+    const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '' }) };
+    let FR = ${JSON.stringify(state.FR)};
+    let FR_MACHINE = ${JSON.stringify(state.FR_MACHINE === undefined ? null : state.FR_MACHINE)};
+    let __actions = null;
+    function frActions(primary, alt) { __actions = { primary: primary.label, alt: alt && alt.label }; }
+    function frGo() {}
+    function frFinish() {}
+    function frRecheck() {}
+    function openCreate() {}
+    function showTab() {}
+    globalThis.__els = __els;
+    globalThis.__actions = () => __actions;
+  `;
+  const fn = pageFunction(name, prelude);
+  fn();
+  return { els: globalThis.__els, actions: globalThis.__actions() };
+}
+
+test('an unrecognised subscription answer never renders as "you have none"', () => {
+  /**
+   * ⚠️ THE ONE SENTENCE `engine/subscription.js` SAYS MUST NOT BE SHOWN TO
+   * SOMEBODY WE COULD NOT READ. The dispatcher's first version fell through to
+   * the negative for anything it did not recognise -- a fourth state, a
+   * truncated response, a typo -- which tells a paying customer to go and buy a
+   * second subscription, on the screen that decides whether they keep this.
+   */
+  for (const sub of [
+    { state: 'unknown', because: 'a plan we do not recognise' },
+    { state: 'something-new' },
+    { state: '' },
+    null,
+    undefined,
+  ]) {
+    const { els } = firstRunHarness('frPaintSubscription', { FR: { subscription: sub } });
+    const out = els['fr-sub'].innerHTML;
+    assert.ok(!/No Claude subscription is connected/.test(out),
+      `subscription state ${JSON.stringify(sub)} rendered as the flat negative`);
+    assert.match(out, /fr-check unknown/,
+      `subscription state ${JSON.stringify(sub)} did not render as "we could not tell"`);
+  }
+
+  // ⚠️ THE CONTROL. If nothing can produce the negative any more, the assertions
+  // above are vacuous — so the one state that SHOULD produce it must.
+  const { els } = firstRunHarness('frPaintSubscription', { FR: { subscription: { state: 'none' } } });
+  assert.match(els['fr-sub'].innerHTML, /No Claude subscription is connected/,
+    'nothing renders the negative any more, so the assertions above prove nothing');
+});
+
+test('the fleet screen renders every path, and a broken payload lands on "we could not see"', () => {
+  const adopt = firstRunHarness('frPaintFleet', {
+    FR: { path: 'adopt', fleetCount: 13, fleetNames: ['Splinter', 'Angel'] },
+  });
+  assert.match(adopt.els['fr-title'].textContent, /13 agents/);
+  // ⚠️ 13 counted, 2 named. The difference has to be on screen or the heading is
+  // a claim the list contradicts.
+  assert.match(adopt.els['fr-fleet'].innerHTML, /and 11 more/,
+    'eleven agents went unaccounted for under a heading that counted them');
+  assert.match(adopt.els['fr-fleet'].innerHTML, /nothing to import/i);
+
+  const create = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+  });
+  assert.match(create.els['fr-title'].textContent, /first agent/i);
+
+  /**
+   * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
+   * board is built from `tmux`, and guessing "make your first agent" at somebody
+   * with a running fleet is the version of this mistake that looks broken.
+   */
+  for (const FR of [
+    null,
+    {},
+    { path: 'unknown', fleetCount: null, fleetNames: [] },
+    { path: 'adopt' },                                   // count and names missing
+    { path: 'nonsense', fleetCount: 3, fleetNames: [] },
+  ]) {
+    const got = firstRunHarness('frPaintFleet', { FR });
+    const title = got.els['fr-title'].textContent;
+    const body = got.els['fr-fleet'].innerHTML;
+    assert.ok(typeof title === 'string' && title.length > 0,
+      `payload ${JSON.stringify(FR)} rendered a screen with no heading at all`);
+    assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
+    assert.ok(got.actions && got.actions.primary,
+      `payload ${JSON.stringify(FR)} left the person with no button to press`);
+  }
+
+  // Both ways out are always offered, whichever path it picked.
+  for (const path of ['adopt', 'create', 'unknown']) {
+    const got = firstRunHarness('frPaintFleet', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
+    assert.ok(got.actions.primary && got.actions.alt,
+      `the ${path} path offers only one door`);
+  }
+});
+
+test('step 4 does not promise a working agent over a check screen that disagreed', () => {
+  /**
+   * ⚠️ THREE CASES, and the first version of this collapsed them to two. "We
+   * never checked" is not "we checked and it was fine", and an `unknown` row is
+   * not a clean one — filtering only `attention` dropped three "we could not
+   * check" findings and made the promise anyway.
+   */
+  const clean = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: { checks: [{ key: 'sleep', state: 'ok', title: 'fine', detail: 'fine' }], attention: 0, unknown: 0 },
+  });
+  assert.ok(!/still outstanding|did not get to look/.test(clean.els['fr-fleet'].innerHTML),
+    'warned about a machine that checked out clean');
+
+  const snagged = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: {
+      checks: [
+        { key: 'installed', state: 'attention', title: 'Claude Code is not where we expected it', detail: 'x' },
+        { key: 'restart', state: 'unknown', title: 'We could not tell whether your agents will start themselves', detail: 'x' },
+      ],
+      attention: 1,
+      unknown: 1,
+    },
+  });
+  const out = snagged.els['fr-fleet'].innerHTML;
+  assert.match(out, /still outstanding/, 'made the promise over the top of a real finding');
+  assert.match(out, /Claude Code is not where we expected it/);
+  assert.match(out, /We could not tell whether your agents/,
+    'the "we could not check" rows were dropped, so only two of the three states are honoured');
+
+  const never = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: null,
+  });
+  assert.match(never.els['fr-fleet'].innerHTML, /did not get to look/,
+    'a person who never saw the check screen was told everything is in place');
 });

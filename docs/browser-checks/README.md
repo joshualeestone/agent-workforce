@@ -59,7 +59,7 @@ paint or geometry result from it is weaker evidence than a headed one.
 ## What each does
 
 **`render-first-run.js`** opens all nine first-run states in light and dark,
-screenshots them into `docs/screenshots/firstrun-*.png`, and measures the
+screenshots them into the output directory you pass it (copy them to `docs/screenshots/firstrun-*.png` when they are what you want in the PR), and measures the
 things a text assertion cannot see: that the overlay is opaque and actually
 covering, that a click in the middle of the screen lands on it, that every
 visible string clears its WCAG AA ratio, that nothing runs off the side, and
