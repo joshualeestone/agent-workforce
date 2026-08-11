@@ -143,19 +143,32 @@ function plan(name, { alsoDeleteFolder = false } = {}) {
   }
 
   const folder = create.workerDir(clean);
+  // ⚠️ Counted RECURSIVELY, because the delete is recursive. `readdirSync` on
+  // its own reports a folder holding one subdirectory of five hundred files as
+  // "1 item", under a plan whose stated purpose is to say what is actually
+  // inside rather than "its files".
   let contents = [];
   try {
-    contents = fs.readdirSync(folder);
+    contents = fs.readdirSync(folder, { recursive: true });
   } catch { /* the folder may already be gone, which the plan simply reflects */ }
 
   return {
     ok: true,
     name: clean,
+    // ⚠️ EVERY destructive step, including the one nobody would think to ask
+    // about. `remove()` also clears the picture, the job title and the
+    // commitment record this app keeps under its own data directory — and the
+    // commitment text can name real work, which the module's own comment calls
+    // a privacy question. The confirmation renders THIS list and nothing else,
+    // so a step missing from here is a thing destroyed without being announced.
     steps: [
       'stop it running',
       'end its session',
       'remove its startup job, so it does not come back at your next login',
-      alsoDeleteFolder ? `delete its folder and everything in it (${contents.length} file${contents.length === 1 ? '' : 's'})` : null,
+      'forget its picture, its job title, and anything it said it was working on',
+      alsoDeleteFolder
+        ? `delete its folder and everything in it (${contents.length} item${contents.length === 1 ? '' : 's'})`
+        : null,
     ].filter(Boolean),
     // What the person is about to lose if they tick the box, named specifically
     // rather than as "its files".
@@ -230,49 +243,78 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
   }
 
   /**
-   * ⚠️ THE SESSION MUST BE OURS, not merely named ours.
+   * ⚠️ THREE WORLDS, NOT TWO, and collapsing them was a defect that deleted
+   * somebody's folder out from under a running agent.
    *
-   * Owning the plist is a fact about DISK. It says this product created an
-   * agent by this name; it does not say the session holding that name right now
-   * is that agent. Our agent's session can die — a crash, or somebody's
-   * `kill-session` — and something else can take the name before the person
-   * gets round to removing the stale card.
+   * The first version asked "is this session ours?" and treated every `false`
+   * the same: no session, a session that is not ours, and TMUX WE COULD NOT ASK
+   * all meant "nothing to end", so the step recorded "ended its session", the
+   * removal ran on to delete the folder, and the agent carried on running out
+   * of a directory that no longer existed. Reachable without anything exotic —
+   * tmux not at the path we expect, which is the Intel-Mac case the README
+   * documents and which `create` preflights and refuses.
    *
-   * `bin/agent-supervisor.sh` already refuses to touch a session it cannot tie
-   * to `@kosmos_agent`, and the README advertises that guarantee. Removal held
-   * a lower bar than the product's own startup script, which is the wrong way
-   * round for the destructive half.
+   * So the question is asked in the right order, and "we could not ask" is its
+   * own answer:
+   *
+   *   cannot ask tmux        → PARTIAL. Never REMOVED, never a folder delete.
+   *   no session by that name → nothing to end. Proceed.
+   *   session, claim is ours  → kill it, then LOOK AGAIN.
+   *   session, not ours       → leave it alone; our files still go.
+   *   session, cannot tell    → PARTIAL. Proving it is not ours is not the same
+   *                             as failing to prove it is.
    */
-  const sessionIsOurs = (() => {
-    const r = run(tmux, ['show-options', '-t', clean, '-v', '@kosmos_agent']);
-    if (!r || r.ok === false) return false;    // no such session, or we cannot ask
-    return String(r.stdout || '').trim() === clean;
-  })();
+  const present = run(tmux, ['has-session', '-t', `=${clean}`]);
+  const sessionExists = Boolean(present && present.ok !== false);
+  const cannotAsk = !sessionExists && !(present && present.code === 1);
+  if (cannotAsk) {
+    steps.push({ label: 'looked for its session', ok: false });
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we stopped its startup job, but could not ask tmux whether it is still running, so we have gone no further. Nothing else has been removed.',
+      steps,
+    };
+  }
+
+  let claim = null;
+  if (sessionExists) {
+    const asked = run(tmux, ['show-options', '-t', clean, '-v', '@kosmos_agent']);
+    if (!asked || asked.ok === false) {
+      steps.push({ label: 'checked whose session it is', ok: false });
+      return {
+        outcome: OUTCOME.PARTIAL,
+        because: `we stopped its startup job, but something is still running as ${clean} and we could not check whether it is the agent we made. We have not touched it, and nothing else has been removed.`,
+        steps,
+      };
+    }
+    claim = String(asked.stdout || '').trim();
+  }
 
   const endedSession = step('ended its session', () => {
-    if (!sessionIsOurs) {
-      // Nothing of ours is running under that name. That IS the end state we
-      // wanted, and killing whatever is there instead would be the hazard the
-      // supervisor refuses.
-      return true;
-    }
-    // The `=` form, exactly: `kill-session -t sam` prefix-matches and will
-    // happily end `samantha-discord`. Measured on this machine, by doing it.
+    // Nothing running under that name: the end state we wanted is already true.
+    if (!sessionExists) return true;
+    /**
+     * ⚠️ Somebody else's. Owning the plist is a fact about DISK — it says this
+     * product made an agent by this name, not that the session holding the name
+     * right now is that agent. Ours can die and something else can take it.
+     * `bin/agent-supervisor.sh` already refuses to touch a session it cannot tie
+     * to `@kosmos_agent`; removal must not hold a lower bar than the product's
+     * own startup script.
+     */
+    if (claim !== clean) return true;
+
     const r = run(tmux, ['kill-session', '-t', `=${clean}`]);
     if (!(r && (r.ok !== false || r.code === 1))) return false;
-    // ⚠️ LOOK AGAIN. The launchd half is verified with `print`; the session half
-    // was asserted from a command whose answer was not re-checked, so a kill
-    // that failed for any reason other than exit 1 — tmux not at the path we
-    // expected, most likely — reported "ended its session" over a session
-    // somebody can still talk to, and then the folder beneath it was deleted.
+    // ⚠️ LOOK AGAIN, because the launchd half is verified with `print` and this
+    // half was asserted from a command whose answer was never re-read.
     const still = run(tmux, ['has-session', '-t', `=${clean}`]);
-    return !(still && still.ok !== false);
+    return Boolean(still && still.ok === false && still.code === 1);
   });
 
-  // ⚠️ STOP if it is still running. Continuing would delete the working
-  // directory out from under a live agent, return the person to a board that
-  // still shows it, and leave a name that can be neither removed (no plist) nor
-  // recreated (the session is still on the roster).
+  // ⚠️ STOP if it is still running. Continuing deletes the working directory out
+  // from under a live agent, returns the person to a board that still shows it,
+  // and leaves a name that can be neither removed (no plist) nor recreated (the
+  // session still holds it).
   if (!endedSession) {
     return {
       outcome: OUTCOME.PARTIAL,

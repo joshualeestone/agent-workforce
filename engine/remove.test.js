@@ -50,10 +50,18 @@ function recorder(mod) {
  */
 function recorderForOurSession(name) {
   const calls = [];
+  let asked = 0;
   remove.setRunner((file, args) => {
     calls.push([file, args]);
     if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
-    if (args && args[0] === 'has-session') return { ok: false, code: 1 };   // gone after the kill
+    if (args && args[0] === 'has-session') {
+      // ⚠️ Present the FIRST time (there is a session to end) and absent
+      // afterwards (the kill worked). The removal asks twice on purpose, and a
+      // fixture that always answered "gone" exercised neither the kill nor the
+      // look-again.
+      asked += 1;
+      return asked === 1 ? { ok: true, stdout: '' } : { ok: false, code: 1 };
+    }
     return { ok: true, stdout: '' };
   });
   return calls;
@@ -163,6 +171,13 @@ test('the plan names every step, and says what is permanent', () => {
 
   assert.equal(keep.ok, true, keep.because);
   assert.ok(keep.steps.length >= 3, 'the plan does not say what it will do');
+  // ⚠️ EVERY destructive step is announced, not just the obvious ones. `remove`
+  // also clears the picture, the job title and the commitment record -- and the
+  // commitment text can name real work. A step the plan does not mention is a
+  // thing destroyed without being shown, and `steps.length >= 3` would not
+  // have noticed a fifth one being added tomorrow.
+  assert.ok(keep.steps.some((s) => /picture/.test(s) && /working on/.test(s)),
+    'the plan does not mention that the app forgets what it remembered, which it always does');
   assert.ok(keep.steps.some((s) => /startup job/.test(s)),
     'the plan does not mention the job, which is the part that makes it stick');
   assert.match(keep.warning, /cannot be undone/,
@@ -362,8 +377,13 @@ test('a session that cannot be killed is not reported as ended', () => {
   // "ended its session" over a session somebody can still talk to.
   const name = madeAgent('kill-fails');
   remove.setRunner((file, args) => {
+    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
     if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
-    if (args && args[0] === 'kill-session') return { ok: false, code: 127 };  // tmux not found
+    // ⚠️ A kill that fails for a reason that is NOT "already gone". The first
+    // version of this fixture used 127 and called it the missing-tmux case,
+    // which cannot happen: a missing binary fails EVERY call, not just this
+    // one. That world is covered by its own test below.
+    if (args && args[0] === 'kill-session') return { ok: false, code: 2 };
     return { ok: true, stdout: '' };
   });
   remove.setDryRun(false);
@@ -383,10 +403,11 @@ test('a session that cannot be killed is not reported as ended', () => {
 
   // Exit 1 IS fine: the session was already gone.
   const name2 = madeAgent('already-gone');
+  let seen = 0;
   remove.setRunner((file, args) => {
     if (args && args[0] === 'show-options') return { ok: true, stdout: name2 + '\n' };
     if (args && args[0] === 'kill-session') return { ok: false, code: 1 };
-    if (args && args[0] === 'has-session') return { ok: false, code: 1 };
+    if (args && args[0] === 'has-session') { seen += 1; return seen === 1 ? { ok: true, stdout: '' } : { ok: false, code: 1 }; }
     return { ok: true, stdout: '' };
   });
   remove.setDryRun(false);
@@ -432,7 +453,8 @@ test('it will not kill a session it cannot prove is ours', () => {
   const calls = [];
   remove.setRunner((file, args) => {
     calls.push([file, args]);
-    // A session of that name exists, and it is somebody else's.
+    // A session of that name EXISTS, and it is somebody else's.
+    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
     if (args && args[0] === 'show-options') return { ok: true, stdout: 'not-ours\n' };
     return { ok: true, stdout: '' };
   });
@@ -540,4 +562,89 @@ test('keeping the folder is said to cost the name, because it does', () => {
     create.setRunner(null);
     status.setPaneSource(null);
   }
+});
+
+test('a tmux we cannot reach stops the removal, rather than reading as "nothing is there"', () => {
+  // ⚠️ THE BLOCKER THIS PINS, and it is the failure this whole codebase is
+  // written against, in the one place where it destroys something.
+  //
+  // "Is this session ours?" answered false for THREE different worlds: no
+  // session, somebody else's session, and TMUX WE COULD NOT ASK. The third read
+  // as "nothing to end", so the step recorded "ended its session", the removal
+  // deleted the folder, and the agent carried on running out of a directory
+  // that no longer existed. It was then neither removable (no plist, so not
+  // ours) nor recreatable (the session still holds the name).
+  //
+  // Reachable with nothing exotic: tmux not at the path we expect, which is the
+  // Intel-Mac case the README documents and `create` refuses up front. A missing
+  // binary fails EVERY tmux call, which is what this fixture describes.
+  const name = madeAgent('tmux-missing');
+  remove.setRunner((file, args) => {
+    if (file !== '/bin/launchctl') return { ok: false, code: null };   // ENOENT: no status
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name, { alsoDeleteFolder: true });
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'a removal that could not ask tmux anything reported the agent gone');
+  assert.match(r.because, /could not ask tmux/);
+  assert.ok(fs.existsSync(create.workerDir(name)),
+    "it deleted the folder out from under an agent it never confirmed had stopped");
+  assert.ok(r.steps.some((s) => /looked for its session/.test(s.label) && !s.ok),
+    'the record does not show that the question was never answered');
+
+  // ⚠️ THE CONTROL. Exit 1 from `has-session` means "no such session", which IS
+  // an answer, and must proceed — otherwise nothing could ever be removed once
+  // its session had already ended.
+  const gone = madeAgent('already-stopped');
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'has-session') return { ok: false, code: 1 };
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+  assert.equal(remove.remove(gone).outcome, remove.OUTCOME.REMOVED,
+    'an agent whose session had already ended cannot be removed at all');
+});
+
+test('a session that survives the kill is not reported as ended', () => {
+  // ⚠️ The look-again after the kill had no test at all: replacing it with
+  // `return true` left every test green. A kill can report success and leave the
+  // session up — and this is the check that stops the folder being deleted
+  // under it.
+  const name = madeAgent('survives-kill');
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };   // still there, always
+    if (args && args[0] === 'show-options') return { ok: true, stdout: name + '\n' };
+    if (args && args[0] === 'kill-session') return { ok: true, stdout: '' };  // claims success
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name, { alsoDeleteFolder: true });
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
+    'a kill that reported success over a surviving session was believed');
+  assert.match(r.because, /could not end the session/);
+  assert.ok(fs.existsSync(create.workerDir(name)), 'the folder went while the agent was still running');
+});
+
+test('a session we cannot identify is left alone, and the removal stops', () => {
+  // Proving a session is NOT ours is different from failing to prove it IS.
+  // The first lets us leave it and carry on; the second must stop, because
+  // whatever is running might be the agent being removed.
+  const name = madeAgent('unreadable-claim');
+  const calls = [];
+  remove.setRunner((file, args) => {
+    calls.push([file, args]);
+    if (args && args[0] === 'has-session') return { ok: true, stdout: '' };
+    if (args && args[0] === 'show-options') return { ok: false, code: 3 };   // cannot read it
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name, { alsoDeleteFolder: true });
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL);
+  assert.match(r.because, /could not check whether it is the agent we made/);
+  assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'), 'it killed what it could not identify');
+  assert.ok(fs.existsSync(create.workerDir(name)), 'it deleted the folder anyway');
 });

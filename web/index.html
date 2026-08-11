@@ -421,7 +421,9 @@ svg { display: block; }
         <button class="btn" id="d-remove-cancel" type="button">Keep it</button>
       </div>
     </div>
-    <div class="fmsg" id="d-remove-msg" role="status" aria-live="polite"></div>
+    <!-- `alert`, not `status`: "it will come back when you next log in" is the
+         one message here a person must not walk away without hearing. -->
+    <div class="fmsg" id="d-remove-msg" role="alert" aria-live="assertive"></div>
   </div>
 </section>
 
@@ -1461,8 +1463,10 @@ function paintRemovePlan() {
   document.getElementById('d-remove-steps').innerHTML =
     plan.steps.map((s) => '<li>' + esc(s) + '</li>').join('');
   const n = plan.folderContents ? plan.folderContents.length : 0;
+  // "items", not "files": the count is recursive, matching the delete, so a
+  // subdirectory is in it and calling that a file would be wrong.
   document.getElementById('d-remove-folder-label').textContent =
-    'Also delete its folder, and the ' + n + ' file' + (n === 1 ? '' : 's') + ' in it, including the instructions you wrote';
+    'Also delete its folder, and the ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, including the instructions you wrote';
 }
 
 document.getElementById('d-remove-start').addEventListener('click', () => {
@@ -1566,11 +1570,25 @@ document.getElementById('d-remove-go').addEventListener('click', async () => {
     // without reading.
     if (done.outcome === 'partial') {
       msg.textContent = done.because;
-      go.disabled = false;
+      /**
+       * ⚠️ RELOAD THE PANEL, do not just re-enable the button.
+       *
+       * Some partials happen after the job has already been removed, and
+       * ownership is keyed on that job — so pressing "Yes, remove it" again
+       * answered "this agent was not created by this app" about the agent the
+       * person had just removed, under a hint still saying it could be removed
+       * here. Asking the engine again puts the screen back in step with the
+       * machine, whatever half-state it is now in.
+       */
       await tick();
+      if (CURRENT) await loadRemoval(CURRENT.sessionName);
       return;
     }
     go.disabled = false;
+    // Nothing should still be pointing at an agent that no longer exists: the
+    // panel behind the board would keep its data, and the plan with it.
+    CURRENT = null;
+    REMOVE_PLAN = null;
     showTab('agents');
     await tick();
   } catch (err) {

@@ -84,6 +84,14 @@ process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), '
 // this one does.
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ ARM DRY-RUN FOR THE REMOVAL ENGINE, at load, before `server.js` requires
+// it. `remove` defaults to NOT dry-run (it must, or the product removes nothing
+// while reporting success), so what keeps `launchctl` off this machine during a
+// route test is otherwise only the ownership gate refusing before it runs and
+// the injected runner inside one try block. That is a correct outcome resting on
+// call ordering, and the next removal test somebody adds outside that block
+// would execute the real thing. `setRunner(null)` re-arms dry-run.
+require('./engine/remove').setRunner(null);
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

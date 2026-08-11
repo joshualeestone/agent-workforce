@@ -45,6 +45,10 @@ not enough:
     rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist
     tmux kill-session -t "=<name>"
     rm -rf ~/work/workers/<name>
+    # and what this app remembered about it, which is kept elsewhere:
+    rm -f ~/Library/Application\ Support/AgentWorkforce/avatars/<name>.*
+    rm -f ~/Library/Application\ Support/AgentWorkforce/profiles/<name>.json
+    rm -f ~/Library/Application\ Support/AgentWorkforce/commitments/<name>.json
 
 The `=` is not a typo. Without it tmux resolves a target by PREFIX, so
 `kill-session -t sam` will happily kill `samantha-discord` if no session is
