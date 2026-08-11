@@ -84,6 +84,14 @@ process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), '
 // this one does.
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ ARM DRY-RUN FOR THE REMOVAL ENGINE, at load, before `server.js` requires
+// it. `remove` defaults to NOT dry-run (it must, or the product removes nothing
+// while reporting success), so what keeps `launchctl` off this machine during a
+// route test is otherwise only the ownership gate refusing before it runs and
+// the injected runner inside one try block. That is a correct outcome resting on
+// call ordering, and the next removal test somebody adds outside that block
+// would execute the real thing. `setRunner(null)` re-arms dry-run.
+require('./engine/remove').setRunner(null);
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1661,6 +1669,32 @@ test('every write route refuses the untied card’s own spelling while the real 
         + 'bystander can act on the real agent');
     }
 
+    /**
+     * ⚠️ THE REMOVAL ROUTES, which were added to this server after the gate was
+     * built and were never brought under it.
+     *
+     * They are the most dangerous members of this list, because they do not
+     * merely write a file: `jobFor('Angel')` resolves to the REAL agent's
+     * `com.angel.discord.plist`, and a removal disables and boots it out. So a
+     * bystander's `tmux new -s Angel` would have taken the operator's actual
+     * agent off the air, permanently at the next login, from a screen that
+     * offered them a live button to do it.
+     *
+     * ⚠️ Asserted through the ROUTE rather than only on the engine. An engine
+     * test does not prove a route is wired, and this whole finding is that a
+     * route was never wired to a gate that already existed.
+     */
+    for (const [method, path] of [['GET', '/api/agent/Angel/removal'], ['DELETE', '/api/agent/Angel/removal']]) {
+      const res = await req(path, method === 'GET' ? undefined : { method });
+      assert.notEqual(res.status, 200,
+        `${method} ${path} was accepted under the untied card's own spelling, so a bystander `
+        + "can disable the real agent's startup job");
+      const body = JSON.parse(res.body);
+      assert.ok(!body.ok, 'the removal was offered for a name the board will not vouch for');
+      assert.match(body.because || body.error || '', /cannot confirm it is this agent/,
+        'it refused without saying why, so the refusal reads as a bug rather than a guard');
+    }
+
     // ⚠️ And the real agent stays writable under its own name, or the fix has
     // simply broken the feature — the direction a previous version of this
     // predicate got wrong.
@@ -1669,6 +1703,12 @@ test('every write route refuses the untied card’s own spelling while the real 
       body: JSON.stringify({ role: 'still editable' }),
     });
     assert.equal(ok.status, 200, 'the real agent became uneditable under its own name');
+
+    // ⚠️ And removal still WORKS for the real agent under its own name, or the
+    // gate has quietly deleted the feature instead of protecting it.
+    const offered = await req('/api/agent/angel/removal');
+    assert.equal(offered.status, 200, 'the gate refuses the real agent too, which removes the feature');
+    assert.equal(JSON.parse(offered.body).ok, true, 'the real agent can no longer be removed under its own name');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
@@ -2096,4 +2136,778 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   assert.doesNotMatch(clean, /could not read/,
     'a healthy board carries a permanent warning about unreadable lines');
   assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
+});
+
+test('the removal routes ask, remove, and put back, over the wire', async () => {
+  // ⚠️ The engine was well covered and the surface a browser talks to was not.
+  // These routes are how the fleet is managed, and the restore route is what
+  // makes the removal safe to offer.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+
+  // An agent that exists, made the way the product makes them.
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = create.createAgent({ name: 'route-removable', role: 'pm' });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+
+  // ⚠️ THE QUESTION, which is what the confirmation renders. It is fetched
+  // rather than composed in the browser so the words a person is asked cannot
+  // drift from what the engine will actually do.
+  const asked = await req('/api/agent/route-removable/removal');
+  assert.equal(asked.status, 200);
+  const body = JSON.parse(asked.body);
+  assert.equal(body.ok, true);
+  assert.match(body.question, /route-removable/,
+    'the confirmation does not name the agent, so a misclick reads the same as the right click');
+  assert.match(body.reassurance, /not be deleted/i,
+    'the screen never tells them their files are safe, which is the one thing they want to know');
+  /**
+   * ⚠️ Was `assert.equal(body.steps, undefined, …)`, which could not fail:
+   * `plan` has never returned `steps` in any revision, so it asserted the
+   * absence of something that was never there. An absence assertion needs a
+   * presence to be measured against -- the removal ITSELF returns `steps`, so
+   * that is the control, and the point becomes the real one: the step list is
+   * for the outcome, and the QUESTION must not recite it.
+   */
+  /**
+   * ⚠️ Stub the roster before ACTING, not only before asserting. This ran with
+   * `setPaneSource(null)`, so `plan()` shelled out to the operator's real tmux
+   * and the branch this assertion depends on was decided by whatever the live
+   * fleet happened to be doing -- a real session under this name would change
+   * the outcome. Dry-run, so nothing was stopped; machine-dependent all the
+   * same, in a file that spends two paragraphs elsewhere insisting on exactly
+   * this.
+   */
+  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneCapture(() => null);
+  const acted = removal.remove('route-removable');
+  status.setPaneSource(null);
+  status.setPaneCapture(null);
+  assert.ok(Array.isArray(acted.steps) && acted.steps.length > 0,
+    'the control failed: nothing produces a step list, so hiding it from the question proves nothing');
+  assert.equal(body.steps, undefined,
+    'the route is back to reciting launchd steps at a person who does not want them');
+  for (const s of acted.steps) {
+    assert.doesNotMatch(String(body.question) + String(body.reassurance), new RegExp(s.label),
+      'the confirmation recites what the removal will do, which Josh cut for describing our implementation');
+  }
+
+  /**
+   * ⚠️ AN AGENT ANOTHER TOOL CREATED — now REMOVABLE, reversing an earlier
+   * design that refused these. Josh: managing the fleet you actually have is
+   * the point, so an agent Kosmos cannot remove is a hole rather than a
+   * safeguard. Built as one rather than named as one, so the fixture differs
+   * from an owned agent in exactly the property that matters: its job is
+   * another tool's label, not ours.
+   */
+  const foreignName = 'route-foreign';
+  fs.mkdirSync(create.workerDir(foreignName), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(foreignName), 'CLAUDE.md'), 'You are **Foreign**.\n', 'utf8');
+  const foreignPlist = nodePath.join(nodePath.dirname(create.plistPath(foreignName)), `com.${foreignName}.discord.plist`);
+  fs.writeFileSync(foreignPlist, '<plist/>', 'utf8');
+
+  const foreign = await req(`/api/agent/${foreignName}/removal`);
+  assert.equal(foreign.status, 200,
+    'the route refused an agent another tool created, which this rebuild exists to support');
+
+  /**
+   * ⚠️ IT IS ASKED ABOUT BY THE NAME ON ITS CARD, NOT ITS NAME ON THE MACHINE.
+   *
+   * This fixture has both, on purpose: the session is `route-foreign` and its
+   * instruction file calls it `Foreign`. They are the same string for every
+   * agent Kosmos creates, so only a pre-existing agent — the kind this rebuild
+   * exists to support — can tell the two apart at all. On the real fleet the
+   * pair is `claudebot` / `Splinter`, and the confirmation asked about
+   * `claudebot`: a name the person has never seen on the board they clicked
+   * from. Josh asked for the confirmation to be named so somebody *understands
+   * what they are doing*, and a name they do not recognise does the opposite.
+   *
+   * The `doesNotMatch` is the half that would have caught it. Asserting only
+   * that "Foreign" appears passes just as happily against a sentence carrying
+   * both names.
+   */
+  const foreignAsk = JSON.parse(foreign.body);
+  assert.match(foreignAsk.question, /Foreign/,
+    'the confirmation does not call the agent what the board calls it');
+  assert.doesNotMatch(foreignAsk.question, /route-foreign/,
+    'the confirmation names the session rather than the agent, so it asks about a name nobody has seen');
+  assert.equal(foreignAsk.label, 'Foreign',
+    'the buttons have no display name to use, so they fall back to naming the session');
+  assert.equal(foreignAsk.name, foreignName,
+    'the display name reached the field the removal is ACTED on, which would remove the wrong thing or nothing');
+
+  // A malformed name answers rather than crashing the process.
+  const bad = await req('/api/agent/%/removal', { method: 'DELETE' });
+  assert.equal(bad.status, 400);
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'the server died on a malformed name');
+
+  const seenRemoved = [];
+  removal.setRunner((f, a) => { seenRemoved.push([f, a]); return a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }; });
+  removal.setDryRun(false);
+  // ⚠️ THE AGENT HAS TO BE ON THE BOARD BEFORE ANY OF THIS MEANS ANYTHING. An
+  // earlier version of this test asserted "it is gone from the board" without
+  // it ever having been there — which passes against a board that never
+  // filtered anything, and passed against one that filtered everything. The
+  // control below is the assertion that gives the two after it their meaning.
+  /**
+   * ⚠️ Stub the pane CAPTURE as well as the pane SOURCE.
+   *
+   * Overriding only the source makes the roster synthetic and then lets
+   * `/api/status` run real `tmux capture-pane` against every fixture name --
+   * which printed `can't find session: route-removable` to stderr on each run, and made this
+   * test depend on the machine's tmux (it would read differently on a box with
+   * no tmux server, or one where a session happened to share the fixture's
+   * name). `null` is exactly what real tmux answered for a session that does
+   * not exist, so nothing else about the test changes.
+   *
+   * ⚠️ Deliberately per-test rather than at file load: several older tests call
+   * `setPaneCapture(null)` in their own `finally`, which would clear a
+   * file-level stub for everything running after it. And a few of them let the
+   * roster fall through to the REAL fleet on purpose, so a global stub would
+   * quietly change what those are measuring.
+   */
+  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneCapture(() => null);
+  try {
+    const before = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(before.includes('route-removable'),
+      'the agent is not on the board to begin with, so nothing below about removing it from the board can fail');
+
+    const gone = await req('/api/agent/route-removable/removal', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(gone.status, 200, 'a legitimate removal was refused: ' + gone.body);
+    assert.equal(JSON.parse(gone.body).outcome, 'removed');
+
+    // ⚠️ REMOVE IS NOT DELETE, asserted at the route rather than only in the
+    // engine: this is the layer the browser reaches, and a route that passed a
+    // wipe flag through would satisfy every engine test.
+    assert.ok(fs.existsSync(create.plistPath('route-removable')), 'the route deleted the startup job');
+    assert.ok(fs.existsSync(create.instructionFile('route-removable')),
+      "the route deleted the agent's instructions");
+
+    // ⚠️ AND IT COMES OFF THE BOARD. The engine cannot assert this — the board
+    // is assembled here — and it is the only part of a removal the person who
+    // asked for it can actually see.
+    const listed = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(!listed.includes('route-removable'),
+      'a removed agent is still on the board, so nothing appeared to happen');
+
+    const removedList = JSON.parse((await req('/api/removed')).body).agents.map((a) => a.name);
+    assert.ok(removedList.includes('route-removable'),
+      'a removed agent is on no list at all, so it is stopped, invisible, and unrecoverable');
+
+    // ⚠️ THE ROUND TRIP. Restore must genuinely put it back — this route is the
+    // reason the confirmation is allowed to be a single light question.
+    const back = await req('/api/agent/route-removable/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(back.status, 200, 'restore was refused: ' + back.body);
+    assert.equal(JSON.parse(back.body).outcome, 'restored');
+    assert.ok(seenRemoved.some(([, a]) => a && a[0] === 'enable'),
+      'nothing was re-enabled, so the agent is "restored" but will not start again');
+    const after = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
+    assert.ok(after.includes('route-removable'), 'a restored agent never came back to the board');
+  } finally {
+    removal.setRunner(null);
+    create.setRunner(null);
+    status.setPaneSource(null);
+    // ⚠️ Put the capture back too, or this test's stub leaks onto every test
+    // that runs after it -- including the ones that read the real fleet.
+    status.setPaneCapture(null);
+  }
+
+  // ⚠️ AND BOTH WRITES ARE COVERED BY THE CROSS-SITE GUARD. They are
+  // state-changing methods that stop and start real jobs; a page on another
+  // site must not be able to reach either one.
+  const crossSite = await req('/api/agent/route-removable/removal', {
+    method: 'DELETE', headers: { origin: 'https://evil.example' },
+  });
+  assert.equal(crossSite.status, 403, 'another website can remove an agent');
+  const crossSiteBack = await req('/api/agent/route-removable/restore', {
+    method: 'POST', headers: { origin: 'https://evil.example' },
+  });
+  assert.equal(crossSiteBack.status, 403, 'another website can restore an agent');
+});
+
+test('the confirmation asks by name, defaults to keeping, and never writes its own words', () => {
+  /**
+   * ⚠️ THIS IS A SOURCE TEST AND SOURCE TESTS ARE WEAK. There is no DOM here —
+   * the product ships zero dependencies, so nothing in this suite can click the
+   * button. What follows checks that the browser file is WIRED the stated way;
+   * it cannot prove the modal behaves that way when a person uses it, and a
+   * mutation that moves one of these lines inside a conditional keeps it green.
+   *
+   * It is worth having anyway for one property no other test can reach: that
+   * this file does not COMPOSE the confirmation. Everything the person is asked
+   * comes from the engine, which IS executed, and is covered by the route test
+   * above. The live round trip in the proof file is what checks the behaviour.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  // The words come from the engine's answer, not from here.
+  assert.match(raw, /rm-title'\)\.textContent = ask\.question/,
+    'the browser writes its own confirmation heading, so it can drift from what removal actually does');
+  assert.match(raw, /rm-small'\)\.textContent = ask\.reassurance/,
+    'the reassurance is composed in the browser rather than served with the question');
+  assert.doesNotMatch(raw, /Are you sure you want to remove/,
+    'the confirmation sentence is hardcoded in the page, which is the drift this split exists to prevent');
+
+  // ⚠️ BOTH buttons name the agent. A bare "Yes"/"No" beside a half-read
+  // heading is how the wrong agent gets removed.
+  /**
+   * ⚠️ Named from the ENGINE's label, the same source as the heading — not from
+   * the session name the page happens to be holding. Those differ for exactly
+   * the pre-existing agents this feature was rebuilt for, and using both put a
+   * button reading "Remove claudebot" under a heading asking about Splinter.
+   */
+  assert.match(raw, /const shown = ask\.label \|\| name/,
+    'the buttons name the agent from something other than the engine, so they can disagree with the heading');
+  assert.match(raw, /'Remove ' \+ shown/, 'the destructive button does not name the agent');
+  assert.match(raw, /'Keep ' \+ shown/, 'the safe button does not name the agent');
+  // ⚠️ And the removal is still SENT as the session name. Speaking the display
+  // name is only safe while nothing acts on it.
+  assert.match(raw, /RM_FOR = name;/,
+    'the modal remembers the display name as the thing to remove, which removes the wrong agent or none');
+
+  // Keeping it is the default answer to every accident.
+  assert.match(raw, /keep\.focus\(\)/, 'the modal opens with the destructive button reachable by Enter');
+  /**
+   * ⚠️ ANCHORED TO THE HANDLER, because the bare `/Escape/` this replaced could
+   * not fail: the word appears in the modal's own HTML comment a thousand lines
+   * away, so deleting the entire keydown handler left the assertion green. A
+   * test that cannot fail is not a weak test, it is a decoration that reads as
+   * coverage -- and this one guarded the gesture that ANSWERS the confirmation
+   * safely.
+   */
+  const esc = raw.slice(raw.indexOf("document.addEventListener('keydown'"));
+  const escBody = esc.slice(0, esc.indexOf('\n});'));
+  assert.ok(escBody.includes("'Escape'"),
+    'the keydown handler does not look at Escape, so it does not dismiss the modal');
+  assert.ok(escBody.includes('closeRemoveModal'),
+    'Escape is read but does not close the modal, so the safe answer has no keyboard route');
+  assert.match(raw, /aria-modal="true"/, 'the dialog is not announced as modal');
+
+  // A partial must not close it — see the engine tests for what partial means.
+  /**
+   * ⚠️ SCOPED TO THE MODAL'S OWN HANDLER, not matched against the whole file.
+   *
+   * The earlier form was `/partial[\s\S]{0,400}?return;/` against the entire
+   * page, which binds happily to the CREATE flow's partial handler several
+   * hundred lines away — it passed against a copy of this file with the removal
+   * modal's partial branch deleted outright. Cutting the handler out first is
+   * what makes the two assertions below about THIS code.
+   */
+  const handler = raw.slice(raw.indexOf("getElementById('rm-go').addEventListener"));
+  const body = handler.slice(0, handler.indexOf('\n});'));
+  assert.ok(body.includes("done.outcome === 'partial'"),
+    'the confirmation does not handle a half-finished removal at all');
+  const partialBranch = body.slice(body.indexOf("done.outcome === 'partial'"));
+  assert.ok(!partialBranch.slice(0, partialBranch.indexOf('return;')).includes('closeRemoveModal'),
+    'a half-finished removal closes the confirmation, so nobody reads that the agent is still running');
+});
+
+
+/**
+ * Every `var(--x)` with no fallback names a property `:root` actually defines.
+ *
+ * ⚠️ THIS IS THE ONE FAILURE THE WHOLE SUITE COULD NOT SEE, and it shipped.
+ *
+ * The removal modal's CSS invented four properties that do not exist
+ * (`--card`, `--ink`, `--line`, `--text-h2`). CSS does not warn: an undefined
+ * custom property with no fallback makes the ENTIRE declaration invalid and it
+ * is dropped. So `background: var(--card)` produced a transparent confirmation
+ * box, `border: 1px solid var(--line)` produced no border, and
+ * `font: var(--text-h2) …` left the heading at 13px normal weight -- a
+ * see-through dialog with the page readable through its own question.
+ *
+ * It survived two review rounds and 316 passing tests because **every existing
+ * assertion about this screen reads its text**, and the text was right. Nothing
+ * in the repo rendered a page. The defect is invisible to the kind of test this
+ * codebase is made of, which is exactly why it needs its own.
+ *
+ * Deliberately whole-file rather than scoped to the modal: the same mistake was
+ * already sitting on `main` in `#d-untied`, unnoticed since it shipped.
+ */
+test('the removed list gives the browser only what it draws', async () => {
+  /**
+   * ⚠️ Pins an ALLOWLIST, which is the only shape that can catch the regression
+   * that matters. The stored record carries the launchd label, the absolute
+   * plist path and whether the job is ours; the screen draws a name and a date.
+   * Spreading the record straight through would pass every other assertion here
+   * -- the fields the browser reads would all still be present -- while putting
+   * machine detail on the wire that this product's vocabulary rule says a
+   * person is never shown, from a server with no login.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'payload-shape';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Payload**.\n', 'utf8');
+  // A startup job on disk, or there is no label and no plist to withhold and
+  // the control below would be true of nothing.
+  const plistDir = nodePath.dirname(create.plistPath(name));
+  fs.mkdirSync(plistDir, { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // ⚠️ `has-session` must answer "gone" (exit 1) or the look-again after the
+  // kill reads as a session that survived, and the removal is a PARTIAL.
+  removal.setRunner((file, args) => (args && args[0] === 'has-session'
+    ? { ok: false, code: 1 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    assert.equal(removal.remove(name).outcome, removal.OUTCOME.REMOVED);
+
+    // ⚠️ CONTROL: the stored record really does carry the fields being excluded,
+    // or "they are absent from the response" is true of nothing.
+    const stored = removal.removedAgents().find((r) => r.name === name);
+    assert.ok(stored.label && stored.plist, 'the fixture has no machine detail to withhold');
+
+    const res = await req('/api/removed');
+    const row = JSON.parse(res.body).agents.find((a) => a.name === name);
+    assert.deepEqual(Object.keys(row).sort(), ['name', 'removedAt', 'shownAs', 'stopped'],
+      'the removed list ships fields the screen does not draw');
+    assert.equal(row.shownAs, 'Payload', 'the row has nothing recognisable to show');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
+/**
+ * The six browser-layer fixes on this branch, pinned so they cannot regress
+ * silently.
+ *
+ * ⚠️ THIS IS A WEAKER INSTRUMENT THAN IT LOOKS, and saying so is the point.
+ * These assert the SHAPE OF THE SOURCE, not behaviour: nothing here runs the
+ * page. A rewrite that keeps the shape and loses the behaviour passes, and the
+ * transparent-modal defect earlier on this branch is proof that source
+ * assertions can be green while the screen is broken.
+ *
+ * It is here because the alternative was nothing. Every one of these is a
+ * defect this branch measured, fixed, and could not otherwise notice being
+ * undone -- all of them were reverted in a sandbox and the whole suite stayed
+ * green. Making them fail noisily is worth more than the purity of admitting
+ * the repo has no DOM, and the honesty lives in this comment rather than in
+ * skipping the test.
+ *
+ * ⚠️ The real fix is rendering the page in the suite, which this repo cannot
+ * do without taking a dependency it has deliberately never taken. That is a
+ * decision for somebody, not something to sneak in here.
+ */
+test('a throwing removal engine answers an error instead of killing the board', async () => {
+  /**
+   * ⚠️ NONE OF THE FOUR REMOVAL ROUTES' try/catch GUARDS WAS HELD. Deleting any
+   * one of them individually left the suite green, despite each carrying a
+   * paragraph explaining that an uncaught throw does not fail the request -- it
+   * EXITS THE PROCESS. The board goes down at the moment somebody is halfway
+   * through removing an agent, with nothing on screen to say what happened.
+   *
+   * Driven through the real server with the engine made to throw, because a
+   * unit test on the engine cannot show that a route survives it.
+   */
+  const removal = require('./engine/remove');
+  const realPlan = removal.plan;
+  const realRemove = removal.remove;
+  const realRestore = removal.restore;
+  const realList = removal.removedAgents;
+
+  const boom = () => { throw new Error('the engine exploded'); };
+  try {
+    removal.plan = boom;
+    removal.remove = boom;
+    removal.restore = boom;
+    removal.removedAgents = boom;
+
+    for (const [method, path] of [
+      ['GET', '/api/agent/anything/removal'],
+      ['DELETE', '/api/agent/anything/removal'],
+      ['POST', '/api/agent/anything/restore'],
+      ['GET', '/api/removed'],
+    ]) {
+      const res = await req(path, method === 'GET' ? undefined : { method });
+      assert.equal(res.status, 500, `${method} ${path} did not answer at all, which means it took the process with it`);
+      assert.match(res.type, /application\/json/, `${method} ${path} answered but not as JSON`);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error, `${method} ${path} answered 500 with nothing to say`);
+    }
+
+    // ⚠️ CONTROL: the server is still up and still serving everything else. If
+    // it had died, every assertion above would have failed on the request
+    // rather than on the status -- but this makes the property explicit.
+    const alive = await req('/api/status');
+    assert.match(alive.type, /application\/json/, 'the board died despite the routes answering');
+  } finally {
+    removal.plan = realPlan;
+    removal.remove = realRemove;
+    removal.restore = realRestore;
+    removal.removedAgents = realList;
+  }
+});
+
+
+test('a half-finished removal answers 200, because it is a state and not an error', async () => {
+  /**
+   * ⚠️ A DELIBERATE DECISION THAT NOTHING HELD. Inverting it to
+   * `outcome === REMOVED ? 200 : 400` passed 346/346 -- and that inversion
+   * routes a PARTIAL into the browser's failure branch, which skips the
+   * `paintRemoved()` refresh the partial path performs and shows a generic
+   * failure instead of the sentence saying the agent may still be running.
+   *
+   * The request was understood and acted on. What happened is in the body,
+   * which is where a removal's outcome has to be read anyway.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'partial-status';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Partial**.\n', 'utf8');
+  fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // bootout refuses: disabled but not stopped, which is a partial.
+  removal.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    const res = await req(`/api/agent/${name}/removal`, { method: 'DELETE' });
+    const body = JSON.parse(res.body);
+    // ⚠️ CONTROL: it really is a partial, or "partials answer 200" is being
+    // asserted about a clean removal.
+    assert.equal(body.outcome, 'partial', `this is a ${body.outcome}, so the status code proves nothing`);
+    assert.equal(res.status, 200,
+      'a half-finished removal answers as an error, so the screen shows a generic failure instead of what happened');
+    assert.match(body.because, /still running|still be going|could not/,
+      'the body does not say what half-happened, which is the only reason 200 is defensible');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
+test('the browser-layer fixes on this branch cannot be undone silently', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  const pins = [
+    // A record written by an older version has no timestamp, and this read the
+    // wrong field, so the date never appeared for anybody.
+    [/a\.removedAt/, 'the removed-list date reads a field the engine does not write'],
+    // The change guard, whose absence wipes a "Restore failed" row every five
+    // seconds and drops keyboard focus with it.
+    [/if \(html !== REMOVED_HTML\)/, 'the removed list repaints unconditionally on every poll'],
+    // Cleared when the list empties, or a stale "Restoring…" row comes back.
+    [/REMOVED_HTML = null;/, 'the change-guard cache is never cleared, so a stale row can return'],
+    // A server failure is not "nothing has been removed".
+    [/if \(!res\.ok\) return;/, 'a failed /api/removed read renders as an empty removed list'],
+    // A 5xx is not a fact about this agent.
+    [/res\.status >= 500/, 'a server error is reported as "we cannot remove this agent"'],
+    // Shift+Tab into the modal must not land on the destructive button.
+    [/\(inside \? ends\[1\] : keep\)\.focus\(\)/, 'tabbing into the modal backwards lands on Remove'],
+    // The removed list is part of the board, so it refreshes with it.
+    [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
+     'the removed list no longer refreshes on the poll, so its count goes stale'],
+  ];
+
+  /**
+   * ⚠️ CONTROL, and it is not decoration: every pattern is checked against a
+   * string that CANNOT contain it, so a pattern matching nothing anywhere -- a
+   * typo, an over-escaped regex -- is caught here rather than passing as
+   * coverage forever.
+   */
+  for (const [re] of pins) {
+    assert.doesNotMatch('nothing at all', re, `pattern ${re} matches empty prose, so it asserts nothing`);
+  }
+
+  for (const [re, why] of pins) {
+    assert.match(raw, re, why);
+  }
+});
+
+
+test('no style rule depends on a custom property that is never defined', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  /**
+   * ⚠️ Returns the UNDEFINED ones, so the check can be pointed at a mutated
+   * copy below. A checker that can only run against the real file cannot be
+   * shown to fail, and a test that has never failed is a claim, not a control.
+   */
+  const undefinedTokens = (html) => {
+    /**
+     * ⚠️ COMMENTS ARE STRIPPED FIRST, and the first draft of this test did not.
+     * The prose above quotes `var(--text-h2)` as the example of the bug, so the
+     * check reported the comment describing the defect as the defect. Caught by
+     * the control below, which is the entire reason it is there.
+     */
+    const live = html.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const css = live.slice(live.indexOf('<style'), live.indexOf('</style>'));
+    /**
+     * ⚠️ EVERY declaration in the stylesheet, not only the ones inside `:root`
+     * -- and the comment here used to claim the narrower thing while the regex
+     * did the wider one.
+     *
+     * Latent today (checked: every custom property in this file IS declared in
+     * a `:root` block), and it matters the day one is not: a property defined
+     * only inside `.foo {}` would count as globally defined here, so a `var()`
+     * on it elsewhere would pass this check while still resolving to nothing --
+     * exactly the failure the test exists to catch. Said accurately rather than
+     * left as a guard whose comment is stronger than its code.
+     */
+    const defined = new Set();
+    for (const m of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1]);
+    /**
+     * Scanned over the WHOLE document, not just the stylesheet: this page also
+     * carries `var()` in inline `style=` attributes, and those fail the same
+     * silent way. A `var(--x, fallback)` is safe by construction, so only bare
+     * uses count.
+     */
+    const bad = new Set();
+    for (const m of live.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)) {
+      if (!defined.has(m[1])) bad.add(m[1]);
+    }
+    return [...bad].sort();
+  };
+
+  /**
+   * ⚠️ THE CONTROL, and it is not decoration.
+   *
+   * "No undefined tokens" passes just as happily against a checker whose regex
+   * matches nothing at all -- which is how a green suite hid this in the first
+   * place. Proving the check FIRES on a token that is definitely missing is
+   * what makes the empty result below mean something.
+   */
+  const found = undefinedTokens(raw);
+
+  const mutated = raw.replace('.rm-acts {', '.rm-acts { outline-color: var(--nope-not-a-token);');
+  assert.notEqual(mutated, raw, 'the mutation did not apply, so the control proves nothing');
+  /**
+   * ⚠️ Stated as "one MORE than the real file has", not as "exactly this one".
+   * The stricter form looks tighter and is worse: the day the real assertion
+   * below has something to say, the control fails first and reports "the check
+   * does not notice a plainly undefined property" -- blaming the instrument for
+   * the reading. Measured, by reintroducing the original bug.
+   */
+  assert.deepEqual(undefinedTokens(mutated), [...found, '--nope-not-a-token'].sort(),
+    'the check does not notice a custom property that is plainly undefined');
+
+  assert.deepEqual(found, [],
+    'a style rule names a custom property nothing defines, so the whole declaration is dropped');
+});
+
+
+test('an agent whose card shows a different name than its session still leaves the board', async () => {
+  /**
+   * ⚠️ THE TEST THE FIRST VERSION OF THIS FEATURE DID NOT HAVE, and its absence
+   * is why the board filter shipped keyed on the wrong field.
+   *
+   * A card carries TWO names: `name` is the DISPLAY name, read out of "You are
+   * **X**" in the agent's own instructions, and `sessionName` is what tmux and
+   * launchd know it as. For an agent this app created they are identical —
+   * which is the only kind of agent the earlier tests used, so filtering on
+   * either one passed. They differ for every pre-existing fleet agent
+   * (`claudebot` displays as "Splinter"), which is exactly the population this
+   * rebuild added support for. Removing one of those left it on the board AND
+   * in the removed list at the same time.
+   *
+   * The fixture below differs from the others in one deliberate way: its
+   * instructions name it something its session is not.
+   */
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+
+  const session = 'two-named';
+  fs.mkdirSync(create.workerDir(session), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(session), 'CLAUDE.md'),
+    'You are **Bartholomew**.\n', 'utf8');
+  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(session)), `com.${session}.discord.plist`), '<plist/>', 'utf8');
+  // The `-discord` session is how a real legacy agent appears: the board files
+  // it under the bare name and reads its display name from its instructions.
+  /**
+   * ⚠️ Stub the pane CAPTURE as well as the pane SOURCE.
+   *
+   * Overriding only the source makes the roster synthetic and then lets
+   * `/api/status` run real `tmux capture-pane` against every fixture name --
+   * which printed `can't find session: two-named-discord` to stderr on each run, and made this
+   * test depend on the machine's tmux (it would read differently on a box with
+   * no tmux server, or one where a session happened to share the fixture's
+   * name). `null` is exactly what real tmux answered for a session that does
+   * not exist, so nothing else about the test changes.
+   *
+   * ⚠️ Deliberately per-test rather than at file load: several older tests call
+   * `setPaneCapture(null)` in their own `finally`, which would clear a
+   * file-level stub for everything running after it. And a few of them let the
+   * roster fall through to the REAL fleet on purpose, so a global stub would
+   * quietly change what those are measuring.
+   */
+  status.setPaneSource(() => `${session}-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  removal.setRunner((f, a) => (a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    // ⚠️ THE CONTROL, twice over: it is on the board, and the two names really
+    // do differ. Without the second check this test would pass against a
+    // fixture whose names coincide, which is the hole it exists to close.
+    const before = JSON.parse((await req('/api/status')).body).agents.find((a) => a.sessionName === session);
+    assert.ok(before, 'the fixture is not on the board, so nothing below can fail');
+    assert.notEqual(before.name, before.sessionName,
+      'the fixture displays under its own session name, so it cannot distinguish the two fields');
+
+    const gone = await req(`/api/agent/${session}/removal`, { method: 'DELETE' });
+    assert.equal(gone.status, 200, gone.body);
+    assert.equal(JSON.parse(gone.body).outcome, 'removed');
+
+    const after = JSON.parse((await req('/api/status')).body).agents.map((a) => a.sessionName);
+    assert.ok(!after.includes(session),
+      'a removed agent whose display name differs from its session is still on the board');
+
+    // ⚠️ AND THE COUNT AGREES WITH THE CARDS. A summary reading one more than
+    // the board shows is how somebody hunts for an agent that is not there.
+    const body = JSON.parse((await req('/api/status')).body);
+    assert.equal(body.counts.total, body.agents.length,
+      'the summary counts an agent the board no longer shows');
+  } finally {
+    // ⚠️ RESTORE BEFORE CLEARING THE RUNNER, not after. `setRunner(null)`
+    // re-arms dry-run, and a dry-run restore answers `restored` while never
+    // rewriting the file — so this ran, reported success, and left the record
+    // in place, quietly filtering this name off `/api/status` for every test
+    // added after it. Cleanup that cannot fail and does nothing is worse than
+    // no cleanup, because it looks handled.
+    await req(`/api/agent/${session}/restore`, { method: 'POST' }).catch(() => {});
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    // ⚠️ Put the capture back too, or this test's stub leaks onto every test
+    // that runs after it -- including the ones that read the real fleet.
+    status.setPaneCapture(null);
+  }
+});
+
+test('a half-removed agent is on the removed list AND still on the board', async () => {
+  /**
+   * ⚠️ THE ONE PREDICATE THAT KEEPS A POSSIBLY-RUNNING AGENT VISIBLE, and until
+   * this test nothing held it: deleting `stopped !== false` from the board
+   * filter (so every removed record hides its card) left the whole suite green.
+   *
+   * That filter is the entire reason `isRemoved` and `isHidden` are separate
+   * questions. A removal that half worked is recorded — so there is a Restore
+   * button — and its agent may still be going, so its card must stay. Hiding a
+   * running agent is the one thing this board must never do.
+   *
+   * The nearest existing test asserts the partial appears in `/api/removed` and
+   * stops there, which is exactly half of the property.
+   */
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const name = 'half-visible';
+  fs.mkdirSync(create.workerDir(name), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Half**.\n', 'utf8');
+  fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
+  fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
+  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneCapture(() => null);
+  // `bootout` refuses: disabled, but not stopped. The half-removal.
+  removal.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 2 }
+    : { ok: true, stdout: '' }));
+  removal.setDryRun(false);
+  try {
+    // ⚠️ CONTROL: it is on the board BEFORE the removal, or "it is still there
+    // afterwards" is true of a board that never had it.
+    const before = JSON.parse((await req('/api/status')).body).agents;
+    assert.ok(before.some((a) => a.sessionName === name), 'the control failed: it was never on the board');
+
+    const gone = removal.remove(name);
+    assert.equal(gone.outcome, removal.OUTCOME.PARTIAL, gone.because);
+
+    const listed = JSON.parse((await req('/api/removed')).body).agents.find((a) => a.name === name);
+    assert.ok(listed, 'a half-removal is on no list, so it has no Restore button and no way back');
+    assert.equal(listed.stopped, false, 'a half-removal was recorded as stopped');
+
+    const after = JSON.parse((await req('/api/status')).body).agents;
+    assert.ok(after.some((a) => a.sessionName === name),
+      'an agent that may still be running was hidden from the board, which is the one thing it must never do');
+  } finally {
+    removal.setRunner(null);
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    try { fs.rmSync(removal.REMOVED_FILE, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+
+test('a job that is disabled but will not unload is recorded, not reported as untouched', async () => {
+  /**
+   * ⚠️ THE WORST STATE THIS MODULE CAN REACH, and it used to be invisible.
+   *
+   * `disable` and `bootout` were one step. When the first succeeded and the
+   * second failed, the answer was "we have left it alone. Nothing has changed"
+   * — while the job WAS disabled and would not start at the next login — and it
+   * returned before writing the record. No record means no row in the removed
+   * list, no Restore button, and the only way back is the manual launchctl
+   * recipe this product exists to spare people.
+   */
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = create.createAgent({ name: 'wont-unload', role: 'pm' });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+
+  removal.setRunner((f, a) => {
+    const cmd = a && a[0];
+    if (cmd === 'bootout') return { ok: false, code: 9 };   // the failure under test
+    if (cmd === 'has-session') return { ok: false, code: 1 };
+    return { ok: true, stdout: '' };
+  });
+  removal.setDryRun(false);
+  try {
+    const res = await req('/api/agent/wont-unload/removal', { method: 'DELETE' });
+    const done = JSON.parse(res.body);
+    assert.equal(done.outcome, 'partial',
+      'a job that would not unload was reported as a completed removal');
+    assert.doesNotMatch(done.because, /Nothing has changed/,
+      'it says nothing changed while the job is disabled and will not start at the next login');
+    assert.match(done.because, /still running/,
+      'nothing tells the person the agent they removed is still going');
+
+    // ⚠️ AND THERE IS A WAY BACK. This is the half that made the old behaviour
+    // unrecoverable rather than merely mis-worded.
+    const listed = JSON.parse((await req('/api/removed')).body).agents.map((a) => a.name);
+    assert.ok(listed.includes('wont-unload'),
+      'a half-removed agent is on no list, so there is no Restore button and no way back');
+  } finally {
+    // Same ordering rule as above: undo while the runner is still armed.
+    await req('/api/agent/wont-unload/restore', { method: 'POST' }).catch(() => {});
+    removal.setRunner(null);
+  }
 });

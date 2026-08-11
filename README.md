@@ -26,16 +26,56 @@ than implying. On a machine where no further agent is ever created, nothing
 reinstalls it. And an agent made by a version before this one has its own copy
 of the old script and keeps it: nothing migrates those.
 
-It cannot stop, remove or message an agent yet.
+**It can also remove one**, from the bottom of that agent's own detail screen,
+behind a confirmation that names the agent.
 
-⚠️ **Removing one is still a manual job, and it matters more than the others**,
-because a created agent has a launchd job that starts it at every login. Deleting
-its folder is not enough — the job would keep trying. Until Remove is built:
+⚠️ **Remove is not delete, and only Remove exists.** Removing an agent takes it
+off this board and stops it starting again. It does not delete anything: not the
+agent's folder, not the instructions you wrote, not its startup file. That is
+what "The agent's folder and the contents you wrote for it will not be deleted"
+on the confirmation means, and it is meant literally.
 
+**Removed agents can be put back.** They are listed under "Show removed agents"
+at the bottom of the Agents tab, each with a Restore button that re-enables the
+same startup job that was disabled.
+
+It removes agents it did not create, too. Being able to manage the ones you
+already have is the point — so a startup file another tool wrote is disabled
+rather than deleted, and Restore turns exactly that one back on.
+
+⚠️ **With one limit, and it is deliberate.** The board also draws a card for any
+tmux session that merely happens to be running Claude — a `tmux new -s notes`
+you opened yourself. Kosmos will not remove one of those: it cannot tell that
+the session belongs to the agent whose name it is filed under, and stopping it
+could stop the wrong thing. The screen says so where the Remove control would
+otherwise be. Every agent Kosmos made, and every one another tool set up
+properly, is removable; a card the board cannot vouch for is not.
+
+It cannot message an agent yet.
+
+⚠️ **If you need to remove one by hand** — because it was made before this
+existed, or because a removal reported that it could not finish — a created
+agent has a launchd job that starts it at every login, and deleting its folder is
+not enough:
+
+    launchctl enable gui/$UID/com.kosmos.agent.<name>
     launchctl bootout gui/$UID/com.kosmos.agent.<name>
     rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist
     tmux kill-session -t "=<name>"
     rm -rf ~/work/workers/<name>
+    # and what this app remembered about it, which is kept elsewhere:
+    rm -f ~/Library/Application\ Support/AgentWorkforce/avatars/<name>.*
+    rm -f ~/Library/Application\ Support/AgentWorkforce/profiles/<name>.json
+    rm -f ~/Library/Application\ Support/AgentWorkforce/commitments/<name>.json
+
+⚠️ **The `enable` line first, and it is the one people will not think of.** A
+removal that got as far as disabling the job and then could not finish leaves a
+**disabled override in launchd's per-user database, keyed on the label** — and
+nothing on disk records it, so deleting the plist and the folder does not clear
+it. Create an agent under that name later and launchd refuses to start it, with
+nothing in the product to explain why. `enable` is what removes the override;
+it is harmless on a label that was never disabled, which is why it is listed
+unconditionally rather than as a special case.
 
 The `=` is not a typo. Without it tmux resolves a target by PREFIX, so
 `kill-session -t sam` will happily kill `samantha-discord` if no session is
@@ -98,7 +138,15 @@ correspondence.
 
 - Fixtures are synthetic or redacted. Never a captured slice of live state.
 - Anything captured from a real machine stays out of this repo.
-- Screenshots of live data do not belong here either. Agent names plus task
-  lines are already a disclosure.
+- Screenshots are held to the same rule, and the rule is about **where the text
+  came from**, not about which words it contains. A shot of the running board
+  ships whatever the fleet happened to be doing that minute, and those task
+  lines have carried client names and financial work.
+- So: a board fed by a **fake tmux with invented task lines** is fine, and the
+  names on the cards are not the sensitive part -- a name grants nobody
+  anything. `docs/screenshots/remove-*.png` are exactly that. Clarified
+  2026-08-11 because the earlier wording ("agent names plus task lines are
+  already a disclosure") read as a ban on the names, and a rule stricter than
+  its reason gets worked around rather than followed.
 
 This repo is private now and public later, so treat every commit as public.

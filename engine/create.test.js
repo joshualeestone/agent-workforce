@@ -745,7 +745,8 @@ test('the refusals that protect a name are each reachable and each tested', () =
     create.OUTCOME.REFUSED);
 
   // A leftover launchd job with no folder: the exact state the README tells
-  // people to expect, because removing an agent is still manual.
+  // people to expect. (Remove exists now and deletes nothing, so the halves can
+  // still come apart; what is still manual is DELETE.)
   const orphan = 'orphan-job';
   fs.mkdirSync(nodePath.dirname(create.plistPath(orphan)), { recursive: true });
   fs.writeFileSync(create.plistPath(orphan), '<plist/>', 'utf8');

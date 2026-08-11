@@ -262,11 +262,21 @@ svg { display: block; }
 #d-untied {
   margin: 0 0 var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--warn, #b8860b);
+  /* ⚠️ `--warn` does not exist either; the fallback kept it valid, so the token
+     check (which exempts anything with a fallback, correctly) could not see it.
+     A hard-coded dark goldenrod stays dark goldenrod in dark mode, where the
+     rest of this note switches. `--warn-border` is the theme-aware one. */
+  border-left: 3px solid var(--warn-border);
   background: var(--bg-sunken);
   color: var(--label);
-  font-size: var(--text-small);
-  border-radius: var(--radius-sm, 4px);
+  /* ⚠️ `--text-small` has never existed. This line was invalid on `main` too,
+     so the one sentence explaining why every write vanished has been rendering
+     at inherited size since it shipped. Found by the token check, not by eye.
+     `--text-callout` IS 12px/15px, so it is the token rather than a literal --
+     a raw `font-size` would also have dropped the line-height the token carries
+     and left this the one rule in the file that does not use the scale. */
+  font: var(--text-callout) var(--font-ui);
+  border-radius: var(--radius-control);   /* `--radius-sm` does not exist; this is the defined one */
 }
 
 #d-instr {
@@ -276,6 +286,22 @@ svg { display: block; }
   border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
 }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
+
+/* Removing an agent. Set apart by a rule and by position -- last on the screen,
+   under a heavier divider.
+
+   ⚠️ An earlier version of this comment claimed the control is distinguished
+   "never by hue alone ... reads identically in greyscale". MEASURED, and it is
+   not true: `--warn-border` over `--bg-elevated` composites to ~204 grey and
+   the ordinary `--border-strong` to ~199, which no eye separates. The amber
+   border is decoration; what actually distinguishes these buttons in greyscale
+   is their TEXT ("Remove casey" / "Keep casey") and their placement. Said
+   accurately rather than left as a contrast claim nobody had measured, in a
+   file whose whole discipline is that a claim on screen has to be checked. */
+.danger { border-top: 1.5px solid var(--border-strong); margin-top: var(--space-8); }
+.danger .flabel { color: var(--label); }
+.danger-btn { border-color: var(--warn-border); }
+.danger-btn:hover { background: var(--warn-bg); }
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
@@ -306,6 +332,75 @@ svg { display: block; }
    request, no dependency, and identical on every machine.
    A local-first product must not fetch a remote asset to draw a pencil, and it
    has to keep working on a machine with no internet at all. */
+/* The removal modal. It covers the board on purpose.
+
+   ⚠️ EVERY COLOUR AND SIZE HERE COMES FROM A TOKEN DEFINED IN `:root` ABOVE.
+   The first version of this block invented four that do not exist (`--card`,
+   `--ink`, `--line`, `--text-h2`). An undefined custom property makes the whole
+   declaration invalid, so the box rendered with NO background and NO border --
+   a transparent confirmation with the page legible through its own words -- and
+   `font: var(--text-h2) …` dropped, leaving the heading at 13px normal weight.
+   Two review rounds and a full suite passed it, because every test asserted the
+   modal's TEXT and nothing rendered it. The test named 'no style rule depends on
+   a custom property that is never defined' now fails on any var() with no
+   fallback naming a property `:root` lacks. (This used to cite `styleTokens`,
+   a symbol that has never existed -- a pointer to a name that is not there, in
+   the file whose stated discipline is that a claim has to be checked.)
+
+   Josh asked for this to be "a bit obnoxious so they really understand what
+   they are doing", and that is the reason for the size and the weight rather
+   than decoration. It is deliberately NOT alarming: removal is reversible, so
+   nothing here says otherwise. Loud about WHICH agent, quiet about danger. */
+.rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
+           display: flex; align-items: center; justify-content: center;
+           padding: var(--space-5); z-index: 50; }
+.rm-box { background: var(--bg-elevated); border: 1px solid var(--border-strong);
+          border-radius: 12px; padding: var(--space-8); max-width: 30rem;
+          width: 100%; box-shadow: 0 18px 48px rgba(17, 20, 24, 0.28); }
+/* ⚠️ The weight is IN the shorthand. `font:` resets font-weight to normal, so a
+   bare `font: var(--text-title-1) …` on an h2 silently un-bolds it. */
+.rm-title { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
+            margin: 0 0 var(--space-5); }
+.rm-small { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+            line-height: 1.45; margin: 0 0 var(--space-8); }
+.rm-acts { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+/* Both answers are full-size and legible. The destructive one is marked by its
+   border, never by hue alone -- this screen reads the same in greyscale. */
+.rm-acts .btn { padding: var(--space-5) var(--space-7); }
+/* The removed list. */
+/* ⚠️ SHARES `.grid`'S TRACKS, not just its max-width, and the difference is the
+   whole fix. The cards are CENTRED columns rather than a full-width block, so
+   `max-width: 1320px` alone still left this list running the full window --
+   starting a third of a screen left of the board it belongs to, at every
+   viewport narrower than the cap. Repeating the template makes this container
+   resolve to exactly the width the grid resolved to, whatever that is.
+   Its own children then span every track. */
+/* ⚠️ The COLUMN gap has to match `.grid`'s too, not just the template. With it
+   at 0 the tracks resolve a few pixels wider, the container lands 6px off the
+   cards, and "almost aligned" reads worse than not trying. Row gap stays 0:
+   `.removed-list` spaces its own rows. */
+.removed-wrap { display: grid; gap: 0 var(--space-5); justify-content: center;
+                grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
+                max-width: 1320px; margin: var(--space-6) auto var(--space-8); }
+.removed-wrap > * { grid-column: 1 / -1; }
+.linkish { background: none; border: 0; padding: var(--space-2) 0;
+           font: var(--text-callout) var(--font-ui); color: var(--label-2);
+           text-decoration: underline; cursor: pointer; }
+.linkish:hover { color: var(--label); }
+.removed-list { margin-top: var(--space-3); display: flex;
+                flex-direction: column; gap: var(--space-2); }
+.removed-row { display: flex; align-items: center; gap: var(--space-4);
+               flex-wrap: wrap; padding: var(--space-3) var(--space-4);
+               border: 0.5px solid var(--separator); border-radius: 8px;
+               background: var(--bg-elevated); }
+.removed-row .who { font: var(--text-body) var(--font-ui); color: var(--label); }
+.removed-row .when { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+                     margin-right: auto; }
+/* A restore that half-worked, said on the row it happened to. Full width so it
+   wraps under the name rather than squeezing the Restore button off the end. */
+.removed-msg { margin-top: var(--space-4); font: var(--text-callout) var(--font-ui);
+               color: var(--label); min-height: 1em; }
+.removed-msg:empty { display: none; }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .edit .icon { width: 15px; height: 15px; }
@@ -313,7 +408,11 @@ svg { display: block; }
 </head>
 <body>
 <header>
-  <h1>Agent Workforce</h1>
+  <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED programmatically without joining
+       the tab order. Without it `h1.focus()` is a silent no-op, and the fallback
+       that sends the keyboard here after a removal would do nothing at all --
+       an accessibility fix that only appears to work is worse than none. -->
+  <h1 tabindex="-1">Agent Workforce</h1>
   <div class="headright">
     <button class="btn" id="new-agent" type="button">New agent</button>
     <div class="checked" id="checked"></div>
@@ -384,7 +483,52 @@ svg { display: block; }
     <div class="fpath" id="d-instr-prev" hidden>An earlier version is kept beside it as <code>CLAUDE.md.previous</code>.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
+
+  <!-- ⚠️ THE ONE CONTROL THAT TAKES SOMETHING AWAY, and it is here rather than
+       on the card deliberately: at the bottom of the one screen you have to
+       open on purpose, after everything else. Nothing about removing an agent
+       should be reachable in passing.
+
+       It is offered for EVERY agent, including ones this app did not create.
+       Managing the fleet you actually have is the point of the product; an
+       agent it can show you but not manage is a hole, not a safeguard. -->
+  <div class="field danger" id="d-remove-agent" hidden>
+    <label class="flabel">Remove this agent</label>
+    <div class="fhint" id="d-remove-hint"></div>
+    <div class="frow">
+      <button class="btn danger-btn" id="d-remove-start" type="button">Remove this agent…</button>
+    </div>
+    <!-- `alert`, not `status`: a removal that only half worked is the one
+         message here a person must not walk away without hearing. -->
+    <div class="fmsg" id="d-remove-msg" role="alert" aria-live="assertive"></div>
+  </div>
 </section>
+
+<!-- ⚠️ A REAL MODAL, and deliberately hard to dismiss by accident. Josh asked
+     for it to be "a bit obnoxious so they really understand what they are
+     doing": it covers the screen, it names the agent in the question rather
+     than saying "this agent", and the button that does the thing names it too,
+     so a misclick cannot read the same as the right click.
+
+     What it does NOT do is recite the work. An earlier version listed the
+     launchd job, the session and the startup file. None of that is what the
+     person is deciding, and a wall of machinery is how a confirmation becomes
+     something people click through. One question, one line of reassurance.
+
+     Keeping it is the default: it holds focus, Escape takes it, and clicking
+     the backdrop takes it. Every accident lands on the harmless answer. -->
+<div class="rm-back" id="rm-modal" hidden>
+  <div class="rm-box" role="alertdialog" aria-modal="true"
+       aria-labelledby="rm-title" aria-describedby="rm-small">
+    <h2 class="rm-title" id="rm-title"></h2>
+    <p class="rm-small" id="rm-small"></p>
+    <div class="rm-acts">
+      <button class="btn" id="rm-keep" type="button"></button>
+      <button class="btn danger-btn" id="rm-go" type="button"></button>
+    </div>
+    <div class="fmsg" id="rm-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
 
 <!-- Creating an agent. Three steps, one panel, reached from the New agent
      button rather than from the tab bar — the same way the detail panel is
@@ -483,6 +627,40 @@ svg { display: block; }
 <div class="summary" id="summary">Loading…</div>
 <div class="build" id="build"></div>
 <div class="grid" id="grid"></div>
+
+<!-- ⚠️ REMOVED AGENTS ARE NOT LOST, and this is where that becomes true for the
+     person rather than only in a file. Removing takes an agent off the board
+     and stops it starting again; it deletes nothing. If there were no way back
+     to it, "remove" would be a destructive act wearing a light confirmation.
+
+     Collapsed by default, and absent entirely when nothing has been removed —
+     an empty "Show removed agents (0)" on a new machine is clutter that
+     teaches the person to ignore this corner of the screen. -->
+<div class="removed-wrap" id="removed-wrap" hidden>
+  <button class="linkish" id="removed-toggle" type="button"
+          aria-expanded="false" aria-controls="removed-list"></button>
+  <div class="removed-list" id="removed-list" hidden></div>
+</div>
+<!-- ⚠️ OUTSIDE `#removed-wrap`, NOT MERELY OUTSIDE `#removed-list`, and the
+     difference is the whole fix.
+     
+     The previous version sat inside the wrap. `paintRemoved` hides the WHOLE
+     wrap when the list comes back empty -- which is precisely the case this
+     message exists for: the restore-partial where the record was cleared and
+     only the start failed, on the last removed agent. The message vanished with
+     the section, leaving an agent on no list, with no card, still stopped, and
+     nothing on screen saying so. Its own comment claimed to have fixed exactly
+     that.
+     
+     ⚠️ AND MY VERIFICATION MISSED IT because I checked the mechanism I had in
+     mind rather than the failure. I asserted `#removed-list` does not contain
+     it and forced a repaint -- both true, both irrelevant to a parent being
+     hidden. A control has to be aimed at the way the thing breaks, not at the
+     way you think you fixed it.
+     
+     `role="alert"` also announces nothing from inside a hidden subtree, so the
+     screen-reader half was silently gone too. -->
+<p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
 
 <script>
 'use strict';
@@ -684,7 +862,73 @@ async function tick() {
          picture and role controls or the explanation.
          The inverse stuck too: an agent that came back stayed withdrawn behind
          a now-false sentence until the panel was reopened. */
-      if (fresh) setWritesOffered(fresh, fresh.isNamedOurs === true);
+      /**
+   * ⚠️ AND IF IT IS NO LONGER ON THE BOARD, STOP OFFERING TO WRITE TO IT.
+   *
+   * Without the else, an agent removed from a second tab -- or one whose
+   * half-removal later completed -- leaves this panel open with stale data, live
+   * write controls and a stale `REMOVE_ASK`. The engine refuses the retry
+   * cleanly, so nothing breaks; what is wrong is a screen that has quietly
+   * stopped being about anything on the board while still offering to change it.
+   */
+  if (!fresh && CURRENT) {
+    /**
+     * ⚠️ NOT `setWritesOffered`, and I tried it first. That function takes
+     * `(agent, tied)` and, when `tied` is false, builds a sentence out of
+     * `a.sessionName` — so passing `null` throws, and passing `CURRENT` renders
+     * the UNTIED explanation ("this session is called X but it is not the one an
+     * agent named X would run in"), which is a different and wrong reason. Read
+     * the function rather than trusting its name.
+     *
+     * The honest thing to say here is smaller: this agent is not on the board
+     * any more, so nothing on this screen should offer to change it.
+     */
+    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    }
+    REMOVE_ASK = null;
+    const start = document.getElementById('d-remove-start');
+    if (start) start.hidden = true;
+    const gone = document.getElementById('d-remove-hint');
+    if (gone) {
+      gone.textContent = 'This agent is no longer on the board. It may have been removed somewhere else, '
+        + 'or it may have stopped. Nothing here can change it until it is back.';
+    }
+    PANEL_WITHDRAWN = true;
+    // ⚠️ And the removal OFFER is re-asked too, not only the write controls.
+    // `setWritesOffered` runs every tick by explicit rule, but `d-remove-start`
+    // and `REMOVE_ASK` were frozen at panel-open state -- so a card that went
+    // tied -> untied while the panel was open kept offering "Remove this
+    // agent…" with the old question. It fails closed (the DELETE re-runs
+    // `plan` and refuses), which makes it an offer that cannot work: the exact
+    // thing `setWritesOffered`'s own note says it exists to prevent.
+  } else if (fresh && PANEL_WITHDRAWN) {
+    /**
+     * ⚠️ AND BACK AGAIN, because the branch above was ONE-WAY.
+     *
+     * It withdrew the panel and nothing ever undid it. Meanwhile the next
+     * poll's `setWritesOffered(fresh, …)` re-enables the picture, role and
+     * instruction controls — so the panel ended up with live, working write
+     * controls sitting under a sentence saying nothing here can change it.
+     * Reachable by an ordinary KeepAlive bounce or a restore in another tab.
+     *
+     * This is the same defect already documented for the sibling controls a few
+     * lines up ("the inverse stuck too: an agent that came back stayed
+     * withdrawn behind a now-false sentence"), reintroduced in the newer
+     * section. A guard that only fires in one direction is half a guard, and
+     * the half it is missing is the one that leaves a false sentence on screen.
+     */
+    PANEL_WITHDRAWN = false;
+    loadRemoval(fresh.sessionName);
+  }
+  if (fresh) {
+    setWritesOffered(fresh, fresh.isNamedOurs === true);
+    // Re-ask whether removal is still on offer, for the reason above. Cheap:
+    // one small fetch, guarded by its own token, and `fromPoll` so it does not
+    // blank a message or steal focus on every tick.
+    loadRemoval(fresh.sessionName, { fromPoll: true });
+  }
 
       // Not while a load is in flight or the file is one we refused: the note
       // then belongs to the load, not to the poll.
@@ -784,6 +1028,36 @@ async function tick() {
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
     checked.className = 'checked' + (age > 30 ? ' stale' : '');
     checked.innerHTML = 'checked<strong>' + (age < 5 ? 'just now' : age + ' seconds ago') + '</strong>';
+
+    /**
+     * ⚠️ THE REMOVED LIST IS PART OF THE BOARD, so it refreshes with it.
+     *
+     * It was painted only on a tab switch and after this window's own
+     * remove/restore, so "Show removed agents (2)" sat stale against anything
+     * that happened elsewhere: a second browser tab, a partial retried from
+     * another window, or a restore somebody did while this screen was open. The
+     * freshness stamp directly above says the board was checked just now, which
+     * makes an unrefreshed count beside it a claim this poll did not support.
+     *
+     * Cheap: `paintRemoved` is one fetch of a small file, and it now leaves the
+     * DOM alone when the markup is unchanged -- which it has to, or this poll
+     * would wipe a "Restore failed" row and steal focus every five seconds.
+     * (An earlier version of this comment asserted that check while the code
+     * rewrote unconditionally: the claim came first and the guard did not
+     * exist, which is the defect this file is otherwise written against.)
+     * Deliberately NOT awaited --
+     * the removed list failing must never stop the grid or the stamp from
+     * painting, and `paintRemoved` already keeps what is on screen when its own
+     * fetch fails.
+     */
+    // ⚠️ Gated on the GRID, not on a `panel-agents` element -- there is no such
+    // element. The agents tab is the absence of a panel (`PANELS` lists the
+    // other five), and `showTab` marks it by unhiding the grid. Checked against
+    // the DOM rather than assumed: `getElementById(...).hidden` on a missing id
+    // throws, which would have taken the whole poll down inside this try and
+    // frozen the board on a stale picture -- the exact failure the freshness
+    // stamp four lines up exists to make visible.
+    if (!document.getElementById('grid').hidden) paintRemoved();
   } catch (err) {
     checked.className = 'checked stale';
     checked.innerHTML = 'checked<strong>failed</strong>';
@@ -814,6 +1088,18 @@ function showTab(tab) {
   document.getElementById('grid').hidden = !agents;
   document.getElementById('summary').hidden = !agents;
   document.getElementById('build').hidden = !agents;
+  // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
+  // shows at all depends on there being something in it, which `paintRemoved`
+  // decides. Unhiding it on every tab switch put an empty box on screen.
+  if (!agents) {
+    document.getElementById('removed-wrap').hidden = true;
+    // ⚠️ And the message with it. It deliberately lives outside the wrap so a
+    // repaint cannot erase it -- which also means nothing else hides it, so a
+    // sentence about the removed list would otherwise sit under Settings or
+    // Projects, describing a list those screens do not show.
+    const msg = document.getElementById('removed-msg');
+    if (msg) msg.textContent = '';
+  } else paintRemoved();
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
 }
 
@@ -892,6 +1178,10 @@ function openDetail(sessionName) {
   const tied = a.isNamedOurs === true;
   setWritesOffered(a, tied);
   if (tied) loadInstructions(a.sessionName);
+  // ⚠️ Asked EVERY time the panel opens, and asked of the engine. Whether an
+  // agent can be removed here is a fact about what created it, and this screen
+  // must not carry its own opinion about that.
+  loadRemoval(a.sessionName);
   showTab('detail');
 }
 
@@ -1197,7 +1487,27 @@ function renderStale(s) {
   // on. its instruction file is not UTF-8 text".
   const why = String(s.because || '');
   const sentence = why ? `${why.charAt(0).toUpperCase()}${why.slice(1)}${/[.!?]$/.test(why) ? '' : '.'}` : '';
-  setLive(el, `<b>We cannot tell whether this is what it is running on.</b> ${esc(sentence)}`);
+  /**
+   * ⚠️ REWORDED 2026-08-11 after Josh read it on screen and could not parse it.
+   * It said "We cannot tell whether this is what it is running on", which is
+   * three pronouns deep and asks the reader to hold two nouns the sentence
+   * never names.
+   *
+   * ⚠️ The STATE stays exactly as it was, and that is the point of the change
+   * rather than a caveat on it. This is the honest "we cannot see" that this
+   * whole codebase exists to keep — the alternative is a screen implying the
+   * agent is running what you are looking at when nobody checked. Only the
+   * words changed.
+   *
+   * What it has to convey, and what the old wording assumed you already knew:
+   * an agent reads this file ONCE, when it starts. So the text on screen and
+   * the text the agent is actually running can differ, and here we could not
+   * work out which. Saying "agents read this file when they start" is what
+   * makes the reason that follows mean anything — without it, "we cannot tell
+   * when this agent last started" reads as an unrelated complaint.
+   */
+  setLive(el, '<b>This might not be what the agent is actually running.</b> '
+    + `Agents read this file when they start. ${esc(sentence)}`);
   el.hidden = false;
 }
 
@@ -1339,6 +1649,658 @@ document.getElementById('d-remove').addEventListener('click', async () => {
   msg.textContent = 'Removed.';
   await tick();
   refreshAvatar();
+});
+
+/* ===========================================================================
+   REMOVING AN AGENT
+   ---------------------------------------------------------------------------
+   ⚠️ The only destructive thing this product does, and the rules it follows:
+
+   1. **The screen never describes the work.** It renders what the ENGINE
+      returns, so the question a person is asked is tied to what will actually
+      happen. A screen that composed its own sentence could drift from the
+      engine, and a confirmation is the one place that must never happen.
+   2. **It is offered for EVERY agent, including ones this app did not create.**
+      An earlier design refused those, reasoning that whatever set an agent up
+      should be what takes it away. Managing the fleet you actually have is the
+      point of the product, so an agent it can show you but not manage is a hole
+      rather than a safeguard.
+   3. **Nothing is deleted, ever.** Remove and Delete are separate things and
+      only Remove exists. The startup job is disabled, not removed; the folder
+      and everything somebody wrote in it is untouched. That is what makes
+      Restore possible, and Restore is what makes a single light question an
+      honest confirmation rather than a trapdoor.
+   ========================================================================== */
+
+let REMOVE_ASK = null;
+// Guards against a slow answer landing after the person has moved on.
+let REMOVE_TOKEN = 0;
+
+async function loadRemoval(sessionName, { fromPoll = false } = {}) {
+  const box = document.getElementById('d-remove-agent');
+  const hint = document.getElementById('d-remove-hint');
+  /**
+   * ⚠️ THE RESET IS FOR OPENING A DIFFERENT AGENT, NOT FOR THE FIVE-SECOND
+   * POLL, and wiring the poll to this without the distinction was a regression
+   * I introduced one round ago while fixing something else.
+   *
+   * Blanking synchronously is right when the panel is being pointed at a new
+   * agent: whatever is on screen belongs to the previous one. Doing it every
+   * five seconds on the SAME agent does three things it has no business doing:
+   *
+   *   1. `#d-remove-msg` is the only surface `reportDiscarded` writes to while
+   *      the panel is open, so a PARTIAL outcome -- the one message this file
+   *      says a person must not walk away without reading -- is erased within
+   *      five seconds. Guaranteed, not racy: a partial leaves the agent on the
+   *      board, so the poll keeps finding it.
+   *   2. Hiding the box blurs `#d-remove-start`, dropping keyboard focus to
+   *      `<body>` on every tick -- the same defect the removed-list change
+   *      guard exists to prevent, on the sibling control.
+   *   3. The section visibly flashes each poll.
+   *
+   * So the poll re-asks the question without disturbing what is on screen.
+   */
+  if (!fromPoll) {
+    box.hidden = true;
+    document.getElementById('d-remove-msg').textContent = '';
+    REMOVE_ASK = null;
+  }
+
+  const mine = ++REMOVE_TOKEN;
+  let ask = null;
+  let reached = true;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/removal', { cache: 'no-store' });
+    ask = await res.json().catch(() => null);
+    /**
+     * ⚠️ AN ANSWER THAT ARRIVED IS NOT THE SAME AS AN ANSWER ABOUT THIS AGENT.
+     *
+     * The guard below covered only a THROWN fetch. A response that does not
+     * parse, or the route's own 500 (`{error, detail}`, no `because`), landed
+     * on the else branch and rendered "We cannot remove this agent right now"
+     * -- a claim about the agent derived from a server failure, which is the
+     * same inversion the comment below says it fixed, one branch over. A 5xx or
+     * an unparseable body says we could not find out, so it is treated as not
+     * having reached the board rather than as a fact about the agent.
+     */
+    if (!res.ok && res.status >= 500) reached = false;
+    if (ask === null) reached = false;
+  } catch {
+    reached = false;
+  }
+  if (mine !== REMOVE_TOKEN || !CURRENT || CURRENT.sessionName !== sessionName) return;
+
+  /**
+   * ⚠️ A BOARD WE COULD NOT REACH IS NOT A FACT ABOUT THIS AGENT.
+   *
+   * The failure path used to fall through to a sentence claiming the agent
+   * could not be removed — a claim derived from a fetch that never answered.
+   * That is the "cannot tell fine from I cannot see it" inversion this codebase
+   * is built against, in the one place where the answer decides whether
+   * something gets taken away.
+   */
+  if (!reached) {
+    /**
+     * ⚠️ SAYS SO, rather than leaving the section absent.
+     *
+     * Returning silently was right about the important half — a board we could
+     * not reach is not a fact about this agent, and claiming "we cannot remove
+     * this agent" from a failed fetch is the inversion this codebase is built
+     * against. But it made the whole Remove section vanish, and the sibling
+     * branch twelve lines down states the rule it broke: *says WHY rather than
+     * simply not being there. Somebody looking for this deserves an answer.*
+     * Both can be true — say we could not find out, and offer nothing.
+     */
+    box.hidden = false;
+    hint.textContent = 'We could not reach the board just now, so we cannot tell you whether this agent can be removed. It will come back on its own.';
+    document.getElementById('d-remove-start').hidden = true;
+    return;
+  }
+
+  box.hidden = false;
+  if (ask && ask.ok) {
+    REMOVE_ASK = ask;
+    // ⚠️ From the engine, like the question and the reassurance. This file used
+    // to write its own version, which is the drift the block below forbids --
+    // and it said an agent with no startup job would be "stopped from starting
+    // again", describing work that does not happen.
+    hint.textContent = ask.hint || '';
+    document.getElementById('d-remove-start').hidden = false;
+  } else {
+    // Says WHY rather than simply not being there. Somebody looking for this
+    // deserves an answer.
+    hint.textContent = (ask && ask.because) || 'We cannot remove this agent right now.';
+    document.getElementById('d-remove-start').hidden = true;
+  }
+}
+
+/* ==========================================================================
+   THE CONFIRMATION
+
+   ⚠️ The words come from the ENGINE (`question`, `reassurance`), not from this
+   file. A screen that composes its own description of a destructive action can
+   drift from the action, and a confirmation is the one place that must never
+   happen. This file decides where the words go; it does not decide what they
+   say.
+   ========================================================================== */
+
+// Whether the poll has withdrawn this panel because its agent left the board.
+// Tracked so the branch that withdraws it can be undone when the agent returns.
+let PANEL_WITHDRAWN = false;
+
+let RM_FOR = null;      // which agent the open modal is about
+let RM_RETURN = null;   // what to focus when it closes
+
+function openRemoveModal(name, ask) {
+  // ⚠️ `RM_FOR` stays the SESSION name: it is what the removal is sent as.
+  // Only the words below use the label.
+  RM_FOR = name;
+  RM_RETURN = document.activeElement;
+  document.getElementById('rm-title').textContent = ask.question;
+  document.getElementById('rm-small').textContent = ask.reassurance;
+  // ⚠️ BOTH buttons name the agent. "Yes" and "No" beside a heading somebody
+  // half-read is how the wrong agent gets removed; a button that says
+  // "Remove casey" cannot be clicked while thinking about a different one.
+  //
+  // ⚠️ And they name it the way the ENGINE named it in the heading above. Using
+  // `name` here put a button reading "Remove claudebot" under a heading asking
+  // about Splinter — two names for one agent inside one dialog, which is worse
+  // than either name alone. `label` falls back to the session name in the
+  // engine, so this cannot end up blank.
+  //
+  // (The heading's own wording is deliberately NOT quoted here. This file must
+  // not contain that sentence at all -- a test asserts as much -- because a copy
+  // of it, even in a comment, is a copy that can drift from the engine's.)
+  const shown = ask.label || name;
+  document.getElementById('rm-go').textContent = 'Remove ' + shown;
+  const keep = document.getElementById('rm-keep');
+  keep.textContent = 'Keep ' + shown;
+  document.getElementById('rm-msg').textContent = '';
+  document.getElementById('rm-go').disabled = false;
+  document.getElementById('rm-modal').hidden = false;
+  // ⚠️ KEEPING IT TAKES FOCUS. Enter or space on an unaimed modal must land on
+  // the harmless answer.
+  keep.focus();
+}
+
+function closeRemoveModal() {
+  document.getElementById('rm-modal').hidden = true;
+  RM_FOR = null;
+  if (RM_RETURN && RM_RETURN.focus) RM_RETURN.focus();
+  RM_RETURN = null;
+}
+
+document.getElementById('d-remove-start').addEventListener('click', () => {
+  // Without an answer from the engine there is no question to ask, and painting
+  // an empty modal would show a confirmation with no name in it.
+  if (!REMOVE_ASK || !CURRENT) return;
+  openRemoveModal(CURRENT.sessionName, REMOVE_ASK);
+});
+
+document.getElementById('rm-keep').addEventListener('click', closeRemoveModal);
+
+// The backdrop and Escape both mean keep it. Every accidental dismissal lands
+// on the harmless answer, which is what makes the modal safe to make loud.
+document.getElementById('rm-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'rm-modal') closeRemoveModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('rm-modal').hidden) closeRemoveModal();
+});
+
+/**
+ * ⚠️ FOCUS STAYS IN THE MODAL WHILE IT IS OPEN.
+ *
+ * Without this, tabbing walks out of the dialog and onto the board behind it —
+ * which for a keyboard or screen-reader user means the confirmation is still on
+ * screen while they are operating something else, and `aria-modal` promises the
+ * opposite. Two controls, so the wrap is a cycle between them.
+ */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  if (document.getElementById('rm-modal').hidden) return;
+  const keep = document.getElementById('rm-keep');
+  const go = document.getElementById('rm-go');
+  /**
+   * ⚠️ A DISABLED BUTTON IS NOT IN THE TAB ORDER, so treating it as an end of
+   * the trap leaks a Tab to the page behind the dialog.
+   *
+   * While a removal is in flight `rm-go` is disabled. With focus on Keep and
+   * `ends[0]` set to the disabled Go, no `preventDefault` fires, native Tab
+   * walks out past `aria-modal="true"`, and the next Tab pulls it back via the
+   * `!inside` arm. One stray stop outside a modal that is meant to hold focus.
+   * The ends are the buttons that can actually take focus.
+   */
+  const reachable = [keep, go].filter((el) => !el.disabled);
+  const order = e.shiftKey ? reachable.slice().reverse() : reachable;
+  const ends = order.length ? [order[0], order[order.length - 1]] : [keep, keep];
+  const inside = document.getElementById('rm-modal').contains(document.activeElement);
+  if (document.activeElement === ends[0] || !inside) {
+    e.preventDefault();
+    /**
+     * ⚠️ WRAPPING lands on the far end; ARRIVING lands on Keep.
+     *
+     * These were one case and they are not the same. Wrapping (`activeElement`
+     * IS the end button) should go to the other end, which is what `ends[1]`
+     * gives. But arriving from OUTSIDE the modal also hit `ends[1]`, and on
+     * Shift+Tab that is "Remove <name>" -- so the one gesture that enters the
+     * dialog backwards put the keyboard on the destructive button. Everything
+     * else here is built so an accident lands on Keep; this was the gap.
+     */
+    (inside ? ends[1] : keep).focus();
+  }
+});
+
+document.getElementById('rm-go').addEventListener('click', async () => {
+  const forAgent = RM_FOR;
+  if (!forAgent) return;
+  const msg = document.getElementById('rm-msg');
+  const go = document.getElementById('rm-go');
+  go.disabled = true;
+  msg.textContent = 'Removing…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal', { method: 'DELETE' });
+    const done = await res.json().catch(() => null);
+    // ⚠️ The modal was closed (or reopened for someone else) while this was in
+    // flight. The answer must not paint THIS modal -- but it must not vanish
+    // either; see `reportDiscarded`.
+    if (RM_FOR !== forAgent) { reportDiscarded(done, forAgent); return; }
+    if (!res.ok || !done || done.outcome === 'refused') {
+      /**
+       * ⚠️ `error` AS WELL AS `because`, and the difference matters most here.
+       *
+       * The route answers a THROWN removal with `{ error: 'the removal failed
+       * partway and we cannot tell you how far it got' }` -- worded that way on
+       * purpose, because the job may already be disabled. Reading only
+       * `because` threw that away and fell back to "we could not remove it, and
+       * we cannot tell you why", which a person reads as *nothing happened*.
+       * That is the opposite of what the server just said, on the one path
+       * where the agent may be half-removed. `loadRemoval` gets this right for
+       * its own 5xx; this handler did not.
+       */
+      msg.textContent = (done && (done.because || done.error))
+        || 'we could not remove it, and we cannot tell you why';
+      go.disabled = false;
+      return;
+    }
+    /**
+     * ⚠️ PARTIAL IS NOT SUCCESS AND DOES NOT CLOSE THE MODAL.
+     *
+     * "We stopped it starting again but could not end the session it is running
+     * in, so it is still going" is the one message a person must not walk away
+     * from without reading. Closing on it would show them a board with the
+     * agent gone from it while the agent is still working.
+     */
+    if (done.outcome === 'partial') {
+      msg.textContent = done.because;
+      // ⚠️ Re-enabled. Some partials are a tmux or launchd call that failed
+      // once; leaving the only button dead forces a dismiss-and-reopen to
+      // retry, and the dismiss is the answer that keeps the agent.
+      go.disabled = false;
+      await tick();
+      await paintRemoved();
+      return;
+    }
+    closeRemoveModal();
+    // Nothing should still be pointing at an agent that is no longer on the
+    // board: the detail panel behind it would keep its data.
+    CURRENT = null;
+    REMOVE_ASK = null;
+    showTab('agents');
+    await tick();
+    await paintRemoved();
+    /**
+     * ⚠️ PUT THE KEYBOARD SOMEWHERE DELIBERATE.
+     *
+     * `closeRemoveModal` returns focus to the button that opened it — correct
+     * everywhere except here, because the very next thing this path does is
+     * hide the panel that button lives in. Focus then falls to `<body>`, so a
+     * keyboard user's next Tab restarts from the top of the document with no
+     * indication of what happened.
+     *
+     * The removed-agents toggle is the right landing spot rather than a
+     * neutral one: it is where the agent they just removed now IS, and it is
+     * the undo. It only exists once something has been removed, which by this
+     * line is true — but `paintRemoved` decides that, so this has to run after
+     * it, and it still falls back rather than assuming.
+     */
+    const undo = document.getElementById('removed-toggle');
+    if (undo && !document.getElementById('removed-wrap').hidden) undo.focus();
+    else document.querySelector('h1').focus();
+  } catch (err) {
+    if (RM_FOR !== forAgent) return;
+    msg.textContent = 'We could not reach the board, so we cannot tell you whether it was removed. (' + err.message + ')';
+    go.disabled = false;
+  }
+});
+
+/**
+ * ⚠️ AN OUTCOME NOBODY IS LOOKING AT STILL HAS TO LAND SOMEWHERE.
+ *
+ * Escape closes the modal while the request is in flight -- only the button is
+ * disabled -- and the `RM_FOR !== forAgent` guard then drops whatever comes
+ * back. That guard is right (a stale answer must not paint a modal now open
+ * about a different agent) but "drop it" is wrong for the one case this file
+ * says a person must not walk away from: a PARTIAL means the agent may still be
+ * running while Kosmos has already half-removed it, and closing the dialog does
+ * not make that untrue.
+ *
+ * So a discarded outcome is written to the detail screen's own message line,
+ * which is a live region and was otherwise unused after the modal opened.
+ */
+function reportDiscarded(done, forAgent) {
+  /**
+   * ⚠️ THE DETAIL PANEL MAY BE HIDDEN BY THE TIME THIS ANSWER LANDS, and a
+   * `role="alert"` inside a hidden subtree announces nothing -- the same fact
+   * this file already had to learn about `#removed-msg`.
+   *
+   * The window is not milliseconds. `run()` gives each launchctl and tmux call
+   * a 20-second timeout and blocks while it waits, so a slow removal holds the
+   * request open for seconds -- ample time to press Escape and click "All
+   * agents". The comment on this function used to say `#d-remove-msg` "is a
+   * live region and was otherwise unused", which was true and did not account
+   * for its parent.
+   *
+   * `#removed-msg` sits outside every hideable container, so it is the fallback.
+   */
+  const panel = document.getElementById('panel-detail');
+  const hidden = !panel || panel.hidden;
+  const back = document.getElementById(hidden ? 'removed-msg' : 'd-remove-msg');
+  if (!back || !done) return;
+  if (hidden) {
+    // Not scoped to CURRENT: the panel it was about is gone, and this is the
+    // one surface still on screen.
+    if (done.outcome === 'partial' || done.outcome === 'refused' || done.outcome === 'removed') {
+      back.textContent = done.because || done.error || '';
+    }
+    return;
+  }
+  // Same reason as the handler above: a thrown removal answers with `error`,
+  // not `because`, and it is the message that says the agent may be half gone.
+  if (done.error && !done.because) { 
+    if (CURRENT && CURRENT.sessionName === forAgent) back.textContent = done.error;
+    return;
+  }
+  /**
+   * ⚠️ Only onto the screen it is ABOUT. If the person dismissed A's modal and
+   * has since opened B's detail panel, `#d-remove-msg` now belongs to B --
+   * so A's outcome would appear under B's "Remove this agent" heading. It
+   * names A, so it is not ambiguous, but it is still the wrong screen.
+   */
+  if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+  if (done.outcome === 'partial' || done.outcome === 'refused') {
+    back.textContent = done.because || 'The removal did not finish.';
+  } else if (done.outcome === 'removed') {
+    back.textContent = done.because || '';
+  }
+}
+
+/* ==========================================================================
+   PUTTING ONE BACK
+
+   ⚠️ This is what makes the removal above safe to confirm with one light
+   question. If restore did not genuinely work, "remove" would be destructive
+   with a confirmation that reads as though it is not.
+   ========================================================================== */
+
+let REMOVED_OPEN = false;
+
+/**
+ * ⚠️ A GENERATION TOKEN, like every other async path in this file.
+ *
+ * This was the only fetch here without one, and it is now fired from three
+ * places at once: the unawaited five-second poll, the toggle click, and the
+ * awaited calls after a remove or a restore. An older response landing last
+ * repaints a stale list AND caches that stale markup in `REMOVED_HTML` -- so a
+ * just-restored row reappears, or a just-removed one is missing from the undo
+ * list, for up to a poll. `REMOVE_TOKEN`, `INSTR_LOAD` and `WATCH` all exist
+ * for exactly this.
+ */
+let REMOVED_TOKEN = 0;
+
+async function paintRemoved() {
+  const wrap = document.getElementById('removed-wrap');
+  const list = document.getElementById('removed-list');
+  const toggle = document.getElementById('removed-toggle');
+  const mine = ++REMOVED_TOKEN;
+  let gone = null;
+  try {
+    const res = await fetch('/api/removed', { cache: 'no-store' });
+    /**
+     * ⚠️ A SERVER FAILURE IS NOT "NOTHING HAS BEEN REMOVED".
+     *
+     * The route's own 500 body (`{error, detail}`) parses perfectly well, so
+     * `agents` came back `undefined`, fell into the empty branch below, and
+     * HID the whole "Show removed agents" control -- telling somebody their
+     * removed agents do not exist on the evidence of a server error. That is
+     * the same inversion `loadRemoval` fixes twenty lines up, and the `catch`
+     * immediately below states the rule this broke.
+     */
+    if (!res.ok) return;
+    const body = await res.json().catch(() => null);
+    if (!body || !Array.isArray(body.agents)) return;
+    gone = body.agents;
+  } catch {
+    // ⚠️ Leave whatever is on screen alone. Emptying the list because one poll
+    // failed would tell somebody their removed agents are gone, which is the
+    // opposite of what this section exists to promise.
+    return;
+  }
+  // ⚠️ A newer paint has started since this one asked. Its answer is the
+  // current one; ours is not, and painting it would also cache it.
+  if (mine !== REMOVED_TOKEN) return;
+
+  // ⚠️ AND WE MAY NO LONGER BE ON THE AGENTS TAB. `tick()` fires this
+  // unawaited, so switching tabs (or opening a card) while /api/removed is in
+  // flight would unhide the removed-agents section underneath Settings or a
+  // detail panel, where nothing hides it again until the next `showTab`. The
+  // token answers "is this answer current"; this answers "is this screen".
+  if (document.getElementById('grid').hidden) return;
+
+  if (gone.length === 0) {
+    wrap.hidden = true;
+    /**
+     * ⚠️ AND FORGET WHAT WAS DRAWN. The cache below is what stops the poll
+     * rewriting a row mid-restore; leaving it set across an empty list turns it
+     * into a trap.
+     *
+     * Measured flow, and it is the ordinary one: remove an agent, press
+     * Restore (the handler replaces that row's button with a disabled
+     * "Restoring…"), the restore succeeds, the list empties and hides -- with
+     * the mutated row and its cached markup both still in hand. Remove the same
+     * agent again the same day and the regenerated markup is byte-identical
+     * (the date is rendered to the day), so the guard skips the rewrite and the
+     * list reappears showing a DISABLED "Restoring…" button. The undo path is
+     * then dead until some other agent is removed or the page is reloaded --
+     * and the undo is the whole reason a single light confirmation is honest.
+     */
+    REMOVED_HTML = null;
+    return;
+  }
+  wrap.hidden = false;
+  toggle.textContent = (REMOVED_OPEN ? 'Hide' : 'Show') + ' removed agents (' + gone.length + ')';
+  toggle.setAttribute('aria-expanded', String(REMOVED_OPEN));
+  list.hidden = !REMOVED_OPEN;
+  /**
+   * ⚠️ THE ROW SHOWS `shownAs`; THE BUTTON CARRIES `name`. Same rule as the
+   * confirmation: act on the session name, speak the display name.
+   *
+   * This is the one screen listing agents that have no card, so a row reading
+   * `claudebot` for the agent the board and the confirmation both called
+   * `Splinter` makes the undo path unrecognisable for exactly the pre-existing
+   * agents this feature was rebuilt to support. `data-restore` stays the
+   * session name because that is what the restore route resolves.
+   *
+   * `shownAs` is captured at removal time; records written before it existed
+   * do not carry one, hence the fallback.
+   */
+  /**
+   * ⚠️ A HALF-REMOVAL SAYS SO, and it is the only screen that can.
+   *
+   * `stopped: false` means Kosmos was asked to remove this agent and could not
+   * finish -- so it is listed here AND still has a card on the board, both
+   * deliberately (`isRemoved` versus `isHidden`). Drawn identically to a clean
+   * removal, the person sees one agent in two places with nothing on either
+   * explaining why. The split exists to make that legible; this is where it
+   * becomes visible.
+   */
+  const html = gone.map((a) => '<div class="removed-row">'
+    + '<span class="who">' + esc(a.shownAs || a.name) + '</span>'
+    + '<span class="when">' + esc(whenRemoved(a))
+    + (a.stopped === false ? ' · <b>may still be running</b>' : '') + '</span>'
+    + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
+    + '</div>').join('');
+
+  /**
+   * ⚠️ ONLY REWRITE WHEN THE ANSWER ACTUALLY CHANGED, and this is not an
+   * optimisation. This runs on the five-second poll, and an unconditional
+   * `innerHTML =` breaks three things it has no business touching:
+   *
+   *   1. A row reading "Restore failed — try again" is replaced by a fresh
+   *      "Restore" within five seconds, so a restore that FAILED and one that
+   *      WORKED become indistinguishable — which is exactly what the comment on
+   *      that handler says must never happen.
+   *   2. A button mid-flight ("Restoring…", disabled) is swapped for an enabled
+   *      one, so a second click fires a duplicate restore.
+   *   3. Keyboard focus on any Restore button is dropped to `<body>`, every
+   *      five seconds, for as long as the tab is open.
+   *
+   * ⚠️ Compared against the HTML we LAST GENERATED, not against the live DOM.
+   * The live DOM legitimately diverges — that is cases 1 and 2 — and comparing
+   * to it would rewrite over precisely the states worth keeping.
+   */
+  if (html !== REMOVED_HTML) {
+    REMOVED_HTML = html;
+    list.innerHTML = html;
+  }
+}
+
+// The last markup `paintRemoved` produced. See the note in that function for
+// why the comparison is against this rather than against `list.innerHTML`.
+let REMOVED_HTML = null;
+
+/**
+ * ⚠️ Answers "we do not know" rather than inventing a date.
+ *
+ * A record written by an older version has no timestamp, and `new Date(undefined)`
+ * renders "Invalid Date" on screen.
+ */
+function whenRemoved(a) {
+  // ⚠️ `removedAt`, which is what the engine writes. This read `a.at` — a field
+  // that does not exist — so the guard below fired every time and the date
+  // never appeared for any agent, under a comment claiming the guard was for
+  // old records only.
+  if (!a || !a.removedAt) return 'removed';
+  const d = new Date(a.removedAt);
+  if (isNaN(d.getTime())) return 'removed';
+  return 'removed ' + d.toLocaleDateString();
+}
+
+document.getElementById('removed-toggle').addEventListener('click', () => {
+  REMOVED_OPEN = !REMOVED_OPEN;
+  paintRemoved();
+});
+
+document.getElementById('removed-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-restore]');
+  if (!btn) return;
+  const name = btn.dataset.restore;
+  btn.disabled = true;
+  btn.textContent = 'Restoring…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/restore', { method: 'POST' });
+    const back = await res.json().catch(() => null);
+    if (!res.ok || !back || back.outcome === 'refused') {
+      // ⚠️ Says so ON THE ROW rather than silently re-rendering. A restore that
+      // failed and a restore that worked must not look the same.
+      btn.disabled = false;
+      btn.textContent = 'Restore failed — try again';
+      return;
+    }
+    /**
+     * ⚠️ A PARTIAL RESTORE IS NOT A SUCCESS, and this branch is why the sibling
+     * remove handler spends a paragraph on the same point.
+     *
+     * `partial` used to fall straight through to the success path, and it broke
+     * in two different directions depending on WHICH half failed:
+     *
+     *   the list-write failed -> the record is still there, so `/api/removed`
+     *     is unchanged, so the markup `paintRemoved` generates is byte-identical
+     *     and the change guard correctly skips the rewrite -- leaving this row
+     *     showing the disabled "Restoring…" this handler set, with no way back
+     *     until some other agent is removed or the page is reloaded. That is
+     *     the same trap the "AND FORGET WHAT WAS DRAWN" note describes for the
+     *     empty list, reached by a path that note does not cover.
+     *
+     *   the start failed -> the row vanishes as though it restored cleanly, and
+     *     "we could not start it again. It may need starting by hand" is never
+     *     shown anywhere at all.
+     *
+     * ⚠️ `REMOVED_HTML` is cleared, or the guard would skip the repaint that
+     * has to happen after this row is put back into a usable state.
+     */
+    if (back.outcome === 'partial') {
+      btn.disabled = false;
+      btn.textContent = 'Restore';
+      /**
+       * ⚠️ THE MESSAGE GOES OUTSIDE THE LIST, because which of the two partials
+       * happened decides whether the row survives, and it must not decide
+       * whether the person is told.
+       *
+       * `restore` fails partially in two independent directions:
+       *
+       *   the LIST-WRITE failed -> the record stays, so /api/removed is
+       *     unchanged, so the markup is identical and the change-guard skips the
+       *     repaint. A note written into the row survives.
+       *
+       *   the START failed -> the record was cleared, so within one five-second
+       *     tick the markup DOES change, the list is rewritten and the row and
+       *     its note are destroyed. If it was the only removed agent the whole
+       *     section hides. The agent is then on no list, has no card because
+       *     nothing restarted its session, and the one sentence saying so has
+       *     silently deleted itself.
+       *
+       * The previous version put the note in the row and reasoned about only the
+       * first case -- reproducing, on the sibling path and with a five-second
+       * fuse, the exact failure its own comment claimed to have fixed. Writing
+       * it somewhere `paintRemoved` never touches makes the distinction stop
+       * mattering, which is better than getting the distinction right.
+       */
+      const say = document.getElementById('removed-msg');
+      if (say) say.textContent = back.because || 'The restore did not finish.';
+      /**
+       * ⚠️ THE CACHE IS LEFT ALONE, AND `tick()` IS NOT CALLED. The first
+       * version of this branch did both, and between them they erased the note
+       * it had just written.
+       *
+       * `REMOVED_HTML = null` makes the next `html !== REMOVED_HTML` trivially
+       * true, so `paintRemoved` rewrites the list and destroys the row -- and
+       * `tick()` calls `paintRemoved` on its way past, so the message survived
+       * for the length of two fetches and was never read by anyone. Exactly the
+       * defect the comment above claims to fix.
+       *
+       * And the reasoning was backwards: by this line the row has ALREADY been
+       * put back into a usable state by hand (button re-enabled, note added),
+       * so keeping the cache is what preserves it. The cache exists to stop the
+       * poll overwriting deliberate row state, and this is deliberate row
+       * state.
+       *
+       * The board itself still refreshes on its own five-second tick; what is
+       * skipped here is only the immediate repaint that would wipe the row.
+       */
+      return;
+    }
+    // ⚠️ Cleared on the way out, or a message about a restore that has since
+    // been retried successfully sits under a list that no longer shows it.
+    const say = document.getElementById('removed-msg');
+    if (say) say.textContent = '';
+    await tick();
+    await paintRemoved();
+  } catch {
+    btn.disabled = false;
+    btn.textContent = 'Restore failed — try again';
+  }
 });
 
 document.getElementById('d-save').addEventListener('click', async () => {
@@ -1779,10 +2741,11 @@ async function watchForAgent(name, result, attempt) {
     warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
       + 'The folder and the instructions are on your computer either way. It may still '
       + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
-      // ⚠️ Removing an agent is still a manual job, and this is the screen where
-      // somebody is most likely to want one gone. Saying "it is set to keep
-      // trying" without saying where is how a person ends up with a job they
-      // cannot find.
+      // ⚠️ This is the screen where somebody is most likely to want an agent
+      // gone, and saying "it is set to keep trying" without saying where is how
+      // a person ends up with a job they cannot find. (This used to add "because
+      // removing an agent is still a manual job" -- Remove exists now. What is
+      // still manual is DELETE, which is why the README recipe stays.)
       // ⚠️ The folder comes from the ANSWER, not from a path built here. This
       // page guessed `~/work/workers/<name>`, which is wrong on any machine
       // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a

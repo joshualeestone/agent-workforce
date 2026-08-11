@@ -7,7 +7,8 @@
  * commitments each agent says it is holding, and the instruction file each
  * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
  * worker directory, a startup script and a launchd job, and loads that job.
- * It cannot yet send input to an agent, or stop or remove one.
+ * It can now stop and remove an agent, and put one back. It cannot yet send
+ * input to one.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -16,7 +17,8 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot, paneRoster } = require('./engine/status');
+const { snapshot, paneRoster, countAgents } = require('./engine/status');
+const removal = require('./engine/remove');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -531,7 +533,39 @@ const server = http.createServer((req, res) => {
       // It also reinstates the measured wrong-card-cost failure: the restart
       // dialog reads these, so the cost shown would be the real agent's while
       // the pane acted on is a stranger's.
-      const agents = snap.agents.map((a) => ({
+      // ⚠️ REMOVED AGENTS COME OFF THE BOARD HERE, and this filter is the whole
+      // user-visible half of a removal. Everything else the engine does is
+      // invisible: the launchd job is disabled, the session ended. If a removed
+      // agent still appeared in this list, the person who removed it would have
+      // clear evidence the product ignored them, and no way to tell that
+      // anything had happened at all.
+      //
+      // Filtering the SNAPSHOT rather than the pane source is deliberate: a
+      // removed agent's session is gone, but a foreign agent whose session was
+      // not ours to end can still be running, and it must vanish from the board
+      // regardless. "Removed" is a fact this product keeps, not something it
+      // infers from what tmux happens to show.
+      // ⚠️ `sessionName`, NOT `name`. They are different fields and they differ
+      // for exactly the agents this feature was rebuilt to support. `name` is
+      // the DISPLAY name, parsed out of "You are **Angel**" in the agent's own
+      // instructions or supplied by an override; `sessionName` is what tmux and
+      // launchd know it as, and it is what a removal records. For an agent this
+      // app created the two coincide, which is why filtering on the wrong one
+      // passed every test — and why removing `claudebot`, whose card reads
+      // "Splinter", would have left it on the board and in the removed list at
+      // the same time. Every other name-keyed reader in this block already uses
+      // `sessionName`; this was the one that did not.
+      // ⚠️ Only the ones that actually STOPPED come off the board. A removal
+      // that half-worked is recorded — so there is a Restore button — but its
+      // agent may still be running, and hiding a running agent is the one thing
+      // this board must never do.
+      // ⚠️ The predicate is read off the records already in hand, not by calling
+      // `isHidden` per agent -- that re-read and re-parsed `removed.json` once
+      // per removed agent, on top of the read `removedAgents()` just did, on
+      // every five-second poll. `stopped !== false` is `isHidden`'s own test;
+      // if the two ever diverge this is the copy that is wrong.
+      const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
+      const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
@@ -556,7 +590,13 @@ const server = http.createServer((req, res) => {
           ? instructions.staleness(a.sessionName, undefined, a.session)
           : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tie this pane to an agent by name' },
       }));
-      body = JSON.stringify({ ...snap, agents, version });
+      // ⚠️ THE COUNTS DESCRIBE THE CARDS THAT ARE LEFT. Computed over the
+      // unfiltered snapshot they put "12 agents" above 11 cards, and can put
+      // "1 needs you" on screen with no card anywhere to click. Recomputed with
+      // the ENGINE's own counter rather than a copy of its predicates here, so
+      // a count added there cannot quietly stop being recomputed here.
+      const counts = countAgents(agents, snap.counts && snap.counts.unreadableLines);
+      body = JSON.stringify({ ...snap, agents, counts, version });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
@@ -751,6 +791,115 @@ const server = http.createServer((req, res) => {
       // green because nothing exercised it. A route's error path needs a test as
       // much as its happy path does.
       .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
+  /**
+   * --- removing an agent ---------------------------------------------------
+   *
+   * ⚠️ REMOVE IS NOT DELETE, and every route here is shaped by that. Removing
+   * takes an agent off this board and stops it coming back; it does not touch
+   * one byte of what is on disk. That is what makes RESTORE possible, and
+   * restore is the reason the removal is safe to offer at all.
+   *
+   * ⚠️ `GET` returns the QUESTION the confirmation asks — not a list of steps.
+   * Josh's wording, deliberately: a person removing an agent does not want to
+   * read that a launchd job will be disabled. They want to be asked once, by
+   * name, and told nothing of theirs is being destroyed. The screen must not
+   * compose that sentence itself, because a screen that writes its own
+   * description of the work can drift from the work.
+   *
+   * ⚠️ It removes agents this product did NOT create, on purpose. An earlier
+   * design refused them, reasoning that whatever set an agent up is what should
+   * take it away. Josh reversed it: managing the fleet you actually have is the
+   * point of the product, and an agent it cannot manage is a hole, not a
+   * safeguard. What survives from that caution is that nothing of theirs is
+   * deleted — a foreign job is DISABLED and its exact label recorded, so
+   * restore puts back precisely what was taken away.
+   */
+  const rm = pathname.match(/^\/api\/agent\/([^/]+)\/removal$/);
+  if (rm && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(rm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+  /**
+   * ⚠️ GUARDED, like every other engine call in this file.
+   *
+   * These four are the only routes that STOP things, and they were the four
+   * handed straight to the socket. `plan` reads the filesystem (the removed
+   * list, the plists, the agent's instruction file for its display name),
+   * `remove` and `restore` shell out to launchctl and tmux, and any of that can
+   * throw. An uncaught throw here does not fail the request, it exits the
+   * process -- so the board goes down at the exact moment somebody is halfway
+   * through removing an agent, with no way to see what happened. The convention
+   * is stated a hundred lines below at `/api/agent/:name/commitments`, and
+   * these routes were written without it.
+   */
+    let plan;
+    try { plan = removal.plan(name); }
+    catch (err) { sendJson(res, 500, { error: 'we could not work out whether this agent can be removed', detail: String(err && err.message || err) }); return; }
+    sendJson(res, plan.ok ? 200 : 400, plan);
+    return;
+  }
+  if (rm && req.method === 'DELETE') {
+    const name = decodeSegment(rm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let done;
+    // ⚠️ Guarded for the reason given on the route above, and it matters most
+    // here: this is the call that has already disabled a launchd job by the
+    // time anything downstream can throw.
+    try { done = removal.remove(name); }
+    catch (err) { sendJson(res, 500, { error: 'the removal failed partway and we cannot tell you how far it got', detail: String(err && err.message || err) }); return; }
+    // ⚠️ A PARTIAL answers 200, deliberately: the request was understood and
+    // acted on, and what happened is in the body, which is where a removal's
+    // outcome has to be read anyway (a removal that half-worked is not an
+    // error, it is a state). The screen branches on `outcome` rather than on
+    // status for exactly that reason.
+    sendJson(res, done.outcome === removal.OUTCOME.REFUSED ? 400 : 200, done);
+    return;
+  }
+
+  // --- putting one back ------------------------------------------------------
+  //
+  // ⚠️ This route is the whole reason the removal is allowed to be casual. If
+  // restore did not genuinely work, "remove" would be a destructive act wearing
+  // a light confirmation, which is the exact defect this codebase keeps
+  // cataloguing. It re-enables the SPECIFIC label that was disabled — read back
+  // from the record, never re-derived — so a foreign agent goes back onto the
+  // job that actually starts it.
+  const rs = pathname.match(/^\/api\/agent\/([^/]+)\/restore$/);
+  if (rs && req.method === 'POST') {
+    const name = decodeSegment(rs[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let back;
+    try { back = removal.restore(name); }
+    catch (err) { sendJson(res, 500, { error: 'we could not put this agent back', detail: String(err && err.message || err) }); return; }
+    sendJson(res, back.outcome === removal.OUTCOME.REFUSED ? 400 : 200, back);
+    return;
+  }
+
+  // The removed ones, for the list at the bottom of the agents tab. Removing
+  // something must never mean losing track of it.
+  if (pathname === '/api/removed' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let agents;
+    // ⚠️ A throw here is the worst of the four: this list IS the undo path, and
+    // taking the process down while somebody looks for it is how a reversible
+    // removal stops being reversible.
+    try { agents = removal.removedAgents(); }
+    catch (err) { sendJson(res, 500, { error: 'we could not read the removed list', detail: String(err && err.message || err) }); return; }
+    /**
+     * ⚠️ Only the fields the screen uses. The stored record also carries the
+     * absolute plist path, the launchd label and whether the job is ours --
+     * none of which the browser reads, and all of which are machine detail this
+     * product's whole vocabulary rule says a person is never shown.
+     */
+    sendJson(res, 200, {
+      agents: agents.map((a) => ({
+        name: a.name,
+        shownAs: a.shownAs || a.name,
+        removedAt: a.removedAt,
+        stopped: a.stopped,
+      })),
+    });
     return;
   }
 
