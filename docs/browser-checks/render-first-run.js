@@ -1,0 +1,234 @@
+/**
+ * Render every first-run state in a real browser and look at it.
+ *
+ * ⚠️ The API responses are intercepted, NOT the render functions. The whole
+ * client path -- fetch, parse, paint -- runs exactly as it does live; the only
+ * thing substituted is what the server said. Calling the paint functions
+ * directly would skip the part that has broken before.
+ */
+const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+
+const BASE = 'http://127.0.0.1:4399';
+const OUT = process.argv[2] || '/tmp/frshots';
+const HEADED = process.env.HEADED !== '0';
+fs.mkdirSync(OUT, { recursive: true });
+
+const MACHINE_OK = {
+  checks: [
+    { key: 'installed', state: 'ok', title: 'Everything it needs to run is installed', detail: 'There is nothing else for you to go and find.' },
+    { key: 'sleep', state: 'ok', title: 'This Mac does not go to sleep', detail: 'So your agents keep working while you are away.' },
+    { key: 'restart', state: 'ok', title: 'Your agents will start themselves', detail: 'If this computer restarts, they come back on their own.' },
+  ], attention: 0, unknown: 0,
+};
+const MACHINE_MIXED = {
+  checks: [
+    { key: 'installed', state: 'ok', title: 'Everything it needs to run is installed', detail: 'There is nothing else for you to go and find.' },
+    { key: 'sleep', state: 'attention', title: 'This Mac keeps working plugged in, and sleeps on battery', detail: "Plugged in it never sleeps. On battery it sleeps after 10 minutes, and your agents stop with it. A laptop you close at five o'clock is not a computer that stays on: if you want them working overnight, leave this one open and plugged in, or use a Mac that stays switched on." },
+    { key: 'restart', state: 'unknown', title: 'We could not tell whether your agents will start themselves', detail: 'They are set up to, and nothing here says they will not. We just could not check.' },
+  ], attention: 1, unknown: 1,
+};
+
+const FLEET_REAL = null; // let the real server answer
+const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
+const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, fleetNames: ['Splinter', 'Casey Jones', 'Angel'], path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
+
+const SHOTS = [
+  { name: 'firstrun-1-welcome', step: 1 },
+  { name: 'firstrun-2-checks-clear', step: 2, machine: MACHINE_OK },
+  { name: 'firstrun-2-checks-attention', step: 2, machine: MACHINE_MIXED },
+  { name: 'firstrun-3-claude-connected', step: 3 },
+  { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
+  { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
+  { name: 'firstrun-4-adopt', step: 4 },
+  { name: 'firstrun-4-create', step: 4, first: FLEET_CREATE },
+  { name: 'firstrun-4-cannot-see', step: 4, first: FLEET_BLIND },
+];
+
+/**
+ * The things a text assertion cannot see. Every one of these has a real defect
+ * behind it: a modal that rendered fully transparent passed 316 tests and two
+ * blind reviews, because nothing had ever put the page on a screen.
+ */
+async function look(page, name) {
+  return page.evaluate((label) => {
+    const bad = [];
+    const box = document.querySelector('#firstrun');
+    const back = getComputedStyle(box);
+
+    // 1. Is it actually there, and actually opaque?
+    const r = box.getBoundingClientRect();
+    if (r.width < 100 || r.height < 100) bad.push(`overlay is ${r.width}x${r.height}`);
+    if (back.opacity !== '1') bad.push(`overlay opacity ${back.opacity}`);
+    const bg = back.backgroundColor;
+    if (/rgba\(.*,\s*0\)/.test(bg) || bg === 'transparent') bad.push(`overlay background is ${bg}`);
+
+    // 2. Is the board actually hidden behind it? Not "styled to be" -- asked.
+    const grid = document.getElementById('grid');
+    if (grid) {
+      const gr = grid.getBoundingClientRect();
+      const mid = document.elementFromPoint(Math.min(window.innerWidth / 2, 400), 300);
+      if (mid && !box.contains(mid)) bad.push(`the point (400,300) hits ${mid.tagName}#${mid.id || ''} outside the overlay`);
+      if (gr.height > 0 && getComputedStyle(grid).visibility === 'visible' && !document.querySelector('body > header').inert) {
+        bad.push('the board behind is not inert');
+      }
+    }
+
+    // 3. Does any visible text have no contrast against what it sits on?
+    /**
+     * ⚠️ ALPHA IS COMPOSITED, and the first version of this function did not do
+     * it. Every tinted surface in this file is a low-alpha black or white over
+     * the panel behind it -- `rgba(0,0,0,0.035)` for the quiet note, an amber at
+     * 0.10 for the warning. Reading that as an OPAQUE colour makes 3.5%-black
+     * come out as black, so black body text on a near-white note scored 1.00 and
+     * the checker reported nine contrast failures on a page that has none.
+     *
+     * It found the bug in itself, which is the only reason any of its other
+     * findings are worth reading.
+     */
+    const parse = (c) => {
+      const m = (c || '').match(/[\d.]+/g);
+      if (!m) return null;
+      return { r: +m[0], g: +m[1], b: +m[2], a: m.length > 3 ? +m[3] : 1 };
+    };
+    const over = (fg, bg) => ({
+      r: fg.r * fg.a + bg.r * (1 - fg.a),
+      g: fg.g * fg.a + bg.g * (1 - fg.a),
+      b: fg.b * fg.a + bg.b * (1 - fg.a),
+      a: 1,
+    });
+    const lum = (c) => {
+      const p = typeof c === 'string' ? parse(c) : c;
+      const f = [p.r, p.g, p.b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+    };
+    /** Every background from this element up, painted onto each other in order. */
+    const paintedBg = (el) => {
+      const stack = [];
+      for (let n = el; n; n = n.parentElement) {
+        const c = parse(getComputedStyle(n).backgroundColor);
+        if (c && c.a > 0) stack.push(c);
+        if (c && c.a === 1) break;
+      }
+      let out = stack.length && stack[stack.length - 1].a === 1
+        ? stack.pop() : { r: 255, g: 255, b: 255, a: 1 };
+      while (stack.length) out = over(stack.pop(), out);
+      return out;
+    };
+    const show = (c) => `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
+    for (const el of box.querySelectorAll('h2, p, div, span, li, button')) {
+      if (!el.getBoundingClientRect().width) continue;
+      const own = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent.trim());
+      if (!own) continue;
+      const st = getComputedStyle(el);
+      if (st.visibility === 'hidden' || st.display === 'none') continue;
+      if (el.classList.contains('vh')) continue;
+      const ground = paintedBg(el);
+      // The text colour composites too: --label is rgba(0,0,0,0.85), not black.
+      const ink = over(parse(st.color), ground);
+      const a = lum(ink); const b = lum(ground);
+      const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      const size = parseFloat(st.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number(st.fontWeight) >= 700);
+      if (ratio < (large ? 3 : 4.5)) {
+        bad.push(`contrast ${ratio.toFixed(2)} on "${el.textContent.trim().slice(0, 42)}" (${show(ink)} on ${show(ground)}, ${size}px)`);
+      }
+    }
+
+    // 4. Does anything run off the side?
+    if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
+      bad.push(`page scrolls horizontally: ${document.documentElement.scrollWidth} > ${document.documentElement.clientWidth}`);
+    }
+    for (const el of box.querySelectorAll('*')) {
+      const er = el.getBoundingClientRect();
+      if (er.width && (er.right > window.innerWidth + 1 || er.left < -1)) {
+        bad.push(`${el.className || el.tagName} runs off the side (${er.left.toFixed(0)}..${er.right.toFixed(0)} of ${window.innerWidth})`);
+        break;
+      }
+    }
+
+    // 5. Is every button reachable and named?
+    for (const b of box.querySelectorAll('button')) {
+      if (b.hidden || !b.getBoundingClientRect().width) continue;
+      if (!b.textContent.trim() && !b.getAttribute('aria-label')) bad.push('a visible button has no name');
+      if (b.tabIndex < 0) bad.push(`button "${b.textContent.trim()}" is not focusable`);
+    }
+    return { label, bad, heading: (document.getElementById('fr-title') || {}).textContent };
+  }, name);
+}
+
+(async () => {
+  const browser = await chromium.launch({ headless: !HEADED });
+  const problems = [];
+
+  /**
+   * ⚠️ THE CONTROL, FIRST. The alpha fix above made every contrast finding go
+   * away, and "it stopped reporting anything" is exactly what a checker that has
+   * been broken into silence also looks like. So: paint one element that really
+   * does fail, and require the checker to catch it. If this does not fire, no
+   * clean run below means anything.
+   */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' });
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/?first-run=1`, { waitUntil: 'networkidle' });
+    await page.evaluate(() => {
+      const p = document.createElement('p');
+      p.textContent = 'deliberately unreadable control text';
+      p.style.cssText = 'color: rgb(200,200,200); background: rgb(255,255,255); font-size: 13px';
+      document.querySelector('#fr-pane-1').appendChild(p);
+    });
+    const seen = await look(page, 'control');
+    const caught = seen.bad.filter((b) => /deliberately unreadable/.test(b));
+    console.log(caught.length
+      ? `control: caught the planted failure (${caught[0]})`
+      : 'control: DID NOT CATCH A PLANTED CONTRAST FAILURE — every clean result below is meaningless');
+    if (!caught.length) problems.push('the contrast control did not fire');
+    const other = seen.bad.filter((b) => !/deliberately unreadable/.test(b));
+    if (other.length) console.log('  (control run also saw: ' + other.join('; ') + ')');
+    await ctx.close();
+  }
+
+  for (const scheme of ['light', 'dark']) {
+    for (const shot of SHOTS) {
+      const ctx = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 2,
+        colorScheme: scheme,
+      });
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => problems.push(`${shot.name} [${scheme}] JS ERROR: ${e.message}`));
+      page.on('console', (m) => { if (m.type() === 'error') problems.push(`${shot.name} [${scheme}] console: ${m.text()}`); });
+      if (shot.machine) {
+        await page.route('**/api/machine', (r) => r.fulfill({ json: shot.machine }));
+      }
+      if (shot.first) {
+        await page.route('**/api/first-run', (r) => r.fulfill({ json: shot.first }));
+      }
+      await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(700);
+      const seen = await look(page, shot.name);
+      for (const b of seen.bad) problems.push(`${shot.name} [${scheme}]: ${b}`);
+      // Clipped to the card with a margin, rather than a viewport of mostly
+      // empty backdrop: it is what a reviewer is actually looking at, and it
+      // keeps the committed images a fraction of the size.
+      const box = await page.locator('.fr-box').boundingBox();
+      const pad = 28;
+      await page.screenshot({
+        path: path.join(OUT, `${shot.name}${scheme === 'dark' ? '-dark' : ''}.png`),
+        clip: {
+          x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad),
+          width: Math.min(box.width + pad * 2, 1280), height: box.height + pad * 2,
+        },
+      });
+      console.log(`${scheme.padEnd(5)} ${shot.name.padEnd(32)} "${seen.heading}"${seen.bad.length ? '  ⚠ ' + seen.bad.length : ''}`);
+      await ctx.close();
+    }
+  }
+  await browser.close();
+  console.log('\n' + (problems.length ? `PROBLEMS (${problems.length}):\n  ` + problems.join('\n  ') : 'no rendering problems found'));
+  process.exit(problems.length ? 1 : 0);
+})();
