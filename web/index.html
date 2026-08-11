@@ -265,7 +265,10 @@ svg { display: block; }
   border-left: 3px solid var(--warn, #b8860b);
   background: var(--bg-sunken);
   color: var(--label);
-  font-size: var(--text-small);
+  /* ⚠️ `--text-small` has never existed. This line was invalid on `main` too,
+     so the one sentence explaining why every write vanished has been rendering
+     at inherited size since it shipped. Found by the token check, not by eye. */
+  font-size: 12px;
   border-radius: var(--radius-sm, 4px);
 }
 
@@ -313,33 +316,67 @@ svg { display: block; }
    request, no dependency, and identical on every machine.
    A local-first product must not fetch a remote asset to draw a pencil, and it
    has to keep working on a machine with no internet at all. */
-/* The removal modal. It covers the board on purpose. */
-.rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.62);
+/* The removal modal. It covers the board on purpose.
+
+   ⚠️ EVERY COLOUR AND SIZE HERE COMES FROM A TOKEN DEFINED IN `:root` ABOVE.
+   The first version of this block invented four that do not exist (`--card`,
+   `--ink`, `--line`, `--text-h2`). An undefined custom property makes the whole
+   declaration invalid, so the box rendered with NO background and NO border --
+   a transparent confirmation with the page legible through its own words -- and
+   `font: var(--text-h2) …` dropped, leaving the heading at 13px normal weight.
+   Two review rounds and a full suite passed it, because every test asserted the
+   modal's TEXT and nothing rendered it. `styleTokens` in server.test.js now
+   fails on any var() with no fallback that names a property `:root` lacks.
+
+   Josh asked for this to be "a bit obnoxious so they really understand what
+   they are doing", and that is the reason for the size and the weight rather
+   than decoration. It is deliberately NOT alarming: removal is reversible, so
+   nothing here says otherwise. Loud about WHICH agent, quiet about danger. */
+.rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
 .rm-back[hidden] { display: none; }
-.rm-box { background: var(--card); border: 1px solid var(--line);
-          border-radius: 12px; padding: var(--space-6); max-width: 30rem;
+.rm-box { background: var(--bg-elevated); border: 1px solid var(--border-strong);
+          border-radius: 12px; padding: var(--space-8); max-width: 30rem;
           width: 100%; box-shadow: 0 18px 48px rgba(17, 20, 24, 0.28); }
-.rm-title { font: var(--text-h2) var(--font-ui); color: var(--ink);
-            margin: 0 0 var(--space-3); }
-.rm-small { font: var(--text-small) var(--font-ui); color: var(--label);
-            margin: 0 0 var(--space-6); }
-.rm-acts { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+/* ⚠️ The weight is IN the shorthand. `font:` resets font-weight to normal, so a
+   bare `font: var(--text-title-1) …` on an h2 silently un-bolds it. */
+.rm-title { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
+            margin: 0 0 var(--space-5); }
+.rm-small { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+            line-height: 1.45; margin: 0 0 var(--space-8); }
+.rm-acts { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+/* Both answers are full-size and legible. The destructive one is marked by its
+   border, never by hue alone -- this screen reads the same in greyscale. */
+.rm-acts .btn { padding: var(--space-5) var(--space-7); }
 /* The removed list. */
-.removed-wrap { margin: var(--space-6) 0 var(--space-8); }
+/* ⚠️ SHARES `.grid`'S TRACKS, not just its max-width, and the difference is the
+   whole fix. The cards are CENTRED columns rather than a full-width block, so
+   `max-width: 1320px` alone still left this list running the full window --
+   starting a third of a screen left of the board it belongs to, at every
+   viewport narrower than the cap. Repeating the template makes this container
+   resolve to exactly the width the grid resolved to, whatever that is.
+   Its own children then span every track. */
+/* ⚠️ The COLUMN gap has to match `.grid`'s too, not just the template. With it
+   at 0 the tracks resolve a few pixels wider, the container lands 6px off the
+   cards, and "almost aligned" reads worse than not trying. Row gap stays 0:
+   `.removed-list` spaces its own rows. */
+.removed-wrap { display: grid; gap: 0 var(--space-5); justify-content: center;
+                grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
+                max-width: 1320px; margin: var(--space-6) auto var(--space-8); }
+.removed-wrap > * { grid-column: 1 / -1; }
 .linkish { background: none; border: 0; padding: var(--space-2) 0;
-           font: var(--text-small) var(--font-ui); color: var(--label);
+           font: var(--text-callout) var(--font-ui); color: var(--label-2);
            text-decoration: underline; cursor: pointer; }
-.linkish:hover { color: var(--ink); }
+.linkish:hover { color: var(--label); }
 .removed-list { margin-top: var(--space-3); display: flex;
                 flex-direction: column; gap: var(--space-2); }
 .removed-row { display: flex; align-items: center; gap: var(--space-4);
                flex-wrap: wrap; padding: var(--space-3) var(--space-4);
-               border: 1px solid var(--line); border-radius: 8px;
-               background: var(--card); }
-.removed-row .who { font: var(--text-body) var(--font-ui); color: var(--ink); }
-.removed-row .when { font: var(--text-small) var(--font-ui); color: var(--label);
+               border: 0.5px solid var(--separator); border-radius: 8px;
+               background: var(--bg-elevated); }
+.removed-row .who { font: var(--text-body) var(--font-ui); color: var(--label); }
+.removed-row .when { font: var(--text-callout) var(--font-ui); color: var(--label-2);
                      margin-right: auto; }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -1526,6 +1563,8 @@ let RM_FOR = null;      // which agent the open modal is about
 let RM_RETURN = null;   // what to focus when it closes
 
 function openRemoveModal(name, ask) {
+  // ⚠️ `RM_FOR` stays the SESSION name: it is what the removal is sent as.
+  // Only the words below use the label.
   RM_FOR = name;
   RM_RETURN = document.activeElement;
   document.getElementById('rm-title').textContent = ask.question;
@@ -1533,9 +1572,20 @@ function openRemoveModal(name, ask) {
   // ⚠️ BOTH buttons name the agent. "Yes" and "No" beside a heading somebody
   // half-read is how the wrong agent gets removed; a button that says
   // "Remove casey" cannot be clicked while thinking about a different one.
-  document.getElementById('rm-go').textContent = 'Remove ' + name;
+  //
+  // ⚠️ And they name it the way the ENGINE named it in the heading above. Using
+  // `name` here put a button reading "Remove claudebot" under a heading asking
+  // about Splinter — two names for one agent inside one dialog, which is worse
+  // than either name alone. `label` falls back to the session name in the
+  // engine, so this cannot end up blank.
+  //
+  // (The heading's own wording is deliberately NOT quoted here. This file must
+  // not contain that sentence at all -- a test asserts as much -- because a copy
+  // of it, even in a comment, is a copy that can drift from the engine's.)
+  const shown = ask.label || name;
+  document.getElementById('rm-go').textContent = 'Remove ' + shown;
   const keep = document.getElementById('rm-keep');
-  keep.textContent = 'Keep ' + name;
+  keep.textContent = 'Keep ' + shown;
   document.getElementById('rm-msg').textContent = '';
   document.getElementById('rm-go').disabled = false;
   document.getElementById('rm-modal').hidden = false;

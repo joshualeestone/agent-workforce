@@ -303,6 +303,14 @@ function plan(name) {
   const problem = create.nameProblem(clean);
   if (problem) return { ok: false, because: problem };
   /**
+   * ⚠️ WHAT TO CALL IT ON SCREEN, resolved once and used by every sentence
+   * below — the refusals as well as the question. See the note above the return
+   * for why this is the display name and not the session name; a refusal shown
+   * on Splinter's own screen reading "claudebot has already been removed" has
+   * the same problem as the confirmation did.
+   */
+  const shown = status.readIdentity(clean).displayName || clean;
+  /**
    * ⚠️ `isHidden`, NOT `isRemoved`, and the difference is a retry.
    *
    * A removal that half worked leaves a record, so keying this on "is there a
@@ -312,7 +320,7 @@ function plan(name) {
    * is genuinely gone; let them try again when it is not.
    */
   if (isHidden(clean)) {
-    return { ok: false, because: `${clean} has already been removed from Kosmos.` };
+    return { ok: false, because: `${shown} has already been removed from Kosmos.` };
   }
   /**
    * ⚠️ THERE HAS TO BE SOMETHING THERE TO REMOVE.
@@ -329,15 +337,37 @@ function plan(name) {
    */
   const there = exists(clean);
   if (there === UNKNOWN) {
-    return { ok: false, because: `we could not check whether ${clean} is still there, so we have not offered to remove it. Try again in a moment.` };
+    return { ok: false, because: `we could not check whether ${shown} is still there, so we have not offered to remove it. Try again in a moment.` };
   }
   if (!there) {
-    return { ok: false, because: `we cannot find an agent called ${clean}.` };
+    return { ok: false, because: `we cannot find an agent called ${shown}.` };
   }
+  /**
+   * ⚠️ THE QUESTION USES THE NAME ON THE CARD, NOT THE NAME ON THE MACHINE.
+   *
+   * These are the same string for every agent Kosmos creates and differ for
+   * exactly the pre-existing ones this feature was rebuilt to cover. The board
+   * shows `Splinter`; the session is `claudebot`. Naming the machine one asks
+   * somebody whether they are sure about removing an agent **they have never
+   * seen that name for** — which defeats the entire reason Josh asked for the
+   * confirmation to be named: *"so they really understand what they are doing."*
+   *
+   * ⚠️ And it is the SAME display-versus-session split that produced a blocker
+   * on this branch already, pointing the other way: the board filtered on the
+   * display name while a removal recorded the session name. The rule that comes
+   * out of both: **act on the session name, speak the display name.** Nothing
+   * below this line acts on `shown`; it is only ever said.
+   *
+   * `readIdentity` falls back to the session name when it cannot read one, so
+   * the worst case is the plainer of two true names, never a wrong one.
+   */
   return {
     ok: true,
     name: clean,
-    question: `Are you sure you want to remove ${clean} from Kosmos?`,
+    // What to CALL it on screen. The buttons use this too, so a confirmation
+    // cannot say "Splinter" above a button reading "Remove claudebot".
+    label: shown,
+    question: `Are you sure you want to remove ${shown} from Kosmos?`,
     reassurance: "The agent's folder and the contents you wrote for it will not be deleted.",
   };
 }

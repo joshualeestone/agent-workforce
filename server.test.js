@@ -2157,7 +2157,32 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
   const foreign = await req(`/api/agent/${foreignName}/removal`);
   assert.equal(foreign.status, 200,
     'the route refused an agent another tool created, which this rebuild exists to support');
-  assert.match(JSON.parse(foreign.body).question, /route-foreign/);
+
+  /**
+   * ⚠️ IT IS ASKED ABOUT BY THE NAME ON ITS CARD, NOT ITS NAME ON THE MACHINE.
+   *
+   * This fixture has both, on purpose: the session is `route-foreign` and its
+   * instruction file calls it `Foreign`. They are the same string for every
+   * agent Kosmos creates, so only a pre-existing agent — the kind this rebuild
+   * exists to support — can tell the two apart at all. On the real fleet the
+   * pair is `claudebot` / `Splinter`, and the confirmation asked about
+   * `claudebot`: a name the person has never seen on the board they clicked
+   * from. Josh asked for the confirmation to be named so somebody *understands
+   * what they are doing*, and a name they do not recognise does the opposite.
+   *
+   * The `doesNotMatch` is the half that would have caught it. Asserting only
+   * that "Foreign" appears passes just as happily against a sentence carrying
+   * both names.
+   */
+  const foreignAsk = JSON.parse(foreign.body);
+  assert.match(foreignAsk.question, /Foreign/,
+    'the confirmation does not call the agent what the board calls it');
+  assert.doesNotMatch(foreignAsk.question, /route-foreign/,
+    'the confirmation names the session rather than the agent, so it asks about a name nobody has seen');
+  assert.equal(foreignAsk.label, 'Foreign',
+    'the buttons have no display name to use, so they fall back to naming the session');
+  assert.equal(foreignAsk.name, foreignName,
+    'the display name reached the field the removal is ACTED on, which would remove the wrong thing or nothing');
 
   // A malformed name answers rather than crashing the process.
   const bad = await req('/api/agent/%/removal', { method: 'DELETE' });
@@ -2258,8 +2283,20 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
 
   // ⚠️ BOTH buttons name the agent. A bare "Yes"/"No" beside a half-read
   // heading is how the wrong agent gets removed.
-  assert.match(raw, /'Remove ' \+ name/, 'the destructive button does not name the agent');
-  assert.match(raw, /'Keep ' \+ name/, 'the safe button does not name the agent');
+  /**
+   * ⚠️ Named from the ENGINE's label, the same source as the heading — not from
+   * the session name the page happens to be holding. Those differ for exactly
+   * the pre-existing agents this feature was rebuilt for, and using both put a
+   * button reading "Remove claudebot" under a heading asking about Splinter.
+   */
+  assert.match(raw, /const shown = ask\.label \|\| name/,
+    'the buttons name the agent from something other than the engine, so they can disagree with the heading');
+  assert.match(raw, /'Remove ' \+ shown/, 'the destructive button does not name the agent');
+  assert.match(raw, /'Keep ' \+ shown/, 'the safe button does not name the agent');
+  // ⚠️ And the removal is still SENT as the session name. Speaking the display
+  // name is only safe while nothing acts on it.
+  assert.match(raw, /RM_FOR = name;/,
+    'the modal remembers the display name as the thing to remove, which removes the wrong agent or none');
 
   // Keeping it is the default answer to every accident.
   assert.match(raw, /keep\.focus\(\)/, 'the modal opens with the destructive button reachable by Enter');
@@ -2283,6 +2320,88 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
   const partialBranch = body.slice(body.indexOf("done.outcome === 'partial'"));
   assert.ok(!partialBranch.slice(0, partialBranch.indexOf('return;')).includes('closeRemoveModal'),
     'a half-finished removal closes the confirmation, so nobody reads that the agent is still running');
+});
+
+
+/**
+ * Every `var(--x)` with no fallback names a property `:root` actually defines.
+ *
+ * ⚠️ THIS IS THE ONE FAILURE THE WHOLE SUITE COULD NOT SEE, and it shipped.
+ *
+ * The removal modal's CSS invented four properties that do not exist
+ * (`--card`, `--ink`, `--line`, `--text-h2`). CSS does not warn: an undefined
+ * custom property with no fallback makes the ENTIRE declaration invalid and it
+ * is dropped. So `background: var(--card)` produced a transparent confirmation
+ * box, `border: 1px solid var(--line)` produced no border, and
+ * `font: var(--text-h2) …` left the heading at 13px normal weight -- a
+ * see-through dialog with the page readable through its own question.
+ *
+ * It survived two review rounds and 316 passing tests because **every existing
+ * assertion about this screen reads its text**, and the text was right. Nothing
+ * in the repo rendered a page. The defect is invisible to the kind of test this
+ * codebase is made of, which is exactly why it needs its own.
+ *
+ * Deliberately whole-file rather than scoped to the modal: the same mistake was
+ * already sitting on `main` in `#d-untied`, unnoticed since it shipped.
+ */
+test('no style rule depends on a custom property that is never defined', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+
+  /**
+   * ⚠️ Returns the UNDEFINED ones, so the check can be pointed at a mutated
+   * copy below. A checker that can only run against the real file cannot be
+   * shown to fail, and a test that has never failed is a claim, not a control.
+   */
+  const undefinedTokens = (html) => {
+    /**
+     * ⚠️ COMMENTS ARE STRIPPED FIRST, and the first draft of this test did not.
+     * The prose above quotes `var(--text-h2)` as the example of the bug, so the
+     * check reported the comment describing the defect as the defect. Caught by
+     * the control below, which is the entire reason it is there.
+     */
+    const live = html.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const css = live.slice(live.indexOf('<style'), live.indexOf('</style>'));
+    // Anything declared inside a `:root` block, including the ones nested in
+    // `@media (prefers-color-scheme: dark)` and `(prefers-contrast: more)`.
+    const defined = new Set();
+    for (const m of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1]);
+    /**
+     * Scanned over the WHOLE document, not just the stylesheet: this page also
+     * carries `var()` in inline `style=` attributes, and those fail the same
+     * silent way. A `var(--x, fallback)` is safe by construction, so only bare
+     * uses count.
+     */
+    const bad = new Set();
+    for (const m of live.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)) {
+      if (!defined.has(m[1])) bad.add(m[1]);
+    }
+    return [...bad].sort();
+  };
+
+  /**
+   * ⚠️ THE CONTROL, and it is not decoration.
+   *
+   * "No undefined tokens" passes just as happily against a checker whose regex
+   * matches nothing at all -- which is how a green suite hid this in the first
+   * place. Proving the check FIRES on a token that is definitely missing is
+   * what makes the empty result below mean something.
+   */
+  const found = undefinedTokens(raw);
+
+  const mutated = raw.replace('.rm-acts {', '.rm-acts { outline-color: var(--nope-not-a-token);');
+  assert.notEqual(mutated, raw, 'the mutation did not apply, so the control proves nothing');
+  /**
+   * ⚠️ Stated as "one MORE than the real file has", not as "exactly this one".
+   * The stricter form looks tighter and is worse: the day the real assertion
+   * below has something to say, the control fails first and reports "the check
+   * does not notice a plainly undefined property" -- blaming the instrument for
+   * the reading. Measured, by reintroducing the original bug.
+   */
+  assert.deepEqual(undefinedTokens(mutated), [...found, '--nope-not-a-token'].sort(),
+    'the check does not notice a custom property that is plainly undefined');
+
+  assert.deepEqual(found, [],
+    'a style rule names a custom property nothing defines, so the whole declaration is dropped');
 });
 
 
