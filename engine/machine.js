@@ -91,8 +91,23 @@ function parsePmset(text) {
 /** Minutes until sleep for one power source, or null when it did not say. */
 function sleepMinutes(section) {
   if (!section || !section.has('sleep')) return null;
-  const n = Number(section.get('sleep'));
-  return Number.isFinite(n) ? n : null;
+  const raw = section.get('sleep');
+  /**
+   * ⚠️ PLAIN DECIMAL DIGITS, WHICH IS WHAT `pmset` PRINTS. Anything else is a
+   * reading we did not understand, and this module's whole job is not turning
+   * one of those into an assertion.
+   *
+   * Two versions of this were too generous. `Number.isFinite` accepted `-5`,
+   * which is neither zero nor greater than zero, so it fell through every
+   * branch into "This Mac does not go to sleep". Tightening to
+   * `Number.isInteger(n) && n >= 0` then still accepted `0x10`, which `Number`
+   * happily reads as 16 — so an uninterpretable value came out as the confident
+   * sentence "This Mac goes to sleep after 16 minutes". Both failed by being
+   * clever about input, in the direction of saying something.
+   */
+  if (!/^\d+$/.test(String(raw))) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 function sleepCheck(text) {
@@ -209,6 +224,7 @@ function installedCheck(opts) {
   const parts = [['Claude Code', claudeBin], ['tmux', tmuxBin]];
 
   const missing = [];
+  const unreadable = [];
   for (const [label, bin] of parts) {
     /**
      * ⚠️ `statSync`, NOT `existsSync`, AND THE DIFFERENCE IS THE WHOLE POINT OF
@@ -254,13 +270,19 @@ function installedCheck(opts) {
       st = fs.statSync(bin);
     } catch (err) {
       if (err && err.code === 'ENOENT') { missing.push({ label, bin }); continue; }
-      return {
-        key: 'installed',
-        state: STATE.UNKNOWN,
-        title: 'We could not check what is installed',
-        detail: `Looking for ${label} on this computer did not work (${String((err && err.message) || err)}). `
-          + 'That does not mean it is missing, only that we could not see it.',
-      };
+      /**
+       * ⚠️ RECORDED, NOT RETURNED. Returning here threw away whatever the OTHER
+       * probe had already established: with Claude genuinely absent and tmux
+       * unreadable, the whole check came back "We could not check what is
+       * installed", naming only tmux — and `attention` dropped to zero, so the
+       * screen said nothing needed doing while Claude was definitively missing.
+       *
+       * That is the identical defect `sleepCheck` above documents fixing, in
+       * its sibling function, written the same afternoon. Half the answer was
+       * read and none of it was reported.
+       */
+      unreadable.push({ label, bin, because: String((err && err.message) || err) });
+      continue;
     }
 
     /**
@@ -279,12 +301,28 @@ function installedCheck(opts) {
     }
   }
 
-  if (!missing.length) {
+  /**
+   * ⚠️ A DEFINITE FINDING OUTRANKS A THING WE COULD NOT READ, so `missing` is
+   * tested first. The two used to be one early return, and the unreadable one
+   * won by arriving first — turning "Claude Code is missing" into "we could not
+   * check", which is the safe-sounding answer to the wrong question.
+   */
+  if (!missing.length && !unreadable.length) {
     return {
       key: 'installed',
       state: STATE.OK,
       title: 'Everything it needs to run is installed',
       detail: 'There is nothing else for you to go and find.',
+    };
+  }
+
+  if (!missing.length) {
+    return {
+      key: 'installed',
+      state: STATE.UNKNOWN,
+      title: 'We could not check what is installed',
+      detail: unreadable.map((u) => `Looking for ${u.label} at ${u.bin} did not work (${u.because})`).join(', and ')
+        + '. That does not mean anything is missing, only that we could not see it.',
     };
   }
 
@@ -302,7 +340,12 @@ function installedCheck(opts) {
       : 'Two things it needs are not where we expected them',
     detail: 'An agent made now would not start. We looked for '
       + missing.map((m) => `${m.label} at ${m.bin}`).join(', and ')
-      + '.',
+      + '.'
+      // ⚠️ And the other half, when there is one. Reporting the definite finding
+      // must not swallow the fact that a second thing could not be read at all.
+      + (unreadable.length
+        ? ` We could not check ${unreadable.map((u) => u.label).join(' or ')} at all.`
+        : ''),
   };
 }
 
