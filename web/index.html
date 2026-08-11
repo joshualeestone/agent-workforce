@@ -1412,12 +1412,30 @@ async function loadRemoval(sessionName) {
   document.getElementById('d-remove-folder').checked = false;
   REMOVE_PLAN = null;
 
+  document.getElementById('d-remove-go').disabled = false;
   let plan = null;
+  let reached = true;
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/removal', { cache: 'no-store' });
     plan = await res.json().catch(() => null);
-  } catch { /* leave it hidden rather than offering something we cannot do */ }
+  } catch {
+    reached = false;
+  }
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+
+  /**
+   * ⚠️ A BOARD WE COULD NOT REACH IS NOT A FACT ABOUT WHO CREATED THIS AGENT.
+   *
+   * The failure path used to fall through to "This agent was not created here",
+   * which is a claim about its origin derived from a fetch that never answered
+   * — the "cannot tell fine from I cannot see it" inversion this codebase is
+   * built against, in the one place where the answer decides whether something
+   * can be destroyed.
+   */
+  if (!reached) {
+    box.hidden = true;
+    return;
+  }
 
   box.hidden = false;
   if (plan && plan.ok) {
@@ -1457,21 +1475,57 @@ document.getElementById('d-remove-cancel').addEventListener('click', () => {
 
 // Ticking the box changes what will happen, so it re-asks the ENGINE rather
 // than the screen rewording its own warning.
+let REMOVE_ASKED = 0;
 document.getElementById('d-remove-folder').addEventListener('change', async (e) => {
   if (!CURRENT) return;
   const forAgent = CURRENT.sessionName;
-  const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal'
-    + (e.target.checked ? '?folder=delete' : ''), { cache: 'no-store' });
-  const plan = await res.json().catch(() => null);
-  if (!CURRENT || CURRENT.sessionName !== forAgent || !plan || !plan.ok) return;
+  const wanted = e.target.checked;
+  const go = document.getElementById('d-remove-go');
+  const msg = document.getElementById('d-remove-msg');
+  // ⚠️ Nothing may be confirmed while the plan on screen is out of date with
+  // the box. The button comes back only when the two agree again.
+  go.disabled = true;
+  const mine = ++REMOVE_ASKED;
+  let plan = null;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/removal'
+      + (wanted ? '?folder=delete' : ''), { cache: 'no-store' });
+    plan = await res.json().catch(() => null);
+  } catch { /* handled below, rather than left as an unhandled rejection */ }
+  // ⚠️ Last-asked wins. Toggling twice raced two requests, and the slower answer
+  // could paint the opposite of the box.
+  if (mine !== REMOVE_ASKED || !CURRENT || CURRENT.sessionName !== forAgent) return;
+  if (!plan || !plan.ok) {
+    // The screen cannot describe work it could not ask about. Say so, and leave
+    // the confirmation disabled rather than showing a stale plan under a
+    // changed checkbox.
+    msg.textContent = 'We could not check what that would do, so nothing has changed. Try again in a moment.';
+    return;
+  }
+  msg.textContent = '';
   REMOVE_PLAN = plan;
   paintRemovePlan();
+  go.disabled = false;
 });
 
 document.getElementById('d-remove-go').addEventListener('click', async () => {
-  if (!CURRENT) return;
+  if (!CURRENT || !REMOVE_PLAN) return;
   const forAgent = CURRENT.sessionName;
-  const wipe = document.getElementById('d-remove-folder').checked;
+  /**
+   * ⚠️ WHAT THE SCREEN SHOWED, not what the checkbox currently says.
+   *
+   * Reading the checkbox let the two disagree: tick it and confirm before the
+   * re-fetch lands, or have that fetch fail, and the warning on screen still
+   * read "its folder stays on your computer, so what you wrote for it is kept"
+   * while the request went out asking to delete it. That is the one contract
+   * this feature is built on — the screen never describes the work, it renders
+   * the plan — broken at the last step, in the direction that destroys what the
+   * person wrote.
+   *
+   * `REMOVE_PLAN` is the plan whose words are on screen. Sending its answer
+   * makes the confirmation binding rather than decorative.
+   */
+  const wipe = REMOVE_PLAN.keepsFolder === false;
   const msg = document.getElementById('d-remove-msg');
   const go = document.getElementById('d-remove-go');
   go.disabled = true;
@@ -1495,6 +1549,7 @@ document.getElementById('d-remove-go').addEventListener('click', async () => {
       await tick();
       return;
     }
+    go.disabled = false;
     showTab('agents');
     await tick();
   } catch (err) {

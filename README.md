@@ -26,11 +26,20 @@ than implying. On a machine where no further agent is ever created, nothing
 reinstalls it. And an agent made by a version before this one has its own copy
 of the old script and keeps it: nothing migrates those.
 
-It cannot stop, remove or message an agent yet.
+**It can also remove one**, from the bottom of that agent's own detail screen,
+behind a warning and a confirmation that says exactly what will happen. Its
+folder is kept unless you ask for it to go: that folder holds the instructions
+you wrote, and "remove this agent" does not mean "delete what I wrote".
 
-⚠️ **Removing one is still a manual job, and it matters more than the others**,
-because a created agent has a launchd job that starts it at every login. Deleting
-its folder is not enough — the job would keep trying. Until Remove is built:
+⚠️ It will only remove agents it created. The board shows every agent on this
+machine, and the ones another tool started are refused by name.
+
+It cannot stop or message an agent yet.
+
+⚠️ **If you need to remove one by hand** — because it was made before this
+existed, or because a removal reported that it could not finish — a created
+agent has a launchd job that starts it at every login, and deleting its folder is
+not enough:
 
     launchctl bootout gui/$UID/com.kosmos.agent.<name>
     rm ~/Library/LaunchAgents/com.kosmos.agent.<name>.plist

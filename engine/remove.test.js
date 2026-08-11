@@ -71,24 +71,61 @@ test('an agent this app did not create is refused, and the refusal says why', ()
   assert.match(r.because, /not created by this app/);
   assert.equal(calls.length, 0, 'it ran a command against an agent it does not own');
 
-  // ⚠️ And the reason is OWNERSHIP, not the board. `isNamedOurs` says we may
-  // speak for an agent; it does not say we may end it. A fleet agent passes
-  // that check and must still be refused here.
+  // ⚠️ AND THE REFUSAL MUST BE ABOUT OWNERSHIP, NOT ABSENCE. The first version
+  // of this test proved nothing: in the sandbox `angel` has no plist AND no
+  // folder, so the refusal was over-determined. Swapping `isOurs` to check the
+  // FOLDER instead of the plist left all ten tests green — and a folder is
+  // precisely the wrong key, because every one of the thirteen fleet agents has
+  // `~/work/workers/<name>`. The guard that matters more than the feature could
+  // be broken in the exact direction that reaches live agents.
+  //
+  // So the fixture is a foreign agent as it actually appears on this machine:
+  // a worker folder with the person's instructions in it, and NO plist of ours.
+  const foreign = 'foreign-agent';
+  fs.mkdirSync(create.workerDir(foreign), { recursive: true });
+  fs.writeFileSync(nodePath.join(create.workerDir(foreign), 'CLAUDE.md'), 'You are **Foreign**, somebody else\'s agent.\n', 'utf8');
+  // What its launchd job looks like: another tool's label, not ours.
+  fs.mkdirSync(nodePath.dirname(create.plistPath(foreign)), { recursive: true });
+  fs.writeFileSync(nodePath.join(nodePath.dirname(create.plistPath(foreign)), `com.${foreign}.discord.plist`), '<plist/>', 'utf8');
+
+  assert.equal(remove.isOurs(foreign), false,
+    'an agent with a worker folder but no job of ours is treated as ours to delete');
+  const foreignPlan = remove.plan(foreign);
+  assert.equal(foreignPlan.ok, false, 'it offered to remove an agent another tool created');
+  assert.match(foreignPlan.because, /not created by this app/);
+  assert.ok(fs.existsSync(create.workerDir(foreign)), 'it touched a foreign agent while refusing it');
+
   assert.equal(remove.isOurs('angel'), false,
     'a fleet agent is treated as ours to delete because the board recognises it');
 
-  // THE CONTROL: an agent we DID make is ours.
+  // THE CONTROL: an agent we DID make is ours, and the ONLY difference between
+  // it and the fixture above is the plist we wrote.
   const mine = madeAgent('ours-to-remove');
   assert.equal(remove.isOurs(mine), true,
     'nothing is ever ours, so the refusal above proves nothing');
+  assert.ok(fs.existsSync(create.plistPath(mine)), 'the control has no job of ours, so it differs in more than one way');
 });
 
 test('a name that could not have been made here is refused before anything runs', () => {
   const calls = recorder(remove);
   remove.setDryRun(false);
-  for (const bad of ['', 'Angel', '../../etc', 'has space', 'x'.repeat(40)]) {
+  // ⚠️ Asserts the REASON, not just the enum. Every one of these is also
+  // refused by the ownership check, so the outcome alone is satisfied whether
+  // or not the name rule exists at all — deleting the `nameProblem` gate left
+  // the first version of this test green. It matters more than usual here:
+  // `../../etc` reaching `workerDir()` would put a recursive delete outside the
+  // workers root, and this is the only test standing over that.
+  for (const [bad, why] of [
+    ['', /give the agent a name/],
+    ['Angel', /lower case/],
+    ['../../etc', /letters, numbers/],
+    ['has space', /letters, numbers/],
+    ['x'.repeat(40), /32 characters/],
+  ]) {
     const r = remove.remove(bad);
     assert.equal(r.outcome, remove.OUTCOME.REFUSED, `'${bad}' was accepted`);
+    assert.match(r.because, why,
+      `'${bad}' was refused for the wrong reason, so the name rule may not be running at all`);
   }
   assert.equal(calls.length, 0, 'a refused name still ran a command');
 });
@@ -263,4 +300,86 @@ test('the module does not start in dry-run, or the product silently does nothing
     "console.log(require('./engine/remove').DRY_RUN)"],
   { cwd: nodePath.join(__dirname, '..'), encoding: 'utf8', env: { ...process.env, AGENT_WORKFORCE_DRY_RUN: '1' } });
   assert.equal(armed.trim(), 'true', 'AGENT_WORKFORCE_DRY_RUN no longer arms dry-run');
+});
+
+test('a bootout that fails stops everything, rather than reporting success over it', () => {
+  // ⚠️ THE WORST DEFECT THIS FILE HAS HAD. The bootout result was discarded, so
+  // a genuine failure was recorded as done; the session was then killed, which
+  // KeepAlive instantly undoes because the job is still loaded; and the plist
+  // was deleted on top of it. That leaves a loaded service with nothing on disk
+  // explaining it -- the one state `create` refuses to clean up -- so the NAME
+  // IS PERMANENTLY UNUSABLE, while the person is told the agent is gone and
+  // watches it come back.
+  const name = madeAgent('bootout-fails');
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'bootout') return { ok: false, code: 5 };   // a real failure
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a failed bootout was reported as a removal');
+  assert.match(r.because, /still running, and nothing has been removed/);
+  assert.ok(fs.existsSync(create.plistPath(name)),
+    'the plist was deleted after the job could not be stopped, which is the state that '
+    + 'makes the name unusable forever');
+  assert.ok(!r.steps.some((s) => /ended its session/.test(s.label)),
+    'it went on to kill the session, which KeepAlive would immediately undo');
+
+  // ⚠️ EXIT 3 IS NOT A FAILURE. launchd answers 3 for a job that is not loaded,
+  // which is the end state we wanted. Without this the common case -- removing
+  // an agent whose job is already stopped -- would refuse to proceed.
+  remove.setRunner((file, args) => (args && args[0] === 'bootout'
+    ? { ok: false, code: 3 } : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name).outcome, remove.OUTCOME.REMOVED,
+    'a job that was already not loaded is treated as a failure, so nothing can be removed');
+});
+
+test('a session that cannot be killed is not reported as ended', () => {
+  // On a machine where tmux is not at the Homebrew path and the override is
+  // unset -- the Intel-Mac case the README names -- every removal recorded
+  // "ended its session" over a session somebody can still talk to.
+  const name = madeAgent('kill-fails');
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'kill-session') return { ok: false, code: 127 };  // tmux not found
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.ok(r.steps.some((s) => /ended its session/.test(s.label) && !s.ok),
+    'a session that could not be killed is recorded as ended');
+
+  // Exit 1 IS fine: the session was already gone.
+  const name2 = madeAgent('already-gone');
+  remove.setRunner((file, args) => (args && args[0] === 'kill-session'
+    ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
+  remove.setDryRun(false);
+  assert.ok(remove.remove(name2).steps.some((s) => /ended its session/.test(s.label) && s.ok),
+    'a session that was already gone is treated as a failure');
+});
+
+test('a job still registered afterwards is PARTIAL, not a removal', () => {
+  // ⚠️ Creating an agent WATCHES the board before saying it is running. Removing
+  // one was claiming its outcome from commands whose answers it had not read.
+  // The same rule both ways, and this is the direction where being wrong means
+  // the agent comes back.
+  const name = madeAgent('still-there');
+  remove.setRunner((file, args) => {
+    if (args && args[0] === 'print') return { ok: true, stdout: 'com.kosmos.agent.still-there = { ... }' };
+    return { ok: true, stdout: '' };
+  });
+  remove.setDryRun(false);
+
+  const r = remove.remove(name);
+  assert.equal(r.outcome, remove.OUTCOME.PARTIAL, 'a job still registered afterwards was called removed');
+  assert.match(r.because, /still registered as a startup job/);
+
+  // THE CONTROL: with launchctl describing nothing, the same agent is removed.
+  const name2 = madeAgent('really-gone');
+  recorder(remove);
+  remove.setDryRun(false);
+  assert.equal(remove.remove(name2).outcome, remove.OUTCOME.REMOVED,
+    'nothing can ever be removed, so the assertion above is about nothing');
 });

@@ -2097,3 +2097,59 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
     'a healthy board carries a permanent warning about unreadable lines');
   assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
 });
+
+test('the removal routes refuse what the engine refuses, and answer what it plans', async () => {
+  // ⚠️ The engine was well covered and the surface a browser talks to was not.
+  // These routes are how the only destructive action in the product is reached.
+  const removal = require('./engine/remove');
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+
+  // An agent that exists, made the way the product makes them.
+  const calls = [];
+  create.setRunner((f, a) => { calls.push([f, a]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = create.createAgent({ name: 'route-removable', role: 'pm' });
+    assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+
+  // The PLAN, which is what the confirmation renders.
+  const plan = await req('/api/agent/route-removable/removal');
+  assert.equal(plan.status, 200);
+  const body = JSON.parse(plan.body);
+  assert.equal(body.ok, true);
+  assert.equal(body.keepsFolder, true, 'the route defaults to destroying the folder');
+  assert.ok(body.steps.length >= 3, 'the plan carries no steps for the screen to show');
+
+  // ⚠️ `?folder=delete` is the flag the screen actually sends, so it is the flag
+  // that gets tested rather than one this test invented.
+  const wipePlan = JSON.parse((await req('/api/agent/route-removable/removal?folder=delete')).body);
+  assert.equal(wipePlan.keepsFolder, false, 'the folder flag is not read from the query string');
+
+  // ⚠️ AN AGENT THIS APP DID NOT CREATE. `angel` is a real one on this machine.
+  const foreign = await req('/api/agent/angel/removal');
+  assert.notEqual(foreign.status, 200, 'the route offered a plan for an agent we did not create');
+  assert.match(JSON.parse(foreign.body).because, /not created by this app/);
+
+  const foreignDelete = await req('/api/agent/angel/removal', { method: 'DELETE' });
+  assert.notEqual(foreignDelete.status, 200, 'DELETE was accepted for an agent we did not create');
+
+  // A malformed name answers rather than crashing the process.
+  const bad = await req('/api/agent/%/removal', { method: 'DELETE' });
+  assert.equal(bad.status, 400);
+  const alive = await req('/api/status');
+  assert.match(alive.type, /application\/json/, 'the server died on a malformed name');
+
+  // ⚠️ AND DELETE IS COVERED BY THE CROSS-SITE GUARD. It is a state-changing
+  // method on the most destructive route in the product; a page on another site
+  // must not be able to reach it.
+  const crossSite = await req('/api/agent/route-removable/removal', {
+    method: 'DELETE', headers: { origin: 'https://evil.example' },
+  });
+  assert.equal(crossSite.status, 403, 'another website can delete an agent');
+});

@@ -27,10 +27,8 @@
  */
 
 const fs = require('node:fs');
-const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const create = require('./create');
-const status = require('./status');
 
 const OUTCOME = { REMOVED: 'removed', REFUSED: 'refused', PARTIAL: 'partial' };
 
@@ -81,12 +79,15 @@ function run(file, args) {
   if (DRY_RUN) return { ok: true, stdout: '', dryRun: true };
   try {
     return { ok: true, stdout: execFileSync(file, args, { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }) };
-  } catch {
-    // ⚠️ A non-zero exit is NOT a failure for every command here. `bootout` on a
-    // job that is not loaded, and `kill-session` on a session that is already
-    // gone, both exit non-zero and both mean "the thing you wanted is already
-    // true". The step decides; this only reports.
-    return { ok: false };
+  } catch (err) {
+    // ⚠️ THE EXIT CODE IS CARRIED, because "already gone" and "it failed" are
+    // both non-zero here and mean opposite things. `bootout` answers 3 for a
+    // job that is not loaded, and `kill-session` answers 1 for a session that
+    // is not there — both of which mean the end state we wanted is already
+    // true. Anything else is a real failure, and the caller must be able to
+    // tell. Returning a bare `{ok:false}` threw that away, and the step above
+    // then treated every outcome as success.
+    return { ok: false, code: err && typeof err.status === 'number' ? err.status : null };
   }
 }
 
@@ -190,17 +191,49 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
    * moment its session ends, so killing the session first just makes launchd
    * put it back — and the person watches the agent they removed reappear.
    */
-  step('stopped its startup job', () => {
+  /**
+   * ⚠️ THE RESULT IS READ, and discarding it was the worst defect in the first
+   * version of this file.
+   *
+   * A `bootout` that genuinely failed was recorded as done, the session was
+   * then killed — which `KeepAlive` instantly undoes, because the job is still
+   * loaded — and the plist was deleted on top of it. That leaves the machine in
+   * the one state `create` refuses to clean up: a loaded service with nothing
+   * on disk explaining it, so the NAME IS PERMANENTLY UNUSABLE, while the person
+   * is told the agent is gone and watches it come back.
+   *
+   * Exit 3 is launchd for "no such service", which is the end state we wanted.
+   * Anything else is a failure and must reach the operator.
+   */
+  const stoppedJob = step('stopped its startup job', () => {
     const r = run('/bin/launchctl', ['bootout', `gui/${process.getuid()}/${create.serviceLabel(clean)}`]);
-    // Not loaded is not a failure: the end state is what we wanted.
-    return true;
+    if (r && r.ok !== false) return true;
+    return r && r.code === 3;   // not loaded: already true
   });
+
+  // ⚠️ Stop here rather than continuing. Killing the session next would have
+  // KeepAlive restart it, and deleting the plist after that destroys the only
+  // record of what is running.
+  if (!stoppedJob) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we could not stop the job that starts it, so we have not gone any further. It is still running, and nothing has been removed. The README says how to remove one by hand.',
+      steps,
+    };
+  }
 
   step('ended its session', () => {
     // The `=` form, exactly: `kill-session -t sam` prefix-matches and will
     // happily end `samantha-discord`. Measured on this machine, by doing it.
-    run(tmux, ['kill-session', '-t', `=${clean}`]);
-    return true;
+    //
+    // ⚠️ Exit 1 here means the session was already gone, which is the end state
+    // we wanted. A failure for any other reason — tmux not where we expected,
+    // most likely on a machine where it is not at the Homebrew path — must not
+    // be recorded as "ended its session" over a session somebody can still talk
+    // to.
+    const r = run(tmux, ['kill-session', '-t', `=${clean}`]);
+    if (r && r.ok !== false) return true;
+    return r && r.code === 1;
   });
 
   const removedJob = step('removed its startup job', () => {
@@ -235,6 +268,29 @@ function remove(name, { alsoDeleteFolder = false, tmuxBin } = {}) {
     return {
       outcome: OUTCOME.PARTIAL,
       because: 'it is removed and will not come back, but its folder could not be deleted. Nothing is running from it.',
+      steps,
+    };
+  }
+
+  /**
+   * ⚠️ LOOK, rather than assume. Creating an agent watches the board until it
+   * can see it before saying it is running; removing one was claiming an
+   * outcome from three commands whose answers it had not read. The same rule
+   * applies in both directions, and this is the direction where being wrong
+   * means the agent comes back.
+   */
+  const stillLoaded = (() => {
+    try {
+      const r = run('/bin/launchctl', ['print', `gui/${process.getuid()}/${create.serviceLabel(clean)}`]);
+      return Boolean(r && r.ok !== false && String(r.stdout || '').trim());
+    } catch {
+      return false;   // `print` throws when there is no such service, which is what we want
+    }
+  })();
+  if (stillLoaded) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      because: 'we removed its files, but it is still registered as a startup job, so it may come back. The README says how to clear that by hand.',
       steps,
     };
   }
