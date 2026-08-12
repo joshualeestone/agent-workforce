@@ -434,10 +434,21 @@ async function runFlow(haveBinary) {
     writeState({ phase: PHASE.DOWNLOADING, progress: { got: 0, total: null }, startedOnce: true });
     let downloaded;
     try {
+      let lastProgressWrite = 0;
       downloaded = await download((got, total) => {
-        if (mem.phase === PHASE.DOWNLOADING) {
-          writeState({ ...mem, progress: { got, total } });
+        if (mem.phase !== PHASE.DOWNLOADING) return;
+        // ⚠️ Throttled: this fires per network chunk, and writeState is a
+        // synchronous write+rename. Unthrottled that is thousands of disk
+        // writes for one 281MB file, to persist a number the UI polls once a
+        // second. The final size still lands: the phase change to INSTALLING
+        // writes, and the poll reads the in-memory copy anyway.
+        const now = Date.now();
+        if (now - lastProgressWrite < 250) {
+          mem.progress = { got, total };
+          return;
         }
+        lastProgressWrite = now;
+        writeState({ ...mem, progress: { got, total } });
       });
     } catch (err) {
       becomeStuck('we could not download Claude', String((err && err.message) || err));
@@ -447,6 +458,7 @@ async function runFlow(haveBinary) {
 
     writeState({ phase: PHASE.INSTALLING, startedOnce: true });
     const inst = await run(downloaded.path, ['install'], { timeout: 180000, env: { TERM: 'dumb' } });
+    if (!driver) return; // cancelled mid-install
     if (!inst.ok) {
       becomeStuck('Claude downloaded but did not finish setting itself up',
         tailOf(`${inst.stdout || ''}\n${inst.stderr || ''}`) || 'it stopped without saying why');
@@ -458,12 +470,17 @@ async function runFlow(haveBinary) {
         `expected it at ${claudeBinPath()}`);
       return;
     }
+    // The verified download did its job; the installed launcher is what runs
+    // from here. The official install script deletes its download too, and
+    // keeping ours means ~281MB per version quietly accumulating in app data.
+    try { fs.unlinkSync(downloaded.path); } catch { /* disk hygiene, not correctness */ }
   }
   if (!driver) return;
   await launchSignin();
 }
 
 async function launchSignin() {
+  if (!driver) return; // cancelled before the sign-in ever launched
   writeState({ phase: PHASE.SIGNIN_LAUNCHING, startedOnce: true });
 
   // A leftover session from an interrupted attempt would be showing a stale
@@ -494,6 +511,7 @@ async function launchSignin() {
 async function tick() {
   if (!driver) return;
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', SESSION]);
+  if (!driver) return; // cancel ran while we were looking
   if (!cap.ok) {
     becomeStuck('the sign-in window closed before Claude finished',
       tailOf(cap.stderr || '') || 'it is no longer there');
@@ -546,15 +564,45 @@ async function tick() {
       }
       return;
     case 'awaiting-code': {
-      if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE && mem.phase !== PHASE.SIGNIN_COMPLETING) {
+      /**
+       * ⚠️ A PASTE PROMPT AFTER A CODE WAS TYPED MEANS THE CODE DID NOT TAKE.
+       * Without this arm the phase sat at `signin-completing` forever while
+       * the terminal literally asked for another code and `submitCode`
+       * refused to accept one -- "Finishing the sign-in…" on a screen nobody
+       * was finishing, the exact shape this codebase bans. The grace covers
+       * the CLI's processing time (the prompt stays up briefly after Enter).
+       */
+      if (mem.phase === PHASE.SIGNIN_COMPLETING) {
+        driver.rejectTicks = (driver.rejectTicks || 0) + 1;
+        if (driver.rejectTicks > Math.max(3, Math.ceil(6000 / TICK_MS))) {
+          driver.rejectTicks = 0;
+          driver.lastActed = null;   // a new code may be typed
+          writeState({
+            phase: PHASE.SIGNIN_AWAITING_CODE,
+            url: seen.url || mem.url || null,
+            because: 'that code did not work, so check it and paste it again',
+            startedOnce: true,
+          });
+        }
+        return;
+      }
+      driver.rejectTicks = 0;
+      if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE) {
         writeState({ phase: PHASE.SIGNIN_AWAITING_CODE, url: seen.url || mem.url || null, startedOnce: true });
       }
       if (driver.pendingCode && driver.lastActed !== 'code') {
         driver.lastActed = 'code';
         const code = driver.pendingCode;
         driver.pendingCode = null;
-        await tmux(['send-keys', '-t', SESSION, '-l', code]);
-        await tmux(['send-keys', '-t', SESSION, 'Enter']);
+        // ⚠️ `--` ends option parsing: the allowed charset includes `-`, and a
+        // code starting with one would otherwise be read by tmux as flags.
+        const typed = await tmux(['send-keys', '-t', SESSION, '-l', '--', code]);
+        const entered = typed.ok ? await tmux(['send-keys', '-t', SESSION, 'Enter']) : typed;
+        if (!typed.ok || !entered.ok) {
+          becomeStuck('we could not type the code into the sign-in',
+            tailOf(`${typed.stderr || ''}\n${entered.stderr || ''}`) || 'the sign-in window did not take it');
+          return;
+        }
         writeState({ phase: PHASE.SIGNIN_COMPLETING, url: mem.url || null, startedOnce: true });
       }
       return;
@@ -590,7 +638,34 @@ async function tick() {
         await tmux(['send-keys', '-t', SESSION, 'Enter']);
         return;
       }
+      /**
+       * ⚠️ LOGIN EVIDENCE CAN ARRIVE FROM ANY SIGN-IN PHASE, not just after a
+       * pasted code -- the browser flow can complete on its own. Without
+       * this, "Login successful" seen while the phase was still
+       * `signin-browser-open` fell into no arm at all and the driver looped
+       * forever at "will notice when it is done", noticing nothing.
+       */
+      if (mem.phase === PHASE.SIGNIN_BROWSER_OPEN || mem.phase === PHASE.SIGNIN_AWAITING_CODE
+        || mem.phase === PHASE.SIGNIN_LAUNCHING) {
+        writeState({ phase: PHASE.SIGNIN_COMPLETING, url: mem.url || null, startedOnce: true });
+        return;
+      }
       if (mem.phase === PHASE.SIGNIN_COMPLETING) {
+        /**
+         * ⚠️ A REPL WITHOUT A READABLE SUBSCRIPTION IS AN ANSWER, not a wait
+         * state: Claude is running and signed in as far as it is concerned,
+         * and our reader cannot confirm the plan. Waiting the full minute is
+         * for the settings file catching up after a login; a live REPL means
+         * it already wrote what it was going to write.
+         */
+        if (seen.kind === 'repl') {
+          driver.replTicks = (driver.replTicks || 0) + 1;
+          if (driver.replTicks > Math.max(3, Math.ceil(8000 / TICK_MS))) {
+            becomeStuck('Claude looks signed in here, but we could not confirm a subscription',
+              sub.because || 'the settings on this computer do not say which plan it is on');
+            return;
+          }
+        }
         // Text says logged in but the config has not flipped yet; give it a
         // bounded wait rather than forever.
         driver.quietTicks += 1;
@@ -614,6 +689,15 @@ async function finishConnected(sub) {
 }
 
 function becomeStuck(because, tail) {
+  /**
+   * ⚠️ NO DRIVER MEANS NOBODY IS STUCK. Every path that lands here crossed an
+   * `await`, and `cancel()` may have run during it -- a person who
+   * deliberately cancelled must not later find a STUCK record written by the
+   * very request their cancel aborted (the abort REJECTS that request, which
+   * is exactly what routes here). Cancel wins, in either order: this guard
+   * covers stuck-after-cancel, and cancel's own IDLE write covers the other.
+   */
+  if (!driver) return;
   const d = driver;
   driver = null;
   if (d && d.timer) clearInterval(d.timer);

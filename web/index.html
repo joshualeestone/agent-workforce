@@ -4458,7 +4458,16 @@ async function frConnResume() {
     if (!res.ok) return;
     const st = await res.json();
     if (FR_STEP !== 3) return;
-    if (frConnActive(st.phase) || st.phase === 'stuck' || st.phase === 'interrupted') {
+    /**
+     * ⚠️ A CONNECTED VERDICT OUTRANKS A STALE FAILURE RECORD. A stuck or
+     * interrupted record persists on disk indefinitely, and somebody who
+     * later connected through Terminal would watch their green row get
+     * replaced by "we could not finish" from an attempt that no longer
+     * matters. A LIVE flow still paints -- reality in motion beats any
+     * verdict -- but a dead record loses to connected.
+     */
+    const doneAnyway = FR && FR.subscription && FR.subscription.state === 'connected';
+    if (frConnActive(st.phase) || ((st.phase === 'stuck' || st.phase === 'interrupted') && !doneAnyway)) {
       FR_CONN_LAST = null;
       frPaintConnect(st);
       if (frConnActive(st.phase)) frConnWatch();
@@ -4626,6 +4635,9 @@ function frPaintConnect(st) {
     box.innerHTML = '<div class="fr-ctitle">Your browser has opened</div>'
       + '<div class="fr-cdetail">Sign in to Claude there. This screen will notice when it is done.</div>'
       + urlLine
+      // The engine sets `because` when a typed code did not take; without
+      // showing it, a rejected code looks like this screen simply asking twice.
+      + ((st && st.because) ? '<div class="fr-note">' + esc(st.because) + '</div>' : '')
       + '<label class="fr-cdetail" for="fr-conn-code">If Claude gives you a code to paste, put it here:</label>'
       + '<div class="fr-code-row">'
       + '<input id="fr-conn-code" type="text" autocomplete="off" spellcheck="false" aria-label="Sign-in code">'

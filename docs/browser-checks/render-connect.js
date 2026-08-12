@@ -289,6 +289,25 @@ const LONG_TAIL = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of what th
     await ctx.close();
   }
 
+  /* ── 6. a stale stuck record loses to a connected verdict ───────────────── */
+  {
+    fs.writeFileSync(CONFIG, JSON.stringify({
+      oauthAccount: { organizationType: 'claude_max', billingType: 'stripe_subscription' },
+    }, null, 2), 'utf8');
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const { page, errors } = await step3Page(ctx, {
+      phase: 'stuck', because: 'an attempt from last week', tail: 'old noise',
+    });
+    await page.waitForTimeout(800);
+    const got = await page.evaluate(() => document.getElementById('fr-sub').textContent);
+    check('[stale-stuck] a connected verdict is NOT replaced by a dead failure record',
+      /is connected/.test(got) && !/could not finish/.test(got), got.slice(0, 110));
+    check('[stale-stuck] no page errors', errors.length === 0, errors.join(' | ').slice(0, 160));
+    // Back to the free config for anything that runs after this block.
+    fs.writeFileSync(CONFIG, JSON.stringify(FREE, null, 2), 'utf8');
+    await ctx.close();
+  }
+
   await browser.close();
 
   const failed = results.filter((r) => !r.pass);

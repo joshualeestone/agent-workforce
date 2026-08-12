@@ -293,6 +293,107 @@ driverTest('the driver walks the measured flow end to end', async () => {
   assert.ok(term.killed >= 1, 'the sign-in window was left running after success');
 });
 
+driverTest('a rejected code is not a dead end: the screen asks again and a second code works', async () => {
+  /**
+   * ⚠️ THE FIRST VERSION SAT AT "signin-completing" FOREVER after a bad code:
+   * the CLI re-showed the paste prompt, the phase never moved, submitCode
+   * refused a corrected code while the terminal literally asked for one, and
+   * the acted-guard meant a second code could never be typed anyway.
+   */
+  const term = fakeTerminal();
+  let codes = 0;
+  term.onCode = () => {
+    codes += 1;
+    if (codes === 1) { term.screen = SCREEN_PASTE; return; }   // rejected: prompt again
+    writeClaudeConfig(CONNECTED_CONFIG);
+    term.screen = SCREEN_LOGIN_DONE;
+  };
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  assert.equal(connect.submitCode('firstCode#111111').ok, true);
+
+  // The rejection surfaces: back to awaiting-code, with the reason carried.
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE
+    && /did not work/.test(connect.state().because || ''), 15000);
+
+  // And a corrected code is ACCEPTED and completes the flow.
+  const second = connect.submitCode('secondCode#22222');
+  assert.equal(second.ok, true, second.because);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 10000);
+  assert.equal(codes, 2, 'the second code was accepted but never typed into the terminal');
+});
+
+driverTest('a code that starts with a dash is typed literally, not read as tmux flags', async () => {
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  const put = connect.submitCode('-abCD1234#efGH567');
+  assert.equal(put.ok, true, put.because);
+  await until(() => term.sent.some((s) => s.includes('-l')), 3000);
+  const literal = term.sent.find((s) => s.includes('-l'));
+  const dashIdx = literal.indexOf('--');
+  assert.ok(dashIdx > -1 && literal[dashIdx + 1] === '-abCD1234#efGH567',
+    `send-keys must end option parsing before the code: ${JSON.stringify(literal)}`);
+});
+
+driverTest('cancel beats a failure that lands after it, in either order', async () => {
+  /**
+   * ⚠️ Every stuck-path crosses an await, and cancel can run during it. The
+   * defect: cancel destroyed the in-flight work, the aborted work rejected,
+   * and the rejection wrote STUCK over the person's deliberate IDLE.
+   */
+  const term = fakeTerminal();
+  let releaseCapture = null;
+  const gate = new Promise((r) => { releaseCapture = r; });
+  const baseRunner = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane') return gate.then(() => ({ ok: false, stdout: '', stderr: 'no server running' }));
+    return baseRunner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await new Promise((r) => setTimeout(r, 60));   // a tick is now parked on the gate
+  await connect.cancel();
+  releaseCapture();                              // the aborted capture now fails
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(connect.state().phase, connect.PHASE.IDLE,
+    'a failure from work the cancel itself aborted overwrote the cancel');
+});
+
+driverTest('a REPL with an unreadable subscription is an answer, not a forever-wait', async () => {
+  /**
+   * ⚠️ A machine whose CLI signs in fine but whose config names a plan we do
+   * not recognise would have looped at "will notice when it is done" forever,
+   * noticing nothing. A live REPL means Claude already wrote what it was
+   * going to write.
+   */
+  const term = fakeTerminal();
+  term.onCode = () => {
+    // Signed in as far as the CLI is concerned; the config stays unreadable.
+    writeClaudeConfig({ oauthAccount: { organizationType: 'claude_shiny_new_plan' } });
+    term.screen = ' > try "help"\n ? for shortcuts';
+  };
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  assert.equal(connect.submitCode('someCode#123456').ok, true);
+
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 20000);
+  const st = connect.state();
+  assert.match(st.because, /could not confirm a subscription/,
+    'the honest sentence is missing; whatever is there instead: ' + st.because);
+  assert.ok(term.killed >= 1, 'the session was left running');
+});
+
 driverTest('a code is refused while nothing is asking for one', async () => {
   const refusedCold = connect.submitCode('abCD1234#efGH5678');
   assert.equal(refusedCold.ok, false);
