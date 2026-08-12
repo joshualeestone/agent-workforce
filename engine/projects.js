@@ -179,13 +179,28 @@ function idFor(name, taken) {
 /**
  * Is this folder there, and can we read it?
  *
- * ⚠️ `lstat` rather than `stat`, then a second look. A symlink to a directory
- * answers `isDirectory()` under `stat` and would be reported as an ordinary
- * folder — which is fine for a project, but it must be RESOLVED before it is
- * displayed, or the path on screen is not the path being worked in. The
- * resolved path is returned beside the stored one rather than replacing it, so
- * a link that later points somewhere else shows up as a change instead of
- * disappearing into an identical-looking row.
+ * ⚠️ `realpathSync` then `statSync`, so a symlinked project folder is resolved
+ * rather than merely accepted, and `real` is returned beside the stored path.
+ *
+ * ⚠️ WHAT `real` IS ACTUALLY FOR, said accurately: it is the identity used to
+ * refuse the same folder twice (`create`'s duplicate check), so two projects
+ * cannot be made out of one directory reached by two names. That is its only
+ * consumer.
+ *
+ * An earlier version of this paragraph claimed `lstat` (this function has never
+ * called it), and claimed the resolved path "must be RESOLVED before it is
+ * displayed, or the path on screen is not the path being worked in", and that a
+ * link pointing somewhere else later "shows up as a change". None of that is
+ * built: the page prints the STORED path, `blockBody` writes the stored path
+ * into the agent's instruction file, and nothing compares `real` over time. So
+ * for a symlinked project the path on screen is exactly the unresolved one the
+ * sentence said must not be shown.
+ *
+ * Left as-is rather than "fixed" to match the sentence, because showing the
+ * stored path is defensible — it is the path the person typed or picked, and
+ * the one they will recognise — and swapping to the resolved path is a product
+ * decision about what a project IS, not a passing correction. The sentence was
+ * the defect.
  */
 function folderState(folder) {
   const given = String(folder || '');

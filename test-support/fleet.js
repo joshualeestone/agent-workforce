@@ -430,9 +430,19 @@ function verify(specs, board) {
 /**
  * A fleet we could not look at, which is NOT an empty fleet.
  *
- * `setPaneSource` answering null is "tmux could not be asked". `paneRoster`
- * throws on it by design; `snapshot` stays lenient. Both halves are real
- * product behaviour and both need arranging from one place.
+ * `setPaneSource` answering null is "tmux could not be asked", and BOTH readers
+ * refuse it: `paneRoster` by its own guard, `snapshot` through `listPanes`.
+ *
+ * ⚠️ This said "`snapshot` stays lenient" until iteration 9, which stopped being
+ * true one commit before the sentence was written — and
+ * `fixture-discipline.test.js` asserts the opposite two directories away. A
+ * reader arranging a blind fleet for a snapshot-based test would have expected
+ * an empty board and got a throw.
+ *
+ * ⚠️ NOT the same thing as a machine with no sessions. tmux answering
+ * "no server running" is an EMPTY fleet and does not come through here — see
+ * `tmuxSaidNoServer` in `engine/status.js`. This seam is the harder case: no
+ * answer at all.
  */
 function blind() {
   status.setPaneSource(() => null);

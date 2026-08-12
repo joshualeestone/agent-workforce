@@ -197,7 +197,11 @@ test('a symlinked folder reports the path it really resolves to', () => {
   projects.create({ name: 'Linked', folder: link });
   const state = projects.list([])[0].folderState;
   assert.equal(state.state, projects.FOLDER.READABLE);
-  assert.equal(state.real, fs.realpathSync(real), 'the path shown must be the path worked in');
+  // ⚠️ NOT "the path shown" -- no screen shows this value. `real` is the
+  // identity the duplicate-folder check refuses on, so what it must be is the
+  // resolved path, and the assertion below says the thing it actually pins.
+  assert.equal(state.real, fs.realpathSync(real),
+    'two projects could be made out of one folder reached by two names');
 });
 
 // ---------------------------------------------------------------------------

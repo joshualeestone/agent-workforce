@@ -277,6 +277,31 @@ async function main() {
     // is being looked at would show up here.
     await page.click('button[data-into$="kosmos-demo"]');
     await page.waitForTimeout(400);
+
+    // ⚠️ KEYBOARD FOCUS SURVIVED THE STEP. `pjBrowse` replaces the whole list
+    // with `innerHTML`, which destroys the button that was just pressed and
+    // drops focus to <body> -- so a keyboard person walking home -> work ->
+    // clients restarted their Tab journey from the top of the document at every
+    // step, in the primary flow for the audience this product is FOR. Nothing
+    // in a screenshot can show that, which is why it is asserted here: the same
+    // reason the confirmation below is checked for visibility rather than
+    // presence.
+    const focus = await page.evaluate(() => ({
+      id: document.activeElement && document.activeElement.id,
+      body: document.activeElement === document.body,
+      text: (document.activeElement && document.activeElement.textContent || '').slice(0, 60),
+    }));
+    if (focus.body || focus.id !== 'pj-crumbs') {
+      throw new Error(
+        'focus was dropped walking into a folder (activeElement: '
+        + (focus.body ? '<body>' : `#${focus.id}`) + '). A keyboard person has to '
+        + 'tab from the top of the document again, with nothing saying where they are.',
+      );
+    }
+    if (!focus.text.trim()) {
+      throw new Error('focus landed on the crumb but the crumb says nothing about where we are');
+    }
+
     await page.click('#pj-use');
     await page.waitForTimeout(300);
   });

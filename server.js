@@ -1322,7 +1322,18 @@ const server = http.createServer((req, res) => {
     let told = [];
     try {
       const roster = safeRoster();
-      told = gone.agents.map((a) => ({ agent: a, ...projects.syncAgent(a, roster) }));
+      // ⚠️ THE DISPLAY NAME TRAVELS WITH THE VERDICT. `gone.agents` are machine
+      // names, and the list's failure note printed them raw -- so for the exact
+      // fleet this feature was built for, the person read "claudebot still
+      // mentions it in their instructions" about the agent whose card everywhere
+      // else says "Splinter". The module's own rule is act on the machine name,
+      // SPEAK the display name, and the roster that resolves the two is already
+      // in hand here. `shownAs` falls back to the machine name, because a name
+      // we cannot resolve is still the only name we have.
+      told = gone.agents.map((a) => {
+        const card = Array.isArray(roster) ? roster.find((c) => c && c.sessionName === a) : null;
+        return { agent: a, shownAs: (card && card.name) || a, ...projects.syncAgent(a, roster) };
+      });
     } catch (err) {
       told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err && err.message) || 'we could not reach the agents that were on it') }];
     }
@@ -1412,6 +1423,16 @@ const server = http.createServer((req, res) => {
     // from home does not climb". `startsWith(home)` is the wrong test twice
     // over: `/Users/agentine` starts with `/Users/agent1`... only by accident of
     // spelling, and it says nothing about a symlink.
+    // ⚠️ CASE, on macOS: `realpath` resolves symlinks but does NOT canonicalise
+    // case on a case-insensitive volume, so `/users/agent1/x` stays lowercase
+    // and `path.relative('/Users/agent1', …)` yields a climb. The containment
+    // check then refuses a path that is genuinely inside home. Left as-is
+    // rather than case-folded: it FAILS CLOSED (a false refusal, never an
+    // escape), the browser only ever hands back paths this route itself
+    // produced, and case-folding a path comparison is exactly the kind of
+    // loosening that turns a containment check into a hole. Recorded so the
+    // next person to meet it knows it is a known false refusal, not a bug in
+    // their typing.
     const rel = path.relative(home, real);
     // `rel.startsWith('..')` alone also refuses a folder legitimately named
     // `..archive`. The climb is the segment `..`, not the two characters.
@@ -1461,10 +1482,22 @@ const server = http.createServer((req, res) => {
       // "nothing else in here" would be a claim nobody checked.
       truncated: hitLimit,
       showing: shown.length,
-      // ⚠️ Only meaningful when we stopped early; otherwise `folders.length`
-      // counts entries that never reached the directory check, so a folder of
-      // 500 folders plus 20 links-to-files read "the first 500 of 520".
-      total: hitLimit ? folders.length : shown.length,
+      // ⚠️ NO TOTAL WHEN WE STOPPED EARLY, because we do not have one.
+      //
+      // This read `hitLimit ? folders.length : shown.length`, with a comment
+      // correctly explaining that `folders.length` counts entries that never
+      // reached the directory check -- and then using it in exactly the branch
+      // where that is true. `readdir` gives 520 entries; we typed the first
+      // 500 and stopped; the other 20 may be files, links to files, or
+      // anything else. So "the first 500 of 520" was a count of things we had
+      // not looked at, and a directory of 500 folders plus 20 links-to-files
+      // announced 20 folders that do not exist.
+      //
+      // `null` is the honest answer and the page says "there are more" rather
+      // than inventing a number. Counting them properly would mean stat-ing
+      // every entry past the limit, which is the synchronous-blocking cost the
+      // limit exists to avoid.
+      total: hitLimit ? null : shown.length,
       // Null AT home rather than at the filesystem root, so "up" can never walk
       // out of the only place this route will serve.
       parent: real === home ? null : path.dirname(real),

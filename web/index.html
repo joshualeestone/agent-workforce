@@ -224,6 +224,12 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
   padding: 2px var(--space-3); }
+/* ⚠️ Dashed and full-width, matching `.pj-member.unseen`: every "we could not
+   look" on this page reads the same way, so the person learns one shape rather
+   than three. `--label` rather than `--label-2` because this one is a sentence
+   to read, not a chip to scan, and it has to clear AA on both themes. */
+.pj-tag-unread { display: block; border-style: dashed; color: var(--label);
+  border-radius: var(--radius-card); padding: var(--space-2) var(--space-3); }
 .panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
                text-transform: uppercase; letter-spacing: .06em; }
 /* --- creating an agent ---------------------------------------------------
@@ -735,9 +741,15 @@ svg { display: block; }
            touched, the name and the whole membership list go with it and cannot
            be got back by re-adding the folder. Same friction, same reason. -->
       <div class="frow" id="pj-one-confirm" hidden style="margin-top: var(--space-4)">
+        <!-- ⚠️ The question is ATTACHED to the buttons. Focus moves to Keep
+             when this opens, and without `aria-describedby` the only thing a
+             screen-reader user heard was "Keep Quarter close" -- the friction
+             this confirmation exists for, silently removed for the people most
+             dependent on being told what a button does. The agent-removal modal
+             it is explicitly modelled on already does this. -->
         <span class="fhint" id="pj-one-confirm-q" style="flex-basis: 100%; margin: 0"></span>
-        <button class="btn" id="pj-one-remove-go" type="button"></button>
-        <button class="btn" id="pj-one-remove-keep" type="button"></button>
+        <button class="btn" id="pj-one-remove-go" type="button" aria-describedby="pj-one-confirm-q"></button>
+        <button class="btn" id="pj-one-remove-keep" type="button" aria-describedby="pj-one-confirm-q"></button>
       </div>
     </div>
   </div>
@@ -752,7 +764,11 @@ svg { display: block; }
       <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
          own files in it</b> — everything it keeps lives somewhere else.</p>
       <div class="frow" style="margin-bottom: var(--space-4)">
-        <p class="pj-crumbs" id="pj-crumbs"></p>
+        <!-- ⚠️ `aria-live` and a label, because focus lands here after every
+             step into a folder (see `pjBrowse`) and the text is the only thing
+             that says where you now are. -->
+        <p class="pj-crumbs" id="pj-crumbs" aria-live="polite"
+           aria-label="The folder you are looking in"></p>
         <button class="btn" id="pj-use" type="button">Use this folder</button>
       </div>
       <div id="pj-browse" class="pj-browse"></div>
@@ -783,10 +799,18 @@ svg { display: block; }
     </div>
 
     <div class="field">
-      <span class="flabel">Which agents are on it?</span>
+      <!-- ⚠️ A GROUP, with its label attached. The roles picker two screens up
+           is a `role="radiogroup"` with an `aria-label` and a comment saying why;
+           this one was a bare div of checkboxes, so a screen-reader user heard
+           "Mara, Project Manager, checkbox, not checked" with nothing saying
+           what the set was or how many were in it. Same control, same need, and
+           the sibling did not inherit it. `group` rather than `radiogroup`
+           because these are not exclusive. -->
+      <span class="flabel" id="pj-agents-label">Which agents are on it?</span>
       <p class="fhint">You can change this later, and you can leave it empty for
          now.</p>
-      <div id="pj-add-agents" class="pj-members"></div>
+      <div id="pj-add-agents" class="pj-members" role="group"
+           aria-labelledby="pj-agents-label"></div>
     </div>
 
     <div class="frow" style="margin-top: var(--space-6)">
@@ -1027,6 +1051,15 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    // Set only after a response, never after a failure: a poll that threw has
+    // still not told us what is on this machine.
+    BOARD_LOOKED = true;
+    // ⚠️ The picker is repainted here rather than only on open, because the
+    // add-a-project flow suppresses the projects poll while it is up. Without
+    // this, a person who opened it before the first status landed kept an empty
+    // picker for the whole flow and created the project with no agents on it.
+    const addView = document.getElementById('pj-add-view');
+    if (addView && !addView.hidden) paintAddAgents();
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
 
     // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
@@ -1322,6 +1355,15 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
 let LAST = [];
+// ⚠️ HAVE WE LOOKED YET, which is a different question from whether the list is
+// empty -- and the agent picker answered them with the same value. `LAST` is
+// `[]` until the first /api/status response lands, so opening Projects and
+// pressing "Add a project" before that returned put "We cannot see any agents
+// on this computer right now" on screen about a look that had not happened. It
+// is this product's central rule inverted, on the screen a first-time person
+// reaches first, and the projects poll deliberately bails while the add view is
+// open, so it never repainted for the life of the flow.
+let BOARD_LOOKED = false;
 let CURRENT = null;
 
 /**
@@ -1433,8 +1475,18 @@ async function paintAgentProjects(sessionName) {
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
   } catch {
-    return; // Silent: the panel has plenty to say already, and an unread
-            // project list is not a fact about this agent.
+    // ⚠️ SAID, never swallowed. This returned silently with the field hidden --
+    // byte-identical to an agent that is genuinely on no projects -- under a
+    // docstring four lines up saying "we have not looked" must not render as
+    // "it is on none". The catch even had a comment rationalising the silence.
+    // A corrupt projects file, or any 500, and the panel quietly asserted the
+    // stronger claim.
+    if (gen !== PJ_GEN) return;
+    document.getElementById('d-projects').innerHTML =
+      '<span class="pj-tag pj-tag-unread">We could not read your projects just now, '
+      + 'so we cannot say which ones this agent is on.</span>';
+    field.hidden = false;
+    return;
   }
   const mine = PROJECTS.filter((p) => (p.agents || []).some((a) => a.sessionName === sessionName));
   if (!mine.length) return;
@@ -3063,7 +3115,15 @@ function pjMember(m, projectId) {
     // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
     // inform a running agent, and saying we did would be the one claim on this
     // screen that nobody could check.
-    toldLine = 'Kosmos told it where this folder is. It will see that the next time it starts.';
+    //
+    // ⚠️ AND THE PREDICTION IS CONDITIONAL, because the verdict behind it is a
+    // record of a past write, not a re-read of the file. Nothing re-checks that
+    // the block is still there, so if the person (or the agent) edits it out,
+    // the flat form went on promising a future read of something that is no
+    // longer in the file. The past-tense half is evidence; the future half is
+    // an expectation, and now reads as one.
+    toldLine = 'Kosmos told it where this folder is. It will see that the next time it '
+      + 'starts, unless its instructions have been changed since.';
   } else if (told.state === 'could_not') {
     toldLine = 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
@@ -3280,10 +3340,37 @@ async function pjBrowse(at) {
   // past the limit is indistinguishable from one that is not there, and
   // "nothing else in here" becomes a claim nobody checked.
   if (body.truncated) {
+    // ⚠️ "There are more", not "of N". The server does not know N when it
+    // stopped early -- it typed the first 500 entries and left the rest
+    // unexamined -- and printing the raw entry count announced folders that
+    // may not be folders.
     rows.push('<p class="pj-note">Showing the first ' + body.showing
-      + ' of ' + body.total + '. Type the path below to reach the rest.</p>');
+      + '. There are more — type the path below to reach the rest.</p>');
   }
   box.innerHTML = rows.join('');
+  // ⚠️ FOCUS GOES BACK INTO THE LIST, because this wholesale innerHTML replace
+  // destroys the button that was just pressed and drops focus to <body>. A
+  // keyboard person walking home → work → clients restarted their Tab journey
+  // from the top of the document three times, with nothing announcing where
+  // they had arrived — in the primary flow for exactly the audience this
+  // product exists for. The same defect was already found and fixed on the pick
+  // button ("keyboard focus drops to the body after every pick"), and this
+  // sibling did not inherit it.
+  //
+  // The crumb, not the first row: it is the thing that CHANGED, and moving to
+  // the first folder would read as though it had been chosen. `tabindex="-1"`
+  // makes it focusable without putting it in the tab order.
+  // ⚠️ `pj-add-view`, and the first version of this said `pj-add` — an element
+  // that does not exist, so `getElementById` returned null, the guard was
+  // always false and the focus() never ran. The unit tests could not have
+  // caught it; the browser check did, on the first run, with the same message
+  // this fix exists to prevent. Run the artifact.
+  const crumbs = document.getElementById('pj-crumbs');
+  const addView = document.getElementById('pj-add-view');
+  if (crumbs && addView && !addView.hidden) {
+    crumbs.setAttribute('tabindex', '-1');
+    crumbs.focus();
+  }
   // ⚠️ Walking INTO a folder does not choose it, and this is the whole reason
   // there is a separate button. The first version chose whatever you were
   // looking at — which meant the screen opened with the person's ENTIRE HOME
@@ -3309,6 +3396,12 @@ function pjChoose(p) {
 
 function paintAddAgents() {
   const box = document.getElementById('pj-add-agents');
+  // ⚠️ "We have not looked yet" is NOT "there are none", and saying the second
+  // for the first is the one thing this product refuses to do.
+  if (!BOARD_LOOKED) {
+    box.innerHTML = '<p class="fhint">Looking for the agents on this computer…</p>';
+    return;
+  }
   if (!LAST.length) {
     box.innerHTML = '<p class="fhint">We cannot see any agents on this computer right now.</p>';
     return;
@@ -3523,7 +3616,10 @@ document.getElementById('pj-one-remove-go').addEventListener('click', async () =
     note.textContent = failed.length
       ? 'Removed ' + body.name + '. ' + failed.length + (failed.length === 1 ? ' agent' : ' agents')
         + ' still mention it in their instructions and we could not change that: '
-        + failed.map((t) => (t.agent || 'one of them') + ' (' + t.because + ')').join('; ') + '.'
+        // ⚠️ `shownAs`, not `agent`: speak the display name. The raw machine
+        // name here read "claudebot" about the agent every other surface calls
+        // "Splinter".
+        + failed.map((t) => (t.shownAs || t.agent || 'one of them') + ' (' + t.because + ')').join('; ') + '.'
       : '';
   } catch (err) {
     msg.textContent = err.message;

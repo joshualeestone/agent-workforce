@@ -270,8 +270,35 @@ test('a listing longer than the limit says it was cut', async () => {
 
   const body = json(await req(`/api/folders?path=${encodeURIComponent(root)}`));
   assert.equal(body.truncated, true);
-  assert.equal(body.total, 520);
   assert.equal(body.showing, 500);
+  // ⚠️ NOT a number. We stopped after typing 500 entries, so the remaining 20
+  // were never checked for being folders at all -- reporting "of 520" was a
+  // count of things nobody had looked at, and in a directory holding
+  // links-to-files it announced folders that do not exist.
+  assert.equal(body.total, null, 'a total we did not count must not be reported as one');
+});
+
+test('a cut listing does not report a total it never counted', async () => {
+  // The control for the assertion above: 500 real folders plus entries that are
+  // NOT folders. `readdir` sees 520; only folders may be claimed.
+  const root = path.join(HOME, 'many-mixed');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(root, { recursive: true });
+  for (let i = 0; i < 500; i += 1) fs.mkdirSync(path.join(root, `d${String(i).padStart(4, '0')}`));
+  // ⚠️ SYMLINKS to files, not plain files. `readdir` types a plain file
+  // immediately and it never enters the candidate list at all, so it could not
+  // have inflated the count -- the entries that DO get in and are only rejected
+  // by the per-entry `statSync` are the ones typed as symlinks. A control built
+  // from plain files exercises nothing (measured: `truncated` came back false).
+  const target = path.join(root, 'd0000', 'a-file.txt');
+  fs.writeFileSync(target, 'x');
+  for (let i = 0; i < 20; i += 1) fs.symlinkSync(target, path.join(root, `zz-link-${i}`));
+
+  const body = json(await req(`/api/folders?path=${encodeURIComponent(root)}`));
+  assert.equal(body.truncated, true, 'the control: this listing really was cut');
+  assert.equal(body.showing, 500);
+  assert.equal(body.total, null,
+    'the route reported 520 folders for a directory holding 500 folders and 20 files');
 });
 
 test('home reached through a SYMLINK still browses, rather than refusing itself', async () => {
@@ -410,9 +437,22 @@ test('a corrupt store does not kill the board, on any projects route', async () 
       assert.ok(res.type.includes('application/json'), `${p} must still answer as JSON`);
       assert.ok(!/"projects":\s*\[\]/.test(res.body), `${p} must not report an empty list for a store it cannot read`);
     }
-    // The control that matters: the server is STILL SERVING afterwards.
+    // ⚠️ The control that matters: the server is STILL SERVING afterwards --
+    // a corrupt projects file once killed the board process outright (exit 9)
+    // through the one read that did not catch.
+    //
+    // ⚠️ This assertion could not fail. It read
+    // `status < 500 || type.includes('application/json')`, and /api/status sets
+    // that content-type on BOTH its 200 path and its 500 catch — so the right
+    // disjunct is true for every response the route can produce, and the only
+    // thing being tested was that `fetch` did not reject. It passed with the
+    // route arbitrarily broken. Asked as what a dead or damaged board would
+    // actually fail: a 200 carrying a real board.
     const alive = await req('/api/status');
-    assert.ok(alive.status < 500 || alive.type.includes('application/json'), 'the board is still up');
+    assert.equal(alive.status, 200, 'the board stopped answering after a corrupt projects file');
+    assert.ok(alive.type.includes('application/json'));
+    assert.ok(Array.isArray(JSON.parse(alive.body).agents),
+      'the board answered, but not with a board');
   });
 });
 
