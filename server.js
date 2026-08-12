@@ -20,6 +20,7 @@ const path = require('node:path');
 const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
+const subscription = require('./engine/subscription');
 const machine = require('./engine/machine');
 
 // Single source of truth for the version. With no support function, "what
@@ -658,7 +659,21 @@ const server = http.createServer((req, res) => {
       // the ENGINE's own counter rather than a copy of its predicates here, so
       // a count added there cannot quietly stop being recomputed here.
       const counts = countAgents(agents, snap.counts && snap.counts.unreadableLines);
-      body = JSON.stringify({ ...snap, agents, counts, version });
+      // ⚠️ A MACHINE-LEVEL FACT, DELIBERATELY NOT A PER-AGENT ONE. Whether this
+      // computer can reach a Claude subscription is one fact about the machine,
+      // not thirteen facts about thirteen agents, and putting it on every card
+      // would bury the one thing the reader needs to see.
+      //
+      // Before this, `subscription.check()` was called in exactly one place --
+      // first-run -- so Kosmos checked the connection during onboarding and then
+      // never looked again. An agent stranded by a broken sign-in produces no
+      // output, lands in `idle`, and reads identically to a healthy agent
+      // waiting for work. The board rendered a dead fleet as a resting one.
+      //
+      // `checkCached` and not `check`: this runs every 5 seconds and the config
+      // is ~95KB. See the cache's own comment for why its key is paranoid.
+      const connection = subscription.checkCached();
+      body = JSON.stringify({ ...snap, agents, counts, connection, version });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
