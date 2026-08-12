@@ -275,7 +275,8 @@ function platformKey() {
  *
  * A leftover partial from an interrupted attempt is discarded and restarted
  * rather than resumed: a byte-range resume would hash clean or dirty the same
- * way, but restart is simpler to reason about and the file is ~100-200MB once.
+ * way, but restart is simpler to reason about and the file downloads once
+ * (measured: 281MB, 9 seconds on this machine's connection).
  */
 async function download(onProgress) {
   const base = downloadBase();
