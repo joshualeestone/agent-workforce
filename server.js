@@ -1076,7 +1076,10 @@ const server = http.createServer((req, res) => {
         try { code = JSON.parse(buf.toString('utf8') || '{}').code; }
         catch { sendJson(res, 400, { error: 'we could not read that' }); return; }
         const put = connect.submitCode(typeof code === 'string' ? code.trim() : code);
-        sendJson(res, put.ok ? 200 : 409, put.ok ? { ok: true } : { error: put.because });
+        // A malformed code is the caller's input being wrong (400); asking at
+        // the wrong moment is a state conflict (409). Different fixes.
+        const status = put.ok ? 200 : (put.kind === 'format' ? 400 : 409);
+        sendJson(res, status, put.ok ? { ok: true } : { error: put.because });
       })
       .catch((err) => sendJson(res, 400, { error: String((err && err.message) || err) }));
     return;

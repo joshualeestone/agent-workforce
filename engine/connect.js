@@ -190,6 +190,20 @@ function state() {
   if (mem.phase !== PHASE.IDLE || mem.startedOnce) return publicView(mem);
   const disk = readPersisted();
   if (disk && ACTIVE_PHASES.includes(disk.phase) && disk.pid !== process.pid) {
+    /**
+     * ⚠️ "ANOTHER PID" IS NOT "A DEAD PID". A second server sharing this data
+     * dir (a different port) writes live, progressing records; declaring its
+     * flow interrupted from pid inequality alone asserts a death nobody
+     * checked. Signal 0 asks the kernel; only a pid that is actually gone
+     * gets the interrupted verdict, and a live one is reported as it stands.
+     */
+    let alive = false;
+    try { process.kill(disk.pid, 0); alive = true; }
+    catch (err) {
+      // EPERM means it exists but is not ours to signal -- that is alive.
+      alive = Boolean(err && err.code === 'EPERM');
+    }
+    if (alive) return publicView(disk);
     return publicView({ ...disk, phase: PHASE.INTERRUPTED, before: disk.phase });
   }
   if (disk && disk.pid !== process.pid
@@ -514,6 +528,15 @@ async function runFlow(owner, haveBinary) {
         writeState({ ...mem, progress: { got, total } });
       });
     } catch (err) {
+      // A death mid-stream leaves a .part behind, and a retry only sweeps the
+      // SAME version's partial -- a version bump between attempts would
+      // strand up to ~281MB that nothing else ever cleans. Sweep them all.
+      try {
+        const dir = path.join(store.ROOT, 'downloads');
+        for (const f of fs.readdirSync(dir)) {
+          if (f.endsWith('.part')) fs.unlinkSync(path.join(dir, f));
+        }
+      } catch { /* nothing partial to clean */ }
       becomeStuck(owner, 'we could not download Claude', String((err && err.message) || err));
       return;
     }
@@ -676,7 +699,13 @@ async function tick(owner) {
           writeState({
             phase: PHASE.SIGNIN_AWAITING_CODE,
             url: seen.url || mem.url || null,
-            because: 'that code did not work, so check it and paste it again',
+            // ⚠️ Two ways to arrive here, two different true sentences.
+            // "Completing" can be reached with no code ever typed (login text
+            // seen from the browser flow, then the CLI re-prompted) -- telling
+            // that person to re-paste a code they never had is a small lie.
+            because: driver.codeTyped
+              ? 'that code did not work, so check it and paste it again'
+              : 'the sign-in did not finish on its own, so paste the code from your browser here',
             startedOnce: true,
           });
         }
@@ -688,12 +717,18 @@ async function tick(owner) {
       }
       if (driver.pendingCode && driver.lastActed !== 'code') {
         driver.lastActed = 'code';
+        driver.codeTyped = true;
         const code = driver.pendingCode;
         driver.pendingCode = null;
         // ⚠️ `--` ends option parsing: the allowed charset includes `-`, and a
         // code starting with one would otherwise be read by tmux as flags.
         const typed = await tmux(['send-keys', '-t', TARGET, '-l', '--', code]);
         const entered = typed.ok ? await tmux(['send-keys', '-t', TARGET, 'Enter']) : typed;
+        // ⚠️ The one post-await write in this module that shipped WITHOUT the
+        // owner re-check: a cancel landing between the sends and this line
+        // overwrote the person's IDLE with a driverless "completing" record
+        // that nothing would ever advance.
+        if (driver !== owner) return;
         if (!typed.ok || !entered.ok) {
           becomeStuck(owner, 'we could not type the code into the sign-in',
             tailOf(`${typed.stderr || ''}\n${entered.stderr || ''}`) || 'the sign-in window did not take it');
@@ -816,14 +851,16 @@ function becomeStuck(owner, because, tail) {
  * into a screen that is not asking is how a driver corrupts a flow.
  */
 function submitCode(code) {
+  // `kind` lets the route pick the right refusal status: 'state' conflicts
+  // are 409s (right code, wrong moment); 'format' is a 400 (bad input).
   if (!driver) {
-    return { ok: false, because: 'the sign-in is not running, so there is nowhere to put that code' };
+    return { ok: false, kind: 'state', because: 'the sign-in is not running, so there is nowhere to put that code' };
   }
   if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE) {
-    return { ok: false, because: 'Claude is not asking for a code right now' };
+    return { ok: false, kind: 'state', because: 'Claude is not asking for a code right now' };
   }
   if (!validCode(code)) {
-    return { ok: false, because: 'that does not look like a sign-in code' };
+    return { ok: false, kind: 'format', because: 'that does not look like a sign-in code' };
   }
   driver.pendingCode = code;
   return { ok: true };
@@ -870,7 +907,7 @@ function resetForTests() {
 }
 
 module.exports = {
-  PHASE, SESSION,
+  PHASE, SESSION, ACTIVE_PHASES,
   state, start, submitCode, cancel,
   classifyPane, extractOauthUrl, tailOf, validCode, redirectDowngrades,
   download, platformKey,

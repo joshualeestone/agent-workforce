@@ -607,6 +607,14 @@ driverTest('a code is refused while nothing is asking for one', async () => {
   const refusedEarly = connect.submitCode('abCD1234#efGH5678');
   assert.equal(refusedEarly.ok, false);
   assert.match(refusedEarly.because, /not asking/);
+  assert.equal(refusedEarly.kind, 'state', 'the route needs the refusal KIND to pick 409 vs 400');
+
+  // And the format refusal carries its own kind, at the moment the terminal
+  // IS asking -- the case the route maps to 400.
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  const badFormat = connect.submitCode('nope;`$(x)`');
+  assert.equal(badFormat.ok, false);
+  assert.equal(badFormat.kind, 'format');
 });
 
 driverTest('a screen nobody recognises becomes stuck, with the screen attached', async () => {

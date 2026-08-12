@@ -113,6 +113,71 @@ test('a code with no flow running is refused with the reason', async () => {
   assert.match(json(got).error, /not running/);
 });
 
+test('the page and the engine agree on which phases are active', () => {
+  /**
+   * ⚠️ `frConnActive` is a hand copy of the engine's ACTIVE_PHASES (one-file
+   * page, no imports). The drift consequence is named in both comments: a
+   * phase added to the engine and missed in the page becomes a panel-less
+   * state whose watcher stops polling -- a frozen screen. This is the test
+   * those comments ask for.
+   */
+  const raw = fs.readFileSync(path.join(__dirname, 'web', 'index.html'), 'utf8');
+  const m = raw.match(/function frConnActive[\s\S]*?return \[([\s\S]*?)\]\.includes/);
+  assert.ok(m, 'frConnActive (or its list) vanished from the page');
+  const pageList = m[1].match(/'[^']+'/g).map((s) => s.slice(1, -1)).sort();
+  assert.deepEqual(pageList, [...connect.ACTIVE_PHASES].sort(),
+    'the page and the engine disagree about which phases are live');
+});
+
+test('a live record from ANOTHER process is reported as it stands, not as interrupted', () => {
+  /**
+   * ⚠️ "Another pid" is not "a dead pid". pid 1 (launchd) is definitionally
+   * alive, so a mid-flight record carrying it must keep its phase; only a
+   * pid the kernel says is gone earns the interrupted verdict.
+   */
+  connect.resetForTests();
+  const file = connect.STATE_FILE();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.writeFileSync(file, JSON.stringify({
+      phase: 'downloading', progress: { got: 5, total: 10 }, pid: 1,
+      updatedAt: new Date().toISOString(),
+    }));
+    assert.equal(connect.state().phase, 'downloading',
+      'a live flow in another process was declared interrupted from pid inequality alone');
+
+    fs.writeFileSync(file, JSON.stringify({
+      phase: 'downloading', progress: { got: 5, total: 10 }, pid: 999999999,
+      updatedAt: new Date().toISOString(),
+    }));
+    // CONTROL: the dead-pid case still earns the verdict.
+    assert.equal(connect.state().phase, 'interrupted');
+  } finally {
+    fs.rmSync(file, { force: true });
+    connect.resetForTests();
+  }
+});
+
+test('a malformed code is a 400; asking at the wrong moment stays a 409', async () => {
+  // The state conflict, through the real engine: nothing is running.
+  const conflict = await post('/api/connect/code', { code: 'abCD1234#efGH5678' });
+  assert.equal(conflict.status, 409);
+
+  // The format refusal is only reachable with a flow parked at awaiting-code,
+  // which the DRY_RUN harness cannot reach -- so the ROUTE MAPPING is tested
+  // by handing it the engine's format verdict directly. The verdict itself
+  // (bad charset => kind: 'format') is pinned in engine/connect.test.js.
+  const real = connect.submitCode;
+  connect.submitCode = () => ({ ok: false, kind: 'format', because: 'that does not look like a sign-in code' });
+  try {
+    const bad = await post('/api/connect/code', { code: 'nope;`$(x)`' });
+    assert.equal(bad.status, 400, 'a malformed code was answered as a state conflict');
+    assert.match(json(bad).error, /does not look like/);
+  } finally {
+    connect.submitCode = real;
+  }
+});
+
 test('a body that is not JSON is a 400, not a crash', async () => {
   const got = await req('/api/connect/code', {
     method: 'POST',
