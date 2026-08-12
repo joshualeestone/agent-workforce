@@ -521,54 +521,6 @@ function findBlock(text) {
  * it.
  */
 /**
- * Where the managed block IS, or null.
- *
- * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
- * idea of where the block starts — `indexOf(BLOCK_START)` from zero — and it
- * was WRONG in exactly the case `spliceBlock` had already been hardened
- * against. Measured: an instruction file carrying a stranded start marker plus
- * a real block lost the user's whole "## House rules" section on removal, and
- * `syncAgent` still answered `told`, so the screen said "Kosmos told it where
- * this folder is" about a write that had just eaten somebody's words. Two
- * derivations of one question is this codebase's worst habit and it grew back
- * inside the fix for the last instance of it.
- *
- * BOTH single-marker cases are reachable from a hand edit or an interrupted
- * write, and each breaks a different naive rule:
- *   a stranded START before a real block — first-start-to-first-end spans them
- *     and eats everything between;
- *   a stranded END before a real block — first-end-then-look-backwards finds no
- *     start, so a block is appended EVERY time and the file grows without bound
- *     until it outgrows the write limit and every save fails, including the
- *     person's own.
- * So: scan ends left to right, and take the first one that has a start before
- * it.
- */
-/**
- * Where the managed block IS, or null.
- *
- * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
- * idea of where the block starts — `indexOf(BLOCK_START)` from zero — and it
- * was WRONG in exactly the case `spliceBlock` had already been hardened
- * against. Measured: an instruction file carrying a stranded start marker plus
- * a real block lost the user's whole "## House rules" section on removal, and
- * `syncAgent` still answered `told`, so the screen said "Kosmos told it where
- * this folder is" about a write that had just eaten somebody's words. Two
- * derivations of one question is this codebase's worst habit and it grew back
- * inside the fix for the last instance of it.
- *
- * BOTH single-marker cases are reachable from a hand edit or an interrupted
- * write, and each breaks a different naive rule:
- *   a stranded START before a real block — first-start-to-first-end spans them
- *     and eats everything between;
- *   a stranded END before a real block — first-end-then-look-backwards finds no
- *     start, so a block is appended EVERY time and the file grows without bound
- *     until it outgrows the write limit and every save fails, including the
- *     person's own.
- * So: scan ends left to right, and take the first one that has a start before
- * it.
- */
-/**
  * Replace the managed block in some instruction text, leaving everything else
  * exactly as it was.
  *

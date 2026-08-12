@@ -118,23 +118,31 @@ async function assertSandboxed() {
     if (!fs.readFileSync(store, 'utf8').includes('kosmos sandbox probe')) {
       throw new Error(`the server at ${BASE} wrote somewhere other than ${store} -- refusing to touch it.`);
     }
-    // ⚠️ AND THE WORKERS ROOT, which is the one that matters. Proving the
-    // projects store is sandboxed proved the harmless half: the writes this
+    // ⚠️ AND THE WORKERS ROOT, WHICH IS THE ONE THAT MATTERS — PROVED BY A READ.
+    // Checking only the projects store proved the harmless half: the writes this
     // guard exists to prevent go to AGENT_WORKFORCE_WORKERS, the instruction
-    // files the live fleet boots from. A server with DATA sandboxed and WORKERS
-    // forgotten passed the old check and would have spliced our block straight
-    // into the real agents' CLAUDE.md.
+    // files the live fleet boots from.
+    //
+    // Two earlier versions of this check were themselves the hazard. The first
+    // picked a REAL agent off /api/status and added it to a project — so against
+    // an unsandboxed server the guard performed the exact destructive write it
+    // exists to prevent, and only THEN noticed. A guard that has to do the
+    // damage to detect it is not a guard. The second used a probe NAME instead,
+    // which cannot work at all: `tellAgent` requires an exact roster match, and
+    // an invented name is in no roster, so a correctly sandboxed server would
+    // have been refused too.
+    //
+    // The instructions route ANSWERS WITH THE PATH IT WOULD READ, so asking it
+    // where a real agent's file lives proves which workers root the server is
+    // using, and writes nothing at all.
     const board = await api('/api/status');
     const someone = (board.agents || []).map((a) => a.sessionName)[0];
-    if (someone) {
-      const worker = path.join(SANDBOX, 'workers', someone);
-      fs.mkdirSync(worker, { recursive: true });
-      fs.writeFileSync(path.join(worker, 'CLAUDE.md'), `# ${someone}\n\nA sandbox fixture, not a real agent.\n`);
-      await post(`/api/project/${made.project.id}/agent/${encodeURIComponent(someone)}`);
-      const wrote = fs.readFileSync(path.join(worker, 'CLAUDE.md'), 'utf8');
-      if (!wrote.includes('kosmos:projects')) {
-        throw new Error(`the server at ${BASE} did not write into ${worker} -- its AGENT_WORKFORCE_WORKERS is NOT sandboxed, and this check would rewrite the real fleet's instruction files. Refusing.`);
-      }
+    if (!someone) {
+      throw new Error(`the server at ${BASE} reports no agents, so the workers root cannot be verified. Refusing rather than guessing.`);
+    }
+    const seen = await api(`/api/agent/${encodeURIComponent(someone)}/instructions`);
+    if (!seen.path || !path.resolve(seen.path).startsWith(path.resolve(SANDBOX) + path.sep)) {
+      throw new Error(`the server at ${BASE} reads instructions from ${seen.path}, which is OUTSIDE ${SANDBOX} -- its AGENT_WORKFORCE_WORKERS is not sandboxed, and this check would rewrite the real fleet's boot files. Refusing.`);
     }
   } finally {
     await api('/api/project/' + encodeURIComponent(made.project.id), { method: 'DELETE' });

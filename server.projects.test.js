@@ -37,12 +37,18 @@ process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
 
-// ⚠️ WITH `/bin/echo` STANDING IN FOR TMUX, THE ROSTER IS ALWAYS NULL — so
-// every route test below ran with "we could not look" and NOT ONE of them ever
-// asserted a present member, a display name, a state, or `agentsUnreadable` in
-// either direction. That blind spot is half of why the routes described members
-// against `paneRoster()` (no name, no state) for this whole branch. The test at
-// the bottom of this file stubs a REAL pane listing so the seam is exercised.
+// ⚠️ THAT VARIABLE DOES NOT STUB THE STATUS ENGINE, and a comment here used to
+// claim it did. `engine/status.js` calls `sh('tmux', …)` directly and never
+// reads `AGENT_WORKFORCE_TMUX_BIN` — only `create.js` and `remove.js` do. So
+// the roster in these tests is whatever the HOST's real tmux answers, which
+// makes results machine-dependent and means the header's claim about what this
+// file exercises was a claim about a world that does not exist.
+//
+// That is the same shape as the defect this branch was just fixed for, in the
+// comment written about it. The seam tests at the bottom of this file stub
+// `setPaneSource` explicitly — the seam the engine actually reads — so both the
+// real-board and the could-not-look paths are exercised on purpose rather than
+// by accident of the host.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -485,6 +491,67 @@ test('with a real board, a member row carries the display name and state', async
     const list = json(await req('/api/projects'));
     assert.equal(list.agentsUnreadable, false, 'and the list says the look succeeded');
   } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a roster we could not read is reported, never rendered as an empty fleet', async () => {
+  reset();
+  // ⚠️ The other half of the seam, and the path the header used to claim was
+  // saturated when in fact nothing exercised it. `setPaneSource` returning null
+  // is "tmux could not be asked", which must reach the page as "we could not
+  // see them" and never as "you have none of them".
+  const status = require('./engine/status');
+  try {
+    const made = json(await post('/api/projects', {
+      name: 'Blind', folder: folder('blind-route'), agents: ['zeta'],
+    })).project;
+
+    status.setPaneSource(() => null);
+    const res = await req('/api/projects');
+    assert.equal(res.status, 200, 'the record is still readable');
+    const body = json(res);
+    assert.equal(body.agentsUnreadable, true, 'and the response says the look failed');
+    const member = body.projects.find((p) => p.id === made.id).agents[0];
+    assert.equal(member.present, false);
+    assert.match(member.because, /cannot see this agent|never seen/);
+  } finally {
+    status.setPaneSource(null);
+  }
+});
+
+test('an agent the person removed does not appear on a project row', async () => {
+  reset();
+  // ⚠️ Two derivations of "the fleet" is this codebase's worst habit, and the
+  // projects roster was one: the board filters removed agents out and called
+  // that "the whole user-visible half of a removal", while a project row still
+  // showed the same agent as present with a live state -- and the write gate
+  // still permitted splicing the block into its boot file. Kosmos would have
+  // edited the instructions of an agent it had told the person was gone.
+  const status = require('./engine/status');
+  const removal = require('./engine/remove');
+  try {
+    status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tWorking\n');
+    status.setPaneCapture(() => 'Worked for 1m 02s\n> \n');
+
+    const made = json(await post('/api/projects', {
+      name: 'Removed', folder: folder('removed-route'), agents: ['zeta'],
+    })).project;
+    // The control: while it is on the board, it reads as present.
+    assert.equal(made.agents[0].present, true, 'the control: present before the removal');
+
+    // Written through the store the removal engine reads, since `recordRemoval`
+    // is deliberately not exported (removing is a route, not a library call).
+    const removedFile = path.join(require('./engine/store').ROOT, 'removed.json');
+    fs.mkdirSync(path.dirname(removedFile), { recursive: true });
+    fs.writeFileSync(removedFile, JSON.stringify([{ name: 'zeta', shownAs: 'zeta', stopped: true }]));
+    assert.ok(removal.removedAgents().some((r) => r.name === 'zeta'), 'the control: the engine sees the removal');
+
+    const after = json(await req('/api/projects')).projects.find((p) => p.id === made.id);
+    assert.equal(after.agents[0].present, false, 'a removed agent is not present on a project row either');
+  } finally {
+    try { fs.rmSync(path.join(require('./engine/store').ROOT, 'removed.json')); } catch { /* never written */ }
     status.setPaneSource(null);
     status.setPaneCapture(null);
   }

@@ -498,6 +498,22 @@ function listPanes() {
   const out = paneSource
     ? paneSource()
     : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  /**
+   * ⚠️ TMUX COULD NOT BE ASKED AT ALL, which is not an empty machine either —
+   * and this case was missing while the one below it was carefully handled.
+   * `sh` swallows a failed spawn and returns null, so on a machine where tmux
+   * is not installed (or not on PATH) `readPanes(null)` produced zero panes and
+   * zero rejects, and the board reported a machine with no agents off a look
+   * that never happened. That is the exact failure the comment below describes
+   * — "a mangled answer and no answer were indistinguishable" — with the third
+   * case, NO ANSWER AT ALL, still indistinguishable from an empty fleet.
+   *
+   * `paneSource` returning null is the same fact from the test seam, so both
+   * go through here.
+   */
+  if (out === null || out === undefined) {
+    throw new Error('we could not ask tmux what is running');
+  }
   const { panes, rejected } = readPanes(out);
 
   /**

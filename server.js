@@ -76,7 +76,17 @@ const os = require('node:os');
 function safeRoster() {
   try {
     const board = snapshot();
-    return (board && board.agents) || [];
+    const agents = (board && board.agents) || [];
+    // ⚠️ REMOVED AGENTS COME OFF HERE TOO, exactly as they do on the board. Two
+    // derivations of "the fleet" is this codebase's worst habit, and this was
+    // one: an agent the person had removed -- which the board calls "the whole
+    // user-visible half of a removal" -- still showed on a project row as
+    // present, with a live state, and the write gate still let us splice the
+    // managed block into its boot file. So Kosmos would have edited the
+    // instructions of an agent it had told the person was gone, and the row
+    // would have said "Kosmos told it where this folder is" about it.
+    const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
+    return agents.filter((a) => !gone.has(a.sessionName));
   } catch {
     return null;
   }

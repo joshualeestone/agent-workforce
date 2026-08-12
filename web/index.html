@@ -3091,10 +3091,14 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance. These regions are `aria-live`, so an unconditional repaint every
- * 5 seconds read the whole project list aloud every 5 seconds; and the member
- * list holds the Take-off buttons, so it threw keyboard focus back to the body
- * on the same clock.
+ * performance: the member list holds the Take-off buttons, so an unconditional
+ * repaint threw keyboard focus back to the body every 5 seconds.
+ *
+ * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated
+ * it. A member's state is exactly what the poll exists to notice, so a
+ * working-to-idle transition still rebuilds the list and still drops focus
+ * mid-interaction. Fixing that properly means updating the row in place rather
+ * than replacing it; this only stops the repaints that change nothing.
  *
  * ⚠️ It is `setLive` -- the one this file already had, for the removed-agents
  * list, for the same reason. A second identical helper under a second name was
@@ -3229,6 +3233,18 @@ function paintOneProject() {
 }
 
 function openProject(id) {
+  // ⚠️ Only opens a project we actually HAVE. `paintOneProject` bails back to
+  // the list when the id is not in `PROJECTS`, and showing the panel
+  // unconditionally afterwards put an entirely blank detail screen on top of
+  // that -- reachable when a create succeeds and the reload after it fails, so
+  // the one screen a first-ever project lands on would be empty with nothing
+  // saying why.
+  if (!pjById(id)) {
+    document.getElementById('pj-list-msg').textContent =
+      'That project was created, but we could not read it back just now.';
+    pjView('list');
+    return;
+  }
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
   pjCloseConfirm();
