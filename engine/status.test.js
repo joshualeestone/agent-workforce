@@ -1466,3 +1466,137 @@ test('one unreadable line does not take the gate away from the whole fleet', () 
     setPaneSource(null);
   }
 });
+
+// ---------------------------------------------------------------------------
+// "there are no sessions" is not "we could not ask"
+// ---------------------------------------------------------------------------
+
+test('tmux answering that no server is running is an EMPTY fleet, not a blind one', () => {
+  // ⚠️ AGAINST A REAL FAILING TMUX, not an invented error object. The whole
+  // defect being closed here is a shape mismatch between what a producer really
+  // returns and what a test believed it returns, so the input is produced by
+  // running the real program against a socket that does not exist.
+  const socket = `kosmos-no-server-probe-${process.pid}`;
+  const got = require('./status').shDetail('tmux', ['-L', socket, 'list-panes', '-a']);
+
+  if (!got.ran) {
+    // tmux is not installed on this machine. Say so rather than passing: a
+    // silent skip here would be a test that reports success for never running.
+    assert.equal(require('./status').tmuxSaidNoServer(got), false,
+      'a program that never started must never read as "there are no sessions"');
+    return;
+  }
+
+  assert.notEqual(got.status, 0, 'the control: this call really did fail');
+  assert.ok(got.err, 'the control: tmux really did say something on stderr');
+  assert.equal(require('./status').tmuxSaidNoServer(got), true,
+    'a machine with tmux installed and nothing running reads as unreachable, so '
+    + 'a first-run board says "we cannot read the agents" about a machine it just looked at');
+});
+
+test('a program that cannot be run at all is still "we could not ask"', () => {
+  // The other half, and the one that must NOT be softened into an empty fleet:
+  // tmux missing entirely is exactly the case the refusal exists for.
+  const got = require('./status').shDetail('kosmos-no-such-program-anywhere', ['--version']);
+  assert.equal(got.ran, false, 'the control: this program really is absent');
+  assert.equal(require('./status').tmuxSaidNoServer(got), false);
+});
+
+test('a tmux failure we do not recognise still refuses, rather than reading as empty', () => {
+  // ⚠️ FAILS CLOSED, against a REAL tmux error that is not "no server".
+  //
+  // MEASURED on this machine: a plain file sitting where the socket should be
+  // answers `error connecting to <path> (Socket operation on non-socket)`. That
+  // matches "error connecting to" and NOT "no such file or directory" — so it
+  // is exactly the input that separates the tight rule from the loose one. The
+  // first version of the rule accepted any "error connecting to" and would have
+  // reported this machine as having no agents; a socket we lack permission to
+  // reach reads the same way.
+  const os = require('node:os');
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const dir = fsx.mkdtempSync(nodePathx.join(os.tmpdir(), 'kosmos-tmux-'));
+  const sockDir = nodePathx.join(dir, `tmux-${process.getuid ? process.getuid() : 0}`);
+  fsx.mkdirSync(sockDir, { recursive: true });
+  fsx.chmodSync(sockDir, 0o700);
+  fsx.writeFileSync(nodePathx.join(sockDir, 'notasocket'), '');
+  const had = process.env.TMUX_TMPDIR;
+  try {
+    process.env.TMUX_TMPDIR = dir;
+    const got = require('./status').shDetail('tmux', ['-L', 'notasocket', 'list-panes', '-a']);
+    // ⚠️ NOT a silent return. A skip that asserts nothing reports green for
+    // never having run, which the first test in this block refuses by name —
+    // and then two of its siblings did exactly that. On a machine without tmux
+    // the fact still worth pinning is that a program which never started can
+    // never read as "there are no sessions".
+    if (!got.ran) {
+      assert.equal(require('./status').tmuxSaidNoServer(got), false,
+        'tmux is absent here, and a program that never started read as an empty fleet');
+      return;
+    }
+    // The control: this really is a connect error, so a rule keyed on that
+    // phrase would fire — which is what makes the `false` below meaningful.
+    assert.match(got.err, /error connecting to/,
+      `the probe did not reproduce a connect error (tmux said: ${got.err.trim()})`);
+    assert.doesNotMatch(got.err, /no such file or directory/i,
+      'the probe produced the ordinary missing-socket error, so it is not exercising '
+      + 'the case that separates the tight rule from the loose one');
+    assert.equal(require('./status').tmuxSaidNoServer(got), false,
+      'a tmux error that is not "no server" was read as a machine with no agents');
+  } finally {
+    if (had === undefined) delete process.env.TMUX_TMPDIR; else process.env.TMUX_TMPDIR = had;
+    fsx.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a machine with tmux and no sessions shows an EMPTY board, not an unreadable one', () => {
+  // ⚠️ THE WIRING, not the predicate. `tmuxSaidNoServer` had three tests and
+  // deleting its call from `tmuxPanes` left every one of them green — the same
+  // unpinnable-wiring shape that `setPaneSource` was introduced for. This one
+  // goes through the real `tmux` binary with `TMUX_TMPDIR` pointed at an empty
+  // directory, so the default socket genuinely does not exist: the state of
+  // every machine that has tmux installed and has not started an agent yet,
+  // which is the first-run machine this product is for.
+  const os = require('node:os');
+  const fsx = require('node:fs');
+  const nodePathx = require('node:path');
+  const status = require('./status');
+  const dir = fsx.mkdtempSync(nodePathx.join(os.tmpdir(), 'kosmos-empty-'));
+  const had = process.env.TMUX_TMPDIR;
+  // ⚠️ `TMUX` TOO. This suite runs INSIDE a tmux pane, and tmux prefers the
+  // socket named by `$TMUX` over `TMUX_TMPDIR` — so without this the probe
+  // reached the operator's REAL server and the test measured the live fleet
+  // while claiming to measure an empty machine. Exactly the wrong-world
+  // failure this branch keeps finding, in the test written to prevent it.
+  const hadTmux = process.env.TMUX;
+  status.setPaneSource(null);   // the REAL tmux path, not the seam
+  try {
+    process.env.TMUX_TMPDIR = dir;
+    delete process.env.TMUX;
+    if (!status.shDetail('tmux', ['-V']).ran) {
+      // Same rule as above: say what is still true rather than passing silently.
+      assert.throws(() => status.snapshot(), /could not ask tmux/,
+        'tmux is absent here, and the board did not refuse to speak about a machine it cannot see');
+      return;
+    }
+    // The control: this really is the no-server state, and not a live server we
+    // happened to reach.
+    const probe = status.shDetail('tmux', ['list-panes', '-a']);
+    assert.equal(probe.ran, true);
+    assert.notEqual(probe.status, 0,
+      'the probe reached a RUNNING tmux server, so this test is measuring the '
+      + 'real fleet rather than an empty machine');
+
+    const board = status.snapshot();
+    assert.deepEqual(board.agents, [], 'a machine with no sessions is an empty board');
+    assert.equal(board.counts.total, 0);
+    assert.equal(board.counts.unreadableLines, 0, 'nothing was unreadable -- there was nothing');
+    assert.deepEqual(status.paneRoster(), [],
+      'the gate refused a machine it had successfully looked at, so every '
+      + 'name-keyed route 404s on a first-run computer');
+  } finally {
+    if (had === undefined) delete process.env.TMUX_TMPDIR; else process.env.TMUX_TMPDIR = had;
+    if (hadTmux === undefined) delete process.env.TMUX; else process.env.TMUX = hadTmux;
+    fsx.rmSync(dir, { recursive: true, force: true });
+  }
+});

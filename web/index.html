@@ -153,6 +153,87 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
 .panel p:last-child { margin-bottom: 0; }
+/* --- projects ---------------------------------------------------------- */
+.panel-wide { max-width: 860px; }
+.pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
+.pj-lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin: var(--space-4) 0 var(--space-6); }
+.pj-list { display: flex; flex-direction: column; gap: var(--space-4); }
+/* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
+   failure. A <button> does NOT inherit the page's colour -- it uses the UA's
+   `buttontext`, which is near-black. In light mode that happened to look
+   right, so the row passed by luck; in dark mode the project NAME rendered
+   dark-grey on dark-grey. Every text test passed either way, because the
+   words were all present. Caught by looking at the dark screenshot. */
+.pj-row { display: block; width: 100%; text-align: left; cursor: pointer;
+  color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+  padding: var(--space-5); }
+.pj-row:hover { background: var(--attn-bg); }
+.pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
+/* ⚠️ `display: block` on all three, and it is not cosmetic. These are
+   SPANs inside a button, so without it the folder path and the agents line ran
+   together into one unreadable string -- which every one of the 408 text tests
+   passed, because the words were all present and in order. This is the whole
+   reason a screenshot is part of the work. */
+.pj-row .pj-path { display: block; font: var(--text-subhead) var(--font-ui); color: var(--label-2);
+  margin-top: 2px; word-break: break-all; }
+.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-3); }
+/* ⚠️ A state, not a decoration. A folder we cannot read has to look different
+   from one we can, or the row quietly reports a project that is fine. */
+.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--label);
+  margin-top: var(--space-3); padding-left: var(--space-4);
+  border-left: 2px solid var(--warn-ink); }
+.pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
+  padding: var(--space-7); text-align: center; }
+.pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
+.pj-folder { font: var(--text-callout) var(--font-ui); color: var(--label-2); word-break: break-all; }
+.pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
+.pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
+.pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
+#pj-one-add { font: var(--text-body) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+.pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+  padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
+.pj-member b { font: 600 var(--text-body) var(--font-ui); }
+.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+.pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
+.pj-member.unseen { border-style: dashed; }
+/* ⚠️ 24px minimum, because this is the only destructive control on the row and
+   WCAG 2.2 SC 2.5.8 (Target Size Minimum) is a Level AA criterion — and AA is
+   this project's floor, not its aspiration. It was a 10px underlined caption
+   with no padding: about a 13px-tall target. */
+.pj-member .drop { margin-left: auto; background: none; border: 0; cursor: pointer;
+  font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
+  min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
+.pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
+.pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
+  border-radius: var(--radius-control); }
+.pj-browse button { display: block; width: 100%; text-align: left; background: none;
+  border: 0; border-bottom: 0.5px solid var(--separator); cursor: pointer;
+  font: var(--text-body) var(--font-ui); color: var(--label); padding: var(--space-4) var(--space-5); }
+.pj-browse button:hover { background: var(--attn-bg); }
+.pj-browse button:last-child { border-bottom: 0; }
+/* Prose, not a disabled control. A disabled <button> is unfocusable and some
+   assistive tech skips it entirely, so a sentence rendered as one is a
+   sentence some people never get. */
+.pj-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+  padding: var(--space-4) var(--space-5); margin: 0; }
+.pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
+.pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
+  padding: 2px var(--space-3); }
+/* ⚠️ Dashed and full-width, matching `.pj-member.unseen`. `--label` rather than
+   `--label-2` because this one is a sentence to read, not a chip to scan, and it
+   has to clear AA on both themes.
+   ⚠️ NOT a claim that every "we could not look" on the page draws the same —
+   an earlier version of this comment said so and it is not true: `pjMember`
+   applies `.unseen` on `!present` only, so a member counted unseen because its
+   pane is untied or its state is unknown draws with a healthy border and says
+   so only in its caption. Worth unifying; not silently claimed. */
+.pj-tag-unread { display: block; border-style: dashed; color: var(--label);
+  border-radius: var(--radius-card); padding: var(--space-2) var(--space-3); }
 .panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
                text-transform: uppercase; letter-spacing: .06em; }
 /* --- creating an agent ---------------------------------------------------
@@ -557,6 +638,13 @@ svg { display: block; }
     </div>
   </div>
 
+  <!-- The relationship read from the agent's end. The mock draws three project
+       names under one agent, so it has to be readable both ways on day one. -->
+  <div class="field" id="d-projects-field" hidden>
+    <span class="flabel" id="d-projects-label">Projects it is on</span>
+    <div class="pj-projects" id="d-projects"></div>
+  </div>
+
   <div class="field">
     <p id="d-untied" hidden></p>
     <label class="flabel" for="d-file">Picture</label>
@@ -819,12 +907,157 @@ svg { display: block; }
   </div>
 </section>
 
-<section class="panel" id="panel-projects" hidden>
-  <h2>Talking to your agents isn't built yet.</h2>
-  <p>This is where you'll give them work and read what they say back, the way you
-     would message a person. Each project is a folder on your computer, and the
-     agents you give access to it can work on what's inside.</p>
-  <p class="soon">Next thing being built.</p>
+<!-- ⚠️ THREE VIEWS IN ONE PANEL, because the tab is one destination. `showTab`
+     owns which PANEL is visible; `showProject` owns which of these is. Two
+     mechanisms for one question is this codebase's worst habit, so the second
+     one is deliberately narrow: it only ever moves inside here. -->
+<section class="panel panel-wide" id="panel-projects" hidden>
+
+  <!-- The list, and the empty state, which is the screen first-run hands you. -->
+  <div id="pj-list-view">
+    <div class="pj-head">
+      <h2>My Projects</h2>
+      <button class="btn" id="pj-new" type="button">Add a project</button>
+    </div>
+    <p class="pj-lede">A project is a folder you already have on this computer,
+       and the agents you have put on it.</p>
+    <p class="fmsg" id="pj-list-msg" aria-live="polite"></p>
+    <div id="pj-list" class="pj-list"></div>
+  </div>
+
+  <!-- One project. -->
+  <div id="pj-one-view" hidden>
+    <button class="back" id="pj-back" type="button">← All projects</button>
+    <div class="pj-head">
+      <h2 id="pj-one-name"></h2>
+    </div>
+    <p class="pj-folder" id="pj-one-folder"></p>
+    <p class="pj-folder-state" id="pj-one-folder-state"></p>
+
+    <div class="field">
+      <span class="flabel">Agents on this project</span>
+      <p class="fhint">Putting an agent here tells it where this project's folder
+         is. It does not stop it reaching anything else, and it is not a
+         permission.</p>
+      <div id="pj-one-agents" class="pj-members"></div>
+      <div class="frow" style="margin-top: var(--space-5)">
+        <select id="pj-one-add" aria-label="An agent to put on this project"></select>
+        <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
+      </div>
+      <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Talking to them isn't built yet.</span>
+      <p class="fhint">This is where you'll give them work and read what they say
+         back, the way you would message a person. It needs one thing we haven't
+         settled: when five agents are on a project, who answers. Everything
+         answering at once and nothing answering are the same bug, so the room
+         waits until that has a rule.</p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Remove this project</span>
+      <p class="fhint">Takes it off this list. <b>Nothing in the folder is
+         deleted</b>, ever, and you can add it again.</p>
+      <button class="btn" id="pj-one-remove" type="button">Remove from Kosmos</button>
+      <!-- ⚠️ It asks, and it names the project in the question and in BOTH
+           buttons. Removing an agent next to this has a full confirmation and a
+           Restore; removing a project had neither, and while nothing on disk is
+           touched, the name and the whole membership list go with it and cannot
+           be got back by re-adding the folder. Same friction, same reason. -->
+      <div class="frow" id="pj-one-confirm" hidden style="margin-top: var(--space-4)">
+        <!-- ⚠️ The question is ATTACHED to the buttons. Focus moves to Keep
+             when this opens, and without `aria-describedby` the only thing a
+             screen-reader user heard was "Keep Quarter close" -- the friction
+             this confirmation exists for, silently removed for the people most
+             dependent on being told what a button does. The agent-removal modal
+             it is explicitly modelled on already does this. -->
+        <span class="fhint" id="pj-one-confirm-q" style="flex-basis: 100%; margin: 0"></span>
+        <button class="btn" id="pj-one-remove-go" type="button" aria-describedby="pj-one-confirm-q"></button>
+        <button class="btn" id="pj-one-remove-keep" type="button" aria-describedby="pj-one-confirm-q"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Adding one. Two decisions, not a form. -->
+  <div id="pj-add-view" hidden>
+    <button class="back" id="pj-add-back" type="button">← All projects</button>
+    <h2>Add a project</h2>
+
+    <div class="field">
+      <span class="flabel">Which folder is this project's work in?</span>
+      <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
+         own files in it</b> — everything it keeps lives somewhere else.</p>
+      <div class="frow" style="margin-bottom: var(--space-4)">
+        <!-- ⚠️ `aria-live`, because focus lands here after every step into a
+             folder (see `pjBrowse`) and this text is the only thing that says
+             where you now are.
+             ⚠️ NO `aria-label`. A first version had one, and it did the exact
+             opposite of its purpose: an accessible name REPLACES the element's
+             text as what is announced, so a keyboard user stepping into a
+             folder heard "The folder you are looking in" instead of the folder
+             they were looking in. `<p>` is also not a permitted host for a
+             name in the first place.
+             `role="heading"` IS a name-from-content role, so the path itself
+             becomes the accessible name, and the location joins the document's
+             heading list, which a screen-reader user can navigate by. (It is NOT
+             a landmark — an earlier version of this comment said so; headings
+             and landmarks are separate ARIA navigation sets, and the one wrong
+             noun sat in a paragraph that is otherwise accurate.)
+             ⚠️ NO `aria-live` alongside the focus move. Both announce, so the
+             person heard the new path twice on every step. Focus is the one that
+             also fixes the tab-order defect, so it is the one kept. -->
+        <p class="pj-crumbs" id="pj-crumbs" role="heading" aria-level="3"></p>
+        <button class="btn" id="pj-use" type="button">Use this folder</button>
+      </div>
+      <div id="pj-browse" class="pj-browse"></div>
+      <!-- ⚠️ Both ways in, and the plan said so. Browsing is for the person who
+           would not know what a path is; typing is for the person whose work
+           lives somewhere this browser will not go (it is rooted at the home
+           folder on purpose). Shipping only the browser meant a project outside
+           home could not be made at all, and there was no way through if the
+           browser itself refused. -->
+      <div class="frow" style="margin-top: var(--space-4)">
+        <input type="text" id="pj-path" placeholder="or type the full path to a folder"
+               aria-label="The full path to a folder">
+        <button class="btn" id="pj-path-go" type="button">Use that path</button>
+      </div>
+      <p class="pj-chosen" id="pj-chosen">No folder chosen yet.</p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">What do you call it?</span>
+      <div class="frow">
+        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
+             disappears the moment somebody types. Its sibling below already had
+             an aria-label, so this was an omission rather than a house
+             pattern. -->
+        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
+               aria-label="What you call this project">
+      </div>
+    </div>
+
+    <div class="field">
+      <!-- ⚠️ A GROUP, with its label attached. The roles picker two screens up
+           is a `role="radiogroup"` with an `aria-label` and a comment saying why;
+           this one was a bare div of checkboxes, so a screen-reader user heard
+           "Mara, Project Manager, checkbox, not checked" with nothing saying
+           what the set was or how many were in it. Same control, same need, and
+           the sibling did not inherit it. `group` rather than `radiogroup`
+           because these are not exclusive. -->
+      <span class="flabel" id="pj-agents-label">Which agents are on it?</span>
+      <p class="fhint">You can change this later, and you can leave it empty for
+         now.</p>
+      <div id="pj-add-agents" class="pj-members" role="group"
+           aria-labelledby="pj-agents-label"></div>
+    </div>
+
+    <div class="frow" style="margin-top: var(--space-6)">
+      <button class="btn" id="pj-create" type="button">Add this project</button>
+    </div>
+    <p class="fmsg" id="pj-add-msg" aria-live="polite"></p>
+  </div>
 </section>
 <section class="panel" id="panel-joint" hidden>
   <h2>Working with other people's agents isn't built yet.</h2>
@@ -1058,6 +1291,16 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    // Set only after a response, never after a failure: a poll that threw has
+    // still not told us what is on this machine.
+    BOARD_LOOKED = true;
+    BOARD_LOOK_FAILED = null;
+    // ⚠️ The picker is repainted here rather than only on open, because the
+    // add-a-project flow suppresses the projects poll while it is up. Without
+    // this, a person who opened it before the first status landed kept an empty
+    // picker for the whole flow and created the project with no agents on it.
+    const addView = document.getElementById('pj-add-view');
+    if (addView && !addView.hidden) paintAddAgents();
     if (WANT_AGENT && !CURRENT) openDetail(WANT_AGENT);
 
     // ⚠️ Keep the OPEN PANEL's staleness in step with the card's.
@@ -1281,6 +1524,13 @@ async function tick() {
     // stamp four lines up exists to make visible.
     if (!document.getElementById('grid').hidden) paintRemoved();
   } catch (err) {
+    // ⚠️ Recorded and REPAINTED, not just written into `#grid`. The picker in
+    // the add-a-project flow reads these globals, that flow hides `#grid`, and
+    // the projects poll is suppressed while it is open — so a failure that only
+    // reached `#grid` was invisible exactly where it mattered most.
+    BOARD_LOOK_FAILED = err && err.message ? err.message : 'we could not read the agents';
+    const addViewOnFail = document.getElementById('pj-add-view');
+    if (addViewOnFail && !addViewOnFail.hidden) paintAddAgents();
     checked.className = 'checked stale';
     checked.innerHTML = 'checked<strong>failed</strong>';
     document.getElementById('grid').innerHTML =
@@ -1323,6 +1573,24 @@ function showTab(tab) {
     if (msg) msg.textContent = '';
   } else paintRemoved();
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
+  // ⚠️ Re-read on every arrival rather than once at boot. A project's folder can
+  // be moved or deleted while this page sits open, and its members' states
+  // change constantly — a list painted once would go on asserting a world that
+  // stopped being true, which is the whole failure this app is built against.
+  // ⚠️ Closes the confirmation on ANY tab change too, not just the back button.
+  // The poll bails while a question is open, on purpose -- so leaving one open
+  // and walking away by the tab bar switched the refresh off for the rest of
+  // the session, which is the exact stall the back button was fixed for. One
+  // way out was covered and the other was not.
+  if (tab !== 'projects') {
+    pjCloseConfirm();
+    // A note about what a removal could not reach describes a moment, not a
+    // state; leaving it up outlives the thing it is about.
+    document.getElementById('pj-list-msg').textContent = '';
+    return;
+  }
+  pjView(PJ_CURRENT ? 'one' : 'list');
+  loadProjects();
 }
 
 document.getElementById('tabs').addEventListener('click', (e) => {
@@ -1335,6 +1603,26 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
 let LAST = [];
+// ⚠️ HAVE WE LOOKED YET, which is a different question from whether the list is
+// empty -- and the agent picker answered them with the same value. `LAST` is
+// `[]` until the first /api/status response lands, so opening Projects and
+// pressing "Add a project" before that returned put "We cannot see any agents
+// on this computer right now" on screen about a look that had not happened. It
+// is this product's central rule inverted, on the screen a first-time person
+// reaches first, and the projects poll deliberately bails while the add view is
+// open, so it never repainted for the life of the flow.
+let BOARD_LOOKED = false;
+// ⚠️ And the THIRD state. `BOARD_LOOKED` alone gives "not yet" and "we looked";
+// a look that FAILED is neither, and without it the picker sat on "Looking for
+// the agents on this computer…" for the rest of the session — a look reported
+// as in progress that had definitively stopped. The board's own error lives in
+// `#grid`, which this tab hides, so nothing on that screen said otherwise and
+// the person finished the flow with no agents on the project. The honest
+// sentence is the board's: we cannot see them, which is not that there are none.
+let BOARD_LOOK_FAILED = null;
+// Ordering guard for the folder browser, the same shape `PJ_GEN` gives the
+// projects reads: two in-flight looks must not paint out of order.
+let PJ_BROWSE_GEN = 0;
 let CURRENT = null;
 
 /**
@@ -1404,7 +1692,75 @@ function openDetail(sessionName) {
   // agent can be removed here is a fact about what created it, and this screen
   // must not carry its own opinion about that.
   loadRemoval(a.sessionName);
+  paintAgentProjects(a.sessionName);
   showTab('detail');
+}
+
+/**
+ * Which projects this agent is on.
+ *
+ * ⚠️ HIDDEN when it is on none, rather than showing an empty box captioned
+ * "Projects it is on". An empty list under a heading reads as a checked and
+ * confirmed nothing; the heading only appears when there is something true to
+ * put under it.
+ *
+ * ⚠️ Reads from `PROJECTS`, which is loaded when the Projects tab is opened —
+ * so it can legitimately be empty here having never been fetched. That is why
+ * it fetches rather than trusting what happens to be in memory: "we have not
+ * looked" must not render as "it is on none".
+ */
+async function paintAgentProjects(sessionName) {
+  const field = document.getElementById('d-projects-field');
+  field.hidden = true;
+  // ⚠️ Takes a generation like `loadProjects` does. It is the second writer of
+  // the same two globals, and it had no guard -- so its response could land
+  // after a newer read and roll the list back. A new sibling does not inherit
+  // the guard; it has to be given it.
+  const gen = ++PJ_GEN;
+  try {
+    const res = await fetch('/api/projects');
+    const body = await res.json();
+    // ⚠️ CHECKED BEFORE ANYTHING IS ASSIGNED. The sibling in `loadProjects` was
+    // corrected for exactly this and THIS copy was left assigning first and
+    // throwing second -- so the comment below described a guard that was not
+    // here. A new sibling does not inherit the guard; it has to be given it. A 500
+    // answered `{error, projectsUnreadable}` with no `projects` key, so
+    // `body.projects || []` made an agent whose list we COULD NOT READ render
+    // identically to one that is on none -- this function's own docstring says
+    // "we have not looked" must not render as "it is on none", and the 500 path
+    // was exactly that failure.
+    if (gen !== PJ_GEN) return;
+    if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'unreadable');
+    PROJECTS = body.projects || [];
+    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+  } catch {
+    // ⚠️ SAID, never swallowed. This returned silently with the field hidden --
+    // byte-identical to an agent that is genuinely on no projects -- under a
+    // docstring four lines up saying "we have not looked" must not render as
+    // "it is on none". The catch even had a comment rationalising the silence.
+    // A corrupt projects file, or any 500, and the panel quietly asserted the
+    // stronger claim.
+    if (gen !== PJ_GEN) return;
+    // ⚠️ The LABEL changes too. "Projects it is on" is itself a claim, and
+    // leaving it over a sentence saying we could not look put the honest line
+    // under a heading asserting the thing it declines to assert.
+    const label = document.getElementById('d-projects-label');
+    if (label) label.textContent = 'Projects';
+    document.getElementById('d-projects').innerHTML =
+      '<span class="pj-tag pj-tag-unread">We could not read your projects just now, '
+      + 'so we cannot say which ones this agent is on.</span>';
+    field.hidden = false;
+    return;
+  }
+  const mine = PROJECTS.filter((p) => (p.agents || []).some((a) => a.sessionName === sessionName));
+  if (!mine.length) return;
+  // Restored, because the failure arm above changes it: a panel opened after a
+  // failed read and then a good one would otherwise keep the weaker heading.
+  const okLabel = document.getElementById('d-projects-label');
+  if (okLabel) okLabel.textContent = 'Projects it is on';
+  document.getElementById('d-projects').innerHTML =
+    mine.map((p) => '<span class="pj-tag">' + esc(p.name) + '</span>').join('');
+  field.hidden = false;
 }
 
 /**
@@ -2982,6 +3338,637 @@ async function watchForAgent(name, result, attempt) {
   document.getElementById('made-retry').hidden = false;
   tick();
 }
+
+/* --------------------------------------------------------------------------
+ * Projects
+ *
+ * ⚠️ THE RULE THIS SCREEN IS BUILT AROUND. Putting an agent on a project is an
+ * ORGANISING fact and never a boundary. Every agent on this machine runs at
+ * full permission and nothing is enforced, so no word here may imply otherwise:
+ * no locks, no "access", no "restricted", no "can only". A level that is not
+ * enforced is worse than none, because it is believed by somebody with no way
+ * to check.
+ *
+ * ⚠️ AND THE SENTENCE THAT KEEPS IT HONEST. An agent reads its instruction file
+ * ONCE, when it starts. So adding it to a project does not reach an agent that
+ * is already running, and this screen says "will see this the next time it
+ * starts" rather than anything in the present tense. That is merged-is-not-
+ * deployed, arriving inside the product.
+ * ------------------------------------------------------------------------ */
+
+let PROJECTS = [];
+let PJ_AGENTS_UNREADABLE = false;
+let PJ_CURRENT = null;      // the project id being looked at, or null
+let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
+let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
+let PJ_ADD_AGENTS = [];     // the agents ticked in the add flow
+
+function pjView(which) {
+  for (const v of ['list', 'one', 'add']) {
+    document.getElementById('pj-' + v + '-view').hidden = (v !== which);
+  }
+}
+
+/**
+ * How a member reads.
+ *
+ * ⚠️ `present: false` is NOT rendered as anything reassuring and NOT dropped.
+ * The board's rule one level up: an agent we cannot read is shown as unknown,
+ * never as something healthy, and never as nothing at all.
+ */
+function pjMember(m, projectId) {
+  const told = m.told || {};
+  let toldLine = '';
+  if (told.state === 'told') {
+    // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
+    // inform a running agent, and saying we did would be the one claim on this
+    // screen that nobody could check.
+    //
+    // ⚠️ AND THE PREDICTION IS CONDITIONAL, because the verdict behind it is a
+    // record of a past write, not a re-read of the file. Nothing re-checks that
+    // the block is still there, so if the person (or the agent) edits it out,
+    // the flat form went on promising a future read of something that is no
+    // longer in the file. The past-tense half is evidence; the future half is
+    // an expectation, and now reads as one.
+    toldLine = 'Kosmos told it where this folder is. It will see that the next time it '
+      + 'starts, unless its instructions have been changed since.';
+  } else if (told.state === 'could_not') {
+    toldLine = 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+  }
+  return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+    + '<b>' + esc(m.name) + '</b>'
+    // ⚠️ An `unknown` state carries its REASON here. A bare "Can't tell" sat
+    // directly above "Kosmos told it where this folder is", and the two read as
+    // a contradiction on one row -- the same juxtaposition the engine calls out
+    // as a shipped defect. Everywhere else in this app an unknown says why.
+    + (m.present
+      ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
+        + (m.state === 'unknown' && m.because ? ' — ' + esc(m.because) : '') + '</small>'
+      : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
+    + (projectId ? '<button class="drop" type="button" aria-label="Take ' + esc(m.name)
+      + ' off this project" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
+    + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + '</div>';
+}
+
+function pjFolderLine(p) {
+  const f = p.folderState || {};
+  if (f.state === 'readable') return { text: '', bad: false };
+  return { text: (f.because || 'we cannot read this folder') + '.', bad: true };
+}
+
+/**
+ * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
+ * performance: the member list holds the Take-off buttons, so an unconditional
+ * repaint threw keyboard focus back to the body every 5 seconds.
+ *
+ * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated
+ * it. A member's state is exactly what the poll exists to notice, so a
+ * working-to-idle transition still rebuilds the list and still drops focus
+ * mid-interaction. Fixing that properly means updating the row in place rather
+ * than replacing it; this only stops the repaints that change nothing.
+ *
+ * ⚠️ It is `setLive` -- the one this file already had, for the removed-agents
+ * list, for the same reason. A second identical helper under a second name was
+ * exactly the two-derivations-of-one-question habit this codebase keeps paying
+ * for, written into the fix for it.
+ */
+const setIfChanged = setLive;
+
+function paintProjects() {
+  const list = document.getElementById('pj-list');
+  if (!PROJECTS.length) {
+    setIfChanged(list, '<div class="pj-empty">'
+      + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
+      + 'and put an agent on it.</p>'
+      + '<button class="btn" id="pj-new-empty" type="button">Add a project</button>'
+      + '</div>');
+    return;
+  }
+  setIfChanged(list, PROJECTS.map((p) => {
+    const s = p.summary || {};
+    const folder = pjFolderLine(p);
+    // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
+    // A summary that hides its own blind spot is the defect this codebase keeps
+    // finding, and a project row is exactly where it would hide.
+    let who;
+    if (!s.total) who = 'No agents on it yet.';
+    else if (PJ_AGENTS_UNREADABLE) who = s.total + (s.total === 1 ? ' agent' : ' agents') + ' — we cannot see how they are doing right now.';
+    else {
+      const bits = [];
+      if (s.needsYou) bits.push(s.needsYou + ' needs you');
+      if (s.working) bits.push(s.working + ' working');
+      if (s.unseen) bits.push(s.unseen + ' we cannot see');
+      who = (p.agents || []).map((a) => esc(a.name)).join(' · ') + (bits.length ? ' — ' + bits.join(', ') : '');
+    }
+    return '<button class="pj-row" type="button" data-project="' + esc(p.id) + '">'
+      + '<b>' + esc(p.name) + '</b>'
+      + '<span class="pj-path">' + esc(p.folder) + '</span>'
+      + '<span class="pj-who">' + who + '</span>'
+      + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
+      + '</button>';
+  }).join(''));
+}
+
+// ⚠️ A generation counter, because the 5-second poll and the click handlers'
+// own `await loadProjects()` can be in flight together and can land out of
+// order. Without it a stale poll response repaints a member that was just
+// removed -- the screen showing a membership the record no longer has.
+let PJ_GEN = 0;
+
+async function loadProjects() {
+  const mine = ++PJ_GEN;
+  try {
+    const res = await fetch('/api/projects');
+    const body = await res.json();
+    if (mine !== PJ_GEN) return;
+    // ⚠️ Checked BEFORE anything is assigned. The first version of this fix
+    // assigned PROJECTS and then threw, so the comment claiming "PROJECTS is
+    // not clobbered on failure" described a guard that was not there -- a
+    // half-applied fix reads exactly like a whole one.
+    // ⚠️ An unreadable projects FILE is an error, not an empty list. The route
+    // answers 500 with `projectsUnreadable` rather than `{projects: []}`, and
+    // painting [] here would put "No projects yet" in front of somebody who
+    // has projects we simply could not read.
+    if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'we cannot read your projects right now');
+    PROJECTS = body.projects || [];
+    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+  } catch {
+    if (mine !== PJ_GEN) return;
+    // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
+    // add-member and remove-member paths call this from the one-project view,
+    // where `#pj-list` is hidden -- so a failed refresh left the member list
+    // showing the state from before the change with no error anywhere visible.
+    // A screen asserting a state nobody checked is the failure this whole app
+    // is built against, and it had crept back in through an error path.
+    const note = 'We cannot read your projects right now. This is not saying you have none, it is saying we cannot see them.';
+    // ⚠️ Through the SAME change-guard as the success path. The poll re-enters
+    // here every 5 seconds while the store stays unreadable, and these are
+    // aria-live regions -- so an unguarded write read the same sentence aloud
+    // every 5 seconds, forever. The error path was the one caller that skipped
+    // the guard written for exactly this.
+    setIfChanged(document.getElementById('pj-list'),
+      '<div class="err"><b>We cannot read your projects right now.</b><br>'
+      + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    const one = document.getElementById('pj-one-msg');
+    const add = document.getElementById('pj-add-msg');
+    if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
+    if (!document.getElementById('pj-add-view').hidden && add.textContent !== note) add.textContent = note;
+    // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
+    // open project as "there is no project by that name" on a transient
+    // network failure -- turning "we could not look" into "it is gone".
+    return;
+  }
+  paintProjects();
+  if (PJ_CURRENT) paintOneProject();
+}
+
+function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
+
+function paintOneProject() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) { pjView('list'); PJ_CURRENT = null; return; }
+  document.getElementById('pj-one-name').textContent = p.name;
+  document.getElementById('pj-one-folder').textContent = p.folder;
+  const folder = pjFolderLine(p);
+  const state = document.getElementById('pj-one-folder-state');
+  state.textContent = folder.bad ? folder.text : '';
+  state.className = 'pj-folder-state' + (folder.bad ? ' bad' : '');
+
+  setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
+    ? p.agents.map((m) => pjMember(m, p.id)).join('')
+    : '<p class="fhint">No agents on this project yet.</p>');
+
+  // Only agents that are NOT already on it, and only ones we can actually see.
+  const on = new Set((p.agents || []).map((a) => a.sessionName));
+  const free = LAST.filter((a) => !on.has(a.sessionName));
+  const sel = document.getElementById('pj-one-add');
+  // ⚠️ THREE reasons this list can be empty, and one sentence covered all of
+  // them. "no other agents we can see" is wrong for the commonest case -- every
+  // agent is already ON the project, so they are all visible -- and it is the
+  // have-not-looked-yet conflation its sibling picker was just fixed for, which
+  // this one did not inherit. Each case now says which it is.
+  // ⚠️ The discriminator is `LAST.length`, NOT `on.size`. With an empty board
+  // and a project that has members, `on.size` is non-zero and this said "every
+  // agent we can see is already on it" while the rows above it said we cannot
+  // see any of them — membership rendered as visibility, on the same screen,
+  // contradicting itself. That state is reachable and became MORE reachable in
+  // this same branch: tmux installed with no server running is now a successful
+  // answer of zero agents rather than a refusal.
+  const emptyBecause = BOARD_LOOK_FAILED
+    ? 'we cannot see the agents right now'
+    : !BOARD_LOOKED ? 'looking for the agents…'
+      : !LAST.length ? 'we cannot see any agents on this computer'
+        : 'every agent we can see is already on it';
+  const html = free.length
+    ? free.map((a) => '<option value="' + esc(a.sessionName) + '">' + esc(a.name) + '</option>').join('')
+    : '<option value="">' + esc(emptyBecause) + '</option>';
+  // ⚠️ The person's CHOICE is preserved across a repaint. Rebuilding the
+  // options resets the select to index 0, so somebody who picked an agent and
+  // then paused for five seconds had a DIFFERENT one silently selected -- and
+  // pressing the button would then rewrite the wrong agent's instruction file.
+  // Repainting only on change also stops the native popup being closed
+  // mid-choice.
+  if (sel.innerHTML !== html) {
+    const chosen = sel.value;
+    sel.innerHTML = html;
+    if (chosen && free.some((a) => a.sessionName === chosen)) sel.value = chosen;
+  }
+  document.getElementById('pj-one-add-go').disabled = !free.length;
+}
+
+function openProject(id) {
+  // ⚠️ Only opens a project we actually HAVE. `paintOneProject` bails back to
+  // the list when the id is not in `PROJECTS`, and showing the panel
+  // unconditionally afterwards put an entirely blank detail screen on top of
+  // that -- reachable when a create succeeds and the reload after it fails, so
+  // the one screen a first-ever project lands on would be empty with nothing
+  // saying why.
+  if (!pjById(id)) {
+    document.getElementById('pj-list-msg').textContent =
+      'That project was created, but we could not read it back just now.';
+    pjView('list');
+    return;
+  }
+  PJ_CURRENT = id;
+  document.getElementById('pj-one-msg').textContent = '';
+  pjCloseConfirm();
+  paintOneProject();
+  pjView('one');
+}
+
+/* --- adding one -------------------------------------------------------- */
+
+async function pjBrowse(at) {
+  const box = document.getElementById('pj-browse');
+  // ⚠️ A GENERATION, like `loadProjects` and `paintAgentProjects` both take.
+  // Two quick clicks (folder A, then B) can land out of order, leaving the
+  // crumb, the list and `PJ_HERE` describing A while the person is in B — and
+  // "Use this folder" would then choose the wrong one. A new sibling does not
+  // inherit the guard; it has to be given it, which is the third time that
+  // sentence has been written in this file. The focus move below makes it worse
+  // without this: a late response would also yank focus back.
+  const gen = ++PJ_BROWSE_GEN;
+  let body;
+  try {
+    const res = await fetch('/api/folders' + (at ? '?path=' + encodeURIComponent(at) : ''));
+    body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we cannot look there');
+  } catch (err) {
+    // ⚠️ THE FAILURE PATH GETS THE SAME TREATMENT AS THE SUCCESS PATH. This
+    // returned before the focus move at the bottom, so a folder that vanished
+    // between listing and click, or a refused path, destroyed the button that
+    // was pressed and dropped the person at the top of the document with an
+    // error nothing announced -- exactly the defect the success path was fixed
+    // for, left standing on the arm where the person most needs to be told.
+    if (gen !== PJ_BROWSE_GEN) return;
+    box.innerHTML = '<p class="pj-note" id="pj-browse-err" tabindex="-1">' + esc(err.message) + '</p>';
+    const note = document.getElementById('pj-browse-err');
+    if (note) note.focus();
+    return;
+  }
+  if (gen !== PJ_BROWSE_GEN) return;
+  document.getElementById('pj-crumbs').textContent = body.path;
+  const rows = [];
+  // ⚠️ Offered only when the answer carries one. At home the server returns a
+  // null parent, so there is no "up" to press — the browser cannot be walked
+  // out of the only place it will serve, and the button does not exist rather
+  // than existing and failing.
+  if (body.parent) rows.push('<button type="button" data-up="' + esc(body.parent) + '">← ' + esc(body.parent) + '</button>');
+  for (const f of body.folders || []) {
+    rows.push('<button type="button" data-into="' + esc(f.path) + '">' + esc(f.name) + '</button>');
+  }
+  if (!(body.folders || []).length) rows.push('<p class="pj-note">Nothing else in here.</p>');
+  // ⚠️ A cut list says it was cut. Otherwise a folder that exists but sorts
+  // past the limit is indistinguishable from one that is not there, and
+  // "nothing else in here" becomes a claim nobody checked.
+  if (body.truncated) {
+    // ⚠️ "WE STOPPED", not "there are more". The server does not know how many
+    // remain -- it typed the first 500 entries and left the rest unexamined, and
+    // they may be files or links to files rather than folders. Printing the raw
+    // entry count claimed folders that do not exist; "there are more" made the
+    // same claim in words, one layer up from the `total: null` that removed it.
+    // What we actually know is where we stopped.
+    rows.push('<p class="pj-note">We stopped after the first ' + body.showing
+      + '. There may be more — type the path below to reach the rest.</p>');
+  }
+  box.innerHTML = rows.join('');
+  // ⚠️ FOCUS GOES BACK INTO THE LIST, because this wholesale innerHTML replace
+  // destroys the button that was just pressed and drops focus to <body>. A
+  // keyboard person walking home → work → clients restarted their Tab journey
+  // from the top of the document three times, with nothing announcing where
+  // they had arrived — in the primary flow for exactly the audience this
+  // product exists for. The same defect was already found and fixed on the pick
+  // button ("keyboard focus drops to the body after every pick"), and this
+  // sibling did not inherit it.
+  //
+  // The crumb, not the first row: it is the thing that CHANGED, and moving to
+  // the first folder would read as though it had been chosen. `tabindex="-1"`
+  // makes it focusable without putting it in the tab order.
+  // ⚠️ `pj-add-view`, and the first version of this said `pj-add` — an element
+  // that does not exist, so `getElementById` returned null, the guard was
+  // always false and the focus() never ran. The unit tests could not have
+  // caught it; the browser check did, on the first run, with the same message
+  // this fix exists to prevent. Run the artifact.
+  const crumbs = document.getElementById('pj-crumbs');
+  const addView = document.getElementById('pj-add-view');
+  if (crumbs && addView && !addView.hidden) {
+    crumbs.setAttribute('tabindex', '-1');
+    crumbs.focus();
+  }
+  // ⚠️ Walking INTO a folder does not choose it, and this is the whole reason
+  // there is a separate button. The first version chose whatever you were
+  // looking at — which meant the screen opened with the person's ENTIRE HOME
+  // FOLDER already selected, and one press of Add would have made it a
+  // project. Choosing the folder is the decision this screen exists for, so it
+  // is taken on purpose or not at all.
+  PJ_HERE = body.path;
+}
+
+function pjChoose(p) {
+  PJ_PICKED = p;
+  document.getElementById('pj-chosen').innerHTML =
+    'This project will be <code>' + esc(p) + '</code>. The agents you put on it '
+    + 'will be told that is where its work is.';
+  const name = document.getElementById('pj-name');
+  // A sensible default the person can overwrite, rather than an empty box: the
+  // folder's own name is nearly always what they would have typed.
+  if (!name.value || name.dataset.auto === '1') {
+    name.value = p.split('/').filter(Boolean).pop() || '';
+    name.dataset.auto = '1';
+  }
+}
+
+/**
+ * ⚠️ EVERY WRITE GOES THROUGH `setLive`, and that became load-bearing the moment
+ * this was put on the five-second poll.
+ *
+ * `box.innerHTML = …` destroys every `[data-pick]` button, including the one
+ * that currently has focus — so a keyboard person who tabbed onto "Mara" lost
+ * their focus point within five seconds, forever, in the primary onboarding
+ * flow. This file already treats that as a defect twice: the pick handler
+ * updates `aria-checked` IN PLACE ("a repaint destroys the very control that was
+ * just activated"), and `paintProjects` routes through `setIfChanged` for the
+ * same reason. This was the one member-list painter without the guard, and the
+ * repaint-on-poll that fixed a stale picker is what armed it.
+ *
+ * Selection survives a repaint either way — it is derived from `PJ_ADD_AGENTS`,
+ * not read off the DOM — so the guard costs nothing.
+ */
+function paintAddAgents() {
+  const box = document.getElementById('pj-add-agents');
+  // ⚠️ "We have not looked yet" is NOT "there are none", and saying the second
+  // for the first is the one thing this product refuses to do.
+  if (BOARD_LOOK_FAILED) {
+    setLive(box, '<p class="fhint">We cannot read the agents on this computer right now. '
+      + 'This is not saying you have none — it is saying we cannot see them. You can still '
+      + 'add the project and put agents on it later.</p>');
+    return;
+  }
+  if (!BOARD_LOOKED) {
+    setLive(box, '<p class="fhint">Looking for the agents on this computer…</p>');
+    return;
+  }
+  if (!LAST.length) {
+    setLive(box, '<p class="fhint">We cannot see any agents on this computer right now.</p>');
+    return;
+  }
+  setLive(box, LAST.map((a) => {
+    const on = PJ_ADD_AGENTS.includes(a.sessionName);
+    return '<button class="pick" type="button" role="checkbox" aria-checked="' + (on ? 'true' : 'false')
+      + '" data-pick="' + esc(a.sessionName) + '">'
+      + '<span class="pick-mark" aria-hidden="true">✓</span>'
+      + '<span><b>' + esc(a.name) + '</b>'
+      + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
+      + '</button>';
+  }).join(''));
+}
+
+function openAddProject() {
+  PJ_PICKED = null;
+  PJ_HERE = null;
+  PJ_ADD_AGENTS = [];
+  const name = document.getElementById('pj-name');
+  name.value = '';
+  name.dataset.auto = '1';
+  document.getElementById('pj-add-msg').textContent = '';
+  document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
+  paintAddAgents();
+  pjView('add');
+  pjBrowse(null);
+}
+
+/* --- wiring ------------------------------------------------------------ */
+
+document.getElementById('pj-new').addEventListener('click', openAddProject);
+// ⚠️ Closes the confirmation on the way out. Leaving it open inside a hidden
+// view left the 5-second refresh permanently switched off (the poll bails while
+// a question is open, on purpose) -- so the screen whose whole honesty argument
+// is "it keeps re-reading" quietly stopped, for the rest of the session, and
+// nothing said so.
+document.getElementById('pj-back').addEventListener('click', () => { pjCloseConfirm(); PJ_CURRENT = null; pjView('list'); });
+document.getElementById('pj-add-back').addEventListener('click', () => pjView('list'));
+
+document.getElementById('pj-list').addEventListener('click', (e) => {
+  if (e.target.closest('#pj-new-empty')) { openAddProject(); return; }
+  const row = e.target.closest('[data-project]');
+  if (row) openProject(row.dataset.project);
+});
+
+document.getElementById('pj-browse').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-into], button[data-up]');
+  if (!btn) return;
+  pjBrowse(btn.dataset.into || btn.dataset.up);
+});
+
+document.getElementById('pj-add-agents').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-pick]');
+  if (!btn) return;
+  const key = btn.dataset.pick;
+  const on = PJ_ADD_AGENTS.includes(key);
+  PJ_ADD_AGENTS = on ? PJ_ADD_AGENTS.filter((k) => k !== key) : [...PJ_ADD_AGENTS, key];
+  // ⚠️ Updates the button IN PLACE rather than rebuilding the list. A repaint
+  // destroys the very control that was just activated: keyboard focus drops to
+  // the body after every pick, so Space-then-Tab cannot walk the list, and
+  // because the element is replaced rather than changed, no `aria-checked`
+  // update is announced -- a keyboard user gets no confirmation the pick
+  // registered at all.
+  btn.setAttribute('aria-checked', String(!on));
+});
+
+document.getElementById('pj-use').addEventListener('click', () => {
+  if (PJ_HERE) pjChoose(PJ_HERE);
+});
+
+document.getElementById('pj-path-go').addEventListener('click', () => {
+  const typed = document.getElementById('pj-path').value.trim();
+  if (!typed) return;
+  // ⚠️ NOT validated here. The server refuses a path that is not a readable
+  // folder and says why in its own words, and a second opinion in the browser
+  // is a second derivation of one question -- which is how this codebase's
+  // worst defects have started. Choosing it is enough; Add is where it is
+  // judged, once.
+  pjChoose(typed);
+});
+
+document.getElementById('pj-name').addEventListener('input', (e) => { e.target.dataset.auto = '0'; });
+
+document.getElementById('pj-create').addEventListener('click', async () => {
+  const msg = document.getElementById('pj-add-msg');
+  const btn = document.getElementById('pj-create');
+  if (!PJ_PICKED) { msg.textContent = 'Choose the folder this project is in first.'; return; }
+  btn.disabled = true;
+  msg.textContent = 'Adding it…';
+  try {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('pj-name').value,
+        folder: PJ_PICKED,
+        agents: PJ_ADD_AGENTS,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not add that project');
+    await loadProjects();
+    // ⚠️ `body.id` is the fallback the route ships for the case where the
+    // project WAS created but the read-back failed; `body.project` is null
+    // there. Reading only `body.project.id` threw a raw JS internals string
+    // into the person's face about a project that exists.
+    openProject((body.project && body.project.id) || body.id);
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('pj-one-add-go').addEventListener('click', async () => {
+  const who = document.getElementById('pj-one-add').value;
+  const msg = document.getElementById('pj-one-msg');
+  if (!who || !PJ_CURRENT) return;
+  msg.textContent = '';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(who), { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not change that project');
+    await loadProjects();
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+document.getElementById('pj-one-agents').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-drop]');
+  if (!btn || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-one-msg');
+  msg.textContent = '';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not change that project');
+    await loadProjects();
+    // ⚠️ THE VERDICT IS READ, not discarded. Taking an agent off also takes the
+    // block back OUT of its instruction file, and that write can fail for every
+    // reason the add can -- the agent stopped, has no folder, keeps its
+    // instructions somewhere we will not touch. The route says which; this
+    // handler used to check only `res.ok` and repaint as plain success, leaving
+    // a block in a file an agent boots from naming a project it is no longer
+    // on, with nothing on screen. Worse than nobody checking: we checked, we
+    // were told, and we dropped the answer.
+    if (body.told && body.told.state === 'could_not') {
+      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts — '
+        + body.told.because + '.';
+    }
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+function pjCloseConfirm() {
+  const box = document.getElementById('pj-one-confirm');
+  const wasOpen = !box.hidden;
+  const opener = document.getElementById('pj-one-remove');
+  box.hidden = true;
+  opener.hidden = false;
+  // ⚠️ Focus goes BACK to the control that opened it, the way the agent-removal
+  // modal's `closeRemoveModal` does. Hiding the container while it held focus
+  // dropped the keyboard user to <body> with nothing to return to.
+  if (wasOpen && document.activeElement === document.body) opener.focus();
+}
+
+// ⚠️ Escape keeps the project, like the agent modal. The justification for this
+// control is "same friction, same reason"; the ways OUT of it should match too.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('pj-one-confirm').hidden) return;
+  pjCloseConfirm();
+});
+
+document.getElementById('pj-one-remove').addEventListener('click', () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  document.getElementById('pj-one-confirm-q').textContent =
+    'Remove "' + p.name + '" from Kosmos? Nothing in the folder is deleted, but the '
+    + 'agents you put on it and the name you gave it are not kept.';
+  document.getElementById('pj-one-remove-go').textContent = 'Remove ' + p.name;
+  document.getElementById('pj-one-remove-keep').textContent = 'Keep ' + p.name;
+  document.getElementById('pj-one-confirm').hidden = false;
+  document.getElementById('pj-one-remove').hidden = true;
+  document.getElementById('pj-one-remove-keep').focus();
+});
+
+document.getElementById('pj-one-remove-keep').addEventListener('click', pjCloseConfirm);
+
+document.getElementById('pj-one-remove-go').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const msg = document.getElementById('pj-one-msg');
+  msg.textContent = '';
+  pjCloseConfirm();
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id), { method: 'DELETE' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not remove that project');
+    PJ_CURRENT = null;
+    await loadProjects();
+    pjView('list');
+    // ⚠️ Removal has no member row left to carry the verdict, so it gets its own
+    // line on the list. Every agent whose instruction file could not be cleared
+    // still has a block naming a project that no longer exists, and the person
+    // is the only one who can do anything about it.
+    const failed = (body.told || []).filter((t) => t && t.state === 'could_not');
+    const note = document.getElementById('pj-list-msg');
+    note.textContent = failed.length
+      ? 'Removed ' + body.name + '. ' + failed.length + (failed.length === 1 ? ' agent' : ' agents')
+        + ' still mention it in their instructions and we could not change that: '
+        // ⚠️ `shownAs`, not `agent`: speak the display name. The raw machine
+        // name here read "claudebot" about the agent every other surface calls
+        // "Splinter".
+        + failed.map((t) => (t.shownAs || t.agent || 'one of them') + ' (' + t.because + ')').join('; ') + '.'
+      : '';
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
+// ⚠️ Kept up to date while it is open, not painted once on arrival. A project's
+// folder can be moved or deleted and its members' states change constantly, so
+// a list painted at the instant of arrival goes on asserting a world that
+// stopped being true -- beside an Agents board that is updating every 5s.
+// Guarded on the panel being visible so it costs nothing on any other tab, and
+// on the add flow being closed so a refresh cannot repaint the folder browser
+// out from under somebody mid-choice.
+setInterval(() => {
+  const panel = document.getElementById('panel-projects');
+  if (!panel || panel.hidden) return;
+  if (!document.getElementById('pj-add-view').hidden) return;
+  // Nor while a removal is being confirmed: repainting under an open question
+  // is how somebody answers a different question than the one they read.
+  if (!document.getElementById('pj-one-confirm').hidden) return;
+  loadProjects();
+}, 5000);
 
 /* ==========================================================================
    FIRST RUN

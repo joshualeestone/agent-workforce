@@ -96,6 +96,7 @@ require('./engine/remove').setRunner(null);
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { start, server, pathOf, decodeSegment } = require('./server');
+const fleet = require('./test-support/fleet');
 
 let base;
 test.before(async () => {
@@ -1166,7 +1167,7 @@ test('a session that merely borrows an agent name cannot rewrite its instruction
   //
   // Deleting the `isNamedOurs === true` clause in `knownAgent` fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
+  status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1203,7 +1204,7 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   //
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
+  status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
@@ -1244,7 +1245,7 @@ test('GET /commitments refuses a name a stranger is currently claiming, but not 
   const status = require('./engine/status');
 
   // Half one: a stranger claiming the name. Must refuse.
-  status.setPaneSource(() => 'angel\t0.0\t2.1.212\t0\t\tstranger');
+  status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const res = await req('/api/agent/angel/commitments');
@@ -1257,7 +1258,7 @@ test('GET /commitments refuses a name a stranger is currently claiming, but not 
   }
 
   // Half two: nobody claiming it at all. Must still read.
-  status.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status.setPaneSource(() => fleet.line({ session: 'someone-else-discord' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const res = await req('/api/agent/angel/commitments');
@@ -1295,7 +1296,7 @@ test('a borrowed name is refused by every name-keyed read, including its alias s
   // Control: with nobody claiming the name, the picture IS served — so the 404s
   // below are the gate refusing, not the file being absent.
   const status0 = require('./engine/status');
-  status0.setPaneSource(() => 'someone-else-discord\t0.0\t2.1.212\t0\t');
+  status0.setPaneSource(() => fleet.line({ session: 'someone-else-discord' }));
   status0.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const ok = await req('/api/agent/angel/avatar');
@@ -1307,7 +1308,11 @@ test('a borrowed name is refused by every name-keyed read, including its alias s
   }
 
   for (const strangerSession of ['angel', 'Angel', 'an.gel']) {
-    status.setPaneSource(() => `${strangerSession}\t0.0\t2.1.212\t0\tstranger`);
+    // ⚠️ `stranger` is the TITLE. Typed as a tab-separated line it sat in the
+    // CLAIM column, which is the one field that ties a session to a name — so
+    // this fixture was one string away from tying the stranger it exists to
+    // prove is untied. Named columns cannot make that mistake.
+    status.setPaneSource(() => fleet.line({ session: strangerSession, title: 'stranger' }));
     status.setPaneCapture(() => 'Worked for 1m\n> \n');
     try {
       for (const route of ['commitments', 'avatar']) {
@@ -1366,7 +1371,7 @@ test('the gate checks do not capture every pane on every request', async () => {
   // gate to `snapshot()` left it green.
   const status = require('./engine/status');
   let captures = 0;
-  status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\t\tx');
+  status.setPaneSource(() => fleet.line({ session: 'zeta-discord', title: 'x' }));
   status.setPaneCapture(() => { captures += 1; return 'Worked for 1m\n> \n'; });
   try {
     captures = 0;
@@ -1402,8 +1407,8 @@ test('a live agent is not taken offline by a stranger holding an alias of its na
   // not "the first card claiming it is untied".
   const status = require('./engine/status');
   status.setPaneSource(() => [
-    'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
+    fleet.line({ session: 'Angel', title: 'unrelated work' }),
+    fleet.line({ session: 'angel-discord', title: 'the real one' }),
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1442,8 +1447,8 @@ test('/api/status reads the store for a tied agent and not for an untied one', a
     return { state: 'holding', commitments: [{ id: 'x', what: `pending for ${name}` }], reportedAt: new Date().toISOString(), because: 'stubbed for this test' };
   };
   status.setPaneSource(() => [
-    'tied-discord\t0.0\t2.1.212\t0\t\tworking',
-    'untied\t0.0\t2.1.212\t0\t\tworking',
+    fleet.line({ session: 'tied-discord', title: 'working' }),
+    fleet.line({ session: 'untied', title: 'working' }),
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1484,8 +1489,8 @@ test('a stranger cannot fetch the real agent’s picture under the stranger’s 
   fsx.writeFileSync(nodePathx.join(avatarDir, 'angel.png'), 'seeded', 'utf8');
 
   status.setPaneSource(() => [
-    'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
+    fleet.line({ session: 'Angel', title: 'unrelated work' }),
+    fleet.line({ session: 'angel-discord', title: 'the real one' }),
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1527,7 +1532,7 @@ test('tmux being unreachable refuses the name-keyed reads rather than serving th
   }
 });
 
-test('the detail panel withdraws the writes it cannot perform, and clears what it cannot show', () => {
+test('the detail panel withdraws the writes it cannot perform, and clears what it cannot show', async () => {
   // ⚠️ BEHAVIOURAL, not source-shape. The first version asserted that
   // `openDetail` mentions `isNamedOurs`, that the load line contains `if`, and
   // that a withdrawing function exists and is called. All four held while the
@@ -1562,11 +1567,33 @@ test('the detail panel withdraws the writes it cannot perform, and clears what i
     ${script.slice(start, end)}
     return (a, tied) => { setWritesOffered(a, tied); return { INSTR_READY, INSTR_VERSION }; };`)(document);
 
+  // ⚠️ REAL CARDS, from the route the page actually reads. These were object
+  // literals, and an object literal is free to carry fields `/api/status` does
+  // not return — which is exactly how a whole feature shipped describing
+  // members against a shape nothing produces. `test-support/fleet` arranges the
+  // panes; the card comes back from the server.
+  const board = fleet.install([
+    fleet.stranger('Angel', { state: 'idle' }),
+    fleet.agent('zeta', { state: 'idle' }),
+  ]);
+  let untiedCard;
+  let tiedCard;
+  try {
+    const cards = JSON.parse((await req('/api/status')).body).agents;
+    untiedCard = cards.find((a) => a.sessionName === 'Angel');
+    tiedCard = cards.find((a) => a.sessionName === 'zeta');
+  } finally {
+    board.restore();
+  }
+  assert.ok(untiedCard && tiedCard, 'the control: the fixture really put both cards on the board');
+  assert.equal(untiedCard.isNamedOurs, false, 'the control: the untied card is really untied');
+  assert.equal(tiedCard.isNamedOurs, true, 'the control: the tied card is really tied');
+
   // Simulate the dangerous sequence: a tied agent's file is on screen, then an
   // untied card is opened.
   els['d-instr'].value = "the real agent's boot file";
   els['d-instr-foot'].hidden = false;
-  const after = run({ sessionName: 'Angel', name: 'Angel Bridge' }, false);
+  const after = run(untiedCard, untiedCard.isNamedOurs);
 
   assert.equal(els['d-instr'].value, '',
     "the previous agent's instruction text was left on screen for a card we "
@@ -1628,7 +1655,7 @@ test('the detail panel withdraws the writes it cannot perform, and clears what i
     + 'panel is open keeps offering writes for a card that is now a stranger’s');
 
   // And a tied card gets everything back.
-  run({ sessionName: 'zeta', name: 'Zeta' }, true);
+  run(tiedCard, tiedCard.isNamedOurs);
   for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
     assert.equal(els[id].disabled, false, `${id} stayed withdrawn for a tied agent`);
   }
@@ -1649,8 +1676,8 @@ test('every write route refuses the untied card’s own spelling while the real 
   // write half under the untied spelling — the case no test covered.
   const status = require('./engine/status');
   status.setPaneSource(() => [
-    'Angel\t0.0\t2.1.212\t0\tunrelated work',
-    'angel-discord\t0.0\t2.1.212\t0\t\tthe real one',
+    fleet.line({ session: 'Angel', title: 'unrelated work' }),
+    fleet.line({ session: 'angel-discord', title: 'the real one' }),
   ].join('\n'));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1796,7 +1823,7 @@ function pageFunction(name, prelude = '') {
   return new Function(`${prelude}\n${script.slice(start, end)}\nreturn ${name};`)();
 }
 
-test('the creation screen only calls an agent made when the board can see it running', () => {
+test('the creation screen only calls an agent made when the board can see it running', async () => {
   const boardCanSeeIt = pageFunction('boardCanSeeIt');
 
   // ⚠️ THE CONTROL, and it is the assertion that makes the rest mean anything.
@@ -1806,7 +1833,20 @@ test('the creation screen only calls an agent made when the board can see it run
   // rejected it would fail every successful creation while every negative case
   // below still passed, which is precisely the shape of a gate test that
   // passes for the wrong reason.
-  const fresh = { sessionName: 'casey', isAgentSession: true, isNamedOurs: true, state: 'unknown' };
+  // ⚠️ A REAL CARD for the brand-new agent, not a literal describing one. The
+  // whole point of the control is that this is what the board really returns
+  // thirty seconds after a creation, and only the board can say that.
+  const board = fleet.install([fleet.agent('casey', { state: 'unknown' })]);
+  let fresh;
+  try {
+    fresh = JSON.parse((await req('/api/status')).body).agents.find((a) => a.sessionName === 'casey');
+  } finally {
+    board.restore();
+  }
+  assert.ok(fresh, 'the control: the fixture really put the new agent on the board');
+  assert.equal(fresh.state, 'unknown', 'the control: a new agent at its first prompt really does read unknown');
+  assert.equal(fresh.isAgentSession, true);
+  assert.equal(fresh.isNamedOurs, true);
   assert.equal(boardCanSeeIt(fresh), true,
     'a healthy new agent sitting at its first prompt is reported as not running');
   assert.equal(boardCanSeeIt({ ...fresh, state: 'idle' }), true);
@@ -2186,7 +2226,7 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
    * same, in a file that spends two paragraphs elsewhere insisting on exactly
    * this.
    */
-  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneSource(() => fleet.line({ session: 'route-removable', claim: 'route-removable', title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   const acted = removal.remove('route-removable');
   status.setPaneSource(null);
@@ -2275,7 +2315,7 @@ test('the removal routes ask, remove, and put back, over the wire', async () => 
    * roster fall through to the REAL fleet on purpose, so a global stub would
    * quietly change what those are measuring.
    */
-  status.setPaneSource(() => 'route-removable\t0.0\t2.1.212\t0\troute-removable\t✳ Claude Code');
+  status.setPaneSource(() => fleet.line({ session: 'route-removable', claim: 'route-removable', title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   try {
     const before = JSON.parse((await req('/api/status')).body).agents.map((a) => a.name);
@@ -2459,7 +2499,7 @@ test('the removed list gives the browser only what it draws', async () => {
   const plistDir = nodePath.dirname(create.plistPath(name));
   fs.mkdirSync(plistDir, { recursive: true });
   fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
-  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session: name, claim: name, title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   // ⚠️ `has-session` must answer "gone" (exit 1) or the look-again after the
   // kill reads as a session that survived, and the removal is a PARTIAL.
@@ -2580,7 +2620,7 @@ test('a half-finished removal answers 200, because it is a state and not an erro
   fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Partial**.\n', 'utf8');
   fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
   fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
-  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session: name, claim: name, title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   // bootout refuses: disabled but not stopped, which is a partial.
   removal.setRunner((file, args) => (args && args[0] === 'bootout'
@@ -2784,7 +2824,7 @@ test('an agent whose card shows a different name than its session still leaves t
    * roster fall through to the REAL fleet on purpose, so a global stub would
    * quietly change what those are measuring.
    */
-  status.setPaneSource(() => `${session}-discord\t0.0\t2.1.212\t0\t\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session: `${session}-discord`, title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   removal.setRunner((f, a) => (a && a[0] === 'has-session' ? { ok: false, code: 1 } : { ok: true, stdout: '' }));
   removal.setDryRun(false);
@@ -2848,7 +2888,7 @@ test('a half-removed agent is on the removed list AND still on the board', async
   fs.writeFileSync(nodePath.join(create.workerDir(name), 'CLAUDE.md'), 'You are **Half**.\n', 'utf8');
   fs.mkdirSync(nodePath.dirname(create.plistPath(name)), { recursive: true });
   fs.writeFileSync(create.plistPath(name), '<plist/>', 'utf8');
-  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session: name, claim: name, title: '✳ Claude Code' }));
   status.setPaneCapture(() => null);
   // `bootout` refuses: disabled, but not stopped. The half-removal.
   removal.setRunner((file, args) => (args && args[0] === 'bootout'

@@ -86,11 +86,102 @@ const STATE = {
 };
 
 function sh(cmd, args) {
+  const got = shDetail(cmd, args);
+  return got.ran && got.status === 0 ? got.out : null;
+}
+
+/**
+ * The same call, with the outcome kept rather than flattened to `null`.
+ *
+ * ⚠️ `sh` throwing everything away is what made "there are no sessions"
+ * indistinguishable from "we could not ask", and this module's whole reason for
+ * existing is that those are different facts. `execFileSync` throws on a
+ * non-zero exit AND on a failed spawn, so the catch could not tell a tmux that
+ * ANSWERED from a tmux that is not installed.
+ *
+ * `ran` is the distinction: a process that started and exited has a numeric
+ * `status`, and one that never started (ENOENT) or was killed by the timeout
+ * does not.
+ */
+function shDetail(cmd, args) {
   try {
-    return execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000 });
-  } catch {
-    return null;
+    return { ran: true, status: 0, out: execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000 }), err: '' };
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : null;
+    return {
+      ran: status !== null,
+      status,
+      out: (e && e.stdout && e.stdout.toString()) || '',
+      err: (e && e.stderr && e.stderr.toString()) || '',
+    };
   }
+}
+
+/**
+ * Did tmux ANSWER, and answer that there is nothing to list?
+ *
+ * ⚠️ A REAL PRODUCT STATE, and refusing it was a regression this branch
+ * introduced while fixing its mirror image. `tmux list-panes -a` exits 1 with
+ * "no server running on …" / "error connecting to …" when no tmux server is up
+ * — which is the NORMAL state of a machine that has tmux installed and no
+ * agents running yet. That is precisely the first-run machine this product
+ * exists for.
+ *
+ * Before this, `sh` flattened that to `null` and `listPanes` threw, so a person
+ * who had installed Kosmos and not yet created an agent got "we cannot read the
+ * agents right now" — the board refusing to speak about a machine it had
+ * successfully looked at. The earlier fix corrected one false claim ("0 agents,
+ * checked just now" when tmux was unreachable) by minting its mirror image.
+ *
+ * ⚠️ IT IS A FACT ABOUT THE SOCKET WE ASKED, not about the machine. "No server
+ * on the socket this process would use" is read here as "no agents", which is
+ * sound today because nothing in production passes `-L` or sets `TMUX_TMPDIR`
+ * (`bin/agent-supervisor.sh` uses the default socket, and so does this module).
+ * Said out loud because the day those disagree, this converts "I am looking at a
+ * different socket" into a confident empty board — the exact conversion this
+ * module exists to prevent, arriving through its own fix for it.
+ *
+ * ⚠️ MATCHED ON TMUX'S OWN MESSAGE, not on the exit code alone. Exit 1 also
+ * covers errors we have no business reading as an empty machine, so anything
+ * that is not recognisably "there is no server" still refuses. Measured on
+ * this machine: `tmux -L <unused> list-panes -a` exits 1 with
+ * "error connecting to /private/tmp/tmux-501/<unused> (No such file or
+ * directory)".
+ */
+function tmuxSaidNoServer(got) {
+  if (!got || !got.ran || got.status === 0) return false;
+  const err = String(got.err || '');
+  // ⚠️ "error connecting to" ALONE IS TOO LOOSE, and the first version of this
+  // guard used it. tmux prints that line for any socket it cannot reach, so
+  // `error connecting to <socket> (Permission denied)` — a socket owned by
+  // somebody else — would have read as "this machine has no agents". That is
+  // the same cannot-see-reported-as-nothing failure this function exists to
+  // fix, rebuilt inside the fix. Only the No-such-file variant is evidence that
+  // there is no server, so only it is accepted.
+  //
+  // MEASURED, and it is why the qualifier matters: a tmux socket directory with
+  // wrong permissions answers "directory … has unsafe permissions", which
+  // matches neither branch and correctly stays a refusal.
+  return /no server running/i.test(err)
+    || (/error connecting to/i.test(err) && /no such file or directory/i.test(err));
+}
+
+/**
+ * The raw `list-panes` text, an empty listing, or `null` for "we could not ask".
+ *
+ * One derivation, shared by `listPanes` and `paneRoster`, because two readers of
+ * the same question drifting apart is this codebase's worst habit and these two
+ * have already drifted once.
+ */
+function tmuxPanes() {
+  const got = shDetail('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  if (got.ran && got.status === 0) return got.out;
+  // ⚠️ An empty STRING, not null. `readPanes('')` is zero panes and zero
+  // rejects, which is the honest reading of "tmux answered, and there are no
+  // sessions" — and it is a different value from the `null` that means we never
+  // got an answer.
+  if (tmuxSaidNoServer(got)) return '';
+  return null;
 }
 
 /**
@@ -495,9 +586,23 @@ let paneSource = null;
 function setPaneSource(fn) { paneSource = typeof fn === 'function' ? fn : null; }
 
 function listPanes() {
-  const out = paneSource
-    ? paneSource()
-    : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  const out = paneSource ? paneSource() : tmuxPanes();
+  /**
+   * ⚠️ TMUX COULD NOT BE ASKED AT ALL, which is not an empty machine either —
+   * and this case was missing while the one below it was carefully handled.
+   * `sh` swallows a failed spawn and returns null, so on a machine where tmux
+   * is not installed (or not on PATH) `readPanes(null)` produced zero panes and
+   * zero rejects, and the board reported a machine with no agents off a look
+   * that never happened. That is the exact failure the comment below describes
+   * — "a mangled answer and no answer were indistinguishable" — with the third
+   * case, NO ANSWER AT ALL, still indistinguishable from an empty fleet.
+   *
+   * `paneSource` returning null is the same fact from the test seam, so both
+   * go through here.
+   */
+  if (out === null || out === undefined) {
+    throw new Error('we could not ask tmux what is running');
+  }
   const { panes, rejected } = readPanes(out);
 
   /**
@@ -1411,19 +1516,21 @@ function paneRoster() {
   // throw from a test: **the realistic failure failed open and served the
   // record.** A guard whose closed path production cannot take is not a guard.
   //
-  // ⚠️ `snapshot()` deliberately keeps the LENIENT behaviour, and the first
-  // version of this note justified that by claiming an empty board "renders as
-  // such". It does not: with tmux dead, `/api/status` answers 200 with zero
-  // agents and a fresh `checkedAt`, so the board paints "0 agents, checked just
-  // now" — byte-identical to a machine that genuinely has none. That is this
-  // module's own rule inverted at the top level, and the sentence asserting
-  // otherwise was written in the same commit that built the distinction here.
+  // ⚠️ AND `snapshot()` REFUSES THE SAME WAY NOW, through `listPanes`. This
+  // note used to say the opposite at length — that snapshot stayed lenient, so
+  // `/api/status` answered 200 with zero agents and a fresh `checkedAt` and the
+  // board painted "0 agents, checked just now" — and that it was being left
+  // that way deliberately because changing it was a product decision. The
+  // product decision was made one round later, in `listPanes`, and this
+  // paragraph was not re-read: `/api/status` now 500s with the reason and the
+  // board says it cannot read the agents. The sentence outlived the behaviour
+  // it described, which is this module's own recurring defect pointed at its
+  // own documentation. Both refusals are asserted together in
+  // `fixture-discipline.test.js`, so the pair cannot drift silently again.
   //
-  // Left lenient rather than fixed in passing: `snapshot()` feeds the whole
-  // board, so making it throw is a visible product decision (what SHOULD the
-  // board show when tmux is gone?) that deserves its own change rather than
-  // riding along in a gate fix. The gate needs the strict answer and gets it.
-  const out = paneSource ? paneSource() : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  // The two functions still are not one, because this one is deliberately
+  // stricter about a PARTIAL answer: see the note below.
+  const out = paneSource ? paneSource() : tmuxPanes();
   if (out === null || out === undefined) {
     throw new Error('could not ask tmux which panes exist');
   }
@@ -1606,7 +1713,7 @@ module.exports = {
   countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs,
   rank, paneOrder, modelDisplayName, readIdentity, transcriptFor,
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
-  setPaneSource, setPaneCapture,
+  setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,
 };
 

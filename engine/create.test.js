@@ -97,6 +97,7 @@ function jobArguments(name) {
 create.setRunner(null);
 const roles = require('./roles');
 const status = require('./status');
+const fleet = require('../test-support/fleet');
 
 /**
  * A runner that records instead of executing.
@@ -447,7 +448,7 @@ test('a name a live session already answers to is refused, even with no folder',
   // session called `casey`, found the fleet's existing one, and reported
   // "casey is running" over a creation that had done nothing whatsoever.
   create.setDryRun(false);   // or the folder assertion below cannot fail
-  status.setPaneSource(() => 'casey-discord\t0.0\t2.1.212\t0\t\tidle');
+  status.setPaneSource(() => fleet.line({ session: 'casey-discord', title: 'idle' }));
   const taken = create.createAgent({ ...BINS, name: 'casey', role: 'pm' });
 
   assert.equal(taken.outcome, create.OUTCOME.REFUSED, 'a name already on the board was accepted');
@@ -1058,7 +1059,7 @@ test('a name that shares a KEY with a live session is refused, not just an ident
   // exact collision, and the gate was checking the wrong thing to enforce it.
   const calls = recorder();
   create.setDryRun(false);
-  status.setPaneSource(() => 'my.bot-discord\t0.0\t2.1.212\t0\t\tidle');
+  status.setPaneSource(() => fleet.line({ session: 'my.bot-discord', title: 'idle' }));
 
   const r = create.createAgent({ ...BINS, name: 'mybot', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.REFUSED,
@@ -1070,7 +1071,7 @@ test('a name that shares a KEY with a live session is refused, not just an ident
   assert.equal(calls.filter(([, a]) => a && a[0] !== 'print').length, 0, 'it started something anyway');
 
   // THE CONTROL: a name that shares no key goes through.
-  status.setPaneSource(() => 'my.bot-discord\t0.0\t2.1.212\t0\t\tidle');
+  status.setPaneSource(() => fleet.line({ session: 'my.bot-discord', title: 'idle' }));
   assert.equal(create.createAgent({ ...BINS, name: 'other-bot', role: 'pm' }).outcome,
     create.OUTCOME.CREATED, 'every name is refused while that session runs, so the above proves nothing');
 });

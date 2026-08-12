@@ -114,6 +114,41 @@ and says so. Name them instead of editing the code:
     AGENT_WORKFORCE_CLAUDE_BIN=/usr/local/bin/claude \
     AGENT_WORKFORCE_TMUX_BIN=/usr/local/bin/tmux node server.js
 
+## Projects
+
+A project is **a folder you already have**, plus the agents you have put on it.
+Nothing this app generates is ever written into that folder; everything it keeps
+lives in its own store, so a project can be a repo somebody already has.
+
+Two caveats belong here rather than in a comment, because both are things a
+person could otherwise believe and have no way to check.
+
+⚠️ **Putting an agent on a project is not a permission.** It is how you say
+which agents belong to which work, and nothing more. Every agent on this machine
+runs with `--dangerously-skip-permissions` and nothing is enforced anywhere, so
+you will find no lock icon, no "access", and no wording suggesting an agent
+cannot reach something. A boundary that is not enforced is worse than none,
+because the person believing it has no way to find out.
+
+⚠️ **A running agent does not see the change.** Putting an agent on a project
+writes the project's folder into that agent's instruction file, and an agent
+reads that file once, when it starts. So the screen says *"it will see that the
+next time it starts"* rather than anything in the present tense. Where the file
+could not be written at all — an agent with no folder on this machine, or one
+whose instructions live somewhere this app will not touch — the membership is
+still recorded and the row says we could not tell it, and why.
+
+What removal does, in both directions: removing an agent from a project, or
+removing the project itself, takes our record away and **tries** to take the
+block back out of the affected agents' instruction files. ⚠️ **That second half
+can fail, for every reason the first write can** — the agent has stopped, has no
+folder on this machine, or keeps its instructions somewhere this app will not
+touch. When it does, the record is still gone and the screen says which agents
+still mention the project and why, because a block left in a file naming a
+project that no longer exists is something only you can clear. **Nothing in the
+folder is ever deleted**, and a project can be added again — though the name you
+gave it and the agents you put on it are not kept.
+
 ## The rule this codebase is built around
 
 An agent we cannot read is shown as **unknown**, never as something healthy.

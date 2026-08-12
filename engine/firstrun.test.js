@@ -16,8 +16,15 @@ process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: tr
 
 const firstrun = require('./firstrun');
 const status = require('./status');
+const fleet = require('../test-support/fleet');
 
-const pane = (name) => `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`;
+// ⚠️ Columns NAMED, not counted. This was a hand-typed tab-separated line, which
+// is the shape that already put a pane TITLE in the CLAIM column elsewhere in
+// this suite -- one string away from tying a session the test meant to be
+// untied. `fleet.line` builds it from `PANE_COLUMNS` by key, so a reordered or
+// added column moves every fixture at once and none can address a column by
+// accident. `fixture-discipline.test.js` enforces it.
+const pane = (name) => fleet.line({ session: name, claim: name, title: '✳ Claude Code' });
 
 test.afterEach(() => {
   status.setPaneSource(null);
