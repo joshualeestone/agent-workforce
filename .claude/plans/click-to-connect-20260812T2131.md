@@ -38,6 +38,15 @@ which commands. So they were re-verified, and the record is here:
    `oauthAccount.organizationType` from `~/.claude.json` (overridable). A completed
    login writes that block. Nothing new to invent on the detection side.
 
+## Pass-1 walkthrough checklist additions (from the challenge loop)
+
+- **Re-capture the post-login screen.** `SCREEN_LOGIN_DONE` is the one
+  synthesized fixture, and the walk-forward Enter keys on its wording
+  ("Press Enter to continue"). If the real screen says something else, the
+  walk-forward silently never fires and onboarding is left mid-screen for the
+  next `claude` run. Capture it during the first real login and update the
+  fixture.
+
 ## What this does NOT verify, said now so it cannot look covered later
 
 - **The final hop of a real login.** Completing OAuth here means signing an agent into

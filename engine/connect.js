@@ -215,17 +215,29 @@ function foreignLiveFlow(disk) {
   let alive = false;
   try { process.kill(disk.pid, 0); alive = true; }
   catch (err) { alive = Boolean(err && err.code === 'EPERM'); }
-  const ageMs = Date.now() - Date.parse(disk.updatedAt || 0);
-  return alive && !(Number.isFinite(ageMs) && ageMs > 60 * 60 * 1000);
+  // ⚠️ Said explicitly, not through coercion: no timestamp means NOT fresh.
+  // The first version leaned on Date.parse(0) happening to read as ancient;
+  // an unparseable stamp would have failed OPEN into "live forever".
+  if (!disk.updatedAt) return false;
+  const ageMs = Date.now() - Date.parse(disk.updatedAt);
+  if (!Number.isFinite(ageMs)) return false;
+  return alive && ageMs <= 60 * 60 * 1000;
 }
 
 function state() {
-  if (mem.phase !== PHASE.IDLE || mem.startedOnce) return publicView(mem);
+  if (mem.phase !== PHASE.IDLE) return publicView(mem);
+  /**
+   * ⚠️ The disk check runs whenever WE are idle, including after a local
+   * flow came and went (`startedOnce`): short-circuiting on that flag hid a
+   * foreign live flow behind our stale idle -- the board said idle over a
+   * sign-in that exists.
+   */
   const disk = readPersisted();
   if (disk && ACTIVE_PHASES.includes(disk.phase) && disk.pid !== process.pid) {
     if (foreignLiveFlow(disk)) return publicView(disk);
     return publicView({ ...disk, phase: PHASE.INTERRUPTED, before: disk.phase });
   }
+  if (mem.startedOnce) return publicView(mem);
   if (disk && disk.pid !== process.pid
     && (disk.phase === PHASE.CONNECTED || disk.phase === PHASE.STUCK)) {
     return publicView(disk);
@@ -662,6 +674,19 @@ async function launchSignin(owner) {
  */
 async function tick(owner) {
   if (driver !== owner) return;
+  // ⚠️ ONE tick in flight at a time. The interval fires on schedule whether
+  // or not the previous capture came back; a slow tmux otherwise stacks
+  // concurrent capture children until their 20s timeouts drain.
+  if (owner.ticking) return;
+  owner.ticking = true;
+  try {
+    await tickBody(owner);
+  } finally {
+    owner.ticking = false;
+  }
+}
+
+async function tickBody(owner) {
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
   if (!cap.ok) {
@@ -913,6 +938,19 @@ function submitCode(code) {
   // `kind` lets the route pick the right refusal status: 'state' conflicts
   // are 409s (right code, wrong moment); 'format' is a 400 (bad input).
   if (!driver) {
+    /**
+     * ⚠️ THE FOREIGN-FLOW SENTENCE MUST BE TRUE. state() on this server
+     * reports the other server's live paste prompt, so the UI renders a
+     * paste box -- and "the sign-in is not running" is then false. Say what
+     * is actually happening and where the code has to go.
+     */
+    if (foreignLiveFlow(readPersisted())) {
+      return {
+        ok: false,
+        kind: 'state',
+        because: 'this sign-in is running under another Kosmos window on this computer, so paste the code there',
+      };
+    }
     return { ok: false, kind: 'state', because: 'the sign-in is not running, so there is nowhere to put that code' };
   }
   if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE) {
