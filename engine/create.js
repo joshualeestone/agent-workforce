@@ -350,6 +350,53 @@ function plistFor(name, claudeBin, tmuxBin) {
 /* ── the steps ───────────────────────────────────────────────────────────── */
 
 /**
+ * A path we will not use, whatever is at the end of it.
+ *
+ * ⚠️ EXPORTED FOR THE SAME REASON `binPaths` IS. Creation refuses these outright
+ * and answers "we could not find Claude on this computer, so an agent made now
+ * would never start" — so a first-run check that asked only whether the file
+ * exists reported "Everything it needs to run is installed" for a path creation
+ * was always going to reject two screens later. That is the same drift the
+ * extraction below exists to end, one rule further along.
+ */
+function unusablePath(bin) {
+  return /['"\n\r\\$`]/.test(String(bin));
+}
+
+/**
+ * Where the two things an agent needs actually live on this computer.
+ *
+ * ⚠️ Overridable by environment, because these two defaults are ONE machine's
+ * paths: an Intel Mac keeps Homebrew at `/usr/local`, and an npm-global Claude
+ * is not in `~/.local/bin` at all. Without a way to say so, this product
+ * simply cannot make an agent on those machines — it refuses, correctly but
+ * uselessly. It is also what lets the route be tested without depending on
+ * what happens to be installed on the machine running the suite.
+ *
+ * ⚠️ Environment and arguments only. NOT the request body: honouring a
+ * caller-supplied path would let anything that can reach this server name an
+ * executable to be launched under launchd on every reboot, which is a far
+ * worse hole than the one creation already is.
+ *
+ * ⚠️ EXPORTED so that the first-run check which tells somebody "everything it
+ * needs is installed" is answering the same question creation will ask. Those
+ * were two lines in two files for about an hour, which is long enough: a check
+ * that looks somewhere else than the code it is vouching for can pass while
+ * creation refuses, on the screen whose entire job is telling them it will
+ * work. One definition, or the two drift.
+ */
+function binPaths(opts) {
+  return {
+    claudeBin: (opts && opts.claudeBin)
+      || process.env.AGENT_WORKFORCE_CLAUDE_BIN
+      || path.join(HOME, '.local', 'bin', 'claude'),
+    tmuxBin: (opts && opts.tmuxBin)
+      || process.env.AGENT_WORKFORCE_TMUX_BIN
+      || '/opt/homebrew/bin/tmux',
+  };
+}
+
+/**
  * Make an agent, and report honestly about how far it got.
  *
  * Returns `{ outcome, because, steps }`. `steps` records each thing attempted
@@ -359,23 +406,7 @@ function plistFor(name, claudeBin, tmuxBin) {
 function createAgent(opts) {
   const name = cleanName(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
-  // ⚠️ Overridable by environment, because these two defaults are ONE machine's
-  // paths: an Intel Mac keeps Homebrew at `/usr/local`, and an npm-global Claude
-  // is not in `~/.local/bin` at all. Without a way to say so, this product
-  // simply cannot make an agent on those machines — it refuses, correctly but
-  // uselessly. It is also what lets the route be tested without depending on
-  // what happens to be installed on the machine running the suite.
-  //
-  // ⚠️ Environment and arguments only. NOT the request body: honouring a
-  // caller-supplied path would let anything that can reach this server name an
-  // executable to be launched under launchd on every reboot, which is a far
-  // worse hole than the one creation already is.
-  const claudeBin = (opts && opts.claudeBin)
-    || process.env.AGENT_WORKFORCE_CLAUDE_BIN
-    || path.join(HOME, '.local', 'bin', 'claude');
-  const tmuxBin = (opts && opts.tmuxBin)
-    || process.env.AGENT_WORKFORCE_TMUX_BIN
-    || '/opt/homebrew/bin/tmux';
+  const { claudeBin, tmuxBin } = binPaths(opts);
 
   const steps = [];
   const problem = nameProblem(name);
@@ -569,7 +600,7 @@ function createAgent(opts) {
   // carrying a quote or a newline is one nothing good comes of passing
   // anywhere, and the guard that matters for the plist is the XML escaping.
   for (const [what, bin] of [['Claude', claudeBin], ['tmux', tmuxBin], ['the agents folder', workerDir(name)]]) {
-    if (/['"\n\r\\$`]/.test(bin)) {
+    if (unusablePath(bin)) {
       return { outcome: OUTCOME.REFUSED, because: `we cannot use that path for ${what}`, steps };
     }
     if (what === 'the agents folder') continue;
@@ -778,6 +809,8 @@ function createAgent(opts) {
 
 module.exports = {
   createAgent,
+  binPaths,
+  unusablePath,
   nameProblem,
   cleanName,
   plistFor,

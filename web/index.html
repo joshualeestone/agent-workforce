@@ -485,6 +485,125 @@ svg { display: block; }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .edit .icon { width: 15px; height: 15px; }
+
+/* ---------------------------------------------------------------------------
+   First run.
+
+   ⚠️ OPAQUE, not the removal modal's tinted backdrop. This is the first thing
+   somebody sees, and half-showing them a board they have not set up yet — with
+   thirteen cards and four tabs behind the words "welcome" — is the opposite of
+   the one thing this screen is for. The board is not dimmed here, it is not
+   there yet.
+--------------------------------------------------------------------------- */
+.fr-back { position: fixed; inset: 0; background: var(--bg-sunken); z-index: 60;
+           overflow-y: auto; display: flex; justify-content: center;
+           padding: var(--space-8) var(--space-5); }
+/* ⚠️ `margin: auto`, NOT `align-items: center`. Centred that way, a card taller
+   than the window has its top cut off and no way to scroll to it — and step 2
+   on a machine with three findings is exactly that card on a short screen.
+   Auto margins centre when it fits and collapse to the top when it does not. */
+.fr-box { background: var(--bg-elevated); border: 0.5px solid var(--separator);
+          border-radius: 14px; box-shadow: var(--shadow-card);
+          max-width: 40rem; width: 100%; overflow: hidden; margin: auto; }
+.fr-bar { padding: var(--space-5) var(--space-7);
+          border-bottom: 0.5px solid var(--separator);
+          font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+.fr-body { padding: var(--space-8) var(--space-7); }
+.fr-body h2 { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
+              margin: 0 0 var(--space-5); }
+/* ⚠️ The heading takes focus on every step change so the step is announced, and
+   the default ring drew a full-width box around it that reads as an editable
+   text field -- visible in the committed screenshots before this. Scoped to
+   `:focus-visible` so the ring still appears for keyboard users, and inset so
+   it reads as an outline on a heading rather than as a control. */
+.fr-body h2:focus { outline: none; }
+.fr-body h2:focus-visible { outline: 2px solid var(--label-3); outline-offset: 4px;
+                            border-radius: 4px; }
+.fr-body p { font: var(--text-body) var(--font-ui); color: var(--label-2);
+             line-height: 1.55; margin: 0 0 var(--space-5); max-width: 34rem; }
+.fr-body p:last-child { margin-bottom: 0; }
+.fr-body p b { color: var(--label); }
+
+/* The progress segments. `aria-hidden`, because the "Step 2 of 4" line above
+   says the same thing in words — two announcements of one fact is noise. */
+.fr-segs { display: flex; gap: var(--space-3); margin-bottom: var(--space-7); }
+.fr-seg { height: 4px; flex: 1; border-radius: 2px; background: var(--separator); }
+.fr-seg.done { background: var(--label-3); }
+.fr-seg.now  { background: var(--label); }
+
+/* A check row. ⚠️ The glyph is aria-hidden and carries a colour; the state is
+   ALSO in a visually-hidden word inside `.fr-mark`, because a screen reader
+   hearing "This Mac goes to sleep after 10 minutes" with no marker cannot tell
+   it apart from the two lines above it that are fine. Same reason `tickLine`
+   spells out "done:" and "failed:" on the creation screen. */
+.fr-check { display: flex; gap: var(--space-5); align-items: flex-start;
+            padding: var(--space-5) var(--space-6); border-radius: 10px;
+            border: 0.5px solid var(--separator); background: var(--bg);
+            margin-bottom: var(--space-4); }
+.fr-check.attention { border: 1px solid var(--warn-border); background: var(--warn-bg);
+                      padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
+.fr-check.unknown { border-style: dashed; border-width: 1px; background: var(--attn-bg);
+                    padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
+.fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
+           line-height: 1.35; color: var(--label-2); }
+.fr-check.attention .fr-mark { color: var(--warn-ink); }
+.fr-ctitle { font: 600 var(--text-body) var(--font-ui); color: var(--label);
+             margin-bottom: var(--space-2); }
+.fr-cdetail { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+              line-height: 1.5; }
+
+/* The names of agents already here. Not links and not buttons: nothing on this
+   screen does anything to them, and a chip that looks clickable and is not is a
+   promise the same as any other. */
+.fr-names { display: flex; flex-wrap: wrap; gap: var(--space-3);
+            margin: 0 0 var(--space-6); padding: 0; list-style: none; }
+.fr-name { font: var(--text-callout) var(--font-ui); color: var(--label);
+           background: var(--bg-sunken); border: 0.5px solid var(--separator);
+           border-radius: var(--radius-pill); padding: var(--space-3) var(--space-5); }
+.fr-more { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+           align-self: center; }
+
+.fr-acts { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center;
+           padding: var(--space-6) var(--space-7) var(--space-8);
+           border-top: 0.5px solid var(--separator); }
+.fr-acts .btn { padding: var(--space-5) var(--space-7); }
+/* ⚠️ The primary is marked by weight and a filled background, and the filled
+   background is `--label` on `--bg`, which is the same pair the body text uses
+   — so it clears AA in both colour schemes without a third colour to check. */
+.fr-primary { background: var(--label); color: var(--bg); border-color: var(--label);
+              font-weight: 600; }
+.fr-primary:hover { background: var(--label); opacity: 0.88; }
+.fr-spacer { margin-left: auto; }
+/* The way out. Deliberately quiet and deliberately present: an overlay with no
+   exit is a trap the first time the detection behind it is wrong. */
+.fr-skip { background: none; border: 0; text-decoration: underline;
+           font: var(--text-callout) var(--font-ui); color: var(--label-2);
+           cursor: pointer; padding: var(--space-4); }
+.fr-skip:hover { color: var(--label); }
+.fr-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+           line-height: 1.5; margin-top: var(--space-6);
+           padding: var(--space-5) var(--space-6); border-radius: 10px;
+           background: var(--attn-bg); }
+.fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
+          margin-top: var(--space-5); min-height: 1em; }
+/* ⚠️ Collapses when empty, but is NOT `display: none` — there are two of these
+   live regions on the panel, and two reserved blank lines put a visible gap
+   under every short step. Taking them out of the render tree instead is how a
+   live region stops announcing in some screen readers, which is the one thing
+   these elements exist to do. */
+.fr-msg:empty { min-height: 0; margin-top: 0; }
+/* ⚠️ `p.fr-next`, not `.fr-next`. `.fr-body p` is one specificity point higher
+   than a bare class, so the italic caption rendered as ordinary body copy and
+   this rule did nothing at all. Caught by looking at the screen; every text
+   assertion in the suite passed over it.
+
+   ⚠️ AND FIXING THAT EXPOSED A REAL CONTRAST FAILURE UNDERNEATH IT. The rule as
+   first written was `--label-3` at 10px, which measures 3.04:1 on white — below
+   the 4.5:1 floor this file's own header says it deviates from Apple's defaults
+   in order to clear. It had been invisible because the rule was doing nothing.
+   `--label-2` at callout size is the same pair `.fr-cdetail` uses, at 5.7:1. */
+.fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+                     margin-top: var(--space-7); font-style: italic; }
 </style>
 </head>
 <body>
@@ -615,6 +734,109 @@ svg { display: block; }
       <button class="btn danger-btn" id="rm-go" type="button"></button>
     </div>
     <div class="fmsg" id="rm-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
+
+<!-- ⚠️ FIRST RUN. An overlay rather than a tab, and the reasoning is worth
+     keeping: a person part way through setup must not be able to click into
+     Settings, and a tab bar sitting above the welcome screen invites exactly
+     that. So this covers everything, opaquely, and the rest of the page is made
+     `inert` while it is up so the keyboard cannot tab behind it either.
+
+     ⚠️ AND IT HAS A WAY OUT ON EVERY STEP. An overlay with no exit is a trap
+     the first time the detection behind it is wrong — and the detection behind
+     it is a flag on disk and a `tmux` call, both of which can be wrong. Taking
+     the exit marks first run SEEN, which is what the flag means: `completedAt`
+     records that somebody has been here, not that it went well.
+
+     Deep-linkable as /?first-run=1 (and &fr-step=N), which is the only way to
+     screenshot it on a machine that has already been through it. -->
+<div class="fr-back" id="firstrun" hidden>
+  <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
+    <div class="fr-bar">Agent Workforce &mdash; Setup</div>
+    <div class="fr-body">
+      <p class="crumb" id="fr-step">Step 1 of 4</p>
+      <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
+      <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED without joining the tab
+           order. Without it `.focus()` here is a silent no-op and the step
+           change is announced to nobody -- the identical fix the `<h1>` at the
+           top of this file already carries, with the identical reason. -->
+      <h2 id="fr-title" tabindex="-1">Welcome</h2>
+
+      <!-- 1. What this is. No account, no email, and where the transcripts go —
+           the last of which the requirements ask to be stated here rather than
+           discovered later. -->
+      <div class="fr-pane" id="fr-pane-1">
+        <p>This is where you see the agents working for you, and where you make
+           new ones. <b>All of it runs on this computer.</b></p>
+        <p>There is no account to make and no email to give. Nothing here signs
+           you up for anything.</p>
+        <!-- ⚠️ THIS PARAGRAPH HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
+             THE SECOND WRONG VERSION WAS WRITTEN WHILE FIXING THE FIRST.
+
+             It began "so you can always go back and read it" — a capability
+             claim, and this app has no way to show anybody a transcript.
+             Correcting that produced "nothing of it is sent anywhere", which is
+             a PRIVACY claim and flatly false: agents think with Claude, which is
+             the entire reason step 3 exists, so what you ask them goes to
+             Anthropic to be answered. Only the RECORD is local.
+
+             Saying that to a non-technical person on the first screen is the
+             worst version of this defect in the whole flow, and it arrived as
+             the fix for a milder one. So the scope is now stated explicitly: the
+             record stays, the questions go, and there is no account either way.
+             §7b asks for the first sentence; the second is what makes it true. -->
+        <p>The record of everything your agents do is written down and kept on
+           this Mac, in full. It is yours and it stays here.</p>
+        <p>Your agents think with Claude, so what you ask them goes to Claude to
+           be answered. Nothing else about you is sent anywhere, and there is no
+           account here to send it to.</p>
+        <p class="fr-next">Next: a quick look at this computer, then Claude,
+           then your agents.</p>
+      </div>
+
+      <!-- 2. The machine checks. Painted from /api/machine. -->
+      <div class="fr-pane" id="fr-pane-2" hidden>
+        <div id="fr-checks" role="status" aria-live="polite"></div>
+        <!-- ⚠️ Announced, like its sibling on the next step. This is the one
+             sentence that reconciles the three rows above it into an answer
+             ("1 thing needs your attention, and 1 thing we could not check"),
+             and it was the only message on the panel that was never spoken.
+             WCAG 2.1 SC 4.1.3, which is AA. -->
+        <div class="fr-msg" id="fr-machine-msg" role="status" aria-live="polite"></div>
+      </div>
+
+      <!-- 3. Claude. THREE answers, and the third must never render as the
+           second — see engine/subscription.js for what that costs. -->
+      <div class="fr-pane" id="fr-pane-3" hidden>
+        <div id="fr-sub"></div>
+        <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
+      </div>
+
+      <!-- 4. The fork. ⚠️ "Adopting" is not an import: every agent already on
+           this machine is already on the board, because the board is built from
+           `tmux list-panes`. So this screen SHOWS them rather than migrating
+           them, and there is no progress bar here because there is no work. -->
+      <div class="fr-pane" id="fr-pane-4" hidden>
+        <div id="fr-fleet"></div>
+      </div>
+
+      <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
+           only message on this screen that can be raised from ANY step — Skip
+           is on all four — so putting it inside step 4's pane, which is where
+           it started, meant a person who skipped from the welcome screen was
+           told nothing at all: the sentence was written into a hidden div.
+           `alert`, because it is the one thing here somebody must not walk away
+           without hearing. -->
+      <div class="fr-msg" id="fr-forgot" role="alert" aria-live="assertive"></div>
+    </div>
+    <div class="fr-acts">
+      <button class="btn" id="fr-back" type="button" hidden>&#8592; Back</button>
+      <button class="fr-skip" id="fr-skip" type="button">Skip setup</button>
+      <span class="fr-spacer"></span>
+      <button class="btn" id="fr-alt" type="button" hidden></button>
+      <button class="btn fr-primary" id="fr-next" type="button">Continue</button>
+    </div>
   </div>
 </div>
 
@@ -3748,6 +3970,667 @@ setInterval(() => {
   loadProjects();
 }, 5000);
 
+/* ==========================================================================
+   FIRST RUN
+
+   The four screens somebody sees before they have a board worth looking at.
+   What to show is decided by `engine/firstrun.state()` and `engine/machine`,
+   in one place each, so this file renders answers rather than working them out
+   — the instruction editor shipped a second copy of a decision once and it took
+   two review passes to find.
+
+   ⚠️ THE ONE RULE, THREE TIMES OVER. Each of these screens has a state meaning
+   *we could not tell*, and none of them may render it as the negative answer:
+     - the machine checks, where "your agents will keep working" is a sentence
+       somebody closes a laptop lid on;
+     - Claude, where telling a paying customer they do not pay loses them;
+     - the fleet, where guessing "create your first agent" at somebody with
+       thirteen running agents looks broken.
+   ========================================================================== */
+
+const FR_STEPS = 4;
+let FR = null;            // what /api/first-run said
+let FR_STEP = 1;
+let FR_RETURN = null;     // where the keyboard was before this opened
+let FR_FORGOT = false;    // the completion flag did not stick, and we said so
+let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and Continue at once
+// ⚠️ Kept so step 4 cannot promise something step 2 just contradicted. Null
+// until the check screen has actually answered -- an empty array here would be
+// "we looked and found nothing wrong", which is not the same thing.
+let FR_MACHINE = null;
+let FR_CHECKING = 0;      // which machine-check request is the current one
+
+/**
+ * ⚠️ `.onclick`, NOT `addEventListener`. These two buttons change meaning on
+ * every step — Continue becomes "Make my first agent" becomes "Continue
+ * anyway" — and adding a listener each time leaves the previous step's action
+ * still bound, so a Back-then-Continue fires two things at once. Assignment
+ * replaces; that is the property wanted here.
+ */
+function frActions(primary, alt) {
+  const next = document.getElementById('fr-next');
+  const other = document.getElementById('fr-alt');
+  next.textContent = primary.label;
+  next.onclick = primary.go;
+  next.disabled = false;
+  if (alt) {
+    other.hidden = false;
+    other.textContent = alt.label;
+    other.onclick = alt.go;
+    // ⚠️ Reset SYMMETRICALLY with the primary. "Check again" disables itself
+    // while its request is in flight, and without this the next step arrived
+    // with its own (different) second button still greyed out.
+    other.disabled = false;
+  } else {
+    other.hidden = true;
+    other.onclick = null;
+  }
+}
+
+function frGo(step) {
+  /**
+   * ⚠️ CLAMPED TO A WHOLE STEP THAT EXISTS, because `?fr-step=` is a deep link
+   * and deep links arrive with whatever is typed into them. `frGo(3.7)` hid
+   * EVERY pane — the loop asks `i !== step` and 3.7 equals none of them — then
+   * printed "Step 3.7 of 4" and painted step 4 into a pane it had just hidden.
+   * A titled, buttoned, completely empty dialog, which is the one shape this
+   * whole screen exists to avoid.
+   */
+  step = Math.trunc(Number(step));
+  if (!Number.isFinite(step) || step < 1) step = 1;
+  if (step > FR_STEPS) step = FR_STEPS;
+  FR_STEP = step;
+  // ⚠️ Cleared on every step change. It is written once when the completion
+  // flag will not stick, and without this it sat on screen for the rest of the
+  // session, describing a failure that happened three screens ago.
+  // ⚠️ And the FLAG with it. Clearing only the sentence left `FR_FORGOT` true,
+  // so the next exit took its "second click always proceeds" path and closed
+  // silently, with nothing on screen saying onboarding would be back.
+  document.getElementById('fr-forgot').innerHTML = '';
+  FR_FORGOT = false;
+  for (let i = 1; i <= FR_STEPS; i += 1) {
+    document.getElementById('fr-pane-' + i).hidden = (i !== step);
+  }
+  document.getElementById('fr-step').textContent = 'Step ' + step + ' of ' + FR_STEPS;
+  document.getElementById('fr-segs').innerHTML = Array.from({ length: FR_STEPS }, (_, i) => {
+    const n = i + 1;
+    return '<div class="fr-seg' + (n < step ? ' done' : (n === step ? ' now' : '')) + '"></div>';
+  }).join('');
+  document.getElementById('fr-back').hidden = (step === 1);
+
+  if (step === 1) {
+    document.getElementById('fr-title').textContent = 'Welcome to Agent Workforce';
+    frActions({ label: 'Continue', go: () => frGo(2) });
+  } else if (step === 2) {
+    document.getElementById('fr-title').textContent = 'Checking your computer';
+    frActions({ label: 'Continue', go: () => frGo(3) },
+      { label: 'Check again', go: frPaintMachine });
+    frPaintMachine();
+  } else if (step === 3) {
+    document.getElementById('fr-title').textContent = 'Claude';
+    frPaintSubscription();
+  } else {
+    frPaintFleet();
+  }
+
+  /**
+   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this steps 3
+   * and 4 were announced to nobody at all. Step 2's list is a live region; the
+   * other two are not, and nothing moved the keyboard — so pressing Continue
+   * told a screen-reader user only that a button's label had changed. The
+   * subscription verdict and the fleet list were never spoken.
+   *
+   * Focus rather than more live regions, because a step change is a change of
+   * view, not a status message arriving in place. WCAG 2.1 SC 4.1.3, which is
+   * this project's floor.
+   */
+  document.getElementById('fr-title').focus();
+}
+
+/* --------------------------------------------------------------------------
+   Step 2 — this computer
+   -------------------------------------------------------------------------- */
+
+/** The word, for anybody who cannot see the glyph or its colour. */
+const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could not check' };
+const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?' };
+
+function frCheckRow(c) {
+  // ⚠️ `hasOwnProperty`, not a truthiness test on the lookup: `c.state ===
+  // 'toString'` hits Object.prototype and interpolates a whole function body
+  // into the class attribute and the screen-reader text. Not reachable from the
+  // engine today, but the test beside this asserts an unrecognised state falls
+  // back safely, and a truthiness test is exactly how it would not.
+  const state = Object.prototype.hasOwnProperty.call(FR_SAY, c.state) ? c.state : 'unknown';
+  return '<div class="fr-check ' + state + '">'
+    // ⚠️ The glyph is decorative and the WORD beside it is not. Both states
+    // render as one character in a box, and on the machine-check screen two of
+    // the three characters are punctuation — so without this a screen reader
+    // hears three findings and cannot tell which one is the problem.
+    + '<div class="fr-mark"><span aria-hidden="true">' + FR_GLYPH[state] + '</span>'
+    + '<span class="vh">' + FR_SAY[state] + ': </span></div>'
+    + '<div><div class="fr-ctitle">' + esc(c.title) + '</div>'
+    + '<div class="fr-cdetail">' + esc(c.detail) + '</div></div></div>';
+}
+
+async function frPaintMachine() {
+  const box = document.getElementById('fr-checks');
+  const msg = document.getElementById('fr-machine-msg');
+  /**
+   * ⚠️ "Check again" IS HELD DOWN WHILE THIS RUNS. The route behind it shells
+   * out twice with a five-second timeout each, on the server's event loop, so a
+   * person tapping the button four times can stall the board for everyone
+   * looking at it -- including the poll behind this overlay. (An earlier version
+   * of this comment called it "the only button in the product that costs a
+   * subprocess per press", which was false: step 3's "Check again" runs `tmux
+   * list-panes` and had no guard at all. It has one now.)
+   */
+  // ⚠️ A TOKEN, not a boolean. An unconditional re-enable in the `finally` let a
+  // STALE request hand the button back while a newer one was still running: leave
+  // step 2 mid-request, come back, press it again, and request #1 finishing
+  // unlocks the button under request #2.
+  FR_CHECKING += 1;
+  const mine = FR_CHECKING;
+  const again = document.getElementById('fr-alt');
+  const wasAgain = !again.hidden;
+  if (wasAgain) again.disabled = true;
+  box.innerHTML = '<p>Looking&hellip;</p>';
+  msg.textContent = '';
+  let got;
+  try {
+    const res = await fetch('/api/machine', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    got = await res.json();
+  } catch (err) {
+    /**
+     * ⚠️ NOT "everything looks fine". The route is written never to fail, so
+     * arriving here means something further out broke — and the honest thing to
+     * put on a screen headed "Checking your computer" when the check did not
+     * run is that it did not run.
+     */
+    box.innerHTML = '<div class="fr-check unknown"><div class="fr-mark">'
+      + '<span aria-hidden="true">?</span><span class="vh">could not check: </span></div>'
+      + '<div><div class="fr-ctitle">We could not check this computer</div>'
+      + '<div class="fr-cdetail">This is not saying anything is wrong with it. It is saying we '
+      + 'could not look. (' + esc(err.message) + ')</div></div></div>';
+    /**
+     * ⚠️ AND THE REMEMBERED ANSWER GOES WITH IT. The sibling empty-body path
+     * below clears this and the failure path did not — so pressing "Check
+     * again" on a clean machine and having THAT request fail left `FR_MACHINE`
+     * holding the earlier all-clear. Step 4 then printed the unhedged "It
+     * starts as soon as it is made…" over a screen that had just said it could
+     * not look.
+     */
+    FR_MACHINE = null;
+    return;
+  } finally {
+    // ⚠️ `finally`: the failure path returns early, and leaving the one button
+    // that retries permanently disabled by a failure is the worst possible time
+    // to lose it. Only the LATEST request may hand it back.
+    if (wasAgain && mine === FR_CHECKING) again.disabled = false;
+  }
+  /**
+   * ⚠️ GUARDED ONCE, PROPERLY. The first version tested `got` for null on this
+   * line and then dereferenced it bare five lines down (`got.attention ||
+   * got.unknown`) -- outside the try, so a 200 whose body is `null` threw an
+   * unhandled rejection and left step 2 saying "Looking…" forever. A body of
+   * `{}` or `[]` rendered a titled, buttoned, empty pane, which is the shape
+   * two other guards in this file were written against.
+   */
+  const checks = (got && Array.isArray(got.checks)) ? got.checks : [];
+  if (!checks.length) {
+    box.innerHTML = '<div class="fr-check unknown"><div class="fr-mark">'
+      + '<span aria-hidden="true">?</span><span class="vh">could not check: </span></div>'
+      + '<div><div class="fr-ctitle">We could not check this computer</div>'
+      + '<div class="fr-cdetail">Nothing came back from the check, so we have nothing to '
+      + 'tell you about this Mac. That is not the same as it being fine.</div></div></div>';
+    FR_MACHINE = null;
+    return;
+  }
+  FR_MACHINE = got;
+  box.innerHTML = checks.map(frCheckRow).join('')
+    // ⚠️ Says what to do about it, and says it is not a wall. §125: guide, do
+    // not error — first run never blocks on anything it finds here.
+    + (checks.some((c) => c.state !== 'ok')
+      ? '<div class="fr-note">You can carry on either way. Nothing here stops you setting up '
+        + 'an agent, and you can change any of it later.</div>'
+      : '');
+  /**
+   * ⚠️ COUNTED APART, never added together. "Two things need your attention"
+   * over one real problem and one thing we could not read is false about half
+   * of what it counts, and false in the direction that sends somebody looking
+   * for a problem that is not there.
+   */
+  // ⚠️ Counted off the CHECKS we actually rendered, not off two numbers the
+  // payload happened to carry. A body whose `attention` disagreed with its rows
+  // would otherwise put a sentence on screen that the list above it contradicts.
+  const attention = checks.filter((c) => c.state === 'attention').length;
+  const unknown = checks.filter((c) => c.state !== 'attention' && c.state !== 'ok').length;
+  const said = [];
+  if (attention) said.push(attention + (attention === 1 ? ' thing needs' : ' things need') + ' your attention');
+  if (unknown) said.push(unknown + (unknown === 1 ? ' thing we' : ' things we') + ' could not check');
+  msg.textContent = said.join(', and ');
+}
+
+/* --------------------------------------------------------------------------
+   Step 3 — Claude
+   -------------------------------------------------------------------------- */
+
+async function frRecheck() {
+  const msg = document.getElementById('fr-sub-msg');
+  /**
+   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 2's is. A comment used
+   * to claim step 2's was "the only button in the product that costs a
+   * subprocess per press"; it was not. This one calls `/api/first-run`, which
+   * runs `firstrun.state()` -> `fleet()` -> `status.paneRoster()` -> `tmux
+   * list-panes`. The guard was written one screen away from the button that
+   * also needed it.
+   */
+  FR_CHECKING += 1;
+  const mine = FR_CHECKING;
+  const again = document.getElementById('fr-alt');
+  const wasAgain = !again.hidden;
+  if (wasAgain) again.disabled = true;
+  msg.textContent = 'Looking again…';
+  try {
+    const res = await fetch('/api/first-run', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const fresh = await res.json();
+    // ⚠️ The WHOLE answer is replaced, not just the subscription. The fleet can
+    // have changed too while somebody was away signing in, and half-updating it
+    // would leave step 4 describing a machine as it was several minutes ago.
+    FR = fresh;
+    /**
+     * ⚠️ ONLY REPAINT IF THEY ARE STILL HERE. `/api/first-run` shells out to
+     * `tmux list-panes`, so the window is real: pressing "Check again" and then
+     * Continue landed step 3's buttons on step 4, replacing "Take me to my
+     * agents" with a Continue that just re-ran step 4. The fresh answer is still
+     * kept -- it is the PAINT that is out of date, not the data.
+     */
+    if (FR_STEP !== 3) return;
+    msg.textContent = '';
+    frPaintSubscription();
+  } catch (err) {
+    // ⚠️ And the old answer stays on screen, unchanged. A failed re-check must
+    // not silently downgrade "connected" to anything.
+    msg.textContent = 'We could not check again just now (' + err.message + ').';
+  } finally {
+    // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
+    // `#fr-alt` is one element that both steps relabel. With a token on one side
+    // only, step 2's late response handed the button back while step 3's request
+    // was still running -- and the comment claiming "only the latest request may
+    // hand it back" was true of one caller out of two.
+    if (wasAgain && mine === FR_CHECKING) again.disabled = false;
+  }
+}
+
+function frPaintSubscription() {
+  const sub = (FR && FR.subscription) || { state: 'unknown', because: 'we have not been able to look' };
+  const box = document.getElementById('fr-sub');
+
+  if (sub.state === 'connected') {
+    box.innerHTML = frCheckRow({
+      state: 'ok',
+      title: (sub.plan || 'A Claude subscription') + ' is connected',
+      detail: 'Your agents think with Claude, and this computer is signed in. Nothing to do here.',
+    });
+    frActions({ label: 'Continue', go: () => frGo(4) });
+    return;
+  }
+
+  /**
+   * ⚠️ THE DEFAULT ARM IS `unknown`, NOT `none`, AND THAT IS THE WHOLE POINT OF
+   * THIS SCREEN.
+   *
+   * This dispatcher's first version fell through to the negative answer for
+   * anything it did not recognise — a fourth state, a truncated response, a
+   * typo in the engine — so an answer we could not read rendered as "No Claude
+   * subscription is connected yet". That is the one sentence `engine/subscription.js`
+   * says must never be shown to somebody we cannot read: it tells a paying
+   * customer to go and buy a second subscription.
+   *
+   * `frCheckRow` twelve lines up already got this treatment. This is the one
+   * where it costs something.
+   */
+  if (sub.state !== 'none') {
+    /**
+     * ⚠️ THE ONE THAT MUST NOT READ AS "NO". Measured on the machine this was
+     * written on: a working Claude Max 20x account whose `hasAvailableSubscription`
+     * is `false`. A screen that turns "we cannot tell" into "you are not
+     * subscribed" tells a paying customer to go and buy a second subscription,
+     * on the screen that decides whether they keep the product.
+     */
+    box.innerHTML = frCheckRow({
+      state: 'unknown',
+      title: 'We could not tell whether Claude is connected',
+      detail: 'This does not mean it is not: ' + (sub.because || 'we could not read the settings')
+        + '. If you already pay for Claude, carry on: nothing here has decided otherwise.',
+    });
+    frActions({ label: 'Continue', go: () => frGo(4) }, { label: 'Check again', go: frRecheck });
+    return;
+  }
+
+  box.innerHTML = frCheckRow({
+    state: 'attention',
+    title: 'No Claude subscription is connected yet',
+    detail: 'Your agents think with Claude, so they need one before they can do anything. '
+      + 'Get a subscription at claude.ai, then sign in to Claude on this computer.',
+  })
+  /**
+   * ⚠️ SAYS WHAT CARRYING ON ACTUALLY GETS THEM. "Continue anyway" with no
+   * sentence beside it lets somebody make an agent, watch it do nothing, and
+   * conclude the product is broken — when what happened is the thing this
+   * screen just told them.
+   */
+  + '<div class="fr-note">You can carry on and look around. An agent made before Claude is '
+  + 'connected will sit there doing nothing until it is.</div>';
+  frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Check again', go: frRecheck });
+}
+
+/* --------------------------------------------------------------------------
+   Step 4 — the agents already here
+   -------------------------------------------------------------------------- */
+
+function frPaintFleet() {
+  const box = document.getElementById('fr-fleet');
+  const path = (FR && FR.path) || 'unknown';
+  const title = document.getElementById('fr-title');
+
+  const names = (FR && Array.isArray(FR.fleetNames)) ? FR.fleetNames : [];
+  const count = FR && FR.fleetCount;
+
+  /**
+   * ⚠️ THE ADOPT SCREEN NEEDS A REAL COUNT, not just the word "adopt". Without
+   * this, a payload naming the path but not the number rendered the heading
+   * "You already have undefined agents here" -- a count nobody established, on
+   * the one screen whose entire job is proving this app can see somebody's
+   * fleet. Every sibling branch guards its payload; this one took the engine's
+   * word for it.
+   */
+  if (path === 'adopt' && Number.isInteger(count) && count > 0) {
+    title.textContent = count === 1 ? 'You already have an agent here' : 'You already have ' + count + ' agents here';
+    /**
+     * ⚠️ NOT AN IMPORT, AND THIS SCREEN MUST NOT MIME ONE. The board is built
+     * from `tmux list-panes`, so every one of these was already on it before
+     * anybody clicked anything. A progress bar here would be a fake step that
+     * can fail, for work that has already happened.
+     *
+     * ⚠️ AND THE COUNT CAN EXCEED THE NAMES. The engine sends the first twelve;
+     * this machine has thirteen. Showing twelve chips under the heading "13
+     * agents" and saying nothing is a screen that does not add up — measured,
+     * on the first live call of the route.
+     */
+    box.innerHTML = '<p>They are already on your board. <b>There is nothing to import</b> and '
+      + 'nothing to wait for. Agent Workforce reads what is running on this computer, so it '
+      + 'could see them before you got here.</p>'
+      + '<ul class="fr-names">'
+      + names.map((n) => '<li class="fr-name">' + esc(n) + '</li>').join('')
+      + (count > names.length
+        ? '<li class="fr-more">and ' + (count - names.length) + ' more</li>' : '')
+      + '</ul>'
+      + '<p>You can give any of them a picture, say what they are for, and change what they '
+         + 'work on, or make a new one.</p>';
+    frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) },
+      { label: 'Make another agent', go: () => frFinish(openCreate) });
+    return;
+  }
+
+  if (path === 'create') {
+    title.textContent = 'Now make your first agent';
+    /**
+     * ⚠️ IT DOES NOT PROMISE OVER THE TOP OF STEP 2. The first version said "It
+     * will start straight away, and it will start itself again every time this
+     * computer does" — two clicks after a screen that may have just said Claude
+     * is not where we expected it and an agent made now would not start. Two
+     * screens in one flow contradicting each other about the same fact, with
+     * the reassuring one last.
+     *
+     * So the promise is hedged to what was actually established, and anything
+     * still outstanding from the check screen is repeated here rather than
+     * quietly dropped.
+     */
+    /**
+     * ⚠️ THREE CASES, NOT TWO, and the declaration of `FR_MACHINE` says so while
+     * the first version of this line collapsed them: `(FR_MACHINE && ...) || []`
+     * made "we never checked" identical to "we checked and it was fine". Somebody
+     * who arrived on `?fr-step=4`, or whose check route failed at step 2, got the
+     * unhedged promise.
+     *
+     * ⚠️ AND `unknown` COUNTS. Filtering only `attention` dropped three "we could
+     * not check" rows on the floor and made the same promise over the top of them
+     * -- the third state going missing from the very fix that was written for the
+     * first two.
+     */
+    const checked = FR_MACHINE && Array.isArray(FR_MACHINE.checks);
+    const snags = checked
+      ? FR_MACHINE.checks.filter((c) => c.state === 'attention' || c.state === 'unknown')
+      : null;
+    box.innerHTML = '<p>There are no agents on this computer yet, so the next thing to do is '
+      + 'make one. It takes two questions: what it is for, and what to call it.</p>'
+      /**
+       * ⚠️ THE FIRST CLAUSE IS HEDGED TOO. The earlier fix softened "it will
+       * start itself again" to "it is set to start itself again" and left "It
+       * starts as soon as it is made" flat -- and that is the clause the check
+       * screen contradicts, sitting directly above a note reading "an agent made
+       * now may not run until that is sorted". One sentence promising and the
+       * next retracting, in that order.
+       */
+      + (checked && !snags.length
+        ? '<p>It starts as soon as it is made, and it is set to start itself again every time '
+          + 'this computer does.</p>'
+        : '<p>Once it is made it is set to start itself again every time this computer '
+          + 'does.</p>')
+      + (!checked
+        ? '<div class="fr-note">We did not get to look over this computer, so we cannot say '
+          + 'in advance whether everything an agent needs is in place. You will find out when '
+          + 'you make one, and it will tell you.</div>'
+        : snags.length
+          ? '<div class="fr-note"><b>' + (snags.length === 1 ? 'One thing' : snags.length + ' things')
+            + ' from the earlier screen ' + (snags.length === 1 ? 'is' : 'are') + ' still outstanding.</b> '
+            + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
+            + 'that is sorted.</div>'
+          : '');
+    frActions({ label: 'Make my first agent', go: () => frFinish(openCreate) },
+      { label: 'Just show me around', go: () => frFinish(() => showTab('agents')) });
+    return;
+  }
+
+  /**
+   * ⚠️ THE FORK IS NOT OFFERED WHEN WE CANNOT COUNT, and this screen says why
+   * rather than quietly picking one. Guessing "make your first agent" at
+   * somebody with a running fleet is the version of this mistake that looks
+   * broken, and guessing the other way shows an empty list as though it were an
+   * answer.
+   */
+  title.textContent = 'We could not see what is on this computer';
+  box.innerHTML = '<p>We could not read the agents running here, so <b>we do not know whether '
+    + 'you already have any</b>. That is not the same as there being none, and it is not a '
+    + 'reason to stop. It just means we are not going to guess which of these you want.</p>'
+    + '<p>Have a look at the board: if your agents are on it, everything is fine and this was '
+    + 'one bad reading. If it is empty, make one.</p>';
+  frActions({ label: 'Show me the board', go: () => frFinish(() => showTab('agents')) },
+    { label: 'Make an agent', go: () => frFinish(openCreate) });
+}
+
+/* --------------------------------------------------------------------------
+   Opening, finishing, and getting out
+   -------------------------------------------------------------------------- */
+
+function frOpen() {
+  FR_RETURN = document.activeElement;
+  document.getElementById('firstrun').hidden = false;
+  /**
+   * ⚠️ `inert` ON EVERYTHING ELSE. The overlay is opaque, so the board is not
+   * visible behind it — but without this the keyboard still tabs straight
+   * through into tabs and cards a person has not been shown yet, and a screen
+   * reader reads the whole board underneath the welcome message.
+   */
+  document.querySelectorAll('body > *:not(#firstrun)').forEach((el) => { el.inert = true; });
+  frGo(1);
+  document.getElementById('fr-next').focus();
+}
+
+function frClose() {
+  document.getElementById('firstrun').hidden = true;
+  document.querySelectorAll('body > *:not(#firstrun)').forEach((el) => { el.inert = false; });
+  if (FR_RETURN && FR_RETURN.focus) FR_RETURN.focus();
+  FR_RETURN = null;
+}
+
+/**
+ * Mark first run seen, then do the thing they chose.
+ *
+ * ⚠️ IT REPORTS A FLAG THAT DID NOT STICK, and it does that by staying on
+ * screen for one more click rather than by closing quietly. A flag that did not
+ * persist means this whole thing reappears on the next launch, over a board
+ * they have already set up — and a sentence shown for the 200ms before the
+ * overlay closes is a sentence nobody reads.
+ *
+ * ⚠️ AND THE SECOND CLICK ALWAYS PROCEEDS, whatever happened. Somewhere to say
+ * it is not the same as somewhere to be stuck.
+ */
+async function frFinish(then) {
+  /**
+   * ⚠️ ONE FLAG, NOT A DISABLED BUTTON. The first version guarded re-entry by
+   * disabling Continue -- which does nothing about Skip or Escape, and both of
+   * those call this too. Clicking "Make my first agent" and then pressing
+   * Escape while the POST was in flight ran TWO completions: two writes, two
+   * closes, and BOTH callbacks, so `openCreate()` opened the create panel and
+   * `showTab('agents')` immediately took it away again.
+   */
+  if (FR_FINISHING) return;
+  FR_FINISHING = true;
+  const next = document.getElementById('fr-next');
+  /**
+   * ⚠️ FOCUS MOVES BEFORE THE BUTTON GOES DEAD. Disabling the element that
+   * currently has focus drops the keyboard to `<body>` -- and `<body>` fires no
+   * `focusin`, so the backstop never recovers it. For up to eight seconds a
+   * keyboard user would be nowhere, behind an inert page.
+   */
+  if (document.activeElement === next) document.getElementById('fr-title').focus();
+  next.disabled = true;
+  let ok = false;
+  let why = '';
+  try {
+    /**
+     * ⚠️ IT HAS TO TIME OUT, or the documented "way out on every step" is a
+     * promise this function cannot keep. A POST that never settles leaves
+     * Continue disabled, Skip and Escape doing nothing, and the page inert
+     * behind an opaque overlay: the exact trap the overlay was designed
+     * against, reached through its own exit. A hang now lands in the
+     * could-not-remember path below, which always has a way onward.
+     */
+    /**
+     * ⚠️ FEATURE-GUARDED. `AbortSignal.timeout` is absent on Safari before 16,
+     * where calling it throws SYNCHRONOUSLY -- straight into the catch below, so
+     * every completion attempt lands in the could-not-remember path and the flag
+     * is never written at all. First run would then reappear on every single
+     * launch, forever, on the one browser this product is most likely to meet.
+     * This file already ships a fallback for engines without `inert`; this is
+     * the same class of gap with a worse ending.
+     */
+    const res = await fetch('/api/first-run/complete', Object.assign(
+      { method: 'POST' },
+      typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? { signal: AbortSignal.timeout(8000) } : {},
+    ));
+    ok = res.ok;
+    if (!ok) {
+      const back = await res.json().catch(() => null);
+      why = (back && back.error) || ('status ' + res.status);
+    }
+  } catch (err) {
+    why = err.message;
+  }
+  FR_FINISHING = false;
+  if (ok || FR_FORGOT) { frClose(); then(); return; }
+  FR_FORGOT = true;
+  next.disabled = false;
+  document.getElementById('fr-forgot').innerHTML =
+    '<div class="fr-note"><b>We could not remember that you have been here.</b> '
+    + 'Everything else works; this may just appear again the next time you open it. ('
+    + esc(why) + ')</div>';
+  frActions({ label: 'Carry on anyway', go: () => { frClose(); then(); } });
+}
+
+document.getElementById('fr-back').addEventListener('click', () => { if (FR_STEP > 1) frGo(FR_STEP - 1); });
+// ⚠️ Skipping MARKS IT SEEN, and that is not a bug. The flag records that
+// somebody has been here, not that it went well — and the alternative, showing
+// this again every launch to a person who dismissed it, is nagging.
+document.getElementById('fr-skip').addEventListener('click', () => frFinish(() => showTab('agents')));
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('firstrun').hidden) return;
+  frFinish(() => showTab('agents'));
+});
+
+/**
+ * ⚠️ THE FALLBACK FOR WHEN `inert` IS NOT A THING.
+ *
+ * Containment above is one attribute, and on any engine that does not implement
+ * it `el.inert = true` is not an error -- it is a property nobody reads. The
+ * overlay stays opaque, so nothing looks wrong, and the keyboard tabs straight
+ * onto a board the person cannot see. The removal modal beside this one has
+ * both a real modal role and a way back; this had one mechanism.
+ *
+ * Cheap, and it costs nothing where `inert` works: nothing outside can ever
+ * receive focus there, so this never fires.
+ */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const overlay = document.getElementById('firstrun');
+  if (overlay.hidden) return;
+  /**
+   * ⚠️ WRAPS IN BOTH DIRECTIONS. The `focusin` backstop below always pulled
+   * focus to the heading, which makes Shift+Tab a dead end -- you can never
+   * reach the action bar backwards, because every attempt lands back on the
+   * title. Wrapping here handles the ordinary case properly and leaves the
+   * backstop for anything that gets past it.
+   */
+  const stops = Array.from(overlay.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])'))
+    .filter((el) => !el.hidden && !el.disabled && el.getClientRects().length);
+  if (!stops.length) return;
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && (document.activeElement === first
+    || document.activeElement === document.getElementById('fr-title'))) { e.preventDefault(); last.focus(); }
+});
+
+document.addEventListener('focusin', (e) => {
+  const overlay = document.getElementById('firstrun');
+  if (overlay.hidden || overlay.contains(e.target)) return;
+  document.getElementById('fr-title').focus();
+});
+
+/**
+ * Whether to open on it at all.
+ *
+ * ⚠️ FAILS CLOSED — as in, no onboarding. If we cannot read the answer we do
+ * not show this, because putting a welcome screen over somebody's working board
+ * because one fetch failed is the same mistake `engine/firstrun.seen()` avoids
+ * one layer down, arriving through the front door instead.
+ */
+async function firstRunBoot(force, step) {
+  let state;
+  try {
+    const res = await fetch('/api/first-run', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    state = await res.json();
+  } catch { return; }
+  // ⚠️ Inside the guard, not after it. A 200 whose body is `null` -- or anything
+  // that is not an object -- threw on `state.done` as an unhandled rejection.
+  // The net effect was still "no overlay", but by accident rather than by the
+  // rule three lines up, and an accident is not a fail-closed guarantee.
+  if (!state || typeof state !== 'object') return;
+  if (state.done && !force) return;
+  FR = state;
+  frOpen();
+  // ⚠️ Only after `frOpen` has painted step 1, so a forced deep link cannot
+  // land on a step whose buttons were never wired.
+  if (step > 1 && step <= FR_STEPS) frGo(step);
+}
+
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
@@ -3758,6 +4641,19 @@ showTab(BOOT_TAB);
 // exactly the failure the instruction editor had when it shipped enabled and
 // empty on its own deep link.
 if (BOOT_TAB === 'create') loadRoles();
+
+/**
+ * ⚠️ FIRST RUN IS ASKED FOR SEPARATELY, AND THE BOARD DOES NOT WAIT FOR IT.
+ * `tick()` below starts immediately: if this fetch hangs, a person gets their
+ * board rather than a blank page, which is the right way round. The overlay is
+ * opaque, so it covering a painted board a moment later is invisible.
+ *
+ * `?first-run=1` forces it open over a machine that has already been through
+ * it, and `&fr-step=N` opens on one step. That is the only way to screenshot
+ * these screens here, and this file already deep-links every other panel for
+ * the same reason.
+ */
+firstRunBoot(PARAMS.get('first-run') === '1', Number(PARAMS.get('fr-step')) || 1);
 
 tick();
 setInterval(tick, 5000);

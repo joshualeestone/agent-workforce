@@ -107,6 +107,27 @@ async function assertSandboxed() {
   //
   // The probe is a real project through the real route, and it passes only if
   // the record lands INSIDE the sandbox we were handed.
+  // ⚠️ FIRST RUN IS MARKED DONE, IN THE SANDBOX, OR THIS CHECK PHOTOGRAPHS THE
+  // WIZARD. Once first-run merged, a board with no completion flag opens the
+  // four-screen setup over everything — correct product behaviour, and fatal to
+  // a check that assumed the board was the first thing on screen. MEASURED: the
+  // run that first met it reported `✔ 1-empty` and `✔ 2-list` while both
+  // screenshots were pictures of "Welcome to Agent Workforce", then hung
+  // clicking a project row that was behind a modal. Two states passed while
+  // looking at the wrong screen, and those images are the PR's visual evidence.
+  //
+  // Written into the sandbox's own data dir, never `~`: the flag is what
+  // switches somebody's real onboarding off.
+  // ⚠️ WRITTEN BY THE ENGINE'S OWN `complete()`, not by a shape typed here. The
+  // first version of this wrote `{done: true, at: …}` — and `seen()` keys on
+  // `completedAt`, so the flag parsed, answered "not done", and the wizard
+  // opened anyway. A fixture inventing a field the real producer does not
+  // write, which is the exact defect this branch spent three rounds building a
+  // mechanism against, committed once more in the check for it. The producer is
+  // one require away, so there is no reason to guess.
+  process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
+  require('../../engine/firstrun').complete();
+
   const probe = path.join(SANDBOX, 'sandbox-probe');
   fs.mkdirSync(probe, { recursive: true });
   const made = await post('/api/projects', { name: 'kosmos sandbox probe', folder: probe });
@@ -199,6 +220,42 @@ async function main() {
       page.on('pageerror', (e) => errors.push(String(e)));
 
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+
+      // ⚠️ IS THE THING WE CAME TO PHOTOGRAPH ACTUALLY ON SCREEN. Asked before
+      // every state, because "the screenshot was taken" is not "the screenshot
+      // is of this feature": with first-run merged, a board with no completion
+      // flag opens the setup wizard over everything, and this check reported
+      // `✔ 1-empty` and `✔ 2-list` for two pictures of "Welcome to Agent
+      // Workforce". A passing run whose images are of another screen is the
+      // worst kind of green, because the images ARE the evidence in the PR.
+      //
+      // Neither branch could have caught it alone -- it exists only in the
+      // merge -- so it is asserted here rather than assumed anywhere.
+      const covered = await page.evaluate(() => {
+        // ⚠️ NOT `offsetParent`. The overlay is `position: fixed`, and a fixed
+        // element's `offsetParent` is ALWAYS null — so the first version of this
+        // guard computed "wizard: false" while the wizard filled the screen, and
+        // passed. A visibility test that cannot see the thing it is testing for
+        // is worse than none. `hidden` is what the code actually toggles, and
+        // the rect is the belt to its braces.
+        const vis = (el) => {
+          if (!el || el.hidden) return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+        };
+        return {
+          wizard: vis(document.getElementById('firstrun')),
+          projects: vis(document.getElementById('panel-projects')),
+        };
+      });
+      if (covered.wizard || !covered.projects) {
+        throw new Error(
+          `the projects panel is not what is on screen (first-run wizard visible: ${covered.wizard}, `
+          + `projects panel visible: ${covered.projects}). Every screenshot from this run would be `
+          + 'of the wrong screen, and they are the PR\'s evidence.',
+        );
+      }
+
       if (prepare) await prepare(page);
       await page.waitForTimeout(400);
 

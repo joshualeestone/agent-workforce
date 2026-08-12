@@ -2650,6 +2650,29 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
   const pins = [
+    /* ---- first run -------------------------------------------------------
+       ⚠️ These are here because NOTHING ELSE CAN CATCH THEM. Reverting either
+       one leaves the page working, every other test green, and the browser
+       checks silent -- which is precisely why they need a pin rather than a
+       check. Until they were added, this list held only the previous branch's
+       fixes while its own comment implied it covered the current one. */
+
+    // The flagship "found only by rendering" defect. Written `.fr-next` it
+    // loses to `.fr-body p` on specificity and the rule does NOTHING -- and the
+    // render check cannot see it, because the fallback it lands on happens to
+    // pass AA. Silent in every layer we have.
+    [/\.fr-body p\.fr-next/, 'the first-run caption rule is back to a bare class, which loses to '
+      + '.fr-body p on specificity and applies to nothing at all'],
+    // Without the guard, `AbortSignal.timeout` throws synchronously on Safari
+    // < 16, every completion lands in the could-not-remember path, and first
+    // run reappears on every launch forever. Chromium always satisfies it, so
+    // no browser check on this machine will ever fail.
+    [/typeof AbortSignal !== 'undefined' && AbortSignal\.timeout/,
+      'the AbortSignal.timeout feature guard is gone, so on an engine without it every '
+      + 'completion throws, lands in the could-not-remember path, and onboarding never stops '
+      + 'reappearing'],
+
+    /* ---- the removal flow, from the previous branch ---------------------- */
     // A record written by an older version has no timestamp, and this read the
     // wrong field, so the date never appeared for anybody.
     [/a\.removedAt/, 'the removed-list date reads a field the engine does not write'],
@@ -2950,4 +2973,497 @@ test('a job that is disabled but will not unload is recorded, not reported as un
     await req('/api/agent/wont-unload/restore', { method: 'POST' }).catch(() => {});
     removal.setRunner(null);
   }
+});
+
+/* ===========================================================================
+   First run — the screens
+
+   ⚠️ WHAT THESE TESTS CANNOT DO IS SEE THE PAGE, and on this branch that is
+   not a theoretical limit. A rule written `.fr-next` instead of `p.fr-next`
+   lost to `.fr-body p` on specificity and did nothing at all; every assertion
+   in this file passed over it, and fixing it revealed a 3.04:1 contrast failure
+   that had been invisible because the rule was inert. Both were found by
+   rendering the page in a browser and measuring it — `docs/browser-checks/`,
+   run outside this suite because it needs a browser and this repo has no
+   dependencies. Neither could have been found here. Do not treat what follows
+   as coverage of how it looks.
+   =========================================================================== */
+
+test('the machine route always answers, with renderable checks and never an error', async () => {
+  // ⚠️ The bound is `>= 1`, not `=== 3`, and deliberately: the route's own catch
+  // path legitimately answers with a single "we could not check this computer"
+  // row. Asserting three would make the honest degraded answer a test failure.
+  const res = await req('/api/machine');
+  assert.match(res.type, /application\/json/);
+  assert.equal(res.status, 200,
+    'the check screen has no branch for a failed route, because the route is written not to fail');
+  const got = JSON.parse(res.body);
+  assert.ok(Array.isArray(got.checks) && got.checks.length >= 1);
+  for (const c of got.checks) {
+    assert.ok(['ok', 'attention', 'unknown'].includes(c.state), 'unrenderable state: ' + c.state);
+    assert.ok(c.title && c.detail, 'a check with nothing to say renders as an empty box');
+  }
+  assert.equal(typeof got.attention, 'number');
+  assert.equal(typeof got.unknown, 'number');
+});
+
+test('a check row carries its state in a WORD, not only in a glyph and a colour', () => {
+  /**
+   * ⚠️ Three findings, and two of the three glyphs are punctuation. `!` and `?`
+   * are aria-hidden decoration; without the visually-hidden word beside them a
+   * screen reader hears three sentences and cannot tell which one is the
+   * problem — on the screen whose entire job is saying which one is.
+   *
+   * Same defect `tickLine` fixed on the creation screen, arriving on a new one.
+   */
+  // ⚠️ The two lookup tables are LIFTED FROM THE PAGE, not retyped here. A
+  // copy of "ready" / "needs your attention" / "could not check" in this file
+  // is a second set of the exact words under test, and it would go on passing
+  // after the page's own set drifted away from it.
+  const raw0 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script0 = raw0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+    const m = script0.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  // ⚠️ The REAL `esc`, lifted from the page, not a `String(s)` stub. With the
+  // stub this test would have gone on passing after `esc()` was removed from
+  // `frCheckRow` entirely -- and what flows through it is engine prose today,
+  // but the whole point of the machine checks is that they quote paths and
+  // error strings from the machine.
+  const realEsc = pageFunction('esc');
+  const frCheckRow = pageFunction('frCheckRow',
+    'const esc = ' + realEsc.toString() + ';\n' + tables);
+
+  const good = frCheckRow({ state: 'ok', title: 'Everything is installed', detail: 'Nothing to do.' });
+  const bad = frCheckRow({ state: 'attention', title: 'This Mac sleeps', detail: 'They stop.' });
+  const dunno = frCheckRow({ state: 'unknown', title: 'We could not tell', detail: 'We could not look.' });
+
+  assert.match(good, /class="vh">ready: <\/span>/, 'a passing check says nothing aloud');
+  assert.match(bad, /class="vh">needs your attention: <\/span>/,
+    'a FINDING is indistinguishable from a pass to a screen reader');
+  assert.match(dunno, /class="vh">could not check: <\/span>/,
+    'a check we could not run sounds exactly like one that passed');
+
+  // And the three are visually distinct too, by class rather than by hue alone.
+  assert.match(good, /class="fr-check ok"/);
+  assert.match(bad, /class="fr-check attention"/);
+  assert.match(dunno, /class="fr-check unknown"/);
+
+  // ⚠️ A state the screen has no branch for must not render as a pass. It falls
+  // to `unknown`, which is the only safe direction for an answer we do not
+  // understand — the same rule the engine below it is built on.
+  const weird = frCheckRow({ state: 'probably-fine', title: 'Hmm', detail: 'Hmm.' });
+  assert.match(weird, /class="fr-check unknown"/,
+    'a state this screen does not know was drawn as a tick');
+
+  assert.match(bad, /aria-hidden="true">!</, 'the glyph is announced as well as shown');
+
+  // ⚠️ And it actually escapes. The machine checks quote real paths and real
+  // error strings back at the person; a title carrying a `<` must not become
+  // markup on the screen that is meant to be telling them the truth.
+  const nasty = frCheckRow({
+    state: 'attention',
+    title: 'tmux is not at </div><script>x</script>',
+    detail: 'We looked for it at /opt/<b>homebrew</b>/bin/tmux.',
+  });
+  assert.ok(!/<script>/.test(nasty), 'a check title carrying markup reached the page as markup');
+  assert.match(nasty, /&lt;script&gt;|&lt;\/div&gt;/, 'nothing was escaped at all');
+});
+
+test('first run fails CLOSED: an unreadable answer shows no onboarding at all', () => {
+  /**
+   * ⚠️ THE DIRECTION MATTERS AND IT IS THE OPPOSITE OF THE USUAL ONE. Putting a
+   * welcome screen over somebody's working board because one fetch failed is
+   * worse than never showing it — `engine/firstrun.seen()` makes exactly this
+   * call one layer down, and the front door has to make it too or the engine's
+   * care is undone by the page.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('async function firstRunBoot');
+  assert.ok(start > -1, 'firstRunBoot vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /catch\s*(\([^)]*\))?\s*\{\s*return;?\s*\}/,
+    'the fetch failure path no longer returns without opening anything');
+  assert.ok(body.indexOf('catch') < body.indexOf('frOpen'),
+    'frOpen is now reachable before the failure has been ruled out');
+  assert.match(body, /state\.done\s*&&\s*!force/,
+    'the done flag no longer decides whether to show this, so it shows every launch');
+});
+
+test('the first-run buttons are ASSIGNED, not accumulated', () => {
+  /**
+   * ⚠️ Continue means four different things across four steps, and on step 4 it
+   * means one of three. `addEventListener` on a button whose meaning changes
+   * leaves every previous meaning still bound, so Back-then-Continue fires two
+   * of them — measured as "advanced two steps at once" the first time it was
+   * clicked through.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function frActions');
+  assert.ok(start > -1, 'frActions vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /\.onclick\s*=/, 'frActions no longer assigns the handler');
+  assert.ok(!/addEventListener/.test(body),
+    'frActions adds listeners to buttons whose meaning changes on every step');
+});
+
+test('the fleet screen never shows fewer names than the number in its own heading', () => {
+  /**
+   * ⚠️ MEASURED ON THE FIRST LIVE CALL OF THE ROUTE: this machine reports 13
+   * agents and the engine sends the first 12. Twelve chips under the heading
+   * "You already have 13 agents here", with nothing accounting for the
+   * thirteenth, is a screen that does not add up in front of somebody who is
+   * being asked to believe it can see their fleet.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('function frPaintFleet');
+  assert.ok(start > -1, 'frPaintFleet vanished');
+  let d = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
+  }
+  const body = script.slice(start, end);
+  assert.match(body, /count\s*>\s*names\.length/,
+    'the heading count and the list length are no longer reconciled, so a fleet larger '
+    + 'than the twelve names the engine sends renders as a heading nobody can verify');
+  // ⚠️ No `|more` alternative here. It used to have one, and `frPaintFleet`
+  // contains the substring "more" in its own `fr-more` class name -- so the
+  // alternation passed even with the reconciliation deleted.
+  assert.match(body, /\(count - names\.length\)/,
+    'nothing computes how many names were not shown, so "and N more" cannot be right');
+
+  // And the fork is only offered when the engine could actually count.
+  assert.match(body, /path === 'adopt'/);
+  assert.match(body, /path === 'create'/);
+  assert.ok(body.indexOf('could not see what is on this computer') > -1,
+    'the unknown path no longer says why it is not choosing, so it quietly picks one');
+});
+
+test('the "we could not remember that" message lives outside the step panes', () => {
+  /**
+   * ⚠️ Skip is on ALL FOUR steps, and this message started inside step 4's pane
+   * — so somebody who skipped from the welcome screen, on a machine where the
+   * flag would not stick, was told nothing at all: the sentence was written into
+   * a hidden div. Found by clicking Skip from step 1 rather than by reading it.
+   */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const forgot = raw.indexOf('id="fr-forgot"');
+  assert.ok(forgot > -1, 'the element the failure message is written into vanished');
+
+  /**
+   * ⚠️ TAG-DEPTH SCANNED, NOT INDEX-COMPARED. The first version of this
+   * assertion took the first `</div>` after `id="fr-fleet"` as the end of the
+   * pane -- but that tag closes `fr-fleet` itself, so anything placed after it
+   * and still inside the pane scored as "outside". Mutation-tested by genuinely
+   * moving the element back in: the check passed, which is the whole failure
+   * mode this file keeps finding. It now walks the tags.
+   */
+  const endOf = (openIdx) => {
+    let depth = 0;
+    const tag = /<(\/?)div\b|\/>/g;
+    tag.lastIndex = raw.lastIndexOf('<div', openIdx);
+    let m;
+    while ((m = tag.exec(raw))) {
+      if (m[0] === '/>') continue;
+      depth += m[1] ? -1 : 1;
+      if (depth === 0) return m.index;
+    }
+    return -1;
+  };
+  const pane4 = raw.indexOf('id="fr-pane-4"');
+  const pane4End = endOf(pane4);
+  assert.ok(pane4End > pane4, 'could not find the end of the step-4 pane');
+  assert.ok(forgot < pane4 || forgot > pane4End,
+    'the completion-failure message is back inside a pane that is hidden on three of four '
+    + 'steps, so skipping from step 1 says nothing at all');
+
+  // ⚠️ And it is inside the body it has to be visible in, not floating loose
+  // after the action bar where no step would show it either.
+  const bodyStart = raw.indexOf('class="fr-body"');
+  assert.ok(forgot > bodyStart && forgot < endOf(bodyStart),
+    'the failure message left the panel body');
+  assert.match(raw.slice(forgot - 200, forgot + 200), /role="alert"/,
+    'the one message somebody must not miss is no longer announced');
+
+  /**
+   * ⚠️ MATCHED AGAINST `frFinish`, NOT AGAINST THE WHOLE SCRIPT. The first
+   * version searched the entire `<script>` body -- and `frGo` also touches
+   * `fr-forgot` (it clears it on every step change), so deleting the write from
+   * `frFinish` outright left this green. Every other assertion in this block
+   * brace-matches the function first; this one did not, which is exactly how a
+   * test ends up guarding nothing.
+   */
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const fStart = script.indexOf('async function frFinish');
+  assert.ok(fStart > -1, 'frFinish vanished');
+  let fd = 0; let fEnd = -1;
+  for (let k = script.indexOf('{', fStart); k < script.length; k += 1) {
+    if (script[k] === '{') fd += 1;
+    else if (script[k] === '}') { fd -= 1; if (fd === 0) { fEnd = k + 1; break; } }
+  }
+  assert.ok(fEnd > -1, 'could not find the end of frFinish');
+  assert.match(script.slice(fStart, fEnd), /getElementById\('fr-forgot'\)/,
+    'frFinish no longer writes the failure anywhere');
+});
+
+/* ---------------------------------------------------------------------------
+   The two first-run render functions, RUN rather than grepped.
+
+   ⚠️ The plan for this branch promised `pageFunction` tests on the render
+   functions and only `frCheckRow` got one; the rest were regex-over-source
+   assertions, which this file's own header says are not coverage of behaviour.
+   These run the real functions against real payload shapes.
+--------------------------------------------------------------------------- */
+
+/** A fake DOM just big enough for the two painters. */
+function firstRunHarness(name, state) {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+    const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  const realEsc = pageFunction('esc');
+  const realRow = pageFunction('frCheckRow',
+    'const esc = ' + realEsc.toString() + ';\n' + tables);
+
+  const els = {};
+  const prelude = `
+    const esc = ${realEsc.toString()};
+    ${tables}
+    const frCheckRow = ${realRow.toString()};
+    const __els = {};
+    const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '' }) };
+    let FR = ${JSON.stringify(state.FR)};
+    let FR_MACHINE = ${JSON.stringify(state.FR_MACHINE === undefined ? null : state.FR_MACHINE)};
+    let __actions = null;
+    function frActions(primary, alt) { __actions = { primary: primary.label, alt: alt && alt.label }; }
+    function frGo() {}
+    function frFinish() {}
+    function frRecheck() {}
+    function openCreate() {}
+    function showTab() {}
+    globalThis.__els = __els;
+    globalThis.__actions = () => __actions;
+  `;
+  const fn = pageFunction(name, prelude);
+  fn();
+  return { els: globalThis.__els, actions: globalThis.__actions() };
+}
+
+test('an unrecognised subscription answer never renders as "you have none"', () => {
+  /**
+   * ⚠️ THE ONE SENTENCE `engine/subscription.js` SAYS MUST NOT BE SHOWN TO
+   * SOMEBODY WE COULD NOT READ. The dispatcher's first version fell through to
+   * the negative for anything it did not recognise -- a fourth state, a
+   * truncated response, a typo -- which tells a paying customer to go and buy a
+   * second subscription, on the screen that decides whether they keep this.
+   */
+  for (const sub of [
+    { state: 'unknown', because: 'a plan we do not recognise' },
+    { state: 'something-new' },
+    { state: '' },
+    null,
+    undefined,
+  ]) {
+    const { els } = firstRunHarness('frPaintSubscription', { FR: { subscription: sub } });
+    const out = els['fr-sub'].innerHTML;
+    assert.ok(!/No Claude subscription is connected/.test(out),
+      `subscription state ${JSON.stringify(sub)} rendered as the flat negative`);
+    assert.match(out, /fr-check unknown/,
+      `subscription state ${JSON.stringify(sub)} did not render as "we could not tell"`);
+  }
+
+  // ⚠️ THE CONTROL. If nothing can produce the negative any more, the assertions
+  // above are vacuous — so the one state that SHOULD produce it must.
+  const { els } = firstRunHarness('frPaintSubscription', { FR: { subscription: { state: 'none' } } });
+  assert.match(els['fr-sub'].innerHTML, /No Claude subscription is connected/,
+    'nothing renders the negative any more, so the assertions above prove nothing');
+});
+
+test('the fleet screen renders every path, and a broken payload lands on "we could not see"', () => {
+  const adopt = firstRunHarness('frPaintFleet', {
+    FR: { path: 'adopt', fleetCount: 13, fleetNames: ['Splinter', 'Angel'] },
+  });
+  assert.match(adopt.els['fr-title'].textContent, /13 agents/);
+  // ⚠️ 13 counted, 2 named. The difference has to be on screen or the heading is
+  // a claim the list contradicts.
+  assert.match(adopt.els['fr-fleet'].innerHTML, /and 11 more/,
+    'eleven agents went unaccounted for under a heading that counted them');
+  assert.match(adopt.els['fr-fleet'].innerHTML, /nothing to import/i);
+
+  const create = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+  });
+  assert.match(create.els['fr-title'].textContent, /first agent/i);
+
+  /**
+   * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
+   * board is built from `tmux`, and guessing "make your first agent" at somebody
+   * with a running fleet is the version of this mistake that looks broken.
+   */
+  for (const FR of [
+    null,
+    {},
+    { path: 'unknown', fleetCount: null, fleetNames: [] },
+    { path: 'adopt' },                                   // names the path, but no count
+    { path: 'adopt', fleetCount: 'lots', fleetNames: [] },
+    { path: 'nonsense', fleetCount: 3, fleetNames: [] },
+  ]) {
+    const got = firstRunHarness('frPaintFleet', { FR });
+    const title = got.els['fr-title'].textContent;
+    const body = got.els['fr-fleet'].innerHTML;
+    /**
+     * ⚠️ THE ASSERTION THE COMMENT ALWAYS CLAIMED. This loop used to check only
+     * that SOMETHING rendered -- a non-empty heading, a non-empty body, a
+     * button -- and `{ path: 'adopt' }` satisfied all three while rendering
+     * "You already have undefined agents here". The comment above said every
+     * malformed shape lands on "we could not see"; nothing tested it, and one
+     * of the shapes in its own list did not.
+     */
+    assert.match(title, /could not see/i,
+      `payload ${JSON.stringify(FR)} rendered a fork rather than "we could not see": "${title}"`);
+    assert.ok(!/undefined|NaN|null/.test(title + body),
+      `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
+    assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
+    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+      `payload ${JSON.stringify(FR)} left the person short of a way onward`);
+  }
+
+  // Both ways out are always offered, whichever path it picked.
+  for (const path of ['adopt', 'create', 'unknown']) {
+    const got = firstRunHarness('frPaintFleet', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
+    assert.ok(got.actions.primary && got.actions.alt,
+      `the ${path} path offers only one door`);
+  }
+});
+
+test('step 4 does not promise a working agent over a check screen that disagreed', () => {
+  /**
+   * ⚠️ THREE CASES, and the first version of this collapsed them to two. "We
+   * never checked" is not "we checked and it was fine", and an `unknown` row is
+   * not a clean one — filtering only `attention` dropped three "we could not
+   * check" findings and made the promise anyway.
+   */
+  const clean = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: { checks: [{ key: 'sleep', state: 'ok', title: 'fine', detail: 'fine' }], attention: 0, unknown: 0 },
+  });
+  assert.ok(!/still outstanding|did not get to look/.test(clean.els['fr-fleet'].innerHTML),
+    'warned about a machine that checked out clean');
+
+  const snagged = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: {
+      checks: [
+        { key: 'installed', state: 'attention', title: 'Claude Code is not where we expected it', detail: 'x' },
+        { key: 'restart', state: 'unknown', title: 'We could not tell whether your agents will start themselves', detail: 'x' },
+      ],
+      attention: 1,
+      unknown: 1,
+    },
+  });
+  const out = snagged.els['fr-fleet'].innerHTML;
+  assert.match(out, /still outstanding/, 'made the promise over the top of a real finding');
+  assert.match(out, /Claude Code is not where we expected it/);
+  assert.match(out, /We could not tell whether your agents/,
+    'the "we could not check" rows were dropped, so only two of the three states are honoured');
+
+  const never = firstRunHarness('frPaintFleet', {
+    FR: { path: 'create', fleetCount: 0, fleetNames: [] },
+    FR_MACHINE: null,
+  });
+  assert.match(never.els['fr-fleet'].innerHTML, /did not get to look/,
+    'a person who never saw the check screen was told everything is in place');
+});
+
+test('the first-run routes answer, and the completion route reports what stuck', async () => {
+  /**
+   * ⚠️ THE ONLY NEW ROUTE THAT WRITES HAD NO SERVER TEST. The browser harness
+   * stubs `/api/first-run/complete`, so the server's own `ok ? 200 : 500`
+   * read-back decision -- the thing that turns "we wrote it" into "it is
+   * actually there" -- was exercised nowhere at all.
+   */
+  const firstrun = require('./engine/firstrun');
+  const fsExists = (p) => { try { fs.accessSync(p); return true; } catch { return false; } };
+
+  const got = await req('/api/first-run');
+  assert.match(got.type, /application\/json/);
+  const state = JSON.parse(got.body);
+  for (const field of ['done', 'fleetKnown', 'path', 'subscription']) {
+    assert.ok(field in state, `/api/first-run stopped answering ${field}, which the screen reads`);
+  }
+  assert.ok(['adopt', 'create', 'unknown'].includes(state.path),
+    `the screen has no branch for path "${state.path}"`);
+  assert.ok(['connected', 'none', 'unknown'].includes(state.subscription.state),
+    `the screen has no branch for subscription "${state.subscription.state}"`);
+
+  /**
+   * ⚠️ A GET MUST NOT WRITE THE FLAG, and the first version of this could not
+   * tell. It read `done` on one GET and compared a later GET to it — but never
+   * established that `done` started FALSE. If reading wrote the flag, the very
+   * first GET in this test had already flipped it, so every subsequent read was
+   * `true` and the comparison passed.
+   *
+   * Proven, not argued: with the route changed to call `firstrun.complete()` on
+   * every read — i.e. loading the page switches off onboarding, the exact
+   * failure this comment names — the whole file stayed green.
+   *
+   * So it asserts the control, and it asks the DISK rather than the route.
+   */
+  assert.equal(state.done, false,
+    'this machine has already been through first run, so this test cannot tell whether a '
+    + 'GET writes the flag — the control is gone and everything below it is vacuous');
+  assert.ok(!fsExists(firstrun.FLAG), 'the flag file exists before any write was asked for');
+
+  await req('/api/first-run');
+  await req('/api/first-run');
+  assert.ok(!fsExists(firstrun.FLAG),
+    'reading the first-run state WROTE the completion flag, so loading the page switches '
+    + 'off onboarding');
+  assert.equal(JSON.parse((await req('/api/first-run')).body).done, false,
+    'reading the first-run state changed it');
+
+  // The write, through the real route, against the sandboxed store.
+  const wrote = await req('/api/first-run/complete', {
+    method: 'POST',
+    headers: { origin: base.replace(/\/$/, '') },
+  });
+  assert.match(wrote.type, /application\/json/);
+  assert.equal(wrote.status, 200, `the completion route refused: ${wrote.body}`);
+  assert.equal(JSON.parse(wrote.body).done, true);
+
+  // ⚠️ AND IT STUCK, asked of the route rather than of the write. This is the
+  // whole point of the read-back: a flag that did not persist means onboarding
+  // returns on the next launch over a board somebody has already set up.
+  assert.equal(JSON.parse((await req('/api/first-run')).body).done, true,
+    'the completion route answered 200 for a flag that is not there when you ask again');
+});
+
+test('the completion route is a write, so another website cannot fire it', async () => {
+  // ⚠️ Inherits the cross-site guard by being a POST. Without it, any page you
+  // visit could switch off somebody's onboarding on their own machine.
+  const cross = await req('/api/first-run/complete', {
+    method: 'POST',
+    headers: { origin: 'https://example.com' },
+  });
+  assert.equal(cross.status, 403, 'a cross-site POST was accepted');
+  assert.match(cross.type, /application\/json/);
 });
