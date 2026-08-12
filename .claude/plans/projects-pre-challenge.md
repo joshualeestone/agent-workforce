@@ -2,23 +2,23 @@
 pre_challenge: true
 method: challenge-loop
 branch: projects
-diff_hash: 2f514f0fec7c2bcf2edd95333241c4de9c978e05f448df5c12228ca0c7f4e0ee
+diff_hash: fef552e227165099eeaa8161dd85abc69c13c41379d35d1b44a7d4358050a2d7
 subdir_audit: passed
 timestamp: 2026-08-12T02:21:41Z
-iterations: 11
+iterations: 12
 converged: false
 ---
 
 ## [CHALLENGE-LOOP] Summary
 
-**Iterations:** 11
+**Iterations:** 12 (11 review rounds, plus a merge round against `main`)
 **Converged:** No. Stopped at iteration 11 on the orchestrator's (Splinter's)
 explicit direction and a context ceiling, not because findings stopped. Iteration
 11 found a BLOCKER. The honest reason is recorded in full below, in the same
 shape as PR #28.
-**Total findings:** 61 across 11 iterations (6 BLOCKERs, 27 WARNINGs, 12
+**Total findings:** 65 across 12 rounds (7 BLOCKERs, 29 WARNINGs, 13
 CONVENTIONs, 16 NITs)
-**Fixed:** 59 | **Deferred:** 2
+**Fixed:** 63 | **Deferred:** 2
 
 Iterations 1-7 ran in earlier sessions; their findings and fixes are recorded in
 the commits named below. Iterations 8-11 ran in this session and are detailed in
@@ -159,6 +159,33 @@ Commit `6183a24`. **The BLOCKER is a regression from iteration 10.**
 - [NIT] `pjBrowse` had no generation guard while both siblings do; the
   socket-scope caveat on `tmuxSaidNoServer` --> FIXED
 
+#### Iteration 12 — the merge round (main, first-run #28)
+
+Not a review round: `main` moved underneath this branch and the merge produced a
+defect that **exists in neither branch alone**, which is worth recording because
+no per-branch process could have found it.
+
+- [BLOCKER] docs/browser-checks — with first-run merged, a board with no
+  completion flag opens the setup wizard over everything. The projects check
+  reported `✔ 1-empty` and `✔ 2-list` while both screenshots were pictures of
+  "Welcome to Agent Workforce", then hung clicking a row behind a modal. Two
+  states passed while photographing another screen — and those images are this
+  PR's evidence --> FIXED: the world is arranged (first-run marked done in the
+  sandbox) AND every shot now asserts the projects panel is visible and the
+  wizard is not.
+- [WARNING] my first fix invented the flag's shape (`{done, at}`; the producer
+  writes `completedAt`), so the wizard opened anyway --> FIXED by calling the
+  engine's own `complete()`. This is the branch's signature defect committed
+  inside the check built against it.
+- [WARNING] my visibility guard used `offsetParent !== null`, which is always
+  null for a `position: fixed` overlay, so it computed "wizard not visible"
+  while the wizard filled the screen --> FIXED.
+- [CONVENTION] `engine/firstrun.test.js` arrived from main with a hand-typed
+  pane line; the lint caught it on the first run after the merge --> FIXED.
+
+Both of my own fixes were found the same way: by looking at the picture the
+check had just called green.
+
 ### Deferred
 
 | # | Finding | Reasoning |
@@ -168,7 +195,7 @@ Commit `6183a24`. **The BLOCKER is a regression from iteration 10.**
 
 ### Verification
 
-- **469 tests green** (`node --test engine/*.test.js *.test.js`), up from 444.
+- **522 tests green** (`node --test engine/*.test.js *.test.js`) after the merge with `main`; 469 before it, up from 444 at the start of this session.
 - **Every fix in iterations 8-11 that could be mutation-tested was**: the fix was
   reverted, the new test confirmed failing, and the fix restored. Three of them
   failed that check on the first attempt and were rewritten — recorded above
