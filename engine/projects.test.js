@@ -178,13 +178,56 @@ test('a symlinked folder reports the path it really resolves to', () => {
 // Members — the display-name trap
 // ---------------------------------------------------------------------------
 
+// ⚠️ THIS FIXTURE ONCE INVENTED ITS OWN FIELDS, and that is how the worst
+// defect on this branch survived six rounds of review. It carried `name`,
+// `state` and `because` — which the routes' actual roster, `paneRoster()`, has
+// NEVER had — so every test here measured a world that does not exist while
+// production rendered machine names, a permanently-zero "needs you" count, and
+// a bare "Can't tell" with no reason. A fixture is a claim about the real
+// shape; measuring against the wrong world does not just fail to find the bug,
+// it manufactures confidence. The contract test below pins the shape to what
+// the status engine really produces, so this fixture cannot drift again.
 const ROSTER = [
-  { sessionName: 'mara', name: 'Mara', state: 'working', because: 'it is doing something' },
-  // ⚠️ The fixture that matters: display name ≠ session name. Matching members
-  // on `name` passes every test built from agents this app created, and fails
-  // for exactly the pre-existing fleet the product exists to manage.
-  { sessionName: 'claudebot', name: 'Splinter', state: 'needs_you', because: 'it is asking something' },
+  { sessionName: 'mara', name: 'Mara', state: 'working', because: 'it is doing something', isNamedOurs: true },
+  // Display name ≠ session name, which is true for exactly the pre-existing
+  // fleet this product exists to manage.
+  { sessionName: 'claudebot', name: 'Splinter', state: 'needs_you', because: 'it is asking something', isNamedOurs: true },
 ];
+
+test('the fields this module reads are the fields the status engine really produces', () => {
+  // ⚠️ THE SEAM TEST. Both sides of it were green while disagreeing: the engine
+  // suite fed `describe` an invented shape, and the route suite stubbed tmux to
+  // `/bin/echo` so its roster was always null — so nothing anywhere asserted
+  // that what the server passes has the fields this module reads. It does not
+  // stub `describe`'s input; it builds a REAL board from a real pane listing
+  // and hands that to `describe`.
+  const status = require('./status');
+  try {
+    status.setPaneSource(() => [
+      'zeta-discord\t0.0\t2.1.212\t0\tWorking on something',
+      'yara-discord\t0.0\tnode\t0\tIdle',
+    ].join('\n'));
+    status.setPaneCapture(() => 'Worked for 1m 02s\n> \n');
+
+    const board = status.snapshot();
+    const card = board.agents.find((a) => a.sessionName === 'zeta');
+    assert.ok(card, 'the control: the fixture really produces a board');
+
+    for (const field of ['sessionName', 'name', 'state', 'because', 'isNamedOurs']) {
+      assert.ok(field in card, `describe reads \`${field}\`, and a real card must carry it`);
+    }
+
+    reset();
+    const p = projects.create({ name: 'Seam', folder: folder('seam'), agents: ['zeta'], roster: board.agents });
+    const member = projects.get(p.id, board.agents).agents[0];
+    assert.equal(member.present, true, 'a real card must resolve');
+    assert.equal(member.name, card.name, 'and the row speaks the name the board speaks');
+    assert.equal(member.state, card.state, 'and carries the state the board carries');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
 
 test('members are matched on the machine name and spoken as the display name', () => {
   reset();
@@ -370,7 +413,7 @@ test('a write that fails partway is reported, not thrown', () => {
   fs.chmodSync(dir, 0o555);
   try {
     const p = projects.create({ name: 'Readonly', folder: folder('readonly'), agents: ['readonly-agent'] });
-    const verdict = projects.syncAgent('readonly-agent', [{ sessionName: 'readonly-agent', name: 'readonly-agent' }]);
+    const verdict = projects.syncAgent('readonly-agent', [{ sessionName: 'readonly-agent', name: 'readonly-agent', isNamedOurs: true }]);
 
     if (verdict.state === projects.TOLD.TOLD && process.getuid && process.getuid() === 0) return;
     assert.equal(verdict.state, projects.TOLD.COULD_NOT);
@@ -588,15 +631,15 @@ test('a name that merely NORMALISES to a real agent does not write that agent’
   const before = fs.readFileSync(file, 'utf8');
 
   projects.create({ name: 'Sneak', folder: folder('sneak'), agents: ['An.gel'] });
-  const verdict = projects.syncAgent('An.gel', [{ sessionName: 'angel', name: 'Angel' }]);
+  const verdict = projects.syncAgent('An.gel', [{ sessionName: 'angel', name: 'Angel', isNamedOurs: true }]);
 
   assert.equal(verdict.state, projects.TOLD.COULD_NOT);
   assert.match(verdict.because, /exactly this name/);
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'the real agent’s boot file is untouched');
 
   // The control: the EXACT name is permitted, or the gate is just "refuse".
-  projects.addAgent(projects.readAll()[0].id, 'angel', [{ sessionName: 'angel', name: 'Angel' }]);
-  const ok = projects.syncAgent('angel', [{ sessionName: 'angel', name: 'Angel' }]);
+  projects.addAgent(projects.readAll()[0].id, 'angel', [{ sessionName: 'angel', name: 'Angel', isNamedOurs: true }]);
+  const ok = projects.syncAgent('angel', [{ sessionName: 'angel', name: 'Angel', isNamedOurs: true }]);
   assert.equal(ok.state, projects.TOLD.TOLD);
   assert.ok(fs.readFileSync(file, 'utf8').includes('You are Angel, and this is your job.'));
 });
@@ -628,7 +671,7 @@ test('an agent on no projects has the block removed, not replaced with a note', 
   reset();
   const dir = agent('lonely', '# Lonely\n\nYou are a test agent.\n\n## House rules\n\nNo em dashes.\n');
   const file = path.join(dir, 'CLAUDE.md');
-  const roster = [{ sessionName: 'lonely', name: 'Lonely' }];
+  const roster = [{ sessionName: 'lonely', name: 'Lonely', isNamedOurs: true }];
   const p = projects.create({ name: 'Brief', folder: folder('brief'), agents: ['lonely'], roster });
   projects.syncAgent('lonely', roster);
   assert.ok(fs.readFileSync(file, 'utf8').includes(projects.BLOCK_START), 'the control: it was there');
@@ -648,7 +691,7 @@ test('an agent with no instruction file is not given one', () => {
   // is not a thing to create because somebody added a project.
   const dir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'bare');
   fs.mkdirSync(dir, { recursive: true });
-  const roster = [{ sessionName: 'bare', name: 'bare' }];
+  const roster = [{ sessionName: 'bare', name: 'bare', isNamedOurs: true }];
   projects.create({ name: 'Bare', folder: folder('bare-project'), agents: ['bare'], roster });
 
   const verdict = projects.syncAgent('bare', roster);
@@ -775,4 +818,25 @@ test('seeing an agent upgrades a "never seen" record rather than leaving it wron
 
   const gone = projects.get(p.id, []).agents[0];
   assert.match(gone.because, /cannot see this agent .* right now/, 'and it no longer claims we never have');
+});
+
+test('a session that merely shares a name is not permission to write', () => {
+  reset();
+  // ⚠️ `paneRoster` returns one entry per session for EVERY pane on the
+  // machine, including a plain `tmux new -s notes` shell. So a session that
+  // happens to share a name was enough to rewrite that agent's boot file --
+  // the most powerful write in the product -- while Remove gates the equivalent
+  // destructive action on `isNamedOurs`.
+  const dir = agent('borrowed', '# Borrowed\n\nYou are a test agent.\n');
+  const file = path.join(dir, 'CLAUDE.md');
+  const before = fs.readFileSync(file, 'utf8');
+  projects.create({ name: 'Borrowed', folder: folder('borrowed-project'), agents: ['borrowed'] });
+
+  const untied = projects.syncAgent('borrowed', [{ sessionName: 'borrowed', name: 'borrowed', isNamedOurs: false }]);
+  assert.equal(untied.state, projects.TOLD.COULD_NOT);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'an untied session writes nothing');
+
+  // The control: the tied card IS permitted, or the gate is just "refuse".
+  const tied = projects.syncAgent('borrowed', [{ sessionName: 'borrowed', name: 'borrowed', isNamedOurs: true }]);
+  assert.equal(tied.state, projects.TOLD.TOLD);
 });

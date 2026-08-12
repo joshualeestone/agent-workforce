@@ -37,6 +37,13 @@ process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
 
+// ⚠️ WITH `/bin/echo` STANDING IN FOR TMUX, THE ROSTER IS ALWAYS NULL — so
+// every route test below ran with "we could not look" and NOT ONE of them ever
+// asserted a present member, a display name, a state, or `agentsUnreadable` in
+// either direction. That blind spot is half of why the routes described members
+// against `paneRoster()` (no name, no state) for this whole branch. The test at
+// the bottom of this file stubs a REAL pane listing so the seam is exercised.
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { start, server } = require('./server');
@@ -450,4 +457,35 @@ test('creating a project reports the instruction-write verdicts as well', async 
   assert.equal(res.status, 200);
   assert.equal(json(res).told[0].state, projects.TOLD.COULD_NOT);
   assert.equal(json(res).told[0].agent, 'nobody-here');
+});
+
+test('with a real board, a member row carries the display name and state', async () => {
+  reset();
+  // ⚠️ The other half of the seam. `/bin/echo` stands in for tmux everywhere
+  // else in this file, which makes the roster permanently null -- so the routes
+  // could describe members against a shape that has no display name at all and
+  // every test here still passed. This one supplies a real pane listing.
+  const status = require('./engine/status');
+  try {
+    status.setPaneSource(() => [
+      'zeta-discord\t0.0\t2.1.212\t0\tWorking on something',
+    ].join('\n'));
+    status.setPaneCapture(() => 'Worked for 1m 02s\n> \n');
+
+    const made = json(await post('/api/projects', {
+      name: 'Seam', folder: folder('seam-route'), agents: ['zeta'],
+    })).project;
+
+    const member = made.agents[0];
+    assert.equal(member.present, true, 'a real card resolves through the route');
+    assert.ok(member.name, 'the row has a display name to speak');
+    assert.ok(member.state, 'and a state to report');
+    assert.notEqual(member.state, undefined);
+
+    const list = json(await req('/api/projects'));
+    assert.equal(list.agentsUnreadable, false, 'and the list says the look succeeded');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
 });

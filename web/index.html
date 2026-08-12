@@ -1301,7 +1301,13 @@ function showTab(tab) {
   // and walking away by the tab bar switched the refresh off for the rest of
   // the session, which is the exact stall the back button was fixed for. One
   // way out was covered and the other was not.
-  if (tab !== 'projects') { pjCloseConfirm(); return; }
+  if (tab !== 'projects') {
+    pjCloseConfirm();
+    // A note about what a removal could not reach describes a moment, not a
+    // state; leaving it up outlives the thing it is about.
+    document.getElementById('pj-list-msg').textContent = '';
+    return;
+  }
   pjView(PJ_CURRENT ? 'one' : 'list');
   loadProjects();
 }
@@ -1405,6 +1411,11 @@ function openDetail(sessionName) {
 async function paintAgentProjects(sessionName) {
   const field = document.getElementById('d-projects-field');
   field.hidden = true;
+  // ⚠️ Takes a generation like `loadProjects` does. It is the second writer of
+  // the same two globals, and it had no guard -- so its response could land
+  // after a newer read and roll the list back. A new sibling does not inherit
+  // the guard; it has to be given it.
+  const gen = ++PJ_GEN;
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
@@ -1417,6 +1428,7 @@ async function paintAgentProjects(sessionName) {
     // identically to one that is on none -- this function's own docstring says
     // "we have not looked" must not render as "it is on none", and the 500 path
     // was exactly that failure.
+    if (gen !== PJ_GEN) return;
     if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'unreadable');
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
@@ -3439,9 +3451,24 @@ document.getElementById('pj-one-agents').addEventListener('click', async (e) => 
 });
 
 function pjCloseConfirm() {
-  document.getElementById('pj-one-confirm').hidden = true;
-  document.getElementById('pj-one-remove').hidden = false;
+  const box = document.getElementById('pj-one-confirm');
+  const wasOpen = !box.hidden;
+  const opener = document.getElementById('pj-one-remove');
+  box.hidden = true;
+  opener.hidden = false;
+  // ⚠️ Focus goes BACK to the control that opened it, the way the agent-removal
+  // modal's `closeRemoveModal` does. Hiding the container while it held focus
+  // dropped the keyboard user to <body> with nothing to return to.
+  if (wasOpen && document.activeElement === document.body) opener.focus();
 }
+
+// ⚠️ Escape keeps the project, like the agent modal. The justification for this
+// control is "same friction, same reason"; the ways OUT of it should match too.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('pj-one-confirm').hidden) return;
+  pjCloseConfirm();
+});
 
 document.getElementById('pj-one-remove').addEventListener('click', () => {
   const p = pjById(PJ_CURRENT);

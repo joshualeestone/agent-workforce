@@ -497,21 +497,6 @@ function findBlock(text) {
 }
 
 /**
- * Replace the managed block in some instruction text, leaving everything else
- * exactly as it was.
- *
- * PURE and separately tested, because this is the function that can eat
- * somebody's words. The instruction file is described in its own module as
- * "the most powerful write in the product", and a projects feature has no
- * business being the thing that truncates one.
- *
- * ⚠️ Both markers must be present AND in the right order for a replacement.
- * A file containing only one of them — half a block, from an interrupted write
- * or a hand edit — gets a NEW block appended rather than having everything from
- * the surviving marker onward eaten. Losing text is worse than a duplicate
- * heading somebody can see and delete.
- */
-/**
  * Where the managed block IS, or null.
  *
  * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
@@ -536,21 +521,6 @@ function findBlock(text) {
  * it.
  */
 /**
- * Replace the managed block in some instruction text, leaving everything else
- * exactly as it was.
- *
- * PURE and separately tested, because this is the function that can eat
- * somebody's words. The instruction file is described in its own module as
- * "the most powerful write in the product", and a projects feature has no
- * business being the thing that truncates one.
- *
- * ⚠️ Both markers must be present AND in the right order for a replacement.
- * A file containing only one of them — half a block, from an interrupted write
- * or a hand edit — gets a NEW block appended rather than having everything from
- * the surviving marker onward eaten. Losing text is worse than a duplicate
- * heading somebody can see and delete.
- */
-/**
  * Where the managed block IS, or null.
  *
  * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
@@ -573,21 +543,6 @@ function findBlock(text) {
  *     person's own.
  * So: scan ends left to right, and take the first one that has a start before
  * it.
- */
-/**
- * Replace the managed block in some instruction text, leaving everything else
- * exactly as it was.
- *
- * PURE and separately tested, because this is the function that can eat
- * somebody's words. The instruction file is described in its own module as
- * "the most powerful write in the product", and a projects feature has no
- * business being the thing that truncates one.
- *
- * ⚠️ Both markers must be present AND in the right order for a replacement.
- * A file containing only one of them — half a block, from an interrupted write
- * or a hand edit — gets a NEW block appended rather than having everything from
- * the surviving marker onward eaten. Losing text is worse than a duplicate
- * heading somebody can see and delete.
  */
 /**
  * Where the managed block IS, or null.
@@ -731,11 +686,17 @@ function tellAgent(sessionName, projects, roster) {
     //
     // A roster of `null` means the caller could not look, which is not
     // permission -- it refuses, and says so, rather than writing on a guess.
-    if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName)) {
+    // ⚠️ `isNamedOurs` TOO, not just the name. `paneRoster` returns one entry
+    // per session for EVERY pane on the machine, including a plain
+    // `tmux new -s notes` shell -- so a session that merely shares a name was
+    // enough permission to rewrite that agent's boot file. Remove gates the
+    // equivalent destructive action on exactly this flag, and the status engine
+    // states the rule outright: every read keyed on a pane name needs it.
+    if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName && a.isNamedOurs === true)) {
       return {
         state: TOLD.COULD_NOT,
         because: Array.isArray(roster)
-          ? 'we cannot see an agent by exactly this name on this computer, so we did not write to anything'
+          ? 'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything'
           : 'we could not check which agents are running, so we did not write to anything',
       };
     }
@@ -792,7 +753,12 @@ function tellAgent(sessionName, projects, roster) {
       state: TOLD.COULD_NOT,
       because: /cannot be this short/.test(raw)
         ? 'taking this out would leave its instructions almost empty, so we left them alone'
-        : (raw || 'we could not write to this agent’s instructions'),
+        : (/larger than an instruction file should be/.test(raw)
+          // Same reason as the length case above: the file was already at the
+          // limit, and telling somebody their file is too big for a write they
+          // did not ask for aims the complaint at the wrong person.
+          ? 'its instructions are already at the size limit, so we left them alone'
+          : (raw || 'we could not write to this agent’s instructions')),
     };
   }
 }

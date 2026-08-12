@@ -49,20 +49,37 @@ const os = require('node:os');
  * `agentsUnreadable`; this helper exists for the routes that are answering a
  * question about the RECORD.
  */
+/**
+ * The agent CARDS a project row is described against, or null if we could not
+ * look.
+ *
+ * ⚠️ `snapshot()`, NOT `paneRoster()`, and this was a real shipped defect for
+ * the whole of this branch's life. `paneRoster` returns exactly
+ * `{sessionName, session, isNamedOurs}` — it has never carried `name`, `state`
+ * or `because`. `describe` reads all three, so every member row rendered with
+ * the machine name instead of the display name (`claudebot`, never
+ * `Splinter` — the ONE thing this feature's own docstring promises), with
+ * `state: undefined` showing as a bare "Can't tell", and with `needsYou` and
+ * `working` permanently zero, so the "1 needs you" the list exists to draw
+ * could never appear. It is visible in the committed screenshots.
+ *
+ * It survived six rounds of review because THE TEST FIXTURE INVENTED THE
+ * FIELDS. `ROSTER` in the engine suite carried `name`/`state`/`because`, which
+ * nothing in this repo produces, so the tests measured a world that does not
+ * exist. Measuring against the wrong world is worse than not measuring: it
+ * produces confidence.
+ *
+ * ⚠️ RETURNS NULL, NOT [], when the look fails. An empty array is a claim — it
+ * says we looked and there was nobody — and every consumer treats a non-array
+ * roster as "we could not look" and says so.
+ */
 function safeRoster() {
-  // ⚠️ RETURNS NULL, NOT []. It used to return an empty array, and an empty
-  // array is a claim: it says we looked and there was nobody. Measured
-  // consequence — creating a project while tmux could not be read recorded
-  // `everSeen[agent] = false` for a real agent, and NOTHING ever recomputes
-  // that, so the screen said "we have never seen an agent by this name on this
-  // computer" about a running agent, permanently. `tellAgent` likewise blamed
-  // the name instead of saying we could not check.
-  //
-  // The engine already knew the difference: every consumer treats a non-array
-  // roster as "we could not look" and says so. Returning [] meant no route ever
-  // reached that path, so the honest branch was dead code in production while
-  // its tests passed.
-  try { return paneRoster(); } catch { return null; }
+  try {
+    const board = snapshot();
+    return (board && board.agents) || [];
+  } catch {
+    return null;
+  }
 }
 
 // Reads the body of an upload. Capped, because an unbounded read on a local
@@ -1123,17 +1140,29 @@ const server = http.createServer((req, res) => {
       });
       return;
     }
+    const roster = safeRoster();
     try {
-      sendJson(res, 200, { projects: projects.list(paneRoster()) });
+      sendJson(res, 200, { projects: projects.list(roster), agentsUnreadable: roster === null });
     } catch {
       // The record is still readable when the roster is not, so the projects
       // themselves are served with every member marked unseen rather than the
       // whole page failing. `describe` already says `present: false` for each.
-      // `readAll` was already proven readable above, so this cannot throw for
-      // that reason — but it is the roster that failed, not the record, and the
-      // record is what this answers.
+      // ⚠️ WRAPPED TOO, though `readAll` was proven readable a few lines above.
+      // An external writer can corrupt the file in between, and this arm
+      // running unguarded is the same class as the crash the route below it was
+      // measured and fixed for — the process exiting on a plain read.
+      let listed;
+      try {
+        listed = projects.list(null);
+      } catch (err) {
+        sendJson(res, 500, {
+          error: String((err && err.message) || 'we cannot read your projects right now'),
+          projectsUnreadable: true,
+        });
+        return;
+      }
       sendJson(res, 200, {
-        projects: projects.list(null),
+        projects: listed,
         agentsUnreadable: true,
         because: 'we cannot read the agents on this computer right now, so we are not saying anything about how they are doing',
       });
@@ -1175,7 +1204,7 @@ const server = http.createServer((req, res) => {
         }
         let project = null;
         try { project = projects.get(made.id, roster); } catch { project = null; }
-        sendJson(res, 200, { project, told, id: made.id });
+        sendJson(res, 200, { project, told, id: made.id, agentsUnreadable: roster === null });
       })
       .catch((err) => sendJson(res, (err && err.code === 'UNREADABLE') ? 500 : 400,
         { error: String((err && err.message) || 'we could not read that request') }));
@@ -1246,7 +1275,12 @@ const server = http.createServer((req, res) => {
         try {
           for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
         } catch { /* reported by the row's own told verdict on the next read */ }
-        sendJson(res, 200, { project: projects.get(id, safeRoster()) });
+        let project = null;
+        try { project = projects.get(id, roster); } catch { project = null; }
+        // ⚠️ ONE roster read, and `agentsUnreadable` reported — PUT was the one
+        // route that read it twice and told nobody, so a failed second look
+        // came back asserting every member was unseen.
+        sendJson(res, 200, { project, agentsUnreadable: roster === null });
       })
       .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400), { error: String((err && err.message) || 'we could not read that request') }));
     return;
