@@ -158,20 +158,60 @@ test('asking for a state the engine does not actually produce is refused', () =>
   // A fixture that means to arrange "an agent asking a question" and arranges
   // `unknown` instead is vacuous — and a permanently-zero "needs you" count
   // survived a whole feature exactly that way.
+  const PROBE = 'zz-leak-probe';
   assert.throws(
-    () => fleet.install([fleet.agent('mara', { state: 'working', screen: 'Worked for 1m\n> \n' })]),
+    () => fleet.install([fleet.agent(PROBE, { state: 'working', screen: 'Worked for 1m\n> \n' })]),
     /asked for as “working” and the engine classified it “idle”/,
   );
-  // ⚠️ And it must leave the engine on real tmux afterwards, or one refused
-  // fixture silently poisons every test that runs after it.
-  const board = status.snapshot();
-  assert.ok(Array.isArray(board.agents), 'the refusal left a stub installed');
+
+  // ⚠️ AND IT MUST LEAVE NO STUB BEHIND, or one refused fixture silently
+  // poisons every test that runs after it — including the ones that fall
+  // through to the real fleet on purpose.
+  //
+  // ⚠️ TWO EARLIER VERSIONS OF THIS ASSERTION COULD NOT FAIL, which is worth
+  // recording because both looked like tests.
+  //   1. `Array.isArray(snapshot().agents)` — true in BOTH worlds. A leaked
+  //      stub also returns an array, of the leaked fleet.
+  //   2. Installing a SECOND fleet and checking the first one's agent is gone —
+  //      the second install overwrites the seam, so it reports the same thing
+  //      whether or not the first leaked. MEASURED: deleting `restore()` from
+  //      `install`'s catch left the suite green.
+  // The question is what the engine answers with NOTHING installed, so that is
+  // what is asked, and the control below proves the probe name is findable when
+  // a stub really is present.
+  let leaked;
+  try {
+    leaked = status.snapshot().agents.some((a) => a.sessionName === PROBE);
+  } catch {
+    // The real `sh('tmux', …)` path refusing is itself proof no stub answered:
+    // a stub would have returned its text and snapshot would not have thrown.
+    leaked = false;
+  }
+  assert.equal(leaked, false,
+    'the refused fixture left its panes installed, so every later test is '
+    + 'reading a fleet nobody arranged');
+
+  // THE CONTROL: with a stub genuinely installed, that same look DOES find the
+  // probe — so the `false` above is the seam being clear, not the look being
+  // blind.
+  const board = fleet.install([fleet.agent(PROBE, { state: 'idle' })]);
+  try {
+    assert.equal(status.snapshot().agents.some((a) => a.sessionName === PROBE), true,
+      'the control failed: this look cannot see a stub even when one is installed, '
+      + 'so the absence asserted above proves nothing');
+  } finally {
+    board.restore();
+  }
 });
 
 test('each state this fixture offers really produces that state', () => {
   // The screens are the only invented strings in the fixture. This is what
   // stops them meaning something else after a change to `classify`.
-  for (const state of ['working', 'needs_you', 'idle', 'rate_limited', 'stopped']) {
+  // ⚠️ Every state `agent()` advertises, including `unknown` — which is not a
+  // screen but the absence of one, and is the single most important to pin
+  // because it is this product's honest answer and the one a bug turns into
+  // something healthy-looking.
+  for (const state of ['working', 'needs_you', 'idle', 'rate_limited', 'stopped', 'unknown']) {
     const board = fleet.install([fleet.agent('mara', { state })]);
     try {
       assert.equal(board.card('mara').state, state);
@@ -198,8 +238,8 @@ test('a display name is derived by the real reader, not asserted by the fixture'
 test('a lookup that misses throws rather than handing back undefined', () => {
   const board = fleet.install([fleet.agent('mara', { state: 'idle' })]);
   try {
-    assert.throws(() => board.card('nobody'), /has no a card for “nobody”/);
-    assert.throws(() => board.row('nobody'), /has no a roster row for “nobody”/);
+    assert.throws(() => board.card('nobody'), /has no card for “nobody”/);
+    assert.throws(() => board.row('nobody'), /has no roster row for “nobody”/);
   } finally {
     board.restore();
   }
@@ -313,10 +353,19 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
 // The discipline: nothing may route around the fixture
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠️ DISCOVERED, never listed. The first version hardcoded the three root files
+ * and only globbed `engine/`, so a NEW root-level suite would have been outside
+ * both lints while the control below still passed — a rule that reads as
+ * covering the suite and silently does not cover its newest file. That is the
+ * same shape as every defect this file exists for, built into the guard itself.
+ *
+ * This mirrors `package.json`'s own test glob (`engine/*.test.js *.test.js`), so
+ * a file the suite runs is a file the lints scan, by construction.
+ */
 const TEST_FILES = [
-  'server.test.js',
-  'server.projects.test.js',
-  'fixture-discipline.test.js',
+  ...fs.readdirSync(__dirname)
+    .filter((f) => f.endsWith('.test.js')),
   ...fs.readdirSync(path.join(__dirname, 'engine'))
     .filter((f) => f.endsWith('.test.js'))
     .map((f) => path.join('engine', f)),
@@ -334,6 +383,12 @@ test('the suite has the test files this lint believes it has', () => {
   for (const rel of TEST_FILES) {
     assert.ok(fs.existsSync(path.join(__dirname, rel)), `${rel} is listed and missing`);
   }
+  // And the two the lints most need to be looking at, named, so a discovery
+  // change that quietly stopped finding them fails here rather than passing on
+  // a shorter list.
+  for (const rel of ['server.test.js', 'server.projects.test.js', 'engine/projects.test.js']) {
+    assert.ok(TEST_FILES.includes(rel), `${rel} is not being scanned by the lints`);
+  }
 });
 
 test('no test builds an agent card or a roster row by hand', () => {
@@ -345,11 +400,34 @@ test('no test builds an agent card or a roster row by hand', () => {
   //
   // Use `test-support/fleet` instead: `fleet.install([...]).agents` gives the
   // real cards, `.roster` the real rows.
+  // ⚠️ THE KEY ALONE, not the key inside a brace on the same line. The first
+  // version of this regex required the `{` and the `sessionName` to share a
+  // line, so the identical card written across four lines — which is how anyone
+  // writes a five-field object — sailed straight through. MEASURED: a planted
+  // multi-line card produced zero offenders and the lint reported green. A rule
+  // that only catches the formatting nobody uses reads as coverage and is not.
+  //
+  // `sessionName` with a colon is an object KEY. Reading one is `a.sessionName`
+  // and shorthand is `{ sessionName }` — neither has the colon, so neither is a
+  // false positive. A leading `.` is excluded for the same reason.
+  const KEY = /(^|[^.\w])sessionName\s*:/;
+
+  // ⚠️ THE POSITIVE CONTROL, and without it this whole test is unfalsifiable.
+  // The only assertion below is `offenders === []`, which is what a regex that
+  // matches NOTHING produces — so anyone "tidying" this pattern into something
+  // narrower gets a green suite and no rule. Assert presence before absence:
+  // prove the rule fires on a known-bad line, and does not fire on the two
+  // shapes that are legitimate.
+  assert.ok(KEY.test("  sessionName: 'mara',"), 'the rule stopped matching a hand-built card');
+  assert.ok(KEY.test("const c = { sessionName: 'mara', name: 'Mara' };"), 'the rule stopped matching a one-line card');
+  assert.ok(!KEY.test('assert.equal(member.sessionName, \'mara\');'), 'the rule now fires on reading a field');
+  assert.ok(!KEY.test('const { sessionName } = card;'), 'the rule now fires on shorthand');
+
   const offenders = [];
   for (const rel of TEST_FILES) {
     if (rel === 'fixture-discipline.test.js') continue;
     read(rel).split('\n').forEach((source, i) => {
-      if (/\{[^}]*\bsessionName\s*:/.test(source)) offenders.push(`${rel}:${i + 1}`);
+      if (KEY.test(source)) offenders.push(`${rel}:${i + 1}`);
     });
   }
   assert.deepEqual(offenders, [],
@@ -378,12 +456,30 @@ test('no test hand-types a tab-separated pane line', () => {
   // which is the same signature `isParseable` keys on. Hand-typing one means
   // maintaining column positions by counting tabs by eye, which has already
   // put a title in the claim column once.
-  const PANE_LINE = /\\t\d+\.\d+\\t/;
+  //
+  // ⚠️ BOTH SPELLINGS OF A TAB, and the first version only caught one. It read
+  // `/\\t\d+\.\d+\\t/`, which matches the two SOURCE CHARACTERS `\t` — so a line
+  // built with real tab characters, or assembled positionally with
+  // `[session, '0.0', cmd, …].join('\t')`, was outside the rule while the
+  // comment claimed to enforce "no hand-ordered pane line". That is the same
+  // defect the rule exists for, in the rule.
+  const PANE_LINE = /(\\t|\t)\d+\.\d+(\\t|\t)/;
+  // A positional join is a hand-ordered line whether or not the digits appear
+  // on the same source line, so it is refused by construction.
+  const POSITIONAL_JOIN = /\.join\((['"])(\\t|\t)\1\)/;
+
+  // The positive controls, for the same reason as the rule above.
+  assert.ok(PANE_LINE.test("'zz-discord\\t0.0\\t2.1.212\\t0\\t\\tt'"), 'the escaped-tab rule stopped matching');
+  assert.ok(PANE_LINE.test("'zz-discord\t0.0\t2.1.212'"), 'the real-tab rule stopped matching');
+  assert.ok(POSITIONAL_JOIN.test("[s, '0.0', cmd].join('\\t')"), 'the positional-join rule stopped matching');
+  assert.ok(!PANE_LINE.test("fleet.line({ session: 'zz-discord' })"), 'the rule now fires on the fixture itself');
+
   const offenders = [];
   for (const rel of TEST_FILES) {
     if (rel === 'fixture-discipline.test.js') continue;
     if (HAND_TYPED_PANE_LINES[rel] === null) continue;
-    const hits = read(rel).split('\n').filter((source) => PANE_LINE.test(source)).length;
+    const hits = read(rel).split('\n')
+      .filter((source) => PANE_LINE.test(source) || POSITIONAL_JOIN.test(source)).length;
     const allowed = HAND_TYPED_PANE_LINES[rel] || 0;
     if (hits > allowed) offenders.push(`${rel}: ${hits} hand-typed pane lines, ${allowed} allowed`);
     if (hits < allowed) {

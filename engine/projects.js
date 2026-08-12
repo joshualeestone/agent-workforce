@@ -219,10 +219,20 @@ function folderState(folder) {
 /**
  * Join a stored project to the agents actually on this machine.
  *
- * PURE, and takes the roster rather than fetching it, so the honest cases can
- * be tested against a fixture instead of against whatever tmux happens to be
+ * ⚠️ TAKES the roster rather than fetching it, so the honest cases can be
+ * tested against a fixture instead of against whatever tmux happens to be
  * running. The cases that matter are exactly the ones a live machine will not
  * reliably produce on demand.
+ *
+ * ⚠️ AND IT IS NOT PURE, though this paragraph called it that for three
+ * commits. It WRITES: when a live card contradicts an `everSeen: false`, the
+ * upgrade is persisted to `projects.json` right here, on a read. That is
+ * deliberate — the alternative is telling somebody "we have never seen an agent
+ * by this name" about one we are looking at — but a caller trusting the word
+ * PURE would be wrong about a read that touches the store. Bounded rather than
+ * chatty: it only writes when something actually needs upgrading, so the
+ * five-second poll does not rewrite the file every tick, and a failed write is
+ * swallowed because a record we cannot update is not a reason to fail a read.
  *
  * ⚠️ A member we cannot find comes back `present: false` and STAYS IN THE LIST.
  * Dropping it would tell the person "these are your agents" while quietly
@@ -517,9 +527,18 @@ function findBlock(text) {
  *     start, so a block is appended EVERY time and the file grows without bound
  *     until it outgrows the write limit and every save fails, including the
  *     person's own.
- * So: scan ends left to right, and take the first one that has a start before
- * it.
+ * So: pair the markers, and refuse rather than guess. `findBlock` scans STARTS
+ * left to right and takes the first one whose next marker is an END with no
+ * second START in between; a stranded marker on either side is skipped rather
+ * than paired across. Two well-formed blocks are AMBIGUOUS and refused outright
+ * — that refusal is the load-bearing half, and an earlier version of this
+ * paragraph described a "first end with a start before it" scan that appears
+ * nowhere in the file and does not mention the refusal at all.
+ *
+ * ⚠️ It documents `findBlock`, ABOVE — this block sat orphaned between the two
+ * functions, attached to neither.
  */
+
 /**
  * Replace the managed block in some instruction text, leaving everything else
  * exactly as it was.

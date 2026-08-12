@@ -23,10 +23,26 @@
  * All three are one shape: **a test measuring a world the producer does not
  * produce.** Measuring against the wrong world is worse than not measuring,
  * because it manufactures confidence. So the fix is not another comment. It is a
- * mechanism: this module is the only sanctioned way for a test to obtain a
- * fleet, and everything it hands back was built by the REAL producers —
- * `snapshot()` and `paneRoster()` — from a pane listing assembled out of
- * `PANE_COLUMNS` by NAME.
+ * mechanism: every fleet in the suite is described HERE, and everything this
+ * module hands back was built by the REAL producers — `snapshot()` and
+ * `paneRoster()` — from a pane listing assembled out of `PANE_COLUMNS` by NAME.
+ *
+ * ⚠️ SAID PRECISELY, because the first version of this paragraph claimed this is
+ * "the only sanctioned way for a test to obtain a fleet" and that is not true.
+ * There are two tiers, and only the first gets all four guarantees below:
+ *
+ *   - `install()` — the full fixture. Sets the seam, runs the real producers,
+ *     verifies its own arrangement, hands back strict cards and rows. Used where
+ *     a test asserts on what the board SAYS.
+ *   - `line()` alone — the pane listing only, for the ~19 places that install
+ *     the seam themselves because they need to change the answer between two
+ *     reads (tied when the plan looks, untied by the time the write happens) or
+ *     to have it throw. Those get guarantee 2 (named columns) and NOT 1, 3 or 4.
+ *
+ * That second tier is a real gap rather than a completed job, and the lint in
+ * `fixture-discipline.test.js` is scoped to what it actually enforces: no
+ * hand-typed pane line, no hand-built card. It does not claim every test goes
+ * through `install()`, because they do not.
  *
  * What that buys, concretely:
  *
@@ -250,13 +266,26 @@ const HOUSEKEEPING = new Set([
  * code cannot read a field the real producer will not give it without failing
  * the test on the spot, naming the producer and the field.
  */
+/**
+ * ⚠️ IT WRAPS NESTED OBJECTS TOO, and the first version did not while this
+ * paragraph already claimed it did. A card carries `context` and `profile`, and
+ * a top-level-only wrapper handed those back raw — so `card.context.pct` (the
+ * real field is `percent`) read `undefined` and passed, which is verbatim the
+ * failure this mechanism is for, one level down. Nested wrapping is memoised so
+ * `card.context === card.context` stays true; a fixture that broke identity
+ * would be a new way for a test to be wrong.
+ */
 function strict(value, producer) {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map((v) => strict(v, producer));
+  const nested = new Map();
   return new Proxy(value, {
     get(target, prop, receiver) {
       if (typeof prop === 'symbol' || prop in target || HOUSEKEEPING.has(prop)) {
-        return Reflect.get(target, prop, receiver);
+        const got = Reflect.get(target, prop, receiver);
+        if (got === null || typeof got !== 'object' || typeof prop === 'symbol') return got;
+        if (!nested.has(prop)) nested.set(prop, strict(got, `${producer}.${String(prop)}`));
+        return nested.get(prop);
       }
       throw new Error(
         `${producer} does not emit \`${String(prop)}\`. It emits: `
@@ -309,17 +338,31 @@ function install(specs, opts = {}) {
     throw err;
   }
 
-  const agents = wrap(board.agents, 'snapshot().agents');
-  const roster = wrap(status.paneRoster(), 'paneRoster()');
+  // ⚠️ INSIDE the same guard as `snapshot()`. Left outside it, a throw here
+  // would leave both seams installed for every test that runs afterwards — the
+  // restore guarantee this module advertises would be resting on the
+  // coincidence that `paneRoster` happens to refuse only on conditions
+  // `listPanes` already refused a few lines earlier.
+  let agents;
+  let roster;
+  try {
+    agents = wrap(board.agents, 'snapshot().agents');
+    roster = wrap(status.paneRoster(), 'paneRoster()');
+  } catch (err) {
+    restore();
+    throw err;
+  }
 
   return {
     agents,
     roster,
-    counts: board.counts,
+    // Wrapped for the same reason as the cards: `counts.needsyou` is not a
+    // field, `needsYou` is, and an unwrapped miss reads as zero.
+    counts: wrap(board.counts, 'snapshot().counts'),
     /** The real card for a name, or a throw. Never `undefined` — see below. */
-    card: (name) => found(agents, name, 'a card'),
+    card: (name) => found(agents, name, 'card'),
     /** The real roster row for a name, or a throw. */
-    row: (name) => found(roster, name, 'a roster row'),
+    row: (name) => found(roster, name, 'roster row'),
     /** A fresh snapshot, for a test that changes the world underneath. */
     snapshot: () => wrap(status.snapshot().agents, 'snapshot().agents'),
     restore,

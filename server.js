@@ -34,24 +34,23 @@ const projects = require('./engine/projects');
 const os = require('node:os');
 
 /**
- * The live agents, or none, without ever failing a projects request.
- *
- * ⚠️ `paneRoster` fails CLOSED by design — it throws when tmux cannot be asked,
- * because the realistic failure used to arrive as an empty roster and get
- * served as fact. That is right for the board, whose whole job is to say how
- * agents are. It is wrong for a project's own record, which is readable either
- * way: the members are still ours to list, and `describe` already marks every
- * one of them `present: false` with a reason when the roster is empty. So this
- * degrades to "we could not see them" rather than to "you have no projects".
- *
- * ⚠️ It is NOT a way of pretending the roster is empty. The one route that
- * reports fleet state alongside the list says so explicitly with
- * `agentsUnreadable`; this helper exists for the routes that are answering a
- * question about the RECORD.
- */
-/**
  * The agent CARDS a project row is described against, or null if we could not
  * look.
+ *
+ * ⚠️ A SECOND DOCBLOCK USED TO SIT ABOVE THIS ONE describing `paneRoster`'s
+ * fail-closed contract, left over from when this helper called it. It has not
+ * called it since the defect below was fixed, so the paragraph documented a
+ * function this code does not use, immediately above a paragraph saying so in
+ * capitals. Removed rather than reworded: an outlived sentence is the defect
+ * this file keeps finding, and keeping two is not better than keeping one.
+ *
+ * What survives from it, because it is still true of THIS helper: refusing is
+ * right for the board, whose job is to say how agents ARE, and wrong for a
+ * project's own record, which is readable either way — the members are still
+ * ours to list, and `describe` marks each one `present: false` with a reason.
+ * So this degrades to "we could not see them", never to "you have no projects",
+ * and the route that reports fleet state alongside the list says so explicitly
+ * with `agentsUnreadable` rather than pretending the roster is empty.
  *
  * ⚠️ `snapshot()`, NOT `paneRoster()`, and this was a real shipped defect for
  * the whole of this branch's life. `paneRoster` returns exactly
@@ -1130,10 +1129,16 @@ const server = http.createServer((req, res) => {
    * a boundary (§4, 2026-08-11). No response carries an access level, because
    * there are none, and a level that is not enforced is worse than none.
    *
-   * ⚠️ `paneRoster` THROWS when tmux cannot be asked, and that is deliberate
+   * ⚠️ `snapshot()` THROWS when tmux cannot be asked, and that is deliberate
    * upstream — the realistic failure used to arrive as an empty roster, which
    * here would mean answering "none of your agents are there" when the truth is
-   * "we could not look". So it is caught and reported as a failure to see.
+   * "we could not look". So `safeRoster` catches it and these routes report a
+   * failure to SEE, distinct from a failure to READ THE RECORD.
+   *
+   * (This named `paneRoster` until iteration 8. These routes describe members
+   * against `snapshot().agents` and have not called `paneRoster` since the
+   * display-name defect was fixed — the sentence outlived the code it was
+   * written about, which is this file's own recurring failure.)
    */
   if (pathname === '/api/projects' && (req.method === 'GET' || req.method === 'HEAD')) {
     // ⚠️ An unreadable projects FILE is answered as an error, never as an empty
