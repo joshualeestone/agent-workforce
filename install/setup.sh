@@ -188,20 +188,29 @@ ok
 # assumption into a fact, for free.
 export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
 
-# ---- claude -----------------------------------------------------------------
-# ⚠️ NOT AN ERROR IF MISSING, and this is the difference between "install failed"
-# and "you have one more thing to do". A brand-new Mac will not have Claude, and
-# telling that person the install failed is how we lose them at step one. The app
-# handles connecting; the installer only reports.
-step "Looking for Claude."
-if command -v claude >/dev/null 2>&1; then
-  info "found it"
-  CLAUDE_READY=yes
-else
-  info "not installed yet, which is fine. Kosmos will help you connect it."
-  CLAUDE_READY=no
-fi
-ok
+# ---- providers: deliberately NOT here -----------------------------------------
+# ⚠️ THE INSTALLER NEVER MENTIONS A PROVIDER BY NAME, AND THAT IS A RULE RATHER
+# THAN AN OMISSION. Decided with Josh, 2026-08-12.
+#
+# An earlier version of this file checked for Claude Code here and reported on
+# it. Harmless today, when Claude is the only option, and a trap the moment there
+# is a second one: the assumption spreads, and adding OpenAI then means either
+# bloating this one line toward 700MB or bolting on a separate mechanism.
+#
+# So this script installs the PLATFORM: a runtime, a terminal multiplexer, and
+# Kosmos. **Choosing a provider inside the app is what installs that provider**,
+# which is also the click that signs you into it.
+#
+# Three things that gets us:
+#   1. The terminal step drops to ~130MB instead of ~400MB. In a room of thirty
+#      people watching a black screen, that difference is the whole experience.
+#   2. The large download happens inside our UI, where a real progress bar can
+#      live, instead of in a terminal where silence reads as a hang.
+#   3. Nobody downloads a provider they will never use.
+#
+# ⚠️ What it costs, so nobody is surprised: the user is NOT finished when this
+# script finishes. The provider screen has to survive being quit and resumed
+# mid-download, because somebody will close the laptop.
 
 # ---- kosmos itself ----------------------------------------------------------
 step "Installing Kosmos."
@@ -223,8 +232,6 @@ step "Starting Kosmos."
 ok
 
 printf '\n  Kosmos is running.\n'
-if [ "$CLAUDE_READY" = "no" ]; then
-  printf '  Open it and it will walk you through connecting Claude.\n'
-fi
+printf '  Open it and it will walk you through connecting your AI account.\n'
 printf '  Your dashboard: http://127.0.0.1:4317\n\n'
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
