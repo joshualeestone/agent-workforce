@@ -116,6 +116,8 @@ uninstall() {
   for f in kosmos; do
     [ -e "$BIN_DIR/$f" ] && { info "removing $BIN_DIR/$f"; rm -f "$BIN_DIR/$f"; }
   done
+  # The icon goes too, or uninstall leaves a dead app that opens nothing.
+  [ -d "$HOME/Applications/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$HOME/Applications/Kosmos.app"; }
   # ⚠️ Deliberately NOT removed: the user's agents, their instruction files, and
   # anything under ~/work. Uninstalling the app must never delete somebody's
   # work, and an installer that cleans up too enthusiastically is worse than one
@@ -225,6 +227,93 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) info "note: add $BIN_DIR to your PATH to run 'kosmos' from anywhere" ;;
 esac
+
+# ---- the front door -----------------------------------------------------------
+# ⚠️ AN ICON IS HOW A NON-TECHNICAL PERSON OWNS SOFTWARE, and without one this
+# whole install produces a URL. Josh, 2026-08-12: "Typing some huge, super
+# technical-looking 127.0.0.1:4317 is super scary looking for a non-technical
+# person... Nobody will ever come back to this after the install essentially."
+# He is right, and it would have been the quiet reason the product got installed
+# once and never opened again.
+#
+# ⚠️ AND THIS DOES NOT REOPEN THE SETTLED "NO .app" DECISION. Requirements §122
+# ruled out a DOWNLOADABLE app, because an unsigned app that arrives from the
+# internet carries a quarantine attribute and Gatekeeper shows the "unidentified
+# developer" block, which needs an Apple developer account to clear.
+#
+# An app BUILT HERE is never downloaded, so it is never quarantined, so
+# Gatekeeper never runs. MEASURED: a locally-created .app has no extended
+# attributes at all and macOS reports it as a proper application bundle. We still
+# ship one terminal line. That line just leaves an icon behind.
+make_app() {
+  # ⚠️ TWO STATEMENTS, NOT ONE. `local app="$1" target="$app/Contents"` looks fine
+  # and fails under `set -u`: bash does not make `app` visible to later
+  # assignments in the SAME `local` statement, so `$app` is unbound and the whole
+  # step dies. Measured, after the installer reported "app: unbound variable" and
+  # created nothing.
+  local app="$1"
+  local target="$app/Contents"
+  rm -rf "$app"
+  mkdir -p "$target/MacOS" "$target/Resources"
+
+  cat > "$target/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>Kosmos</string>
+  <key>CFBundleDisplayName</key><string>Kosmos</string>
+  <key>CFBundleIdentifier</key><string>com.chaoskosmos.kosmos</string>
+  <key>CFBundleExecutable</key><string>Kosmos</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleIconFile</key><string>Kosmos</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><false/>
+</dict></plist>
+PLIST
+
+  # ⚠️ IT STARTS THE BOARD IF IT IS NOT RUNNING, rather than only opening a URL.
+  # An icon that opens a dead page after a reboot is worse than no icon: the
+  # person concludes the product broke, and they are not wrong to.
+  cat > "$target/MacOS/Kosmos" <<LAUNCH
+#!/bin/bash
+KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
+if ! /usr/bin/curl -fsS -m 2 http://127.0.0.1:4317/ >/dev/null 2>&1; then
+  "\$KOSMOS_HOME/bin/kosmos" start >/dev/null 2>&1
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    /usr/bin/curl -fsS -m 1 http://127.0.0.1:4317/ >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+exec /usr/bin/open "http://127.0.0.1:4317"
+LAUNCH
+  chmod +x "$target/MacOS/Kosmos"
+
+  # The icon is optional so the installer never fails for the want of artwork.
+  [ -f "$KOSMOS_HOME/Kosmos.icns" ] && cp "$KOSMOS_HOME/Kosmos.icns" "$target/Resources/Kosmos.icns"
+
+  # ⚠️ TELL macOS THE APP EXISTS. A freshly created bundle is not in the
+  # LaunchServices database, and until it is, it can show a generic icon or
+  # behave oddly when opened. Measured: straight after creation, lsregister knew
+  # nothing about it.
+  #
+  # On a machine that has run this before, this is also what makes a REPLACED
+  # bundle pick up a new icon instead of the cached old one. Failure here is not
+  # fatal, the app still works, so it never aborts the install.
+  local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
+  return 0
+}
+
+step "Adding Kosmos to your Applications."
+APP_DIR="$HOME/Applications"
+mkdir -p "$APP_DIR"
+if make_app "$APP_DIR/Kosmos.app"; then
+  info "you will find it in Applications, as Kosmos"
+  ok
+else
+  info "could not create the app icon, but Kosmos itself is fine"
+fi
 
 # ---- start ------------------------------------------------------------------
 step "Starting Kosmos."
