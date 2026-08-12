@@ -96,8 +96,18 @@ const SESSION = 'kosmos-connect';
  * named `kosmos-connect2`, typing Enter into a Claude running with permissions
  * bypassed. `create.js` also refuses the name outright, but the exact-match
  * pin must not depend on that gate holding forever.
+ *
+ * ⚠️ TWO SPELLINGS, MEASURED ON tmux 3.6a, because they are not
+ * interchangeable: session-targeted commands (kill-session) take `=name`,
+ * but PANE-targeted commands (capture-pane, send-keys) REFUSE the bare form
+ * with "can't find pane: =name" -- the exact-match pin needs the trailing
+ * colon (`=name:`, the session's active window) to resolve. The bare form
+ * shipped on the pane commands for one iteration and the LIVE check caught
+ * it: every capture failed and the driver reported the window closed while
+ * Claude sat there running.
  */
-const TARGET = '=' + SESSION;
+const TARGET = '=' + SESSION;          // session-targeted commands
+const PANE_TARGET = '=' + SESSION + ':'; // pane-targeted commands
 
 /* ── the runner seam ─────────────────────────────────────────────────────── */
 
@@ -480,6 +490,16 @@ async function start() {
   if (driver) return state();
 
   /**
+   * ⚠️ THE SAME FOREIGN-FLOW REFUSAL AS `cancel()`, because start is a write
+   * path too: without it, a start POSTed to the non-owning server clobbered
+   * the owner's live record with IDLE and then killed the shared-named
+   * session out from under the owning flow. All three of state/cancel/start
+   * now agree about whose flow it is, through one helper.
+   */
+  const disk = readPersisted();
+  if (foreignLiveFlow(disk)) return publicView(disk);
+
+  /**
    * ⚠️ No "already connected" memo here: the subscription check below IS the
    * guard, and it reads reality. A memoed CONNECTED would refuse to reconnect
    * somebody whose connection broke after the first success -- a long-lived
@@ -494,7 +514,7 @@ async function start() {
    */
   const sub = subscription.check();
   if (sub.state === subscription.STATE.CONNECTED) {
-    return writeState({ phase: PHASE.CONNECTED, plan: sub.plan, startedOnce: true });
+    return publicView(writeState({ phase: PHASE.CONNECTED, plan: sub.plan, startedOnce: true }));
   }
 
   const bin = claudeBinPath();
@@ -608,6 +628,17 @@ async function launchSignin(owner) {
   // screen; start clean instead of guessing where it was.
   await killSession();
 
+  /**
+   * ⚠️ DELIBERATELY UNQUOTED, and that is a measurement, not an oversight.
+   * A review pass argued these needed shell-quoting ("tmux joins with spaces
+   * and runs through a shell"); quoting was tried, and the LIVE check caught
+   * it killing the launch outright -- with MULTIPLE arguments this tmux
+   * (3.6a) executes them as argv, so added quotes become literal characters
+   * in the filename, while a space inside a value already survives unquoted
+   * (measured: an env value containing "dir with space" launched fine, the
+   * quoted form died instantly). Single-argument commands are the form that
+   * goes through a shell; keep this multi-arg and keep it bare.
+   */
   const cmd = [];
   if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR) {
     cmd.push('env', `CLAUDE_CONFIG_DIR=${process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR}`);
@@ -631,7 +662,7 @@ async function launchSignin(owner) {
  */
 async function tick(owner) {
   if (driver !== owner) return;
-  const cap = await tmux(['capture-pane', '-p', '-J', '-t', TARGET]);
+  const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
   if (!cap.ok) {
     becomeStuck(owner, 'the sign-in window closed before Claude finished',
@@ -684,14 +715,14 @@ async function tick(owner) {
     case 'theme':
       if (driver.acted !== sig) {
         driver.acted = sig;
-        await tmux(['send-keys', '-t', TARGET, 'Enter']);
+        await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
       }
       return;
     case 'login-method':
       if (driver.acted !== sig) {
         driver.acted = sig;
         // Option 1, "Claude account with subscription", is already selected.
-        await tmux(['send-keys', '-t', TARGET, 'Enter']);
+        await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
       }
       return;
     case 'browser-open':
@@ -741,8 +772,8 @@ async function tick(owner) {
         driver.pendingCode = null;
         // ⚠️ `--` ends option parsing: the allowed charset includes `-`, and a
         // code starting with one would otherwise be read by tmux as flags.
-        const typed = await tmux(['send-keys', '-t', TARGET, '-l', '--', code]);
-        const entered = typed.ok ? await tmux(['send-keys', '-t', TARGET, 'Enter']) : typed;
+        const typed = await tmux(['send-keys', '-t', PANE_TARGET, '-l', '--', code]);
+        const entered = typed.ok ? await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']) : typed;
         // ⚠️ The one post-await write in this module that shipped WITHOUT the
         // owner re-check: a cancel landing between the sends and this line
         // overwrote the person's IDLE with a driverless "completing" record
@@ -767,13 +798,22 @@ async function tick(owner) {
        * login already landed.
        */
       const sub = subscription.check();
+      /**
+       * ⚠️ "ASKS FOR ENTER" IS A PROPERTY OF THE TEXT, NOT OF THE VERDICT.
+       * The real post-login screen says BOTH "Login successful" and "Press
+       * Enter to continue", and classifies as login-done (the further state)
+       * -- so a guard keyed on kind === 'press-enter' never fired on the very
+       * screen that asks, and the walk-forward this comment promises never
+       * happened.
+       */
+      const asksEnter = /Press Enter to continue/i.test(cap.stdout);
       if (sub.state === subscription.STATE.CONNECTED) {
         // Claude may still be mid-onboarding in the pane (security notes and
         // the like). Walk it forward so the NEXT run of claude -- an agent's
         // first start -- does not begin at a screen nobody is watching.
-        if (seen.kind === 'press-enter' && driver.acted !== sig) {
+        if (asksEnter && driver.acted !== sig) {
           driver.acted = sig;
-          await tmux(['send-keys', '-t', TARGET, 'Enter']);
+          await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
           return;
         }
         // ⚠️ Its OWN counter: sharing it with the config-catch-up wait meant
@@ -787,9 +827,9 @@ async function tick(owner) {
         driver.settleTicks = (driver.settleTicks || 0) + 1;
         return;
       }
-      if (seen.kind === 'press-enter' && driver.acted !== sig) {
+      if (asksEnter && driver.acted !== sig) {
         driver.acted = sig;
-        await tmux(['send-keys', '-t', TARGET, 'Enter']);
+        await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
         return;
       }
       /**
@@ -897,8 +937,11 @@ async function cancel() {
    * stale record still gets cleaned: that is the orphan case cancel exists
    * for.)
    */
-  if (!driver && foreignLiveFlow(readPersisted())) {
-    return publicView(readPersisted());
+  if (!driver) {
+    // Read ONCE: the owning process can replace the file between two reads,
+    // and a second read coming back null would throw inside publicView.
+    const disk = readPersisted();
+    if (foreignLiveFlow(disk)) return publicView(disk);
   }
   const d = driver;
   driver = null;
@@ -927,7 +970,9 @@ async function cancel() {
       if (f.endsWith('.part') || f.startsWith('claude-')) fs.unlinkSync(path.join(dir, f));
     }
   } catch { /* nothing to clean */ }
-  return writeState({ phase: PHASE.IDLE, startedOnce: true });
+  // publicView like every other exit: the raw record carries pid/updatedAt/
+  // startedOnce, which no HTTP answer elsewhere leaks.
+  return publicView(writeState({ phase: PHASE.IDLE, startedOnce: true }));
 }
 
 /** Tests only: forget everything without touching disk records. */

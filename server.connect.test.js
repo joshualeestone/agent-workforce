@@ -206,6 +206,34 @@ test('cancel refuses to destroy a LIVE flow belonging to another process', () =>
   })();
 });
 
+test('start also refuses to clobber a LIVE flow belonging to another process', async () => {
+  /**
+   * ⚠️ Start is a write path too: without the same refusal cancel carries, a
+   * start on the non-owning server wrote IDLE over the owner's live record
+   * and then killed the shared-named session out from under it.
+   */
+  connect.resetForTests();
+  const file = connect.STATE_FILE();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const record = {
+    phase: 'signin-awaiting-code', url: 'https://claude.com/oauth?x=1', pid: 1,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    fs.writeFileSync(file, JSON.stringify(record));
+    const st = await connect.start();
+    assert.equal(st.phase, 'signin-awaiting-code',
+      'start on the non-owning server did not report the owner\'s flow');
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.phase, 'signin-awaiting-code',
+      'start on the non-owning server clobbered the owner\'s live record');
+    assert.equal(after.pid, 1, 'the record changed hands');
+  } finally {
+    fs.rmSync(file, { force: true });
+    connect.resetForTests();
+  }
+});
+
 test('a malformed code is a 400; asking at the wrong moment stays a 409', async () => {
   // The state conflict, through the real engine: nothing is running.
   const conflict = await post('/api/connect/code', { code: 'abCD1234#efGH5678' });

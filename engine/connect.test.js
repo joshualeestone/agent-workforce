@@ -333,6 +333,20 @@ driverTest('the driver walks the measured flow end to end', async () => {
   const literal = term.sent.find((s) => s.includes('-l'));
   assert.ok(literal && literal.includes('abCD1234#efGH5678'), 'the code was accepted but never typed');
   assert.ok(term.killed >= 1, 'the sign-in window was left running after success');
+
+  /**
+   * ⚠️ THE WALK-FORWARD ENTER ACTUALLY FIRES. The post-login screen says both
+   * "Login successful" and "Press Enter to continue" and classifies as
+   * login-done -- a guard keyed on the press-enter KIND never pressed Enter
+   * on the one screen that asks, so onboarding was abandoned mid-screen for
+   * the next claude run to trip over. Two Enters after the code: the one that
+   * submits it, and the walk-forward.
+   */
+  const literalIdx = term.sent.findIndex((s) => s.includes('-l'));
+  const entersAfterCode = term.sent.slice(literalIdx + 1)
+    .filter((s) => s[s.length - 1] === 'Enter' && !s.includes('-l'));
+  assert.ok(entersAfterCode.length >= 2,
+    `the "Press Enter to continue" screen never got its Enter: ${term.sent.map((s) => s.join(' ')).join(' | ')}`);
 });
 
 driverTest('a rejected code is not a dead end: the screen asks again and a second code works', async () => {
@@ -503,10 +517,19 @@ driverTest('every tmux target is pinned exact, so a near-name agent can never be
   await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
 
   // Recorded from the seam: every -t across the whole flow, including kills.
-  const targets = term.all.filter((a) => a.includes('-t')).map((a) => a[a.indexOf('-t') + 1]);
+  // ⚠️ Two exact-match spellings, both required (measured on tmux 3.6a):
+  // session commands take `=name`; pane commands REFUSE it and need `=name:`
+  // -- the bare form on capture/send shipped once and the live check caught
+  // every capture failing while Claude sat there running.
+  const targets = term.all.filter((a) => a.includes('-t'))
+    .map((a) => [a[0], a[a.indexOf('-t') + 1]]);
   assert.ok(targets.length >= 5, `expected a flow's worth of targeted commands, saw ${targets.length}`);
-  for (const t of targets) {
-    assert.equal(t, '=' + connect.SESSION, `an unpinned target went out: ${t}`);
+  for (const [cmd, t] of targets) {
+    if (cmd === 'kill-session') {
+      assert.equal(t, '=' + connect.SESSION, `an unpinned session target went out: ${cmd} ${t}`);
+    } else {
+      assert.equal(t, '=' + connect.SESSION + ':', `a pane command without the colon form went out: ${cmd} ${t}`);
+    }
   }
   // And session CREATION uses the bare name (a -s arg is a name, not a target).
   const made = term.all.find((a) => a[0] === 'new-session');
