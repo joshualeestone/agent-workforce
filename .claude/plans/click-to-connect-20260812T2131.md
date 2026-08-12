@@ -171,6 +171,9 @@ POSTs inherit the existing cross-site guard, same as `/api/first-run/complete`.
   (unknown plan shapes) would have looped forever; it now goes `stuck` with an
   honest sentence.
 - The plan guessed the binary at 100-200MB; it is 281MB.
+- The plan's `checking` phase was folded into `signin-completing`: the config
+  poll IS the completion wait, and a separate phase would have been a second
+  name for the same observable state.
 - Two stale browser-check servers from this morning's merged branches were
   squatting ports 4413/4414 and answering with OLD code (`no such endpoint`
   for `/api/connect`). Verified by cwd before killing. The check now runs on

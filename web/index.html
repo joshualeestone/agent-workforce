@@ -4473,7 +4473,16 @@ async function frConnResume() {
       FR_CONN_LAST = null;
       frPaintConnect(st);
       if (frConnActive(st.phase)) frConnWatch();
+      return;
     }
+    /**
+     * ⚠️ A FLOW THAT FINISHED WHILE THEY WERE AWAY MUST NOT LOSE TO THE
+     * CACHED VERDICT. The page-load answer said "not connected", the flow
+     * completed server-side, and painting the cache shows a Connect button
+     * on a connected machine -- self-healing only if they click it again.
+     * Same exit as the watcher: re-pull and let the real reader repaint.
+     */
+    if (st.phase === 'connected' && !doneAnyway) frRecheck();
   } catch { /* the static verdict stays */ }
 }
 
@@ -4561,7 +4570,9 @@ async function frConnSubmitCode() {
     });
     const got = await res.json();
     if (!res.ok) { msg.textContent = got.error || 'That code was not accepted.'; return; }
-    msg.textContent = 'Code sent. Finishing the sign-in…';
+    // Just the receipt: the panel that follows says "Finishing the sign-in"
+    // in its title, and saying it here too is the said-it-twice shape.
+    msg.textContent = 'Code sent.';
   } catch (err) {
     msg.textContent = 'We could not send that (' + err.message + ').';
   } finally {

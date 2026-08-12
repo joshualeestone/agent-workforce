@@ -296,6 +296,41 @@ const LONG_TAIL = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of what th
     await ctx.close();
   }
 
+  /* ── 5b. a flow that finished while they were away wins over the cache ──── */
+  {
+    /* The page loads while "not connected" (first /api/first-run answer),
+       but the connect flow already finished server-side. The resume must
+       route to a re-check, which then answers connected -- both answers
+       scripted so the sequence is deterministic. */
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e.message)));
+    let firstRunCalls = 0;
+    await page.route('**/api/first-run', (route) => {
+      firstRunCalls += 1;
+      const sub = firstRunCalls === 1
+        ? { state: 'none', plan: null, because: 'no Claude subscription is connected on this computer yet.' }
+        : { state: 'connected', plan: 'Claude Max', because: 'a Claude subscription is connected on this computer' };
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: sub }),
+      });
+    });
+    await page.route('**/api/connect', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({ contentType: 'application/json', body: JSON.stringify({ phase: 'connected', plan: 'Claude Max' }) });
+      } else route.continue();
+    });
+    await page.goto(`${BASE}/?first-run=1&fr-step=3`, { waitUntil: 'load' });
+    await page.waitForTimeout(1500);
+    const got = await page.evaluate(() => document.getElementById('fr-sub').textContent);
+    check('[resume-connected] a finished flow beats the page-load cache',
+      /is connected/.test(got) && !/No Claude subscription/.test(got), got.slice(0, 110));
+    check('[resume-connected] no page errors', errors.length === 0, errors.join(' | ').slice(0, 160));
+    await ctx.close();
+  }
+
   /* ── 6. a stale stuck record loses to a connected verdict ───────────────── */
   {
     fs.writeFileSync(CONFIG, JSON.stringify({

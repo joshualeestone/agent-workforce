@@ -168,6 +168,44 @@ test('a live record from ANOTHER process is reported as it stands, not as interr
   }
 });
 
+test('cancel refuses to destroy a LIVE flow belonging to another process', () => {
+  /**
+   * ⚠️ `state()` deliberately reports a second server's live flow as it
+   * stands; a cancel posted to the WRONG server must then refuse to kill
+   * that flow's session and clobber its record -- the reporting side and the
+   * destructive side must agree about whose flow it is. pid 1 is
+   * definitionally alive; the fresh timestamp makes it a live flow.
+   */
+  connect.resetForTests();
+  const file = connect.STATE_FILE();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const record = {
+    phase: 'downloading', progress: { got: 5, total: 10 }, pid: 1,
+    updatedAt: new Date().toISOString(),
+  };
+  return (async () => {
+    try {
+      fs.writeFileSync(file, JSON.stringify(record));
+      const st = await connect.cancel();
+      assert.equal(st.phase, 'downloading',
+        'cancel on the non-owning server reported it had cancelled a flow it does not own');
+      const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.equal(after.phase, 'downloading',
+        'cancel on the non-owning server clobbered the owner\'s live record');
+
+      // CONTROL: the same record from a DEAD pid is the orphan case, and
+      // cancel must clean that one.
+      fs.writeFileSync(file, JSON.stringify({ ...record, pid: 999999999 }));
+      const st2 = await connect.cancel();
+      assert.equal(st2.phase, 'idle', 'the orphan case stopped being cleanable');
+    } finally {
+      // the second cancel rewrote the file to idle; remove it for later tests
+      fs.rmSync(file, { force: true });
+      connect.resetForTests();
+    }
+  })();
+});
+
 test('a malformed code is a 400; asking at the wrong moment stays a 409', async () => {
   // The state conflict, through the real engine: nothing is running.
   const conflict = await post('/api/connect/code', { code: 'abCD1234#efGH5678' });

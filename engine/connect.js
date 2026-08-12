@@ -186,33 +186,34 @@ const ACTIVE_PHASES = [
  * `downloading` would be a progress bar nobody is moving -- a screen asserting
  * a state nobody is producing, the exact shape this codebase is built against.
  */
+/**
+ * Is this persisted record a LIVE flow belonging to another process?
+ *
+ * ⚠️ Two rules, both earned. "Another pid" is not "a dead pid": a second
+ * server sharing this data dir writes live, progressing records, and
+ * declaring its flow interrupted from pid inequality alone asserts a death
+ * nobody checked -- signal 0 asks the kernel (EPERM = exists, not ours =
+ * alive). And a live pid is not proof of a live FLOW: pids get recycled, so
+ * "alive" only counts while the record is also fresh -- an hour without a
+ * single write is not a flow anybody is running. (Sign-in phases legitimately
+ * sit unwritten while a person dawdles in a browser tab, hence an hour and
+ * not a minute.) One helper, because `state()` (reporting) and `cancel()`
+ * (refusing to destroy) must agree about whose flow it is.
+ */
+function foreignLiveFlow(disk) {
+  if (!disk || !ACTIVE_PHASES.includes(disk.phase) || disk.pid === process.pid) return false;
+  let alive = false;
+  try { process.kill(disk.pid, 0); alive = true; }
+  catch (err) { alive = Boolean(err && err.code === 'EPERM'); }
+  const ageMs = Date.now() - Date.parse(disk.updatedAt || 0);
+  return alive && !(Number.isFinite(ageMs) && ageMs > 60 * 60 * 1000);
+}
+
 function state() {
   if (mem.phase !== PHASE.IDLE || mem.startedOnce) return publicView(mem);
   const disk = readPersisted();
   if (disk && ACTIVE_PHASES.includes(disk.phase) && disk.pid !== process.pid) {
-    /**
-     * ⚠️ "ANOTHER PID" IS NOT "A DEAD PID". A second server sharing this data
-     * dir (a different port) writes live, progressing records; declaring its
-     * flow interrupted from pid inequality alone asserts a death nobody
-     * checked. Signal 0 asks the kernel; only a pid that is actually gone
-     * gets the interrupted verdict, and a live one is reported as it stands.
-     */
-    let alive = false;
-    try { process.kill(disk.pid, 0); alive = true; }
-    catch (err) {
-      // EPERM means it exists but is not ours to signal -- that is alive.
-      alive = Boolean(err && err.code === 'EPERM');
-    }
-    /**
-     * ⚠️ A LIVE PID IS NOT PROOF OF A LIVE FLOW: pids get recycled, and a
-     * recycled one would keep a dead record rendering as live progress
-     * forever. So "alive" only counts while the record is also FRESH -- an
-     * hour without a single write is not a flow anybody is running. (Sign-in
-     * phases legitimately sit unwritten while a person dawdles in a browser
-     * tab, which is why the bound is an hour and not a minute.)
-     */
-    const ageMs = Date.now() - Date.parse(disk.updatedAt || 0);
-    if (alive && !(Number.isFinite(ageMs) && ageMs > 60 * 60 * 1000)) return publicView(disk);
+    if (foreignLiveFlow(disk)) return publicView(disk);
     return publicView({ ...disk, phase: PHASE.INTERRUPTED, before: disk.phase });
   }
   if (disk && disk.pid !== process.pid
@@ -886,6 +887,19 @@ function submitCode(code) {
 
 /** Stop everything, clean up everything we made, own nothing half-claimed. */
 async function cancel() {
+  /**
+   * ⚠️ NOT OURS TO CANCEL. `state()` deliberately reports a second server's
+   * live flow as it stands; a cancel POSTed to THIS server must then refuse
+   * to kill that flow's session, sweep its downloads, and write IDLE over
+   * its record -- otherwise the reporting side supports a scenario the
+   * destructive side corrupts. With no local driver, a fresh mid-flight
+   * record from a live foreign pid stays that flow's property. (A dead or
+   * stale record still gets cleaned: that is the orphan case cancel exists
+   * for.)
+   */
+  if (!driver && foreignLiveFlow(readPersisted())) {
+    return publicView(readPersisted());
+  }
   const d = driver;
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
