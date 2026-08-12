@@ -394,6 +394,56 @@ driverTest('a REPL with an unreadable subscription is an answer, not a forever-w
   assert.ok(term.killed >= 1, 'the session was left running');
 });
 
+driverTest('a login that completes in the browser, with no code ever pasted, still connects', async () => {
+  /**
+   * ⚠️ PINS THE ANY-PHASE ARM. The browser flow can finish on its own; the
+   * first version had no arm for "Login successful" arriving while the phase
+   * was still awaiting-code, so the driver looped at "will notice when it is
+   * done", noticing nothing. Reverting that arm must fail THIS test.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // The browser completes; no code is ever submitted here. The config does
+  // not flip yet, so the transition must come from the pane text alone.
+  term.screen = SCREEN_LOGIN_DONE;
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_COMPLETING, 5000);
+
+  // Now the CLI writes the config, and the flow finishes from evidence.
+  writeClaudeConfig(CONNECTED_CONFIG);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 10000);
+});
+
+test('a secure fetch never follows a redirect down to plain http', () => {
+  /**
+   * The manifest carries the checksum everything is verified against; an
+   * https→http hop would make "verified" mean "verified against whatever a
+   * network attacker wrote". The rule is a pure function so it is testable
+   * without standing up a TLS server; both fetchers route through it.
+   */
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'http://evil.example/x'), true);
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', '//evil.example/x'), false,
+    'a scheme-relative redirect from https stays https and is fine');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'https://cdn.claude.ai/x'), false);
+  assert.equal(connect.redirectDowngrades('http://127.0.0.1:4000/x', 'http://127.0.0.1:4000/y'), false,
+    'a test fixture served over http may redirect within http');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', '::junk::'), false,
+    'garbage without a scheme resolves RELATIVE to the https base (it will just 404) -- '
+    + 'measured: new URL treats it as a path, so it is not a downgrade');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'http://['), true,
+    'a target that cannot parse at all is refused, not followed');
+
+  // ⚠️ CONTROL that the rule is actually WIRED into the fetchers, not just
+  // exported: both call sites reference it by name.
+  const src = fs.readFileSync(nodePath.join(__dirname, 'connect.js'), 'utf8');
+  const wired = (src.match(/redirectDowngrades\(/g) || []).length;
+  assert.ok(wired >= 3, `redirectDowngrades is defined but wired into ${wired - 1} call sites`);
+});
+
 driverTest('a code is refused while nothing is asking for one', async () => {
   const refusedCold = connect.submitCode('abCD1234#efGH5678');
   assert.equal(refusedCold.ok, false);

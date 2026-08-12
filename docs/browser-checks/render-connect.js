@@ -212,13 +212,20 @@ const LONG_TAIL = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of what th
     check('[code] Enter submits what was typed', sent.length === 1 && sent[0] && sent[0].code === code,
       JSON.stringify(sent));
 
-    /* Keyboard reachability: the input is in the Tab order of the dialog. */
+    /* Keyboard reachability, asserted by FOCUS ARRIVING, not by properties an
+       enabled input always has -- the first version of this check could not
+       fail. Focus lands (visible, enabled, tabIndex !== -1 all required for
+       focus() to take), and Tab moves OFF it, proving it sits in the order. */
     const reachable = await page.evaluate(() => {
       const input = document.getElementById('fr-conn-code');
       input.blur();
-      return input.tabIndex >= 0 || input.tabIndex === 0 || !input.disabled;
+      input.focus();
+      return document.activeElement === input && input.tabIndex !== -1;
     });
-    check('[code] the input is keyboard-reachable', reachable);
+    check('[code] focus actually lands on the input', reachable);
+    await page.keyboard.press('Tab');
+    check('[code] Tab moves focus onward, so it is in the tab order',
+      await page.evaluate(() => document.activeElement && document.activeElement.id === 'fr-conn-code-go'));
 
     check('[code] no page errors', errors.length === 0, errors.join(' | ').slice(0, 160));
     await page.screenshot({ path: path.join(SHOTS, 'connect-4-awaiting-code.png') });

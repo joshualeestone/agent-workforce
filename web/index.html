@@ -4492,14 +4492,20 @@ function frConnWatch() {
     // itself continues server-side; it is the PAINT that must not land on
     // another step's screen.
     if (FR_STEP !== 3) { frConnStopWatch(); return; }
-    frPaintConnect(st);
-    if (st.phase === 'connected') {
+    if (st.phase === 'connected' || st.phase === 'idle') {
+      /**
+       * ⚠️ `idle` here means somebody ELSE ended the flow (a cancel from a
+       * second window of this board). The painter has no idle panel on
+       * purpose, so without this the old panel and its Cancel button froze
+       * on screen -- a state nobody was producing. Both exits repaint the
+       * static verdict from the same reader as always.
+       */
       frConnStopWatch();
-      // The standard verdict painter takes over: re-pull the whole first-run
-      // answer so the green row comes from the same reader as always.
+      FR_CONN_LAST = null;
       frRecheck();
       return;
     }
+    frPaintConnect(st);
     if (!frConnActive(st.phase)) frConnStopWatch();
   }, 1000);
 }

@@ -116,17 +116,24 @@ function run(file, args, opts) {
   if (runner) return Promise.resolve(runner(file, args, opts));
   if (DRY_RUN) return Promise.resolve({ ok: true, stdout: '', dryRun: true });
   return new Promise((resolve) => {
-    execFile(file, args, {
+    const child = execFile(file, args, {
       encoding: 'utf8',
       timeout: (opts && opts.timeout) || 20000,
       env: { ...process.env, ...(opts && opts.env) },
       maxBuffer: 4 * 1024 * 1024,
     }, (err, stdout, stderr) => {
+      if (activeChild === child) activeChild = null;
       if (err) resolve({ ok: false, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err });
       else resolve({ ok: true, stdout: String(stdout || ''), stderr: String(stderr || '') });
     });
+    // ⚠️ Held so cancel can KILL it. Without this, cancelling during
+    // `claude install` had no handle: the install finished in the background
+    // and put a launcher on the machine of somebody who had said stop.
+    if (opts && opts.cancellable) activeChild = child;
   });
 }
+
+let activeChild = null;
 
 /* ── persisted state ─────────────────────────────────────────────────────── */
 
@@ -194,6 +201,20 @@ function publicView(s) {
 
 /* ── the download ────────────────────────────────────────────────────────── */
 
+/**
+ * Would following this redirect drop from https to http? Pure, so the rule is
+ * testable without standing up a TLS server. The manifest these fetches carry
+ * holds the checksum everything else is verified against; a downgrade would
+ * make "checksum-verified" mean "verified against an attacker-writable value".
+ */
+function redirectDowngrades(fromUrl, location) {
+  try {
+    return fromUrl.startsWith('https:') && new URL(location, fromUrl).protocol === 'http:';
+  } catch {
+    return true; // an unparseable redirect target is not one we follow
+  }
+}
+
 /** GET a small text/json body, following redirects. */
 function fetchText(url, redirects) {
   const left = redirects === undefined ? 5 : redirects;
@@ -202,6 +223,10 @@ function fetchText(url, redirects) {
     const req = lib.get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && left > 0) {
         res.resume();
+        if (redirectDowngrades(url, res.headers.location)) {
+          reject(new Error('the download service redirected to an insecure address, so we stopped'));
+          return;
+        }
         resolve(fetchText(new URL(res.headers.location, url).toString(), left - 1));
         return;
       }
@@ -218,6 +243,10 @@ function fetchText(url, redirects) {
     });
     req.setTimeout(30000, () => { req.destroy(new Error('the download service did not answer in time')); });
     req.on('error', reject);
+    // ⚠️ Tracked like the big fetch: a cancel that lands during the /latest or
+    // manifest GET must abort it, or download() runs on to fetch 281MB for a
+    // flow nobody wants any more.
+    activeRequest = req;
   });
 }
 
@@ -229,6 +258,10 @@ function fetchFile(url, dest, onProgress, redirects) {
     const req = lib.get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && left > 0) {
         res.resume();
+        if (redirectDowngrades(url, res.headers.location)) {
+          reject(new Error('the download service redirected to an insecure address, so we stopped'));
+          return;
+        }
         resolve(fetchFile(new URL(res.headers.location, url).toString(), dest, onProgress, left - 1));
         return;
       }
@@ -325,6 +358,9 @@ async function download(onProgress) {
 function classifyPane(text) {
   const t = String(text || '');
   if (/Login successful|Logged in as/i.test(t)) return { kind: 'login-done' };
+  // The REPL outranks the paste prompt: it IS the furthest state, and the CLI
+  // clears into it, but a capture landing mid-clear could carry both.
+  if (/\? for shortcuts/.test(t)) return { kind: 'repl' };
   if (/Paste code here/i.test(t)) {
     const url = extractOauthUrl(t);
     return { kind: 'awaiting-code', url };
@@ -335,7 +371,6 @@ function classifyPane(text) {
   if (/Select login method/i.test(t)) return { kind: 'login-method' };
   if (/Choose the text style/i.test(t)) return { kind: 'theme' };
   if (/Press Enter to continue/i.test(t)) return { kind: 'press-enter' };
-  if (/\? for shortcuts/.test(t)) return { kind: 'repl' };
   if (!t.trim()) return { kind: 'blank' };
   return { kind: 'unknown', tail: tailOf(t) };
 }
@@ -454,11 +489,20 @@ async function runFlow(haveBinary) {
       becomeStuck('we could not download Claude', String((err && err.message) || err));
       return;
     }
-    if (!driver) return; // cancelled mid-download
+    if (!driver) {
+      // Cancelled, but the download had already finished: a verified 281MB
+      // binary is on disk for a flow nobody wants. Cancel's contract is "own
+      // nothing half-claimed", and this is the window its cleanup cannot see.
+      try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
+      return;
+    }
 
     writeState({ phase: PHASE.INSTALLING, startedOnce: true });
-    const inst = await run(downloaded.path, ['install'], { timeout: 180000, env: { TERM: 'dumb' } });
-    if (!driver) return; // cancelled mid-install
+    const inst = await run(downloaded.path, ['install'], { timeout: 180000, env: { TERM: 'dumb' }, cancellable: true });
+    if (!driver) {
+      try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
+      return;
+    }
     if (!inst.ok) {
       becomeStuck('Claude downloaded but did not finish setting itself up',
         tailOf(`${inst.stdout || ''}\n${inst.stderr || ''}`) || 'it stopped without saying why');
@@ -702,6 +746,7 @@ function becomeStuck(because, tail) {
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
   if (activeRequest) { try { activeRequest.destroy(); } catch { /* already ended */ } activeRequest = null; }
+  if (activeChild) { try { activeChild.kill(); } catch { /* already exited */ } activeChild = null; }
   killSession().catch(() => { /* it may never have existed */ });
   writeState({ phase: PHASE.STUCK, because, tail: tail || null, startedOnce: true });
 }
@@ -731,13 +776,19 @@ async function cancel() {
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
   if (activeRequest) { try { activeRequest.destroy(); } catch { /* already ended */ } activeRequest = null; }
+  if (activeChild) { try { activeChild.kill(); } catch { /* already exited */ } activeChild = null; }
   await killSession();
   try {
+    /**
+     * ⚠️ Partials AND finished downloads. A verified binary is only useful to
+     * the flow that fetched it; after a cancel it is 281MB of somebody's disk
+     * spent on a thing they said no to.
+     */
     const dir = path.join(store.ROOT, 'downloads');
     for (const f of fs.readdirSync(dir)) {
-      if (f.endsWith('.part')) fs.unlinkSync(path.join(dir, f));
+      if (f.endsWith('.part') || f.startsWith('claude-')) fs.unlinkSync(path.join(dir, f));
     }
-  } catch { /* nothing partial to clean */ }
+  } catch { /* nothing to clean */ }
   return writeState({ phase: PHASE.IDLE, startedOnce: true });
 }
 
@@ -752,7 +803,7 @@ function resetForTests() {
 module.exports = {
   PHASE, SESSION,
   state, start, submitCode, cancel,
-  classifyPane, extractOauthUrl, tailOf, validCode,
+  classifyPane, extractOauthUrl, tailOf, validCode, redirectDowngrades,
   download, platformKey,
   setRunner, setDryRun, setTickInterval, setUnknownGrace, resetForTests,
   STATE_FILE,
