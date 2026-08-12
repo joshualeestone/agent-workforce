@@ -51,6 +51,23 @@ could stop the wrong thing. The screen says so where the Remove control would
 otherwise be. Every agent Kosmos made, and every one another tool set up
 properly, is removable; a card the board cannot vouch for is not.
 
+**It can also connect Claude.** On first-run step 3, if no subscription is
+connected, one click downloads Claude Code (checksum-verified before anything
+is executed, with a real progress bar from real bytes), installs it with no
+sudo and no Homebrew, and drives the sign-in: the browser opens, the person
+signs in, and if Claude hands them a code there is a box here to paste it into.
+The finish line is the settings file actually saying `connected` — never a
+sentence scraped off a terminal. A screen the driver does not recognise is
+reported as "we could not finish", with what the terminal actually said shown,
+and the manual path (open Terminal, type `claude`) always offered.
+
+⚠️ **What that flow has NOT proven yet:** the final hop — pasting a real code
+and watching credentials land — has only run against a scripted fake, because
+completing it for real means signing an agent's machine into a live account.
+`docs/browser-checks/live-connect.js` proves everything up to the paste prompt
+against the real CLI; the last step belongs to the first walkthrough on a
+machine that is not this one.
+
 It cannot message an agent yet.
 
 ⚠️ **If you need to remove one by hand** — because it was made before this

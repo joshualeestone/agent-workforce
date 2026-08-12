@@ -127,24 +127,51 @@ POSTs inherit the existing cross-site guard, same as `/api/first-run/complete`.
 
 ## Work items
 
-- [ ] 1. `engine/connect.js`: state store + download with SHA256 verify + progress
+- [x] 1. `engine/connect.js`: state store + download with SHA256 verify + progress
         (tests: fixture download server, checksum mismatch refuses to execute,
         resume discards partials, progress shape)
-- [ ] 2. `engine/connect.js`: install step + sign-in driver against captured-fixture
+- [x] 2. `engine/connect.js`: install step + sign-in driver against captured-fixture
         pane text (tests: every recognised screen, an unrecognised screen goes
         `stuck` with the tail, code forwarding, completion via subscription flip,
         fake CLI end-to-end)
-- [ ] 3. Server routes + tests (start/status/code/cancel, guard inheritance,
-        never-500 on status, refusal reasons)
-- [ ] 4. First-run step 3 UI + browser check (sandboxed server, real render of:
-        button present in none/unknown, progress state, paste state, connected
-        state, stuck state showing pane tail; light + dark; per docs/browser-checks
-        discipline, wanted-vs-got on anything that scrolls)
-- [ ] 5. Live verify on this machine, sandboxed: real download (small timeout
-        budget), real `claude install` into a sandbox prefix, real sign-in driven to
-        the paste prompt in a sandboxed CLAUDE_CONFIG_DIR, then cancel. Never
-        completing auth on this machine.
-- [ ] 6. README + first-run plan doc updated (step 3 now connects; the deliberate
-        non-verification of the final hop recorded)
+- [x] 3. Server routes + tests (start/status/code/cancel, guard inheritance,
+        never-500 on status, refusal reasons) -- `server.connect.test.js`, a
+        separate file per the projects precedent (merge-hazard avoidance)
+- [x] 4. First-run step 3 UI + browser check -- `render-connect.js`, 34/34,
+        light + dark, screenshots in `docs/browser-checks/shots/`
+- [x] 5. Live verify, sandboxed -- committed as
+        `docs/browser-checks/live-connect.js`. Measured: 281MB download in 9.1s,
+        checksum verified; `claude install` exits 0 with NO tty (TERM=dumb), so
+        the engine's execFile assumption holds; the real driver walked the real
+        v2.1.229 CLI to the paste prompt and captured the OAuth URL; cancel
+        cleaned up; no credentials were created.
+- [x] 6. README + browser-checks README updated (step 3 now connects; the
+        deliberate non-verification of the final hop recorded in both)
 - [ ] 7. /challenge-loop to convergence, then PR with screenshots (reviewer
         joshualeestone, screenshot in PR + Discord per standing rule)
+
+## Execution notes (what the plan did not predict)
+
+- **The screenshot caught what 32 green checks did not**: the phase
+  announcement (a live region for screen readers) rendered visibly under a
+  panel title that already said the same thing -- the said-it-twice copy
+  defect class from #31, again. Moved to a visually-hidden live region; a
+  check now asserts single-statement visible copy AND that the announcement
+  still exists for screen readers.
+- **Scope call made during build:** the `unknown` subscription state does NOT
+  get a Connect button (the plan said none + unknown). Unknown can be a
+  signed-in paying customer we failed to read; pushing them into a sign-in
+  flow is the exact asymmetry `engine/subscription.js` exists to prevent.
+  Recorded in a comment at the decision site.
+- **"Check again" left the `none` state** (two-button bar): Connect Claude
+  re-checks reality before doing anything, so the just-signed-in-via-Terminal
+  case is covered by the same button.
+- **A driver hazard found while designing, not by a test:** a machine whose
+  CLI reaches the REPL while the subscription still reads not-connected
+  (unknown plan shapes) would have looped forever; it now goes `stuck` with an
+  honest sentence.
+- The plan guessed the binary at 100-200MB; it is 281MB.
+- Two stale browser-check servers from this morning's merged branches were
+  squatting ports 4413/4414 and answering with OLD code (`no such endpoint`
+  for `/api/connect`). Verified by cwd before killing. The check now runs on
+  4437.
