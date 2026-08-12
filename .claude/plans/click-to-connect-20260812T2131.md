@@ -175,3 +175,13 @@ POSTs inherit the existing cross-site guard, same as `/api/first-run/complete`.
   squatting ports 4413/4414 and answering with OLD code (`no such endpoint`
   for `/api/connect`). Verified by cwd before killing. The check now runs on
   4437.
+- **The org validation helper does not fit this repo and was not gamed to
+  pass.** `validation_log_run_or_skip` sees a package.json and runs the org TS
+  sequence (`yarn type-check && lint-fix && test && build`); this
+  zero-dependency repo deliberately has none of those scripts, and no previous
+  branch here has a validation-proof record either (checked
+  `~/.cache/claude-validation-proofs/`). The repo's whole validation story is
+  `node --test` (555/555), the rendered checks (34/34, light+dark), and the
+  sandboxed live check -- all run and green. Adding fake no-op `type-check`
+  and `build` scripts to satisfy the log would be tooling theatre; recorded
+  here instead.
