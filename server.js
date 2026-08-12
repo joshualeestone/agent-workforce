@@ -21,6 +21,7 @@ const { snapshot, paneRoster, countAgents } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
+const connect = require('./engine/connect');
 const machine = require('./engine/machine');
 
 // Single source of truth for the version. With no support function, "what
@@ -1023,6 +1024,72 @@ const server = http.createServer((req, res) => {
     sendJson(res, ok ? 200 : 500, ok
       ? { done: true }
       : { error: 'we could not remember that, so this may appear again next time' });
+    return;
+  }
+
+  // --- connect: the click that installs Claude and signs it in -------------
+
+  /**
+   * Where the connect flow is right now. Polled by first run while a connect
+   * is in flight.
+   *
+   * ⚠️ NEVER 500s for a state question, same contract as /api/machine: every
+   * phase, including stuck, is an ANSWER. An error here would blank the one
+   * screen whose job is telling somebody what is happening.
+   */
+  if (pathname === '/api/connect' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let st;
+    try { st = connect.state(); }
+    catch (err) {
+      st = {
+        phase: 'stuck',
+        because: 'we could not work out where the connection attempt is',
+        tail: String((err && err.message) || err),
+      };
+    }
+    sendJson(res, 200, st);
+    return;
+  }
+
+  // Begin (or, after an interruption, begin again -- `start` re-checks
+  // reality and skips whatever is already true). POST, so it inherits the
+  // cross-site guard: this one downloads and runs software.
+  if (pathname === '/api/connect/start' && req.method === 'POST') {
+    connect.start()
+      .then((st) => sendJson(res, 200, st))
+      .catch((err) => sendJson(res, 500, {
+        error: 'we could not start connecting',
+        detail: String((err && err.message) || err),
+      }));
+    return;
+  }
+
+  /**
+   * The pasted sign-in code. Refused with the reason whenever the terminal is
+   * not actually asking for one -- typing into a screen that is not asking is
+   * how a driver corrupts a flow.
+   */
+  if (pathname === '/api/connect/code' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let code;
+        try { code = JSON.parse(buf.toString('utf8') || '{}').code; }
+        catch { sendJson(res, 400, { error: 'we could not read that' }); return; }
+        const put = connect.submitCode(typeof code === 'string' ? code.trim() : code);
+        sendJson(res, put.ok ? 200 : 409, put.ok ? { ok: true } : { error: put.because });
+      })
+      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || err) }));
+    return;
+  }
+
+  // Stop, clean up what we made, own nothing half-claimed.
+  if (pathname === '/api/connect/cancel' && req.method === 'POST') {
+    connect.cancel()
+      .then((st) => sendJson(res, 200, st))
+      .catch((err) => sendJson(res, 500, {
+        error: 'we could not stop it cleanly',
+        detail: String((err && err.message) || err),
+      }));
     return;
   }
 
