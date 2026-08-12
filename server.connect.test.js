@@ -146,6 +146,16 @@ test('a live record from ANOTHER process is reported as it stands, not as interr
     assert.equal(connect.state().phase, 'downloading',
       'a live flow in another process was declared interrupted from pid inequality alone');
 
+    // ⚠️ But a live pid with an HOUR-stale record is a recycled pid, not a
+    // flow: without the freshness bound, that record renders as live progress
+    // nobody is moving, forever.
+    fs.writeFileSync(file, JSON.stringify({
+      phase: 'downloading', progress: { got: 5, total: 10 }, pid: 1,
+      updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    }));
+    assert.equal(connect.state().phase, 'interrupted',
+      'an hour-dead record with a recycled pid was reported as live progress');
+
     fs.writeFileSync(file, JSON.stringify({
       phase: 'downloading', progress: { got: 5, total: 10 }, pid: 999999999,
       updatedAt: new Date().toISOString(),

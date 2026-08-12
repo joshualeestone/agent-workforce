@@ -73,7 +73,9 @@ While a sign-in is in flight there is a real tmux session called
 card the board cannot vouch for. That is the board honestly reporting what is
 running; the card leaves when the sign-in finishes. The name is reserved (you
 cannot create an agent called `kosmos-connect`), and every command the flow
-sends is pinned to the exact session name.
+sends is pinned to the exact session name. The reservation also means the flow
+treats any session with that exact name as its own: a `tmux new -s
+kosmos-connect` you opened by hand will be closed when a connect starts.
 
 It cannot message an agent yet.
 

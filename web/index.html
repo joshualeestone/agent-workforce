@@ -4591,16 +4591,25 @@ function frPaintConnect(st) {
   const phase = st && st.phase;
 
   /**
-   * ⚠️ REPAINT ONLY ON PHASE CHANGE. This runs every second, and a person may
-   * be halfway through typing a code into the input this function would
-   * otherwise rebuild -- innerHTML replacement empties the field under their
-   * cursor. Progress inside a phase updates the two elements it owns.
+   * ⚠️ REPAINT ONLY WHEN THE SCREEN'S MEANING CHANGES. This runs every
+   * second, and a person may be halfway through typing a code into the input
+   * this function would otherwise rebuild -- innerHTML replacement empties
+   * the field under their cursor. Progress inside a phase updates the two
+   * elements it owns.
+   *
+   * The key carries `because` as well as phase: a throttled background tab
+   * can miss the completing hop entirely, so a code rejection comes back as
+   * the SAME phase with a new reason -- and keying on phase alone left "that
+   * code did not work" unrendered forever. Rebuilding on a reason change
+   * empties the input, which is right: the reason changing means the code in
+   * it did not work.
    */
-  if (phase === FR_CONN_LAST) {
+  const paintKey = phase + '|' + ((st && st.because) || '');
+  if (paintKey === FR_CONN_LAST) {
     if (phase === 'downloading') frConnPaintProgress(st.progress);
     return;
   }
-  FR_CONN_LAST = phase;
+  FR_CONN_LAST = paintKey;
   // ⚠️ Announced in the HIDDEN live region, not fr-sub-msg: the visible panel
   // already says this in its title, and a visible copy said it twice.
   msg.textContent = '';

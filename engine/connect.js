@@ -203,7 +203,16 @@ function state() {
       // EPERM means it exists but is not ours to signal -- that is alive.
       alive = Boolean(err && err.code === 'EPERM');
     }
-    if (alive) return publicView(disk);
+    /**
+     * ⚠️ A LIVE PID IS NOT PROOF OF A LIVE FLOW: pids get recycled, and a
+     * recycled one would keep a dead record rendering as live progress
+     * forever. So "alive" only counts while the record is also FRESH -- an
+     * hour without a single write is not a flow anybody is running. (Sign-in
+     * phases legitimately sit unwritten while a person dawdles in a browser
+     * tab, which is why the bound is an hour and not a minute.)
+     */
+    const ageMs = Date.now() - Date.parse(disk.updatedAt || 0);
+    if (alive && !(Number.isFinite(ageMs) && ageMs > 60 * 60 * 1000)) return publicView(disk);
     return publicView({ ...disk, phase: PHASE.INTERRUPTED, before: disk.phase });
   }
   if (disk && disk.pid !== process.pid
@@ -390,10 +399,12 @@ async function download(onProgress) {
  */
 function classifyPane(text) {
   const t = String(text || '');
-  if (/Login successful|Logged in as/i.test(t)) return { kind: 'login-done' };
-  // The REPL outranks the paste prompt: it IS the furthest state, and the CLI
-  // clears into it, but a capture landing mid-clear could carry both.
+  // The REPL outranks everything, including "Login successful": it IS the
+  // furthest state, and when both share a mid-clear capture, classifying as
+  // repl routes the unreadable-subscription case to its fast honest exit
+  // (8s) instead of the 60s catch-up wait.
   if (/\? for shortcuts/.test(t)) return { kind: 'repl' };
+  if (/Login successful|Logged in as/i.test(t)) return { kind: 'login-done' };
   if (/Paste code here/i.test(t)) {
     const url = extractOauthUrl(t);
     return { kind: 'awaiting-code', url };
@@ -531,12 +542,19 @@ async function runFlow(owner, haveBinary) {
       // A death mid-stream leaves a .part behind, and a retry only sweeps the
       // SAME version's partial -- a version bump between attempts would
       // strand up to ~281MB that nothing else ever cleans. Sweep them all.
-      try {
-        const dir = path.join(store.ROOT, 'downloads');
-        for (const f of fs.readdirSync(dir)) {
-          if (f.endsWith('.part')) fs.unlinkSync(path.join(dir, f));
-        }
-      } catch { /* nothing partial to clean */ }
+      // ⚠️ ONLY IF THIS FLOW STILL OWNS THE DIR: a stale flow's late network
+      // rejection must not delete the .part a successor flow is mid-writing
+      // -- the same guard cancel's own sweep carries, for the same reason.
+      // (This sweep shipped one iteration without the guard: the fix for the
+      // stranded-partial NIT introduced the race, found on the next pass.)
+      if (driver === owner) {
+        try {
+          const dir = path.join(store.ROOT, 'downloads');
+          for (const f of fs.readdirSync(dir)) {
+            if (f.endsWith('.part')) fs.unlinkSync(path.join(dir, f));
+          }
+        } catch { /* nothing partial to clean */ }
+      }
       becomeStuck(owner, 'we could not download Claude', String((err && err.message) || err));
       return;
     }
