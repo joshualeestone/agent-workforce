@@ -137,7 +137,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
              background: var(--bg-sunken); border: 0.5px solid var(--separator);
              display: flex; align-items: center; justify-content: center; }
 .detail-av img { width: 100%; height: 100%; object-fit: cover; }
-.detail-initials { font: 600 var(--text-title-3) var(--font-ui); color: var(--label-2); }
+.detail-initials { font: 600 var(--text-title-3) var(--font-ui); color: var(--label-3); }
 .detail-name { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-meta { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-top: 2px; }
 .detail-state { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); }
@@ -222,7 +222,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
-.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
 .pj-member.unseen { border-style: dashed; }
 /* ⚠️ 24px minimum, because this is the only destructive control on the row and
@@ -287,7 +287,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pick .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
                  border-left: 2px solid var(--border-strong); color: var(--label);
                  font: var(--text-callout) var(--font-ui); }
-.pick small { font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+.pick small { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
         padding: var(--space-3) 0; display: flex; gap: var(--space-4); align-items: baseline; }
@@ -296,7 +296,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .tick.fail { color: var(--label); }
 .tick.fail .mark { color: var(--warn-ink); }
 .tick.waiting .mark { color: var(--label-3); }
-.tick.undone { color: var(--label-2); }
+.tick.undone { color: var(--label-3); }
 .tick.undone .mark { color: var(--label-3); }
 .first-action { margin-top: var(--space-6); padding: var(--space-5);
                 background: var(--bg-sunken); border-radius: var(--radius-control);
@@ -409,7 +409,14 @@ svg { display: block; }
 .danger .flabel { color: var(--label); }
 .danger-btn { border-color: var(--warn-border); }
 .danger-btn:hover { background: var(--warn-bg); }
-.fpath { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+/* ⚠️ `--label-2`, NOT `--label-3`. Measured on the rendered panel: at
+   `--label-3` this was 3.01:1 at 10px, which fails AA for normal text and is
+   not close. It pre-dates this change, but this change is what made it matter:
+   demoting the file path to mouse print means this is now the ONLY place the
+   file is named, so it is load-bearing text rather than decoration.
+   Mouse print got smaller in IMPORTANCE, not in legibility. Only two elements
+   carry this class, both in this panel, so the blast radius is the panel. */
+.fpath { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
    and it is still right when the file was edited outside this app entirely. */
@@ -533,7 +540,7 @@ svg { display: block; }
           max-width: 40rem; width: 100%; overflow: hidden; margin: auto; }
 .fr-bar { padding: var(--space-5) var(--space-7);
           border-bottom: 0.5px solid var(--separator);
-          font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+          font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .fr-body { padding: var(--space-8) var(--space-7); }
 .fr-body h2 { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
               margin: 0 0 var(--space-5); }
@@ -571,7 +578,7 @@ svg { display: block; }
 .fr-check.unknown { border-style: dashed; border-width: 1px; background: var(--attn-bg);
                     padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
-           line-height: 1.35; color: var(--label-2); }
+           line-height: 1.35; color: var(--label-3); }
 .fr-check.attention .fr-mark { color: var(--warn-ink); }
 .fr-ctitle { font: 600 var(--text-body) var(--font-ui); color: var(--label);
              margin-bottom: var(--space-2); }
@@ -693,8 +700,26 @@ svg { display: block; }
   </div>
 
   <div class="field">
-    <label class="flabel" for="d-instr">What they should focus on</label>
-    <div class="fhint">Your words, in plain language. It is the first thing they read every time they start, and it is how you tell them what they are for.</div>
+    <!-- ⚠️ "SPECIAL PURPOSE", AND THE FILENAME IS NEVER THE LABEL. Josh,
+         2026-08-12. Two reasons, and the second is the load-bearing one.
+
+         1. A business person does not know what a `.md` file is, and every
+            agent product has invented its own: Claude Code has `CLAUDE.md`,
+            Codex has `AGENTS.md`, OpenClaw had `soul.md`. Naming ours teaches
+            a word that means nothing to the audience this product is for.
+
+         2. ⚠️ THE FILENAME IS ABOUT TO BE WRONG. The moment an agent runs on
+            something other than Claude, the file underneath changes name, and
+            any label that spelled it out becomes a lie on screen. The concept
+            is stable; the file is a per-provider implementation detail. So the
+            label names the concept, and the file appears once, small, below.
+
+         The path is DEMOTED, NOT HIDDEN. "A real file you can also edit by
+         hand" is Kosmos declining to pretend there is no file, which is a trust
+         signal for the person who does want to look. Hiding it would buy
+         simplicity with a small dishonesty. -->
+    <label class="flabel" for="d-instr">Their special purpose</label>
+    <div class="fhint">What this agent is for, in your words. It is the first thing they read every time they start.</div>
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
@@ -713,7 +738,11 @@ svg { display: block; }
       <b>This file has changed since you opened it.</b> What is in the box is not
       what is on disk any more. Reopen this agent to see the current version.
     </div>
-    <div class="fpath" id="d-instr-prev" hidden>An earlier version is kept beside it as <code>CLAUDE.md.previous</code>.</div>
+    <!-- ⚠️ No filename here either. It used to read "kept beside it as
+         CLAUDE.md.previous", which is both jargon and, on a non-Claude agent,
+         simply the wrong name. What the reader needs is that the old version
+         still exists, not what it is called. -->
+    <div class="fpath" id="d-instr-prev" hidden>The previous version is kept alongside it, so nothing you replace is lost.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
   </div>
 

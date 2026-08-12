@@ -95,3 +95,11 @@ temp root, and refuses the real `~/.claude.json` outright.
 screenshot is a picture of the onboarding wizard with the board behind it, and the DOM
 assertions still pass. That happened on the first run of this very check: three
 byte-identical screenshots, 17/19 green.
+
+## render-special-purpose.js
+
+The detail panel calls the instructions a "special purpose" and names no file.
+
+⚠️ **Restart the server after editing `web/index.html`.** It caches the page at
+startup, so an in-place edit does not reach the browser. A mutation test that skips
+this reports a false PASS: measured, while checking that the AA guard bites.
