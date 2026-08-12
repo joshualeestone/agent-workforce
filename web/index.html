@@ -4442,6 +4442,8 @@ let FR_CONN_TIMER = null;
 let FR_CONN_LAST = null;   // the last phase painted, so repaints are on change
 
 function frConnActive(phase) {
+  // ⚠️ A hand copy of engine/connect.js ACTIVE_PHASES -- a phase added there
+  // and missed here becomes a panel-less, watch-less state. Change BOTH.
   return ['downloading', 'installing', 'signin-launching', 'signin-browser-open',
     'signin-awaiting-code', 'signin-completing'].includes(phase);
 }
@@ -4580,6 +4582,7 @@ const FR_CONN_SAY = {
   'signin-completing': 'Finishing the sign-in.',
   connected: 'Connected.',
   stuck: 'We could not finish connecting Claude.',
+  interrupted: 'A connection attempt was interrupted.',
 };
 
 function frPaintConnect(st) {
@@ -4676,11 +4679,22 @@ function frPaintConnect(st) {
   }
 
   if (phase === 'interrupted') {
+    /**
+     * ⚠️ THE COPY ONLY CLAIMS WHAT IS KNOWN, per before-phase. A download or
+     * install dies with the server process, so "nothing is running now" is a
+     * fact there. A SIGN-IN runs in a tmux session that OUTLIVES the server,
+     * so after a mid-sign-in death the window may genuinely still be open --
+     * asserting otherwise would be a settled sentence about a state nobody
+     * checked. Start again closes it either way (launchSignin kills first).
+     */
+    const wasSignin = !{ downloading: 1, installing: 1 }[st && st.before];
     box.innerHTML = frCheckRow({
       state: 'unknown',
       title: 'A connection attempt was interrupted',
-      detail: 'Kosmos was closed while it was ' + frConnBefore(st && st.before)
-        + '. Nothing is running now, and starting again picks up safely.',
+      detail: 'Kosmos was closed while it was ' + frConnBefore(st && st.before) + '. '
+        + (wasSignin
+          ? 'The sign-in window may still be open; starting again closes it and starts clean.'
+          : 'Nothing is running now, and starting again picks up safely.'),
     });
     frActions({ label: 'Start again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
     return;

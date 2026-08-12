@@ -204,6 +204,46 @@ test('a download service answering nonsense is an error, not a hang', async (t) 
   await assert.rejects(() => connect.download(), /did not answer with a version/);
 });
 
+test('a stuck install does not strand the 281MB download in app data', async (t) => {
+  /**
+   * ⚠️ The success path deletes the binary after install for exactly this
+   * reason; the FAILURE path forgot to, stranding one file per attempted
+   * version with nothing that would ever clean it. Driven end to end: a real
+   * (fixture) download through the real flow, an install that fails through
+   * the seam, and the downloads dir asked afterwards.
+   */
+  connect.resetForTests();
+  clearClaudeConfig();
+  const binary = crypto.randomBytes(64 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.7', binary, checksum });
+  // Point the binary path somewhere that does NOT exist, so start() downloads.
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = nodePath.join(SANDBOX, 'no-such-claude');
+  connect.setRunner((file, args) => {
+    if (String(file).includes('claude-9.9.7') && args[0] === 'install') {
+      return { ok: false, stdout: '', stderr: 'install exploded' };
+    }
+    return { ok: true, stdout: '' };
+  });
+  connect.setDryRun(false);
+  t.after(async () => {
+    await connect.cancel().catch(() => {});
+    connect.resetForTests();
+    connect.setRunner(null);
+    delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE;
+    delete process.env.AGENT_WORKFORCE_CLAUDE_BIN;
+  });
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 10000);
+  assert.match(connect.state().because, /did not finish setting itself up/);
+
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  const leftovers = (() => { try { return fs.readdirSync(dir); } catch { return []; } })()
+    .filter((f) => f.includes('9.9.7'));
+  assert.deepEqual(leftovers, [], `the failed install stranded: ${leftovers.join(', ')}`);
+});
+
 /* ── the driver, against a scripted terminal ─────────────────────────────── */
 
 /**

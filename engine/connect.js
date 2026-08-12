@@ -171,6 +171,8 @@ function readPersisted() {
   catch { return null; }
 }
 
+// ⚠️ Hand-copied into web/index.html frConnActive (the page ships as one file
+// with no import mechanism). A phase added here must be added there too.
 const ACTIVE_PHASES = [
   PHASE.DOWNLOADING, PHASE.INSTALLING, PHASE.SIGNIN_LAUNCHING,
   PHASE.SIGNIN_BROWSER_OPEN, PHASE.SIGNIN_AWAITING_CODE, PHASE.SIGNIN_COMPLETING,
@@ -531,12 +533,18 @@ async function runFlow(owner, haveBinary) {
       return;
     }
     if (!inst.ok) {
+      // ⚠️ The binary goes too: a stuck install otherwise strands 281MB per
+      // attempted version in app data, which is exactly what the deletion on
+      // the success path below exists to prevent. A retry re-downloads in
+      // seconds; the disk does not get the file back on its own.
+      try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
       becomeStuck(owner, 'Claude downloaded but did not finish setting itself up',
         tailOf(`${inst.stdout || ''}\n${inst.stderr || ''}`) || 'it stopped without saying why');
       return;
     }
     try { fs.accessSync(claudeBinPath(), fs.constants.X_OK); }
     catch {
+      try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
       becomeStuck(owner, 'Claude said it set itself up, but we cannot find it where it should be',
         `expected it at ${claudeBinPath()}`);
       return;
