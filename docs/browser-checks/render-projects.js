@@ -375,6 +375,32 @@ async function main() {
     });
     await page.click('[data-project="reedhandover"]');
     await page.waitForTimeout(300);
+    // ⚠️ MEASURED WHILE THE BAD-FOLDER PROJECT IS OPEN, which is the only
+    // moment `.pj-folder-state.bad` exists. The comment below used to claim
+    // this rule was in the list; it was not, and the `els` pass runs on
+    // `hendersonlease`, whose folder is readable -- so `paintOneProject` sets
+    // the class WITHOUT `bad` and the selector could not have matched even if
+    // it had been listed. Narration outrunning the check, in the file rewritten
+    // because the previous check could not fail. It is a real measurement now.
+    const badFolderEls = await page.evaluate(() => {
+      const bgOf = (el) => {
+        let n = el;
+        while (n) {
+          const c = getComputedStyle(n).backgroundColor;
+          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          n = n.parentElement;
+        }
+        return 'rgb(255, 255, 255)';
+      };
+      const out = [];
+      for (const sel of ['#pj-one-view .pj-folder-state.bad']) {
+        const el = document.querySelector(sel);
+        if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
+        const cs = getComputedStyle(el);
+        out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      }
+      return out;
+    });
     await page.click('#pj-back');
     await page.waitForTimeout(200);
     await page.click('[data-project="hendersonlease"]');
@@ -394,12 +420,12 @@ async function main() {
       // matched the FIRST one in the document -- inside a hidden panel -- and
       // the stricter miss-reporting above caught it on the first run, which is
       // the check working rather than the check being wrong.
-      // ⚠️ `.pj-warn` and `.pj-folder-state.bad` are IN this list. They are the
-      // only two rules in the new CSS whose whole job is to look different from
-      // a healthy row, and the previous version's comment claimed to cover the
-      // folder warning while its selector list did not contain it -- narration
-      // outrunning the check, in the file written because the last check could
-      // not fail. They are measured on the project whose folder is missing.
+      // ⚠️ The two rules whose whole job is to look DIFFERENT from a healthy
+      // row are measured elsewhere, because neither exists on this screen:
+      // `.pj-warn` in the `listEls` pass above (it is a list row), and
+      // `.pj-folder-state.bad` in the `badFolderEls` pass below, while the
+      // project whose folder is missing is open. This list is the one-project
+      // view of a HEALTHY project, so it cannot carry either.
       for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
         '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel']) {
@@ -412,7 +438,7 @@ async function main() {
       }
       return out;
     });
-    for (const e of [...listEls, ...els]) {
+    for (const e of [...listEls, ...badFolderEls, ...els]) {
       if (e.missing) {
         contrastFails += 1;
         console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);

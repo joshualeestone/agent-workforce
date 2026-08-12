@@ -482,6 +482,13 @@ test('no test hand-types a tab-separated pane line', () => {
       .filter((source) => PANE_LINE.test(source) || POSITIONAL_JOIN.test(source)).length;
     const allowed = HAND_TYPED_PANE_LINES[rel] || 0;
     if (hits > allowed) offenders.push(`${rel}: ${hits} hand-typed pane lines, ${allowed} allowed`);
+    // ⚠️ The ratchet, and it is currently UNARMED: every entry in
+    // `HAND_TYPED_PANE_LINES` is `null` (fully exempt) and `continue`s above, so
+    // `allowed` is always 0 and this arm cannot run. Kept rather than deleted
+    // because the moment anyone records a numeric allowance — the expected way
+    // to land a partial conversion — it becomes the thing that stops the debt
+    // being quietly left at a stale number. Said out loud so nobody reads it as
+    // an active guard.
     if (hits < allowed) {
       offenders.push(
         `${rel}: ${hits} hand-typed pane lines but ${allowed} are still allowed for. `

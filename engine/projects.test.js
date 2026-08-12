@@ -323,6 +323,30 @@ test('a member we can see but cannot READ is counted as unseen, not as fine', ()
   assert.equal(nils.state, 'unknown');
 });
 
+test('a stranger holding the name does not upgrade "we have never seen this"', () => {
+  reset();
+  // ⚠️ The one name-keyed read in `describe` that WRITES, and the one that did
+  // not ask whether the pane is ours. A mistyped member that has never been an
+  // agent is stamped `everSeen: false` and says so honestly. Any ordinary
+  // `tmux new -s notes` shell then matched by sessionName and flipped that flag
+  // to true, PERSISTED -- after which the row read "we cannot see this agent on
+  // this computer right now" about a name that never existed, and there is no
+  // way back because the upgrade only goes false -> true.
+  const p = projects.create({ name: 'Typo', folder: folder('typo-project'), agents: ['notes'], roster: [] });
+  assert.equal(projects.readAll()[0].everSeen.notes, false, 'the control: it starts unseen');
+
+  projects.get(p.id, cards([fleet.stranger('notes', { state: 'unknown' })]));
+  assert.equal(projects.readAll()[0].everSeen.notes, false,
+    'a plain tmux session sharing the name was taken as having seen the agent');
+  assert.match(projects.get(p.id, []).agents[0].because, /never seen an agent by this name/,
+    'and the row stopped saying the true thing about a name that has never existed');
+
+  // THE CONTROL: a TIED pane does upgrade it, or the gate is just "never".
+  projects.get(p.id, cards([fleet.agent('notes')]));
+  assert.equal(projects.readAll()[0].everSeen.notes, true,
+    'the control failed: a real agent no longer upgrades the record either');
+});
+
 test('a pane merely holding the name is not spoken for on the row', () => {
   reset();
   // ⚠️ The borrowed-name defect, wearing a project row. `describe` matches on

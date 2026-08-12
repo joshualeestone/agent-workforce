@@ -1524,7 +1524,16 @@ test('a tmux failure we do not recognise still refuses, rather than reading as e
   try {
     process.env.TMUX_TMPDIR = dir;
     const got = require('./status').shDetail('tmux', ['-L', 'notasocket', 'list-panes', '-a']);
-    if (!got.ran) return;   // no tmux on this machine
+    // ⚠️ NOT a silent return. A skip that asserts nothing reports green for
+    // never having run, which the first test in this block refuses by name —
+    // and then two of its siblings did exactly that. On a machine without tmux
+    // the fact still worth pinning is that a program which never started can
+    // never read as "there are no sessions".
+    if (!got.ran) {
+      assert.equal(require('./status').tmuxSaidNoServer(got), false,
+        'tmux is absent here, and a program that never started read as an empty fleet');
+      return;
+    }
     // The control: this really is a connect error, so a rule keyed on that
     // phrase would fire — which is what makes the `false` below meaningful.
     assert.match(got.err, /error connecting to/,
@@ -1564,7 +1573,12 @@ test('a machine with tmux and no sessions shows an EMPTY board, not an unreadabl
   try {
     process.env.TMUX_TMPDIR = dir;
     delete process.env.TMUX;
-    if (!status.shDetail('tmux', ['-V']).ran) return;   // no tmux on this machine
+    if (!status.shDetail('tmux', ['-V']).ran) {
+      // Same rule as above: say what is still true rather than passing silently.
+      assert.throws(() => status.snapshot(), /could not ask tmux/,
+        'tmux is absent here, and the board did not refuse to speak about a machine it cannot see');
+      return;
+    }
     // The control: this really is the no-server state, and not a live server we
     // happened to reach.
     const probe = status.shDetail('tmux', ['list-panes', '-a']);

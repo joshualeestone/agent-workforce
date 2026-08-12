@@ -224,10 +224,14 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
   padding: 2px var(--space-3); }
-/* ⚠️ Dashed and full-width, matching `.pj-member.unseen`: every "we could not
-   look" on this page reads the same way, so the person learns one shape rather
-   than three. `--label` rather than `--label-2` because this one is a sentence
-   to read, not a chip to scan, and it has to clear AA on both themes. */
+/* ⚠️ Dashed and full-width, matching `.pj-member.unseen`. `--label` rather than
+   `--label-2` because this one is a sentence to read, not a chip to scan, and it
+   has to clear AA on both themes.
+   ⚠️ NOT a claim that every "we could not look" on the page draws the same —
+   an earlier version of this comment said so and it is not true: `pjMember`
+   applies `.unseen` on `!present` only, so a member counted unseen because its
+   pane is untied or its state is unknown draws with a healthy border and says
+   so only in its caption. Worth unifying; not silently claimed. */
 .pj-tag-unread { display: block; border-style: dashed; color: var(--label);
   border-radius: var(--radius-card); padding: var(--space-2) var(--space-3); }
 .panel .soon { font: var(--text-caption) var(--font-ui); color: var(--label-3);
@@ -764,11 +768,20 @@ svg { display: block; }
       <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
          own files in it</b> — everything it keeps lives somewhere else.</p>
       <div class="frow" style="margin-bottom: var(--space-4)">
-        <!-- ⚠️ `aria-live` and a label, because focus lands here after every
-             step into a folder (see `pjBrowse`) and the text is the only thing
-             that says where you now are. -->
+        <!-- ⚠️ `aria-live`, because focus lands here after every step into a
+             folder (see `pjBrowse`) and this text is the only thing that says
+             where you now are.
+             ⚠️ NO `aria-label`. A first version had one, and it did the exact
+             opposite of its purpose: an accessible name REPLACES the element's
+             text as what is announced, so a keyboard user stepping into a
+             folder heard "The folder you are looking in" instead of the folder
+             they were looking in. `<p>` is also not a permitted host for a
+             name in the first place.
+             `role="heading"` IS a name-from-content role, so the path itself
+             becomes the accessible name, and it gives the location a landmark
+             a screen-reader user can navigate back to. -->
         <p class="pj-crumbs" id="pj-crumbs" aria-live="polite"
-           aria-label="The folder you are looking in"></p>
+           role="heading" aria-level="3"></p>
         <button class="btn" id="pj-use" type="button">Use this folder</button>
       </div>
       <div id="pj-browse" class="pj-browse"></div>
@@ -1054,6 +1067,7 @@ async function tick() {
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
     BOARD_LOOKED = true;
+    BOARD_LOOK_FAILED = null;
     // ⚠️ The picker is repainted here rather than only on open, because the
     // add-a-project flow suppresses the projects poll while it is up. Without
     // this, a person who opened it before the first status landed kept an empty
@@ -1283,6 +1297,13 @@ async function tick() {
     // stamp four lines up exists to make visible.
     if (!document.getElementById('grid').hidden) paintRemoved();
   } catch (err) {
+    // ⚠️ Recorded and REPAINTED, not just written into `#grid`. The picker in
+    // the add-a-project flow reads these globals, that flow hides `#grid`, and
+    // the projects poll is suppressed while it is open — so a failure that only
+    // reached `#grid` was invisible exactly where it mattered most.
+    BOARD_LOOK_FAILED = err && err.message ? err.message : 'we could not read the agents';
+    const addViewOnFail = document.getElementById('pj-add-view');
+    if (addViewOnFail && !addViewOnFail.hidden) paintAddAgents();
     checked.className = 'checked stale';
     checked.innerHTML = 'checked<strong>failed</strong>';
     document.getElementById('grid').innerHTML =
@@ -1364,6 +1385,14 @@ let LAST = [];
 // reaches first, and the projects poll deliberately bails while the add view is
 // open, so it never repainted for the life of the flow.
 let BOARD_LOOKED = false;
+// ⚠️ And the THIRD state. `BOARD_LOOKED` alone gives "not yet" and "we looked";
+// a look that FAILED is neither, and without it the picker sat on "Looking for
+// the agents on this computer…" for the rest of the session — a look reported
+// as in progress that had definitively stopped. The board's own error lives in
+// `#grid`, which this tab hides, so nothing on that screen said otherwise and
+// the person finished the flow with no agents on the project. The honest
+// sentence is the board's: we cannot see them, which is not that there are none.
+let BOARD_LOOK_FAILED = null;
 let CURRENT = null;
 
 /**
@@ -3275,9 +3304,19 @@ function paintOneProject() {
   const on = new Set((p.agents || []).map((a) => a.sessionName));
   const free = LAST.filter((a) => !on.has(a.sessionName));
   const sel = document.getElementById('pj-one-add');
+  // ⚠️ THREE reasons this list can be empty, and one sentence covered all of
+  // them. "no other agents we can see" is wrong for the commonest case -- every
+  // agent is already ON the project, so they are all visible -- and it is the
+  // have-not-looked-yet conflation its sibling picker was just fixed for, which
+  // this one did not inherit. Each case now says which it is.
+  const emptyBecause = BOARD_LOOK_FAILED
+    ? 'we cannot see the agents right now'
+    : !BOARD_LOOKED ? 'looking for the agents…'
+      : on.size ? 'every agent we can see is already on it'
+        : 'we cannot see any agents on this computer';
   const html = free.length
     ? free.map((a) => '<option value="' + esc(a.sessionName) + '">' + esc(a.name) + '</option>').join('')
-    : '<option value="">no other agents we can see</option>';
+    : '<option value="">' + esc(emptyBecause) + '</option>';
   // ⚠️ The person's CHOICE is preserved across a repaint. Rebuilding the
   // options resets the select to index 0, so somebody who picked an agent and
   // then paused for five seconds had a DIFFERENT one silently selected -- and
@@ -3398,6 +3437,12 @@ function paintAddAgents() {
   const box = document.getElementById('pj-add-agents');
   // ⚠️ "We have not looked yet" is NOT "there are none", and saying the second
   // for the first is the one thing this product refuses to do.
+  if (BOARD_LOOK_FAILED) {
+    box.innerHTML = '<p class="fhint">We cannot read the agents on this computer right now. '
+      + 'This is not saying you have none — it is saying we cannot see them. You can still '
+      + 'add the project and put agents on it later.</p>';
+    return;
+  }
   if (!BOARD_LOOKED) {
     box.innerHTML = '<p class="fhint">Looking for the agents on this computer…</p>';
     return;
