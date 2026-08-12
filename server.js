@@ -1150,7 +1150,10 @@ const server = http.createServer((req, res) => {
         } catch {
           throw new Error('we could not read that request');
         }
-        const made = projects.create({ name: body.name, folder: body.folder, agents: body.agents, roster: safeRoster() });
+        // One roster for the whole request: the same observation decides
+        // `everSeen`, the write permission, and what the response reports.
+        const roster = safeRoster();
+        const made = projects.create({ name: body.name, folder: body.folder, agents: body.agents, roster });
         // ⚠️ Told AFTER the record is written, never before. If announcing it
         // failed first, a membership the person asked for would not exist at
         // all -- and the whole point of the three-valued verdict is that a
@@ -1164,7 +1167,6 @@ const server = http.createServer((req, res) => {
         // project" -- DELETE was split into two try blocks for exactly this
         // ("the person was told their removal failed for a removal that
         // happened") and create had the same shape.
-        const roster = safeRoster();
         let told = [];
         try {
           told = made.agents.map((a) => ({ agent: a, ...projects.syncAgent(a, roster) }));
@@ -1190,9 +1192,15 @@ const server = http.createServer((req, res) => {
     // request for one project took the whole board process down — exit 9,
     // nothing serving. The app that watches the fleet dying on a plain read is
     // worse than every state the guard family around it protects.
+    // ⚠️ ONE roster read per request. Two `tmux list-panes` calls can disagree,
+    // and the disagreement is exactly the sentence this app exists not to say:
+    // the response could carry every member as "we cannot see this agent right
+    // now" while asserting `agentsUnreadable: false` -- claiming those agents
+    // are missing on the strength of a look that had in fact failed.
+    const roster = safeRoster();
     let found;
     try {
-      found = projects.get(id, safeRoster());
+      found = projects.get(id, roster);
     } catch (err) {
       sendJson(res, 500, {
         error: String((err && err.message) || 'we cannot read your projects right now'),
@@ -1201,7 +1209,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (!found) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
-    sendJson(res, 200, { project: found, agentsUnreadable: safeRoster() === null });
+    sendJson(res, 200, { project: found, agentsUnreadable: roster === null });
     return;
   }
 
@@ -1278,12 +1286,14 @@ const server = http.createServer((req, res) => {
     const id = decodeSegment(member[1]);
     const name = decodeSegment(member[2]);
     if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    // ⚠️ TWO try blocks, for the same reason delete and create have them: once
+    // the membership change has landed it HAPPENED, and a later failure while
+    // telling the agent or reading the project back must not come back as "we
+    // could not change that project".
+    const roster = safeRoster();
     try {
-      const roster = safeRoster();
       if (req.method === 'POST') projects.addAgent(id, name, roster);
       else projects.removeAgent(id, name);
-      const verdict = projects.syncAgent(name, roster);
-      sendJson(res, 200, { project: projects.get(id, safeRoster()), told: verdict });
     } catch (err) {
       // ⚠️ Three different answers, because they are three different facts. A
       // store we cannot read is ours (500), a project that is not there is a
@@ -1294,7 +1304,17 @@ const server = http.createServer((req, res) => {
       const code = (err && err.code === 'UNREADABLE') ? 500
         : (/no project by that name/.test(String(err && err.message)) ? 404 : 400);
       sendJson(res, code, { error: String((err && err.message) || 'we could not change that project') });
+      return;
     }
+    let verdict;
+    try {
+      verdict = projects.syncAgent(name, roster);
+    } catch (err) {
+      verdict = { state: projects.TOLD.COULD_NOT, because: String((err && err.message) || 'we could not reach that agent') };
+    }
+    let project = null;
+    try { project = projects.get(id, roster); } catch { project = null; }
+    sendJson(res, 200, { project, told: verdict, agentsUnreadable: roster === null });
     return;
   }
 
@@ -1392,6 +1412,9 @@ const server = http.createServer((req, res) => {
       // "nothing else in here" would be a claim nobody checked.
       truncated: hitLimit,
       showing: shown.length,
+      // ⚠️ Only meaningful when we stopped early; otherwise `folders.length`
+      // counts entries that never reached the directory check, so a folder of
+      // 500 folders plus 20 links-to-files read "the first 500 of 520".
       total: hitLimit ? folders.length : shown.length,
       // Null AT home rather than at the filesystem root, so "up" can never walk
       // out of the only place this route will serve.

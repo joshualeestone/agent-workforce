@@ -1296,7 +1296,14 @@ function showTab(tab) {
   // be moved or deleted while this page sits open, and its members' states
   // change constantly — a list painted once would go on asserting a world that
   // stopped being true, which is the whole failure this app is built against.
-  if (tab === 'projects') { pjView(PJ_CURRENT ? 'one' : 'list'); loadProjects(); }
+  // ⚠️ Closes the confirmation on ANY tab change too, not just the back button.
+  // The poll bails while a question is open, on purpose -- so leaving one open
+  // and walking away by the tab bar switched the refresh off for the rest of
+  // the session, which is the exact stall the back button was fixed for. One
+  // way out was covered and the other was not.
+  if (tab !== 'projects') { pjCloseConfirm(); return; }
+  pjView(PJ_CURRENT ? 'one' : 'list');
+  loadProjects();
 }
 
 document.getElementById('tabs').addEventListener('click', (e) => {
@@ -1401,9 +1408,10 @@ async function paintAgentProjects(sessionName) {
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
-    PROJECTS = body.projects || [];
-    PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
-    // ⚠️ `res.ok` is checked, and PROJECTS is not clobbered on failure. A 500
+    // ⚠️ CHECKED BEFORE ANYTHING IS ASSIGNED. The sibling in `loadProjects` was
+    // corrected for exactly this and THIS copy was left assigning first and
+    // throwing second -- so the comment below described a guard that was not
+    // here. A new sibling does not inherit the guard; it has to be given it. A 500
     // answered `{error, projectsUnreadable}` with no `projects` key, so
     // `body.projects || []` made an agent whose list we COULD NOT READ render
     // identically to one that is on none -- this function's own docstring says
@@ -3376,7 +3384,11 @@ document.getElementById('pj-create').addEventListener('click', async () => {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not add that project');
     await loadProjects();
-    openProject(body.project.id);
+    // ⚠️ `body.id` is the fallback the route ships for the case where the
+    // project WAS created but the read-back failed; `body.project` is null
+    // there. Reading only `body.project.id` threw a raw JS internals string
+    // into the person's face about a project that exists.
+    openProject((body.project && body.project.id) || body.id);
   } catch (err) {
     msg.textContent = err.message;
   } finally {

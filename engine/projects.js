@@ -428,11 +428,13 @@ function removeAgent(id, sessionName) {
   const key = String(sessionName || '').trim();
   return mutate(id, (p) => {
     const told = { ...(p.told || {}) };
+    const everSeen = { ...(p.everSeen || {}) };
+    delete everSeen[key];
     // The record of having told it goes with the membership. Keeping it would
     // leave a stale "we told this agent" beside an agent that is no longer on
     // the project, which is a sentence about a thing that is not true any more.
     delete told[key];
-    return { ...p, agents: (p.agents || []).filter((a) => a !== key), told };
+    return { ...p, agents: (p.agents || []).filter((a) => a !== key), told, everSeen };
   });
 }
 
@@ -457,6 +459,42 @@ function remove(id) {
 // ---------------------------------------------------------------------------
 // Telling the agent where its work is
 // ---------------------------------------------------------------------------
+
+function findBlock(text) {
+  const original = String(text == null ? '' : text);
+  // ⚠️ THIS FUNCTION HAS BEEN WRONG THREE TIMES, each time in a damaged shape
+  // the version before it had not considered, and each fix was written against
+  // the single case in front of it. So it is now paired with a MATRIX test over
+  // every arrangement of a stray start and a stray end, before and after the
+  // block — 25 shapes — instead of one fixture per round. The rule below is
+  // what survives all of them.
+  //
+  // A block is a start, the FIRST end after it, and NO other start in between.
+  // That "tight" condition is what stops a stray start from pairing with the
+  // real block's end and swallowing everything the user wrote between them,
+  // which is how two of the three earlier versions destroyed text.
+  const tight = [];
+  for (let at = 0; ; ) {
+    const start = original.indexOf(BLOCK_START, at);
+    if (start < 0) break;
+    const end = original.indexOf(BLOCK_END, start + BLOCK_START.length);
+    if (end < 0) break;
+    const next = original.indexOf(BLOCK_START, start + BLOCK_START.length);
+    if (next < 0 || next > end) tight.push({ start, end: end + BLOCK_END.length });
+    at = start + BLOCK_START.length;
+  }
+  if (!tight.length) return null;
+  // ⚠️ TWO WELL-FORMED BLOCKS ARE AMBIGUOUS, AND WE REFUSE RATHER THAN GUESS.
+  // They are structurally identical, so picking one means overwriting a span of
+  // somebody's file on a guess — and the matrix showed exactly that guess
+  // deleting their words. This module's whole posture is that something we
+  // cannot determine is reported rather than assumed, so the callers turn this
+  // into a `could_not` carrying a reason a person can act on, and nothing is
+  // written at all. Refusing costs the feature until the file is tidied;
+  // guessing costs the file.
+  if (tight.length > 1) return { ambiguous: true, pairs: tight.length };
+  return tight[0];
+}
 
 /**
  * Replace the managed block in some instruction text, leaving everything else
@@ -497,30 +535,84 @@ function remove(id) {
  * So: scan ends left to right, and take the first one that has a start before
  * it.
  */
-function findBlock(text) {
-  const original = String(text == null ? '' : text);
-  // ⚠️ SCANS ENDS FROM THE RIGHT, and that direction is the fix. Left to right,
-  // a file carrying BOTH a stranded start and a stranded end read the span
-  // between them as the block -- measured: '## House rules' and the sentence
-  // under it deleted on the next write, because a stray START followed by a
-  // stray END is a well-formed pair by any local rule, and the user's words
-  // were sitting inside it.
-  //
-  // Our block is always the LAST complete pair, because we only ever append.
-  // Taking the last end with a start before it gets every damaged case right at
-  // once -- stranded start, stranded end, or both -- instead of one at a time,
-  // which is how the previous two versions of this function each fixed the case
-  // in front of them and left the next one.
-  for (let from = original.length; ;) {
-    const end = original.lastIndexOf(BLOCK_END, from);
-    if (end < 0) return null;
-    const start = original.lastIndexOf(BLOCK_START, end);
-    if (start >= 0) return { start, end: end + BLOCK_END.length };
-    if (end === 0) return null;
-    from = end - 1;
-  }
-}
-
+/**
+ * Replace the managed block in some instruction text, leaving everything else
+ * exactly as it was.
+ *
+ * PURE and separately tested, because this is the function that can eat
+ * somebody's words. The instruction file is described in its own module as
+ * "the most powerful write in the product", and a projects feature has no
+ * business being the thing that truncates one.
+ *
+ * ⚠️ Both markers must be present AND in the right order for a replacement.
+ * A file containing only one of them — half a block, from an interrupted write
+ * or a hand edit — gets a NEW block appended rather than having everything from
+ * the surviving marker onward eaten. Losing text is worse than a duplicate
+ * heading somebody can see and delete.
+ */
+/**
+ * Where the managed block IS, or null.
+ *
+ * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
+ * idea of where the block starts — `indexOf(BLOCK_START)` from zero — and it
+ * was WRONG in exactly the case `spliceBlock` had already been hardened
+ * against. Measured: an instruction file carrying a stranded start marker plus
+ * a real block lost the user's whole "## House rules" section on removal, and
+ * `syncAgent` still answered `told`, so the screen said "Kosmos told it where
+ * this folder is" about a write that had just eaten somebody's words. Two
+ * derivations of one question is this codebase's worst habit and it grew back
+ * inside the fix for the last instance of it.
+ *
+ * BOTH single-marker cases are reachable from a hand edit or an interrupted
+ * write, and each breaks a different naive rule:
+ *   a stranded START before a real block — first-start-to-first-end spans them
+ *     and eats everything between;
+ *   a stranded END before a real block — first-end-then-look-backwards finds no
+ *     start, so a block is appended EVERY time and the file grows without bound
+ *     until it outgrows the write limit and every save fails, including the
+ *     person's own.
+ * So: scan ends left to right, and take the first one that has a start before
+ * it.
+ */
+/**
+ * Replace the managed block in some instruction text, leaving everything else
+ * exactly as it was.
+ *
+ * PURE and separately tested, because this is the function that can eat
+ * somebody's words. The instruction file is described in its own module as
+ * "the most powerful write in the product", and a projects feature has no
+ * business being the thing that truncates one.
+ *
+ * ⚠️ Both markers must be present AND in the right order for a replacement.
+ * A file containing only one of them — half a block, from an interrupted write
+ * or a hand edit — gets a NEW block appended rather than having everything from
+ * the surviving marker onward eaten. Losing text is worse than a duplicate
+ * heading somebody can see and delete.
+ */
+/**
+ * Where the managed block IS, or null.
+ *
+ * ⚠️ ONE rule, two callers, and that is the point. `removeBlock` had its own
+ * idea of where the block starts — `indexOf(BLOCK_START)` from zero — and it
+ * was WRONG in exactly the case `spliceBlock` had already been hardened
+ * against. Measured: an instruction file carrying a stranded start marker plus
+ * a real block lost the user's whole "## House rules" section on removal, and
+ * `syncAgent` still answered `told`, so the screen said "Kosmos told it where
+ * this folder is" about a write that had just eaten somebody's words. Two
+ * derivations of one question is this codebase's worst habit and it grew back
+ * inside the fix for the last instance of it.
+ *
+ * BOTH single-marker cases are reachable from a hand edit or an interrupted
+ * write, and each breaks a different naive rule:
+ *   a stranded START before a real block — first-start-to-first-end spans them
+ *     and eats everything between;
+ *   a stranded END before a real block — first-end-then-look-backwards finds no
+ *     start, so a block is appended EVERY time and the file grows without bound
+ *     until it outgrows the write limit and every save fails, including the
+ *     person's own.
+ * So: scan ends left to right, and take the first one that has a start before
+ * it.
+ */
 /**
  * Replace the managed block in some instruction text, leaving everything else
  * exactly as it was.
@@ -534,6 +626,9 @@ function spliceBlock(text, body) {
   const original = String(text == null ? '' : text);
   const block = `${BLOCK_START}\n${body}\n${BLOCK_END}`;
   const at = findBlock(original);
+  // Unchanged, byte for byte, when we cannot tell which block is ours. The
+  // caller reports it; writing anything here would be the guess.
+  if (at && at.ambiguous) return original;
   if (at) return original.slice(0, at.start) + block + original.slice(at.end);
   if (!original.trim()) return block + '\n';
   const sep = original.endsWith('\n') ? '\n' : '\n\n';
@@ -554,7 +649,7 @@ function spliceBlock(text, body) {
 function removeBlock(text) {
   const original = String(text == null ? '' : text);
   const at = findBlock(original);
-  if (!at) return original;
+  if (!at || at.ambiguous) return original;
   const before = original.slice(0, at.start);
   const after = original.slice(at.end);
   // The block was written with a blank line in front of it; take that back out
@@ -666,6 +761,15 @@ function tellAgent(sessionName, projects, roster) {
       return {
         state: TOLD.COULD_NOT,
         because: 'this agent has no instructions file yet, and we will not create one for it',
+      };
+    }
+    // ⚠️ Two complete blocks in one file: we cannot tell which is ours, so we
+    // say so rather than overwrite a span of somebody's file on a guess.
+    const found = findBlock(current.text || '');
+    if (found && found.ambiguous) {
+      return {
+        state: TOLD.COULD_NOT,
+        because: `its instructions contain ${found.pairs} Kosmos project blocks, so we cannot tell which is ours and did not change anything`,
       };
     }
     // ⚠️ An agent on NO projects gets the block REMOVED, not replaced with a

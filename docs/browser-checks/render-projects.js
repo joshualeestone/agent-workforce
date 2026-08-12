@@ -71,6 +71,8 @@ const OUT = process.argv[3] || '/tmp/pjshots';
 // The server's sandbox root, so the 'told' half of the verdict can be shown.
 const SANDBOX = process.argv[4] || process.env.AGENT_WORKFORCE_SANDBOX || null;
 const HEADED = process.env.HEADED !== '0';
+// Set only once we have created the fixture tree ourselves; the cleanup keys on it.
+let OURS = null;
 
 async function api(p, options) {
   const res = await fetch(BASE + p, options);
@@ -116,6 +118,24 @@ async function assertSandboxed() {
     if (!fs.readFileSync(store, 'utf8').includes('kosmos sandbox probe')) {
       throw new Error(`the server at ${BASE} wrote somewhere other than ${store} -- refusing to touch it.`);
     }
+    // ⚠️ AND THE WORKERS ROOT, which is the one that matters. Proving the
+    // projects store is sandboxed proved the harmless half: the writes this
+    // guard exists to prevent go to AGENT_WORKFORCE_WORKERS, the instruction
+    // files the live fleet boots from. A server with DATA sandboxed and WORKERS
+    // forgotten passed the old check and would have spliced our block straight
+    // into the real agents' CLAUDE.md.
+    const board = await api('/api/status');
+    const someone = (board.agents || []).map((a) => a.sessionName)[0];
+    if (someone) {
+      const worker = path.join(SANDBOX, 'workers', someone);
+      fs.mkdirSync(worker, { recursive: true });
+      fs.writeFileSync(path.join(worker, 'CLAUDE.md'), `# ${someone}\n\nA sandbox fixture, not a real agent.\n`);
+      await post(`/api/project/${made.project.id}/agent/${encodeURIComponent(someone)}`);
+      const wrote = fs.readFileSync(path.join(worker, 'CLAUDE.md'), 'utf8');
+      if (!wrote.includes('kosmos:projects')) {
+        throw new Error(`the server at ${BASE} did not write into ${worker} -- its AGENT_WORKFORCE_WORKERS is NOT sandboxed, and this check would rewrite the real fleet's instruction files. Refusing.`);
+      }
+    }
   } finally {
     await api('/api/project/' + encodeURIComponent(made.project.id), { method: 'DELETE' });
     fs.rmSync(probe, { recursive: true, force: true });
@@ -152,9 +172,15 @@ async function someAgents(n, sandbox) {
 }
 
 async function main() {
+  // ⚠️ BEFORE the browser is launched and before the output directory is made.
+  // A refusal should cost a second and touch nothing; running it after
+  // `chromium.launch()` meant a run that was going to be refused spawned a
+  // browser first and took a minute to say no.
+  await assertSandboxed();
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: !HEADED });
   const shots = [];
+  let overflows = 0;
 
   async function shot(name, prepare) {
     for (const scheme of ['light', 'dark']) {
@@ -178,7 +204,13 @@ async function main() {
       // `scrollWidth - clientWidth` is the one comparison immune to that.
       const overflow = await page.evaluate(() =>
         document.documentElement.scrollWidth - document.documentElement.clientWidth);
-      if (overflow > 0) console.log(`  ⚠️ ${name} (${scheme}) overflows horizontally by ${overflow}px`);
+      if (overflow > 0) {
+        // ⚠️ FAILS the run. Every other measurement in this file does; this one
+        // only logged, so a page that overflowed still exited 0 and the check
+        // reported success.
+        overflows += 1;
+        console.log(`  ⚠️ ${name} (${scheme}) overflows horizontally by ${overflow}px`);
+      }
 
       await ctx.close();
     }
@@ -186,7 +218,6 @@ async function main() {
   }
 
   // 1. Nothing yet — the screen first-run hands you.
-  await assertSandboxed();
   await clearProjects();
   await shot('1-empty');
 
@@ -203,6 +234,12 @@ async function main() {
   if (fs.existsSync(demo)) {
     throw new Error(`${demo} already exists; this check creates and deletes that folder, so it will not touch yours. Move it aside and re-run.`);
   }
+  // ⚠️ ONLY A TREE THIS RUN CREATED IS EVER DELETED. The cleanup used to be an
+  // unconditional `finally`, and `.finally` runs after `.catch` -- so the run
+  // that refused to touch an operator's existing ~/kosmos-demo printed
+  // "it will not touch yours" and then deleted it on the way out. The guard
+  // could not protect anything it was standing in front of.
+  OURS = demo;
   for (const d of ['henderson-lease', 'quarter-close', 'reed-handover']) {
     fs.mkdirSync(path.join(demo, d), { recursive: true });
   }
@@ -372,7 +409,7 @@ async function main() {
   console.log(withErrors.length
     ? `⚠️ ${withErrors.length} had console errors`
     : 'no console errors on any state');
-  if (withErrors.length || contrastFails) process.exitCode = 1;
+  if (withErrors.length || contrastFails || overflows) process.exitCode = 1;
 }
 
 // ⚠️ In a `finally`. The fixture tree lives in the operator's REAL home
@@ -385,5 +422,6 @@ async function main() {
 main()
   .catch((err) => { console.error(err); process.exitCode = 1; })
   .finally(() => {
-    try { fs.rmSync(path.join(process.env.HOME, 'kosmos-demo'), { recursive: true, force: true }); } catch { /* nothing to clean */ }
+    if (!OURS) return; // never ours, never deleted
+    try { fs.rmSync(OURS, { recursive: true, force: true }); } catch { /* nothing to clean */ }
   });

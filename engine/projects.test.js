@@ -704,24 +704,62 @@ test('findBlock is the one rule both writers use', () => {
   }
 });
 
-test('two stranded markers together still do not eat the words between them', () => {
-  // ⚠️ The case the previous two versions of the pair-finder each missed, in
-  // turn: a stray START followed by a stray END is a well-formed pair by any
-  // local rule, and the user's text was sitting inside it. Measured before the
-  // fix: '## House rules' and the sentence under it deleted on the next write.
-  // Scanning ends from the RIGHT gets all three damaged shapes at once, rather
-  // than one per round.
+test('every arrangement of stray markers keeps the user’s words, and none grows', () => {
+  // ⚠️ THE TEST THAT SHOULD HAVE EXISTED THREE ROUNDS AGO. `findBlock` was wrong
+  // three times running, and each fix was written against the single damaged
+  // shape in front of it — which is the compounding-fix failure this repo keeps
+  // paying for. This is the matrix instead: every arrangement of a stray start
+  // and a stray end, before and after the real block, with the user's words in
+  // every gap. 25 shapes.
+  //
+  // The invariants are the three that matter, and none of them is "it produced
+  // the output I expected": nothing the user wrote is lost, the file does not
+  // grow, and a write either replaces the block or is REFUSED outright. An
+  // honest refusal is a pass — when two well-formed blocks make it impossible
+  // to tell which is ours, declining is the correct answer.
   const S = projects.BLOCK_START;
   const E = projects.BLOCK_END;
-  const damaged = `# A\n\n${S}\nstranded\n\n## House rules\n\nKEEPME\n\n${E}\n\n## More\n\n${S}\nreal\n${E}`;
+  const BLOCK = `${S}\nBODY\n${E}`;
+  const strays = [[], [S], [E], [S, E], [E, S]];
 
-  let text = damaged;
-  for (let i = 0; i < 6; i += 1) text = projects.spliceBlock(text, `ROUND ${i}`);
-  assert.ok(text.includes('KEEPME'), 'six writes must not eat it');
-  assert.ok(text.includes('ROUND 5') && !text.includes('ROUND 4'), 'and each one replaces the last');
-  assert.ok(projects.removeBlock(damaged).includes('KEEPME'), 'nor may removal');
+  let checked = 0;
+  for (const before of strays) {
+    for (const after of strays) {
+      const parts = ['HEAD'];
+      before.forEach((m, i) => parts.push(m, `BEFORE${i}`));
+      parts.push(BLOCK);
+      after.forEach((m, i) => parts.push(m, `AFTER${i}`));
+      parts.push('TAIL');
+      const original = `${parts.join('\n\n')}\n`;
+      const words = original.match(/HEAD|BEFORE\d|AFTER\d|TAIL/g);
+      const shape = `before=[${before.map((x) => (x === S ? 'S' : 'E'))}] after=[${after.map((x) => (x === S ? 'S' : 'E'))}]`;
+
+      let text = original;
+      for (let i = 0; i < 6; i += 1) text = projects.spliceBlock(text, `ROUND${i}`);
+
+      for (const w of words) assert.ok(text.includes(w), `${shape}: six writes lost ${w}`);
+      assert.ok(text.split(S).length - 1 <= original.split(S).length - 1, `${shape}: the file grew`);
+      const refused = text === original;
+      assert.ok(refused || text.includes('ROUND5'), `${shape}: neither replaced nor refused`);
+
+      const removed = projects.removeBlock(original);
+      for (const w of words) assert.ok(removed.includes(w), `${shape}: removal lost ${w}`);
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 25);
 });
 
+test('two complete blocks are refused rather than guessed between', () => {
+  const S = projects.BLOCK_START;
+  const E = projects.BLOCK_END;
+  const twice = `# A\n\n${S}\nfirst\n${E}\n\n## Mine\n\nKEEPME\n\n${S}\nsecond\n${E}\n`;
+  const found = projects.findBlock(twice);
+  assert.equal(found.ambiguous, true);
+  assert.equal(found.pairs, 2);
+  assert.equal(projects.spliceBlock(twice, 'NEW'), twice, 'nothing is written on a guess');
+  assert.equal(projects.removeBlock(twice), twice);
+});
 test('seeing an agent upgrades a "never seen" record rather than leaving it wrong', () => {
   reset();
   // ⚠️ `everSeen` was written once at add time. An agent added while the roster
