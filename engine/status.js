@@ -133,6 +133,14 @@ function shDetail(cmd, args) {
  * successfully looked at. The earlier fix corrected one false claim ("0 agents,
  * checked just now" when tmux was unreachable) by minting its mirror image.
  *
+ * ⚠️ IT IS A FACT ABOUT THE SOCKET WE ASKED, not about the machine. "No server
+ * on the socket this process would use" is read here as "no agents", which is
+ * sound today because nothing in production passes `-L` or sets `TMUX_TMPDIR`
+ * (`bin/agent-supervisor.sh` uses the default socket, and so does this module).
+ * Said out loud because the day those disagree, this converts "I am looking at a
+ * different socket" into a confident empty board — the exact conversion this
+ * module exists to prevent, arriving through its own fix for it.
+ *
  * ⚠️ MATCHED ON TMUX'S OWN MESSAGE, not on the exit code alone. Exit 1 also
  * covers errors we have no business reading as an empty machine, so anything
  * that is not recognisably "there is no server" still refuses. Measured on

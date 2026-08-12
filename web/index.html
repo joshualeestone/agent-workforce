@@ -522,7 +522,7 @@ svg { display: block; }
   <!-- The relationship read from the agent's end. The mock draws three project
        names under one agent, so it has to be readable both ways on day one. -->
   <div class="field" id="d-projects-field" hidden>
-    <span class="flabel">Projects it is on</span>
+    <span class="flabel" id="d-projects-label">Projects it is on</span>
     <div class="pj-projects" id="d-projects"></div>
   </div>
 
@@ -778,10 +778,15 @@ svg { display: block; }
              they were looking in. `<p>` is also not a permitted host for a
              name in the first place.
              `role="heading"` IS a name-from-content role, so the path itself
-             becomes the accessible name, and it gives the location a landmark
-             a screen-reader user can navigate back to. -->
-        <p class="pj-crumbs" id="pj-crumbs" aria-live="polite"
-           role="heading" aria-level="3"></p>
+             becomes the accessible name, and the location joins the document's
+             heading list, which a screen-reader user can navigate by. (It is NOT
+             a landmark — an earlier version of this comment said so; headings
+             and landmarks are separate ARIA navigation sets, and the one wrong
+             noun sat in a paragraph that is otherwise accurate.)
+             ⚠️ NO `aria-live` alongside the focus move. Both announce, so the
+             person heard the new path twice on every step. Focus is the one that
+             also fixes the tab-order defect, so it is the one kept. -->
+        <p class="pj-crumbs" id="pj-crumbs" role="heading" aria-level="3"></p>
         <button class="btn" id="pj-use" type="button">Use this folder</button>
       </div>
       <div id="pj-browse" class="pj-browse"></div>
@@ -1393,6 +1398,9 @@ let BOARD_LOOKED = false;
 // the person finished the flow with no agents on the project. The honest
 // sentence is the board's: we cannot see them, which is not that there are none.
 let BOARD_LOOK_FAILED = null;
+// Ordering guard for the folder browser, the same shape `PJ_GEN` gives the
+// projects reads: two in-flight looks must not paint out of order.
+let PJ_BROWSE_GEN = 0;
 let CURRENT = null;
 
 /**
@@ -1511,6 +1519,11 @@ async function paintAgentProjects(sessionName) {
     // A corrupt projects file, or any 500, and the panel quietly asserted the
     // stronger claim.
     if (gen !== PJ_GEN) return;
+    // ⚠️ The LABEL changes too. "Projects it is on" is itself a claim, and
+    // leaving it over a sentence saying we could not look put the honest line
+    // under a heading asserting the thing it declines to assert.
+    const label = document.getElementById('d-projects-label');
+    if (label) label.textContent = 'Projects';
     document.getElementById('d-projects').innerHTML =
       '<span class="pj-tag pj-tag-unread">We could not read your projects just now, '
       + 'so we cannot say which ones this agent is on.</span>';
@@ -1519,6 +1532,10 @@ async function paintAgentProjects(sessionName) {
   }
   const mine = PROJECTS.filter((p) => (p.agents || []).some((a) => a.sessionName === sessionName));
   if (!mine.length) return;
+  // Restored, because the failure arm above changes it: a panel opened after a
+  // failed read and then a good one would otherwise keep the weaker heading.
+  const okLabel = document.getElementById('d-projects-label');
+  if (okLabel) okLabel.textContent = 'Projects it is on';
   document.getElementById('d-projects').innerHTML =
     mine.map((p) => '<span class="pj-tag">' + esc(p.name) + '</span>').join('');
   field.hidden = false;
@@ -3309,11 +3326,18 @@ function paintOneProject() {
   // agent is already ON the project, so they are all visible -- and it is the
   // have-not-looked-yet conflation its sibling picker was just fixed for, which
   // this one did not inherit. Each case now says which it is.
+  // ⚠️ The discriminator is `LAST.length`, NOT `on.size`. With an empty board
+  // and a project that has members, `on.size` is non-zero and this said "every
+  // agent we can see is already on it" while the rows above it said we cannot
+  // see any of them — membership rendered as visibility, on the same screen,
+  // contradicting itself. That state is reachable and became MORE reachable in
+  // this same branch: tmux installed with no server running is now a successful
+  // answer of zero agents rather than a refusal.
   const emptyBecause = BOARD_LOOK_FAILED
     ? 'we cannot see the agents right now'
     : !BOARD_LOOKED ? 'looking for the agents…'
-      : on.size ? 'every agent we can see is already on it'
-        : 'we cannot see any agents on this computer';
+      : !LAST.length ? 'we cannot see any agents on this computer'
+        : 'every agent we can see is already on it';
   const html = free.length
     ? free.map((a) => '<option value="' + esc(a.sessionName) + '">' + esc(a.name) + '</option>').join('')
     : '<option value="">' + esc(emptyBecause) + '</option>';
@@ -3355,15 +3379,33 @@ function openProject(id) {
 
 async function pjBrowse(at) {
   const box = document.getElementById('pj-browse');
+  // ⚠️ A GENERATION, like `loadProjects` and `paintAgentProjects` both take.
+  // Two quick clicks (folder A, then B) can land out of order, leaving the
+  // crumb, the list and `PJ_HERE` describing A while the person is in B — and
+  // "Use this folder" would then choose the wrong one. A new sibling does not
+  // inherit the guard; it has to be given it, which is the third time that
+  // sentence has been written in this file. The focus move below makes it worse
+  // without this: a late response would also yank focus back.
+  const gen = ++PJ_BROWSE_GEN;
   let body;
   try {
     const res = await fetch('/api/folders' + (at ? '?path=' + encodeURIComponent(at) : ''));
     body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we cannot look there');
   } catch (err) {
-    box.innerHTML = '<p class="pj-note">' + esc(err.message) + '</p>';
+    // ⚠️ THE FAILURE PATH GETS THE SAME TREATMENT AS THE SUCCESS PATH. This
+    // returned before the focus move at the bottom, so a folder that vanished
+    // between listing and click, or a refused path, destroyed the button that
+    // was pressed and dropped the person at the top of the document with an
+    // error nothing announced -- exactly the defect the success path was fixed
+    // for, left standing on the arm where the person most needs to be told.
+    if (gen !== PJ_BROWSE_GEN) return;
+    box.innerHTML = '<p class="pj-note" id="pj-browse-err" tabindex="-1">' + esc(err.message) + '</p>';
+    const note = document.getElementById('pj-browse-err');
+    if (note) note.focus();
     return;
   }
+  if (gen !== PJ_BROWSE_GEN) return;
   document.getElementById('pj-crumbs').textContent = body.path;
   const rows = [];
   // ⚠️ Offered only when the answer carries one. At home the server returns a
@@ -3379,12 +3421,14 @@ async function pjBrowse(at) {
   // past the limit is indistinguishable from one that is not there, and
   // "nothing else in here" becomes a claim nobody checked.
   if (body.truncated) {
-    // ⚠️ "There are more", not "of N". The server does not know N when it
-    // stopped early -- it typed the first 500 entries and left the rest
-    // unexamined -- and printing the raw entry count announced folders that
-    // may not be folders.
-    rows.push('<p class="pj-note">Showing the first ' + body.showing
-      + '. There are more — type the path below to reach the rest.</p>');
+    // ⚠️ "WE STOPPED", not "there are more". The server does not know how many
+    // remain -- it typed the first 500 entries and left the rest unexamined, and
+    // they may be files or links to files rather than folders. Printing the raw
+    // entry count claimed folders that do not exist; "there are more" made the
+    // same claim in words, one layer up from the `total: null` that removed it.
+    // What we actually know is where we stopped.
+    rows.push('<p class="pj-note">We stopped after the first ' + body.showing
+      + '. There may be more — type the path below to reach the rest.</p>');
   }
   box.innerHTML = rows.join('');
   // ⚠️ FOCUS GOES BACK INTO THE LIST, because this wholesale innerHTML replace
@@ -3433,25 +3477,41 @@ function pjChoose(p) {
   }
 }
 
+/**
+ * ⚠️ EVERY WRITE GOES THROUGH `setLive`, and that became load-bearing the moment
+ * this was put on the five-second poll.
+ *
+ * `box.innerHTML = …` destroys every `[data-pick]` button, including the one
+ * that currently has focus — so a keyboard person who tabbed onto "Mara" lost
+ * their focus point within five seconds, forever, in the primary onboarding
+ * flow. This file already treats that as a defect twice: the pick handler
+ * updates `aria-checked` IN PLACE ("a repaint destroys the very control that was
+ * just activated"), and `paintProjects` routes through `setIfChanged` for the
+ * same reason. This was the one member-list painter without the guard, and the
+ * repaint-on-poll that fixed a stale picker is what armed it.
+ *
+ * Selection survives a repaint either way — it is derived from `PJ_ADD_AGENTS`,
+ * not read off the DOM — so the guard costs nothing.
+ */
 function paintAddAgents() {
   const box = document.getElementById('pj-add-agents');
   // ⚠️ "We have not looked yet" is NOT "there are none", and saying the second
   // for the first is the one thing this product refuses to do.
   if (BOARD_LOOK_FAILED) {
-    box.innerHTML = '<p class="fhint">We cannot read the agents on this computer right now. '
+    setLive(box, '<p class="fhint">We cannot read the agents on this computer right now. '
       + 'This is not saying you have none — it is saying we cannot see them. You can still '
-      + 'add the project and put agents on it later.</p>';
+      + 'add the project and put agents on it later.</p>');
     return;
   }
   if (!BOARD_LOOKED) {
-    box.innerHTML = '<p class="fhint">Looking for the agents on this computer…</p>';
+    setLive(box, '<p class="fhint">Looking for the agents on this computer…</p>');
     return;
   }
   if (!LAST.length) {
-    box.innerHTML = '<p class="fhint">We cannot see any agents on this computer right now.</p>';
+    setLive(box, '<p class="fhint">We cannot see any agents on this computer right now.</p>');
     return;
   }
-  box.innerHTML = LAST.map((a) => {
+  setLive(box, LAST.map((a) => {
     const on = PJ_ADD_AGENTS.includes(a.sessionName);
     return '<button class="pick" type="button" role="checkbox" aria-checked="' + (on ? 'true' : 'false')
       + '" data-pick="' + esc(a.sessionName) + '">'
@@ -3459,7 +3519,7 @@ function paintAddAgents() {
       + '<span><b>' + esc(a.name) + '</b>'
       + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
       + '</button>';
-  }).join('');
+  }).join(''));
 }
 
 function openAddProject() {
