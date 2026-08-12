@@ -217,10 +217,12 @@ function fakeTerminal() {
   const f = {
     screen: SCREEN_THEME,
     sent: [],        // every send-keys, in order
+    all: [],         // every tmux command verbatim, for target auditing
     killed: 0,
     made: 0,
     onCode: () => { writeClaudeConfig(CONNECTED_CONFIG); f.screen = SCREEN_LOGIN_DONE; },
     runner(file, args) {
+      f.all.push(args.slice());
       const cmd = args[0];
       if (cmd === 'new-session') { f.made += 1; return { ok: true, stdout: '' }; }
       if (cmd === 'kill-session') { f.killed += 1; return { ok: true, stdout: '' }; }
@@ -442,6 +444,114 @@ test('a secure fetch never follows a redirect down to plain http', () => {
   const src = fs.readFileSync(nodePath.join(__dirname, 'connect.js'), 'utf8');
   const wired = (src.match(/redirectDowngrades\(/g) || []).length;
   assert.ok(wired >= 3, `redirectDowngrades is defined but wired into ${wired - 1} call sites`);
+});
+
+driverTest('every tmux target is pinned exact, so a near-name agent can never be hit', async () => {
+  /**
+   * ⚠️ tmux resolves `-t` by PREFIX when no exact session matches. After our
+   * session dies, an unpinned kill/capture/send aimed at `kosmos-connect`
+   * could land on an agent somebody named `kosmos-connect2` -- typing keys
+   * into a Claude running with permissions bypassed. `=` makes the target
+   * exact-or-nothing.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  connect.submitCode('abCD1234#efGH5678');
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
+
+  // Recorded from the seam: every -t across the whole flow, including kills.
+  const targets = term.all.filter((a) => a.includes('-t')).map((a) => a[a.indexOf('-t') + 1]);
+  assert.ok(targets.length >= 5, `expected a flow's worth of targeted commands, saw ${targets.length}`);
+  for (const t of targets) {
+    assert.equal(t, '=' + connect.SESSION, `an unpinned target went out: ${t}`);
+  }
+  // And session CREATION uses the bare name (a -s arg is a name, not a target).
+  const made = term.all.find((a) => a[0] === 'new-session');
+  assert.equal(made[made.indexOf('-s') + 1], connect.SESSION);
+});
+
+test('the connect session name is reserved: no agent can be created with it', () => {
+  const create = require('./create');
+  assert.match(String(create.nameProblem('kosmos-connect')), /reserved/,
+    'create accepts the sign-in session name, so an agent and the driver would share a pane');
+  // Control: a NEAR name stays allowed -- exact-match pins make it safe, and
+  // over-reserving would refuse names people legitimately want.
+  assert.equal(create.nameProblem('kosmos-connect2'), null);
+});
+
+driverTest('a stale failure cannot tear down the fresh flow that replaced it', async () => {
+  /**
+   * ⚠️ THE REPLACED CASE, which `!driver` cannot see: flow A parks on a
+   * capture, cancel runs, flow B starts, and THEN A's aborted capture fails.
+   * Existence says "a driver is there"; only identity knows it is not A's.
+   */
+  const term = fakeTerminal();
+  let releaseA = null;
+  let captures = 0;
+  const gate = new Promise((r) => { releaseA = r; });
+  const baseRunner = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane') {
+      captures += 1;
+      if (captures === 1) return gate.then(() => ({ ok: false, stdout: '', stderr: 'no server running' }));
+    }
+    return baseRunner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();                       // flow A; its first capture parks
+  await new Promise((r) => setTimeout(r, 40));
+  await connect.cancel();
+  await connect.start();                       // flow B, healthy
+  await until(() => {
+    const p = connect.state().phase;
+    return p !== connect.PHASE.IDLE && p !== connect.PHASE.STUCK;
+  });
+  releaseA();                                  // A's aborted capture now fails
+  await new Promise((r) => setTimeout(r, 120));
+  const st = connect.state();
+  assert.notEqual(st.phase, connect.PHASE.STUCK,
+    'flow A\'s corpse wrote STUCK over flow B: ' + JSON.stringify(st));
+});
+
+driverTest('a pane that stays blank forever becomes stuck, not eternal progress', async () => {
+  /**
+   * ⚠️ The never-drawing screen used to get ETERNITY while the unrecognised
+   * screen got 10 seconds -- "Getting the sign-in ready" painted forever over
+   * a hung Claude. The blank grace is 4.5x the unknown grace (45s real),
+   * shrunk here through the same knob the unknown grace tests use.
+   */
+  const term = fakeTerminal();
+  term.screen = '';
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  // Well inside the grace: a briefly blank pane is NOT a failure.
+  await new Promise((r) => setTimeout(r, 300));
+  assert.notEqual(connect.state().phase, connect.PHASE.STUCK,
+    'a briefly blank pane was treated as a failure');
+
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /never drew/,
+    'the blank hang went stuck for the wrong reason: ' + connect.state().because);
+});
+
+test('a version answer that tries to steer the file path is refused', async (t) => {
+  const server = http.createServer((req, res) => {
+    const body = Buffer.from('9.9.9/../../escape');
+    res.writeHead(200, { 'content-length': body.length });
+    res.end(body);
+  });
+  await new Promise((r) => { server.listen(0, '127.0.0.1', r); });
+  t.after(() => server.close());
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+  await assert.rejects(() => connect.download(), /did not answer with a version/,
+    'a path-traversal version string was accepted into the download path');
 });
 
 driverTest('a code is refused while nothing is asking for one', async () => {

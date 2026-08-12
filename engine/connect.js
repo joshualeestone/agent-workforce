@@ -88,6 +88,16 @@ const STATE_FILE = () => path.join(store.ROOT, 'connect.json');
  * name; nothing creates one called this).
  */
 const SESSION = 'kosmos-connect';
+/**
+ * ⚠️ EVERY `-t` USES THE `=` EXACT-MATCH PREFIX, the same rule remove.js and
+ * the README already treat as mandatory. Without it, tmux resolves a target by
+ * PREFIX when no exact session exists -- so after our session dies, a
+ * kill/capture/send aimed at `kosmos-connect` could land on an agent somebody
+ * named `kosmos-connect2`, typing Enter into a Claude running with permissions
+ * bypassed. `create.js` also refuses the name outright, but the exact-match
+ * pin must not depend on that gate holding forever.
+ */
+const TARGET = '=' + SESSION;
 
 /* ── the runner seam ─────────────────────────────────────────────────────── */
 
@@ -314,7 +324,14 @@ function platformKey() {
 async function download(onProgress) {
   const base = downloadBase();
   const version = (await fetchText(`${base}/latest`)).trim();
-  if (!/^\d+\.\d+\.\d+/.test(version)) {
+  /**
+   * ⚠️ FULLY ANCHORED, because this string is interpolated into URLs and into
+   * the ON-DISK FILENAME. Prefix-only matching would accept
+   * `1.2.3/../../anywhere` and steer the write path (of a file that ends up
+   * chmod 755) wherever the answer pointed. The service is trusted for the
+   * bytes it serves, never for where we put them.
+   */
+  if (!/^\d+\.\d+\.\d+[A-Za-z0-9.-]*$/.test(version)) {
     throw new Error('the download service did not answer with a version');
   }
   let manifest;
@@ -408,7 +425,7 @@ async function tmux(args, opts) {
 }
 
 async function killSession() {
-  await tmux(['kill-session', '-t', SESSION]);
+  await tmux(['kill-session', '-t', TARGET]);
 }
 
 /**
@@ -456,15 +473,24 @@ async function start() {
   let haveBinary = false;
   try { fs.accessSync(bin, fs.constants.X_OK); haveBinary = true; } catch { /* not installed yet */ }
 
-  driver = { pendingCode: null, lastActed: null, acted: null, unknownTicks: 0, quietTicks: 0 };
+  /**
+   * ⚠️ EVERY ASYNC ARM OF A FLOW CARRIES ITS OWNING DRIVER, and teardown
+   * compares IDENTITY, not existence. The defect this closes: work parked on
+   * an await belonged to a flow that was cancelled, a fresh `start` installed
+   * a NEW driver during the cancel's own awaits, and the stale work's failure
+   * then saw "a driver exists" and tore down the healthy new flow. `!driver`
+   * cannot distinguish "cancelled" from "replaced"; `driver !== owner` can.
+   */
+  const owner = { pendingCode: null, lastActed: null, acted: null, unknownTicks: 0 };
+  driver = owner;
 
-  runFlow(haveBinary).catch((err) => {
-    becomeStuck('something went wrong that we did not plan for', String((err && err.message) || err));
+  runFlow(owner, haveBinary).catch((err) => {
+    becomeStuck(owner, 'something went wrong that we did not plan for', String((err && err.message) || err));
   });
   return state();
 }
 
-async function runFlow(haveBinary) {
+async function runFlow(owner, haveBinary) {
   if (!haveBinary) {
     writeState({ phase: PHASE.DOWNLOADING, progress: { got: 0, total: null }, startedOnce: true });
     let downloaded;
@@ -486,31 +512,32 @@ async function runFlow(haveBinary) {
         writeState({ ...mem, progress: { got, total } });
       });
     } catch (err) {
-      becomeStuck('we could not download Claude', String((err && err.message) || err));
+      becomeStuck(owner, 'we could not download Claude', String((err && err.message) || err));
       return;
     }
-    if (!driver) {
-      // Cancelled, but the download had already finished: a verified 281MB
-      // binary is on disk for a flow nobody wants. Cancel's contract is "own
-      // nothing half-claimed", and this is the window its cleanup cannot see.
+    if (driver !== owner) {
+      // Cancelled (or replaced), but the download had already finished: a
+      // verified 281MB binary is on disk for a flow nobody wants. Cancel's
+      // contract is "own nothing half-claimed", and this is the window its
+      // cleanup cannot see.
       try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
       return;
     }
 
     writeState({ phase: PHASE.INSTALLING, startedOnce: true });
     const inst = await run(downloaded.path, ['install'], { timeout: 180000, env: { TERM: 'dumb' }, cancellable: true });
-    if (!driver) {
+    if (driver !== owner) {
       try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
       return;
     }
     if (!inst.ok) {
-      becomeStuck('Claude downloaded but did not finish setting itself up',
+      becomeStuck(owner, 'Claude downloaded but did not finish setting itself up',
         tailOf(`${inst.stdout || ''}\n${inst.stderr || ''}`) || 'it stopped without saying why');
       return;
     }
     try { fs.accessSync(claudeBinPath(), fs.constants.X_OK); }
     catch {
-      becomeStuck('Claude said it set itself up, but we cannot find it where it should be',
+      becomeStuck(owner, 'Claude said it set itself up, but we cannot find it where it should be',
         `expected it at ${claudeBinPath()}`);
       return;
     }
@@ -519,12 +546,12 @@ async function runFlow(haveBinary) {
     // keeping ours means ~281MB per version quietly accumulating in app data.
     try { fs.unlinkSync(downloaded.path); } catch { /* disk hygiene, not correctness */ }
   }
-  if (!driver) return;
-  await launchSignin();
+  if (driver !== owner) return;
+  await launchSignin(owner);
 }
 
-async function launchSignin() {
-  if (!driver) return; // cancelled before the sign-in ever launched
+async function launchSignin(owner) {
+  if (driver !== owner) return; // cancelled before the sign-in ever launched
   writeState({ phase: PHASE.SIGNIN_LAUNCHING, startedOnce: true });
 
   // A leftover session from an interrupted attempt would be showing a stale
@@ -539,12 +566,12 @@ async function launchSignin() {
 
   const made = await tmux(['new-session', '-d', '-s', SESSION, '-x', '220', '-y', '50', ...cmd]);
   if (!made.ok) {
-    becomeStuck('we could not open the window Claude signs in through',
+    becomeStuck(owner, 'we could not open the window Claude signs in through',
       tailOf(`${made.stdout || ''}\n${made.stderr || ''}`) || 'tmux would not start');
     return;
   }
-  if (!driver) { await killSession(); return; }
-  driver.timer = setInterval(() => { tick().catch(() => { /* next tick retries */ }); }, TICK_MS);
+  if (driver !== owner) { await killSession(); return; }
+  owner.timer = setInterval(() => { tick(owner).catch(() => { /* next tick retries */ }); }, TICK_MS);
 }
 
 /**
@@ -552,12 +579,12 @@ async function launchSignin() {
  * is acted on ONCE: a second Enter on the theme screen would land on the next
  * screen and pick whatever was under the cursor.
  */
-async function tick() {
-  if (!driver) return;
-  const cap = await tmux(['capture-pane', '-p', '-J', '-t', SESSION]);
-  if (!driver) return; // cancel ran while we were looking
+async function tick(owner) {
+  if (driver !== owner) return;
+  const cap = await tmux(['capture-pane', '-p', '-J', '-t', TARGET]);
+  if (driver !== owner) return; // cancelled or replaced while we were looking
   if (!cap.ok) {
-    becomeStuck('the sign-in window closed before Claude finished',
+    becomeStuck(owner, 'the sign-in window closed before Claude finished',
       tailOf(cap.stderr || '') || 'it is no longer there');
     return;
   }
@@ -569,11 +596,16 @@ async function tick() {
     // capture can land mid-paint. ~10s of never recognising anything is a
     // different fact, and it is reported rather than waited out forever.
     if (driver.unknownTicks > Math.max(3, Math.ceil(UNKNOWN_GRACE_MS / TICK_MS))) {
-      becomeStuck('Claude showed a screen we do not recognise', seen.tail);
+      becomeStuck(owner, 'Claude showed a screen we do not recognise', seen.tail);
     }
     return;
   }
   driver.unknownTicks = 0;
+  // ⚠️ NOT reset on blank itself -- the first version of this line ran for
+  // every classification including 'blank', so the counter it exists to feed
+  // was zeroed on the very tick that incremented it and the escalation could
+  // never fire. Caught by the test timing out, not by reading the diff.
+  if (seen.kind !== 'blank') driver.blankTicks = 0;
 
   /**
    * ⚠️ ACT ONCE PER SCREEN, where "screen" is the kind plus the text itself.
@@ -586,18 +618,30 @@ async function tick() {
 
   switch (seen.kind) {
     case 'blank':
+      /**
+       * ⚠️ A PERMANENTLY BLANK PANE IS AN ANSWER TOO. Blanks are legitimate
+       * between screens, so the grace is generous -- but a Claude that clears
+       * the screen and hangs must not leave "Getting the sign-in ready" on
+       * screen forever, which is progress nobody is producing.
+       */
+      driver.blankTicks = (driver.blankTicks || 0) + 1;
+      // 4.5x the unknown grace (45s in production): blanks are legitimate
+      // between screens, so the bound is generous -- but it exists.
+      if (driver.blankTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 4.5) / TICK_MS))) {
+        becomeStuck(owner, 'Claude never drew its sign-in screen', 'the window stayed blank');
+      }
       return;
     case 'theme':
       if (driver.acted !== sig) {
         driver.acted = sig;
-        await tmux(['send-keys', '-t', SESSION, 'Enter']);
+        await tmux(['send-keys', '-t', TARGET, 'Enter']);
       }
       return;
     case 'login-method':
       if (driver.acted !== sig) {
         driver.acted = sig;
         // Option 1, "Claude account with subscription", is already selected.
-        await tmux(['send-keys', '-t', SESSION, 'Enter']);
+        await tmux(['send-keys', '-t', TARGET, 'Enter']);
       }
       return;
     case 'browser-open':
@@ -640,10 +684,10 @@ async function tick() {
         driver.pendingCode = null;
         // ⚠️ `--` ends option parsing: the allowed charset includes `-`, and a
         // code starting with one would otherwise be read by tmux as flags.
-        const typed = await tmux(['send-keys', '-t', SESSION, '-l', '--', code]);
-        const entered = typed.ok ? await tmux(['send-keys', '-t', SESSION, 'Enter']) : typed;
+        const typed = await tmux(['send-keys', '-t', TARGET, '-l', '--', code]);
+        const entered = typed.ok ? await tmux(['send-keys', '-t', TARGET, 'Enter']) : typed;
         if (!typed.ok || !entered.ok) {
-          becomeStuck('we could not type the code into the sign-in',
+          becomeStuck(owner, 'we could not type the code into the sign-in',
             tailOf(`${typed.stderr || ''}\n${entered.stderr || ''}`) || 'the sign-in window did not take it');
           return;
         }
@@ -667,19 +711,23 @@ async function tick() {
         // first start -- does not begin at a screen nobody is watching.
         if (seen.kind === 'press-enter' && driver.acted !== sig) {
           driver.acted = sig;
-          await tmux(['send-keys', '-t', SESSION, 'Enter']);
+          await tmux(['send-keys', '-t', TARGET, 'Enter']);
           return;
         }
-        if (seen.kind === 'repl' || driver.quietTicks > 4) {
-          await finishConnected(sub);
+        // ⚠️ Its OWN counter: sharing it with the config-catch-up wait meant
+        // a late-flipping config finished on the next tick and killed the
+        // session mid-onboarding, skipping the walk-forward this comment
+        // promises.
+        if (seen.kind === 'repl' || (driver.settleTicks || 0) > 4) {
+          await finishConnected(owner, sub);
           return;
         }
-        driver.quietTicks += 1;
+        driver.settleTicks = (driver.settleTicks || 0) + 1;
         return;
       }
       if (seen.kind === 'press-enter' && driver.acted !== sig) {
         driver.acted = sig;
-        await tmux(['send-keys', '-t', SESSION, 'Enter']);
+        await tmux(['send-keys', '-t', TARGET, 'Enter']);
         return;
       }
       /**
@@ -705,16 +753,17 @@ async function tick() {
         if (seen.kind === 'repl') {
           driver.replTicks = (driver.replTicks || 0) + 1;
           if (driver.replTicks > Math.max(3, Math.ceil(8000 / TICK_MS))) {
-            becomeStuck('Claude looks signed in here, but we could not confirm a subscription',
+            becomeStuck(owner, 'Claude looks signed in here, but we could not confirm a subscription',
               sub.because || 'the settings on this computer do not say which plan it is on');
             return;
           }
         }
         // Text says logged in but the config has not flipped yet; give it a
-        // bounded wait rather than forever.
-        driver.quietTicks += 1;
-        if (driver.quietTicks > Math.ceil(60000 / TICK_MS)) {
-          becomeStuck('Claude says it signed in, but we cannot see the connection yet',
+        // bounded wait rather than forever. Its OWN counter, distinct from
+        // the post-connected settle above.
+        driver.waitTicks = (driver.waitTicks || 0) + 1;
+        if (driver.waitTicks > Math.ceil(60000 / TICK_MS)) {
+          becomeStuck(owner, 'Claude says it signed in, but we cannot see the connection yet',
             'the settings file has not caught up; Check again in a moment, or try once more');
         }
       }
@@ -724,7 +773,8 @@ async function tick() {
   }
 }
 
-async function finishConnected(sub) {
+async function finishConnected(owner, sub) {
+  if (driver !== owner) return;
   const d = driver;
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
@@ -732,16 +782,17 @@ async function finishConnected(sub) {
   writeState({ phase: PHASE.CONNECTED, plan: sub.plan || null, startedOnce: true });
 }
 
-function becomeStuck(because, tail) {
+function becomeStuck(owner, because, tail) {
   /**
-   * ⚠️ NO DRIVER MEANS NOBODY IS STUCK. Every path that lands here crossed an
-   * `await`, and `cancel()` may have run during it -- a person who
-   * deliberately cancelled must not later find a STUCK record written by the
-   * very request their cancel aborted (the abort REJECTS that request, which
-   * is exactly what routes here). Cancel wins, in either order: this guard
-   * covers stuck-after-cancel, and cancel's own IDLE write covers the other.
+   * ⚠️ ONLY THE OWNING FLOW MAY DECLARE ITSELF STUCK. Every path that lands
+   * here crossed an `await`, and during it the flow may have been CANCELLED
+   * (driver null) or REPLACED by a fresh start (driver is somebody else). A
+   * person who deliberately cancelled must not later find a STUCK record
+   * written by the very request their cancel aborted, and a stale flow's
+   * failure must never tear down the healthy flow that superseded it --
+   * existence checks cannot tell those apart; identity can.
    */
-  if (!driver) return;
+  if (!driver || driver !== owner) return;
   const d = driver;
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
@@ -778,6 +829,16 @@ async function cancel() {
   if (activeRequest) { try { activeRequest.destroy(); } catch { /* already ended */ } activeRequest = null; }
   if (activeChild) { try { activeChild.kill(); } catch { /* already exited */ } activeChild = null; }
   await killSession();
+  /**
+   * ⚠️ A FRESH FLOW MAY HAVE STARTED DURING THE AWAIT ABOVE. Everything past
+   * this line belongs to whoever owns `driver` NOW: sweeping the downloads
+   * dir would delete the new flow's in-flight .part, and writing IDLE would
+   * clobber its live record. The new flow owns the state; this cancel is
+   * done. (Residual, documented: the killSession above may have killed a
+   * session the new flow just made -- its driver then reports "the sign-in
+   * window closed", an honest failure, never silent corruption.)
+   */
+  if (driver) return state();
   try {
     /**
      * ⚠️ Partials AND finished downloads. A verified binary is only useful to

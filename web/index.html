@@ -4502,6 +4502,12 @@ function frConnWatch() {
        */
       frConnStopWatch();
       FR_CONN_LAST = null;
+      if (st.phase === 'connected') {
+        // The one phase the panel painter never paints, announced here so a
+        // screen-reader user hears the finish, not just the buttons changing.
+        const say = document.getElementById('fr-conn-say');
+        if (say) say.textContent = FR_CONN_SAY.connected;
+      }
       frRecheck();
       return;
     }
