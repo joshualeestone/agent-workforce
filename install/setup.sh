@@ -1,0 +1,230 @@
+#!/bin/bash
+# Kosmos installer. One line, no sudo, nothing outside your home folder.
+#
+#   curl -fsSL https://chaoskosmos.com/setup | sh
+#
+# ⚠️ WHO THIS IS FOR, because it governs every decision below. The person running
+# this has been handed a line to paste by someone they trust, in a room, and has
+# possibly never opened Terminal before. They are not debugging. If something
+# goes wrong they will not read a stack trace, they will conclude the product is
+# broken and stop. So:
+#
+#   - EVERY step prints what it is doing BEFORE it does it. A silent install is
+#     the documented disqualifying failure (requirements §122): a blank terminal
+#     for several minutes reads as broken, and the person quits before it
+#     finishes. Measured on a competitor the same week this was written: ten
+#     minutes of no output at all while it downloaded a database.
+#   - Every failure prints what to do next, in a sentence, not an error code.
+#   - Nothing needs sudo. Nothing is written outside $HOME.
+#   - Running it twice is safe and says so.
+#
+# ⚠️ AND IT MUST BE REVERSIBLE. `--uninstall` genuinely returns the machine to
+# before. That is not politeness: the first run on a never-touched Mac is the
+# most valuable test this project will ever get, and it is worth exactly once
+# unless we can put the machine back.
+
+set -euo pipefail
+
+KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
+BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
+LOG_DIR="$KOSMOS_HOME/logs"
+LOG="$LOG_DIR/install.log"
+
+# ---- where the pieces come from --------------------------------------------
+# ⚠️ BOTH SOURCES ARE OVERRIDABLE, and that is what makes the clean-machine test
+# possible. On a release these fetch from the published URL. For the first run on
+# a never-touched Mac we want to test the INSTALLER, not the CDN, so
+# KOSMOS_TMUX_SRC and KOSMOS_SRC can point at local files carried over on a
+# thumb drive. Same code path, one variable different.
+KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
+
+fetch_tmux() {
+  local dest="$1"
+  mkdir -p "$dest"
+  if [ -n "${KOSMOS_TMUX_SRC:-}" ]; then
+    info "using local copy: $KOSMOS_TMUX_SRC"
+    [ -d "$KOSMOS_TMUX_SRC" ] || return 1
+    cp -R "$KOSMOS_TMUX_SRC/." "$dest/"
+  else
+    local url="$KOSMOS_RELEASE_BASE/tmux-$ARCH.tar.gz"
+    info "downloading from $url"
+    # ⚠️ Progress is ON. `curl -fsSL` is silent, and several minutes of nothing
+    # is the failure this whole file is written against.
+    curl -fL --progress-bar "$url" -o "$dest/tmux.tar.gz" || return 1
+    tar -xzf "$dest/tmux.tar.gz" -C "$dest" && rm -f "$dest/tmux.tar.gz"
+  fi
+  [ -x "$dest/bin/tmux" ] || return 1
+
+  # ⚠️ VERIFY THE THING WE JUST PLACED, rather than assuming the copy worked.
+  # An arm64 binary with a broken signature does not run at all, and the failure
+  # is silent and baffling. Better to say so here than to have the board come up
+  # empty later with no explanation.
+  if ! codesign -v "$dest/bin/tmux" 2>/dev/null; then
+    info "the copy of tmux did not arrive intact"
+    return 1
+  fi
+  return 0
+}
+
+install_kosmos() {
+  local dest="$1"
+  mkdir -p "$dest/bin"
+  if [ -n "${KOSMOS_SRC:-}" ]; then
+    info "using local copy: $KOSMOS_SRC"
+    [ -d "$KOSMOS_SRC" ] || return 1
+    cp -R "$KOSMOS_SRC/." "$dest/"
+  else
+    local url="$KOSMOS_RELEASE_BASE/kosmos-$ARCH.tar.gz"
+    info "downloading from $url"
+    curl -fL --progress-bar "$url" -o "$dest/kosmos.tar.gz" || return 1
+    tar -xzf "$dest/kosmos.tar.gz" -C "$dest" && rm -f "$dest/kosmos.tar.gz"
+  fi
+  [ -x "$dest/bin/kosmos" ] || return 1
+  return 0
+}
+
+# ---- how it talks -----------------------------------------------------------
+# ⚠️ Plain sentences, no jargon, no filenames the reader did not choose. The one
+# screen a non-technical person cannot get past is the one written for somebody
+# else.
+step()  { printf '\n  %s\n' "$*"; }
+info()  { printf '     %s\n' "$*"; }
+ok()    { printf '     done\n'; }
+die()   {
+  printf '\n  Something went wrong.\n     %s\n\n' "$*" >&2
+  [ -f "$LOG" ] && printf '  The details are in %s\n\n' "$LOG" >&2
+  exit 1
+}
+
+# Everything also goes to a log, so one run produces a transcript rather than a
+# memory of what happened. That is what makes the clean-machine test worth
+# something afterwards.
+start_log() {
+  mkdir -p "$LOG_DIR"
+  exec 3>&1
+  exec > >(tee -a "$LOG") 2>&1
+  printf '\n=== kosmos install %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG"
+}
+
+# ---- uninstall --------------------------------------------------------------
+uninstall() {
+  step "Removing Kosmos."
+  if [ -d "$KOSMOS_HOME" ]; then
+    info "deleting $KOSMOS_HOME"
+    rm -rf "$KOSMOS_HOME"
+  fi
+  for f in kosmos; do
+    [ -e "$BIN_DIR/$f" ] && { info "removing $BIN_DIR/$f"; rm -f "$BIN_DIR/$f"; }
+  done
+  # ⚠️ Deliberately NOT removed: the user's agents, their instruction files, and
+  # anything under ~/work. Uninstalling the app must never delete somebody's
+  # work, and an installer that cleans up too enthusiastically is worse than one
+  # that leaves a folder behind.
+  printf '\n  Kosmos is removed. Your agents and their files were left alone.\n\n'
+  exit 0
+}
+
+[ "${1:-}" = "--uninstall" ] && uninstall
+
+# ---- preflight --------------------------------------------------------------
+# ⚠️ ASK WHETHER THIS IS A FRESH MACHINE **BEFORE** ANYTHING CREATES A DIRECTORY.
+# The first version asked afterwards, and `start_log` had already made
+# $KOSMOS_HOME/logs to write into. So the installer created the evidence it then
+# used to decide, and told a person installing for the very first time
+# "Kosmos is already installed here."
+#
+# Caught by running it against a genuinely empty directory. On the never-touched
+# Mac that is the FIRST SENTENCE the user would have read, and it says the
+# product is confused about its own state on the one run where trust is decided.
+FRESH_INSTALL=yes
+[ -d "$KOSMOS_HOME" ] && FRESH_INSTALL=no
+
+start_log
+
+printf '\n  Installing Kosmos\n'
+printf '  This takes a couple of minutes and does not need your password.\n'
+
+step "Checking this Mac."
+case "$(uname -s)" in
+  Darwin) ;;
+  *) die "Kosmos runs on macOS. This looks like $(uname -s)." ;;
+esac
+ARCH="$(uname -m)"
+info "macOS $(sw_vers -productVersion 2>/dev/null || echo '?') on $ARCH"
+ok
+
+# ⚠️ IDEMPOTENT, AND IT SAYS SO. Somebody who is not sure whether it worked will
+# run it again. That must be safe and must not look like a failure.
+if [ "$FRESH_INSTALL" = "no" ]; then
+  info "Kosmos is already installed here. Updating it in place."
+fi
+
+mkdir -p "$KOSMOS_HOME" "$BIN_DIR"
+
+# ---- tmux -------------------------------------------------------------------
+# ⚠️ THE HARD PART, AND WHY IT IS SOLVED THIS WAY. macOS does not ship tmux, and
+# Kosmos is built on it: the board reads what your agents are doing from tmux, so
+# without it there is no product and it cannot degrade to a warning.
+#
+# We ship our own rather than asking for Homebrew, which would mean sudo and a
+# multi-gigabyte developer-tools download in front of someone who was told this
+# takes one line. Ours is ~2MB, lives in this folder, and touches nothing else.
+step "Setting up the pieces Kosmos needs."
+if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
+  info "the terminal manager is already here"
+else
+  info "installing a private copy of tmux (about 2MB, nothing system-wide)"
+  # In a real release this fetches the signed bundle from the release URL. Kept
+  # as a function so the clean-machine test can point it at a local file.
+  fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager."
+fi
+ok
+
+# ⚠️ TERMINFO IS PINNED RATHER THAN TRUSTED. The bundled ncurses carries a
+# compiled-in path to the terminfo database from the machine it was built on,
+# which will not exist here. macOS ships its own at /usr/share/terminfo and
+# ncurses is expected to fall back to it, but "expected to" is doing work in that
+# sentence and this is the machine where it would fail. Pinning it converts an
+# assumption into a fact, for free.
+export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
+
+# ---- claude -----------------------------------------------------------------
+# ⚠️ NOT AN ERROR IF MISSING, and this is the difference between "install failed"
+# and "you have one more thing to do". A brand-new Mac will not have Claude, and
+# telling that person the install failed is how we lose them at step one. The app
+# handles connecting; the installer only reports.
+step "Looking for Claude."
+if command -v claude >/dev/null 2>&1; then
+  info "found it"
+  CLAUDE_READY=yes
+else
+  info "not installed yet, which is fine. Kosmos will help you connect it."
+  CLAUDE_READY=no
+fi
+ok
+
+# ---- kosmos itself ----------------------------------------------------------
+step "Installing Kosmos."
+install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos."
+ln -sf "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
+info "installed to $KOSMOS_HOME"
+ok
+
+# ⚠️ Say it, do not assume it. A binary in ~/.local/bin is useless to somebody
+# whose shell does not look there, and silently not working is the worst outcome.
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) info "note: add $BIN_DIR to your PATH to run 'kosmos' from anywhere" ;;
+esac
+
+# ---- start ------------------------------------------------------------------
+step "Starting Kosmos."
+"$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start."
+ok
+
+printf '\n  Kosmos is running.\n'
+if [ "$CLAUDE_READY" = "no" ]; then
+  printf '  Open it and it will walk you through connecting Claude.\n'
+fi
+printf '  Your dashboard: http://127.0.0.1:4317\n\n'
+printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
