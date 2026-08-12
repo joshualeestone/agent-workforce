@@ -619,6 +619,24 @@ svg { display: block; }
            background: var(--attn-bg); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
           margin-top: var(--space-5); min-height: 1em; }
+/* The connect flow (step 3). The bar is quiet monochrome on purpose: this
+   screen has no brand accent, and inventing one for a progress bar would make
+   the download the loudest thing in onboarding. */
+.fr-progress { height: 6px; border-radius: 3px; background: var(--separator);
+               overflow: hidden; margin: var(--space-5) 0 var(--space-4); }
+.fr-progress-fill { height: 100%; background: var(--label-2); transition: width 0.3s; }
+/* What the terminal actually said, when we got stuck. Scrolls in place rather
+   than growing the dialog; nothing here is for reading closely, it is for
+   showing a person (or the person helping them) what happened. */
+.fr-conn-tail { font: 11px/1.5 var(--font-mono); color: var(--label-2);
+                background: var(--bg-sunken); border: 0.5px solid var(--separator);
+                border-radius: 8px; padding: var(--space-4) var(--space-5);
+                margin-top: var(--space-5); max-height: 9em; overflow: auto;
+                white-space: pre-wrap; word-break: break-all; }
+.fr-code-row { display: flex; gap: var(--space-4); margin-top: var(--space-4); flex-wrap: wrap; }
+.fr-code-row input { flex: 1; min-width: 200px; font: var(--text-body) var(--font-mono);
+                     padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+                     border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
 /* ⚠️ Collapses when empty, but is NOT `display: none` — there are two of these
    live regions on the panel, and two reserved blank lines put a visible gap
    under every short step. Taking them out of the render tree instead is how a
@@ -866,6 +884,12 @@ svg { display: block; }
       <div class="fr-pane" id="fr-pane-3" hidden>
         <div id="fr-sub"></div>
         <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
+        <!-- ⚠️ The connect flow's phase announcements, VISUALLY HIDDEN on
+             purpose. Each phase panel already says what is happening in its
+             title; speaking the change needs a live region, but rendering the
+             same sentence twice is the said-it-twice copy defect the
+             connection notice was already caught by once. -->
+        <div class="vh" id="fr-conn-say" role="status" aria-live="polite"></div>
       </div>
 
       <!-- 4. The fork. ⚠️ "Adopting" is not an import: every agent already on
@@ -4206,6 +4230,10 @@ function frGo(step) {
   } else if (step === 3) {
     document.getElementById('fr-title').textContent = 'Claude';
     frPaintSubscription();
+    // ⚠️ A connect flow may already be running (it keeps going server-side
+    // when somebody wanders to another step). If it is, this repaints the
+    // live flow over the static verdict once the answer arrives.
+    frConnResume();
   } else {
     frPaintFleet();
   }
@@ -4401,6 +4429,266 @@ async function frRecheck() {
   }
 }
 
+/* --------------------------------------------------------------------------
+   Step 3 — the connect flow (the click that installs Claude and signs it in)
+
+   The engine owns the truth (engine/connect.js); this paints it. Phases the
+   server can answer: idle, downloading, installing, signin-launching,
+   signin-browser-open, signin-awaiting-code, signin-completing, connected,
+   stuck, interrupted.
+   -------------------------------------------------------------------------- */
+
+let FR_CONN_TIMER = null;
+let FR_CONN_LAST = null;   // the last phase painted, so repaints are on change
+
+function frConnActive(phase) {
+  return ['downloading', 'installing', 'signin-launching', 'signin-browser-open',
+    'signin-awaiting-code', 'signin-completing'].includes(phase);
+}
+
+/**
+ * On arriving at step 3: if a connect flow is already running (it keeps going
+ * server-side while somebody wanders off to another step), paint the live
+ * flow over the static verdict. Fail-open: if this fetch fails, the static
+ * verdict is already on screen and stays.
+ */
+async function frConnResume() {
+  try {
+    const res = await fetch('/api/connect', { cache: 'no-store' });
+    if (!res.ok) return;
+    const st = await res.json();
+    if (FR_STEP !== 3) return;
+    if (frConnActive(st.phase) || st.phase === 'stuck' || st.phase === 'interrupted') {
+      FR_CONN_LAST = null;
+      frPaintConnect(st);
+      if (frConnActive(st.phase)) frConnWatch();
+    }
+  } catch { /* the static verdict stays */ }
+}
+
+function frConnStopWatch() {
+  if (FR_CONN_TIMER) { clearInterval(FR_CONN_TIMER); FR_CONN_TIMER = null; }
+}
+
+function frConnWatch() {
+  if (FR_CONN_TIMER) return;
+  FR_CONN_TIMER = setInterval(async () => {
+    let st;
+    try {
+      const res = await fetch('/api/connect', { cache: 'no-store' });
+      if (!res.ok) return;   // a blip; the next tick asks again
+      st = await res.json();
+    } catch { return; }
+    // ⚠️ Only paint if they are still here — same rule as frRecheck. The flow
+    // itself continues server-side; it is the PAINT that must not land on
+    // another step's screen.
+    if (FR_STEP !== 3) { frConnStopWatch(); return; }
+    frPaintConnect(st);
+    if (st.phase === 'connected') {
+      frConnStopWatch();
+      // The standard verdict painter takes over: re-pull the whole first-run
+      // answer so the green row comes from the same reader as always.
+      frRecheck();
+      return;
+    }
+    if (!frConnActive(st.phase)) frConnStopWatch();
+  }, 1000);
+}
+
+async function frConnectStart() {
+  const msg = document.getElementById('fr-sub-msg');
+  msg.textContent = '';
+  const next = document.getElementById('fr-next');
+  next.disabled = true;   // one press, one flow; re-enabled by the repaint
+  try {
+    const res = await fetch('/api/connect/start', { method: 'POST' });
+    const st = await res.json();
+    if (!res.ok) throw new Error(st.error || ('status ' + res.status));
+    if (FR_STEP !== 3) return;
+    if (st.phase === 'connected') { frRecheck(); return; }
+    FR_CONN_LAST = null;
+    frPaintConnect(st);
+    frConnWatch();
+  } catch (err) {
+    next.disabled = false;
+    msg.textContent = 'We could not start connecting (' + err.message + ').';
+  }
+}
+
+async function frConnCancel() {
+  frConnStopWatch();
+  try { await fetch('/api/connect/cancel', { method: 'POST' }); }
+  catch { /* the repaint below asks reality either way */ }
+  FR_CONN_LAST = null;
+  frRecheck();
+}
+
+async function frConnSubmitCode() {
+  const input = document.getElementById('fr-conn-code');
+  const btn = document.getElementById('fr-conn-code-go');
+  const msg = document.getElementById('fr-sub-msg');
+  const code = ((input && input.value) || '').trim();
+  if (!code) { msg.textContent = 'Paste the code first.'; return; }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/connect/code', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const got = await res.json();
+    if (!res.ok) { msg.textContent = got.error || 'That code was not accepted.'; return; }
+    msg.textContent = 'Code sent. Finishing the sign-in…';
+  } catch (err) {
+    msg.textContent = 'We could not send that (' + err.message + ').';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function frMB(n) { return Math.max(0, Math.round(n / 1048576)) + 'MB'; }
+
+/** One sentence per phase, spoken once on each phase CHANGE — the per-second
+    progress numbers stay out of the live region on purpose. */
+const FR_CONN_SAY = {
+  downloading: 'Downloading Claude.',
+  installing: 'Setting Claude up on this computer.',
+  'signin-launching': 'Getting the sign-in ready.',
+  'signin-browser-open': 'Your browser has opened. Sign in to Claude there.',
+  'signin-awaiting-code': 'Your browser has opened. If Claude gives you a code, paste it here.',
+  'signin-completing': 'Finishing the sign-in.',
+  connected: 'Connected.',
+  stuck: 'We could not finish connecting Claude.',
+};
+
+function frPaintConnect(st) {
+  const box = document.getElementById('fr-sub');
+  const msg = document.getElementById('fr-sub-msg');
+  const phase = st && st.phase;
+
+  /**
+   * ⚠️ REPAINT ONLY ON PHASE CHANGE. This runs every second, and a person may
+   * be halfway through typing a code into the input this function would
+   * otherwise rebuild -- innerHTML replacement empties the field under their
+   * cursor. Progress inside a phase updates the two elements it owns.
+   */
+  if (phase === FR_CONN_LAST) {
+    if (phase === 'downloading') frConnPaintProgress(st.progress);
+    return;
+  }
+  FR_CONN_LAST = phase;
+  // ⚠️ Announced in the HIDDEN live region, not fr-sub-msg: the visible panel
+  // already says this in its title, and a visible copy said it twice.
+  msg.textContent = '';
+  const say = document.getElementById('fr-conn-say');
+  if (say && Object.prototype.hasOwnProperty.call(FR_CONN_SAY, phase)) {
+    say.textContent = FR_CONN_SAY[phase];
+  }
+
+  const urlLine = st && st.url
+    ? '<div class="fr-cdetail">Browser did not open? '
+      + '<a href="' + esc(st.url) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>'
+    : '';
+
+  if (phase === 'downloading') {
+    box.innerHTML = '<div class="fr-ctitle">Downloading Claude&#8230;</div>'
+      + '<div class="fr-progress"><div class="fr-progress-fill" id="fr-conn-fill" style="width:0%"></div></div>'
+      + '<div class="fr-cdetail" id="fr-conn-prog"></div>'
+      + '<div class="fr-cdetail">This is the one big download. Everything after it is quick.</div>';
+    frConnPaintProgress(st.progress);
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'installing' || phase === 'signin-launching') {
+    box.innerHTML = '<div class="fr-ctitle">'
+      + (phase === 'installing' ? 'Setting Claude up on this computer&#8230;' : 'Getting the sign-in ready&#8230;')
+      + '</div>'
+      + '<div class="fr-cdetail">A moment or two.</div>';
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'signin-browser-open' || phase === 'signin-completing') {
+    box.innerHTML = '<div class="fr-ctitle">'
+      + (phase === 'signin-completing' ? 'Finishing the sign-in&#8230;' : 'Your browser has opened')
+      + '</div>'
+      + '<div class="fr-cdetail">'
+      + (phase === 'signin-completing'
+        ? 'Checking the connection. This screen will change on its own.'
+        : 'Sign in to Claude there. This screen will notice when it is done.')
+      + '</div>' + urlLine;
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'signin-awaiting-code') {
+    box.innerHTML = '<div class="fr-ctitle">Your browser has opened</div>'
+      + '<div class="fr-cdetail">Sign in to Claude there. This screen will notice when it is done.</div>'
+      + urlLine
+      + '<label class="fr-cdetail" for="fr-conn-code">If Claude gives you a code to paste, put it here:</label>'
+      + '<div class="fr-code-row">'
+      + '<input id="fr-conn-code" type="text" autocomplete="off" spellcheck="false" aria-label="Sign-in code">'
+      + '<button class="btn" id="fr-conn-code-go" type="button">Use code</button>'
+      + '</div>';
+    document.getElementById('fr-conn-code-go').onclick = frConnSubmitCode;
+    document.getElementById('fr-conn-code').onkeydown = (e) => { if (e.key === 'Enter') frConnSubmitCode(); };
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'stuck') {
+    box.innerHTML = frCheckRow({
+      state: 'attention',
+      title: 'We could not finish connecting Claude',
+      detail: (st && st.because) || 'It stopped without saying why.',
+    })
+    + ((st && st.tail) ? '<pre class="fr-conn-tail">' + esc(st.tail) + '</pre>' : '')
+    + '<div class="fr-note">Nothing is broken by this. You can try again, or connect without '
+    + 'Kosmos: open Terminal, type <b>claude</b>, and follow its sign-in. Then come back '
+    + 'and press Try again to check.</div>';
+    frActions({ label: 'Try again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
+    return;
+  }
+
+  if (phase === 'interrupted') {
+    box.innerHTML = frCheckRow({
+      state: 'unknown',
+      title: 'A connection attempt was interrupted',
+      detail: 'Kosmos was closed while it was ' + frConnBefore(st && st.before)
+        + '. Nothing is running now, and starting again picks up safely.',
+    });
+    frActions({ label: 'Start again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
+    return;
+  }
+
+  // `connected` and `idle` have no panel of their own: the standard verdict
+  // painter owns those screens, and frConnWatch/frConnectStart route there.
+}
+
+function frConnBefore(phase) {
+  return {
+    downloading: 'downloading Claude',
+    installing: 'setting Claude up',
+  }[phase] || 'signing in';
+}
+
+function frConnPaintProgress(progress) {
+  const fill = document.getElementById('fr-conn-fill');
+  const line = document.getElementById('fr-conn-prog');
+  if (!fill || !line) return;
+  const got = (progress && progress.got) || 0;
+  const total = progress && progress.total;
+  if (total) {
+    fill.style.width = Math.min(100, Math.round((got / total) * 100)) + '%';
+    line.textContent = frMB(got) + ' of ' + frMB(total);
+  } else {
+    // No Content-Length: an honest count beats a bar pretending to know.
+    fill.style.width = '0%';
+    line.textContent = frMB(got) + ' so far';
+  }
+}
+
 function frPaintSubscription() {
   const sub = (FR && FR.subscription) || { state: 'unknown', because: 'we have not been able to look' };
   const box = document.getElementById('fr-sub');
@@ -4451,7 +4739,8 @@ function frPaintSubscription() {
     state: 'attention',
     title: 'No Claude subscription is connected yet',
     detail: 'Your agents think with Claude, so they need one before they can do anything. '
-      + 'Get a subscription at claude.ai, then sign in to Claude on this computer.',
+      + 'If you have a subscription at claude.ai, Connect Claude does the rest here; '
+      + 'if you do not, get one there first.',
   })
   /**
    * ⚠️ SAYS WHAT CARRYING ON ACTUALLY GETS THEM. "Continue anyway" with no
@@ -4461,7 +4750,18 @@ function frPaintSubscription() {
    */
   + '<div class="fr-note">You can carry on and look around. An agent made before Claude is '
   + 'connected will sit there doing nothing until it is.</div>';
-  frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Check again', go: frRecheck });
+  /**
+   * ⚠️ "Check again" is gone from THIS state on purpose, not by accident:
+   * Connect Claude re-checks the connection before it does anything else, so
+   * somebody who just signed in through Terminal gets their green row from the
+   * same button — and the two-button bar stays two buttons.
+   *
+   * ⚠️ And the `unknown` state above deliberately does NOT get a Connect
+   * button. Unknown means this machine may already be signed in by somebody
+   * who pays; pushing them toward a sign-in flow is the exact asymmetry
+   * `engine/subscription.js` exists to prevent. They keep Check again.
+   */
+  frActions({ label: 'Connect Claude', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
 }
 
 /* --------------------------------------------------------------------------
