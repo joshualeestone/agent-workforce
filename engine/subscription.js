@@ -81,7 +81,17 @@ function readConfig() {
   try {
     return { kind: 'ok', data: JSON.parse(raw) };
   } catch {
-    return { kind: 'unreadable', because: 'the Claude settings on this computer are not readable as JSON' };
+    // ⚠️ "damaged", NOT "not readable as JSON". Josh, 2026-08-12: "the warnings
+    // can't talk about JSON for non-technical people." He is right, and this
+    // string is not internal: it reaches the first-run screen and the board's
+    // connection notice, which are the two screens that decide whether somebody
+    // keeps the product. A person who does not know what JSON is learns nothing
+    // from this except that something is broken and they are not the audience.
+    //
+    // The distinction from the branch above is kept, because it is useful in
+    // support even when the reader cannot name it: that one is "we could not
+    // open it", this one is "we opened it and it is damaged".
+    return { kind: 'unreadable', because: 'the Claude settings on this computer are damaged' };
   }
 }
 

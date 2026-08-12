@@ -85,7 +85,7 @@ test('settings we cannot read are UNKNOWN, never "no subscription"', () => {
   const r = sub.check();
   assert.equal(r.state, sub.STATE.UNKNOWN,
     'an unreadable config was reported as a definite answer about somebody\'s account');
-  assert.match(r.because, /not readable as JSON/);
+  assert.match(r.because, /damaged/);
 });
 
 test('a config with no account block is UNKNOWN rather than an assertion', () => {
@@ -297,4 +297,43 @@ test('an IN-PLACE rewrite of different length is caught at an identical mtime', 
 
   assert.equal(sub.checkCached().state, sub.STATE.NONE,
     'a same-inode rewrite at the same mtime must still be seen');
+});
+
+
+test('no user-facing sentence uses developer jargon', () => {
+  /**
+   * ⚠️ A MECHANISM, NOT A ONE-OFF FIX. Josh caught "the Claude settings on this
+   * computer are not readable as JSON" reaching a user, 2026-08-12: "the
+   * warnings can't talk about JSON for non-technical people."
+   *
+   * These strings surface on the first-run screen and the board's connection
+   * notice, which are the two screens that decide whether a non-technical
+   * person keeps the product. The fix for one string is worth little; what stops
+   * the next one is a check that reads every sentence this module can produce.
+   *
+   * Deliberately a blocklist of words a person would have to be a developer to
+   * understand, not a readability score. The bar is "would somebody in the
+   * training room know what this means".
+   */
+  const JARGON = /\b(json|parse[sd]?|null|undefined|oauth|api|token|schema|enum|uuid|stderr|stdout|exit code|regex|config file|stack trace)\b/i;
+
+  const sentences = [];
+  const collect = () => { const r = sub.check(); if (r && r.because) sentences.push(r.because); };
+
+  write(MAX); collect();                                             // connected
+  write({ oauthAccount: { organizationType: 'claude_free' } }); collect();   // none
+  write({ someOtherThing: true }); collect();                        // no account block
+  write({ oauthAccount: { organizationType: 'claude_unheard_of' } }); collect();
+  write({ oauthAccount: { accountUuid: 'x' } }); collect();
+  fs.writeFileSync(CONFIG, '{ broken', 'utf8'); collect();           // damaged
+  clear(); collect();                                                // absent
+
+  // CONTROL: the sweep actually produced the sentences it claims to check, or
+  // an empty list would pass this test for the wrong reason.
+  assert.ok(sentences.length >= 6, `only collected ${sentences.length} sentences`);
+  assert.ok(sentences.some((t) => /damaged/.test(t)), 'the damaged-settings case was not reached');
+
+  for (const t of sentences) {
+    assert.ok(!JARGON.test(t), `user-facing sentence uses jargon: "${t}"`);
+  }
 });
