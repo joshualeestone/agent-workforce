@@ -76,3 +76,22 @@ it before any clean result below is worth reading.
 Skip, Escape, the hand-off into creating an agent, a returning visit, a failing
 `/api/first-run`, a failing `/api/machine`, and a completion flag that will not
 stick. It asserts against the DOM and the real flag file, never against source.
+
+## render-connection.js
+
+The connection notice on the board, in all three states.
+
+    SB=$(mktemp -d /tmp/connsb-XXXXXX); CFG="$SB/claude.json"
+    echo '{"oauthAccount":{"organizationType":"claude_max"}}' > "$CFG"
+    PORT=4412 AGENT_WORKFORCE_DATA="$SB/data" AGENT_WORKFORCE_WORKERS="$SB/workers" \
+      AGENT_WORKFORCE_LAUNCH="$SB/launch" AGENT_WORKFORCE_CLAUDE_CONFIG="$CFG" node server.js &
+    AGENT_WORKFORCE_DATA="$SB/data" NODE_PATH=/path/to/playwright/node_modules \
+      node docs/browser-checks/render-connection.js http://127.0.0.1:4412 /tmp/connshots "$CFG"
+
+⚠️ It **rewrites** the config path it is given, so it refuses anything that is not under a
+temp root, and refuses the real `~/.claude.json` outright.
+
+⚠️ It marks first run complete in the sandbox before rendering. Without that every
+screenshot is a picture of the onboarding wizard with the board behind it, and the DOM
+assertions still pass. That happened on the first run of this very check: three
+byte-identical screenshots, 17/19 green.

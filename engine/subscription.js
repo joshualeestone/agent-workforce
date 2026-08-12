@@ -217,4 +217,66 @@ function planName(org, tier) {
   return m ? `${base} ${m[1]}` : base;
 }
 
-module.exports = { check, planName, STATE, CONFIG_PATH: CONFIG };
+/* ---- the cached read, for the status tick -------------------------------
+   ⚠️ THIS EXISTS FOR A MEASURED REASON, NOT A SUSPECTED ONE. `check()` parses
+   the Claude config, which is 95,152 bytes on the machine this was written on,
+   and the board asks for status every 5 seconds. That is twelve 95KB parses a
+   minute, forever, to answer a question whose answer changes when somebody logs
+   in or out. The README calls that class of work "the difference between a page
+   that idles cool and one that spins a fan".
+
+   ⚠️ AND THIS IS THE LEAST TRUSTWORTHY CODE IN THE FEATURE, so read its failure
+   mode before changing it. A stale cache here does not merely serve an old
+   number: it would keep reporting `connected` AFTER the connection broke, which
+   is precisely the case this whole feature was built to catch. The cache lying
+   is worse than the cache not existing.
+
+   So the key is deliberately paranoid. It is not just mtime:
+
+     - `mtimeMs` catches an edit,
+     - `size` catches an edit that somehow lands on the same millisecond,
+     - `ino` catches an ATOMIC REPLACE, which is how a lot of tools write config
+       (write a temp file, rename over the target). That leaves mtime and size
+       plausible-looking on a brand new file, and the inode is what gives it
+       away.
+
+   A failed stat is a KEY, not an error. `missing:ENOENT` is a different key
+   from any real file, so a deleted config invalidates rather than sticking on
+   the last good answer. Same for a permissions change. That is the property
+   that stops this from lying.
+
+   Known and accepted: a filesystem with coarse mtime granularity could hide an
+   edit that also preserved size AND inode. Rewriting a JSON config in place,
+   within one mtime tick, to the same byte length, is not a thing that happens
+   to this file. Documented rather than defended against. */
+let cached = null;      // { key, verdict }
+
+function statKey() {
+  try {
+    const st = fs.statSync(CONFIG);
+    return `${st.mtimeMs}:${st.size}:${st.ino}`;
+  } catch (err) {
+    return `missing:${(err && err.code) || 'ERR'}`;
+  }
+}
+
+/**
+ * `check()`, but it only re-reads the file when the file has actually changed.
+ * Safe to call on every status tick.
+ *
+ * @returns {{state: string, plan: string|null, because: string}}
+ */
+function checkCached() {
+  const key = statKey();
+  if (cached && cached.key === key) return cached.verdict;
+  const verdict = check();
+  cached = { key, verdict };
+  return verdict;
+}
+
+/** Tests only: drop the memo so a case can start from a known state. */
+function resetCache() { cached = null; }
+
+module.exports = {
+  check, checkCached, resetCache, planName, STATE, CONFIG_PATH: CONFIG,
+};

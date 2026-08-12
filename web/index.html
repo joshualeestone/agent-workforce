@@ -91,6 +91,32 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
   .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
   .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
+  /* ---- the connection notice ---------------------------------------------
+     ⚠️ TWO VISUALLY DISTINCT STATES, BECAUSE THEY ARE DIFFERENT CLAIMS, and
+     collapsing them is the exact mistake `engine/subscription.js` was written
+     to avoid making one layer down.
+
+       .conn-bad     we looked, and there is no subscription connected.
+       .conn-unsure  we could not look. NOT a failure, and it must not be
+                     dressed as one: telling a paying customer their account is
+                     broken because a file was unreadable is worse than saying
+                     nothing, and it is the sentence that sends them off to buy
+                     a second subscription they already have.
+
+     So `unsure` gets the neutral surface, the same one the board already uses
+     for "we cannot read this", and only `bad` gets the warn tint. */
+  .conn {
+    max-width: 1320px; margin-left: auto; margin-right: auto;
+    margin-bottom: var(--space-5);
+    padding: var(--space-4) var(--space-5);
+    border-radius: 10px; border: 1px solid var(--separator);
+    background: var(--attn-bg); color: var(--label);
+    font: var(--text-callout) var(--font-ui);
+  }
+  .conn[hidden] { display: none; }   /* an author rule would beat the UA hidden */
+  .conn-bad { background: var(--warn-bg); border-color: var(--warn-border); }
+  .conn-unsure { background: var(--attn-bg); border-color: var(--separator); }
+
 /* auto-FIT, not auto-fill: empty columns collapse, so two agents don't sit in
    the top-left of a thirteen-agent lattice. Centred and width-capped so a small
    workforce reads as deliberate rather than as a screen you failed to fill --
@@ -1079,6 +1105,13 @@ svg { display: block; }
      restarts, updates, your Claude account, and deleting your history.</p>
   <p class="soon">Coming later.</p>
 </section>
+<!-- ⚠️ ONE FACT ABOUT THE MACHINE, ABOVE THE FLEET, not a badge on thirteen
+     cards. Whether this computer can reach a Claude subscription is a single
+     thing, and repeating it per agent would bury the sentence that explains why
+     the whole board looks asleep.
+     `role="status"` and not `alert`: it is a condition, announced when it
+     appears, not an interruption. -->
+<div class="conn" id="conn" role="status" aria-live="polite" hidden></div>
 <div class="summary" id="summary">Loading…</div>
 <div class="build" id="build"></div>
 <div class="grid" id="grid"></div>
@@ -1279,6 +1312,80 @@ function card(a) {
   </div>`;
 }
 
+/**
+ * The connection to Claude, as one fact above the fleet.
+ *
+ * ⚠️ THE HONESTY CONSTRAINT IS THE WHOLE DESIGN HERE, so read it before
+ * changing any of this copy.
+ *
+ * When the connection is not working we do NOT know that a given idle agent is
+ * dead. It might have finished thirty seconds ago and be perfectly fine. So the
+ * banner states the fact we DID observe (the connection is not working) and
+ * says agents may be unable to start work. It never counts corpses.
+ *
+ * Asserting "12 agents are dead" off one file read would be exactly the
+ * overreach this feature exists to correct: it would replace one confident
+ * wrong answer (everything is idle and fine) with another (everything is dead).
+ *
+ * ⚠️ THREE STATES, STYLED AS THREE THINGS. `unknown` is not a failure. It means
+ * we could not read the settings, which is different from "you have no
+ * subscription", and `engine/subscription.js` goes to real trouble to keep them
+ * apart. Collapsing them here would throw that away at the last step, and it is
+ * the difference between telling a paying customer their account is fine and
+ * telling them to go buy a second one.
+ */
+function renderConnection(conn, agents) {
+  const el = document.getElementById('conn');
+  if (!el) return;
+
+  // No verdict at all: say nothing rather than invent reassurance. An older
+  // server that does not send the field must not render as "connected".
+  if (!conn || !conn.state) { el.hidden = true; el.textContent = ''; el.className = 'conn'; return; }
+
+  if (conn.state === 'connected') { el.hidden = true; el.textContent = ''; el.className = 'conn'; return; }
+
+  const idle = (agents || []).filter((a) => a && a.state === 'idle').length;
+  const bad = conn.state === 'none';
+
+  const head = bad
+    ? 'Kosmos cannot reach a Claude subscription on this computer.'
+    : 'Kosmos cannot tell whether a Claude subscription is connected.';
+
+  // ⚠️ "may not be able to", not "cannot". We are inferring from one fact about
+  // the machine, not from anything observed about these agents.
+  const effect = idle
+    ? ' ' + idle + (idle === 1 ? ' agent is' : ' agents are') +
+      ' sitting idle and may not be able to start work until this is fixed.'
+    : '';
+
+  /**
+   * ⚠️ THE `because` STRINGS ARE WRITTEN FOR A DIFFERENT SENTENCE, and pasting
+   * them straight after a headline produced this, on screen, in the first
+   * render of this feature:
+   *
+   *   "Kosmos cannot reach a Claude subscription on this computer. no Claude
+   *    subscription is connected on this computer yet. 12 agents are sitting…"
+   *
+   * Two defects visible only by reading it: the same fact stated twice, and a
+   * lower-case sentence following a full stop. Every assertion passed. Caught by
+   * looking at the picture, which is the third time on this branch.
+   *
+   * So: the reason is only appended when it ADDS something (it explains why we
+   * could not tell), and it is sentence-cased and terminated when it is used.
+   */
+  const detail = (() => {
+    if (bad) return '';                 // the headline already says it
+    const why = String(conn.because || '').trim();
+    if (!why) return '';
+    const cased = why.charAt(0).toUpperCase() + why.slice(1);
+    return ' ' + (/[.!?]$/.test(cased) ? cased : cased + '.');
+  })();
+
+  el.className = 'conn ' + (bad ? 'conn-bad' : 'conn-unsure');
+  el.textContent = head + detail + effect;
+  el.hidden = false;
+}
+
 async function tick() {
   const checked = document.getElementById('checked');
   try {
@@ -1475,6 +1582,7 @@ async function tick() {
       bits.push(`${c.unreadableLines} we could not read at all, so some agents may be missing`);
     }
     document.getElementById('summary').textContent = bits.join(' · ');
+    renderConnection(data.connection, data.agents);
     // Says "early" out loud. For a product whose whole thesis is not
     // overstating what it knows, admitting its own maturity is on-brand.
     //
