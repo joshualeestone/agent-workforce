@@ -278,7 +278,20 @@ function describe(project, roster) {
       // name it is showing was read off a live agent or is just the key.
       name: card && card.name ? card.name : sessionName,
       present: Boolean(card),
-      state: card ? card.state : 'unknown',
+      // ⚠️ TIED, and it is a different question from `present`. A pane can hold
+      // this name without being this agent — a stranger's `tmux new -s angel`
+      // is on the roster and matches by `sessionName`. The write gate already
+      // refuses those (`tellAgent` requires `isNamedOurs`), but the ROW said
+      // `present: true` and reported the stranger's state as this member's, so
+      // the screen vouched for an agent the same module refuses to write to.
+      // Publishing the fact is not enough on its own: the counts below have to
+      // honour it, or the row still says "1 working" about a pane we cannot
+      // tie to anybody.
+      tied: Boolean(card && card.isNamedOurs),
+      // ⚠️ `unknown` for an untied pane, for the same reason the board refuses
+      // to read its model or its transcript: whatever that pane is doing, we
+      // have not established it is this agent doing it.
+      state: (card && card.isNamedOurs) ? card.state : 'unknown',
       // ⚠️ "Never seen" is only said when we have never seen it. The flag is
       // written once at add time, and an agent added while the roster was
       // unreadable was stamped `false` forever -- so a real agent that stopped
@@ -286,7 +299,14 @@ function describe(project, roster) {
       // strictly stronger claim than the record supports. `describe` upgrades
       // the flag the moment a live card proves otherwise (see below), so this
       // can only fire for a name we genuinely have never resolved.
-      because: card ? card.because : (
+      // ⚠️ An UNTIED pane's reason is not this member's reason. `card.because`
+      // there is a sentence about somebody else's session ("it finished and is
+      // waiting for you"), and printing it under this member's name is the
+      // board's borrowed-name defect wearing a project row. Said plainly
+      // instead, and the row's own state is `unknown` by the same rule.
+      because: (card && !card.isNamedOurs)
+        ? 'something is running under this name, but we cannot tell that it is this agent'
+        : card ? card.because : (
         (project.everSeen && project.everSeen[sessionName] === false)
           // Said plainly, because it is almost always a typed name that never
           // matched anything, and telling somebody an agent is "missing" sends
@@ -307,11 +327,28 @@ function describe(project, roster) {
     // `unseen` beside the counts so a row can never quietly report that
     // everything is fine when some of it was unreadable. A summary that hides
     // its own blind spot is the defect this codebase keeps finding.
+    //
+    // ⚠️ AND IT HID ONE, directly under that sentence. `unseen` counted only
+    // members with no card at all, so the two ways of being unreadable WHILE
+    // ON THE BOARD fell through every bucket: a member whose card says
+    // `unknown` (its pane could not be captured — the product's own "I cannot
+    // see it" value), and a member whose pane is not tied to the name. Both
+    // landed in `total` and in nothing else, so a project holding one working
+    // agent and one unreadable one rendered as "mara · nils — 1 working", with
+    // no trace of the blind spot. The SAME agent on the Agents tab reads
+    // "Can't tell" over "we cannot see this one, so we are not telling you it
+    // is fine". Two derivations of one question, disagreeing.
+    //
+    // `unseen` is now "members this row cannot speak for", which is the count
+    // the sentence above always claimed it was.
     summary: {
       total: members.length,
-      needsYou: members.filter((m) => m.present && m.state === 'needs_you').length,
-      working: members.filter((m) => m.present && m.state === 'working').length,
-      unseen: members.filter((m) => !m.present).length,
+      // ⚠️ `tied` on both, because a state read off a pane we cannot tie to
+      // this name is somebody else's state. Counting it here is how a stranger
+      // would have put "1 needs you" on another person's project row.
+      needsYou: members.filter((m) => m.present && m.tied && m.state === 'needs_you').length,
+      working: members.filter((m) => m.present && m.tied && m.state === 'working').length,
+      unseen: members.filter((m) => !m.present || !m.tied || m.state === 'unknown').length,
     },
   };
 }

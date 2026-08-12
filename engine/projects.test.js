@@ -293,6 +293,59 @@ test('the row summary counts what it can see AND says what it could not', () => 
   assert.equal(described.summary.unseen, 1, 'a summary that hides its own blind spot is the defect');
 });
 
+test('a member we can see but cannot READ is counted as unseen, not as fine', () => {
+  reset();
+  // ⚠️ THE SUMMARY'S OWN BLIND SPOT. `unseen` counted only members with no card
+  // at all, so a member whose pane could not be captured -- state `unknown`,
+  // this product's "I cannot see it" value -- landed in `total` and in no other
+  // bucket. A project holding one working agent and one unreadable one rendered
+  // as "mara · nils -- 1 working", while the SAME agent on the Agents tab reads
+  // "Can't tell" over "we cannot see this one, so we are not telling you it is
+  // fine". The row has to say what it cannot speak for.
+  const board = cards([
+    fleet.agent('mara', { state: 'working' }),
+    fleet.agent('nils', { state: 'unknown' }),
+  ]);
+  projects.create({ name: 'Mixed', folder: folder('mixed-unknown'), agents: ['mara', 'nils'] });
+  const [described] = projects.list(board);
+
+  // The control: the one we CAN read is counted, or "1 unseen" below proves nothing.
+  assert.equal(described.summary.working, 1, 'the control: a readable working agent is counted');
+  assert.equal(described.summary.total, 2);
+  assert.equal(described.summary.unseen, 1, 'an agent on the board whose pane we could not read is a blind spot');
+
+  const nils = described.agents.find((a) => a.sessionName === 'nils');
+  assert.equal(nils.present, true, 'it IS on the board -- this is not the missing case');
+  assert.equal(nils.state, 'unknown');
+});
+
+test('a pane merely holding the name is not spoken for on the row', () => {
+  reset();
+  // ⚠️ The borrowed-name defect, wearing a project row. `describe` matches on
+  // `sessionName`, and a stranger's `tmux new -s borrowed` is on the roster --
+  // so the row reported the STRANGER's state as this member's, and the
+  // stranger's `because` ("it finished and is waiting for you") printed under
+  // this member's name. The write gate already refuses untied panes; the screen
+  // was vouching for what the same module will not write to.
+  const tiedBoard = cards([fleet.agent('borrowed', { state: 'working' })]);
+  const untiedBoard = cards([fleet.stranger('borrowed', { state: 'working' })]);
+  projects.create({ name: 'Borrowed row', folder: folder('borrowed-row'), agents: ['borrowed'] });
+
+  // The control FIRST: tied, it is spoken for and counted.
+  const tied = projects.list(tiedBoard)[0];
+  assert.equal(tied.agents[0].tied, true, 'the control: the tied case really is tied');
+  assert.equal(tied.summary.working, 1, 'the control: a tied working agent IS counted');
+  assert.equal(tied.summary.unseen, 0);
+
+  const untied = projects.list(untiedBoard)[0];
+  const member = untied.agents[0];
+  assert.equal(member.tied, false, 'the fixture is not exercising the untied case');
+  assert.equal(member.state, 'unknown', 'a pane we cannot tie to this name reported its state as this member’s');
+  assert.match(member.because, /cannot tell that it is this agent/);
+  assert.equal(untied.summary.working, 0, 'a stranger’s session put "1 working" on somebody’s project row');
+  assert.equal(untied.summary.unseen, 1, 'and the row did not say it could not speak for it');
+});
+
 test('an agent is on every project it was added to, read from the agent’s end', () => {
   reset();
   const a = projects.create({ name: 'One', folder: folder('one'), agents: ['mara'] });
