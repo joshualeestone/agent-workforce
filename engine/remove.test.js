@@ -24,6 +24,7 @@ process.on('exit', () => {
 const remove = require('./remove');
 const create = require('./create');
 const status = require('./status');
+const fleet = require('../test-support/fleet');
 
 const BINS = { claudeBin: '/bin/echo', tmuxBin: '/bin/echo' };
 
@@ -101,7 +102,7 @@ function foreignAgent(name) {
 /** The board sees this agent running in this session. */
 function boardShows(name, session) {
   const claim = session.endsWith('-discord') ? '' : name;
-  status.setPaneSource(() => `${session}\t0.0\t2.1.212\t0\t${claim}\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session, claim, title: '✳ Claude Code' }));
 }
 
 test.afterEach(() => {
@@ -333,7 +334,7 @@ test('a session the board does not tie to this agent is left alone', () => {
   // that name right now is this agent, and `bin/agent-supervisor.sh` already
   // refuses to touch a session it cannot tie to us.
   const name = madeAgent('name-taken');
-  status.setPaneSource(() => `${name}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`);
+  status.setPaneSource(() => fleet.line({ session: name, claim: 'somebody-else', title: '✳ Claude Code' }));
   const calls = world();
   remove.setDryRun(false);
 
@@ -379,8 +380,8 @@ test('the untied check is still made at the session step, for a roster that chan
     // ended. `world()` is installed after this, so the count starts at the
     // plan's own lookup.
     return asked <= 1
-      ? `${name}\t0.0\t2.1.212\t0\t${name}\t✳ Claude Code`
-      : `${name}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`;
+      ? fleet.line({ session: name, claim: name, title: '✳ Claude Code' })
+      : fleet.line({ session: name, claim: 'somebody-else', title: '✳ Claude Code' });
   });
   const calls = world();
   remove.setDryRun(false);
@@ -449,7 +450,7 @@ test('a session the product did not name is still removable', () => {
   for (const odd of ['Notes', 'orch.main', '0', 'UPPER', 'has space']) {
     fs.mkdirSync(create.workerDir(odd), { recursive: true });
     fs.writeFileSync(nodePath.join(create.workerDir(odd), 'CLAUDE.md'), `You are **${odd}**.\n`, 'utf8');
-    status.setPaneSource(() => `${odd}\t0.0\t2.1.212\t0\t${odd}\t✳ Claude Code`);
+    status.setPaneSource(() => fleet.line({ session: odd, claim: odd, title: '✳ Claude Code' }));
     const ask = remove.plan(odd);
     assert.equal(ask.ok, true, `'${odd}' cannot be removed: ${ask.because}`);
     assert.match(ask.question, new RegExp(odd.replace('.', '\\.')), `'${odd}' is not named in its own confirmation`);
@@ -1375,7 +1376,7 @@ test('the two partials a person actually hits still record, so Restore is there'
   let asked = 0;
   status.setPaneSource(() => {
     asked += 1;
-    if (asked <= 1) return `${a}\t0.0\t2.1.212\t0\t${a}\t✳ Claude Code`;
+    if (asked <= 1) return fleet.line({ session: a, claim: a, title: '✳ Claude Code' });
     throw new Error('tmux went away');
   });
   const r1 = remove.remove(a);
@@ -1395,8 +1396,8 @@ test('the two partials a person actually hits still record, so Restore is there'
   status.setPaneSource(() => {
     asked2 += 1;
     return asked2 <= 1
-      ? `${b}\t0.0\t2.1.212\t0\t${b}\t✳ Claude Code`
-      : `${b}\t0.0\t2.1.212\t0\tsomebody-else\t✳ Claude Code`;
+      ? fleet.line({ session: b, claim: b, title: '✳ Claude Code' })
+      : fleet.line({ session: b, claim: 'somebody-else', title: '✳ Claude Code' });
   });
   world();
   remove.setDryRun(false);

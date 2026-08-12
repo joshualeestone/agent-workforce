@@ -1427,18 +1427,20 @@ function paneRoster() {
   // throw from a test: **the realistic failure failed open and served the
   // record.** A guard whose closed path production cannot take is not a guard.
   //
-  // ⚠️ `snapshot()` deliberately keeps the LENIENT behaviour, and the first
-  // version of this note justified that by claiming an empty board "renders as
-  // such". It does not: with tmux dead, `/api/status` answers 200 with zero
-  // agents and a fresh `checkedAt`, so the board paints "0 agents, checked just
-  // now" — byte-identical to a machine that genuinely has none. That is this
-  // module's own rule inverted at the top level, and the sentence asserting
-  // otherwise was written in the same commit that built the distinction here.
+  // ⚠️ AND `snapshot()` REFUSES THE SAME WAY NOW, through `listPanes`. This
+  // note used to say the opposite at length — that snapshot stayed lenient, so
+  // `/api/status` answered 200 with zero agents and a fresh `checkedAt` and the
+  // board painted "0 agents, checked just now" — and that it was being left
+  // that way deliberately because changing it was a product decision. The
+  // product decision was made one round later, in `listPanes`, and this
+  // paragraph was not re-read: `/api/status` now 500s with the reason and the
+  // board says it cannot read the agents. The sentence outlived the behaviour
+  // it described, which is this module's own recurring defect pointed at its
+  // own documentation. Both refusals are asserted together in
+  // `fixture-discipline.test.js`, so the pair cannot drift silently again.
   //
-  // Left lenient rather than fixed in passing: `snapshot()` feeds the whole
-  // board, so making it throw is a visible product decision (what SHOULD the
-  // board show when tmux is gone?) that deserves its own change rather than
-  // riding along in a gate fix. The gate needs the strict answer and gets it.
+  // The two functions still are not one, because this one is deliberately
+  // stricter about a PARTIAL answer: see the note below.
   const out = paneSource ? paneSource() : sh('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
   if (out === null || out === undefined) {
     throw new Error('could not ask tmux which panes exist');

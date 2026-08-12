@@ -54,6 +54,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { start, server } = require('./server');
 const projects = require('./engine/projects');
+const fleet = require('./test-support/fleet');
 
 const WORK = path.join(SANDBOX, 'work');
 fs.mkdirSync(WORK, { recursive: true });
@@ -471,13 +472,8 @@ test('with a real board, a member row carries the display name and state', async
   // else in this file, which makes the roster permanently null -- so the routes
   // could describe members against a shape that has no display name at all and
   // every test here still passed. This one supplies a real pane listing.
-  const status = require('./engine/status');
+  const board = fleet.install([fleet.agent('zeta', { state: 'working' })]);
   try {
-    status.setPaneSource(() => [
-      'zeta-discord\t0.0\t2.1.212\t0\tWorking on something',
-    ].join('\n'));
-    status.setPaneCapture(() => 'Worked for 1m 02s\n> \n');
-
     const made = json(await post('/api/projects', {
       name: 'Seam', folder: folder('seam-route'), agents: ['zeta'],
     })).project;
@@ -485,14 +481,18 @@ test('with a real board, a member row carries the display name and state', async
     const member = made.agents[0];
     assert.equal(member.present, true, 'a real card resolves through the route');
     assert.ok(member.name, 'the row has a display name to speak');
-    assert.ok(member.state, 'and a state to report');
-    assert.notEqual(member.state, undefined);
+    // ⚠️ Against the CARD the fixture really produced, not against a string
+    // typed here. `ok(member.state)` alone passes for any non-empty state, so
+    // it would have gone on passing had the route started reporting every
+    // member as `unknown` — which is the shape of the defect this test was
+    // added for, one step milder.
+    assert.equal(member.state, board.card('zeta').state);
+    assert.equal(member.state, 'working');
 
     const list = json(await req('/api/projects'));
     assert.equal(list.agentsUnreadable, false, 'and the list says the look succeeded');
   } finally {
-    status.setPaneSource(null);
-    status.setPaneCapture(null);
+    board.restore();
   }
 });
 
@@ -502,13 +502,13 @@ test('a roster we could not read is reported, never rendered as an empty fleet',
   // saturated when in fact nothing exercised it. `setPaneSource` returning null
   // is "tmux could not be asked", which must reach the page as "we could not
   // see them" and never as "you have none of them".
-  const status = require('./engine/status');
+  let blind = null;
   try {
     const made = json(await post('/api/projects', {
       name: 'Blind', folder: folder('blind-route'), agents: ['zeta'],
     })).project;
 
-    status.setPaneSource(() => null);
+    blind = fleet.blind();
     const res = await req('/api/projects');
     assert.equal(res.status, 200, 'the record is still readable');
     const body = json(res);
@@ -517,7 +517,7 @@ test('a roster we could not read is reported, never rendered as an empty fleet',
     assert.equal(member.present, false);
     assert.match(member.because, /cannot see this agent|never seen/);
   } finally {
-    status.setPaneSource(null);
+    if (blind) blind.restore();
   }
 });
 
@@ -529,12 +529,9 @@ test('an agent the person removed does not appear on a project row', async () =>
   // showed the same agent as present with a live state -- and the write gate
   // still permitted splicing the block into its boot file. Kosmos would have
   // edited the instructions of an agent it had told the person was gone.
-  const status = require('./engine/status');
   const removal = require('./engine/remove');
+  const board = fleet.install([fleet.agent('zeta', { state: 'working' })]);
   try {
-    status.setPaneSource(() => 'zeta-discord\t0.0\t2.1.212\t0\tWorking\n');
-    status.setPaneCapture(() => 'Worked for 1m 02s\n> \n');
-
     const made = json(await post('/api/projects', {
       name: 'Removed', folder: folder('removed-route'), agents: ['zeta'],
     })).project;
@@ -552,7 +549,6 @@ test('an agent the person removed does not appear on a project row', async () =>
     assert.equal(after.agents[0].present, false, 'a removed agent is not present on a project row either');
   } finally {
     try { fs.rmSync(path.join(require('./engine/store').ROOT, 'removed.json')); } catch { /* never written */ }
-    status.setPaneSource(null);
-    status.setPaneCapture(null);
+    board.restore();
   }
 });
