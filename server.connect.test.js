@@ -234,6 +234,34 @@ test('start also refuses to clobber a LIVE flow belonging to another process', a
   }
 });
 
+test('a code posted to the non-owning server is refused with the TRUE sentence', () => {
+  /**
+   * ⚠️ state() on this server reports the other server's live paste prompt,
+   * so the UI renders a paste box here -- and "the sign-in is not running"
+   * would then be a false sentence. The refusal must say where the code
+   * actually goes.
+   */
+  connect.resetForTests();
+  const file = connect.STATE_FILE();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.writeFileSync(file, JSON.stringify({
+      phase: 'signin-awaiting-code', url: 'https://claude.com/oauth?x=1', pid: 1,
+      updatedAt: new Date().toISOString(),
+    }));
+    const put = connect.submitCode('abCD1234#efGH5678');
+    assert.equal(put.ok, false);
+    assert.match(put.because, /another Kosmos window/,
+      'the refusal claims the sign-in is not running while state() reports it running');
+    // CONTROL: with no record at all, the plain not-running sentence returns.
+    fs.rmSync(file, { force: true });
+    assert.match(connect.submitCode('abCD1234#efGH5678').because, /not running/);
+  } finally {
+    fs.rmSync(file, { force: true });
+    connect.resetForTests();
+  }
+});
+
 test('a malformed code is a 400; asking at the wrong moment stays a 409', async () => {
   // The state conflict, through the real engine: nothing is running.
   const conflict = await post('/api/connect/code', { code: 'abCD1234#efGH5678' });

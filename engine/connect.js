@@ -386,9 +386,12 @@ async function download(onProgress) {
   try { manifest = JSON.parse(await fetchText(`${base}/${version}/manifest.json`)); }
   catch { throw new Error('the download service answered with something we could not read'); }
   const plat = platformKey();
-  const want = manifest && manifest.platforms && manifest.platforms[plat]
-    && manifest.platforms[plat].checksum;
-  if (!want || !/^[a-f0-9]{64}$/.test(want)) {
+  // Case-normalised: SHA256 hex is hex whichever case the service prints it
+  // in, and rejecting uppercase would blame the Mac ("no build for this
+  // kind") for what is really a formatting difference.
+  const want = String((manifest && manifest.platforms && manifest.platforms[plat]
+    && manifest.platforms[plat].checksum) || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(want)) {
     throw new Error(`the download service has no build for this kind of Mac (${plat})`);
   }
 
@@ -687,6 +690,17 @@ async function tick(owner) {
 }
 
 async function tickBody(owner) {
+  /**
+   * ⚠️ HEARTBEAT. State is otherwise written only on phase changes, so a
+   * flow legitimately parked at the paste prompt for over an hour would go
+   * stale under the freshness bound -- and a second server would then treat
+   * the LIVE flow as interrupted and cancel could kill it. The owning driver
+   * proves it is alive by touching the record every few minutes.
+   */
+  if (mem.pid === process.pid && ACTIVE_PHASES.includes(mem.phase)) {
+    const age = Date.now() - Date.parse(mem.updatedAt || 0);
+    if (Number.isFinite(age) && age > 5 * 60 * 1000) writeState({ ...mem });
+  }
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
   if (!cap.ok) {
@@ -721,6 +735,29 @@ async function tickBody(owner) {
    * spinner frames), so their text is a stable identity.
    */
   const sig = `${seen.kind}:${crypto.createHash('sha1').update(tailOf(cap.stdout)).digest('hex').slice(0, 12)}`;
+
+  /**
+   * ⚠️ A RECOGNISED SCREEN THAT NEVER MOVES IS A THIRD KIND OF HANG. Unknown
+   * screens get 10s and blank panes 45s, but a theme screen that we pressed
+   * Enter on and that keeps sitting there had NO bound at all -- "Getting
+   * the sign-in ready" forever over a wedged CLI. Only the choosing screens
+   * count: the paste prompt and the browser wait legitimately sit unchanged
+   * for as long as a person dawdles.
+   */
+  if (seen.kind === 'theme' || seen.kind === 'login-method') {
+    if (sig === driver.lastSig) {
+      driver.sameTicks = (driver.sameTicks || 0) + 1;
+      if (driver.acted === sig && driver.sameTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 6) / TICK_MS))) {
+        becomeStuck(owner, 'Claude is not moving past its first screens', tailOf(cap.stdout));
+        return;
+      }
+    } else {
+      driver.sameTicks = 0;
+    }
+  } else {
+    driver.sameTicks = 0;
+  }
+  driver.lastSig = sig;
 
   switch (seen.kind) {
     case 'blank':
@@ -863,9 +900,15 @@ async function tickBody(owner) {
        * this, "Login successful" seen while the phase was still
        * `signin-browser-open` fell into no arm at all and the driver looped
        * forever at "will notice when it is done", noticing nothing.
+       *
+       * ⚠️ AND "Press Enter to continue" ALONE IS NOT LOGIN EVIDENCE: a
+       * pre-login announcement screen carries no login at all, and advancing
+       * on it painted "Finishing the sign-in" before sign-in began. Only the
+       * screens that SAY logged-in (login-done, or a live REPL) advance.
        */
-      if (mem.phase === PHASE.SIGNIN_BROWSER_OPEN || mem.phase === PHASE.SIGNIN_AWAITING_CODE
-        || mem.phase === PHASE.SIGNIN_LAUNCHING) {
+      if ((seen.kind === 'login-done' || seen.kind === 'repl')
+        && (mem.phase === PHASE.SIGNIN_BROWSER_OPEN || mem.phase === PHASE.SIGNIN_AWAITING_CODE
+          || mem.phase === PHASE.SIGNIN_LAUNCHING)) {
         writeState({ phase: PHASE.SIGNIN_COMPLETING, url: mem.url || null, startedOnce: true });
         return;
       }
