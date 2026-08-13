@@ -129,7 +129,9 @@ machine. Measured against this server, not theorised.
 
 If you genuinely want to reach this from somewhere else, name that host in
 `AGENT_WORKFORCE_ALLOWED_HOSTS`, and understand that anyone who reaches that URL
-can rewrite the file any of your agents boots from, and make new ones.
+can rewrite the file any of your agents boots from, make new ones, and make
+this machine download and execute Claude and drive a sign-in
+(`POST /api/connect/start`).
 
     node server.js      # then open http://127.0.0.1:4317
 

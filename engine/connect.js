@@ -561,6 +561,17 @@ async function start() {
    */
   const sub = subscription.check();
   if (sub.state === subscription.STATE.CONNECTED) {
+    /**
+     * ⚠️ KILL ANY LEFTOVER SIGN-IN SESSION FIRST. A mid-sign-in server death
+     * followed by the person finishing the login in their browser lands
+     * exactly here on "Start again" -- and without this kill, "connected" is
+     * reported while the dead flow's Claude keeps running as an unvouched
+     * card forever, making the interrupted panel's "starting again closes
+     * it" a false sentence on this one path. Safe: the name is reserved and
+     * the target exact-pinned, and the foreign-flow guard above already
+     * established no live flow owns it.
+     */
+    await killSession();
     return publicView(writeState({ phase: PHASE.CONNECTED, plan: sub.plan, startedOnce: true }));
   }
 
@@ -724,7 +735,23 @@ async function launchSignin(owner) {
     return;
   }
   if (driver !== owner) { await killSession(); return; }
-  owner.timer = setInterval(() => { tick(owner).catch(() => { /* next tick retries */ }); }, TICK_MS);
+  owner.timer = setInterval(() => {
+    tick(owner).catch(() => {
+      /**
+       * ⚠️ BOUNDED, like every other silent-failure path. Nothing in
+       * tickBody throws today (the seams resolve, writeState catches), so
+       * this is purely defensive -- but a future deterministic throw would
+       * otherwise loop silently forever with the current phase frozen on
+       * screen, the one hang shape the blank/unknown/stalled bounds do not
+       * cover.
+       */
+      owner.tickErrors = (owner.tickErrors || 0) + 1;
+      if (owner.tickErrors > 20) {
+        becomeStuck(owner, 'something kept going wrong while watching the sign-in',
+          'the watcher errored repeatedly; Try again, or use Terminal');
+      }
+    });
+  }, TICK_MS);
 }
 
 /**
@@ -741,6 +768,7 @@ async function tick(owner) {
   owner.ticking = true;
   try {
     await tickBody(owner);
+    owner.tickErrors = 0;
   } finally {
     owner.ticking = false;
   }

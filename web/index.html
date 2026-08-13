@@ -4456,10 +4456,14 @@ function frConnActive(phase) {
  * verdict is already on screen and stays.
  */
 async function frConnResume() {
+  // Same out-of-order guard as the watcher: a slow resume answer carrying a
+  // stale record must not repaint over a flow the person just started.
+  const seq = ++FR_CONN_SEQ;
   try {
     const res = await fetch('/api/connect', { cache: 'no-store' });
     if (!res.ok) return;
     const st = await res.json();
+    if (seq !== FR_CONN_SEQ) return;
     if (FR_STEP !== 3) return;
     /**
      * ⚠️ A CONNECTED VERDICT OUTRANKS A STALE FAILURE RECORD. A stuck or
@@ -4543,6 +4547,9 @@ async function frConnectStart() {
     const st = await res.json();
     if (!res.ok) throw new Error(st.error || ('status ' + res.status));
     if (FR_STEP !== 3) return;
+    // Invalidate any in-flight resume/poll answer: the click's own view of
+    // the flow is newer than anything requested before it.
+    FR_CONN_SEQ += 1;
     if (st.phase === 'connected') { frRecheck(); return; }
     FR_CONN_LAST = null;
     frPaintConnect(st);
@@ -4566,7 +4573,18 @@ async function frConnCancel() {
      * would render as ended a sign-in nobody ended. Keep painting reality.
      */
     if (res.ok && st && frConnActive(st.phase)) refused = st;
-  } catch { /* the repaint below asks reality either way */ }
+  } catch {
+    /**
+     * ⚠️ A FAILED CANCEL POST MEANS WE KNOW NOTHING. Falling through to the
+     * static verdict would paint no-flow over a flow that may still be
+     * live with nothing polling it. Re-adopt through resume, which asks
+     * reality and fail-opens to the static verdict only when reality says
+     * so.
+     */
+    FR_CONN_LAST = null;
+    frConnResume();
+    return;
+  }
   FR_CONN_LAST = null;
   if (refused) { frPaintConnect(refused); frConnWatch(); return; }
   frRecheck();
