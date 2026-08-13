@@ -576,6 +576,21 @@ async function runFlow(owner, haveBinary) {
     try {
       let lastProgressWrite = 0;
       downloaded = await download((got, total) => {
+        /**
+         * ⚠️ A CANCELLED FLOW'S DOWNLOAD ABORTS ITSELF AT THE NEXT CHUNK.
+         * Cancel can land in the momentary gaps where no request handle is
+         * registered; without this, the orphaned download ran to completion
+         * and its path-based renames could collide with a successor flow's
+         * in-progress file. Destroying from inside the progress callback
+         * (never throwing -- an exception in a 'data' listener does not
+         * reject the promise, it kills the process) closes the window at
+         * chunk granularity. Residual, documented as accepted: the handful
+         * of chunkless milliseconds between the metadata GETs.
+         */
+        if (driver !== owner) {
+          if (activeRequest) { try { activeRequest.destroy(new Error('cancelled')); } catch { /* ending anyway */ } }
+          return;
+        }
         if (mem.phase !== PHASE.DOWNLOADING) return;
         // ⚠️ Throttled: this fires per network chunk, and writeState is a
         // synchronous write+rename. Unthrottled that is thousands of disk
@@ -714,8 +729,10 @@ async function tickBody(owner) {
    * proves it is alive by touching the record every few minutes.
    */
   if (mem.pid === process.pid && ACTIVE_PHASES.includes(mem.phase)) {
-    const age = Date.now() - Date.parse(mem.updatedAt || 0);
-    if (Number.isFinite(age) && age > 5 * 60 * 1000) writeState({ ...mem });
+    // Explicit like foreignLiveFlow, not through coercion: a record missing
+    // its stamp gets one now, and an unparseable stamp is treated as due.
+    const age = mem.updatedAt ? Date.now() - Date.parse(mem.updatedAt) : Infinity;
+    if (!Number.isFinite(age) || age > 5 * 60 * 1000) writeState({ ...mem });
   }
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
@@ -824,6 +841,11 @@ async function tickBody(owner) {
         if (driver.rejectTicks > Math.max(3, Math.ceil(6000 / TICK_MS))) {
           driver.rejectTicks = 0;
           driver.lastActed = null;   // a new code may be typed
+          // ⚠️ The completing-wait counters too: without these, the 60s
+          // config wait and the 8s REPL bound were budgets per FLOW, not per
+          // attempt, and a retried sign-in could be declared stuck early.
+          driver.waitTicks = 0;
+          driver.replTicks = 0;
           driver.rejectCount = (driver.rejectCount || 0) + 1;
           writeState({
             phase: PHASE.SIGNIN_AWAITING_CODE,

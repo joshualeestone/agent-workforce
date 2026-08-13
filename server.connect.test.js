@@ -156,6 +156,15 @@ test('a live record from ANOTHER process is reported as it stands, not as interr
     assert.equal(connect.state().phase, 'interrupted',
       'an hour-dead record with a recycled pid was reported as live progress');
 
+    // ⚠️ And NO timestamp fails CLOSED. The first version leaned on
+    // Date.parse coercion and would have failed OPEN into "live forever" if
+    // the parse ever changed; the comment records the rule, this pins it.
+    fs.writeFileSync(file, JSON.stringify({
+      phase: 'downloading', progress: { got: 5, total: 10 }, pid: 1,
+    }));
+    assert.equal(connect.state().phase, 'interrupted',
+      'a live-pid record with no timestamp at all was treated as a live foreign flow');
+
     fs.writeFileSync(file, JSON.stringify({
       phase: 'downloading', progress: { got: 5, total: 10 }, pid: 999999999,
       updatedAt: new Date().toISOString(),

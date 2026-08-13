@@ -4439,7 +4439,8 @@ async function frRecheck() {
    -------------------------------------------------------------------------- */
 
 let FR_CONN_TIMER = null;
-let FR_CONN_LAST = null;   // the last phase painted, so repaints are on change
+let FR_CONN_LAST = null;   // the last phase+reason painted, so repaints are on change
+let FR_CONN_SEQ = 0;       // drops out-of-order poll answers (slow response, newer already painted)
 
 function frConnActive(phase) {
   // ⚠️ A hand copy of engine/connect.js ACTIVE_PHASES -- a phase added there
@@ -4493,12 +4494,17 @@ function frConnStopWatch() {
 function frConnWatch() {
   if (FR_CONN_TIMER) return;
   FR_CONN_TIMER = setInterval(async () => {
+    // ⚠️ Same hazard the engine's tick guards one layer down: a slow answer
+    // resolving after a newer one would paint an older phase over the
+    // current screen. Later requests win; stale answers are dropped.
+    const seq = ++FR_CONN_SEQ;
     let st;
     try {
       const res = await fetch('/api/connect', { cache: 'no-store' });
       if (!res.ok) return;   // a blip; the next tick asks again
       st = await res.json();
     } catch { return; }
+    if (seq !== FR_CONN_SEQ) return;
     // ⚠️ Only paint if they are still here — same rule as frRecheck. The flow
     // itself continues server-side; it is the PAINT that must not land on
     // another step's screen.
