@@ -982,6 +982,19 @@ async function tickBody(owner) {
       } else if (seen.url && !mem.url) {
         writeState({ ...mem, url: seen.url });
       }
+      /**
+       * ⚠️ COMPLETING IS A PROMISE WITH A DEADLINE whatever the pane shows.
+       * The 60s config wait only ticked in the login-text branch, so a CLI
+       * wedged on this frame after a code was typed left "Finishing the
+       * sign-in" painted forever. Same counter, same honest exit.
+       */
+      if (mem.phase === PHASE.SIGNIN_COMPLETING) {
+        owner.waitTicks = (owner.waitTicks || 0) + 1;
+        if (owner.waitTicks > Math.ceil(60000 / TICK_MS)) {
+          becomeStuck(owner, 'Claude says it signed in, but we cannot see the connection yet',
+            'the settings file has not caught up; Check again in a moment, or try once more');
+        }
+      }
       return;
     case 'awaiting-code': {
       /**
