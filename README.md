@@ -3,6 +3,25 @@
 A small team of agents that runs on your own computer, under your own
 Claude subscription.
 
+## Installing (the product's front door)
+
+End users install with one line, which the marketing page distributes:
+
+    curl -fsSL https://chaoskosmos.com/setup | sh
+
+That runs `install/setup.sh`: it checksum-verifies and installs a private
+tmux bundle and the Kosmos bundle (the app + a pinned Node runtime + the
+`kosmos` command) under `~/.local/share/kosmos`, creates a locally-built
+Kosmos.app icon, links `~/.local/bin/kosmos`, and starts the board.
+`kosmos start|stop|restart|status|open|version` manages it after that.
+`sh -s -- --uninstall` reverses everything except the agents' own files.
+Apple silicon, macOS 13.5+ (gated in a sentence, and every built artifact
+is gated against the same floor).
+
+Release artifacts are produced by `tools/build-tmux-bundle.sh` and
+`tools/build-kosmos-bundle.sh` (each emits its tarball plus the `.sha256`
+the installer requires) and published under chaoskosmos.com/dist.
+
 ## Status: Phase 1
 
 It shows you what the agents on this machine are doing, and it can now change

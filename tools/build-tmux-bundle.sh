@@ -146,10 +146,19 @@ echo "==> verifying"
 # precisely because a bundled dylib can depend on another non-system one,
 # and repoint() silences install_name_tool, so a dylib that kept a Homebrew
 # load path would otherwise pass this build and break on a clean Mac.
+# ⚠️ @rpath dependencies fail too: deps_of deliberately skips @-prefixed
+# entries (they are what repoint WRITES), which means an @rpath dependency
+# was never collected or rewritten -- it resolves through LC_RPATH into the
+# build machine's filesystem and breaks on a clean Mac just as surely as a
+# literal /opt path. So does a surviving LC_RPATH itself.
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
-  if otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -qE '^/opt/|^/usr/local/'; then
-    echo "FAIL: a Homebrew load path survived in $(basename "$f"). This bundle would break on a clean Mac." >&2
+  if otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -qE '^/opt/|^/usr/local/|^@rpath'; then
+    echo "FAIL: an unresolved load path survived in $(basename "$f"). This bundle would break on a clean Mac." >&2
     otool -L "$f" >&2
+    exit 1
+  fi
+  if otool -l "$f" | grep -q LC_RPATH; then
+    echo "FAIL: $(basename "$f") carries an LC_RPATH into the build machine's filesystem." >&2
     exit 1
   fi
 done
@@ -177,7 +186,7 @@ otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
 FLOOR_MAJOR=13; FLOOR_MINOR=5
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
   minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || continue
+  [ -n "$minos" ] || { echo "    (no LC_BUILD_VERSION on $(basename "$f"); skipping floor check)"; continue; }
   major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
   if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
     if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then

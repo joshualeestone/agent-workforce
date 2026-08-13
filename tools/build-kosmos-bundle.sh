@@ -55,6 +55,12 @@ done
 cp -R "$REPO/web" "$STAGE/app/web"
 cp "$REPO/bin/agent-supervisor.sh" "$STAGE/app/bin/"
 chmod +x "$STAGE/app/bin/agent-supervisor.sh"
+# The app icon artwork, when it exists: the installer looks for
+# app/assets/Kosmos.icns, and without this entry the icon plumbing in
+# setup.sh could never fire no matter what landed in the repo.
+if [ -d "$REPO/assets" ]; then
+  cp -R "$REPO/assets" "$STAGE/app/assets"
+fi
 
 # ---- the command ------------------------------------------------------------
 cp "$REPO/install/kosmos" "$STAGE/bin/kosmos"
@@ -95,6 +101,21 @@ else
   echo "    checksum ok"
   tar -xzf "$TMP/$TARBALL" -C "$TMP"
   cp "$TMP/node-v$NODE_VERSION-darwin-$NARCH/bin/node" "$STAGE/runtime/bin/node"
+  # ⚠️ Node's LICENSE travels with the binary. It is the single file that
+  # carries the notices for Node AND everything Node bundles (OpenSSL, ICU,
+  # V8, zlib, ...), all of which require their notices to accompany binary
+  # redistribution. The tmux bundle refuses to pack without its notices;
+  # the same rule holds here.
+  cp "$TMP/node-v$NODE_VERSION-darwin-$NARCH/LICENSE" "$STAGE/runtime/LICENSE"
+fi
+if [ ! -f "$STAGE/runtime/LICENSE" ]; then
+  if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+    echo "TEST BUILD: runtime licence file not available from NODE_SOURCE" > "$STAGE/runtime/LICENSE"
+    echo "    WARN: no runtime LICENSE (allowed: TEST BUILD)"
+  else
+    echo "FAIL: no LICENSE for the bundled runtime; binaries may not ship without their notices." >&2
+    exit 1
+  fi
 fi
 chmod +x "$STAGE/runtime/bin/node"
 

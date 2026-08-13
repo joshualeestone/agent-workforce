@@ -158,9 +158,22 @@ install_kosmos() {
   # read as a successful update: the check must look at what just arrived,
   # never at what was already there. Only the bundle's three components are
   # replaced; tmux/, logs/ and the pidfile are the machine's own state.
+  # ⚠️ Three renames, not one, so there IS a small window where an interrupt
+  # leaves part-old, part-new -- stated rather than claimed away. The board
+  # is stopped during the swap, every rename is same-filesystem, and the
+  # recovery is the installer's own re-run, which `kosmos start` names when
+  # the tree is incomplete.
   [ -x "$stage/bin/kosmos" ] || { rm -rf "$stage"; return 1; }
   [ -x "$stage/runtime/bin/node" ] || { rm -rf "$stage"; return 1; }
   [ -f "$stage/app/server.js" ] || { rm -rf "$stage"; return 1; }
+  # The runtime must RUN here, the same probe the tmux bundle gets: a
+  # binary that will not load fails silently and baffling, and the floor
+  # gate upstream makes that unlikely, not impossible.
+  if ! "$stage/runtime/bin/node" --version >/dev/null 2>&1; then
+    info "the runtime will not run on this Mac"
+    rm -rf "$stage"
+    return 1
+  fi
   local part
   for part in bin app runtime; do
     rm -rf "$dest/$part" || { rm -rf "$stage"; return 1; }
@@ -212,6 +225,9 @@ start_log() {
 }
 
 # ---- uninstall --------------------------------------------------------------
+# (Uninstall narrates to the screen only: its file transcript would live in
+# the very folder being deleted, and tee holding an unlinked file preserves
+# nothing. The screen is the record here, deliberately.)
 uninstall() {
   step "Removing Kosmos."
   # The board first, while the command that knows how still exists: deleting
@@ -223,12 +239,10 @@ uninstall() {
   # symlinks, so once the folder was deleted the dangling link answered
   # "nothing there" and survived every uninstall -- the user was told Kosmos
   # was removed while a dead `kosmos` stayed on their PATH. Measured.
-  for f in kosmos; do
-    if [ -e "$BIN_DIR/$f" ] || [ -L "$BIN_DIR/$f" ]; then
-      info "removing $BIN_DIR/$f"
-      rm -f "$BIN_DIR/$f"
-    fi
-  done
+  if [ -e "$BIN_DIR/kosmos" ] || [ -L "$BIN_DIR/kosmos" ]; then
+    info "removing $BIN_DIR/kosmos"
+    rm -f "$BIN_DIR/kosmos"
+  fi
   # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
   # one launchd job per agent (com.kosmos.agent.*), set to start at every
   # login. With Kosmos gone there is no UI left to manage them, and "left
@@ -254,8 +268,13 @@ uninstall() {
     # binary deleted out from under it. Killed BY NAME, one session per
     # plist found, never kill-server: on a machine with other tmux use,
     # the server is not ours to kill.
+    # ⚠️ `=$_name`, NEVER the bare name: tmux target resolution falls back
+    # to a PREFIX match, and this repo has already measured `kill-session
+    # -t sam` killing samantha-discord (bin/agent-supervisor.sh records the
+    # incident). The = forces an exact match, the same form every engine
+    # call site uses.
     if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
-      "$KOSMOS_HOME/tmux/bin/tmux" kill-session -t "$_name" 2>/dev/null || true
+      "$KOSMOS_HOME/tmux/bin/tmux" kill-session -t "=$_name" 2>/dev/null || true
     fi
     rm -f "$_plist"
   done
@@ -265,15 +284,36 @@ uninstall() {
   fi
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
   [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
+  # The shared supervisor is app plumbing (the same argument as the launchd
+  # jobs) and goes; the STORE next to it is the user's agent records and
+  # stays, and the closing sentence names where.
+  _support="${AGENT_WORKFORCE_DATA:-$HOME/Library/Application Support}/AgentWorkforce"
+  if [ -d "$_support/bin" ]; then
+    info "removing the shared supervisor"
+    rm -rf "$_support/bin"
+  fi
   # ⚠️ Deliberately NOT removed: the user's agents' folders, their instruction
   # files, and anything under ~/work. Uninstalling the app must never delete
   # somebody's work, and an installer that cleans up too enthusiastically is
   # worse than one that leaves a folder behind.
-  printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone.\n\n'
+  printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone\n'
+  printf '  (in your Library/Application Support/AgentWorkforce folder and their own folders).\n\n'
   exit 0
 }
 
-[ "${1:-}" = "--uninstall" ] && uninstall
+# ⚠️ AN UNRECOGNISED FLAG REFUSES, IT DOES NOT INSTALL. The one argument
+# this script takes is the one that UNDOES the install; a typo in it
+# (--uninstal, -uninstall, --help) silently doing the opposite would be
+# indefensible. No argument at all is the install.
+case "${1:-}" in
+  "") ;;
+  --uninstall) uninstall ;;
+  *)
+    printf '\n  The only option is --uninstall. To install, run it with no options:\n' >&2
+    printf '    curl -fsSL https://chaoskosmos.com/setup | sh\n\n' >&2
+    exit 2
+    ;;
+esac
 
 # ---- preflight --------------------------------------------------------------
 # ⚠️ ASK WHETHER THIS IS A FRESH MACHINE **BEFORE** ANYTHING CREATES A DIRECTORY.
@@ -319,6 +359,7 @@ esac
 MACOS_FLOOR_MAJOR=13
 MACOS_FLOOR_MINOR=5
 _osver="$(sw_vers -productVersion 2>/dev/null || echo 0.0)"
+[ -n "$_osver" ] || _osver="0.0"
 _osmajor="${_osver%%.*}"
 _osrest="${_osver#*.}"
 _osminor="${_osrest%%.*}"
@@ -393,6 +434,17 @@ export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
 
 # ---- kosmos itself ----------------------------------------------------------
 step "Installing Kosmos."
+# ⚠️ THE RUNNING BOARD STOPS BEFORE THE SWAP, or the update does not happen.
+# The swap replaces app/ and runtime/ on disk, but the OLD process keeps
+# serving from memory, and the final `kosmos start` sees a healthy port and
+# returns without starting anything -- so the installer would print
+# "Kosmos is running" while the machine keeps executing the previous
+# version until a reboot. Stopping first also closes the window where the
+# live server's web/index.html is deleted out from under it mid-install.
+if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
+  info "pausing Kosmos for the update"
+  "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+fi
 install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos."
 ln -sf "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
 info "installed to $KOSMOS_HOME"
@@ -471,6 +523,9 @@ PLIST
   cat > "$target/MacOS/Kosmos" <<LAUNCH || return 1
 #!/bin/bash
 KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
+# The port this install chose travels with the icon; without it, an install
+# on a non-default port produced an icon that opened the default one.
+export KOSMOS_PORT="\${KOSMOS_PORT:-$PORT}"
 if ! "\$KOSMOS_HOME/bin/kosmos" open >/dev/null 2>&1; then
   /usr/bin/osascript -e 'display alert "Kosmos could not start" message "Something went wrong bringing Kosmos up. The details are in $KOSMOS_HOME/logs/board.log. Reinstalling usually fixes it: paste the install line into Terminal again." as critical' >/dev/null 2>&1
   exit 1

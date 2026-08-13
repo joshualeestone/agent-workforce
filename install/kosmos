@@ -26,10 +26,12 @@ set -euo pipefail
 # ---- where am I -------------------------------------------------------------
 # ⚠️ RESOLVED THROUGH THE SYMLINK BY HAND. The installer links this file into
 # ~/.local/bin, so `dirname $0` there answers ~/.local/bin and every relative
-# path breaks. `readlink -f` would do the walk for us but only exists on
-# macOS 12.3+, and the app supports 12.0. The loop is the portable spelling:
-# follow links (relative ones resolve against the link's own directory) until
-# a real file, then take its parent's parent as home.
+# path breaks. The floor is macOS 13.5, whose readlink has -f, but the loop
+# costs nothing, handles any chain of links the same way everywhere, and
+# keeps this file free of a version assumption that would silently become
+# the load-bearing fact if the floor ever moved. Follow links (relative ones
+# resolve against the link's own directory) until a real file, then take its
+# parent's parent as home.
 SELF="${BASH_SOURCE[0]}"
 while [ -L "$SELF" ]; do
   DIR="$(cd "$(dirname "$SELF")" && pwd)"
@@ -186,14 +188,22 @@ cmd_version() {
   fi
 }
 
+cmd_restart() {
+  # Stop tolerates "was not running"; the point is that start then runs the
+  # code that is on disk NOW, which is what an update needs.
+  cmd_stop || true
+  cmd_start
+}
+
 case "${1:-}" in
   start)   cmd_start ;;
   stop)    cmd_stop ;;
+  restart) cmd_restart ;;
   status)  cmd_status ;;
   open)    cmd_open ;;
   version) cmd_version ;;
   *)
-    printf '\n  kosmos start | stop | status | open | version\n\n'
+    printf '\n  kosmos start | stop | restart | status | open | version\n\n'
     printf '  The dashboard lives at %s once started.\n\n' "$URL"
     exit 2
     ;;
