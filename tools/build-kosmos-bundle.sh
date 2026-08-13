@@ -132,11 +132,22 @@ chmod +x "$STAGE/runtime/bin/node"
 # tmux from this Mac stamps minos 26.0 and would load on nothing older),
 # so the floor is read out of the artifact with otool and compared, not
 # assumed. KOSMOS_ALLOW_MINOS=1 overrides for LOCAL TEST BUILDS ONLY.
-FLOOR_MAJOR=13; FLOOR_MINOR=5
+FLOOR="$(cat "$(dirname "$0")/macos-floor")"
+FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
 check_minos() {
   local f="$1" minos major minor
   minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || { echo "    (no LC_BUILD_VERSION on $(basename "$f"); skipping floor check)"; return 0; }
+  [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
+  # Cannot-read refuses, same rule as the tmux builder: a gate that passes
+  # what it cannot see is the green-on-blind shape this repo bans.
+  if [ -z "$minos" ]; then
+    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+      echo "    WARN: cannot read a deployment target from $(basename "$f") (allowed: TEST BUILD)"
+      return 0
+    fi
+    echo "FAIL: cannot read a deployment target from $(basename "$f"); refusing to certify the floor." >&2
+    exit 1
+  fi
   major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
   if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
     if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
@@ -160,7 +171,16 @@ check_minos "$STAGE/runtime/bin/node"
 # real board on this machine.
 echo "==> smoke test: the staged app boots and serves its page"
 SMOKE_LOG="$(mktemp)"
-PORT=0 "$STAGE/runtime/bin/node" "$STAGE/app/server.js" > "$SMOKE_LOG" 2>&1 &
+# ⚠️ Disposable roots: without these the staged server points at the BUILD
+# MACHINE'S live store, launchd directory and tmux fleet. Today's server
+# only reads on GET /, so nothing is mutated -- but that is a property of
+# the current server, not of this test, and a future boot-time write must
+# land in a throwaway, never in the operator's real data.
+SMOKE_ROOTS="$(mktemp -d)"
+PORT=0 AGENT_WORKFORCE_DATA="$SMOKE_ROOTS/data" \
+  AGENT_WORKFORCE_LAUNCH="$SMOKE_ROOTS/launch" \
+  AGENT_WORKFORCE_WORKERS="$SMOKE_ROOTS/workers" \
+  "$STAGE/runtime/bin/node" "$STAGE/app/server.js" > "$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
 SMOKE_URL=""
 for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -194,6 +214,7 @@ kill "$SMOKE_PID" 2>/dev/null || true
 wait "$SMOKE_PID" 2>/dev/null || true
 echo "    boots, answers at $SMOKE_URL, and serves its own page"
 rm -f "$SMOKE_LOG"
+rm -rf "$SMOKE_ROOTS"
 
 # ---- the tarball ------------------------------------------------------------
 echo "==> packing"

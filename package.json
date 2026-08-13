@@ -5,10 +5,10 @@
   "description": "A small team of assistants that runs on your own computer.",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test engine/*.test.js *.test.js && npm run test:shell",
+    "test": "node --test engine/*.test.js *.test.js && yarn test:shell",
     "type-check": "echo 'plain JavaScript, nothing to type-check'",
     "lint-fix": "echo 'no linter configured'",
     "build": "echo 'no build step for the app: it runs from source. Release bundles: tools/build-*-bundle.sh'",
-    "test:shell": "sh -n install/setup.sh && bash -n install/kosmos && bash -n tools/build-tmux-bundle.sh && bash -n tools/build-kosmos-bundle.sh"
+    "test:shell": "sh -n install/setup.sh && bash -n install/kosmos && bash -n tools/build-tmux-bundle.sh && bash -n tools/build-kosmos-bundle.sh && bash tools/check-floor-consistency.sh"
   }
 }

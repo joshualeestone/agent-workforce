@@ -76,6 +76,7 @@ die() { printf '  %s\n' "$*" >&2; exit 1; }
 # which here would call our own running board a stranger. Measured in the
 # bundle build's smoke test, which failed its own healthy bundle this way.
 healthy() {
+  local _body
   _body="$(/usr/bin/curl -fsS -m 2 "$URL/" 2>/dev/null)" || return 1
   case "$_body" in
     *"Agent Workforce"*|*Kosmos*) return 0 ;;
@@ -143,7 +144,16 @@ cmd_start() {
 cmd_stop() {
   local pid
   if pid="$(running_pid)"; then
-    say "Stopping Kosmos."
+    # ⚠️ The pidfile is pid-scoped and the health check is port-scoped, and
+    # they can disagree: with KOSMOS_PORT pointed elsewhere, status says
+    # "not running" while the recorded process is alive on its original
+    # port. Killing it silently made two adjacent commands contradict each
+    # other, with the destructive one lying. Say which board this is.
+    if ! healthy; then
+      say "Stopping a Kosmos board that is not answering on port $PORT (it was likely started with a different port)."
+    else
+      say "Stopping Kosmos."
+    fi
     kill "$pid" 2>/dev/null || true
     local i
     for i in $(seq 1 10); do
@@ -189,8 +199,12 @@ cmd_version() {
 }
 
 cmd_restart() {
-  # Stop tolerates "was not running"; the point is that start then runs the
-  # code that is on disk NOW, which is what an update needs.
+  # The point is that start then runs the code that is on disk NOW, which
+  # is what an update needs. The `|| true` tolerates "was not running";
+  # it can NOT tolerate the stranger-on-the-port case, because that branch
+  # of stop exits the process outright -- and that is correct here too:
+  # a port owned by something we refuse to kill is a port start cannot
+  # bind, so continuing would only move the failure one line down.
   cmd_stop || true
   cmd_start
 }

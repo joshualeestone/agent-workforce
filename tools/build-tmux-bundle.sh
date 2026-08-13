@@ -49,6 +49,10 @@
 #         <out>/tmux-<arch>.tar.gz (+ .sha256), ad-hoc signed, relocatable.
 
 set -euo pipefail
+# ⚠️ nullglob: with no dylibs collected (a differently-linked source build),
+# every `lib/*.dylib` loop and argument list must become empty, not the
+# literal string `lib/*.dylib` handed to install_name_tool and codesign.
+shopt -s nullglob
 
 # ⚠️ Same argument shape as build-kosmos-bundle.sh: $1 is the OUTPUT dir;
 # the staged bundle lands in a subdirectory and the tarball beside it. The
@@ -131,7 +135,7 @@ repoint() {
 echo "==> rewriting load paths"
 repoint "$OUT/bin/tmux" "@executable_path/../lib"
 for lib in "$OUT"/lib/*.dylib; do
-  install_name_tool -id "@loader_path/$(basename "$lib")" "$lib"
+  install_name_tool -id "@loader_path/$(basename "$lib")" "$lib" 2>/dev/null
   repoint "$lib" "@loader_path"
 done
 
@@ -152,7 +156,13 @@ echo "==> verifying"
 # build machine's filesystem and breaks on a clean Mac just as surely as a
 # literal /opt path. So does a surviving LC_RPATH itself.
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
-  if otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -qE '^/opt/|^/usr/local/|^@rpath'; then
+  # ⚠️ An ALLOWLIST: this loop is the backstop for the case collect/repoint
+  # did NOT handle, and a denylist of the prefixes we already know about
+  # (/opt, /usr/local, @rpath) cannot catch the one that surprises us
+  # (/nix/store, a custom-prefix Homebrew). Anything that is not a system
+  # library or one of our own rewritten references fails.
+  if otool -L "$f" | tail -n +2 | awk '{print $1}' \
+      | grep -vE '^/usr/lib/|^/System/|^@executable_path/|^@loader_path/' | grep -q .; then
     echo "FAIL: an unresolved load path survived in $(basename "$f"). This bundle would break on a clean Mac." >&2
     otool -L "$f" >&2
     exit 1
@@ -183,10 +193,22 @@ otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
 # silently. Until a tmux built against the floor SDK is sourced, a release
 # build of this bundle FAILS here on purpose; KOSMOS_ALLOW_MINOS=1 permits
 # a LOCAL TEST BUILD only.
-FLOOR_MAJOR=13; FLOOR_MINOR=5
+FLOOR="$(cat "$(dirname "$0")/macos-floor")"
+FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
   minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || { echo "    (no LC_BUILD_VERSION on $(basename "$f"); skipping floor check)"; continue; }
+  [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
+  # ⚠️ CANNOT-READ REFUSES. A gate that passes what it cannot see is the
+  # green-on-blind failure shape this repo's README bans; both load-command
+  # spellings are parsed above, so an empty result means something new.
+  if [ -z "$minos" ]; then
+    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+      echo "    WARN: cannot read a deployment target from $(basename "$f") (allowed: TEST BUILD)"
+      continue
+    fi
+    echo "FAIL: cannot read a deployment target from $(basename "$f"); refusing to certify the floor." >&2
+    exit 1
+  fi
   major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
   if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
     if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then

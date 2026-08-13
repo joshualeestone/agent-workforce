@@ -74,7 +74,7 @@ KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
 # where nothing beyond a clean Mac may be assumed.
 verify_download() {
   local file="$1" url="$2" want got
-  curl -fsSL "$url.sha256" -o "$file.sha256" || { info "the download's checksum file is missing"; return 1; }
+  curl -fsL "$url.sha256" -o "$file.sha256" 2>/dev/null || { info "the download's checksum file is missing"; return 1; }
   want="$(awk '{print $1; exit}' "$file.sha256")"
   got="$(shasum -a 256 "$file" | awk '{print $1}')"
   rm -f "$file.sha256"
@@ -103,6 +103,15 @@ fetch_tmux() {
     cp -R "$KOSMOS_TMUX_SRC/." "$stage/" || { rm -rf "$stage"; return 1; }
   else
     local url="$KOSMOS_RELEASE_BASE/tmux-$ARCH.tar.gz"
+    # A reachability probe first, so the two failures a launch-day install
+    # actually hits (no network, a half-published CDN) refuse in a sentence
+    # instead of a curl error code. The real download keeps its progress
+    # bar, which lives on stderr and cannot be silenced without losing it.
+    if ! curl -fsIL -m 15 "$url" >/dev/null 2>&1; then
+      info "could not reach the download at $url"
+      info "Check your internet connection and paste the install line again; it is safe to re-run."
+      rm -rf "$stage"; return 1
+    fi
     info "downloading from $url"
     # ⚠️ Progress is ON. `curl -fsSL` is silent, and several minutes of nothing
     # is the failure this whole file is written against.
@@ -147,6 +156,11 @@ install_kosmos() {
     cp -R "$KOSMOS_SRC/." "$stage/" || { rm -rf "$stage"; return 1; }
   else
     local url="$KOSMOS_RELEASE_BASE/kosmos-$ARCH.tar.gz"
+    if ! curl -fsIL -m 15 "$url" >/dev/null 2>&1; then
+      info "could not reach the download at $url"
+      info "Check your internet connection and paste the install line again; it is safe to re-run."
+      rm -rf "$stage"; return 1
+    fi
     info "downloading from $url"
     curl -fL --progress-bar "$url" -o "$stage/kosmos.tar.gz" || { rm -rf "$stage"; return 1; }
     verify_download "$stage/kosmos.tar.gz" "$url" || { rm -rf "$stage"; return 1; }
@@ -166,6 +180,7 @@ install_kosmos() {
   [ -x "$stage/bin/kosmos" ] || { rm -rf "$stage"; return 1; }
   [ -x "$stage/runtime/bin/node" ] || { rm -rf "$stage"; return 1; }
   [ -f "$stage/app/server.js" ] || { rm -rf "$stage"; return 1; }
+  [ -f "$stage/app/web/index.html" ] || { rm -rf "$stage"; return 1; }
   # The runtime must RUN here, the same probe the tmux bundle gets: a
   # binary that will not load fails silently and baffling, and the floor
   # gate upstream makes that unlikely, not impossible.
@@ -233,8 +248,10 @@ uninstall() {
   # The board first, while the command that knows how still exists: deleting
   # the folder under a running server leaves it serving ghosts.
   if [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
+    info "stopping the board"
     "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
   fi
+  _agents_stopped=no
   # ⚠️ THE SYMLINK GOES BEFORE THE FOLDER, AND `-L` IS CHECKED. `-e` follows
   # symlinks, so once the folder was deleted the dangling link answered
   # "nothing there" and survived every uninstall -- the user was told Kosmos
@@ -254,6 +271,7 @@ uninstall() {
     [ -e "$_plist" ] || continue
     _label="$(basename "$_plist" .plist)"
     _name="${_label#com.kosmos.agent.}"
+    _agents_stopped=yes
     info "stopping the background job for $_name"
     # ⚠️ enable BEFORE bootout, the order the app's own runbook uses. The
     # app's Remove path runs `launchctl disable`, which writes a per-user
@@ -296,8 +314,14 @@ uninstall() {
   # files, and anything under ~/work. Uninstalling the app must never delete
   # somebody's work, and an installer that cleans up too enthusiastically is
   # worse than one that leaves a folder behind.
-  printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone\n'
-  printf '  (in your Library/Application Support/AgentWorkforce folder and their own folders).\n\n'
+  # Claim only what was observed: on a machine with no agents, "your agents
+  # were stopped" would be the file's own sin of asserting the unobserved.
+  if [ "$_agents_stopped" = "yes" ]; then
+    printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone\n'
+    printf '  (in your Library/Application Support/AgentWorkforce folder and their own folders).\n\n'
+  else
+    printf '\n  Kosmos is removed.\n\n'
+  fi
   exit 0
 }
 
@@ -325,8 +349,13 @@ esac
 # Caught by running it against a genuinely empty directory. On the never-touched
 # Mac that is the FIRST SENTENCE the user would have read, and it says the
 # product is confused about its own state on the one run where trust is decided.
+# ⚠️ Keyed on the INSTALLED PRODUCT, not on the directory existing: start_log
+# creates $KOSMOS_HOME/logs before anything can fail, so a run that died at a
+# dropped download left the directory behind, and the RETRY -- the likeliest
+# second run there is -- opened with "already installed here" on a machine
+# where Kosmos has never run. The launcher existing is what installed means.
 FRESH_INSTALL=yes
-[ -d "$KOSMOS_HOME" ] && FRESH_INSTALL=no
+[ -x "$KOSMOS_HOME/bin/kosmos" ] && FRESH_INSTALL=no
 
 start_log
 
@@ -397,7 +426,7 @@ info "installing a private copy of tmux (about 2MB, nothing system-wide)"
 # URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
 # signed, and saying "signed" would overclaim). Kept as a function so the
 # clean-machine test can point it at a local file.
-fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager."
+fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager. It is safe to paste the install line and try again; if it keeps failing, your network may be blocking the download."
 ok
 
 # ⚠️ TERMINFO IS PINNED RATHER THAN TRUSTED. The bundled ncurses carries a
@@ -445,8 +474,8 @@ if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
   info "pausing Kosmos for the update"
   "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
 fi
-install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos."
-ln -sf "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
+install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos. It is safe to paste the install line and try again; if it keeps failing, your network may be blocking the download."
+ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
 info "installed to $KOSMOS_HOME"
 ok
 
@@ -507,7 +536,7 @@ make_app() {
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$ver</string>
   <key>CFBundleIconFile</key><string>Kosmos</string>
-  <key>LSMinimumSystemVersion</key><string>13.5</string>
+  <key>LSMinimumSystemVersion</key><string>$MACOS_FLOOR_MAJOR.$MACOS_FLOOR_MINOR</string>
   <key>LSUIElement</key><false/>
 </dict></plist>
 PLIST
