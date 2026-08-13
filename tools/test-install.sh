@@ -73,7 +73,14 @@ SYSNEVER_MTIME="$(stat -f %Fm "$SB/sysnever")"
 # real-folder mutation on a dev machine with a real Kosmos install), so the
 # snapshot hashes name + mtime + size of every top-level entry.
 real_apps_fingerprint() {
-  find "$1" -maxdepth 1 -exec stat -f '%N %m %z' {} \; 2>/dev/null | sort | shasum | cut -d' ' -f1
+  # ⚠️ A MISSING FOLDER FINGERPRINTS AS "absent", IT DOES NOT KILL THE RUN.
+  # A never-touched Mac has no ~/Applications until something creates it,
+  # and under set -euo pipefail a failing find aborted the whole harness
+  # with zero output before a single assertion ran (measured with
+  # HOME=/tmp/kosmos-nohome: exit 1, no sentences). %Fm not %m, so a
+  # same-second create-and-delete still moves the fingerprint.
+  [ -d "$1" ] || { printf 'absent\n'; return 0; }
+  find "$1" -maxdepth 1 -exec stat -f '%N %Fm %z' {} \; 2>/dev/null | sort | shasum | cut -d' ' -f1 || true
 }
 REAL_HOME_APPS_BEFORE="$(real_apps_fingerprint "$HOME/Applications")"
 REAL_SYS_APPS_BEFORE="$(real_apps_fingerprint /Applications)"
@@ -301,7 +308,7 @@ RC=0; cat "$SETUP" | HOME="$SBH7" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS2
 chk "foreign-aliased install exits 0" "[ $RC -eq 0 ]"
 chk "the stranger's app is byte-identical" "grep -q 'stranger' \"$SYSALIAS2/Kosmos.app/Contents/MacOS/Kosmos\""
 chk "no icon was written anywhere" "[ \"\$(ls -A \"$SYSALIAS2\" | grep -cv '^Kosmos.app\$')\" = \"0\" ]"
-chk "the skip speaks its own sentence" "grep -q 'no icon was created' \"$SB/alias-foreign.log\""
+chk "the skip speaks its own sentence" "grep -q 'is the same folder, so no icon was created' \"$SB/alias-foreign.log\""
 "$SB/bin9/kosmos" stop > /dev/null 2>&1 || true
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -424,6 +431,62 @@ else
   chk "the give-up sentence prints" "grep -q 'could not create the app icon, but Kosmos itself is fine' \"$SB/noicon.log\""
   chmod 755 "$SYS_RO2" "$SBH12/Applications"
   "$SB/bin13/kosmos" stop > /dev/null 2>&1 || true
+fi
+
+echo "== a link entry is decided by its target, and each skip sentence is its own =="
+# The unknown-skip leg: a dangling home Applications symlink plus a foreign
+# system bundle. The install must refuse to guess, write no icon, and say
+# "could not be checked" rather than "is the same folder".
+SYS_F2="$SB/sysforeign2"
+mkdir -p "$SYS_F2/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# stranger2\nKOSMOS_HOME="${KOSMOS_HOME:-/not/ours/2}"\n' > "$SYS_F2/Kosmos.app/Contents/MacOS/Kosmos"
+SBH13="$SB/dangling-home"
+mkdir -p "$SBH13"
+ln -s "$SB/does-not-exist" "$SBH13/Applications"
+export KOSMOS_HOME="$SB/home15" KOSMOS_BIN_DIR="$SB/bin15"
+RC=0; cat "$SETUP" | HOME="$SBH13" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_F2" sh > "$SB/unknown-skip.log" 2>&1 || RC=$?
+chk "unknown-skip install exits 0" "[ $RC -eq 0 ]"
+chk "unknown-skip speaks its own sentence" "grep -q 'could not be checked, so no icon was created' \"$SB/unknown-skip.log\""
+chk "the second stranger is untouched" "grep -q 'stranger2' \"$SYS_F2/Kosmos.app/Contents/MacOS/Kosmos\""
+"$SB/bin15/kosmos" stop > /dev/null 2>&1 || true
+
+# A home-folder LINK at uninstall: one pointing at the system bundle this
+# uninstall sweeps is our residue and goes; one pointing anywhere else is
+# left and named as a link.
+SYS_OK5="$SB/sysok5"
+seed_kosmos_bundle "$SYS_OK5" "$SB/home16"
+SBH14="$SB/link-home"
+mkdir -p "$SBH14/Applications"
+ln -s "$SYS_OK5/Kosmos.app" "$SBH14/Applications/Kosmos.app"
+export KOSMOS_HOME="$SB/home16" KOSMOS_BIN_DIR="$SB/bin16"
+RC=0; HOME="$SBH14" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK5" sh -s -- --uninstall < "$SETUP" > "$SB/link-un.log" 2>&1 || RC=$?
+chk "link uninstall exits 0" "[ $RC -eq 0 ]"
+chk "our link swept with its bundle" "[ ! -e \"$SBH14/Applications/Kosmos.app\" ] && [ ! -L \"$SBH14/Applications/Kosmos.app\" ]"
+chk "the link sweep is named" "grep -q 'removing the Kosmos link' \"$SB/link-un.log\""
+ln -s "$SB/somewhere-else/Kosmos.app" "$SBH14/Applications/Kosmos.app"
+RC=0; HOME="$SBH14" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK5" sh -s -- --uninstall < "$SETUP" > "$SB/link-un2.log" 2>&1 || RC=$?
+chk "foreign link survives" "[ -L \"$SBH14/Applications/Kosmos.app\" ]"
+chk "foreign link is named as a link" "grep -q 'is a link this install did not create' \"$SB/link-un2.log\""
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP stale-system-icon leg: running as root"
+  SKIPS=$((SKIPS + 1))
+else
+  # The two-icon state, named: the probe fails on a machine whose earlier
+  # install owns a system icon; the fresh icon goes home and the stale
+  # one is called out.
+  SYS_RO3="$SB/sysro3"
+  seed_kosmos_bundle "$SYS_RO3" "$SB/home17"
+  chmod 555 "$SYS_RO3"
+  SBH15="$SB/stale-sys-home"
+  mkdir -p "$SBH15"
+  export KOSMOS_HOME="$SB/home17" KOSMOS_BIN_DIR="$SB/bin17"
+  RC=0; cat "$SETUP" | HOME="$SBH15" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO3" sh > "$SB/stale-sys.log" 2>&1 || RC=$?
+  chk "stale-sys install exits 0" "[ $RC -eq 0 ]"
+  chk "fresh icon landed in the home folder" "[ -x \"$SBH15/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "the unreachable system icon is named" "grep -q 'could not be updated from this account' \"$SB/stale-sys.log\""
+  chmod 755 "$SYS_RO3"
+  "$SB/bin17/kosmos" stop > /dev/null 2>&1 || true
 fi
 
 echo "== the operator's real folders were never touched =="

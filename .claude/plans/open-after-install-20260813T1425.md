@@ -27,9 +27,13 @@ from one that failed.
    because ACLs make `-w` lie in both directions. The closing sentence names
    where the icon actually went. A stale pre-change icon in ~/Applications is
    cleaned up when the system-folder install succeeds.
-2. **A fresh install ends by opening the dashboard** (`/usr/bin/open`,
-   best-effort, fresh installs only). Updates stay quiet. Any sandbox
-   override or KOSMOS_NO_OPEN suppresses it.
+2. **A fresh install ends by opening the dashboard** (`/usr/bin/open` by
+   default; KOSMOS_OPEN_CMD substitutes the harness's recording stub;
+   best-effort, fresh installs only). Updates stay quiet. Suppressed by
+   KOSMOS_NO_OPEN or by the verbatim KOSMOS_APP_DIR sandbox override
+   (KOSMOS_SYS_APP_DIR alone does not suppress it; the harness's global
+   `export KOSMOS_NO_OPEN=1` is what keeps every pass quiet, and it is
+   load-bearing).
 3. **Uninstall sweeps both default icon locations** (pre-change installs
    wrote the home folder), each bounded by the fixed leaf name, and a
    surviving icon is named, never silently skipped.

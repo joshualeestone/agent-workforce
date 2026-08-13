@@ -47,7 +47,10 @@
 # ⚠️ AND IT MUST BE REVERSIBLE. `--uninstall` genuinely returns the machine to
 # before. That is not politeness: the first run on a never-touched Mac is the
 # most valuable test this project will ever get, and it is worth exactly once
-# unless we can put the machine back.
+# unless we can put the machine back. One stated bound: anything the
+# uninstall cannot PROVE this installer created is left alone and named,
+# never deleted; on the rare machine where that leaves something behind,
+# the sentence says what it is.
 
 # ⚠️ THE macOS CHECK RUNS BEFORE ANY set OPTION. `set -o pipefail` is not
 # POSIX; on a Linux dash the old order died with a raw shell error before
@@ -96,6 +99,10 @@ BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
 # fallback against disposable directories -- a fallback that can only run
 # where the primary works is untested by construction, and the probe's
 # failure leg is exactly the one a standard (non-admin) user will live on.
+# Test-only by contract, and SYMMETRIC by obligation: an install driven
+# with this override must be uninstalled with the same value, or the
+# sweep looks at the real /Applications and the sandboxed icon is
+# orphaned.
 SYS_APP_DIR="${KOSMOS_SYS_APP_DIR:-/Applications}"
 # ⚠️ APP_DIR IS RESOLVED LAZILY, by the install path only, right before the
 # icon is written. Resolving it here would run the write probe on EVERY
@@ -107,6 +114,7 @@ APP_DIR="${KOSMOS_APP_DIR:-$HOME/Applications}"
 APP_OTHER_OWNER=no
 APP_SKIP_ICON=no
 APP_SKIP_REASON=""
+APP_SYS_STALE=no
 resolve_app_dir() {
   # The verbatim override is a sandbox: no probing, no fallback.
   [ -n "${KOSMOS_APP_DIR:-}" ] && { APP_DIR="$KOSMOS_APP_DIR"; return 0; }
@@ -169,6 +177,13 @@ resolve_app_dir() {
     /bin/rmdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null \
       || rm -rf "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null || true
     APP_DIR="$SYS_APP_DIR"
+  elif grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+    # The probe FAILED on a machine where an earlier run of this install
+    # already put an icon in the system folder (admin rights since lost,
+    # folder since locked). The fresh icon goes to the home folder, and
+    # the now-unreachable system icon is NAMED, or the user ends up with
+    # two Kosmos icons and a sentence describing one.
+    APP_SYS_STALE=yes
   fi
   return 0
 }
@@ -523,7 +538,20 @@ uninstall() {
     # -e OR -L, the same shape as the system-folder gate above: -d follows
     # symlinks, so a dangling link named Kosmos.app here would survive
     # every uninstall in silence, against the survivor-is-NAMED rule.
-    if [ -e "$HOME/Applications/Kosmos.app" ] || [ -L "$HOME/Applications/Kosmos.app" ]; then
+    #
+    # A LINK ENTRY is decided by its target, not by the tests below (which
+    # would follow it onto whatever it points at): a link at the system
+    # bundle this uninstall just swept is our residue and goes; any other
+    # link was not made by this installer and is left, named.
+    if [ -L "$HOME/Applications/Kosmos.app" ]; then
+      _lnk_target="$(readlink "$HOME/Applications/Kosmos.app" 2>/dev/null)" || _lnk_target=""
+      if [ "$_lnk_target" = "$SYS_APP_DIR/Kosmos.app" ]; then
+        info "removing the Kosmos link from $HOME/Applications"
+        rm -f "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
+      else
+        info "note: the Kosmos.app in the Applications folder inside your home folder is a link this install did not create; it was left alone."
+      fi
+    elif [ -e "$HOME/Applications/Kosmos.app" ]; then
       if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ] && [ "$_home_apps_phys" != "$_sys_apps_phys" ]; then
         # The same ownership token as the system folder: uninstalling
         # Kosmos must not delete somebody's unrelated app that happens to
@@ -876,6 +904,19 @@ PLIST
   cat > "$target/MacOS/Kosmos" <<LAUNCH || return 1
 #!/bin/bash
 KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
+# The baked default above belongs to the account that installed Kosmos. On
+# a Mac with several accounts, the shared Applications icon would otherwise
+# start (or fail to start) the INSTALLING account's private tree for
+# whoever clicks it. Another account gets a sentence pointing at the
+# install line instead. (A deliberate KOSMOS_HOME in the environment
+# bypasses this, which is what the harness and power users use.)
+case "\$KOSMOS_HOME" in
+  "\$HOME"/*) ;;
+  *)
+    /usr/bin/osascript -e 'display alert "Kosmos was installed by a different account" message "This Kosmos belongs to another user of this Mac. To use Kosmos from this account, paste the install line from chaoskosmos.com into Terminal." as critical' >/dev/null 2>&1
+    exit 1
+    ;;
+esac
 # The port this install chose travels with the icon; without it, an install
 # on a non-default port produced an icon that opened the default one.
 export KOSMOS_PORT="\${KOSMOS_PORT:-$PORT}"
@@ -898,13 +939,17 @@ LAUNCH
 
 step "Adding Kosmos to your Applications."
 resolve_app_dir
-# ⚠️ THE ONE DIALOG THIS RUN CAN SHOW IS NAMED BEFORE IT CAN APPEAR. On
-# some macOS versions, App Management (TCC) asks whether Terminal may
-# manage apps the first time anything writes a bundle into /Applications.
-# The person this file is written for was promised no password and no
-# surprises; an unexplained system dialog mid-run reads as "something went
-# wrong". A denial is handled below (the icon falls back to the home
-# folder), so this sentence is the only missing piece.
+# ⚠️ THE ONE DIALOG THIS RUN CAN SHOW IS NAMED BEFORE IT CAN APPEAR.
+# Anticipatory, NOT measured on this machine (which had already granted
+# Terminal everything): Apple's App Management (TCC, macOS 13+) documents
+# that modifying app bundles can prompt "Terminal would like to manage
+# apps". The person this file is written for was promised no password and
+# no surprises; an unexplained system dialog mid-run reads as "something
+# went wrong". A denial is handled below (the icon falls back to the home
+# folder). Printed only on the first system-folder write to avoid
+# re-raising a resolved worry every update; if the dialog ever fires on a
+# REPLACE instead, the fallback still covers the denial, just without
+# this warm-up sentence.
 # Only on the FIRST system-folder write (nothing at the target yet): the
 # dialog is one-time, and re-raising a resolved worry on every update is
 # its own small alarm.
@@ -966,7 +1011,13 @@ if [ "$APP_MADE" = "yes" ]; then
     # folder), the "stale icon" IS the bundle written two lines up, and
     # this cleanup would delete the app it just installed while printing
     # success. Reproduced during review; the pwd -P compare is the guard.
-    if [ -z "${KOSMOS_APP_DIR:-}" ] && [ -d "$HOME/Applications/Kosmos.app" ]; then
+    # ⚠️ AND NEVER WHEN THE ENTRY ITSELF IS A SYMLINK. The folder-granular
+    # pwd -P compare cannot see a real ~/Applications containing
+    # `Kosmos.app -> /Applications/Kosmos.app`: every test below would
+    # follow the link onto the bundle just written, un-register the live
+    # app and print a move that did not happen. A link is not a stale
+    # bundle; it is left exactly as found.
+    if [ -z "${KOSMOS_APP_DIR:-}" ] && [ -d "$HOME/Applications/Kosmos.app" ] && [ ! -L "$HOME/Applications/Kosmos.app" ]; then
       _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
       _app_dir_phys="$(cd "$APP_DIR" 2>/dev/null && pwd -P)" || _app_dir_phys=""
       if [ -n "$_home_apps_phys" ] && [ -n "$_app_dir_phys" ] && [ "$_home_apps_phys" != "$_app_dir_phys" ]; then
@@ -991,11 +1042,15 @@ if [ "$APP_MADE" = "yes" ]; then
         else
           info "note: a Kosmos.app not created by this install is in the Applications folder inside your home folder; it was left alone."
         fi
-      elif [ -z "$_home_apps_phys" ] || [ -z "$_app_dir_phys" ]; then
-        # The fail-closed leg says so, mirroring the uninstall's identical
-        # guard; only the physically-equal leg stays silent, because there
-        # the "stale icon" is the bundle just written and nothing is stale.
+      elif [ -z "$_home_apps_phys" ]; then
+        # The fail-closed legs say so, split the same way as the
+        # uninstall's guard: the note names the side that actually failed
+        # the check. Only the physically-equal leg stays silent, because
+        # there the "stale icon" is the bundle just written and nothing
+        # is stale.
         info "note: could not check the Applications folder inside your home folder; anything there was left alone."
+      elif [ -z "$_app_dir_phys" ]; then
+        info "note: could not check $APP_DIR, so anything in the Applications folder inside your home folder was left alone."
       fi
     fi
   else
@@ -1009,6 +1064,10 @@ if [ "$APP_MADE" = "yes" ]; then
     else
       info "you will find it in the Applications folder inside your home folder, as Kosmos"
       info "(or type Kosmos into Spotlight)"
+      if [ "$APP_SYS_STALE" = "yes" ]; then
+        info "note: the older Kosmos icon in Applications could not be updated from this account;"
+        info "use the new one (the old one may be out of date)"
+      fi
     fi
   fi
   ok
@@ -1068,7 +1127,10 @@ printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s 
 OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
 # command -v rather than -x: it resolves a bare command name as well as a
 # path, so an override like KOSMOS_OPEN_CMD=open does not silently no-op.
-if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && command -v "$OPEN_CMD" >/dev/null 2>&1; then
+# The verbatim sandbox override also suppresses the open (belt to
+# KOSMOS_NO_OPEN's braces): KOSMOS_APP_DIR set means a harness, and a
+# harness must not depend solely on remembering the other knob.
+if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && [ -z "${KOSMOS_APP_DIR:-}" ] && command -v "$OPEN_CMD" >/dev/null 2>&1; then
   "$OPEN_CMD" "http://127.0.0.1:$PORT" >/dev/null 2>&1 || true
 fi
 }
