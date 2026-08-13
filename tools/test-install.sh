@@ -56,8 +56,8 @@ chk() {
 }
 
 echo "== install (piped into sh, local sources, port $PORT) =="
-cat "$SETUP" | sh > "$SB/install.log" 2>&1
-chk "install exits 0" "[ $? -eq 0 ]"
+RC=0; cat "$SETUP" | sh > "$SB/install.log" 2>&1 || RC=$?
+chk "install exits 0" "[ $RC -eq 0 ]"
 chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
@@ -66,27 +66,48 @@ chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
 echo "== update (stale file must not survive; board must restart) =="
 touch "$SB/home/app/engine/stale-marker.js"
 PID1="$(cat "$SB/home/board.pid")"
-cat "$SETUP" | sh > "$SB/update.log" 2>&1
-chk "update exits 0" "[ $? -eq 0 ]"
+RC=0; cat "$SETUP" | sh > "$SB/update.log" 2>&1 || RC=$?
+chk "update exits 0" "[ $RC -eq 0 ]"
 chk "stale file gone (swap, not merge)" "[ ! -e \"$SB/home/app/engine/stale-marker.js\" ]"
 chk "board restarted (new pid)" "[ \"$PID1\" != \"$(cat "$SB/home/board.pid")\" ]"
 chk "board serves after update" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 
 echo "== refusals speak sentences =="
-"$SB/bin/kosmos" stop > /dev/null 2>&1
 OUT="$(sh -s -- --uninstal < "$SETUP" 2>&1 || true)"
 chk "typo flag refuses instead of installing" "echo \"\$OUT\" | grep -q 'The only option is --uninstall'"
 
 echo "== uninstall reverses the machine =="
 printf '<plist/>' > "$SB/launch/com.kosmos.agent.tiharness.plist"
-sh -s -- --uninstall < "$SETUP" > "$SB/uninstall.log" 2>&1
-chk "uninstall exits 0" "[ $? -eq 0 ]"
+RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall.log" 2>&1 || RC=$?
+chk "uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home gone" "[ ! -d \"$SB/home\" ]"
 chk "symlink gone" "[ ! -e \"$SB/bin/kosmos\" ] && [ ! -L \"$SB/bin/kosmos\" ]"
 chk "app gone" "[ ! -d \"$SB/apps/Kosmos.app\" ]"
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
 chk "user data untouched" "[ -d \"$SB/data\" ]"
-chk "port released" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
+chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
+
+echo "== the download path (file:// origin, no local-copy shortcut) =="
+# The local-copy branch above never runs reachable(), verify_download() or
+# tar; the release path must be driven too, and curl serves file:// for
+# both probes, so no server is needed. A flipped byte in the sidecar must
+# refuse in a sentence.
+mkdir -p "$SB/dist"
+cp "$HERE/dist/tmux-arm64.tar.gz" "$HERE/dist/tmux-arm64.tar.gz.sha256" \
+   "$HERE/dist/kosmos-arm64.tar.gz" "$HERE/dist/kosmos-arm64.tar.gz.sha256" "$SB/dist/" 2>/dev/null \
+  || { echo "SKIP download-path pass: packed tarballs missing from dist/"; exit 0; }
+unset KOSMOS_TMUX_SRC KOSMOS_SRC
+export KOSMOS_RELEASE_BASE="file://$SB/dist"
+RC=0; cat "$SETUP" | sh > "$SB/dl-install.log" 2>&1 || RC=$?
+chk "download-path install exits 0" "[ $RC -eq 0 ]"
+chk "download-path board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
+"$SB/bin/kosmos" stop > /dev/null 2>&1
+sh -s -- --uninstall < "$SETUP" > /dev/null 2>&1
+printf 'x' >> "$SB/dist/kosmos-arm64.tar.gz"
+RC=0; cat "$SETUP" | sh > "$SB/tamper.log" 2>&1 || RC=$?
+chk "tampered download refuses" "[ $RC -ne 0 ]"
+chk "tamper refusal speaks a sentence" "grep -q 'did not arrive intact' \"$SB/tamper.log\""
+chk "no stage residue after refusal" "[ -z \"\$(ls -d \"$SB/home\"/.kosmos.stage.* 2>/dev/null)\" ]"
 
 echo
 echo "$PASS passed, $FAIL failed"

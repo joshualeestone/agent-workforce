@@ -222,6 +222,19 @@ if [ ! -f "$NOTICES" ]; then
   echo "FAIL: $NOTICES is missing; the bundle may not ship binaries without their licence notices." >&2
   exit 1
 fi
+# ⚠️ COMPLETENESS IS CHECKED, NOT ASSUMED. collect() discovers the dylib set
+# dynamically; the notices file is static. A re-sourced tmux (the plan's own
+# next step) is exactly the change that could pull in a fifth library, and
+# shipping it un-noticed while the build stays green is the green-on-blind
+# shape the floor gate exists to close, in the licence dimension. Each
+# bundled dylib's project name must appear in the notices.
+for _lib in "$OUT"/lib/*.dylib; do
+  _proj="$(basename "$_lib" | sed -E 's/^lib//; s/[_.]core//; s/[-.0-9]+\.dylib$//; s/w$//')"
+  if ! grep -qi "$_proj" "$NOTICES"; then
+    echo "FAIL: bundled $(basename "$_lib") has no matching notice in $NOTICES (looked for '$_proj')." >&2
+    exit 1
+  fi
+done
 cp "$NOTICES" "$OUT/THIRD-PARTY-NOTICES.txt"
 
 # ---- the tarball the installer downloads, and its checksum -------------------

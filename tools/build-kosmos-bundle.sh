@@ -113,11 +113,16 @@ else
   cp "$TMP/node-v$NODE_VERSION-darwin-$NARCH/LICENSE" "$STAGE/runtime/LICENSE"
 fi
 if [ ! -f "$STAGE/runtime/LICENSE" ]; then
-  if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+  # ⚠️ Its own flag, not KOSMOS_ALLOW_MINOS: one flag meaning both "I accept
+  # a wrong floor" and "I accept a missing licence" does not stay legible,
+  # and someone overriding the floor for its documented dev-machine reason
+  # must not silently disable the licence check too.
+  if [ -n "${KOSMOS_ALLOW_NO_LICENSE:-}" ]; then
     echo "TEST BUILD: runtime licence file not available from NODE_SOURCE" > "$STAGE/runtime/LICENSE"
-    echo "    WARN: no runtime LICENSE (allowed: TEST BUILD)"
+    echo "    WARN: no runtime LICENSE (allowed: KOSMOS_ALLOW_NO_LICENSE test build)"
   else
     echo "FAIL: no LICENSE for the bundled runtime; binaries may not ship without their notices." >&2
+    echo "      (NODE_SOURCE test builds may set KOSMOS_ALLOW_NO_LICENSE=1.)" >&2
     exit 1
   fi
 fi
@@ -204,7 +209,7 @@ rm -rf "$SMOKE_ROOTS"
 # here: this is the half that changes between releases, package.json is a
 # static 0.1.0, and a user report must be traceable to a binary.
 {
-  echo "app:    $(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null || echo '?'))"
+  echo "app:    $(cd "$REPO" && git describe --always --dirty 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null || echo '?'))"
   echo "node:   $("$STAGE/runtime/bin/node" --version)"
   echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ) on macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 } > "$STAGE/VERSION"

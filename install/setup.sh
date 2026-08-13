@@ -452,6 +452,9 @@ _osrest="${_osver#*.}"
 _osminor="${_osrest%%.*}"
 case "$_osmajor" in (*[!0-9]*|'') _osmajor=0 ;; esac
 case "$_osminor" in (*[!0-9]*|'') _osminor=0 ;; esac
+if [ "$_osver" = "0.0" ]; then
+  die "Kosmos could not read this Mac's macOS version, so it cannot confirm it will run here. Kosmos needs macOS $MACOS_FLOOR_MAJOR.$MACOS_FLOOR_MINOR or newer."
+fi
 if [ "$_osmajor" -lt "$MACOS_FLOOR_MAJOR" ] || { [ "$_osmajor" -eq "$MACOS_FLOOR_MAJOR" ] && [ "$_osminor" -lt "$MACOS_FLOOR_MINOR" ]; }; then
   die "Kosmos needs macOS $MACOS_FLOOR_MAJOR.$MACOS_FLOOR_MINOR or newer. This Mac is on $_osver. Updating macOS in System Settings gets you there."
 fi
@@ -555,7 +558,7 @@ step "Installing Kosmos."
 # (The board was already paused above, before the tmux swap; a refused
 # pause has already refused the whole update in a sentence.)
 install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos. The line above says why. It is safe to paste the install line and try again."
-ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
+ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos" || die "Could not place the kosmos command in $BIN_DIR. Check that your home folder is writable."
 info "installed to $KOSMOS_HOME"
 ok
 
@@ -665,7 +668,7 @@ LAUNCH
 }
 
 step "Adding Kosmos to your Applications."
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR" || die "Could not create $APP_DIR. Check that your home folder is writable."
 if make_app "$APP_DIR/Kosmos.app"; then
   info "you will find it in Applications, as Kosmos"
   ok
