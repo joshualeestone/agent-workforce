@@ -179,7 +179,8 @@ done
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
   codesign -v "$f" 2>/dev/null || { echo "FAIL: invalid signature on $f" >&2; exit 1; }
 done
-echo "    signatures valid on tmux and $(ls "$OUT"/lib/*.dylib | wc -l | tr -d ' ') dylibs"
+_dylibs=("$OUT"/lib/*.dylib)
+echo "    signatures valid on tmux and ${#_dylibs[@]} dylibs"
 echo "==> ok: $(du -sh "$OUT" | cut -f1) at $OUT"
 echo "    load paths:"
 otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
@@ -194,6 +195,10 @@ otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
 # build of this bundle FAILS here on purpose; KOSMOS_ALLOW_MINOS=1 permits
 # a LOCAL TEST BUILD only.
 FLOOR="$(cat "$(dirname "$0")/macos-floor")"
+case "$FLOOR" in
+  [0-9]*.[0-9]|[0-9]*.[0-9][0-9]) ;;
+  *) echo "FAIL: tools/macos-floor must be MAJOR.MINOR (got '$FLOOR')" >&2; exit 1 ;;
+esac
 FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
 for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
   minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"

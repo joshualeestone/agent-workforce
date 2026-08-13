@@ -1,8 +1,10 @@
 Third-party notices for the Kosmos tmux bundle
 ================================================
 
-This bundle redistributes unmodified binaries of the following software.
-Each licence below requires this notice to accompany the binaries.
+This bundle redistributes binaries of the following software, with their
+load commands rewritten for relocation (install_name_tool) and re-signed
+with an ad-hoc signature; the code itself is unmodified. Each licence
+below requires this notice to accompany the binaries.
 
 ------------------------------------------------------------------------
 tmux (ISC licence)

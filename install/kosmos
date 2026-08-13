@@ -63,7 +63,10 @@ export PATH="$KOSMOS_HOME/tmux/bin:$PATH"
 # assumption into a fact.
 export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
 
-say() { printf '  %s\n' "$*"; }
+# The installer sets KOSMOS_SAY_INDENT so this command's narration nests as
+# detail under the installer's own step lines instead of reading as new
+# steps; run by hand, it stays at the command's two-space voice.
+say() { printf '%s%s\n' "${KOSMOS_SAY_INDENT:-  }" "$*"; }
 die() { printf '  %s\n' "$*" >&2; exit 1; }
 
 # ⚠️ IDENTITY, NOT JUST A 200. Any process squatting on the port answers a
@@ -192,7 +195,7 @@ cmd_version() {
   if [ -x "$NODE" ] && [ -f "$KOSMOS_HOME/app/package.json" ]; then
     # The path travels as an environment variable, never interpolated into
     # the JS source: a quote or backslash in a path must stay a path.
-    KOSMOS_PKG="$KOSMOS_HOME/app/package.json"       "$NODE" -p 'require(process.env.KOSMOS_PKG).version'
+    KOSMOS_PKG="$KOSMOS_HOME/app/package.json" "$NODE" -p 'require(process.env.KOSMOS_PKG).version'
   else
     die "Kosmos looks incomplete here."
   fi

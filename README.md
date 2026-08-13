@@ -12,7 +12,8 @@ End users install with one line, which the marketing page distributes:
 That runs `install/setup.sh`: it checksum-verifies and installs a private
 tmux bundle and the Kosmos bundle (the app + a pinned Node runtime + the
 `kosmos` command) under `~/.local/share/kosmos`, creates a locally-built
-Kosmos.app icon, links `~/.local/bin/kosmos`, and starts the board.
+Kosmos.app (icon artwork pending: it shows the generic app icon until the
+Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 `kosmos start|stop|restart|status|open|version` manages it after that.
 `sh -s -- --uninstall` reverses everything except the agents' own files.
 Apple silicon, macOS 13.5+ (gated in a sentence, and every built artifact

@@ -133,6 +133,10 @@ chmod +x "$STAGE/runtime/bin/node"
 # so the floor is read out of the artifact with otool and compared, not
 # assumed. KOSMOS_ALLOW_MINOS=1 overrides for LOCAL TEST BUILDS ONLY.
 FLOOR="$(cat "$(dirname "$0")/macos-floor")"
+case "$FLOOR" in
+  [0-9]*.[0-9]|[0-9]*.[0-9][0-9]) ;;
+  *) echo "FAIL: tools/macos-floor must be MAJOR.MINOR (got '$FLOOR')" >&2; exit 1 ;;
+esac
 FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
 check_minos() {
   local f="$1" minos major minor
@@ -194,6 +198,7 @@ smoke_fail() {
   sed 's/^/    /' "$SMOKE_LOG" >&2
   kill "$SMOKE_PID" 2>/dev/null || true
   rm -f "$SMOKE_LOG"
+  rm -rf "$SMOKE_ROOTS"
   exit 1
 }
 [ -n "$SMOKE_URL" ] || smoke_fail "the staged app never announced a port. It said:"

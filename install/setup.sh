@@ -74,7 +74,7 @@ KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
 # where nothing beyond a clean Mac may be assumed.
 verify_download() {
   local file="$1" url="$2" want got
-  curl -fsL "$url.sha256" -o "$file.sha256" 2>/dev/null || { info "the download's checksum file is missing"; return 1; }
+  curl -fsL -m 30 "$url.sha256" -o "$file.sha256" 2>/dev/null || { info "the download's checksum file is missing"; return 1; }
   want="$(awk '{print $1; exit}' "$file.sha256")"
   got="$(shasum -a 256 "$file" | awk '{print $1}')"
   rm -f "$file.sha256"
@@ -83,6 +83,14 @@ verify_download() {
     return 1
   fi
   return 0
+}
+
+# A HEAD probe first, and a one-byte ranged GET before refusing: some static
+# origins reject HEAD (405) while serving GET fine, and "check your internet
+# connection" for a working connection is the wrong sentence.
+reachable() {
+  curl -fsIL -m 15 "$1" >/dev/null 2>&1 && return 0
+  curl -fsL -r 0-0 -m 15 -o /dev/null "$1" >/dev/null 2>&1
 }
 
 # ⚠️ FETCHED INTO A FRESH STAGE AND SWAPPED, never merged over what is there.
@@ -107,7 +115,7 @@ fetch_tmux() {
     # actually hits (no network, a half-published CDN) refuse in a sentence
     # instead of a curl error code. The real download keeps its progress
     # bar, which lives on stderr and cannot be silenced without losing it.
-    if ! curl -fsIL -m 15 "$url" >/dev/null 2>&1; then
+    if ! reachable "$url"; then
       info "could not reach the download at $url"
       info "Check your internet connection and paste the install line again; it is safe to re-run."
       rm -rf "$stage"; return 1
@@ -156,7 +164,7 @@ install_kosmos() {
     cp -R "$KOSMOS_SRC/." "$stage/" || { rm -rf "$stage"; return 1; }
   else
     local url="$KOSMOS_RELEASE_BASE/kosmos-$ARCH.tar.gz"
-    if ! curl -fsIL -m 15 "$url" >/dev/null 2>&1; then
+    if ! reachable "$url"; then
       info "could not reach the download at $url"
       info "Check your internet connection and paste the install line again; it is safe to re-run."
       rm -rf "$stage"; return 1
@@ -250,6 +258,14 @@ uninstall() {
   if [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
     info "stopping the board"
     "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+    # A refused stop (a board this command did not start) is NAMED rather
+    # than glossed: the files still come off, but an orphan process would
+    # keep the port and answer errors from a deleted tree, so the user
+    # hears about it and gets the way out.
+    if curl -fsS -m 2 "http://127.0.0.1:${KOSMOS_PORT:-4317}/" >/dev/null 2>&1; then
+      info "note: something is still answering on port ${KOSMOS_PORT:-4317} that this uninstall could not stop."
+      info "It was not started by the kosmos command. Quit it, or restart your Mac, to finish."
+    fi
   fi
   _agents_stopped=no
   # ⚠️ THE SYMLINK GOES BEFORE THE FOLDER, AND `-L` IS CHECKED. `-e` follows
@@ -314,10 +330,11 @@ uninstall() {
   # files, and anything under ~/work. Uninstalling the app must never delete
   # somebody's work, and an installer that cleans up too enthusiastically is
   # worse than one that leaves a folder behind.
-  # Claim only what was observed: on a machine with no agents, "your agents
-  # were stopped" would be the file's own sin of asserting the unobserved.
+  # Claim only what was observed: the plists were REMOVED (we removed them);
+  # "stopped" would assert an outcome the best-effort bootout never checked.
+  # And on a machine with no agents, say nothing about agents at all.
   if [ "$_agents_stopped" = "yes" ]; then
-    printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone\n'
+    printf '\n  Kosmos is removed. Your agents\047 background jobs were removed; their files were left alone\n'
     printf '  (in your Library/Application Support/AgentWorkforce folder and their own folders).\n\n'
   else
     printf '\n  Kosmos is removed.\n\n'
@@ -406,7 +423,7 @@ if [ "$FRESH_INSTALL" = "no" ]; then
   info "Kosmos is already installed here. Updating it in place."
 fi
 
-mkdir -p "$KOSMOS_HOME" "$BIN_DIR"
+mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check that your home folder is writable."
 
 # ---- tmux -------------------------------------------------------------------
 # ⚠️ THE HARD PART, AND WHY IT IS SOLVED THIS WAY. macOS does not ship tmux, and
@@ -426,7 +443,7 @@ info "installing a private copy of tmux (about 2MB, nothing system-wide)"
 # URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
 # signed, and saying "signed" would overclaim). Kept as a function so the
 # clean-machine test can point it at a local file.
-fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager. It is safe to paste the install line and try again; if it keeps failing, your network may be blocking the download."
+fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager. The line above says why. It is safe to paste the install line and try again."
 ok
 
 # ⚠️ TERMINFO IS PINNED RATHER THAN TRUSTED. The bundled ncurses carries a
@@ -473,8 +490,16 @@ step "Installing Kosmos."
 if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
   info "pausing Kosmos for the update"
   "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+  # ⚠️ stop can REFUSE (a board it did not start, a lost pidfile), and
+  # swapping the tree under a still-live server means the old process keeps
+  # serving while the closing start sees a healthy port and calls it done:
+  # the update that did not happen, reported as one that did. Refuse here,
+  # in a sentence, instead.
+  if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+    die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+  fi
 fi
-install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos. It is safe to paste the install line and try again; if it keeps failing, your network may be blocking the download."
+install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos. The line above says why. It is safe to paste the install line and try again."
 ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
 info "installed to $KOSMOS_HOME"
 ok
@@ -594,7 +619,7 @@ fi
 
 # ---- start ------------------------------------------------------------------
 step "Starting Kosmos."
-"$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start."
+KOSMOS_SAY_INDENT="     " "$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start. What it said is above; it is safe to paste the install line again."
 ok
 
 printf '\n  Kosmos is running.\n'
