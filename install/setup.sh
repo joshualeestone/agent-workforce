@@ -13,8 +13,9 @@
 # install's own, and names anything it leaves). macOS may show its own one-time
 # "Terminal wants to manage apps" dialog for the icon step. It never
 # touches any other app. A fresh
-# install finishes by opening your browser at the Kosmos dashboard;
-# updates never do, and KOSMOS_NO_OPEN=1 turns it off.
+# install that confirms its own board is running finishes by opening your
+# browser at the Kosmos dashboard; updates never do, and KOSMOS_NO_OPEN=1
+# turns it off.
 #
 # ⚠️ THE SHEBANG SAYS sh BECAUSE THE PAGE SAYS sh. This file's contract is
 # the interpreter the marketing line actually invokes: macOS /bin/sh, which
@@ -563,10 +564,13 @@ uninstall() {
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
   # BOTH default locations are swept -- installs before 2026-08-13 wrote
   # ~/Applications, newer ones prefer /Applications -- each bounded by the
-  # fixed leaf name. Under a test override only the override dir is
+  # fixed leaf name. Under the VERBATIM override only the override dir is
   # touched: KOSMOS_APP_DIR set means a sandbox, and a sandboxed uninstall
   # reaching into the machine's REAL Applications folders would delete a
   # real install out from under the person running the test.
+  # (KOSMOS_SYS_APP_DIR alone does NOT sandbox the home-folder sweep in
+  # the else-branch below; a hand-driven --uninstall using it must
+  # override HOME too, as the harness always does.)
   if [ -n "${KOSMOS_APP_DIR:-}" ]; then
     # The SAME ownership gate as every other destructive site: the header
     # promise ("anything the uninstall cannot PROVE this installer
@@ -929,7 +933,7 @@ ok
 # whose shell does not look there, and silently not working is the worst outcome.
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon or the dashboard address shown at the end" ;;
+  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon, or the way in named at the end" ;;
 esac
 
 # ---- the front door -----------------------------------------------------------
@@ -984,6 +988,10 @@ make_app() {
     fi
   done
   rm -rf "$stage" 2>/dev/null || true
+  # (The own-pid stage and aside this run creates are cleaned WITHOUT the
+  # ownership predicate, deliberately: a partial stage is unprovable by
+  # construction, and refusing to clean our own current-run scratch would
+  # leave it forever. The predicate gates only OTHER pids' residue.)
   # ⚠️ mkdir WITHOUT -p, by absolute path, as the stage's first act: -p
   # follows a symlink planted at this predictable name and would build the
   # bundle at the link's target, then install the link itself as
@@ -1337,9 +1345,9 @@ elif [ "$APP_HOME_FOREIGN" = "yes" ]; then
     info "(something else also has the Kosmos spot in Applications; it was left alone too)"
   fi
   if [ "$APP_SYS_STALE" = "swap" ]; then
-    info "(the Kosmos icon already in Applications could not be replaced; it is still there and still works)"
+    info "(the Kosmos icon already in Applications could not be replaced and is still there)"
   fi
-  info "Open Kosmos with the dashboard address below (worth bookmarking)."
+  info "The closing lines below say how to open Kosmos."
 elif [ "$APP_SKIP_ICON" = "yes" ]; then
   # The fail-closed leg of the divert's aliasing guard: something not ours
   # holds the system spot AND the home Applications folder is (or cannot be
@@ -1354,7 +1362,7 @@ elif [ "$APP_SKIP_ICON" = "yes" ]; then
     info "something else already has the Kosmos spot in Applications, and the folders"
     info "around it could not be checked, so no icon was created."
   fi
-  info "Open Kosmos with the dashboard address below (worth bookmarking)."
+  info "The closing lines below say how to open Kosmos."
 else
   info "could not create the app icon, but Kosmos itself is fine"
 fi
@@ -1396,9 +1404,11 @@ if [ "$BOARD_OURS" = "yes" ]; then
   printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 else
   printf '\n  Kosmos is installed, but could not confirm its own board is the one answering\n'
-  printf '  on port %s. Something else may already be using it (often another account%ss\n' "$PORT" "'"
-  printf '  Kosmos; each account runs its own). Try a different port, like:\n'
-  printf '    KOSMOS_PORT=4318 kosmos start\n\n'
+  printf '  on port %s (an "already running" line above refers to a board something else\n' "$PORT"
+  printf '  started, often another account%ss Kosmos; each account runs its own).\n' "'"
+  printf '  Start yours on a different port, for example:\n'
+  printf '    KOSMOS_PORT=4318 %s/kosmos start\n' "$BIN_DIR"
+  printf '  and it will print your dashboard address.\n\n'
 fi
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
 
