@@ -27,6 +27,14 @@ set -euo pipefail
 
 KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
 BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
+# ⚠️ Overridable for the same reason the sources are: the sandboxed test of
+# this installer must not write an app icon into the real ~/Applications of
+# the machine it runs on. Everything this script writes goes under a root the
+# test can point somewhere disposable.
+APP_DIR="${KOSMOS_APP_DIR:-$HOME/Applications}"
+# The port everything below names. Overridable for the sandboxed installer
+# test; the app icon and the closing sentences bake in whatever was installed.
+PORT="${KOSMOS_PORT:-4317}"
 LOG_DIR="$KOSMOS_HOME/logs"
 LOG="$LOG_DIR/install.log"
 
@@ -99,11 +107,29 @@ die()   {
 # Everything also goes to a log, so one run produces a transcript rather than a
 # memory of what happened. That is what makes the clean-machine test worth
 # something afterwards.
+#
+# ⚠️ A FIFO AND tee, NOT `exec > >(tee ...)`. The page tells people to pipe
+# this into `sh`, and macOS sh is bash in POSIX mode, where process
+# substitution is a SYNTAX ERROR: the exact line the marketing page hands out
+# died on line one of real use. Caught by running the script with sh, the way
+# a user actually will, instead of with bash, the way its author did. The
+# fifo spelling is plain POSIX and behaves identically; it is unlinked as
+# soon as both ends are open, so nothing is left behind.
 start_log() {
   mkdir -p "$LOG_DIR"
-  exec 3>&1
-  exec > >(tee -a "$LOG") 2>&1
   printf '\n=== kosmos install %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG"
+  _pipe="$LOG_DIR/.log.pipe.$$"
+  rm -f "$_pipe"
+  if mkfifo "$_pipe" 2>/dev/null; then
+    tee -a "$LOG" < "$_pipe" &
+    exec 3>&1
+    exec > "$_pipe" 2>&1
+    rm -f "$_pipe"
+  else
+    # No fifo (exotic filesystem): the install still narrates on screen, it
+    # just loses the file transcript. Never fail the install for the log.
+    exec 3>&1
+  fi
 }
 
 # ---- uninstall --------------------------------------------------------------
@@ -117,7 +143,7 @@ uninstall() {
     [ -e "$BIN_DIR/$f" ] && { info "removing $BIN_DIR/$f"; rm -f "$BIN_DIR/$f"; }
   done
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
-  [ -d "$HOME/Applications/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$HOME/Applications/Kosmos.app"; }
+  [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
   # ⚠️ Deliberately NOT removed: the user's agents, their instruction files, and
   # anything under ~/work. Uninstalling the app must never delete somebody's
   # work, and an installer that cleans up too enthusiastically is worse than one
@@ -278,14 +304,14 @@ PLIST
   cat > "$target/MacOS/Kosmos" <<LAUNCH
 #!/bin/bash
 KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
-if ! /usr/bin/curl -fsS -m 2 http://127.0.0.1:4317/ >/dev/null 2>&1; then
+if ! /usr/bin/curl -fsS -m 2 http://127.0.0.1:$PORT/ >/dev/null 2>&1; then
   "\$KOSMOS_HOME/bin/kosmos" start >/dev/null 2>&1
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    /usr/bin/curl -fsS -m 1 http://127.0.0.1:4317/ >/dev/null 2>&1 && break
+    /usr/bin/curl -fsS -m 1 http://127.0.0.1:$PORT/ >/dev/null 2>&1 && break
     sleep 1
   done
 fi
-exec /usr/bin/open "http://127.0.0.1:4317"
+exec /usr/bin/open "http://127.0.0.1:$PORT"
 LAUNCH
   chmod +x "$target/MacOS/Kosmos"
 
@@ -306,7 +332,6 @@ LAUNCH
 }
 
 step "Adding Kosmos to your Applications."
-APP_DIR="$HOME/Applications"
 mkdir -p "$APP_DIR"
 if make_app "$APP_DIR/Kosmos.app"; then
   info "you will find it in Applications, as Kosmos"
@@ -322,5 +347,5 @@ ok
 
 printf '\n  Kosmos is running.\n'
 printf '  Open it and it will walk you through connecting your AI account.\n'
-printf '  Your dashboard: http://127.0.0.1:4317\n\n'
+printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'

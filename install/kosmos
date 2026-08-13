@@ -1,0 +1,171 @@
+#!/bin/bash
+# The `kosmos` command. This file ships INSIDE the bundle at
+# $KOSMOS_HOME/bin/kosmos; the installer symlinks it into ~/.local/bin and the
+# app icon execs it. It is the one entry point that knows where everything
+# lives, so nothing else has to.
+#
+#   kosmos start     start the board if it is not already running
+#   kosmos stop      stop it
+#   kosmos status    say whether it is running, in a sentence
+#   kosmos open      start if needed, then open the dashboard in the browser
+#   kosmos version   print the app version
+#
+# ⚠️ WHO RUNS THIS, because it governs the voice: mostly nobody. The person
+# installs with one pasted line and lives in the icon and the browser tab from
+# then on. This command exists for the installer, the icon's launcher, and the
+# rare person who likes terminals. It still speaks in sentences, not codes,
+# because the rare person deserves the same respect.
+#
+# ⚠️ BASH 3.2 AND NOTHING ELSE. macOS ships bash 3.2 and a clean Mac has no
+# python3 (invoking it can trigger the Xcode command-line-tools dialog, which
+# is exactly the kind of surprise this install must never produce). Everything
+# here is plain POSIX-ish bash plus curl, which every Mac has.
+
+set -euo pipefail
+
+# ---- where am I -------------------------------------------------------------
+# ⚠️ RESOLVED THROUGH THE SYMLINK BY HAND. The installer links this file into
+# ~/.local/bin, so `dirname $0` there answers ~/.local/bin and every relative
+# path breaks. `readlink -f` would do the walk for us but only exists on
+# macOS 12.3+, and the app supports 12.0. The loop is the portable spelling:
+# follow links (relative ones resolve against the link's own directory) until
+# a real file, then take its parent's parent as home.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  case "$SELF" in /*) ;; *) SELF="$DIR/$SELF" ;; esac
+done
+KOSMOS_HOME="${KOSMOS_HOME:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+
+NODE="$KOSMOS_HOME/runtime/bin/node"
+APP="$KOSMOS_HOME/app/server.js"
+PORT="${KOSMOS_PORT:-4317}"
+URL="http://127.0.0.1:$PORT"
+PIDFILE="$KOSMOS_HOME/board.pid"
+LOG_DIR="$KOSMOS_HOME/logs"
+BOARD_LOG="$LOG_DIR/board.log"
+
+# ---- the environment the board needs ----------------------------------------
+# ⚠️ THE BUNDLED tmux COMES FIRST ON PATH. The engine calls `tmux` by name;
+# on a clean Mac the only tmux is ours, and on a machine that also has a
+# Homebrew tmux the board must still read the same server the agents run in.
+# Two tmux BINARIES are fine so long as they share a socket directory; two
+# VERSIONS picked at random per process are not, so ours wins deterministically.
+export PATH="$KOSMOS_HOME/tmux/bin:$PATH"
+# ⚠️ TERMINFO IS PINNED HERE, NOT ONLY IN THE INSTALLER. The installer's export
+# dies with the installer's process; this is the process tree the app and its
+# tmux actually run in. Same reasoning as the bundle tooling: the bundled
+# ncurses carries a compiled-in terminfo path from the build machine, macOS
+# ships /usr/share/terminfo, and pinning converts the documented fallback
+# assumption into a fact.
+export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
+
+say() { printf '  %s\n' "$*"; }
+die() { printf '  %s\n' "$*" >&2; exit 1; }
+
+healthy() { /usr/bin/curl -fsS -m 2 "$URL/" >/dev/null 2>&1; }
+
+running_pid() {
+  # The pidfile is a hint, not the truth: verify the process exists AND is
+  # ours before believing it. A stale pid that now belongs to a random
+  # process must not make `stop` kill a stranger.
+  [ -f "$PIDFILE" ] || return 1
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null)" || return 1
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -p "$pid" -o command= 2>/dev/null | grep -q "app/server.js" || return 1
+  printf '%s' "$pid"
+}
+
+cmd_start() {
+  if healthy; then
+    say "Kosmos is already running at $URL"
+    return 0
+  fi
+  [ -x "$NODE" ] || die "Kosmos looks incomplete: the runtime is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
+  [ -f "$APP" ]  || die "Kosmos looks incomplete: the app is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
+  mkdir -p "$LOG_DIR"
+  say "Bringing the board up."
+  # Detached from this terminal, with everything it prints kept in a log so a
+  # problem produces a transcript rather than a vanished window.
+  # ⚠️ stdin FROM /dev/null AND FD 3 CLOSED, measured against the installer:
+  # setup.sh saves its screen stream on fd 3, the server inherited it, and a
+  # `curl | sh` install then NEVER RETURNED -- the terminal sat open until
+  # the server died, because the shell's pipe could not reach EOF while the
+  # server held the descriptor. The server needs no terminal and no
+  # installer plumbing; it gets neither.
+  PORT="$PORT" nohup "$NODE" "$APP" </dev/null >> "$BOARD_LOG" 2>&1 3>&- &
+  printf '%s' "$!" > "$PIDFILE"
+  # ⚠️ WAIT FOR THE BOARD TO ANSWER, NOT FOR THE PROCESS TO EXIST. A pid that
+  # crashes half a second in still had a pid. Thirty half-second tries is
+  # fifteen seconds, which covers a slow first boot with headroom; the log is
+  # named on failure because it is the only witness.
+  local i
+  for i in $(seq 1 30); do
+    healthy && { say "Kosmos is running at $URL"; return 0; }
+    kill -0 "$(cat "$PIDFILE")" 2>/dev/null || break
+    sleep 0.5
+  done
+  die "Kosmos did not come up. What it said is in $BOARD_LOG"
+}
+
+cmd_stop() {
+  local pid
+  if pid="$(running_pid)"; then
+    say "Stopping Kosmos."
+    kill "$pid" 2>/dev/null || true
+    local i
+    for i in $(seq 1 10); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.3
+    done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    rm -f "$PIDFILE"
+    say "Stopped."
+  elif healthy; then
+    # Answering on the port but not our recorded process: somebody started it
+    # by hand, or the pidfile is gone. Say what is true instead of guessing.
+    die "Something is answering at $URL but it was not started by this command, so it was left alone."
+  else
+    say "Kosmos is not running."
+  fi
+}
+
+cmd_status() {
+  if healthy; then
+    local pid
+    pid="$(running_pid)" || pid=""
+    if [ -n "$pid" ]; then say "Kosmos is running at $URL"; else say "Kosmos is running at $URL (started outside this command)"; fi
+  else
+    say "Kosmos is not running. Start it with: kosmos start"
+    exit 1
+  fi
+}
+
+cmd_open() {
+  healthy || cmd_start
+  exec /usr/bin/open "$URL"
+}
+
+cmd_version() {
+  if [ -x "$NODE" ] && [ -f "$KOSMOS_HOME/app/package.json" ]; then
+    "$NODE" -p "require('$KOSMOS_HOME/app/package.json').version"
+  else
+    die "Kosmos looks incomplete here."
+  fi
+}
+
+case "${1:-}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  status)  cmd_status ;;
+  open)    cmd_open ;;
+  version) cmd_version ;;
+  *)
+    printf '\n  kosmos start | stop | status | open | version\n\n'
+    printf '  The dashboard lives at %s once started.\n\n' "$URL"
+    exit 2
+    ;;
+esac
