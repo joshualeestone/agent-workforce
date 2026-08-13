@@ -193,6 +193,16 @@ function nameProblem(raw) {
   if (/-discord$/.test(name)) {
     return 'names cannot end in -discord, which the board reads as an agent running somewhere else';
   }
+  /* ⚠️ `kosmos-connect` is the sign-in flow's own tmux session
+   * (engine/connect.js SESSION). connect.js pins every target with the `=`
+   * exact-match prefix, so a NEAR-collision is already harmless there -- this
+   * gate closes the EXACT collision, where an agent and the sign-in flow
+   * would share one session name and the driver's send-keys, capture and
+   * kill would all be aimed at a real agent's pane. Prefix-named agents
+   * (kosmos-connect2) stay allowed; exactness is what matters. */
+  if (name === 'kosmos-connect') {
+    return 'that name is reserved: it is the window Kosmos signs Claude in through';
+  }
   return null;
 }
 

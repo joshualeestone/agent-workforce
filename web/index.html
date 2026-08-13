@@ -619,6 +619,24 @@ svg { display: block; }
            background: var(--attn-bg); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
           margin-top: var(--space-5); min-height: 1em; }
+/* The connect flow (step 3). The bar is quiet monochrome on purpose: this
+   screen has no brand accent, and inventing one for a progress bar would make
+   the download the loudest thing in onboarding. */
+.fr-progress { height: 6px; border-radius: 3px; background: var(--separator);
+               overflow: hidden; margin: var(--space-5) 0 var(--space-4); }
+.fr-progress-fill { height: 100%; background: var(--label-2); transition: width 0.3s; }
+/* What the terminal actually said, when we got stuck. Scrolls in place rather
+   than growing the dialog; nothing here is for reading closely, it is for
+   showing a person (or the person helping them) what happened. */
+.fr-conn-tail { font: 11px/1.5 var(--font-mono); color: var(--label-2);
+                background: var(--bg-sunken); border: 0.5px solid var(--separator);
+                border-radius: 8px; padding: var(--space-4) var(--space-5);
+                margin-top: var(--space-5); max-height: 9em; overflow: auto;
+                white-space: pre-wrap; word-break: break-all; }
+.fr-code-row { display: flex; gap: var(--space-4); margin-top: var(--space-4); flex-wrap: wrap; }
+.fr-code-row input { flex: 1; min-width: 200px; font: var(--text-body) var(--font-mono);
+                     padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+                     border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
 /* ⚠️ Collapses when empty, but is NOT `display: none` — there are two of these
    live regions on the panel, and two reserved blank lines put a visible gap
    under every short step. Taking them out of the render tree instead is how a
@@ -866,6 +884,12 @@ svg { display: block; }
       <div class="fr-pane" id="fr-pane-3" hidden>
         <div id="fr-sub"></div>
         <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
+        <!-- ⚠️ The connect flow's phase announcements, VISUALLY HIDDEN on
+             purpose. Each phase panel already says what is happening in its
+             title; speaking the change needs a live region, but rendering the
+             same sentence twice is the said-it-twice copy defect the
+             connection notice was already caught by once. -->
+        <div class="vh" id="fr-conn-say" role="status" aria-live="polite"></div>
       </div>
 
       <!-- 4. The fork. ⚠️ "Adopting" is not an import: every agent already on
@@ -4206,6 +4230,10 @@ function frGo(step) {
   } else if (step === 3) {
     document.getElementById('fr-title').textContent = 'Claude';
     frPaintSubscription();
+    // ⚠️ A connect flow may already be running (it keeps going server-side
+    // when somebody wanders to another step). If it is, this repaints the
+    // live flow over the static verdict once the answer arrives.
+    frConnResume();
   } else {
     frPaintFleet();
   }
@@ -4384,13 +4412,19 @@ async function frRecheck() {
      * agents" with a Continue that just re-ran step 4. The fresh answer is still
      * kept -- it is the PAINT that is out of date, not the data.
      */
-    if (FR_STEP !== 3) return;
+    if (FR_STEP !== 3) return true;
     msg.textContent = '';
     frPaintSubscription();
+    return true;
   } catch (err) {
     // ⚠️ And the old answer stays on screen, unchanged. A failed re-check must
     // not silently downgrade "connected" to anything.
     msg.textContent = 'We could not check again just now (' + err.message + ').';
+    // The primary button must never stay dead behind a failed fetch --
+    // frConnectStart disables it and counts on a repaint to hand it back.
+    const next = document.getElementById('fr-next');
+    if (next) next.disabled = false;
+    return false;
   } finally {
     // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
     // `#fr-alt` is one element that both steps relabel. With a token on one side
@@ -4398,6 +4432,475 @@ async function frRecheck() {
     // was still running -- and the comment claiming "only the latest request may
     // hand it back" was true of one caller out of two.
     if (wasAgain && mine === FR_CHECKING) again.disabled = false;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Step 3 — the connect flow (the click that installs Claude and signs it in)
+
+   The engine owns the truth (engine/connect.js); this paints it. Phases the
+   server can answer: idle, downloading, installing, signin-launching,
+   signin-browser-open, signin-awaiting-code, signin-completing, connected,
+   stuck, interrupted.
+   -------------------------------------------------------------------------- */
+
+let FR_CONN_TIMER = null;
+let FR_CONN_LAST = null;   // the last phase+reason painted, so repaints are on change
+let FR_CONN_SEQ = 0;       // drops out-of-order poll answers (slow response, newer already painted)
+
+function frConnActive(phase) {
+  // ⚠️ A hand copy of engine/connect.js ACTIVE_PHASES -- a phase added there
+  // and missed here becomes a panel-less, watch-less state. Change BOTH.
+  return ['downloading', 'installing', 'signin-launching', 'signin-browser-open',
+    'signin-awaiting-code', 'signin-completing'].includes(phase);
+}
+
+/**
+ * On arriving at step 3: if a connect flow is already running (it keeps going
+ * server-side while somebody wanders off to another step), paint the live
+ * flow over the static verdict. Fail-open: if this fetch fails, the static
+ * verdict is already on screen and stays.
+ */
+async function frConnResume() {
+  // Same out-of-order guard as the watcher: a slow resume answer carrying a
+  // stale record must not repaint over a flow the person just started.
+  const seq = ++FR_CONN_SEQ;
+  try {
+    const res = await fetch('/api/connect', { cache: 'no-store' });
+    if (!res.ok) return;
+    const st = await res.json();
+    if (seq !== FR_CONN_SEQ) return;
+    if (FR_STEP !== 3) return;
+    /**
+     * ⚠️ A CONNECTED VERDICT OUTRANKS A STALE FAILURE RECORD. A stuck or
+     * interrupted record persists on disk indefinitely, and somebody who
+     * later connected through Terminal would watch their green row get
+     * replaced by "we could not finish" from an attempt that no longer
+     * matters. A LIVE flow still paints -- reality in motion beats any
+     * verdict -- but a dead record loses to connected.
+     */
+    const doneAnyway = FR && FR.subscription && FR.subscription.state === 'connected';
+    if (frConnActive(st.phase) || ((st.phase === 'stuck' || st.phase === 'interrupted') && !doneAnyway)) {
+      FR_CONN_LAST = null;
+      frPaintConnect(st);
+      if (frConnActive(st.phase)) frConnWatch();
+      return;
+    }
+    /**
+     * ⚠️ A FLOW THAT FINISHED WHILE THEY WERE AWAY MUST NOT LOSE TO THE
+     * CACHED VERDICT. The page-load answer said "not connected", the flow
+     * completed server-side, and painting the cache shows a Connect button
+     * on a connected machine -- self-healing only if they click it again.
+     * Same exit as the watcher: re-pull and let the real reader repaint.
+     */
+    if (st.phase === 'connected' && !doneAnyway) frRecheck();
+  } catch { /* the static verdict stays */ }
+}
+
+function frConnStopWatch() {
+  if (FR_CONN_TIMER) { clearInterval(FR_CONN_TIMER); FR_CONN_TIMER = null; }
+}
+
+let FR_CONN_FAILS = 0;
+function frConnWatch() {
+  if (FR_CONN_TIMER) return;
+  FR_CONN_FAILS = 0;
+  FR_CONN_TIMER = setInterval(async () => {
+    // ⚠️ Same hazard the engine's tick guards one layer down: a slow answer
+    // resolving after a newer one would paint an older phase over the
+    // current screen. Later requests win; stale answers are dropped.
+    const seq = ++FR_CONN_SEQ;
+    let st;
+    try {
+      const res = await fetch('/api/connect', { cache: 'no-store' });
+      if (!res.ok) throw new Error('status ' + res.status);
+      st = await res.json();
+    } catch {
+      /**
+       * ⚠️ BOUNDED, like every silent-failure shape the engine owns. A dead
+       * server left the last panel ("Downloading Claude…", frozen bar)
+       * standing forever with nothing successfully polling it -- the one
+       * remaining screen asserting a state nobody was checking. After ~10s
+       * of failures the screen says so honestly; the poll keeps trying, and
+       * a success repaints reality.
+       */
+      if (FR_STEP !== 3) { frConnStopWatch(); return; }
+      FR_CONN_FAILS += 1;
+      if (FR_CONN_FAILS === 10) {
+        FR_CONN_LAST = null;
+        document.getElementById('fr-sub').innerHTML = frCheckRow({
+          state: 'unknown',
+          title: 'We cannot see the connection attempt right now',
+          detail: 'Kosmos stopped answering. It may be restarting; this screen keeps trying.',
+        });
+      }
+      return;
+    }
+    FR_CONN_FAILS = 0;
+    if (seq !== FR_CONN_SEQ) return;
+    // ⚠️ Only paint if they are still here — same rule as frRecheck. The flow
+    // itself continues server-side; it is the PAINT that must not land on
+    // another step's screen.
+    if (FR_STEP !== 3) { frConnStopWatch(); return; }
+    if (st.phase === 'connected' || st.phase === 'idle') {
+      /**
+       * ⚠️ `idle` here means somebody ELSE ended the flow (a cancel from a
+       * second window of this board). The painter has no idle panel on
+       * purpose, so without this the old panel and its Cancel button froze
+       * on screen -- a state nobody was producing. Both exits repaint the
+       * static verdict from the same reader as always.
+       */
+      frConnStopWatch();
+      FR_CONN_LAST = null;
+      if (st.phase === 'connected') {
+        // The one phase the panel painter never paints, announced here so a
+        // screen-reader user hears the finish, not just the buttons changing.
+        const say = document.getElementById('fr-conn-say');
+        if (say) say.textContent = FR_CONN_SAY.connected;
+        // Transitional truth on screen NOW: if the recheck fetch fails, the
+        // stale "Finishing the sign-in" panel must not stand as the record.
+        document.getElementById('fr-sub').innerHTML = frCheckRow({
+          state: 'ok', title: 'Connected', detail: 'Fetching the details\u2026',
+        });
+      }
+      frConnSettle();
+      return;
+    }
+    frPaintConnect(st);
+    if (!frConnActive(st.phase)) {
+      frConnStopWatch();
+      /**
+       * ⚠️ A phase the painter has no panel for (the defensive `unsure`,
+       * or anything a future engine adds) must not strand the LAST panel
+       * on screen with nothing checking it -- stuck and interrupted paint
+       * their own panels; everything else hands back to the real verdict.
+       */
+      if (st.phase !== 'stuck' && st.phase !== 'interrupted') {
+        FR_CONN_LAST = null;
+        frConnSettle();
+      }
+    }
+  }, 1000);
+}
+
+async function frConnectStart() {
+  const msg = document.getElementById('fr-sub-msg');
+  msg.textContent = '';
+  const next = document.getElementById('fr-next');
+  next.disabled = true;   // one press, one flow; re-enabled by the repaint
+  try {
+    const res = await fetch('/api/connect/start', { method: 'POST' });
+    const st = await res.json();
+    if (!res.ok) throw new Error(st.error || ('status ' + res.status));
+    if (FR_STEP !== 3) return;
+    // Invalidate any in-flight resume/poll answer: the click's own view of
+    // the flow is newer than anything requested before it.
+    FR_CONN_SEQ += 1;
+    if (st.phase === 'connected') { frConnSettle(); return; }
+    FR_CONN_LAST = null;
+    frPaintConnect(st);
+    frConnWatch();
+  } catch (err) {
+    next.disabled = false;
+    msg.textContent = 'We could not start connecting (' + err.message + ').';
+  }
+}
+
+async function frConnCancel() {
+  frConnStopWatch();
+  // ⚠️ Invalidate any in-flight poll answer, same as frConnectStart: a stale
+  // pre-cancel answer resolving after the repaint below would paint the
+  // ended flow's panel (with a dead Cancel button) over the fresh verdict,
+  // with no watcher running.
+  FR_CONN_SEQ += 1;
+  let refused = null;
+  try {
+    const res = await fetch('/api/connect/cancel', { method: 'POST' });
+    // A non-ok answer means the cancel did NOT happen -- same posture as the
+    // network failure below: we know nothing, so re-adopt from reality.
+    if (!res.ok) throw new Error('cancel answered ' + res.status);
+    const st = await res.json();
+    /**
+     * ⚠️ CANCEL CAN REFUSE. When the flow belongs to another server sharing
+     * this data dir, the engine answers with the LIVE foreign phase instead
+     * of idle -- and painting the plain "not connected" verdict over it
+     * would render as ended a sign-in nobody ended. Keep painting reality.
+     */
+    if (st && frConnActive(st.phase)) refused = st;
+  } catch {
+    /**
+     * ⚠️ A FAILED CANCEL POST MEANS WE KNOW NOTHING. Falling through to the
+     * static verdict would paint no-flow over a flow that may still be
+     * live with nothing polling it. Re-adopt through resume, which asks
+     * reality and fail-opens to the static verdict only when reality says
+     * so.
+     */
+    FR_CONN_LAST = null;
+    frConnResume();
+    // And keep polling: if the server is down, the watcher's failure bound
+    // paints the honest "we cannot see" row instead of leaving the dead
+    // panel standing; if it comes back, reality repaints.
+    frConnWatch();
+    return;
+  }
+  FR_CONN_LAST = null;
+  if (refused) {
+    // Say WHY the button did nothing, or it just reads as broken.
+    const msg = document.getElementById('fr-sub-msg');
+    if (msg) msg.textContent = 'This sign-in is running under another Kosmos window on this computer, so cancel it there.';
+    frPaintConnect(refused);
+    frConnWatch();
+    return;
+  }
+  frConnSettle();
+}
+
+async function frConnSubmitCode() {
+  const input = document.getElementById('fr-conn-code');
+  const btn = document.getElementById('fr-conn-code-go');
+  const msg = document.getElementById('fr-sub-msg');
+  const code = ((input && input.value) || '').trim();
+  if (!code) { msg.textContent = 'Paste the code first.'; return; }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/connect/code', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const got = await res.json();
+    if (!res.ok) { msg.textContent = got.error || 'That code was not accepted.'; return; }
+    // Just the receipt: the panel that follows says "Finishing the sign-in"
+    // in its title, and saying it here too is the said-it-twice shape.
+    msg.textContent = 'Code sent.';
+  } catch (err) {
+    msg.textContent = 'We could not send that (' + err.message + ').';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
+ * The recheck used by the connect flow's exits, with ONE bounded retry: the
+ * watcher stops before this runs, so a single failed fetch here otherwise
+ * froze the dead flow's last panel on screen with nothing polling -- a state
+ * nobody was producing. One retry, then the error line stands and the
+ * repainted verdict (or the person's next click) takes it from there.
+ */
+async function frConnSettle() {
+  const ok = await frRecheck();
+  if (!ok) setTimeout(() => { if (FR_STEP === 3) frRecheck(); }, 2000);
+}
+
+function frMB(n) { return Math.max(0, Math.round(n / 1e6)) + 'MB'; }
+
+/** One sentence per phase, spoken once on each phase CHANGE — the per-second
+    progress numbers stay out of the live region on purpose. */
+const FR_CONN_SAY = {
+  downloading: 'Downloading Claude.',
+  installing: 'Setting Claude up on this computer.',
+  'signin-launching': 'Getting the sign-in ready.',
+  'signin-browser-open': 'Your browser has opened. Sign in to Claude there.',
+  'signin-awaiting-code': 'Your browser has opened. If Claude gives you a code, paste it here.',
+  'signin-completing': 'Finishing the sign-in.',
+  connected: 'Connected.',
+  stuck: 'We could not finish connecting Claude.',
+  interrupted: 'A connection attempt was interrupted.',
+};
+
+function frPaintConnect(st) {
+  const box = document.getElementById('fr-sub');
+  const msg = document.getElementById('fr-sub-msg');
+  const phase = st && st.phase;
+
+  /**
+   * ⚠️ REPAINT ONLY WHEN THE SCREEN'S MEANING CHANGES. This runs every
+   * second, and a person may be halfway through typing a code into the input
+   * this function would otherwise rebuild -- innerHTML replacement empties
+   * the field under their cursor. Progress inside a phase updates the two
+   * elements it owns.
+   *
+   * The key carries `because` as well as phase: a throttled background tab
+   * can miss the completing hop entirely, so a code rejection comes back as
+   * the SAME phase with a new reason -- and keying on phase alone left "that
+   * code did not work" unrendered forever. Rebuilding on a reason change
+   * empties the input, which is right: the reason changing means the code in
+   * it did not work.
+   */
+  const paintKey = phase + '|' + ((st && st.because) || '');
+  if (paintKey === FR_CONN_LAST) {
+    if (phase === 'downloading') frConnPaintProgress(st.progress);
+    // ⚠️ The URL can arrive a capture-tick AFTER the phase painted (the
+    // engine writes it late for exactly that case), and a full rebuild here
+    // would empty the code input mid-typing -- so the link gets its own
+    // targeted updater, like the progress numbers.
+    frConnPaintUrl(st && st.url);
+    return;
+  }
+  FR_CONN_LAST = paintKey;
+  // ⚠️ Announced in the HIDDEN live region, not fr-sub-msg: the visible panel
+  // already says this in its title, and a visible copy said it twice.
+  msg.textContent = '';
+  const say = document.getElementById('fr-conn-say');
+  if (say && Object.prototype.hasOwnProperty.call(FR_CONN_SAY, phase)) {
+    say.textContent = FR_CONN_SAY[phase];
+  }
+
+  // Always a container, filled by frConnPaintUrl -- the one element that can
+  // change inside a phase without the panel rebuilding.
+  const urlLine = '<div id="fr-conn-url"></div>';
+
+  if (phase === 'downloading') {
+    box.innerHTML = '<div class="fr-ctitle">Downloading Claude&#8230;</div>'
+      // Static progressbar semantics, no live chatter: the phase change was
+      // announced once; a screen reader can QUERY the value without being
+      // spoken over every second.
+      + '<div class="fr-progress" id="fr-conn-bar" role="progressbar" aria-label="Download progress" '
+      + 'aria-valuemin="0" aria-valuemax="100"><div class="fr-progress-fill" id="fr-conn-fill" style="width:0%"></div></div>'
+      + '<div class="fr-cdetail" id="fr-conn-prog"></div>'
+      + '<div class="fr-cdetail">This is the one big download. Everything after it is quick.</div>';
+    frConnPaintProgress(st.progress);
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'installing' || phase === 'signin-launching') {
+    box.innerHTML = '<div class="fr-ctitle">'
+      + (phase === 'installing' ? 'Setting Claude up on this computer&#8230;' : 'Getting the sign-in ready&#8230;')
+      + '</div>'
+      + '<div class="fr-cdetail">A moment or two.</div>';
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'signin-browser-open' || phase === 'signin-completing') {
+    box.innerHTML = '<div class="fr-ctitle">'
+      + (phase === 'signin-completing' ? 'Finishing the sign-in&#8230;' : 'Your browser has opened')
+      + '</div>'
+      + '<div class="fr-cdetail">'
+      + (phase === 'signin-completing'
+        ? 'Checking the connection. This screen will change on its own.'
+        : 'Sign in to Claude there. This screen will notice when it is done.')
+      + '</div>' + urlLine;
+    frConnPaintUrl(st && st.url);
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'signin-awaiting-code') {
+    box.innerHTML = '<div class="fr-ctitle">Your browser has opened</div>'
+      + '<div class="fr-cdetail">Sign in to Claude there. This screen will notice when it is done.</div>'
+      + urlLine
+      // The engine sets `because` when a typed code did not take; without
+      // showing it, a rejected code looks like this screen simply asking twice.
+      + ((st && st.because) ? '<div class="fr-note">' + esc(st.because) + '</div>' : '')
+      + '<label class="fr-cdetail" for="fr-conn-code">If Claude gives you a code to paste, put it here:</label>'
+      + '<div class="fr-code-row">'
+      + '<input id="fr-conn-code" type="text" autocomplete="off" spellcheck="false" aria-label="Sign-in code">'
+      + '<button class="btn" id="fr-conn-code-go" type="button">Use code</button>'
+      + '</div>';
+    document.getElementById('fr-conn-code-go').onclick = frConnSubmitCode;
+    document.getElementById('fr-conn-code').onkeydown = (e) => {
+      // Same in-flight guard as the button: a second Enter after the first
+      // code was typed earns a 409 that stomps the "Code sent." receipt.
+      const go = document.getElementById('fr-conn-code-go');
+      if (e.key === 'Enter' && !(go && go.disabled)) frConnSubmitCode();
+    };
+    frConnPaintUrl(st && st.url);
+    frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
+    return;
+  }
+
+  if (phase === 'stuck') {
+    box.innerHTML = frCheckRow({
+      state: 'attention',
+      title: 'We could not finish connecting Claude',
+      detail: (st && st.because) || 'It stopped without saying why.',
+    })
+    + ((st && st.tail) ? '<pre class="fr-conn-tail">' + esc(st.tail) + '</pre>' : '')
+    + '<div class="fr-note">Nothing is broken by this. You can try again, or connect without '
+    + 'Kosmos: open Terminal, type <b>claude</b>, and follow its sign-in. Then come back '
+    + 'and press Try again to check.</div>';
+    frActions({ label: 'Try again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
+    return;
+  }
+
+  if (phase === 'interrupted') {
+    /**
+     * ⚠️ THE COPY ONLY CLAIMS WHAT IS KNOWN, per before-phase. A download or
+     * install dies with the server process, so "nothing is running now" is a
+     * fact there. A SIGN-IN runs in a tmux session that OUTLIVES the server,
+     * so after a mid-sign-in death the window may genuinely still be open --
+     * asserting otherwise would be a settled sentence about a state nobody
+     * checked. Start again closes it either way (launchSignin kills first).
+     */
+    // Three befores, three different TRUE sentences: the in-process download
+    // dies with the server; an install is a CHILD process that may finish in
+    // the background; a sign-in runs in tmux, which outlives the server.
+    const before = st && st.before;
+    const afterSentence = before === 'downloading'
+      ? 'Nothing is running now, and starting again picks up safely.'
+      : (before === 'installing'
+        ? 'The setup step may still be finishing in the background; starting again checks and picks up safely.'
+        : 'The sign-in window may still be open; starting again closes it and starts clean.');
+    box.innerHTML = frCheckRow({
+      state: 'unknown',
+      title: 'A connection attempt was interrupted',
+      detail: 'Kosmos was closed while it was ' + frConnBefore(before) + '. ' + afterSentence,
+    });
+    frActions({ label: 'Start again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
+    return;
+  }
+
+  // `connected` and `idle` have no panel of their own: the standard verdict
+  // painter owns those screens, and frConnWatch/frConnectStart route there.
+}
+
+function frConnBefore(phase) {
+  return {
+    downloading: 'downloading Claude',
+    installing: 'setting Claude up',
+  }[phase] || 'signing in';
+}
+
+/**
+ * The fallback sign-in link, updated in place: the panel must not rebuild
+ * (that empties the code input mid-typing), but the URL is honestly late
+ * sometimes -- the terminal prints it a capture-tick after the prompt.
+ */
+function frConnPaintUrl(url) {
+  const box = document.getElementById('fr-conn-url');
+  if (!box) return;
+  // ⚠️ Compared against what WE last set, never against innerHTML read back:
+  // serializers may round-trip markup differently, and a permanently-unequal
+  // comparison would rebuild the link on every poll tick -- under a person
+  // mid-copy of the fallback URL.
+  const key = url || null;
+  if (box.__frUrl === key) return;
+  box.__frUrl = key;
+  box.innerHTML = key
+    ? '<div class="fr-cdetail">Browser did not open? '
+      + '<a href="' + esc(key) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>'
+    : '';
+}
+
+function frConnPaintProgress(progress) {
+  const fill = document.getElementById('fr-conn-fill');
+  const line = document.getElementById('fr-conn-prog');
+  if (!fill || !line) return;
+  const got = (progress && progress.got) || 0;
+  const total = progress && progress.total;
+  const bar = document.getElementById('fr-conn-bar');
+  if (total) {
+    const pct = Math.min(100, Math.round((got / total) * 100));
+    fill.style.width = pct + '%';
+    line.textContent = frMB(got) + ' of ' + frMB(total);
+    if (bar && bar.setAttribute) bar.setAttribute('aria-valuenow', String(pct));
+  } else {
+    // No Content-Length: an honest count beats a bar pretending to know.
+    fill.style.width = '0%';
+    line.textContent = frMB(got) + ' so far';
+    if (bar && bar.removeAttribute) bar.removeAttribute('aria-valuenow');
   }
 }
 
@@ -4451,7 +4954,8 @@ function frPaintSubscription() {
     state: 'attention',
     title: 'No Claude subscription is connected yet',
     detail: 'Your agents think with Claude, so they need one before they can do anything. '
-      + 'Get a subscription at claude.ai, then sign in to Claude on this computer.',
+      + 'If you have a subscription at claude.ai, Connect Claude does the rest here; '
+      + 'if you do not, get one there first.',
   })
   /**
    * ⚠️ SAYS WHAT CARRYING ON ACTUALLY GETS THEM. "Continue anyway" with no
@@ -4461,7 +4965,18 @@ function frPaintSubscription() {
    */
   + '<div class="fr-note">You can carry on and look around. An agent made before Claude is '
   + 'connected will sit there doing nothing until it is.</div>';
-  frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Check again', go: frRecheck });
+  /**
+   * ⚠️ "Check again" is gone from THIS state on purpose, not by accident:
+   * Connect Claude re-checks the connection before it does anything else, so
+   * somebody who just signed in through Terminal gets their green row from the
+   * same button — and the two-button bar stays two buttons.
+   *
+   * ⚠️ And the `unknown` state above deliberately does NOT get a Connect
+   * button. Unknown means this machine may already be signed in by somebody
+   * who pays; pushing them toward a sign-in flow is the exact asymmetry
+   * `engine/subscription.js` exists to prevent. They keep Check again.
+   */
+  frActions({ label: 'Connect Claude', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
 }
 
 /* --------------------------------------------------------------------------

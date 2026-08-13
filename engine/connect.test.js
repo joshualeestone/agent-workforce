@@ -1,0 +1,944 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const http = require('node:http');
+const os = require('node:os');
+const nodePath = require('node:path');
+
+/**
+ * ⚠️ Sandbox BEFORE requiring: `store` fixes its root at load, `subscription`
+ * fixes its config path at load, and the real ones are the operator's live
+ * app data and live Claude account.
+ */
+const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'connect-test-'));
+process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'data');
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
+// The two sandbox seams travel together (launchSignin warns loudly otherwise,
+// and a warning that fires on every green run trains people to ignore it).
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR = nodePath.join(SANDBOX, 'claude-config-dir');
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
+process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ } });
+
+const connect = require('./connect');
+const subscription = require('./subscription');
+
+/* ── fixture pane text ─────────────────────────────────────────────────────
+   ⚠️ FIXTURE-DISCIPLINE: every screen below is CAPTURED text from a real
+   `tmux capture-pane` of claude v2.1.229 driven in a sandboxed
+   CLAUDE_CONFIG_DIR on 2026-08-12 -- not typed from memory. If the CLI's
+   wording changes, re-capture; do not hand-edit these into what the new
+   version "probably" says. */
+
+const SCREEN_THEME = ` Let's get started.
+ Choose the text style that looks best with your terminal
+ To change this later, run /theme
+   1. Auto (match terminal)
+ ❯ 2. Dark mode ✔
+   3. Light mode
+   4. Dark mode (colorblind-friendly)
+   5. Light mode (colorblind-friendly)
+   6. Dark mode (ANSI colors only)
+   7. Light mode (ANSI colors only)`;
+
+const SCREEN_LOGIN_METHOD = ` Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.
+ Select login method:
+ ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise
+   2. Anthropic Console account · API usage billing
+   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI`;
+
+const SCREEN_SPINNER = `Welcome to Claude Code v2.1.229
+ ✳ Opening browser to sign in…`;
+
+// The URL as the pane actually renders it: wrapped across lines by width.
+const SCREEN_PASTE = ` Browser didn't open? Use the url below to sign in (c to copy)
+https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3
+Ainference&code_challenge=rBQJOjK7flitOKUq_aSgfXvWglfl-x0siAN6vQIBDwA&code_challenge_method=S256&state=Fm9qWztZHDP1s7Hquwdb2xijzGuvcNOk5GiLpHrX4s
+U
+ Paste code here if prompted >`;
+
+// Synthesised from the CLI's known post-login line; marked as such. The
+// completion verdict never depends on this text (the config flip decides), so
+// a wording drift here cannot produce a false "connected".
+const SCREEN_LOGIN_DONE = ` Login successful. Press Enter to continue…`;
+
+const CONNECTED_CONFIG = {
+  hasAvailableSubscription: false,
+  oauthAccount: {
+    organizationType: 'claude_max',
+    billingType: 'stripe_subscription',
+    organizationRateLimitTier: 'default_claude_max_20x',
+  },
+};
+
+const writeClaudeConfig = (obj) => fs.writeFileSync(process.env.AGENT_WORKFORCE_CLAUDE_CONFIG, JSON.stringify(obj));
+const clearClaudeConfig = () => { try { fs.rmSync(process.env.AGENT_WORKFORCE_CLAUDE_CONFIG, { force: true }); } catch { /* fine */ } };
+
+function until(fn, ms) {
+  const deadline = Date.now() + (ms || 3000);
+  return new Promise((resolve, reject) => {
+    const t = setInterval(() => {
+      let v;
+      try { v = fn(); } catch (e) { clearInterval(t); reject(e); return; }
+      if (v) { clearInterval(t); resolve(v); return; }
+      if (Date.now() > deadline) { clearInterval(t); reject(new Error('condition never became true')); }
+    }, 10);
+  });
+}
+
+/* ── recognisers ─────────────────────────────────────────────────────────── */
+
+test('every captured screen is recognised as itself', () => {
+  assert.equal(connect.classifyPane(SCREEN_THEME).kind, 'theme');
+  assert.equal(connect.classifyPane(SCREEN_LOGIN_METHOD).kind, 'login-method');
+  assert.equal(connect.classifyPane(SCREEN_SPINNER).kind, 'browser-open');
+  assert.equal(connect.classifyPane(SCREEN_PASTE).kind, 'awaiting-code');
+  assert.equal(connect.classifyPane(SCREEN_LOGIN_DONE).kind, 'login-done');
+});
+
+test('an accumulated pane reads as the FURTHEST screen, not the first match', () => {
+  /**
+   * ⚠️ The pane accumulates: by the paste prompt, earlier text may still be
+   * on screen. A classifier that returns the first sentence it recognises
+   * would call this "login-method" and press Enter into the paste prompt.
+   */
+  const accumulated = `${SCREEN_LOGIN_METHOD}\n${SCREEN_PASTE}`;
+  assert.equal(connect.classifyPane(accumulated).kind, 'awaiting-code');
+});
+
+test('a screen we do not recognise is unknown, and carries what it said', () => {
+  const got = connect.classifyPane('Something entirely new\nthat no version has shown before');
+  assert.equal(got.kind, 'unknown');
+  assert.match(got.tail, /entirely new/);
+});
+
+test('the wrapped OAuth URL is reassembled whole', () => {
+  const url = connect.extractOauthUrl(SCREEN_PASTE);
+  assert.ok(url.startsWith('https://claude.com/cai/oauth/authorize?'), url);
+  // The parts that lived on continuation lines are back in one piece, and the
+  // prompt line under them did not get glued on.
+  assert.match(url, /scope=user%3Ainference/);
+  assert.match(url, /state=Fm9qWztZHDP1s7Hquwdb2xijzGuvcNOk5GiLpHrX4sU$/);
+  assert.doesNotMatch(url, /Paste/);
+});
+
+test('codes are one clean token or they are refused', () => {
+  assert.equal(connect.validCode('abCD1234#efGH5678'), true);
+  assert.equal(connect.validCode('ac_9-Zz.~/+='.repeat(2)), true);
+  assert.equal(connect.validCode('has space'), false);
+  assert.equal(connect.validCode('semi;colon'), false);
+  assert.equal(connect.validCode('short'), false);
+  assert.equal(connect.validCode(''), false);
+  assert.equal(connect.validCode(null), false);
+  assert.equal(connect.validCode('back`tick'.padEnd(10, 'a')), false);
+  assert.equal(connect.validCode('dollar$sign'.padEnd(10, 'a')), false);
+});
+
+/* ── the download ────────────────────────────────────────────────────────── */
+
+function serveRelease(t, { version, binary, checksum }) {
+  const paths = {
+    '/latest': () => version,
+    [`/${version}/manifest.json`]: () => JSON.stringify({
+      platforms: { [connect.platformKey()]: { checksum } },
+    }),
+    [`/${version}/${connect.platformKey()}/claude`]: () => binary,
+  };
+  const server = http.createServer((req, res) => {
+    const answer = paths[req.url];
+    if (!answer) { res.writeHead(404); res.end(); return; }
+    // Content-Length, like the real service: it is what progress totals
+    // come from, and chunked answers are the degraded case, not the norm.
+    const body = Buffer.isBuffer(answer()) ? answer() : Buffer.from(answer());
+    res.writeHead(200, { 'content-length': body.length });
+    res.end(body);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      t.after(() => server.close());
+      resolve(`http://127.0.0.1:${server.address().port}`);
+    });
+  });
+}
+
+test('a verified download lands executable, with progress that adds up', async (t) => {
+  const binary = crypto.randomBytes(300 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.9', binary, checksum });
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+
+  const seen = [];
+  const got = await connect.download((g, total) => seen.push([g, total]));
+
+  assert.equal(got.version, '9.9.9');
+  const onDisk = fs.readFileSync(got.path);
+  assert.equal(crypto.createHash('sha256').update(onDisk).digest('hex'), checksum,
+    'what landed is not what was served');
+  assert.ok(fs.statSync(got.path).mode & 0o100, 'the binary is not executable');
+  assert.ok(seen.length > 0, 'no progress was ever reported');
+  const [lastGot, lastTotal] = seen[seen.length - 1];
+  assert.equal(lastGot, binary.length, 'progress never reached the full size');
+  assert.equal(lastTotal, binary.length, 'the total did not come from Content-Length');
+});
+
+test('a checksum mismatch is refused, and nothing runnable is kept', async (t) => {
+  const binary = crypto.randomBytes(64 * 1024);
+  const wrong = crypto.createHash('sha256').update('not the payload').digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.8', binary, checksum: wrong });
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+
+  await assert.rejects(() => connect.download(), /did not match its checksum/);
+
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  const leftovers = (() => { try { return fs.readdirSync(dir); } catch { return []; } })()
+    .filter((f) => f.includes('9.9.8'));
+  assert.deepEqual(leftovers, [], `the unverified download survived: ${leftovers.join(', ')}`);
+});
+
+test('a download service answering nonsense is an error, not a hang', async (t) => {
+  const server = http.createServer((req, res) => { res.writeHead(200); res.end('<html>maintenance</html>'); });
+  await new Promise((r) => { server.listen(0, '127.0.0.1', r); });
+  t.after(() => server.close());
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+
+  await assert.rejects(() => connect.download(), /did not answer with a version/);
+});
+
+test('a stuck install does not strand the 281MB download in app data', async (t) => {
+  /**
+   * ⚠️ The success path deletes the binary after install for exactly this
+   * reason; the FAILURE path forgot to, stranding one file per attempted
+   * version with nothing that would ever clean it. Driven end to end: a real
+   * (fixture) download through the real flow, an install that fails through
+   * the seam, and the downloads dir asked afterwards.
+   */
+  connect.resetForTests();
+  clearClaudeConfig();
+  const binary = crypto.randomBytes(64 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.7', binary, checksum });
+  // Point the binary path somewhere that does NOT exist, so start() downloads.
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = nodePath.join(SANDBOX, 'no-such-claude');
+  connect.setRunner((file, args) => {
+    if (String(file).includes('claude-9.9.7') && args[0] === 'install') {
+      return { ok: false, stdout: '', stderr: 'install exploded' };
+    }
+    return { ok: true, stdout: '' };
+  });
+  connect.setDryRun(false);
+  t.after(async () => {
+    await connect.cancel().catch(() => {});
+    connect.resetForTests();
+    connect.setRunner(null);
+    delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE;
+    delete process.env.AGENT_WORKFORCE_CLAUDE_BIN;
+  });
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 10000);
+  assert.match(connect.state().because, /did not finish setting itself up/);
+
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  const leftovers = (() => { try { return fs.readdirSync(dir); } catch { return []; } })()
+    .filter((f) => f.includes('9.9.7'));
+  assert.deepEqual(leftovers, [], `the failed install stranded: ${leftovers.join(', ')}`);
+});
+
+test('cancel mid-download aborts the stream and leaves nothing behind', async (t) => {
+  /**
+   * ⚠️ THE PATHS WHOSE REGRESSIONS THE COMMENTS THEMSELVES DOCUMENT (the
+   * .part sweep "shipped one iteration without the guard") had no test: every
+   * download test ran to completion, and the cancel tests ran under DRY_RUN
+   * where no download exists. This one drives a REAL slow download through
+   * start(), cancels mid-stream, and asks the disk and the state afterwards.
+   */
+  connect.resetForTests();
+  clearClaudeConfig();
+  subscription.resetCache();
+  const binary = crypto.randomBytes(400 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  // A server that trickles the binary so the cancel has a mid-stream to land in.
+  const paths = {
+    '/latest': () => Buffer.from('9.9.6'),
+    '/9.9.6/manifest.json': () => Buffer.from(JSON.stringify({ platforms: { [connect.platformKey()]: { checksum } } })),
+  };
+  const server = http.createServer((req, res) => {
+    if (paths[req.url]) {
+      const body = paths[req.url]();
+      res.writeHead(200, { 'content-length': body.length });
+      res.end(body);
+      return;
+    }
+    res.writeHead(200, { 'content-length': binary.length });
+    let sent = 0;
+    const drip = setInterval(() => {
+      if (sent >= binary.length) { clearInterval(drip); res.end(); return; }
+      res.write(binary.subarray(sent, sent + 16 * 1024));
+      sent += 16 * 1024;
+    }, 30);
+    res.on('close', () => clearInterval(drip));
+  });
+  await new Promise((r) => { server.listen(0, '127.0.0.1', r); });
+  t.after(() => server.close());
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = `http://127.0.0.1:${server.address().port}`;
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = nodePath.join(SANDBOX, 'no-such-claude-2');
+  connect.setRunner(() => ({ ok: true, stdout: '' }));
+  connect.setDryRun(false);
+  t.after(async () => {
+    await connect.cancel().catch(() => {});
+    connect.resetForTests();
+    connect.setRunner(null);
+    delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE;
+    delete process.env.AGENT_WORKFORCE_CLAUDE_BIN;
+  });
+
+  await connect.start();
+  await until(() => {
+    const st = connect.state();
+    return st.phase === connect.PHASE.DOWNLOADING && st.progress && st.progress.got > 0;
+  }, 10000);
+
+  const st = await connect.cancel();
+  assert.equal(st.phase, connect.PHASE.IDLE);
+  // Give any orphaned continuation a moment to do its worst, then look.
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(connect.state().phase, connect.PHASE.IDLE,
+    'something overwrote the cancel after the fact');
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  const leftovers = (() => { try { return fs.readdirSync(dir); } catch { return []; } })();
+  assert.deepEqual(leftovers, [], `the cancelled download left: ${leftovers.join(', ')}`);
+});
+
+test('a fresh download sweeps other versions\' leftovers', async (t) => {
+  /**
+   * ⚠️ A server death between a download's rename and its install strands a
+   * verified binary that only a same-version retry would otherwise clean; a
+   * version bump before the retry stranded ~281MB permanently.
+   */
+  const binary = crypto.randomBytes(32 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.5', binary, checksum });
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, `claude-0.0.1-${connect.platformKey()}`), 'stale corpse');
+  fs.writeFileSync(nodePath.join(dir, 'claude-0.0.2-x.part'), 'stale partial');
+
+  await connect.download();
+  const left = fs.readdirSync(dir).sort();
+  assert.deepEqual(left, [`claude-9.9.5-${connect.platformKey()}`],
+    `stale leftovers survived the fresh download: ${left.join(', ')}`);
+  fs.rmSync(nodePath.join(dir, `claude-9.9.5-${connect.platformKey()}`), { force: true });
+});
+
+driverTest('a binary that exists but does not run is re-downloaded, not trusted', async () => {
+  /**
+   * ⚠️ EXECUTABLE IS NOT WORKING: a truncated launcher from an interrupted
+   * install passes X_OK forever, and trusting it dead-ended every Try again
+   * on the same broken binary. The probe turns "a file is there" into "the
+   * thing runs"; a probe failure must route to the download path.
+   */
+  const broken = nodePath.join(SANDBOX, 'broken-claude');
+  fs.writeFileSync(broken, '#!/no/such/interpreter\n');
+  fs.chmodSync(broken, 0o755);
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = broken;
+
+  const term = fakeTerminal();
+  const calls = [];
+  connect.setRunner((file, args) => {
+    calls.push([file, args[0]]);
+    if (file === broken && args[0] === '--version') return { ok: false, stdout: '', stderr: 'exec format error' };
+    return term.runner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  // The probe failed, so the flow must be DOWNLOADING (or stuck on the
+  // fixture-less download), never a sign-in phase driven by the broken file.
+  await until(() => {
+    const p = connect.state().phase;
+    return p === connect.PHASE.DOWNLOADING || p === connect.PHASE.STUCK;
+  }, 5000);
+  assert.ok(calls.some(([f, a]) => f === broken && a === '--version'),
+    'the existing binary was trusted without ever being run');
+  const p = connect.state().phase;
+  assert.notEqual(String(p).startsWith('signin'), true,
+    'a broken binary was handed to the sign-in flow');
+});
+
+/* ── the driver, against a scripted terminal ─────────────────────────────── */
+
+/**
+ * A fake tmux that behaves like the real CLI did when probed: Enter on the
+ * theme screen advances to login method, Enter there brings the browser/paste
+ * screen, and a pasted code "logs in" by flipping the sandboxed Claude config
+ * -- which is exactly the side effect a real login has, and the only signal
+ * the driver is allowed to trust.
+ */
+function fakeTerminal() {
+  const f = {
+    screen: SCREEN_THEME,
+    sent: [],        // every send-keys, in order
+    all: [],         // every tmux command verbatim, for target auditing
+    killed: 0,
+    made: 0,
+    onCode: () => { writeClaudeConfig(CONNECTED_CONFIG); f.screen = SCREEN_LOGIN_DONE; },
+    runner(file, args) {
+      f.all.push(args.slice());
+      const cmd = args[0];
+      if (cmd === 'new-session') { f.made += 1; return { ok: true, stdout: '' }; }
+      if (cmd === 'kill-session') { f.killed += 1; return { ok: true, stdout: '' }; }
+      if (cmd === 'capture-pane') return { ok: true, stdout: f.screen };
+      if (cmd === 'send-keys') {
+        f.sent.push(args.slice(2));
+        const literal = args.includes('-l');
+        if (literal) { f.onCode(args[args.length - 1]); return { ok: true, stdout: '' }; }
+        // An Enter: advance the way the real CLI was measured to.
+        if (f.screen === SCREEN_THEME) f.screen = SCREEN_LOGIN_METHOD;
+        else if (f.screen === SCREEN_LOGIN_METHOD) f.screen = SCREEN_PASTE;
+        return { ok: true, stdout: '' };
+      }
+      return { ok: true, stdout: '' };
+    },
+  };
+  return f;
+}
+
+function driverTest(name, fn) {
+  test(name, async (t) => {
+    connect.resetForTests();
+    clearClaudeConfig();
+    subscription.resetCache();
+    connect.setTickInterval(15);
+    connect.setUnknownGrace(300);
+    // The node binary exists and is executable, which is all "already
+    // installed" means to `start` -- no download in these tests.
+    process.env.AGENT_WORKFORCE_CLAUDE_BIN = process.execPath;
+    t.after(async () => {
+      await connect.cancel().catch(() => {});
+      connect.resetForTests();
+      connect.setRunner(null);
+      connect.setTickInterval(700);
+      connect.setUnknownGrace(10000);
+      delete process.env.AGENT_WORKFORCE_CLAUDE_BIN;
+      clearClaudeConfig();
+      subscription.resetCache();
+    });
+    await fn(t);
+  });
+}
+
+driverTest('the driver walks the measured flow end to end', async () => {
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  const st = connect.state();
+  assert.ok(st.url && st.url.includes('oauth'), 'the OAuth URL was on screen and was not captured');
+
+  // Exactly one Enter per choosing screen, counted BEFORE any code is typed:
+  // a second Enter on the theme screen would land on the next screen and pick
+  // whatever was under the cursor.
+  const entersSoFar = term.sent.filter((s) => s[s.length - 1] === 'Enter' && !s.includes('-l'));
+  assert.equal(entersSoFar.length, 2, `expected one Enter for theme + one for login method, saw ${term.sent.map((s) => s.join(' ')).join(' | ')}`);
+
+  const put = connect.submitCode('abCD1234#efGH5678');
+  assert.equal(put.ok, true, put.because);
+
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
+  const done = connect.state();
+  assert.equal(done.plan, 'Claude Max 20x', 'the plan the login produced is not reported');
+
+  const literal = term.sent.find((s) => s.includes('-l'));
+  assert.ok(literal && literal.includes('abCD1234#efGH5678'), 'the code was accepted but never typed');
+  assert.ok(term.killed >= 1, 'the sign-in window was left running after success');
+
+  /**
+   * ⚠️ THE WALK-FORWARD ENTER ACTUALLY FIRES. The post-login screen says both
+   * "Login successful" and "Press Enter to continue" and classifies as
+   * login-done -- a guard keyed on the press-enter KIND never pressed Enter
+   * on the one screen that asks, so onboarding was abandoned mid-screen for
+   * the next claude run to trip over. Two Enters after the code: the one that
+   * submits it, and the walk-forward.
+   */
+  const literalIdx = term.sent.findIndex((s) => s.includes('-l'));
+  const entersAfterCode = term.sent.slice(literalIdx + 1)
+    .filter((s) => s[s.length - 1] === 'Enter' && !s.includes('-l'));
+  assert.ok(entersAfterCode.length >= 2,
+    `the "Press Enter to continue" screen never got its Enter: ${term.sent.map((s) => s.join(' ')).join(' | ')}`);
+});
+
+driverTest('a rejected code is not a dead end: the screen asks again and a second code works', async () => {
+  /**
+   * ⚠️ THE FIRST VERSION SAT AT "signin-completing" FOREVER after a bad code:
+   * the CLI re-showed the paste prompt, the phase never moved, submitCode
+   * refused a corrected code while the terminal literally asked for one, and
+   * the acted-guard meant a second code could never be typed anyway.
+   */
+  const term = fakeTerminal();
+  let codes = 0;
+  term.onCode = () => {
+    codes += 1;
+    if (codes <= 2) { term.screen = SCREEN_PASTE; return; }   // rejected: prompt again
+    writeClaudeConfig(CONNECTED_CONFIG);
+    term.screen = SCREEN_LOGIN_DONE;
+  };
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  assert.equal(connect.submitCode('firstCode#111111').ok, true);
+
+  // The rejection surfaces: back to awaiting-code, with the reason carried.
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE
+    && /did not work/.test(connect.state().because || ''), 15000);
+  assert.doesNotMatch(connect.state().because, /still/,
+    'the first rejection already used the escalated sentence, so the second cannot differ');
+
+  // ⚠️ A SECOND identical failure must produce a DIFFERENT sentence: the page
+  // repaints (and a screen reader re-announces) only when the reason text
+  // changes, so an identical retry failure would otherwise show and say
+  // nothing at all.
+  assert.equal(connect.submitCode('secondCode#22222').ok, true);
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE
+    && /still did not work/.test(connect.state().because || ''), 15000);
+
+  // And a corrected code is ACCEPTED and completes the flow.
+  const third = connect.submitCode('thirdCode#333333');
+  assert.equal(third.ok, true, third.because);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 10000);
+  assert.equal(codes, 3, 'the third code was accepted but never typed into the terminal');
+});
+
+driverTest('the owning driver heartbeats its record while parked', async () => {
+  /**
+   * ⚠️ THE FRESHNESS BOUND IS ONLY SAFE BECAUSE OF THIS. A flow parked at
+   * the paste prompt writes no phase changes; without the heartbeat, its
+   * record ages past the bound and a second server would treat the LIVE
+   * flow as interrupted -- and cancel could then kill it. Policy injected,
+   * not read from comments: heartbeat 50ms for the test.
+   */
+  connect.setFreshnessForTests(60 * 1000, 50);
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  try {
+    await connect.start();
+    await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+    const first = JSON.parse(fs.readFileSync(connect.STATE_FILE(), 'utf8')).updatedAt;
+    await new Promise((r) => setTimeout(r, 250));
+    const later = JSON.parse(fs.readFileSync(connect.STATE_FILE(), 'utf8'));
+    assert.equal(later.phase, 'signin-awaiting-code', 'the phase moved; this test needs a parked flow');
+    assert.ok(Date.parse(later.updatedAt) > Date.parse(first),
+      'the parked record was never re-stamped, so a second server would age it out');
+  } finally {
+    connect.setFreshnessForTests(null, null);
+  }
+});
+
+driverTest('a code that starts with a dash is typed literally, not read as tmux flags', async () => {
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  const put = connect.submitCode('-abCD1234#efGH567');
+  assert.equal(put.ok, true, put.because);
+  await until(() => term.sent.some((s) => s.includes('-l')), 3000);
+  const literal = term.sent.find((s) => s.includes('-l'));
+  const dashIdx = literal.indexOf('--');
+  assert.ok(dashIdx > -1 && literal[dashIdx + 1] === '-abCD1234#efGH567',
+    `send-keys must end option parsing before the code: ${JSON.stringify(literal)}`);
+});
+
+driverTest('cancel beats a failure that lands after it, in either order', async () => {
+  /**
+   * ⚠️ Every stuck-path crosses an await, and cancel can run during it. The
+   * defect: cancel destroyed the in-flight work, the aborted work rejected,
+   * and the rejection wrote STUCK over the person's deliberate IDLE.
+   */
+  const term = fakeTerminal();
+  let releaseCapture = null;
+  const gate = new Promise((r) => { releaseCapture = r; });
+  const baseRunner = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane') return gate.then(() => ({ ok: false, stdout: '', stderr: 'no server running' }));
+    return baseRunner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await new Promise((r) => setTimeout(r, 60));   // a tick is now parked on the gate
+  await connect.cancel();
+  releaseCapture();                              // the aborted capture now fails
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(connect.state().phase, connect.PHASE.IDLE,
+    'a failure from work the cancel itself aborted overwrote the cancel');
+});
+
+driverTest('a REPL with an unreadable subscription is an answer, not a forever-wait', async () => {
+  /**
+   * ⚠️ A machine whose CLI signs in fine but whose config names a plan we do
+   * not recognise would have looped at "will notice when it is done" forever,
+   * noticing nothing. A live REPL means Claude already wrote what it was
+   * going to write.
+   */
+  const term = fakeTerminal();
+  term.onCode = () => {
+    // Signed in as far as the CLI is concerned; the config stays unreadable.
+    writeClaudeConfig({ oauthAccount: { organizationType: 'claude_shiny_new_plan' } });
+    term.screen = ' > try "help"\n ? for shortcuts';
+  };
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  assert.equal(connect.submitCode('someCode#123456').ok, true);
+
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 20000);
+  const st = connect.state();
+  assert.match(st.because, /could not confirm a subscription/,
+    'the honest sentence is missing; whatever is there instead: ' + st.because);
+  assert.ok(term.killed >= 1, 'the session was left running');
+});
+
+driverTest('a login that completes in the browser, with no code ever pasted, still connects', async () => {
+  /**
+   * ⚠️ PINS THE ANY-PHASE ARM. The browser flow can finish on its own; the
+   * first version had no arm for "Login successful" arriving while the phase
+   * was still awaiting-code, so the driver looped at "will notice when it is
+   * done", noticing nothing. Reverting that arm must fail THIS test.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // The browser completes; no code is ever submitted here. The config does
+  // not flip yet, so the transition must come from the pane text alone.
+  term.screen = SCREEN_LOGIN_DONE;
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_COMPLETING, 5000);
+
+  // Now the CLI writes the config, and the flow finishes from evidence.
+  writeClaudeConfig(CONNECTED_CONFIG);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 10000);
+});
+
+test('a secure fetch never follows a redirect down to plain http', () => {
+  /**
+   * The manifest carries the checksum everything is verified against; an
+   * https→http hop would make "verified" mean "verified against whatever a
+   * network attacker wrote". The rule is a pure function so it is testable
+   * without standing up a TLS server; both fetchers route through it.
+   */
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'http://evil.example/x'), true);
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', '//evil.example/x'), false,
+    'a scheme-relative redirect from https stays https and is fine');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'https://cdn.claude.ai/x'), false);
+  assert.equal(connect.redirectDowngrades('http://127.0.0.1:4000/x', 'http://127.0.0.1:4000/y'), false,
+    'a test fixture served over http may redirect within http');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', '::junk::'), false,
+    'garbage without a scheme resolves RELATIVE to the https base (it will just 404) -- '
+    + 'measured: new URL treats it as a path, so it is not a downgrade');
+  assert.equal(connect.redirectDowngrades('https://downloads.claude.ai/x', 'http://['), true,
+    'a target that cannot parse at all is refused, not followed');
+
+  // ⚠️ CONTROL that the rule is actually WIRED into the fetchers, not just
+  // exported: both call sites reference it by name.
+  const src = fs.readFileSync(nodePath.join(__dirname, 'connect.js'), 'utf8');
+  const wired = (src.match(/redirectDowngrades\(/g) || []).length;
+  assert.ok(wired >= 3, `redirectDowngrades is defined but wired into ${wired - 1} call sites`);
+});
+
+driverTest('every tmux target is pinned exact, so a near-name agent can never be hit', async () => {
+  /**
+   * ⚠️ tmux resolves `-t` by PREFIX when no exact session matches. After our
+   * session dies, an unpinned kill/capture/send aimed at `kosmos-connect`
+   * could land on an agent somebody named `kosmos-connect2` -- typing keys
+   * into a Claude running with permissions bypassed. `=` makes the target
+   * exact-or-nothing.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  connect.submitCode('abCD1234#efGH5678');
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
+
+  // Recorded from the seam: every -t across the whole flow, including kills.
+  // ⚠️ Two exact-match spellings, both required (measured on tmux 3.6a):
+  // session commands take `=name`; pane commands REFUSE it and need `=name:`
+  // -- the bare form on capture/send shipped once and the live check caught
+  // every capture failing while Claude sat there running.
+  const targets = term.all.filter((a) => a.includes('-t'))
+    .map((a) => [a[0], a[a.indexOf('-t') + 1]]);
+  assert.ok(targets.length >= 5, `expected a flow's worth of targeted commands, saw ${targets.length}`);
+  for (const [cmd, t] of targets) {
+    if (cmd === 'kill-session') {
+      assert.equal(t, '=' + connect.SESSION, `an unpinned session target went out: ${cmd} ${t}`);
+    } else {
+      assert.equal(t, '=' + connect.SESSION + ':', `a pane command without the colon form went out: ${cmd} ${t}`);
+    }
+  }
+  // And session CREATION uses the bare name (a -s arg is a name, not a target).
+  const made = term.all.find((a) => a[0] === 'new-session');
+  assert.equal(made[made.indexOf('-s') + 1], connect.SESSION);
+});
+
+test('the connect session name is reserved: no agent can be created with it', () => {
+  const create = require('./create');
+  assert.match(String(create.nameProblem('kosmos-connect')), /reserved/,
+    'create accepts the sign-in session name, so an agent and the driver would share a pane');
+  // Control: a NEAR name stays allowed -- exact-match pins make it safe, and
+  // over-reserving would refuse names people legitimately want.
+  assert.equal(create.nameProblem('kosmos-connect2'), null);
+});
+
+driverTest('a stale failure cannot tear down the fresh flow that replaced it', async () => {
+  /**
+   * ⚠️ THE REPLACED CASE, which `!driver` cannot see: flow A parks on a
+   * capture, cancel runs, flow B starts, and THEN A's aborted capture fails.
+   * Existence says "a driver is there"; only identity knows it is not A's.
+   */
+  const term = fakeTerminal();
+  let releaseA = null;
+  let captures = 0;
+  const gate = new Promise((r) => { releaseA = r; });
+  const baseRunner = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane') {
+      captures += 1;
+      if (captures === 1) return gate.then(() => ({ ok: false, stdout: '', stderr: 'no server running' }));
+    }
+    return baseRunner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();                       // flow A; its first capture parks
+  await new Promise((r) => setTimeout(r, 40));
+  await connect.cancel();
+  await connect.start();                       // flow B, healthy
+  await until(() => {
+    const p = connect.state().phase;
+    return p !== connect.PHASE.IDLE && p !== connect.PHASE.STUCK;
+  });
+  releaseA();                                  // A's aborted capture now fails
+  await new Promise((r) => setTimeout(r, 120));
+  const st = connect.state();
+  assert.notEqual(st.phase, connect.PHASE.STUCK,
+    'flow A\'s corpse wrote STUCK over flow B: ' + JSON.stringify(st));
+});
+
+driverTest('a recognised screen that never advances becomes stuck, not eternal progress', async () => {
+  /**
+   * ⚠️ THE THIRD HANG SHAPE: unknown screens and blank panes had bounds, but
+   * a theme screen we pressed Enter on that keeps sitting there had none --
+   * "Getting the sign-in ready" forever over a wedged CLI. Bound derived
+   * from the same grace knob the others use (6x).
+   */
+  const term = fakeTerminal();
+  const advance = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    const r = advance(file, args);
+    term.screen = SCREEN_THEME;   // whatever was pressed, the CLI never moves
+    return r;
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /not moving past/,
+    'the wedge went stuck for the wrong reason: ' + connect.state().because);
+});
+
+driverTest('a pane that stays blank forever becomes stuck, not eternal progress', async () => {
+  /**
+   * ⚠️ The never-drawing screen used to get ETERNITY while the unrecognised
+   * screen got 10 seconds -- "Getting the sign-in ready" painted forever over
+   * a hung Claude. The blank grace is 4.5x the unknown grace (45s real),
+   * shrunk here through the same knob the unknown grace tests use.
+   */
+  const term = fakeTerminal();
+  term.screen = '';
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  // Well inside the grace: a briefly blank pane is NOT a failure.
+  await new Promise((r) => setTimeout(r, 300));
+  assert.notEqual(connect.state().phase, connect.PHASE.STUCK,
+    'a briefly blank pane was treated as a failure');
+
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /never drew/,
+    'the blank hang went stuck for the wrong reason: ' + connect.state().because);
+});
+
+test('a version answer that tries to steer the file path is refused', async (t) => {
+  const server = http.createServer((req, res) => {
+    const body = Buffer.from('9.9.9/../../escape');
+    res.writeHead(200, { 'content-length': body.length });
+    res.end(body);
+  });
+  await new Promise((r) => { server.listen(0, '127.0.0.1', r); });
+  t.after(() => server.close());
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+  await assert.rejects(() => connect.download(), /did not answer with a version/,
+    'a path-traversal version string was accepted into the download path');
+});
+
+driverTest('a partial redraw cannot walk the phase backwards from the paste prompt', async () => {
+  /**
+   * ⚠️ The paste screen contains the "Use the url below" line too, so a
+   * capture landing mid-repaint (prompt line not yet drawn) classifies as
+   * browser-open. The unguarded version regressed the phase -- rebuilding
+   * the panel under the person's typing, and (worse) bypassing the one arm
+   * that resets the typed-code guard, so a later code was accepted but never
+   * typed: a livelock only Cancel escaped.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // The mid-repaint frame: browser-open text, no paste prompt.
+  term.screen = SCREEN_SPINNER;
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(connect.state().phase, connect.PHASE.SIGNIN_AWAITING_CODE,
+    'a partial redraw regressed the phase from the paste prompt');
+
+  // The full screen returns, and a code still works end to end.
+  term.screen = SCREEN_PASTE;
+  const put = connect.submitCode('abCD1234#efGH5678');
+  assert.equal(put.ok, true, put.because);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
+});
+
+driverTest('a persistently failing capture earns "window closed"; a blip does not', async () => {
+  /**
+   * ⚠️ `!cap.ok` also covers a spawn failure on a loaded machine and the
+   * exec timeout -- declaring "the sign-in window closed" off ONE transient
+   * error was a settled sentence about a state nobody verified. A session
+   * that is truly gone keeps failing; the short run of failures earns the
+   * sentence honestly. Both halves pinned here.
+   */
+  const term = fakeTerminal();
+  let failCaptures = false;
+  const base = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane' && failCaptures) {
+      return { ok: false, stdout: '', stderr: "can't find pane: =kosmos-connect:" };
+    }
+    return base(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // One blip's worth of failures must NOT close the flow.
+  failCaptures = true;
+  await new Promise((r) => setTimeout(r, 120));
+  assert.notEqual(connect.state().phase, connect.PHASE.STUCK,
+    'a transient capture failure was declared a closed window');
+
+  // Persistent failure earns the sentence (threshold ~3s wall-clock).
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /window closed/,
+    'persistent capture failure went stuck for the wrong reason: ' + connect.state().because);
+});
+
+driverTest('a code is refused while nothing is asking for one', async () => {
+  const refusedCold = connect.submitCode('abCD1234#efGH5678');
+  assert.equal(refusedCold.ok, false);
+  assert.match(refusedCold.because, /not running/);
+
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  // Still on the theme screen: the terminal is not asking for a code.
+  const refusedEarly = connect.submitCode('abCD1234#efGH5678');
+  assert.equal(refusedEarly.ok, false);
+  assert.match(refusedEarly.because, /not asking/);
+  assert.equal(refusedEarly.kind, 'state', 'the route needs the refusal KIND to pick 409 vs 400');
+
+  // And the format refusal carries its own kind, at the moment the terminal
+  // IS asking -- the case the route maps to 400.
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+  const badFormat = connect.submitCode('nope;`$(x)`');
+  assert.equal(badFormat.ok, false);
+  assert.equal(badFormat.kind, 'format');
+});
+
+driverTest('a screen nobody recognises becomes stuck, with the screen attached', async () => {
+  const term = fakeTerminal();
+  term.screen = 'A WHOLE NEW ONBOARDING\nnothing here matches any recogniser';
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 5000);
+  const st = connect.state();
+  assert.match(st.because, /do not recognise/);
+  assert.match(st.tail, /WHOLE NEW ONBOARDING/, 'the pane content is not carried, so nobody can see what happened');
+  assert.ok(term.killed >= 1, 'the session was left running after getting stuck');
+});
+
+driverTest('already connected means connected, without touching anything', async () => {
+  writeClaudeConfig(CONNECTED_CONFIG);
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+
+  const st = await connect.start();
+  assert.equal(st.phase, connect.PHASE.CONNECTED);
+  assert.equal(term.made, 0, 'a sign-in session was opened for somebody already signed in');
+});
+
+driverTest('cancel stops the flow and reports idle', async () => {
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase !== connect.PHASE.IDLE);
+
+  const st = await connect.cancel();
+  assert.equal(st.phase, connect.PHASE.IDLE);
+  assert.ok(term.killed >= 1, 'cancel did not close the sign-in window');
+});
+
+/* ── interruption ────────────────────────────────────────────────────────── */
+
+test('a mid-flight record from a dead process reads as interrupted, not as progress', () => {
+  connect.resetForTests();
+  const file = connect.STATE_FILE();
+  fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    phase: connect.PHASE.DOWNLOADING,
+    progress: { got: 12345, total: 99999 },
+    pid: 999999999,
+    updatedAt: new Date().toISOString(),
+  }));
+
+  const st = connect.state();
+  assert.equal(st.phase, connect.PHASE.INTERRUPTED,
+    'a progress bar nobody is moving would have been shown');
+  assert.equal(st.before, connect.PHASE.DOWNLOADING);
+  fs.rmSync(file, { force: true });
+});

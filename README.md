@@ -51,6 +51,35 @@ could stop the wrong thing. The screen says so where the Remove control would
 otherwise be. Every agent Kosmos made, and every one another tool set up
 properly, is removable; a card the board cannot vouch for is not.
 
+**It can also connect Claude.** On first-run step 3, if no subscription is
+connected, one click downloads Claude Code (checksum-verified before anything
+is executed, with a real progress bar from real bytes), installs it with no
+sudo and no Homebrew, and drives the sign-in: the browser opens, the person
+signs in, and if Claude hands them a code there is a box here to paste it into.
+The finish line is the settings file actually saying `connected` — never a
+sentence scraped off a terminal. A screen the driver does not recognise is
+reported as "we could not finish", with what the terminal actually said shown,
+and the manual path (open Terminal, type `claude`) always offered.
+
+⚠️ **What that flow has NOT proven yet:** the final hop — pasting a real code
+and watching credentials land — has only run against a scripted fake, because
+completing it for real means signing an agent's machine into a live account.
+`docs/browser-checks/live-connect.js` proves everything up to the paste prompt
+against the real CLI; the last step belongs to the first walkthrough on a
+machine that is not this one.
+
+While a sign-in is in flight there is a real tmux session called
+`kosmos-connect` running Claude, so the Agents tab may briefly show it as a
+card the board cannot vouch for. That is the board honestly reporting what is
+running; the card leaves when the sign-in finishes. A sign-in nobody finishes
+does not leave on its own: walking away mid-flow ("Continue anyway") keeps the
+window open, and the way to end it is back on setup step 3 (Cancel), or
+`tmux kill-session -t "=kosmos-connect"` from Terminal. The name is reserved
+(you cannot create an agent called `kosmos-connect`), and every command the
+flow sends is pinned to the exact session name. The reservation also means the flow
+treats any session with that exact name as its own: a `tmux new -s
+kosmos-connect` you opened by hand will be closed when a connect starts.
+
 It cannot message an agent yet.
 
 ⚠️ **If you need to remove one by hand** — because it was made before this
@@ -103,7 +132,9 @@ machine. Measured against this server, not theorised.
 
 If you genuinely want to reach this from somewhere else, name that host in
 `AGENT_WORKFORCE_ALLOWED_HOSTS`, and understand that anyone who reaches that URL
-can rewrite the file any of your agents boots from, and make new ones.
+can rewrite the file any of your agents boots from, make new ones, and make
+this machine download and execute Claude and drive a sign-in
+(`POST /api/connect/start`).
 
     node server.js      # then open http://127.0.0.1:4317
 
