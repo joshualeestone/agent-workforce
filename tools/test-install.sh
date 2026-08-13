@@ -388,7 +388,7 @@ else
   RC=0; cat "$SETUP" | HOME="$SBH17" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_DEEP" sh > "$SB/deep.log" 2>&1 || RC=$?
   chk "deep-locked reinstall exits 0" "[ $RC -eq 0 ]"
   chk "the visible slot holds a complete bundle" "[ -x \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\" ]"
-  chk "the new bundle is provably ours" "grep -q \":-$SB/home19}\\\"\" \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\""
+  chk "the new bundle is provably ours" "grep -qF \":-$SB/home19}\\\"\" \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\""
   chk "the locked aside is named at install time" "grep -q 'could not remove the leftover hidden folder' \"$SB/deep.log\""
   "$SB/bin19/kosmos" stop > /dev/null 2>&1 || true
   # ⚠️ The lock STAYS for the uninstall. The first version of this pass
@@ -551,6 +551,7 @@ export KOSMOS_HOME="$SB/home15" KOSMOS_BIN_DIR="$SB/bin15"
 RC=0; cat "$SETUP" | HOME="$SBH13" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_F2" sh > "$SB/unknown-skip.log" 2>&1 || RC=$?
 chk "unknown-skip install exits 0" "[ $RC -eq 0 ]"
 chk "unknown-skip speaks its own sentence" "grep -q 'could not be checked, so no icon was created' \"$SB/unknown-skip.log\""
+chk "unknown-skip does not claim the same-folder cause" "! grep -q 'is the same folder' \"$SB/unknown-skip.log\""
 chk "the second stranger is untouched" "grep -q 'stranger2' \"$SYS_F2/Kosmos.app/Contents/MacOS/Kosmos\""
 "$SB/bin15/kosmos" stop > /dev/null 2>&1 || true
 
@@ -640,6 +641,14 @@ RC=0; KOSMOS_HOME="$SB/evil}brace" sh < "$SETUP" > "$SB/guard2.log" 2>&1 || RC=$
 chk "a closing brace in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard2.log\""
 RC=0; KOSMOS_HOME="$(printf '%s\n%s' "$SB/evil" "line")" sh < "$SETUP" > "$SB/guard3.log" 2>&1 || RC=$?
 chk "a newline in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard3.log\""
+
+echo "== the production open default is real =="
+# Every observing pass substitutes the recording stub, and command -v
+# silently no-ops on an unresolvable value, so a typo in the default
+# would disable the branch's headline behavior on every real install
+# while the suite stayed green. Pin the literal and the binary.
+chk "the served file defaults to /usr/bin/open" "grep -q 'KOSMOS_OPEN_CMD:-/usr/bin/open' \"$SETUP\""
+chk "/usr/bin/open exists on this machine" "[ -x /usr/bin/open ]"
 
 echo "== the open gate's sandbox belt, and a file-shadowed Applications =="
 # The [ -z KOSMOS_APP_DIR ] clause in the open gate: a fresh sandboxed
