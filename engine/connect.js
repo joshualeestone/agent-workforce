@@ -490,9 +490,12 @@ function classifyPane(text) {
   if (/Opening browser to sign in|Use the url below to sign in/i.test(t)) {
     return { kind: 'browser-open', url: extractOauthUrl(t) };
   }
+  // press-enter outranks the choosing screens: it is the later state when
+  // both share an accumulated pane, and its arm runs the subscription check
+  // the choosing arms deliberately skip.
+  if (/Press Enter to continue/i.test(t)) return { kind: 'press-enter' };
   if (/Select login method/i.test(t)) return { kind: 'login-method' };
   if (/Choose the text style/i.test(t)) return { kind: 'theme' };
-  if (/Press Enter to continue/i.test(t)) return { kind: 'press-enter' };
   if (!t.trim()) return { kind: 'blank' };
   return { kind: 'unknown', tail: tailOf(t) };
 }
@@ -1120,11 +1123,11 @@ async function tickBody(owner) {
         // the like). Walk it forward so the NEXT run of claude -- an agent's
         // first start -- does not begin at a screen nobody is watching.
         if (asksEnter && owner.acted !== sig) {
-        if ((owner.kindActions || 0) >= 20) {
-          becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
-          return;
-        }
-        owner.kindActions = (owner.kindActions || 0) + 1;
+          if ((owner.kindActions || 0) >= 20) {
+            becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
+            return;
+          }
+          owner.kindActions = (owner.kindActions || 0) + 1;
           owner.acted = sig;
           await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
           return;

@@ -4800,7 +4800,12 @@ function frPaintConnect(st) {
       + '<button class="btn" id="fr-conn-code-go" type="button">Use code</button>'
       + '</div>';
     document.getElementById('fr-conn-code-go').onclick = frConnSubmitCode;
-    document.getElementById('fr-conn-code').onkeydown = (e) => { if (e.key === 'Enter') frConnSubmitCode(); };
+    document.getElementById('fr-conn-code').onkeydown = (e) => {
+      // Same in-flight guard as the button: a second Enter after the first
+      // code was typed earns a 409 that stomps the "Code sent." receipt.
+      const go = document.getElementById('fr-conn-code-go');
+      if (e.key === 'Enter' && !(go && go.disabled)) frConnSubmitCode();
+    };
     frConnPaintUrl(st && st.url);
     frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
     return;
