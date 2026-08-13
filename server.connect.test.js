@@ -349,6 +349,9 @@ function connectHarness(st) {
   const realProgress = pageFunction('frConnPaintProgress',
     'const frMB = ' + realMB.toString() + ';\n'
     + 'const document = { getElementById: () => null };');
+  const realPaintUrl = pageFunction('frConnPaintUrl',
+    'const esc = ' + realEsc.toString() + ';\n'
+    + 'const document = { getElementById: () => null };');
 
   const prelude = `
     const esc = ${realEsc.toString()};
@@ -361,6 +364,7 @@ function connectHarness(st) {
     const __els = {};
     const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '', style: {}, onclick: null, onkeydown: null }) };
     const frConnPaintProgress = ${realProgress.toString()};
+    const frConnPaintUrl = ${realPaintUrl.toString()};
     let __actions = null;
     function frActions(primary, alt) { __actions = { primary: primary.label, alt: alt && alt.label }; }
     function frGo() {}
@@ -419,10 +423,29 @@ test('the sign-in URL lands in the href escaped', () => {
     phase: 'signin-awaiting-code',
     url: 'https://claude.com/oauth?a=1&state="><script>x</script>',
   });
-  const out = els['fr-sub'].innerHTML;
+  // The link lives in its own in-place-updatable container now.
+  const out = els['fr-conn-url'].innerHTML;
   assert.ok(out.includes('href="https://claude.com/oauth?a=1&amp;state=&quot;&gt;'),
     'the URL was not escaped into the href');
   assert.ok(!out.includes('"><script>'), 'the URL broke out of its attribute');
+});
+
+test('a URL that arrives after the phase painted still surfaces, without a rebuild', () => {
+  /**
+   * ⚠️ The terminal prints the URL a capture-tick after the paste prompt
+   * sometimes; the engine writes it late for exactly that case, and the
+   * page's repaint key deliberately ignores it (a rebuild would empty the
+   * code input mid-typing). The targeted updater is what reconciles the two:
+   * link appears, panel untouched.
+   */
+  const h = connectHarness({ phase: 'signin-awaiting-code', url: null });
+  assert.equal(h.els['fr-conn-url'].innerHTML, '', 'a link rendered before any URL existed');
+  h.els['fr-sub'].innerHTML = 'SENTINEL: unchanged means untouched';
+  h.paint({ phase: 'signin-awaiting-code', url: 'https://claude.com/oauth?late=1' });
+  assert.ok(h.els['fr-conn-url'].innerHTML.includes('href="https://claude.com/oauth?late=1"'),
+    'the late URL never surfaced; the fallback link is missing for the whole phase');
+  assert.equal(h.els['fr-sub'].innerHTML, 'SENTINEL: unchanged means untouched',
+    'the late URL rebuilt the panel, which empties the code input mid-typing');
 });
 
 test('a repaint on the same phase does not rebuild the screen under the person', () => {

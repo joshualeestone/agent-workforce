@@ -239,6 +239,12 @@ function foreignLiveFlow(disk) {
 }
 
 function state() {
+  /**
+   * A terminal local verdict (STUCK/CONNECTED in mem) outranks the disk on
+   * purpose -- it is this server's own answer -- which also means a foreign
+   * flow is only surfaced while WE are idle. Accepted asymmetry: the next
+   * start() click consults the disk and repaints reality either way.
+   */
   if (mem.phase !== PHASE.IDLE) return publicView(mem);
   /**
    * ⚠️ The disk check runs whenever WE are idle, including after a local
@@ -670,7 +676,11 @@ async function runFlow(owner, haveBinary) {
       // Cancelled (or replaced), but the download had already finished: a
       // verified 281MB binary is on disk for a flow nobody wants. Cancel's
       // contract is "own nothing half-claimed", and this is the window its
-      // cleanup cannot see.
+      // cleanup cannot see. (Residual, documented as accepted like cancel's
+      // killSession: this unlinks BY PATH, and a successor downloading the
+      // same version renames to the identical path -- a stale unlink landing
+      // after that rename costs the successor an honest re-download, never
+      // silent corruption.)
       try { fs.unlinkSync(downloaded.path); } catch { /* already gone */ }
       return;
     }

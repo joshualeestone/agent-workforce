@@ -4656,6 +4656,11 @@ function frPaintConnect(st) {
   const paintKey = phase + '|' + ((st && st.because) || '');
   if (paintKey === FR_CONN_LAST) {
     if (phase === 'downloading') frConnPaintProgress(st.progress);
+    // ⚠️ The URL can arrive a capture-tick AFTER the phase painted (the
+    // engine writes it late for exactly that case), and a full rebuild here
+    // would empty the code input mid-typing -- so the link gets its own
+    // targeted updater, like the progress numbers.
+    frConnPaintUrl(st && st.url);
     return;
   }
   FR_CONN_LAST = paintKey;
@@ -4667,10 +4672,9 @@ function frPaintConnect(st) {
     say.textContent = FR_CONN_SAY[phase];
   }
 
-  const urlLine = st && st.url
-    ? '<div class="fr-cdetail">Browser did not open? '
-      + '<a href="' + esc(st.url) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>'
-    : '';
+  // Always a container, filled by frConnPaintUrl -- the one element that can
+  // change inside a phase without the panel rebuilding.
+  const urlLine = '<div id="fr-conn-url"></div>';
 
   if (phase === 'downloading') {
     box.innerHTML = '<div class="fr-ctitle">Downloading Claude&#8230;</div>'
@@ -4700,6 +4704,7 @@ function frPaintConnect(st) {
         ? 'Checking the connection. This screen will change on its own.'
         : 'Sign in to Claude there. This screen will notice when it is done.')
       + '</div>' + urlLine;
+    frConnPaintUrl(st && st.url);
     frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
     return;
   }
@@ -4718,6 +4723,7 @@ function frPaintConnect(st) {
       + '</div>';
     document.getElementById('fr-conn-code-go').onclick = frConnSubmitCode;
     document.getElementById('fr-conn-code').onkeydown = (e) => { if (e.key === 'Enter') frConnSubmitCode(); };
+    frConnPaintUrl(st && st.url);
     frActions({ label: 'Continue anyway', go: () => frGo(4) }, { label: 'Cancel', go: frConnCancel });
     return;
   }
@@ -4767,6 +4773,20 @@ function frConnBefore(phase) {
     downloading: 'downloading Claude',
     installing: 'setting Claude up',
   }[phase] || 'signing in';
+}
+
+/**
+ * The fallback sign-in link, updated in place: the panel must not rebuild
+ * (that empties the code input mid-typing), but the URL is honestly late
+ * sometimes -- the terminal prints it a capture-tick after the prompt.
+ */
+function frConnPaintUrl(url) {
+  const box = document.getElementById('fr-conn-url');
+  if (!box) return;
+  if (!url) { if (box.innerHTML) box.innerHTML = ''; return; }
+  const want = '<div class="fr-cdetail">Browser did not open? '
+    + '<a href="' + esc(url) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>';
+  if (box.innerHTML !== want) box.innerHTML = want;
 }
 
 function frConnPaintProgress(progress) {
