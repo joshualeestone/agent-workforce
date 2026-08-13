@@ -19,13 +19,21 @@ Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 and the AgentWorkforce store (profiles, avatars, commitments): user work
 and records about it stay; the app and its plumbing go.
 Apple silicon, macOS 13.5+ (gated in a sentence, and the builders refuse
-to pack a release artifact above that floor; note the tmux bundle still
-needs re-sourcing against the floor before a release build can pack at
-all, which is tracked in the branch plan).
+to pack a release artifact above that floor).
 
-Release artifacts are produced by `tools/build-tmux-bundle.sh` and
-`tools/build-kosmos-bundle.sh` (each emits its tarball plus the `.sha256`
-the installer requires) and published under chaoskosmos.com/dist.
+Release artifacts are produced in two steps on a build machine with the
+Xcode command line tools: `tools/build-tmux-from-source.sh <out>` first
+(downloads ~15MB of pinned, checksum-verified sources and compiles tmux
+plus its three libraries against the floor in tools/macos-floor, several
+minutes; a Homebrew-copied tmux inherits the build machine's macOS as its
+minimum and the gate refuses it; version bumps go through
+KOSMOS_TRUST_FIRST_FETCH=1, see the script header), then
+`TMUX_SOURCE=<out>/tmux-floor-prefix/bin/tmux tools/build-tmux-bundle.sh`
+and `tools/build-kosmos-bundle.sh` (each emits its tarball plus the
+`.sha256` the installer requires, the tmux one carrying the harvested
+upstream licences and dependency versions), published under
+chaoskosmos.com/dist. Named debt before first publish: a minos stamp is a
+promise, not a run; one real macOS 13.x boot should run the tarball.
 
 ## Status: Phase 1
 

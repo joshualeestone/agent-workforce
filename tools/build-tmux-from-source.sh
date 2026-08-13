@@ -1,0 +1,306 @@
+#!/bin/bash
+# Build tmux and its three dylibs FROM SOURCE against the macOS deployment
+# floor, so the bundle we ship can actually load on the Macs we promise.
+#
+# ⚠️ WHY THIS EXISTS. A binary copied off a build machine inherits that
+# machine's OS as its minimum: the Homebrew tmux on this Mac stamps
+# minos 26.0 (measured with otool), and dyld refuses to load a dylib built
+# for a newer OS than the host -- so a bundle made from it works on the
+# build machine and on NOTHING in the supported range. The floor gate in
+# tools/lib/floor-gate.sh refuses to pack such a bundle for release; this
+# script is what produces one it will accept. MACOSX_DEPLOYMENT_TARGET at
+# compile time is what stamps the floor into every artifact.
+#
+# ⚠️ THE FLOOR COMES FROM tools/macos-floor, the same single source the
+# gates read, so this builder cannot drift from what the installer promises.
+#
+# ⚠️ SOURCES ARE PINNED BY VERSION AND CHECKSUM. The four tarballs come
+# from the projects' own release URLs, and each download is verified
+# against the SHA-256 recorded below before anything is compiled. To bump
+# a version: change the version, run with KOSMOS_TRUST_FIRST_FETCH=1 once
+# (it prints the measured hash and refuses to finish), record the printed
+# hash here, run clean. A release build never runs on an unrecorded hash.
+# ⚠️ HONEST LIMIT: the recorded hashes are trust-on-first-use, measured by
+# this script from an https fetch (downgrade-proof via --proto), not
+# cross-checked against upstream signatures. Cross-checking against the
+# projects' published signatures/hashes is the upgrade, on the release
+# security list beside artifact signing.
+#
+# Output: a self-contained prefix at <out>/tmux-floor-prefix whose
+# bin/tmux links the three freshly built dylibs. Feed it to the bundler:
+#
+#   TMUX_SOURCE=<out>/tmux-floor-prefix/bin/tmux tools/build-tmux-bundle.sh <out>
+#
+# The bundler's collect() picks up the prefix dylibs, rewrites their load
+# paths, re-signs, and the floor gate certifies the result -- with no
+# KOSMOS_ALLOW_MINOS override, which is the whole point.
+
+set -euo pipefail
+
+TMUX_VERSION="3.5a"
+LIBEVENT_VERSION="2.1.12-stable"
+NCURSES_VERSION="6.5"
+UTF8PROC_VERSION="2.9.0"
+
+# sha256 of each release tarball. Empty means not yet recorded: the script
+# refuses to build it without KOSMOS_TRUST_FIRST_FETCH=1, and even then it
+# stops after printing the measured hashes so they can be recorded here.
+TMUX_SHA="16216bd0877170dfcc64157085ba9013610b12b082548c7c9542cc0103198951"
+LIBEVENT_SHA="92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
+NCURSES_SHA="136d91bc269a9a5785e5f9e980bc76ab57428f604ce3e5a5a90cebc767971cc6"
+UTF8PROC_SHA="bd215d04313b5bc42c1abedbcb0a6574667e31acee1085543a232204e36384c4"
+
+TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
+LIBEVENT_URL="https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz"
+NCURSES_URL="https://invisible-island.net/archives/ncurses/ncurses-${NCURSES_VERSION}.tar.gz"
+UTF8PROC_URL="https://github.com/JuliaStrings/utf8proc/releases/download/v${UTF8PROC_VERSION}/utf8proc-${UTF8PROC_VERSION}.tar.gz"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLOOR="$(cat "$HERE/macos-floor")"
+export MACOSX_DEPLOYMENT_TARGET="$FLOOR"
+
+OUT="${1:-dist}"
+mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
+PREFIX="$OUT/tmux-floor-prefix"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# Refuse in a sentence, not a 20-line configure log, when the toolchain is
+# absent (this is a BUILD-machine script; the user path never needs one).
+for t in cc make; do
+  command -v "$t" >/dev/null 2>&1 || {
+    echo "FAIL: '$t' is not available. Install the Xcode command line tools (xcode-select --install) and re-run." >&2
+    exit 1
+  }
+done
+
+echo "==> building for macOS $FLOOR (MACOSX_DEPLOYMENT_TARGET)"
+
+TRUST_LINES=""
+fetch() {
+  # Two statements, not one: bash does not make $name visible to later
+  # assignments in the SAME local statement under set -u (the exact trap
+  # install/setup.sh's make_app comment records, walked into again here).
+  local name="$1" url="$2" want="$3" got
+  local file="$WORK/$name.tar.gz"
+  echo "==> fetching $name from $url"
+  curl -fL --proto '=https' --proto-redir '=https' --progress-bar "$url" -o "$file"
+  got="$(shasum -a 256 "$file" | awk '{print $1}')"
+  if [ -z "$want" ]; then
+    if [ -n "${KOSMOS_TRUST_FIRST_FETCH:-}" ]; then
+      TRUST_LINES="$TRUST_LINES
+  $name: $got"
+      return 0
+    fi
+    echo "FAIL: no recorded checksum for $name. Run once with KOSMOS_TRUST_FIRST_FETCH=1 to measure, then record the printed hash in this script." >&2
+    exit 1
+  fi
+  if [ "$want" != "$got" ]; then
+    echo "FAIL: checksum mismatch for $name" >&2
+    echo "  want $want" >&2
+    echo "  got  $got" >&2
+    exit 1
+  fi
+  echo "    checksum ok"
+}
+
+fetch tmux     "$TMUX_URL"     "$TMUX_SHA"
+fetch libevent "$LIBEVENT_URL" "$LIBEVENT_SHA"
+fetch ncurses  "$NCURSES_URL"  "$NCURSES_SHA"
+fetch utf8proc "$UTF8PROC_URL" "$UTF8PROC_SHA"
+
+if [ -n "${KOSMOS_TRUST_FIRST_FETCH:-}" ]; then
+  echo ""
+  if [ -z "$TRUST_LINES" ]; then
+    echo "All hashes are already recorded; nothing to measure. Run without the flag."
+    exit 1
+  fi
+  echo "Measured hashes -- record these in $(basename "$0") and re-run clean:"
+  echo "$TRUST_LINES"
+  echo ""
+  echo "Refusing to build from unverified sources. (That is the point of the flag.)"
+  exit 1
+fi
+
+rm -rf "$PREFIX"
+mkdir -p "$PREFIX"
+NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
+unpack() { tar -xzf "$WORK/$1.tar.gz" -C "$WORK"; }
+
+echo "==> libevent $LIBEVENT_VERSION (core only)"
+# ⚠️ CORE ONLY, HAND-INSTALLED, and both halves are measured facts. The
+# 2.1.12 tree's libevent_extra and libevent_pthreads fail to LINK under
+# this toolchain (undefined _evutil_* for arm64), and tmux links exactly
+# libevent_core -- so the failing libraries are ones we must not ship
+# anyway. `make libevent_core.la` needs the generated config header first
+# (a plain `make` orders that via BUILT_SOURCES; a targeted make does not).
+# The dylib's install_name already points at $PREFIX/lib from libtool, so
+# the hand-install is a copy, not a relink.
+unpack libevent
+( cd "$WORK/libevent-$LIBEVENT_VERSION" \
+  && ./configure --prefix="$PREFIX" --disable-openssl --disable-static --quiet \
+  && make include/event2/event-config.h \
+  && make libevent_core.la \
+  && mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" \
+  && cp -RP .libs/libevent_core*.dylib "$PREFIX/lib/" \
+  && cp -R include/. "$PREFIX/include/" \
+  && cp libevent_core.pc "$PREFIX/lib/pkgconfig/" ) > "$WORK/libevent.log" 2>&1 \
+  || { echo "FAIL: libevent build. Log tail:"; tail -20 "$WORK/libevent.log"; exit 1; }
+
+echo "==> ncurses $NCURSES_VERSION (wide, shared, system terminfo)"
+# ⚠️ THE COMPILED-IN TERMINFO PATH IS THE SYSTEM ONE, ON PURPOSE. The
+# Homebrew build's compiled-in Cellar path is exactly the trap the
+# installer pins TERMINFO_DIRS against; building with the macOS path baked
+# in removes the assumption instead of papering it (the pin stays as belt
+# and braces). And only libs+headers are installed: `make install` also
+# writes a terminfo DATABASE, whose install died on this filesystem (tic
+# failed writing an entry -- measured; the exact collision mechanism was
+# not established and does not matter here), and we must not ship a
+# database we tell the loader never to read.
+unpack ncurses
+( cd "$WORK/ncurses-$NCURSES_VERSION" \
+  && ./configure --prefix="$PREFIX" --with-shared --without-normal --without-debug \
+       --without-ada --without-cxx-binding --enable-widec --without-manpages \
+       --without-progs --without-tests --without-tack \
+       --with-default-terminfo-dir=/usr/share/terminfo \
+       --with-terminfo-dirs=/usr/share/terminfo \
+       --enable-pc-files --with-pkg-config-libdir="$PREFIX/lib/pkgconfig" \
+  && make -j"$NCPU" \
+  && make install.libs install.includes ) > "$WORK/ncurses.log" 2>&1 \
+  || { echo "FAIL: ncurses build. Log tail:"; tail -20 "$WORK/ncurses.log"; exit 1; }
+
+echo "==> utf8proc $UTF8PROC_VERSION"
+unpack utf8proc
+( cd "$WORK/utf8proc-$UTF8PROC_VERSION" \
+  && make -j"$NCPU" prefix="$PREFIX" \
+  && make prefix="$PREFIX" install ) > "$WORK/utf8proc.log" 2>&1 \
+  || { echo "FAIL: utf8proc build. Log tail:"; tail -20 "$WORK/utf8proc.log"; exit 1; }
+
+echo "==> tmux $TMUX_VERSION"
+unpack tmux
+# ⚠️ tmux MUST LINK THE ncursesw IT WAS COMPILED AGAINST. Without the
+# pkg-config pin, configure compiled against our 6.5 widec headers and
+# then linked /usr/lib/libncurses.5.4.dylib -- an ABI mismatch that
+# happened to pass tmux -V (measured on the first run of this script).
+# The verification below asserts the linkage, so this cannot regress
+# silently.
+( cd "$WORK/tmux-$TMUX_VERSION" \
+  && PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
+     CPPFLAGS="-I$PREFIX/include -I$PREFIX/include/ncursesw" \
+     LDFLAGS="-L$PREFIX/lib" \
+     LIBNCURSES_CFLAGS="-I$PREFIX/include/ncursesw" \
+     LIBNCURSES_LIBS="-L$PREFIX/lib -lncursesw" \
+     ./configure --prefix="$PREFIX" --enable-utf8proc --quiet \
+  && make -j"$NCPU" \
+  && make install ) > "$WORK/tmux.log" 2>&1 \
+  || { echo "FAIL: tmux build. Log tail:"; tail -30 "$WORK/tmux.log"; exit 1; }
+
+# ⚠️ VERIFY WHAT WAS JUST BUILT: it runs, and every artifact carries the
+# floor -- the same otool read the gates use, so a toolchain that ignored
+# the deployment target fails HERE, not on a customer's Mac.
+"$PREFIX/bin/tmux" -V >/dev/null || { echo "FAIL: built tmux does not run" >&2; exit 1; }
+echo "    $("$PREFIX/bin/tmux" -V) built"
+# ⚠️ Compile-against and link-against must be the same library, for ALL
+# THREE dependencies, not only the one that already bit us: the build
+# machine has Homebrew copies of each, and a silent wrong-library link
+# passed tmux -V once already (the ncurses incident recorded above).
+for lib in libncursesw libevent_core libutf8proc; do
+  if ! otool -L "$PREFIX/bin/tmux" | grep -qF "$PREFIX/lib/$lib"; then
+    echo "FAIL: tmux did not link the $lib it was compiled against:" >&2
+    otool -L "$PREFIX/bin/tmux" >&2
+    exit 1
+  fi
+done
+# ⚠️ A REAL SESSION THROUGH A PTY, NOT ONLY -V. tmux -V passed the
+# ABI-mismatched build, and a DETACHED new-session never attaches a client
+# so it never consults terminfo either (measured: a bogus TERM passes
+# detached, fails only under a pty). `script -q /dev/null` provides the
+# pty and TERM is pinned so the lookup is deterministic. An ISOLATED
+# socket, never the user's server. A minos stamp is a promise, not a run:
+# whether these artifacts LOAD on a real 13.x boot, and whether the needed
+# terminfo ENTRIES exist there, are the two halves of the clean-machine
+# debt named in the plan. (Baking /usr/share/terminfo removes the fallback
+# assumption; whether the needed ENTRIES exist there on a floor-age macOS
+# is what the clean-machine test still owes us -- there is no second
+# directory to fall back to now, on purpose.)
+# expect provides the pty (it ships in base macOS; `script -q` needs a
+# parent tty and fails headless -- measured). Paths travel as env vars so
+# spaces survive the -c string.
+_sock="$WORK/smoke-sock"
+export SMOKE_TMUX="$PREFIX/bin/tmux" SMOKE_SOCK="$_sock"
+if TERM=xterm-256color /usr/bin/expect -c 'spawn -noecho $env(SMOKE_TMUX) -S $env(SMOKE_SOCK) new-session -d -s floorsmoke; expect eof' > "$WORK/tmux-smoke.err" 2>&1 \
+   && "$PREFIX/bin/tmux" -S "$_sock" list-panes -a >/dev/null 2>&1; then
+  "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
+  echo "    a real session (pty-attached) starts, lists, and dies cleanly"
+else
+  "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
+  echo "FAIL: the built tmux cannot run a real session:" >&2
+  cat "$WORK/tmux-smoke.err" >&2
+  exit 1
+fi
+# ⚠️ THE CONTROL THAT PROVES THE INSTRUMENT SEES TERMINFO: a bogus TERM
+# must FAIL under the same pty. Without this, a smoke that silently
+# stopped consulting terminfo (the detached-session mistake this block
+# replaces) would keep passing while covering nothing.
+export SMOKE_SOCK="$WORK/smoke-sock-ctl"
+if TERM=kosmos-bogus-term-xyz /usr/bin/expect -c 'spawn -noecho $env(SMOKE_TMUX) -S $env(SMOKE_SOCK) new-session -d -s floorctl; expect eof' 2>/dev/null | grep -q "unsuitable terminal"; then
+  "$PREFIX/bin/tmux" -S "$WORK/smoke-sock-ctl" kill-server 2>/dev/null || true
+  echo "    control: a bogus TERM is refused, so the smoke genuinely consults terminfo"
+else
+  "$PREFIX/bin/tmux" -S "$WORK/smoke-sock-ctl" kill-server 2>/dev/null || true
+  echo "FAIL: the bogus-TERM control did not refuse; the session smoke is not consulting terminfo." >&2
+  exit 1
+fi
+# ⚠️ COUNTED PER LIBRARY, so the sweep cannot pass by finding nothing: an
+# aggregate threshold would still pass with a whole library missing (two
+# files per surviving library), which is the green-on-blind shape this
+# repo bans. Each glob must match at least one real Mach-O file.
+check_floor() {
+  local label="$1"; shift
+  local found=0 f minos
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    case "$f" in *.dylib) file -b "$f" | grep -q dynamically || continue ;; esac
+    minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
+    [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
+    echo "    $(basename "$f"): minos $minos"
+    [ "$minos" = "$FLOOR" ] || { echo "FAIL: $(basename "$f") stamped $minos, wanted $FLOOR" >&2; exit 1; }
+    found=$((found + 1))
+  done
+  [ "$found" -ge 1 ] || { echo "FAIL: no $label artifact found to check; it is missing from the prefix." >&2; exit 1; }
+}
+check_floor "tmux"     "$PREFIX/bin/tmux"
+check_floor "libevent" "$PREFIX"/lib/libevent_core*.dylib
+check_floor "ncurses"  "$PREFIX"/lib/libncursesw*.dylib
+check_floor "utf8proc" "$PREFIX"/lib/libutf8proc*.dylib
+
+# ⚠️ LICENCES HARVESTED FROM THE PINNED SOURCES THEMSELVES, so the shipped
+# notices are the upstream text of the exact versions built, not a
+# hand-typed approximation (the hand-typed file missed libevent's
+# arc4random ISC block and utf8proc's Unicode data licence). The bundler
+# ships these verbatim when present. BUILD-INFO records the four versions
+# a CVE response needs to map a bundle to affected code.
+mkdir -p "$PREFIX/share/kosmos-licenses"
+cp "$WORK/libevent-$LIBEVENT_VERSION/LICENSE" "$PREFIX/share/kosmos-licenses/libevent-$LIBEVENT_VERSION.txt"
+cp "$WORK/ncurses-$NCURSES_VERSION/COPYING" "$PREFIX/share/kosmos-licenses/ncurses-$NCURSES_VERSION.txt"
+cp "$WORK/utf8proc-$UTF8PROC_VERSION/LICENSE.md" "$PREFIX/share/kosmos-licenses/utf8proc-$UTF8PROC_VERSION.txt"
+if [ -f "$WORK/tmux-$TMUX_VERSION/COPYING" ]; then
+  cp "$WORK/tmux-$TMUX_VERSION/COPYING" "$PREFIX/share/kosmos-licenses/tmux-$TMUX_VERSION.txt"
+else
+  # tmux carries per-file ISC headers rather than a top-level licence file
+  # in some releases; the hand-typed ISC notice in third-party-notices.txt
+  # remains the fallback the bundler uses.
+  echo "    (tmux tarball has no COPYING; bundler falls back to the typed ISC notice)"
+fi
+{
+  echo "tmux-src: $TMUX_VERSION"
+  echo "libevent: $LIBEVENT_VERSION (core only)"
+  echo "ncurses:  $NCURSES_VERSION"
+  echo "utf8proc: $UTF8PROC_VERSION"
+  echo "floor:    $FLOOR"
+} > "$PREFIX/BUILD-INFO"
+
+echo "==> ok: floor-targeted prefix at $PREFIX"
+echo "    next: TMUX_SOURCE=$PREFIX/bin/tmux tools/build-tmux-bundle.sh $OUT"
