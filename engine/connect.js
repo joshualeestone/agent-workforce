@@ -226,6 +226,9 @@ function setFreshnessForTests(boundMs, heartbeatMs) {
 
 function foreignLiveFlow(disk) {
   if (!disk || !ACTIVE_PHASES.includes(disk.phase) || disk.pid === process.pid) return false;
+  // A hand-edited record carrying pid 0 or a negative pid would probe the
+  // whole process GROUP and answer "alive"; only a real positive pid counts.
+  if (!Number.isInteger(disk.pid) || disk.pid <= 0) return false;
   let alive = false;
   try { process.kill(disk.pid, 0); alive = true; }
   catch (err) { alive = Boolean(err && err.code === 'EPERM'); }
@@ -821,6 +824,19 @@ async function tickBody(owner) {
     // capture can land mid-paint. ~10s of never recognising anything is a
     // different fact, and it is reported rather than waited out forever.
     if (driver.unknownTicks > Math.max(3, Math.ceil(UNKNOWN_GRACE_MS / TICK_MS))) {
+      /**
+       * ⚠️ THE CONFIG OUTRANKS THE SCREEN IN BOTH DIRECTIONS. A future CLI
+       * whose post-login wording drifts from our recognisers classifies as
+       * unknown -- and without this check, a login that actually LANDED was
+       * reported "we could not finish" while the settings already said
+       * connected. Never a false connected (the config decides, as always);
+       * this only prevents the false failure.
+       */
+      const sub = subscription.check();
+      if (sub.state === subscription.STATE.CONNECTED) {
+        finishConnected(owner, sub);
+        return;
+      }
       becomeStuck(owner, 'Claude showed a screen we do not recognise', seen.tail);
     }
     return;
@@ -1048,8 +1064,22 @@ async function tickBody(owner) {
         if (seen.kind === 'repl') {
           driver.replTicks = (driver.replTicks || 0) + 1;
           if (driver.replTicks > Math.max(3, Math.ceil(8000 / TICK_MS))) {
-            becomeStuck(owner, 'Claude looks signed in here, but we could not confirm a subscription',
-              sub.because || 'the settings on this computer do not say which plan it is on');
+            /**
+             * ⚠️ TWO DIFFERENT TRUE SENTENCES. `none` here is POSITIVE
+             * knowledge -- a signed-in free plan, likely the most common
+             * way a machine with a config reaches this flow at all -- and
+             * for that person "we could not confirm" misstates what is
+             * known, and "open Terminal and run claude" cannot help (the
+             * CLI is already signed in). `unknown` is the genuine
+             * cannot-confirm.
+             */
+            if (sub.state === subscription.STATE.NONE) {
+              becomeStuck(owner, 'this computer is signed in to Claude, but on a plan without a subscription',
+                'agents need a subscription to think with; upgrade at claude.ai, then press Try again');
+            } else {
+              becomeStuck(owner, 'Claude looks signed in here, but we could not confirm a subscription',
+                sub.because || 'the settings on this computer do not say which plan it is on');
+            }
             return;
           }
         }

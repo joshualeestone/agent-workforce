@@ -71,9 +71,12 @@ machine that is not this one.
 While a sign-in is in flight there is a real tmux session called
 `kosmos-connect` running Claude, so the Agents tab may briefly show it as a
 card the board cannot vouch for. That is the board honestly reporting what is
-running; the card leaves when the sign-in finishes. The name is reserved (you
-cannot create an agent called `kosmos-connect`), and every command the flow
-sends is pinned to the exact session name. The reservation also means the flow
+running; the card leaves when the sign-in finishes. A sign-in nobody finishes
+does not leave on its own: walking away mid-flow ("Continue anyway") keeps the
+window open, and the way to end it is back on setup step 3 (Cancel), or
+`tmux kill-session -t "=kosmos-connect"` from Terminal. The name is reserved
+(you cannot create an agent called `kosmos-connect`), and every command the
+flow sends is pinned to the exact session name. The reservation also means the flow
 treats any session with that exact name as its own: a `tmux new -s
 kosmos-connect` you opened by hand will be closed when a connect starts.
 

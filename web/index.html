@@ -4412,13 +4412,19 @@ async function frRecheck() {
      * agents" with a Continue that just re-ran step 4. The fresh answer is still
      * kept -- it is the PAINT that is out of date, not the data.
      */
-    if (FR_STEP !== 3) return;
+    if (FR_STEP !== 3) return true;
     msg.textContent = '';
     frPaintSubscription();
+    return true;
   } catch (err) {
     // ⚠️ And the old answer stays on screen, unchanged. A failed re-check must
     // not silently downgrade "connected" to anything.
     msg.textContent = 'We could not check again just now (' + err.message + ').';
+    // The primary button must never stay dead behind a failed fetch --
+    // frConnectStart disables it and counts on a repaint to hand it back.
+    const next = document.getElementById('fr-next');
+    if (next) next.disabled = false;
+    return false;
   } finally {
     // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
     // `#fr-alt` is one element that both steps relabel. With a token on one side
@@ -4528,8 +4534,13 @@ function frConnWatch() {
         // screen-reader user hears the finish, not just the buttons changing.
         const say = document.getElementById('fr-conn-say');
         if (say) say.textContent = FR_CONN_SAY.connected;
+        // Transitional truth on screen NOW: if the recheck fetch fails, the
+        // stale "Finishing the sign-in" panel must not stand as the record.
+        document.getElementById('fr-sub').innerHTML = frCheckRow({
+          state: 'ok', title: 'Connected', detail: 'Fetching the details\u2026',
+        });
       }
-      frRecheck();
+      frConnSettle();
       return;
     }
     frPaintConnect(st);
@@ -4550,7 +4561,7 @@ async function frConnectStart() {
     // Invalidate any in-flight resume/poll answer: the click's own view of
     // the flow is newer than anything requested before it.
     FR_CONN_SEQ += 1;
-    if (st.phase === 'connected') { frRecheck(); return; }
+    if (st.phase === 'connected') { frConnSettle(); return; }
     FR_CONN_LAST = null;
     frPaintConnect(st);
     frConnWatch();
@@ -4595,7 +4606,7 @@ async function frConnCancel() {
   }
   FR_CONN_LAST = null;
   if (refused) { frPaintConnect(refused); frConnWatch(); return; }
-  frRecheck();
+  frConnSettle();
 }
 
 async function frConnSubmitCode() {
@@ -4621,6 +4632,18 @@ async function frConnSubmitCode() {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/**
+ * The recheck used by the connect flow's exits, with ONE bounded retry: the
+ * watcher stops before this runs, so a single failed fetch here otherwise
+ * froze the dead flow's last panel on screen with nothing polling -- a state
+ * nobody was producing. One retry, then the error line stands and the
+ * repainted verdict (or the person's next click) takes it from there.
+ */
+async function frConnSettle() {
+  const ok = await frRecheck();
+  if (!ok) setTimeout(() => { if (FR_STEP === 3) frRecheck(); }, 2000);
 }
 
 function frMB(n) { return Math.max(0, Math.round(n / 1048576)) + 'MB'; }
@@ -4788,10 +4811,17 @@ function frConnBefore(phase) {
 function frConnPaintUrl(url) {
   const box = document.getElementById('fr-conn-url');
   if (!box) return;
-  if (!url) { if (box.innerHTML) box.innerHTML = ''; return; }
-  const want = '<div class="fr-cdetail">Browser did not open? '
-    + '<a href="' + esc(url) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>';
-  if (box.innerHTML !== want) box.innerHTML = want;
+  // ⚠️ Compared against what WE last set, never against innerHTML read back:
+  // serializers may round-trip markup differently, and a permanently-unequal
+  // comparison would rebuild the link on every poll tick -- under a person
+  // mid-copy of the fallback URL.
+  const key = url || null;
+  if (box.__frUrl === key) return;
+  box.__frUrl = key;
+  box.innerHTML = key
+    ? '<div class="fr-cdetail">Browser did not open? '
+      + '<a href="' + esc(key) + '" target="_blank" rel="noopener">Use this link to sign in</a>.</div>'
+    : '';
 }
 
 function frConnPaintProgress(progress) {
