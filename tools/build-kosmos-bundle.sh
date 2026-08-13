@@ -228,7 +228,7 @@ rm -rf "$SMOKE_ROOTS"
 # here: this is the half that changes between releases, package.json is a
 # static 0.1.0, and a user report must be traceable to a binary.
 {
-  echo "app:    $(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'require(process.env.KOSMOS_PKG).version' 2>/dev/null || echo '?'))"
+  echo "app:    $(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null || echo '?'))"
   echo "node:   $("$STAGE/runtime/bin/node" --version)"
   echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ) on macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 } > "$STAGE/VERSION"
