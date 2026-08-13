@@ -902,6 +902,15 @@ async function tickBody(owner) {
     owner.blankTicks = 0;
     if (seen.kind !== 'unknown') owner.everSaw = true;
   }
+  /**
+   * ⚠️ ACTIONS PER CONTINUOUS SCREEN-KIND ARE BOUNDED. The act-once guard is
+   * keyed on the pane TEXT, so an animated screen (a spinner frame in the
+   * tail) mints a fresh signature every tick and the Enter arms re-fire
+   * forever -- typing Enter into the pane every 700ms with no exit. Twenty
+   * keypresses without the KIND changing is not progress, whatever the
+   * pixels are doing.
+   */
+  if (seen.kind !== owner.lastKind) { owner.lastKind = seen.kind; owner.kindActions = 0; }
   // The rejection grace resets whenever the paste prompt is NOT on screen: a
   // mid-clear tick between two prompt sightings otherwise resumed the count
   // from its stale value and shortened the grace.
@@ -962,12 +971,22 @@ async function tickBody(owner) {
       return;
     case 'theme':
       if (owner.acted !== sig) {
+        if ((owner.kindActions || 0) >= 20) {
+          becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
+          return;
+        }
+        owner.kindActions = (owner.kindActions || 0) + 1;
         owner.acted = sig;
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
       }
       return;
     case 'login-method':
       if (owner.acted !== sig) {
+        if ((owner.kindActions || 0) >= 20) {
+          becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
+          return;
+        }
+        owner.kindActions = (owner.kindActions || 0) + 1;
         owner.acted = sig;
         // Option 1, "Claude account with subscription", is already selected.
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
@@ -1101,6 +1120,11 @@ async function tickBody(owner) {
         // the like). Walk it forward so the NEXT run of claude -- an agent's
         // first start -- does not begin at a screen nobody is watching.
         if (asksEnter && owner.acted !== sig) {
+        if ((owner.kindActions || 0) >= 20) {
+          becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
+          return;
+        }
+        owner.kindActions = (owner.kindActions || 0) + 1;
           owner.acted = sig;
           await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
           return;
@@ -1117,6 +1141,11 @@ async function tickBody(owner) {
         return;
       }
       if (asksEnter && owner.acted !== sig) {
+        if ((owner.kindActions || 0) >= 20) {
+          becomeStuck(owner, 'Claude keeps asking to continue and never moves on', tailOf(cap.stdout));
+          return;
+        }
+        owner.kindActions = (owner.kindActions || 0) + 1;
         owner.acted = sig;
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
         return;

@@ -28,6 +28,9 @@ process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = path.join(SANDBOX, 'claude.json');
+// The two sandbox seams travel together (launchSignin warns loudly otherwise,
+// and a warning that fires on every green run trains people to ignore it).
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR = path.join(SANDBOX, 'claude-config-dir');
 // `/bin/echo` exists and is executable, which is all "Claude is installed"
 // means to `start` -- so no test here ever reaches the download path.
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';

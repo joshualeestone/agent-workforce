@@ -4644,7 +4644,14 @@ async function frConnCancel() {
     return;
   }
   FR_CONN_LAST = null;
-  if (refused) { frPaintConnect(refused); frConnWatch(); return; }
+  if (refused) {
+    // Say WHY the button did nothing, or it just reads as broken.
+    const msg = document.getElementById('fr-sub-msg');
+    if (msg) msg.textContent = 'This sign-in is running under another Kosmos window on this computer, so cancel it there.';
+    frPaintConnect(refused);
+    frConnWatch();
+    return;
+  }
   frConnSettle();
 }
 
@@ -4822,14 +4829,19 @@ function frPaintConnect(st) {
      * asserting otherwise would be a settled sentence about a state nobody
      * checked. Start again closes it either way (launchSignin kills first).
      */
-    const wasSignin = !{ downloading: 1, installing: 1 }[st && st.before];
+    // Three befores, three different TRUE sentences: the in-process download
+    // dies with the server; an install is a CHILD process that may finish in
+    // the background; a sign-in runs in tmux, which outlives the server.
+    const before = st && st.before;
+    const afterSentence = before === 'downloading'
+      ? 'Nothing is running now, and starting again picks up safely.'
+      : (before === 'installing'
+        ? 'The setup step may still be finishing in the background; starting again checks and picks up safely.'
+        : 'The sign-in window may still be open; starting again closes it and starts clean.');
     box.innerHTML = frCheckRow({
       state: 'unknown',
       title: 'A connection attempt was interrupted',
-      detail: 'Kosmos was closed while it was ' + frConnBefore(st && st.before) + '. '
-        + (wasSignin
-          ? 'The sign-in window may still be open; starting again closes it and starts clean.'
-          : 'Nothing is running now, and starting again picks up safely.'),
+      detail: 'Kosmos was closed while it was ' + frConnBefore(before) + '. ' + afterSentence,
     });
     frActions({ label: 'Start again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
     return;
