@@ -83,7 +83,7 @@ echo "\$@" >> "$SB/opened.log"
 EOS
 chmod +x "$SB/open-stub"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIPS=0
 chk() {
   if eval "$2"; then PASS=$((PASS + 1)); echo "PASS  $1"
   else FAIL=$((FAIL + 1)); echo "FAIL  $1"; fi
@@ -128,21 +128,28 @@ echo "== the download path (file:// origin, no local-copy shortcut) =="
 # both probes, so no server is needed. A flipped byte in the sidecar must
 # refuse in a sentence.
 mkdir -p "$SB/dist"
-cp "$HERE/dist/tmux-arm64.tar.gz" "$HERE/dist/tmux-arm64.tar.gz.sha256" \
-   "$HERE/dist/kosmos-arm64.tar.gz" "$HERE/dist/kosmos-arm64.tar.gz.sha256" "$SB/dist/" 2>/dev/null \
-  || { echo "SKIP download-path pass: packed tarballs missing from dist/"; exit 0; }
-unset KOSMOS_TMUX_SRC KOSMOS_SRC
-export KOSMOS_RELEASE_BASE="file://$SB/dist"
-RC=0; cat "$SETUP" | sh > "$SB/dl-install.log" 2>&1 || RC=$?
-chk "download-path install exits 0" "[ $RC -eq 0 ]"
-chk "download-path board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
-"$SB/bin/kosmos" stop > /dev/null 2>&1
-sh -s -- --uninstall < "$SETUP" > /dev/null 2>&1
-printf 'x' >> "$SB/dist/kosmos-arm64.tar.gz"
-RC=0; cat "$SETUP" | sh > "$SB/tamper.log" 2>&1 || RC=$?
-chk "tampered download refuses" "[ $RC -ne 0 ]"
-chk "tamper refusal speaks a sentence" "grep -q 'did not arrive intact' \"$SB/tamper.log\""
-chk "no stage residue after refusal" "[ -z \"\$(ls -d \"$SB/home\"/.kosmos.stage.* 2>/dev/null)\" ]"
+# ⚠️ A missing tarball SKIPS ONLY THIS BLOCK, loudly and counted. The first
+# version exited 0 here, so a machine with the staged trees but not the
+# packed tarballs ran none of the later passes and still printed "N
+# passed, 0 failed" -- a partial run indistinguishable from a full one.
+if cp "$HERE/dist/tmux-arm64.tar.gz" "$HERE/dist/tmux-arm64.tar.gz.sha256" \
+   "$HERE/dist/kosmos-arm64.tar.gz" "$HERE/dist/kosmos-arm64.tar.gz.sha256" "$SB/dist/" 2>/dev/null; then
+  unset KOSMOS_TMUX_SRC KOSMOS_SRC
+  export KOSMOS_RELEASE_BASE="file://$SB/dist"
+  RC=0; cat "$SETUP" | sh > "$SB/dl-install.log" 2>&1 || RC=$?
+  chk "download-path install exits 0" "[ $RC -eq 0 ]"
+  chk "download-path board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
+  "$SB/bin/kosmos" stop > /dev/null 2>&1
+  sh -s -- --uninstall < "$SETUP" > /dev/null 2>&1
+  printf 'x' >> "$SB/dist/kosmos-arm64.tar.gz"
+  RC=0; cat "$SETUP" | sh > "$SB/tamper.log" 2>&1 || RC=$?
+  chk "tampered download refuses" "[ $RC -ne 0 ]"
+  chk "tamper refusal speaks a sentence" "grep -q 'did not arrive intact' \"$SB/tamper.log\""
+  chk "no stage residue after refusal" "[ -z \"\$(ls -d \"$SB/home\"/.kosmos.stage.* 2>/dev/null)\" ]"
+else
+  echo "SKIP download-path passes: packed tarballs missing from dist/ (later passes still run)"
+  SKIPS=$((SKIPS + 1))
+fi
 
 echo "== the Applications probe (system folder when writable, home when not) =="
 # ⚠️ These passes leave KOSMOS_APP_DIR EMPTY on purpose -- they exercise the
@@ -192,6 +199,7 @@ if [ "$(id -u)" -eq 0 ]; then
   # environment reason. Skip loudly and seed the icon the sweep pass below
   # expects the fallback install to have left.
   echo "SKIP fallback leg: running as root, chmod 555 does not deny root"
+  SKIPS=$((SKIPS + 1))
   seed_kosmos_bundle "$SBH/Applications" "$SB/home3"
 else
   SYS_RO="$SB/sysro"
@@ -217,11 +225,16 @@ chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 chk "another install's system icon left alone" "[ -d \"$SYS_OK/Kosmos.app\" ]"
 chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK was not created by this install\" \"$SB/probe-un.log\""
-# The OWNER's uninstall takes it.
+# The OWNER's uninstall takes it. Probe and stage residue are seeded first
+# so the sweep the served header PROMISES ("--uninstall sweeps it") is
+# pinned rather than assumed, in both folders.
+mkdir -p "$SYS_OK/.Kosmos.app.stage.999" "$SYS_OK/.kosmos-write-probe.777" "$SBH/Applications/.Kosmos.app.stage.888"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
 chk "owner uninstall exits 0" "[ $RC -eq 0 ]"
 chk "system-folder icon swept by its owner" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
+chk "stage and probe residue swept from the system folder" "[ -z \"\$(ls -A \"$SYS_OK\")\" ]"
+chk "stage residue swept from the home folder" "[ ! -e \"$SBH/Applications/.Kosmos.app.stage.888\" ]"
 
 echo "== aliased folders (~/Applications symlinked to the system folder) =="
 # The failure this pins: with ~/Applications a symlink to the system
@@ -293,6 +306,7 @@ chk "the skip speaks its own sentence" "grep -q 'no icon was created' \"$SB/alia
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP wedge and survivor-note legs: running as root, chmod denials do not bind"
+  SKIPS=$((SKIPS + 1))
 else
   echo "== a bundle that cannot be replaced sends the icon to the home folder =="
   # The retry leg: the system folder is writable (the probe passes) but the
@@ -366,6 +380,7 @@ chk "home icon left alone under fail-closed" "[ -d \"$SBH10/Applications/Kosmos.
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP chmod-denial note legs: running as root"
+  SKIPS=$((SKIPS + 1))
 else
   # The move-cleanup's OWN failure note: a write-locked home Applications
   # makes the stale icon undeletable, and the survivor must be named
@@ -412,9 +427,13 @@ else
 fi
 
 echo "== the operator's real folders were never touched =="
-chk "real home Applications unchanged" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"
-chk "real /Applications unchanged" "[ \"\$(real_apps_fingerprint /Applications)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
+chk "real home Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"
+chk "real /Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint /Applications)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
 
 echo
-echo "$PASS passed, $FAIL failed"
+if [ "$SKIPS" -gt 0 ]; then
+  echo "$PASS passed, $FAIL failed, $SKIPS block(s) SKIPPED (a skipped run is NOT a full run)"
+else
+  echo "$PASS passed, $FAIL failed"
+fi
 [ "$FAIL" -eq 0 ]

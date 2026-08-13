@@ -9,7 +9,9 @@
 # .Kosmos.app.stage.<pid> folder beside its spot and renamed into place
 # (an interrupted run can leave that staging folder behind; --uninstall
 # sweeps it). macOS may show its own one-time "Terminal wants to manage
-# apps" dialog for the icon step. It never touches any other app.
+# apps" dialog for the icon step. It never touches any other app. A fresh
+# install finishes by opening your browser at the Kosmos dashboard;
+# updates never do, and KOSMOS_NO_OPEN=1 turns it off.
 #
 # ⚠️ THE SHEBANG SAYS sh BECAUSE THE PAGE SAYS sh. This file's contract is
 # the interpreter the marketing line actually invokes: macOS /bin/sh, which
@@ -58,6 +60,21 @@ esac
 set -euo pipefail
 
 KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
+# ⚠️ A NEWLINE IN KOSMOS_HOME IS REFUSED OUTRIGHT. The ownership checks
+# below prove a bundle is ours with `grep -F` on a token built from this
+# value, and grep -F treats a newline in the pattern as a pattern
+# SEPARATOR: the token degrades into two alternatives, one of which (`}"`)
+# matches every launcher ever written, silently turning every ownership
+# gate on every rm -rf fail-OPEN. Same posture as the KOSMOS_HOME=$HOME
+# guard on the uninstall path: the one catastrophic misuse of an override
+# is refused in a sentence, not survived.
+case "$KOSMOS_HOME" in
+  *"
+"*)
+    printf '\n  KOSMOS_HOME contains a newline, which would defeat the safety checks below. Unset it and run again.\n\n' >&2
+    exit 2
+    ;;
+esac
 BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
 # ⚠️ Overridable for the same reason the sources are: the sandboxed test of
 # this installer must not write an app icon into the real Applications
@@ -473,9 +490,10 @@ uninstall() {
     # the predicate, one account's uninstall would delete another
     # account's working icon. The HOME folder needs no predicate -- it is
     # per-user by construction.
-    # -e OR -L, matching the install-side gate: a dangling symlink named
-    # Kosmos.app is residue too, and -d alone leaves it invisible forever
-    # on the path whose header promises the machine is returned to before.
+    # -e OR -L, the same shape as resolve_app_dir's aliasing check: a
+    # dangling symlink named Kosmos.app is residue too, and -d alone
+    # leaves it invisible forever on the path whose header promises the
+    # machine is returned to before.
     # (Ownership cannot be proven through a dangling link, so the refusal
     # note prints; that is honest, and the note names the survivor.)
     if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
@@ -502,7 +520,10 @@ uninstall() {
     # bundle alone and say so, never a license to delete through it.
     _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
     _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
-    if [ -d "$HOME/Applications/Kosmos.app" ]; then
+    # -e OR -L, the same shape as the system-folder gate above: -d follows
+    # symlinks, so a dangling link named Kosmos.app here would survive
+    # every uninstall in silence, against the survivor-is-NAMED rule.
+    if [ -e "$HOME/Applications/Kosmos.app" ] || [ -L "$HOME/Applications/Kosmos.app" ]; then
       if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ] && [ "$_home_apps_phys" != "$_sys_apps_phys" ]; then
         # The same ownership token as the system folder: uninstalling
         # Kosmos must not delete somebody's unrelated app that happens to
@@ -884,13 +905,16 @@ resolve_app_dir
 # surprises; an unexplained system dialog mid-run reads as "something went
 # wrong". A denial is handled below (the icon falls back to the home
 # folder), so this sentence is the only missing piece.
-if [ "$APP_SKIP_ICON" != "yes" ] && [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
+# Only on the FIRST system-folder write (nothing at the target yet): the
+# dialog is one-time, and re-raising a resolved worry on every update is
+# its own small alarm.
+if [ "$APP_SKIP_ICON" != "yes" ] && [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ] && [ ! -e "$SYS_APP_DIR/Kosmos.app" ]; then
   info "if your Mac asks whether Terminal can manage apps, that is this step; Allow puts the icon in Applications"
 fi
 APP_MADE=no
 if [ "$APP_SKIP_ICON" = "yes" ]; then
   : # said below, where the not-made sentences live
-elif ! mkdir -p "$APP_DIR"; then
+elif ! mkdir -p "$APP_DIR" 2>/dev/null; then
   die "Could not create $APP_DIR. Check that it is writable."
 elif make_app "$APP_DIR/Kosmos.app"; then
   APP_MADE=yes
@@ -967,6 +991,11 @@ if [ "$APP_MADE" = "yes" ]; then
         else
           info "note: a Kosmos.app not created by this install is in the Applications folder inside your home folder; it was left alone."
         fi
+      elif [ -z "$_home_apps_phys" ] || [ -z "$_app_dir_phys" ]; then
+        # The fail-closed leg says so, mirroring the uninstall's identical
+        # guard; only the physically-equal leg stays silent, because there
+        # the "stale icon" is the bundle just written and nothing is stale.
+        info "note: could not check the Applications folder inside your home folder; anything there was left alone."
       fi
     fi
   else
