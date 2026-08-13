@@ -39,10 +39,12 @@
 #     finishes. Measured on a competitor the same week this was written: ten
 #     minutes of no output at all while it downloaded a database.
 #   - Every failure prints what to do next, in a sentence, not an error code.
-#   - Nothing needs sudo. Nothing is written outside $HOME except the app
+#   - Nothing needs sudo. Nothing is written outside $HOME except: the app
 #     icon (and the write probe that decides where it can go), which uses
 #     /Applications only when this user can already write there without a
-#     password. The header sentence above makes the same claim; keep the
+#     password; the icon's one-line registration with macOS
+#     (LaunchServices, so Spotlight knows it exists); and, on --uninstall,
+#     the launchd enable/bootout that removes agents' background jobs. The header sentence above makes the same claim; keep the
 #     two in agreement, because this file is served verbatim at
 #     https://chaoskosmos.com/setup and these sentences are what a cautious
 #     person reads before piping it into sh.
@@ -88,6 +90,13 @@ KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
 # (--uninstall is refused too, deliberately: its own deletion gates
 # depend on this same value, and running them against a poisoned one is
 # worse than asking the user to fix it first.)
+case "$KOSMOS_HOME" in
+  /*) ;;
+  *)
+    printf '\n  KOSMOS_HOME must be an absolute path (a relative one would resolve against whatever folder the icon is opened from). Unset it and run again.\n\n' >&2
+    exit 2
+    ;;
+esac
 case "$KOSMOS_HOME" in
   *"
 "*|*'"'*|*'$'*|*'`'*|*'\'*|*'}'*)
@@ -248,14 +257,19 @@ PORT="${KOSMOS_PORT:-4317}"
 # anything but digits is refused in a sentence (reproduced in review: a
 # crafted KOSMOS_PORT ran a command at click time). The '' arm is
 # unreachable belt (the :- default already replaced an empty value).
+# Length-bounded BEFORE any numeric compare: test(1) overflows on huge
+# digit strings and fails OPEN with raw shell errors (measured), so the
+# case refuses empties, non-digits, leading zeros (they would be baked
+# verbatim into the launcher URL), and anything over five digits, and
+# only then is the in-range compare safe.
 case "$PORT" in
-  ''|*[!0-9]*)
-    printf '\n  KOSMOS_PORT must be a number. Unset it and run again.\n\n' >&2
+  ''|*[!0-9]*|0*|??????*)
+    printf '\n  KOSMOS_PORT must be a number from 1 to 65535, with no leading zeros. Unset it and run again.\n\n' >&2
     exit 2
     ;;
 esac
-if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
-  printf '\n  KOSMOS_PORT must be between 1 and 65535. Unset it and run again.\n\n' >&2
+if [ "$PORT" -gt 65535 ]; then
+  printf '\n  KOSMOS_PORT must be a number from 1 to 65535. Unset it and run again.\n\n' >&2
   exit 2
 fi
 LOG_DIR="$KOSMOS_HOME/logs"
@@ -933,7 +947,7 @@ ok
 # whose shell does not look there, and silently not working is the worst outcome.
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon, or the way in named at the end" ;;
+  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; the app icon step below and the closing lines cover how to open Kosmos" ;;
 esac
 
 # ---- the front door -----------------------------------------------------------
@@ -1212,18 +1226,19 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
       _retry_ok=yes
     fi
   fi
+  # The system-folder outcome is recorded BEFORE the retry can branch
+  # away (including the aliased _retry_ok=no leg): the transcript
+  # otherwise went quiet about Applications entirely on those legs,
+  # right after the TCC warm-up set the expectation that an icon would
+  # land there. The reason is "swap", not "probe": this account could
+  # write the folder.
+  if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
+    APP_SYS_STALE=swap
+  else
+    APP_SYS_FAILED=yes
+  fi
   if [ "$_retry_ok" = "yes" ]; then
     APP_DIR="$HOME/Applications"
-    # The system-folder outcome is recorded HERE, before the retry can
-    # branch away: on the home-foreign leg the transcript otherwise went
-    # quiet about Applications entirely, right after the TCC warm-up set
-    # the expectation that an icon would land there. The reason is
-    # "swap", not "probe": this account could write the folder.
-    if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
-      APP_SYS_STALE=swap
-    else
-      APP_SYS_FAILED=yes
-    fi
     # The same home-folder ownership gate as the direct path above: the
     # retry must not replace an occupant it cannot prove is ours either.
     if { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
@@ -1346,6 +1361,10 @@ elif [ "$APP_HOME_FOREIGN" = "yes" ]; then
   fi
   if [ "$APP_SYS_STALE" = "swap" ]; then
     info "(the Kosmos icon already in Applications could not be replaced and is still there)"
+  elif [ "$APP_SYS_STALE" = "probe" ]; then
+    info "(the Kosmos icon already in Applications could not be updated from this account and is still there)"
+  elif [ "$APP_SYS_FAILED" = "yes" ]; then
+    info "(no icon could be put into Applications this time either)"
   fi
   info "The closing lines below say how to open Kosmos."
 elif [ "$APP_SKIP_ICON" = "yes" ]; then
@@ -1365,6 +1384,9 @@ elif [ "$APP_SKIP_ICON" = "yes" ]; then
   info "The closing lines below say how to open Kosmos."
 else
   info "could not create the app icon, but Kosmos itself is fine"
+  if [ "$APP_SYS_STALE" != "no" ]; then
+    info "(the Kosmos icon already in Applications is still there from before)"
+  fi
 fi
 
 # ---- start ------------------------------------------------------------------
@@ -1391,7 +1413,7 @@ if [ -f "$KOSMOS_HOME/board.pid" ]; then
       # The pid must BE the board (the same ps predicate install/kosmos's
       # running_pid uses): a recycled pid behind a stale pidfile would
       # otherwise read as ours, and this flag gates the browser open.
-      case "$(/bin/ps -p "$_bpid" -o command= 2>/dev/null)" in
+      case "$(/bin/ps -ww -p "$_bpid" -o command= 2>/dev/null)" in
         *app/server.js*) BOARD_OURS=yes ;;
       esac
       ;;
@@ -1407,7 +1429,7 @@ else
   printf '  on port %s (an "already running" line above refers to a board something else\n' "$PORT"
   printf '  started, often another account%ss Kosmos; each account runs its own).\n' "'"
   printf '  Start yours on a different port, for example:\n'
-  printf '    KOSMOS_PORT=4318 %s/kosmos start\n' "$BIN_DIR"
+  printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$((PORT + 1))" "$BIN_DIR"
   printf '  and it will print your dashboard address.\n\n'
 fi
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
