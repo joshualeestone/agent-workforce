@@ -461,11 +461,11 @@ test('a repaint on the same phase does not rebuild the screen under the person',
 });
 
 test('download progress is honest: a real total gets a bar, no total gets a count', () => {
-  const h = connectHarness({ phase: 'downloading', progress: { got: 52428800, total: 104857600 } });
+  const h = connectHarness({ phase: 'downloading', progress: { got: 50000000, total: 100000000 } });
   assert.equal(h.els['fr-conn-fill'].style.width, '50%');
   assert.match(h.els['fr-conn-prog'].textContent, /50MB of 100MB/);
 
-  const bare = connectHarness({ phase: 'downloading', progress: { got: 52428800, total: null } });
+  const bare = connectHarness({ phase: 'downloading', progress: { got: 50000000, total: null } });
   assert.equal(bare.els['fr-conn-fill'].style.width, '0%',
     'with no Content-Length the bar pretended to know how far along it is');
   assert.match(bare.els['fr-conn-prog'].textContent, /50MB so far/);

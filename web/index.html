@@ -4524,8 +4524,9 @@ function frConnWatch() {
        * of failures the screen says so honestly; the poll keeps trying, and
        * a success repaints reality.
        */
+      if (FR_STEP !== 3) { frConnStopWatch(); return; }
       FR_CONN_FAILS += 1;
-      if (FR_CONN_FAILS === 10 && FR_STEP === 3) {
+      if (FR_CONN_FAILS === 10) {
         FR_CONN_LAST = null;
         document.getElementById('fr-sub').innerHTML = frCheckRow({
           state: 'unknown',
@@ -4624,6 +4625,10 @@ async function frConnCancel() {
      */
     FR_CONN_LAST = null;
     frConnResume();
+    // And keep polling: if the server is down, the watcher's failure bound
+    // paints the honest "we cannot see" row instead of leaving the dead
+    // panel standing; if it comes back, reality repaints.
+    frConnWatch();
     return;
   }
   FR_CONN_LAST = null;
@@ -4668,7 +4673,7 @@ async function frConnSettle() {
   if (!ok) setTimeout(() => { if (FR_STEP === 3) frRecheck(); }, 2000);
 }
 
-function frMB(n) { return Math.max(0, Math.round(n / 1048576)) + 'MB'; }
+function frMB(n) { return Math.max(0, Math.round(n / 1e6)) + 'MB'; }
 
 /** One sentence per phase, spoken once on each phase CHANGE — the per-second
     progress numbers stay out of the live region on purpose. */

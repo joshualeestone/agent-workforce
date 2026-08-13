@@ -140,7 +140,7 @@ const LONG_TAIL = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of what th
   {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const { page, errors } = await step3Page(ctx, {
-      phase: 'downloading', progress: { got: 52428800, total: 104857600 },
+      phase: 'downloading', progress: { got: 50000000, total: 100000000 },
     });
     const got = await page.evaluate(() => {
       const fill = document.getElementById('fr-conn-fill');

@@ -819,10 +819,21 @@ async function tickBody(owner) {
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
   if (!cap.ok) {
-    becomeStuck(owner, 'the sign-in window closed before Claude finished',
-      tailOf(cap.stderr || '') || 'it is no longer there');
+    /**
+     * ⚠️ ONE FAILED CAPTURE IS NOT A CLOSED WINDOW. `!ok` also covers a
+     * spawn failure on a loaded machine and the exec timeout, and declaring
+     * "the sign-in window closed" off a single transient error is a settled
+     * sentence about a state nobody verified. A session that is truly gone
+     * keeps failing, so a short run of failures earns the sentence honestly.
+     */
+    driver.captureFails = (driver.captureFails || 0) + 1;
+    if (driver.captureFails > Math.max(3, Math.ceil(3000 / TICK_MS))) {
+      becomeStuck(owner, 'the sign-in window closed before Claude finished',
+        tailOf(cap.stderr || '') || 'it is no longer there');
+    }
     return;
   }
+  driver.captureFails = 0;
   const seen = classifyPane(cap.stdout);
 
   if (seen.kind === 'unknown') {
