@@ -111,6 +111,28 @@ BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
 # exist. macOS gives admin users group write on /Applications, so the common
 # case needs no password; the probe is an actual mkdir, not `-w`, because
 # ACLs can make `-w` lie in both directions.
+# ⚠️ THE ownership predicate, defined ONCE. Every rm -rf and every claim
+# in this file is gated by this exact function; it was previously
+# hand-assembled at a dozen sites in four different guard combinations,
+# and every gap a review found was a site missing one guard the others
+# had. It returns 0 only for a REAL directory bundle -- no symlink at
+# the root, at Contents, at MacOS, or at the launcher leaf, because a
+# link at any level would make the content check read a file the bundle
+# does not own -- whose launcher carries this install's anchored token
+# (`:-<home>}"`, closing brace and quote included, so prefix-related
+# homes cannot cross-match). /usr/bin/grep by absolute path: this answer
+# decides where rm -rf points, so it must not be answerable by whatever
+# a user's PATH puts in front of grep (the same argument the write
+# probe's /bin/mkdir records).
+bundle_is_ours() {
+  [ -d "$1" ] || return 1
+  [ ! -L "$1" ] || return 1
+  [ ! -L "$1/Contents" ] || return 1
+  [ ! -L "$1/Contents/MacOS" ] || return 1
+  [ ! -L "$1/Contents/MacOS/Kosmos" ] || return 1
+  /usr/bin/grep -qF ":-$KOSMOS_HOME}\"" "$1/Contents/MacOS/Kosmos" 2>/dev/null
+}
+
 # SYS_APP_DIR is overridable ONLY so the harness can drive the probe AND its
 # fallback against disposable directories -- a fallback that can only run
 # where the primary works is untested by construction, and the probe's
@@ -165,9 +187,7 @@ resolve_app_dir() {
   # link to our own bundle and silently deleting it. Linkness decides
   # first; only a real directory earns the content check.
   if { [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; } \
-     && { [ -L "$SYS_APP_DIR/Kosmos.app" ] \
-          || [ -L "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-          || ! grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
+     && ! bundle_is_ours "$SYS_APP_DIR/Kosmos.app"; then
     APP_OTHER_OWNER=yes
     # ⚠️ THE DIVERT ITSELF NEEDS THE ALIASING GUARD. "Send the icon to the
     # per-user folder instead" is only an escape if the per-user folder is
@@ -209,7 +229,7 @@ resolve_app_dir() {
     /bin/rmdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null \
       || rm -rf "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null || true
     APP_DIR="$SYS_APP_DIR"
-  elif grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+  elif bundle_is_ours "$SYS_APP_DIR/Kosmos.app"; then
     # The probe FAILED on a machine where an earlier run of this install
     # already put an icon in the system folder (admin rights since lost,
     # folder since locked). The fresh icon goes to the home folder, and
@@ -233,6 +253,10 @@ case "$PORT" in
     exit 2
     ;;
 esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  printf '\n  KOSMOS_PORT must be between 1 and 65535. Unset it and run again.\n\n' >&2
+  exit 2
+fi
 LOG_DIR="$KOSMOS_HOME/logs"
 LOG="$LOG_DIR/install.log"
 
@@ -494,8 +518,8 @@ uninstall() {
     # deleting the plist while that override stands leaves a machine where
     # a reinstalled Kosmos creates an agent with the same name and launchd
     # silently refuses to start it, with nothing on disk to explain why.
-    /bin/launchctl enable "gui/$(id -u)/$_label" 2>/dev/null || true
-    /bin/launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+    /bin/launchctl enable "gui/$(/usr/bin/id -u)/$_label" 2>/dev/null || true
+    /bin/launchctl bootout "gui/$(/usr/bin/id -u)/$_label" 2>/dev/null || true
     # The agent itself runs in a detached tmux session that outlives its
     # launchd job; with Kosmos gone it would keep running against a tmux
     # binary deleted out from under it. Killed BY NAME, one session per
@@ -550,8 +574,7 @@ uninstall() {
     # override path is not an exemption. -e OR -L like every sibling, so
     # a dangling link is named rather than silently surviving.
     if [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; then
-      if [ ! -L "$APP_DIR/Kosmos.app" ] && [ ! -L "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-         && grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+      if bundle_is_ours "$APP_DIR/Kosmos.app"; then
         info "removing the Kosmos app"
         rm -rf "$APP_DIR/Kosmos.app" 2>/dev/null || info "note: could not remove $APP_DIR/Kosmos.app; drag it to the Trash to finish."
       else
@@ -560,8 +583,7 @@ uninstall() {
     fi
     for _res in "$APP_DIR"/.Kosmos.app.stage.* "$APP_DIR"/.Kosmos.app.old.*; do
       { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
-      if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
-         && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+      if bundle_is_ours "$_res"; then
         rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
       else
         # "could not be proven": a foreign account's aside fails the grep,
@@ -590,8 +612,7 @@ uninstall() {
       # The same anchored token as resolve_app_dir: the closing `}"` keeps
       # two homes in a prefix relationship from cross-matching, because
       # this grep is the sole gate on an rm -rf in a shared folder.
-      if [ ! -L "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-         && grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+      if bundle_is_ours "$SYS_APP_DIR/Kosmos.app"; then
         info "removing the Kosmos app from $SYS_APP_DIR"
         # A standard user cannot always delete from /Applications; an icon
         # that survives is NAMED, never silently skipped. The flag feeds
@@ -603,10 +624,11 @@ uninstall() {
           info "note: could not remove $SYS_APP_DIR/Kosmos.app; drag it to the Trash to finish."
         fi
       else
-        # "was not created by this install" claims only what the failed
-        # match observed: it covers another account's Kosmos AND a
-        # third-party app that happens to carry the name.
-        info "note: the Kosmos app in $SYS_APP_DIR was not created by this install and was left alone."
+        # "could not be proven": the failed match observed exactly that
+        # and nothing more -- it covers another account's Kosmos, a
+        # third-party app carrying the name, and a user's link to our
+        # own bundle (linkness fails the proof by design).
+        info "note: the Kosmos app in $SYS_APP_DIR could not be proven to belong to this install and was left alone."
       fi
     fi
     # ⚠️ Skipped when the two folders are physically the same (~/Applications
@@ -644,8 +666,7 @@ uninstall() {
         # The same ownership token as the system folder: uninstalling
         # Kosmos must not delete somebody's unrelated app that happens to
         # carry the name, even in the per-user folder.
-        if [ ! -L "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" ] \
-           && grep -qF ":-$KOSMOS_HOME}\"" "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+        if bundle_is_ours "$HOME/Applications/Kosmos.app"; then
           info "removing the Kosmos app from $HOME/Applications"
           rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
         else
@@ -681,8 +702,7 @@ uninstall() {
     for _res in "$SYS_APP_DIR"/.Kosmos.app.stage.* "$SYS_APP_DIR"/.Kosmos.app.old.* \
                 "$HOME/Applications"/.Kosmos.app.stage.* "$HOME/Applications"/.Kosmos.app.old.*; do
       { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
-      if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
-         && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+      if bundle_is_ours "$_res"; then
         rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
       else
         # "could not be proven": a foreign account's aside fails the grep,
@@ -909,7 +929,7 @@ ok
 # whose shell does not look there, and silently not working is the worst outcome.
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon instead (created below), which needs no setup" ;;
+  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon or the dashboard address shown at the end" ;;
 esac
 
 # ---- the front door -----------------------------------------------------------
@@ -959,8 +979,7 @@ make_app() {
   local _res
   for _res in "$appdir"/.Kosmos.app.stage.* "$appdir"/.Kosmos.app.old.*; do
     { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
-    if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
-       && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+    if bundle_is_ours "$_res"; then
       rm -rf "$_res" 2>/dev/null || true
     fi
   done
@@ -995,8 +1014,7 @@ make_app() {
     # proof must be contemporaneous with the displacement, or the header
     # sentence "only ever replaces a Kosmos icon it can prove it created"
     # holds only usually.
-    if [ -L "$app" ] || [ -L "$app/Contents/MacOS/Kosmos" ] \
-       || ! grep -qF ":-$KOSMOS_HOME}\"" "$app/Contents/MacOS/Kosmos" 2>/dev/null; then
+    if ! bundle_is_ours "$app"; then
       rm -rf "$stage" 2>/dev/null || true
       return 1
     fi
@@ -1155,9 +1173,7 @@ elif ! mkdir -p "$APP_DIR" 2>/dev/null; then
   :
 elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" != "$SYS_APP_DIR" ] \
      && { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
-     && { [ -L "$APP_DIR/Kosmos.app" ] \
-          || [ -L "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-          || ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
+     && ! bundle_is_ours "$APP_DIR/Kosmos.app"; then
   # ⚠️ THE HOME FOLDER GETS THE SAME OWNERSHIP GATE AS EVERY OTHER
   # destructive site. This was the one path left that replaced an
   # occupant without proof -- while the uninstall sweep and the stale
@@ -1203,9 +1219,7 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
     # The same home-folder ownership gate as the direct path above: the
     # retry must not replace an occupant it cannot prove is ours either.
     if { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
-       && { [ -L "$APP_DIR/Kosmos.app" ] \
-            || [ -L "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-            || ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
+       && ! bundle_is_ours "$APP_DIR/Kosmos.app"; then
       APP_HOME_FOREIGN=yes
     elif mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
       APP_MADE=yes
@@ -1249,7 +1263,7 @@ if [ "$APP_MADE" = "yes" ]; then
         # genuine one always carries the launcher line. Anything else
         # named Kosmos.app in the user's own folder is theirs, is left
         # alone, and is named.
-        if grep -qF ":-$KOSMOS_HOME}\"" "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+        if bundle_is_ours "$HOME/Applications/Kosmos.app"; then
           # Unregister BEFORE the removal (lsregister searches paths for
           # applications, so -u on an already-deleted path is likely a
           # no-op and would leave the stale Spotlight record this call
@@ -1361,8 +1375,19 @@ ok
 # started is the proof; no pidfile with a live pid means the port is
 # someone else's.
 BOARD_OURS=no
-if [ -f "$KOSMOS_HOME/board.pid" ] && kill -0 "$(cat "$KOSMOS_HOME/board.pid" 2>/dev/null)" 2>/dev/null; then
-  BOARD_OURS=yes
+if [ -f "$KOSMOS_HOME/board.pid" ]; then
+  _bpid="$(cat "$KOSMOS_HOME/board.pid" 2>/dev/null)" || _bpid=""
+  case "$_bpid" in
+    ''|*[!0-9]*) ;;
+    *)
+      # The pid must BE the board (the same ps predicate install/kosmos's
+      # running_pid uses): a recycled pid behind a stale pidfile would
+      # otherwise read as ours, and this flag gates the browser open.
+      case "$(/bin/ps -p "$_bpid" -o command= 2>/dev/null)" in
+        *app/server.js*) BOARD_OURS=yes ;;
+      esac
+      ;;
+  esac
 fi
 
 if [ "$BOARD_OURS" = "yes" ]; then
@@ -1370,9 +1395,9 @@ if [ "$BOARD_OURS" = "yes" ]; then
   printf '  Open it and it will walk you through connecting your AI account.\n'
   printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 else
-  printf '\n  Kosmos is installed, but another Kosmos on this Mac is already using port %s,\n' "$PORT"
-  printf '  so this install did not start its own board. If that is another account%ss\n' "'"
-  printf '  Kosmos, each account runs its own; start yours on a different port, like:\n'
+  printf '\n  Kosmos is installed, but could not confirm its own board is the one answering\n'
+  printf '  on port %s. Something else may already be using it (often another account%ss\n' "$PORT" "'"
+  printf '  Kosmos; each account runs its own). Try a different port, like:\n'
   printf '    KOSMOS_PORT=4318 kosmos start\n\n'
 fi
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'

@@ -269,7 +269,7 @@ RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninst
 chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 chk "another install's system icon left alone" "[ -d \"$SYS_OK/Kosmos.app\" ]"
-chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK was not created by this install\" \"$SB/probe-un.log\""
+chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK could not be proven to belong to this install\" \"$SB/probe-un.log\""
 # The OWNER's uninstall takes it. Probe and stage residue are seeded first
 # so the sweep the served header PROMISES ("--uninstall sweeps it") is
 # pinned rather than assumed, in both folders.
@@ -713,13 +713,39 @@ echo "== a stranger's board on the port is never presented as this install's =="
 export KOSMOS_HOME="$SB/home26" KOSMOS_BIN_DIR="$SB/bin26" KOSMOS_APP_DIR="$SB/apps26"
 RC=0; cat "$SETUP" | sh > "$SB/first-board.log" 2>&1 || RC=$?
 chk "first board install exits 0" "[ $RC -eq 0 ]"
-export KOSMOS_HOME="$SB/home27" KOSMOS_BIN_DIR="$SB/bin27" KOSMOS_APP_DIR="$SB/apps27"
+# ⚠️ Probe-style env, deliberately: with KOSMOS_APP_DIR set, the sandbox
+# belt suppresses the open on its own and BOARD_OURS is never consulted
+# (proven by mutation: deleting the BOARD_OURS clause kept the suite
+# green in that shape). With KOSMOS_APP_DIR empty and the stub as the
+# open command, BOARD_OURS is the SOLE suppressor, so this pass pins it.
+SBH23="$SB/stranger-home"
+SYS28="$SB/sys28"
+mkdir -p "$SBH23" "$SYS28"
+export KOSMOS_HOME="$SB/home27" KOSMOS_BIN_DIR="$SB/bin27"
 OPENED_BEFORE_STRANGER="$(wc -l < "$SB/opened.log" | tr -d ' ')"
-RC=0; cat "$SETUP" | KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
+RC=0; cat "$SETUP" | HOME="$SBH23" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS28" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
 chk "occupied-port install exits 0" "[ $RC -eq 0 ]"
-chk "the occupied port is named, not claimed" "grep -q 'already using port' \"$SB/stranger-board.log\" && ! grep -q 'Kosmos is running.' \"$SB/stranger-board.log\""
+chk "the occupied port is named, not claimed" "grep -q 'could not confirm its own board' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
 chk "no browser was opened onto the stranger's board" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_STRANGER\" ]"
 "$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
+
+echo "== a link at the SYSTEM path survives uninstall, named =="
+# The round-14 gap: an owned-target LINK at the system entry passed the
+# leaf -L and the grep (both follow links) and was deleted as "the
+# Kosmos app". Linkness must decide at the root for the uninstall too.
+SYS29="$SB/sys29"
+REALB2="$SB/realbundle2"
+mkdir -p "$SYS29"
+seed_kosmos_bundle "$REALB2" "$SB/home28"
+ln -s "$REALB2/Kosmos.app" "$SYS29/Kosmos.app"
+SBH24="$SB/lnk3-home"
+mkdir -p "$SBH24"
+export KOSMOS_HOME="$SB/home28" KOSMOS_BIN_DIR="$SB/bin28"
+RC=0; HOME="$SBH24" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS29" sh -s -- --uninstall < "$SETUP" > "$SB/lnk3-un.log" 2>&1 || RC=$?
+chk "owned-target-link uninstall exits 0" "[ $RC -eq 0 ]"
+chk "the link survives the uninstall" "[ -L \"$SYS29/Kosmos.app\" ]"
+chk "its target survives too" "[ -f \"$REALB2/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "the link is named, not claimed" "grep -q 'could not be proven to belong to this install' \"$SB/lnk3-un.log\""
 
 echo "== the production open default is real =="
 # Every observing pass substitutes the recording stub, and command -v
