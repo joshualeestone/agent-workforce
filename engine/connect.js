@@ -372,6 +372,7 @@ function platformKey() {
 async function download(onProgress) {
   const base = downloadBase();
   const version = (await fetchText(`${base}/latest`)).trim();
+  activeRequest = null; // finished; "set" must keep meaning "in flight"
   /**
    * ⚠️ FULLY ANCHORED, because this string is interpolated into URLs and into
    * the ON-DISK FILENAME. Prefix-only matching would accept
@@ -385,6 +386,7 @@ async function download(onProgress) {
   let manifest;
   try { manifest = JSON.parse(await fetchText(`${base}/${version}/manifest.json`)); }
   catch { throw new Error('the download service answered with something we could not read'); }
+  activeRequest = null;
   const plat = platformKey();
   // Case-normalised: SHA256 hex is hex whichever case the service prints it
   // in, and rejecting uppercase would blame the Mac ("no build for this
@@ -400,8 +402,22 @@ async function download(onProgress) {
   const dest = path.join(dir, `claude-${version}-${plat}`);
   const part = `${dest}.part`;
   try { fs.unlinkSync(part); } catch { /* no partial to discard */ }
+  /**
+   * ⚠️ And every OTHER version's leftovers. A server death between a
+   * download's rename and its install strands a verified binary that only a
+   * same-version retry or a cancel would clean -- a version bump before the
+   * retry stranded ~281MB permanently. Every fresh download owns the dir.
+   */
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if ((f.startsWith('claude-') || f.endsWith('.part')) && f !== path.basename(dest)) {
+        fs.unlinkSync(path.join(dir, f));
+      }
+    }
+  } catch { /* nothing stale to clean */ }
 
   const got = await fetchFile(`${base}/${version}/${plat}/claude`, part, onProgress);
+  activeRequest = null;
   if (got.sha256 !== want) {
     try { fs.unlinkSync(part); } catch { /* already gone */ }
     throw new Error('the downloaded file did not match its checksum, so it was not kept');
@@ -808,16 +824,22 @@ async function tickBody(owner) {
         if (driver.rejectTicks > Math.max(3, Math.ceil(6000 / TICK_MS))) {
           driver.rejectTicks = 0;
           driver.lastActed = null;   // a new code may be typed
+          driver.rejectCount = (driver.rejectCount || 0) + 1;
           writeState({
             phase: PHASE.SIGNIN_AWAITING_CODE,
             url: seen.url || mem.url || null,
-            // ⚠️ Two ways to arrive here, two different true sentences.
-            // "Completing" can be reached with no code ever typed (login text
-            // seen from the browser flow, then the CLI re-prompted) -- telling
-            // that person to re-paste a code they never had is a small lie.
-            because: driver.codeTyped
-              ? 'that code did not work, so check it and paste it again'
-              : 'the sign-in did not finish on its own, so paste the code from your browser here',
+            /**
+             * ⚠️ Two ways to arrive here, two different true sentences --
+             * and a SECOND rejection gets a THIRD, because the page repaints
+             * (and a screen reader re-announces) only when the sentence
+             * changes: an identical retry failure would otherwise show and
+             * say nothing at all.
+             */
+            because: !driver.codeTyped
+              ? 'the sign-in did not finish on its own, so paste the code from your browser here'
+              : (driver.rejectCount > 1
+                ? 'that code still did not work; make sure you are copying the newest one'
+                : 'that code did not work, so check it and paste it again'),
             startedOnce: true,
           });
         }

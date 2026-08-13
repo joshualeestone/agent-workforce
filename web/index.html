@@ -4549,9 +4549,20 @@ async function frConnectStart() {
 
 async function frConnCancel() {
   frConnStopWatch();
-  try { await fetch('/api/connect/cancel', { method: 'POST' }); }
-  catch { /* the repaint below asks reality either way */ }
+  let refused = null;
+  try {
+    const res = await fetch('/api/connect/cancel', { method: 'POST' });
+    const st = await res.json();
+    /**
+     * ⚠️ CANCEL CAN REFUSE. When the flow belongs to another server sharing
+     * this data dir, the engine answers with the LIVE foreign phase instead
+     * of idle -- and painting the plain "not connected" verdict over it
+     * would render as ended a sign-in nobody ended. Keep painting reality.
+     */
+    if (res.ok && st && frConnActive(st.phase)) refused = st;
+  } catch { /* the repaint below asks reality either way */ }
   FR_CONN_LAST = null;
+  if (refused) { frPaintConnect(refused); frConnWatch(); return; }
   frRecheck();
 }
 
