@@ -681,6 +681,28 @@ driverTest('a stale failure cannot tear down the fresh flow that replaced it', a
     'flow A\'s corpse wrote STUCK over flow B: ' + JSON.stringify(st));
 });
 
+driverTest('a recognised screen that never advances becomes stuck, not eternal progress', async () => {
+  /**
+   * ⚠️ THE THIRD HANG SHAPE: unknown screens and blank panes had bounds, but
+   * a theme screen we pressed Enter on that keeps sitting there had none --
+   * "Getting the sign-in ready" forever over a wedged CLI. Bound derived
+   * from the same grace knob the others use (6x).
+   */
+  const term = fakeTerminal();
+  const advance = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    const r = advance(file, args);
+    term.screen = SCREEN_THEME;   // whatever was pressed, the CLI never moves
+    return r;
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /not moving past/,
+    'the wedge went stuck for the wrong reason: ' + connect.state().because);
+});
+
 driverTest('a pane that stays blank forever becomes stuck, not eternal progress', async () => {
   /**
    * ⚠️ The never-drawing screen used to get ETERNITY while the unrecognised

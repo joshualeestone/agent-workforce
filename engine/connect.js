@@ -555,6 +555,10 @@ async function start() {
    */
   const disk = readPersisted();
   if (foreignLiveFlow(disk)) return publicView(disk);
+  // (Residual, accepted like cancel's: this is check-then-act, so two
+  // servers starting in the SAME instant both pass and one flow's session
+  // kill costs the other an honest "the sign-in window closed" -- a failure
+  // that names itself, never corruption.)
 
   /**
    * ⚠️ No "already connected" memo here: the subscription check below IS the

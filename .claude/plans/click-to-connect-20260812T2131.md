@@ -46,6 +46,17 @@ which commands. So they were re-verified, and the record is here:
   walk-forward silently never fires and onboarding is left mid-screen for the
   next `claude` run. Capture it during the first real login and update the
   fixture.
+- **Measure the code-validation timing.** The rejection heuristic reads "paste
+  prompt still up ~6s after the code was typed" as "the code did not work",
+  measured only against the scripted fake. If the real CLI validates slowly
+  while leaving the prompt up, the person is told the code failed while
+  validation is in flight (self-correcting when login lands, but a false
+  sentence). Watch the real timing during pass 1 and widen the grace if it is
+  tight.
+- **Capture any pre-login "Press Enter to continue" screen if one appears.**
+  The guard that refuses to read that screen as login evidence cannot be
+  tested until a real capture of one exists; fixture discipline forbids
+  inventing its text.
 
 ## What this does NOT verify, said now so it cannot look covered later
 
