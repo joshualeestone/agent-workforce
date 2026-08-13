@@ -10,7 +10,8 @@
 # broken and stop. So:
 #
 #   - EVERY step prints what it is doing BEFORE it does it. A silent install is
-#     the documented disqualifying failure (requirements §122): a blank terminal
+#     the documented disqualifying failure (launch decision, 2026-08-11: a
+#     silent install disqualifies the product): a blank terminal
 #     for several minutes reads as broken, and the person quits before it
 #     finishes. Measured on a competitor the same week this was written: ten
 #     minutes of no output at all while it downloaded a database.
@@ -22,6 +23,14 @@
 # before. That is not politeness: the first run on a never-touched Mac is the
 # most valuable test this project will ever get, and it is worth exactly once
 # unless we can put the machine back.
+
+# ⚠️ THE macOS CHECK RUNS BEFORE ANY set OPTION. `set -o pipefail` is not
+# POSIX; on a Linux dash the old order died with a raw shell error before
+# reaching the friendly "Kosmos runs on macOS" sentence below.
+case "$(uname -s)" in
+  Darwin) ;;
+  *) printf '\n  Kosmos runs on macOS. This looks like %s.\n\n' "$(uname -s)" >&2; exit 1 ;;
+esac
 
 set -euo pipefail
 
@@ -46,48 +55,96 @@ LOG="$LOG_DIR/install.log"
 # thumb drive. Same code path, one variable different.
 KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
 
-fetch_tmux() {
-  local dest="$1"
-  mkdir -p "$dest"
-  if [ -n "${KOSMOS_TMUX_SRC:-}" ]; then
-    info "using local copy: $KOSMOS_TMUX_SRC"
-    [ -d "$KOSMOS_TMUX_SRC" ] || return 1
-    cp -R "$KOSMOS_TMUX_SRC/." "$dest/"
-  else
-    local url="$KOSMOS_RELEASE_BASE/tmux-$ARCH.tar.gz"
-    info "downloading from $url"
-    # ⚠️ Progress is ON. `curl -fsSL` is silent, and several minutes of nothing
-    # is the failure this whole file is written against.
-    curl -fL --progress-bar "$url" -o "$dest/tmux.tar.gz" || return 1
-    tar -xzf "$dest/tmux.tar.gz" -C "$dest" && rm -f "$dest/tmux.tar.gz"
-  fi
-  [ -x "$dest/bin/tmux" ] || return 1
-
-  # ⚠️ VERIFY THE THING WE JUST PLACED, rather than assuming the copy worked.
-  # An arm64 binary with a broken signature does not run at all, and the failure
-  # is silent and baffling. Better to say so here than to have the board come up
-  # empty later with no explanation.
-  if ! codesign -v "$dest/bin/tmux" 2>/dev/null; then
-    info "the copy of tmux did not arrive intact"
+# ⚠️ EVERY DOWNLOAD IS CHECKSUM-VERIFIED before anything is extracted. The
+# build publishes a .sha256 next to each tarball; a mismatch, a truncated
+# download, or a missing checksum file all refuse in a sentence. HTTPS alone
+# says who you talked to, not that the bytes are the ones the build made --
+# and this line is pasted by people who cannot audit what it fetched.
+# ⚠️ shasum, not sha256sum: macOS ships shasum, and this is the user path
+# where nothing beyond a clean Mac may be assumed.
+verify_download() {
+  local file="$1" url="$2" want got
+  curl -fsSL "$url.sha256" -o "$file.sha256" || { info "the download's checksum file is missing"; return 1; }
+  want="$(awk '{print $1; exit}' "$file.sha256")"
+  got="$(shasum -a 256 "$file" | awk '{print $1}')"
+  rm -f "$file.sha256"
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    info "the download did not arrive intact (checksum mismatch)"
     return 1
   fi
   return 0
 }
 
+# ⚠️ FETCHED INTO A FRESH STAGE AND SWAPPED, never merged over what is there.
+# Merging an update over an old tree keeps files the new version deleted, and
+# a half-failed copy leaves a tree that LOOKS installed. The swap means the
+# destination is only ever a complete old version or a complete new one.
+fetch_tmux() {
+  local dest="$1"
+  local stage="$dest.stage.$$"
+  rm -rf "$stage"
+  mkdir -p "$stage" || return 1
+  if [ -n "${KOSMOS_TMUX_SRC:-}" ]; then
+    info "using local copy: $KOSMOS_TMUX_SRC"
+    [ -d "$KOSMOS_TMUX_SRC" ] || return 1
+    cp -R "$KOSMOS_TMUX_SRC/." "$stage/" || return 1
+  else
+    local url="$KOSMOS_RELEASE_BASE/tmux-$ARCH.tar.gz"
+    info "downloading from $url"
+    # ⚠️ Progress is ON. `curl -fsSL` is silent, and several minutes of nothing
+    # is the failure this whole file is written against.
+    curl -fL --progress-bar "$url" -o "$stage/tmux.tar.gz" || return 1
+    verify_download "$stage/tmux.tar.gz" "$url" || return 1
+    tar -xzf "$stage/tmux.tar.gz" -C "$stage" || return 1
+    rm -f "$stage/tmux.tar.gz"
+  fi
+  [ -x "$stage/bin/tmux" ] || return 1
+
+  # ⚠️ VERIFY THE THING WE JUST PLACED, rather than assuming the copy worked.
+  # An arm64 binary with a broken signature does not run at all, and the failure
+  # is silent and baffling. Better to say so here than to have the board come up
+  # empty later with no explanation.
+  if ! codesign -v "$stage/bin/tmux" 2>/dev/null; then
+    info "the copy of tmux did not arrive intact"
+    rm -rf "$stage"
+    return 1
+  fi
+  rm -rf "$dest" || return 1
+  mv "$stage" "$dest" || return 1
+  return 0
+}
+
 install_kosmos() {
   local dest="$1"
-  mkdir -p "$dest/bin"
+  local stage="$dest/.kosmos.stage.$$"
+  rm -rf "$stage"
+  mkdir -p "$stage" || return 1
   if [ -n "${KOSMOS_SRC:-}" ]; then
     info "using local copy: $KOSMOS_SRC"
     [ -d "$KOSMOS_SRC" ] || return 1
-    cp -R "$KOSMOS_SRC/." "$dest/"
+    cp -R "$KOSMOS_SRC/." "$stage/" || return 1
   else
     local url="$KOSMOS_RELEASE_BASE/kosmos-$ARCH.tar.gz"
     info "downloading from $url"
-    curl -fL --progress-bar "$url" -o "$dest/kosmos.tar.gz" || return 1
-    tar -xzf "$dest/kosmos.tar.gz" -C "$dest" && rm -f "$dest/kosmos.tar.gz"
+    curl -fL --progress-bar "$url" -o "$stage/kosmos.tar.gz" || return 1
+    verify_download "$stage/kosmos.tar.gz" "$url" || return 1
+    tar -xzf "$stage/kosmos.tar.gz" -C "$stage" || return 1
+    rm -f "$stage/kosmos.tar.gz"
   fi
-  [ -x "$dest/bin/kosmos" ] || return 1
+  # ⚠️ THE STAGE IS VERIFIED, THEN SWAPPED. On the update path the old
+  # bundle already satisfies checks against $dest, so a failed copy used to
+  # read as a successful update: the check must look at what just arrived,
+  # never at what was already there. Only the bundle\'s three components are
+  # replaced; tmux/, logs/ and the pidfile are the machine\'s own state.
+  [ -x "$stage/bin/kosmos" ] || { rm -rf "$stage"; return 1; }
+  [ -x "$stage/runtime/bin/node" ] || { rm -rf "$stage"; return 1; }
+  [ -f "$stage/app/server.js" ] || { rm -rf "$stage"; return 1; }
+  local part
+  for part in bin app runtime; do
+    rm -rf "$dest/$part" || { rm -rf "$stage"; return 1; }
+    mv "$stage/$part" "$dest/$part" || { rm -rf "$stage"; return 1; }
+  done
+  rm -rf "$stage"
   return 0
 }
 
@@ -122,33 +179,59 @@ start_log() {
   rm -f "$_pipe"
   if mkfifo "$_pipe" 2>/dev/null; then
     tee -a "$LOG" < "$_pipe" &
-    exec 3>&1
     exec > "$_pipe" 2>&1
     rm -f "$_pipe"
-  else
-    # No fifo (exotic filesystem): the install still narrates on screen, it
-    # just loses the file transcript. Never fail the install for the log.
-    exec 3>&1
   fi
+  # No fifo (exotic filesystem): the install still narrates on screen, it
+  # just loses the file transcript. Never fail the install for the log.
+  # ⚠️ NO fd IS SAVED HERE. An `exec 3>&1` looked tidy and was never read;
+  # its only effect was to be inherited by every child, which is exactly the
+  # descriptor leak that once held a curl | sh install open forever.
 }
 
 # ---- uninstall --------------------------------------------------------------
 uninstall() {
   step "Removing Kosmos."
+  # The board first, while the command that knows how still exists: deleting
+  # the folder under a running server leaves it serving ghosts.
+  if [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
+    "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+  fi
+  # ⚠️ THE SYMLINK GOES BEFORE THE FOLDER, AND `-L` IS CHECKED. `-e` follows
+  # symlinks, so once the folder was deleted the dangling link answered
+  # "nothing there" and survived every uninstall -- the user was told Kosmos
+  # was removed while a dead `kosmos` stayed on their PATH. Measured.
+  for f in kosmos; do
+    if [ -e "$BIN_DIR/$f" ] || [ -L "$BIN_DIR/$f" ]; then
+      info "removing $BIN_DIR/$f"
+      rm -f "$BIN_DIR/$f"
+    fi
+  done
+  # ⚠️ THE AGENTS\' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
+  # one launchd job per agent (com.kosmos.agent.*), set to start at every
+  # login. With Kosmos gone there is no UI left to manage them, and "left
+  # alone" would mean invisible processes restarting forever with a manual
+  # launchctl recipe as the only exit. The jobs are app plumbing; the
+  # agents\' FILES are user work and stay.
+  _agents_dir="${AGENT_WORKFORCE_LAUNCH:-$HOME/Library/LaunchAgents}"
+  for _plist in "$_agents_dir"/com.kosmos.agent.*.plist; do
+    [ -e "$_plist" ] || continue
+    _label="$(basename "$_plist" .plist)"
+    info "stopping the background job for ${_label#com.kosmos.agent.}"
+    /bin/launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+    rm -f "$_plist"
+  done
   if [ -d "$KOSMOS_HOME" ]; then
     info "deleting $KOSMOS_HOME"
     rm -rf "$KOSMOS_HOME"
   fi
-  for f in kosmos; do
-    [ -e "$BIN_DIR/$f" ] && { info "removing $BIN_DIR/$f"; rm -f "$BIN_DIR/$f"; }
-  done
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
   [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
-  # ⚠️ Deliberately NOT removed: the user's agents, their instruction files, and
-  # anything under ~/work. Uninstalling the app must never delete somebody's
-  # work, and an installer that cleans up too enthusiastically is worse than one
-  # that leaves a folder behind.
-  printf '\n  Kosmos is removed. Your agents and their files were left alone.\n\n'
+  # ⚠️ Deliberately NOT removed: the user's agents' folders, their instruction
+  # files, and anything under ~/work. Uninstalling the app must never delete
+  # somebody's work, and an installer that cleans up too enthusiastically is
+  # worse than one that leaves a folder behind.
+  printf '\n  Kosmos is removed. Your agents\047 files were left alone; their background jobs were stopped.\n\n'
   exit 0
 }
 
@@ -178,6 +261,13 @@ case "$(uname -s)" in
   *) die "Kosmos runs on macOS. This looks like $(uname -s)." ;;
 esac
 ARCH="$(uname -m)"
+# ⚠️ Named refusal, not a mystery. Without this an Intel Mac asks the CDN for
+# a bundle that does not exist and the experience is a bare "Could not
+# install Kosmos" after a 404. Say the real reason in a sentence.
+case "$ARCH" in
+  arm64) ;;
+  *) die "Kosmos needs a Mac with Apple silicon (M1 or newer). This Mac is $ARCH." ;;
+esac
 info "macOS $(sw_vers -productVersion 2>/dev/null || echo '?') on $ARCH"
 ok
 
@@ -202,8 +292,10 @@ if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
   info "the terminal manager is already here"
 else
   info "installing a private copy of tmux (about 2MB, nothing system-wide)"
-  # In a real release this fetches the signed bundle from the release URL. Kept
-  # as a function so the clean-machine test can point it at a local file.
+  # On a release this fetches the checksum-verified bundle from the release
+  # URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
+  # signed, and saying "signed" would overclaim). Kept as a function so the
+  # clean-machine test can point it at a local file.
   fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager."
 fi
 ok
@@ -262,8 +354,8 @@ esac
 # He is right, and it would have been the quiet reason the product got installed
 # once and never opened again.
 #
-# ⚠️ AND THIS DOES NOT REOPEN THE SETTLED "NO .app" DECISION. Requirements §122
-# ruled out a DOWNLOADABLE app, because an unsigned app that arrives from the
+# ⚠️ AND THIS DOES NOT REOPEN THE SETTLED "NO .app" DECISION. The launch
+# decision of 2026-08-11 ruled out a DOWNLOADABLE app, because an unsigned app that arrives from the
 # internet carries a quarantine attribute and Gatekeeper shows the "unidentified
 # developer" block, which needs an Apple developer account to clear.
 #
@@ -277,12 +369,23 @@ make_app() {
   # assignments in the SAME `local` statement, so `$app` is unbound and the whole
   # step dies. Measured, after the installer reported "app: unbound variable" and
   # created nothing.
+  #
+  # ⚠️ EVERY STEP CARRIES ITS OWN `|| return 1`. This function runs as an `if`
+  # condition, and that DISABLES `set -e` for its whole body (measured: a
+  # failing mkdir inside it did not abort, and the caller printed success
+  # over a bundle that was never created). The fallback branch at the call
+  # site is only reachable if failures are returned by hand.
   local app="$1"
   local target="$app/Contents"
-  rm -rf "$app"
-  mkdir -p "$target/MacOS" "$target/Resources"
+  # The version the app reports is the one that was installed, read from the
+  # installed bundle itself, so the plist cannot drift from package.json.
+  local ver
+  ver="$(KOSMOS_PKG="$KOSMOS_HOME/app/package.json" \
+    "$KOSMOS_HOME/runtime/bin/node" -p 'require(process.env.KOSMOS_PKG).version' 2>/dev/null)" || ver="0.0.0"
+  rm -rf "$app" || return 1
+  mkdir -p "$target/MacOS" "$target/Resources" || return 1
 
-  cat > "$target/Info.plist" <<PLIST
+  cat > "$target/Info.plist" <<PLIST || return 1
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -291,29 +394,30 @@ make_app() {
   <key>CFBundleIdentifier</key><string>com.chaoskosmos.kosmos</string>
   <key>CFBundleExecutable</key><string>Kosmos</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$ver</string>
   <key>CFBundleIconFile</key><string>Kosmos</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><false/>
 </dict></plist>
 PLIST
 
-  # ⚠️ IT STARTS THE BOARD IF IT IS NOT RUNNING, rather than only opening a URL.
-  # An icon that opens a dead page after a reboot is worse than no icon: the
-  # person concludes the product broke, and they are not wrong to.
-  cat > "$target/MacOS/Kosmos" <<LAUNCH
+  # ⚠️ IT STARTS THE BOARD IF IT IS NOT RUNNING, rather than only opening a
+  # URL, and it does so through `kosmos open`, which is the one place that
+  # knows how to start, health-check and identify the board (a squatter on
+  # the port must not be opened and called Kosmos). If that fails, the icon
+  # says so in a dialog instead of opening a dead page: an icon that opens a
+  # browser error is how a person concludes the product broke, and they are
+  # not wrong to. osascript ships on every Mac; if even the dialog fails
+  # there is nothing left this launcher can do quietly, and it exits.
+  cat > "$target/MacOS/Kosmos" <<LAUNCH || return 1
 #!/bin/bash
 KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
-if ! /usr/bin/curl -fsS -m 2 http://127.0.0.1:$PORT/ >/dev/null 2>&1; then
-  "\$KOSMOS_HOME/bin/kosmos" start >/dev/null 2>&1
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    /usr/bin/curl -fsS -m 1 http://127.0.0.1:$PORT/ >/dev/null 2>&1 && break
-    sleep 1
-  done
+if ! "\$KOSMOS_HOME/bin/kosmos" open >/dev/null 2>&1; then
+  /usr/bin/osascript -e 'display alert "Kosmos could not start" message "Something went wrong bringing Kosmos up. The details are in $KOSMOS_HOME/logs/board.log. Reinstalling usually fixes it: paste the install line into Terminal again." as critical' >/dev/null 2>&1
+  exit 1
 fi
-exec /usr/bin/open "http://127.0.0.1:$PORT"
 LAUNCH
-  chmod +x "$target/MacOS/Kosmos"
+  chmod +x "$target/MacOS/Kosmos" || return 1
 
   # The icon is optional so the installer never fails for the want of artwork.
   [ -f "$KOSMOS_HOME/Kosmos.icns" ] && cp "$KOSMOS_HOME/Kosmos.icns" "$target/Resources/Kosmos.icns"

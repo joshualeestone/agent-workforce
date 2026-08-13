@@ -80,6 +80,21 @@ chmod u+w "$OUT/bin/tmux"
 # artifact, not by reading the script.
 #
 # `|| true` makes "no dependencies" the ordinary answer it always was.
+# Resolve a path through any chain of symlinks with nothing but cd/pwd and
+# readlink: Homebrew's dylibs are links into the Cellar, and the copy must
+# take the real file. python3 did this in one line and was also the one
+# build dependency the header claims not to have -- on a Mac without the
+# developer tools, merely invoking it pops the install dialog.
+resolve_file() {
+  local f="$1" d
+  while [ -L "$f" ]; do
+    d="$(cd "$(dirname "$f")" && pwd -P)"
+    f="$(readlink "$f")"
+    case "$f" in /*) ;; *) f="$d/$f" ;; esac
+  done
+  printf '%s/%s' "$(cd "$(dirname "$f")" && pwd -P)" "$(basename "$f")"
+}
+
 deps_of() {
   otool -L "$1" 2>/dev/null | tail -n +2 | awk '{print $1}' \
     | grep -vE '^/usr/lib|^/System|^@' || true
@@ -90,7 +105,7 @@ collect() {
   for dep in $(deps_of "$file"); do
     base="$(basename "$dep")"
     [ -f "$OUT/lib/$base" ] && continue
-    real="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$dep")"
+    real="$(resolve_file "$dep")"
     [ -f "$real" ] || { echo "    warn: cannot resolve $dep" >&2; continue; }
     cp "$real" "$OUT/lib/$base"
     chmod u+w "$OUT/lib/$base"
@@ -137,3 +152,13 @@ echo "    signatures valid on tmux and $(ls "$OUT"/lib/*.dylib | wc -l | tr -d '
 echo "==> ok: $(du -sh "$OUT" | cut -f1) at $OUT"
 echo "    load paths:"
 otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
+
+# ---- the tarball the installer downloads, and its checksum -------------------
+# ⚠️ The .sha256 is not decoration: install/setup.sh REFUSES a download whose
+# checksum file is missing or mismatched, so publishing the tarball without
+# this file next to it bricks the install on purpose.
+ARCH="$(uname -m)"
+TARBALL="$(dirname "$OUT")/tmux-$ARCH.tar.gz"
+tar -czf "$TARBALL" -C "$OUT" bin lib
+( cd "$(dirname "$TARBALL")" && shasum -a 256 "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256" )
+echo "==> packed: $(du -sh "$TARBALL" | cut -f1) at $TARBALL (+ .sha256)"

@@ -64,7 +64,26 @@ export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
 say() { printf '  %s\n' "$*"; }
 die() { printf '  %s\n' "$*" >&2; exit 1; }
 
-healthy() { /usr/bin/curl -fsS -m 2 "$URL/" >/dev/null 2>&1; }
+# ⚠️ IDENTITY, NOT JUST A 200. Any process squatting on the port answers a
+# bare liveness probe, and then start/status/the app icon would all point a
+# person at a stranger's page and call it Kosmos. The board serves its own
+# UI at /, so the probe asks for the page and checks it is ours.
+# ⚠️ A case STATEMENT, NOT `printf | grep -q`: under pipefail, grep -q
+# exits on its early match and printf takes SIGPIPE writing the rest of a
+# 250KB page, so the pipeline reports failure on a page that MATCHED --
+# which here would call our own running board a stranger. Measured in the
+# bundle build's smoke test, which failed its own healthy bundle this way.
+healthy() {
+  _body="$(/usr/bin/curl -fsS -m 2 "$URL/" 2>/dev/null)" || return 1
+  case "$_body" in
+    *"Agent Workforce"*|*Kosmos*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# The port answers but not with our page: somebody else lives there.
+port_taken_by_stranger() {
+  /usr/bin/curl -s -o /dev/null -m 2 "$URL/" 2>/dev/null && ! healthy
+}
 
 running_pid() {
   # The pidfile is a hint, not the truth: verify the process exists AND is
@@ -83,6 +102,9 @@ cmd_start() {
   if healthy; then
     say "Kosmos is already running at $URL"
     return 0
+  fi
+  if port_taken_by_stranger; then
+    die "Another app on this Mac is already using port $PORT, so Kosmos cannot start there. Quit that app and run 'kosmos start' again."
   fi
   [ -x "$NODE" ] || die "Kosmos looks incomplete: the runtime is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
   [ -f "$APP" ]  || die "Kosmos looks incomplete: the app is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
@@ -151,7 +173,9 @@ cmd_open() {
 
 cmd_version() {
   if [ -x "$NODE" ] && [ -f "$KOSMOS_HOME/app/package.json" ]; then
-    "$NODE" -p "require('$KOSMOS_HOME/app/package.json').version"
+    # The path travels as an environment variable, never interpolated into
+    # the JS source: a quote or backslash in a path must stay a path.
+    KOSMOS_PKG="$KOSMOS_HOME/app/package.json"       "$NODE" -p 'require(process.env.KOSMOS_PKG).version'
   else
     die "Kosmos looks incomplete here."
   fi

@@ -105,23 +105,43 @@ chmod +x "$STAGE/runtime/bin/node"
   echo "FAIL: the staged node does not run" >&2; exit 1; }
 
 # ---- smoke test -------------------------------------------------------------
-# ⚠️ THE STAGED TREE IS WHAT GETS TESTED, not the repo. The failure this
-# catches is the explicit ship list above missing a file the server needs:
-# the repo copy would run fine while the bundle is broken. PORT=0 asks the OS
-# for a free port, so this never collides with a real board on this machine.
-echo "==> smoke test: the staged app boots from the staged runtime"
+# ⚠️ THE STAGED TREE IS WHAT GETS TESTED, not the repo, AND A REAL REQUEST IS
+# MADE. "The process stayed alive" cannot catch the ship list missing a file
+# the server reads per request (web/index.html is read on every GET), so a
+# bundle with no UI at all would boot, idle, and ship. PORT=0 still asks the
+# OS for a free port -- the server prints the port it actually bound, and
+# that line is parsed rather than guessed, so this never collides with a
+# real board on this machine.
+echo "==> smoke test: the staged app boots and serves its page"
 SMOKE_LOG="$(mktemp)"
 PORT=0 "$STAGE/runtime/bin/node" "$STAGE/app/server.js" > "$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
-sleep 1.5
-if kill -0 "$SMOKE_PID" 2>/dev/null; then
-  kill "$SMOKE_PID" 2>/dev/null; wait "$SMOKE_PID" 2>/dev/null || true
-  echo "    boots and stays up"
-else
-  echo "FAIL: the staged app died on boot. It said:" >&2
+SMOKE_URL=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  SMOKE_URL="$(sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9]*\).*/\1/p' "$SMOKE_LOG" | head -1)"
+  [ -n "$SMOKE_URL" ] && break
+  kill -0 "$SMOKE_PID" 2>/dev/null || break
+  sleep 0.5
+done
+smoke_fail() {
+  echo "FAIL: $1" >&2
   sed 's/^/    /' "$SMOKE_LOG" >&2
+  kill "$SMOKE_PID" 2>/dev/null || true
   exit 1
-fi
+}
+[ -n "$SMOKE_URL" ] || smoke_fail "the staged app never announced a port. It said:"
+PAGE="$(curl -fsS -m 5 "$SMOKE_URL/" 2>/dev/null)" || smoke_fail "the staged app did not answer at $SMOKE_URL. It said:"
+# ⚠️ A case STATEMENT, NOT `printf | grep -q`, AND THIS WAS MEASURED HERE:
+# under pipefail, grep -q exits on its early match, printf takes SIGPIPE
+# writing the rest of a 250KB page, and the PIPELINE reports failure on a
+# page that matched. The first run of this smoke test failed its own
+# healthy bundle exactly that way. No pipe, no signal, no lie.
+case "$PAGE" in
+  *"Agent Workforce"*|*Kosmos*) ;;
+  *) smoke_fail "the staged app answered with something that is not its own page:" ;;
+esac
+kill "$SMOKE_PID" 2>/dev/null; wait "$SMOKE_PID" 2>/dev/null || true
+echo "    boots, answers at $SMOKE_URL, and serves its own page"
 rm -f "$SMOKE_LOG"
 
 # ---- the tarball ------------------------------------------------------------
@@ -129,5 +149,8 @@ echo "==> packing"
 TARBALL_OUT="$OUT/kosmos-$ARCH.tar.gz"
 rm -f "$TARBALL_OUT"
 tar -czf "$TARBALL_OUT" -C "$STAGE" bin app runtime
-echo "==> ok: $(du -sh "$TARBALL_OUT" | cut -f1) at $TARBALL_OUT"
+# ⚠️ The .sha256 is what install/setup.sh verifies before extracting; a
+# tarball published without it refuses to install, on purpose.
+( cd "$OUT" && shasum -a 256 "$(basename "$TARBALL_OUT")" > "$(basename "$TARBALL_OUT").sha256" )
+echo "==> ok: $(du -sh "$TARBALL_OUT" | cut -f1) at $TARBALL_OUT (+ .sha256)"
 echo "    contains: $(tar -tzf "$TARBALL_OUT" | wc -l | tr -d ' ') files"
