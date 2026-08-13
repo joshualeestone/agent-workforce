@@ -42,10 +42,17 @@ from one that failed.
   fallback against disposable directories; the fallback leg is what a
   standard (non-admin) user lives on, and a fallback that can only run where
   the primary works is untested by construction.
-- tools/test-install.sh grew from 22 to 34 assertions: probe success (system
-  folder, honest sentence, stale-icon cleanup, no residue), probe failure
-  (home folder, honest sentence, no residue in the read-only dir), and the
-  two-location uninstall sweep.
+- tools/test-install.sh grew from 22 to 55 assertions (the count the
+  harness itself prints): probe success (system folder, honest sentences,
+  stale-icon cleanup with the move named, no residue, the fresh-install
+  open via a recording stub), probe failure (home folder, no residue in
+  the read-only dir, the KOSMOS_NO_OPEN suppressor), the override-bypasses-
+  probe invariant, the ownership-checked uninstall sweep (non-owner
+  refuses in a sentence, owner takes), the aliased-folders world
+  (~/Applications symlinked to the system folder: install survives its own
+  cleanup, a foreign uninstall cannot delete through the link), and the
+  foreign-bundle divert (a Kosmos.app this installer did not create is
+  never claimed, never modified, and the divert speaks its own sentence).
 
 ## Out of scope
 

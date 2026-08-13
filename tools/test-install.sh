@@ -34,7 +34,7 @@ if [ ! -d "$TMUX_SRC" ] || [ ! -d "$KOS_SRC" ]; then
 fi
 
 SB="$(mktemp -d)"
-trap 'for _h in home home2 home3; do if [ -f "$SB/$_h/board.pid" ]; then kill "$(cat "$SB/$_h/board.pid")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
+trap 'for _h in home home2 home3 home4 home5 home6; do if [ -f "$SB/$_h/board.pid" ]; then kill "$(cat "$SB/$_h/board.pid")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
 # A free port, probed rather than assumed: several agents and a real board
@@ -176,7 +176,7 @@ else
   RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO" KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe2.log" 2>&1 || RC=$?
   chk "fallback install exits 0" "[ $RC -eq 0 ]"
   chk "app fell back to the home folder" "[ -x \"$SBH/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
-  chk "transcript names the home folder" "grep -q 'Applications folder inside your home folder' \"$SB/probe2.log\""
+  chk "transcript names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/probe2.log\""
   chk "no probe residue in the read-only folder" "[ -z \"\$(ls -A \"$SYS_RO\")\" ]"
   chk "KOSMOS_NO_OPEN suppressed the fresh-install open" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"1\" ]"
   chmod 755 "$SYS_RO"
@@ -190,12 +190,60 @@ RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninst
 chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 chk "another install's system icon left alone" "[ -d \"$SYS_OK/Kosmos.app\" ]"
-chk "the refusal speaks a sentence" "grep -q 'belongs to a different install' \"$SB/probe-un.log\""
+chk "the refusal speaks a sentence" "grep -q 'was not created by this install' \"$SB/probe-un.log\""
 # The OWNER's uninstall takes it.
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
 chk "owner uninstall exits 0" "[ $RC -eq 0 ]"
 chk "system-folder icon swept by its owner" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
+
+echo "== aliased folders (~/Applications symlinked to the system folder) =="
+# The failure this pins: with ~/Applications a symlink to the system
+# folder, the stale-icon cleanup and the home-folder sweep both look
+# THROUGH the link at the bundle the other branch owns. Delete either
+# pwd -P guard in setup.sh and these assertions fail: the install would
+# remove the app it just wrote, the foreign uninstall would delete a
+# bundle its ownership check had just refused.
+SBH3="$SB/alias-home"
+SYSALIAS="$SB/sysalias"
+mkdir -p "$SBH3" "$SYSALIAS"
+ln -s "$SYSALIAS" "$SBH3/Applications"
+export KOSMOS_HOME="$SB/home4" KOSMOS_BIN_DIR="$SB/bin4"
+RC=0; cat "$SETUP" | HOME="$SBH3" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS" sh > "$SB/alias.log" 2>&1 || RC=$?
+chk "aliased install exits 0" "[ $RC -eq 0 ]"
+chk "app survives its own stale-icon cleanup" "[ -x \"$SYSALIAS/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "no phantom move sentence" "! grep -q 'icon moved here' \"$SB/alias.log\""
+"$SB/bin4/kosmos" stop > /dev/null 2>&1 || true
+# A DIFFERENT install's uninstall in the aliased world: the ownership
+# check refuses the system icon, and the home sweep must not delete it
+# through the symlink either.
+RC=0; HOME="$SBH3" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS" KOSMOS_HOME="$SB/home5" KOSMOS_BIN_DIR="$SB/bin5" sh -s -- --uninstall < "$SETUP" > "$SB/alias-un.log" 2>&1 || RC=$?
+chk "foreign uninstall exits 0 in the aliased world" "[ $RC -eq 0 ]"
+chk "refused bundle survives the aliased home sweep" "[ -d \"$SYSALIAS/Kosmos.app\" ]"
+# The owner's uninstall takes it, exactly once, with no survivor note.
+RC=0; HOME="$SBH3" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS" sh -s -- --uninstall < "$SETUP" > "$SB/alias-un2.log" 2>&1 || RC=$?
+chk "owner uninstall exits 0 in the aliased world" "[ $RC -eq 0 ]"
+chk "aliased bundle removed by its owner" "[ ! -d \"$SYSALIAS/Kosmos.app\" ]"
+chk "no spurious survivor note" "! grep -q 'could not remove' \"$SB/alias-un2.log\""
+
+echo "== a foreign Kosmos.app in the system folder is never claimed =="
+# The failure this pins: an app named Kosmos that this installer did NOT
+# create sits at the system path. make_app begins with rm -rf on its
+# target, so claiming the path destroys a stranger's app while printing
+# success. The install must divert to the per-user folder, say so, and
+# leave the foreign bundle byte-identical.
+SYS_FOREIGN="$SB/sysforeign"
+mkdir -p "$SYS_FOREIGN/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# not ours\nKOSMOS_HOME="${KOSMOS_HOME:-/somewhere/else/kosmos}"\n' > "$SYS_FOREIGN/Kosmos.app/Contents/MacOS/KosmosDesktop"
+SBH4="$SB/divert-home"
+mkdir -p "$SBH4"
+export KOSMOS_HOME="$SB/home6" KOSMOS_BIN_DIR="$SB/bin6"
+RC=0; cat "$SETUP" | HOME="$SBH4" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_FOREIGN" sh > "$SB/divert.log" 2>&1 || RC=$?
+chk "divert install exits 0" "[ $RC -eq 0 ]"
+chk "foreign bundle untouched" "grep -q 'not ours' \"$SYS_FOREIGN/Kosmos.app/Contents/MacOS/KosmosDesktop\""
+chk "our app went to the home folder instead" "[ -x \"$SBH4/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "the divert speaks its own sentence" "grep -q 'something else already has the Kosmos spot' \"$SB/divert.log\""
+"$SB/bin6/kosmos" stop > /dev/null 2>&1 || true
 
 echo
 echo "$PASS passed, $FAIL failed"

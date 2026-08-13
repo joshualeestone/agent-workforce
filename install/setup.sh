@@ -2,7 +2,10 @@
 # Kosmos installer. One line, no sudo, no password. Everything lives in your
 # home folder except the app icon, which goes to /Applications when this
 # user can write there without a password (macOS admin accounts can), and
-# into the Applications folder inside your home folder otherwise.
+# into the Applications folder inside your home folder otherwise. In
+# /Applications it only ever replaces a Kosmos icon it can prove it created
+# itself (by the icon's own contents), and its write check creates and
+# removes one empty hidden folder there. It never touches any other app.
 #
 # ⚠️ THE SHEBANG SAYS sh BECAUSE THE PAGE SAYS sh. This file's contract is
 # the interpreter the marketing line actually invokes: macOS /bin/sh, which
@@ -85,15 +88,26 @@ resolve_app_dir() {
   # The verbatim override is a sandbox: no probing, no fallback.
   [ -n "${KOSMOS_APP_DIR:-}" ] && { APP_DIR="$KOSMOS_APP_DIR"; return 0; }
   APP_DIR="$HOME/Applications"
-  # ⚠️ NEVER CLAIM A BUNDLE THAT BELONGS TO A DIFFERENT INSTALL. The launcher
-  # bakes the installing user's KOSMOS_HOME as its default, so on a Mac with
-  # two admin accounts, replacing the shared /Applications icon would break
-  # the other account's working install, and every reinstall would clobber
-  # the icon back and forth between them. A bundle whose launcher does not
-  # name THIS install's KOSMOS_HOME sends the icon to the per-user folder
-  # instead, and the icon step says so.
-  if [ -f "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
-     && ! grep -qF "$KOSMOS_HOME" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+  # ⚠️ NEVER CLAIM A BUNDLE THIS INSTALL CANNOT PROVE IS ITS OWN. The
+  # launcher bakes the installing user's KOSMOS_HOME as its default, so on
+  # a Mac with two admin accounts, replacing the shared /Applications icon
+  # would break the other account's working install, and every reinstall
+  # would clobber the icon back and forth between them.
+  #
+  # ⚠️ POSITIVE PROOF, NOT ABSENCE OF DISPROOF. make_app begins with rm -rf
+  # on its target, so claiming the path IS the destructive act. If ANYTHING
+  # sits at the system path, it is claimed only on evidence: the launcher
+  # line naming this KOSMOS_HOME, matched WITH its closing token
+  # (`:-<home>}"`) so two homes in a prefix relationship cannot
+  # cross-match. Everything else -- a third-party app that happens to be
+  # named Kosmos, a half-written bundle, an unreadable launcher, a
+  # different executable name -- diverts to the per-user folder, and the
+  # icon step says so. (The first version keyed on the launcher FILE
+  # existing, which made the install fail destructive exactly where the
+  # uninstall below fails safe: a stranger's app was rm -rf'd while the
+  # transcript printed success.)
+  if [ -e "$SYS_APP_DIR/Kosmos.app" ] \
+     && ! grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
     APP_OTHER_OWNER=yes
     return 0
   fi
@@ -426,24 +440,36 @@ uninstall() {
     # account's working icon. The HOME folder needs no predicate -- it is
     # per-user by construction.
     if [ -d "$SYS_APP_DIR/Kosmos.app" ]; then
-      if grep -qF "$KOSMOS_HOME" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+      # The same anchored token as resolve_app_dir: the closing `}"` keeps
+      # two homes in a prefix relationship from cross-matching, because
+      # this grep is the sole gate on an rm -rf in a shared folder.
+      if grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
         info "removing the Kosmos app from $SYS_APP_DIR"
         # A standard user cannot always delete from /Applications; an icon
         # that survives is NAMED, never silently skipped.
         rm -rf "$SYS_APP_DIR/Kosmos.app" 2>/dev/null || info "note: could not remove $SYS_APP_DIR/Kosmos.app; drag it to the Trash to finish."
       else
-        info "note: the Kosmos app in $SYS_APP_DIR belongs to a different install on this Mac and was left alone."
+        # "was not created by this install" claims only what the failed
+        # match observed: it covers another account's Kosmos AND a
+        # third-party app that happens to carry the name.
+        info "note: the Kosmos app in $SYS_APP_DIR was not created by this install and was left alone."
       fi
     fi
     # ⚠️ Skipped when the two folders are physically the same (~/Applications
     # symlinked to /Applications): the ownership-checked branch above
-    # already decided that bundle's fate, and this unconditional delete
-    # would override its refusal through the symlink.
+    # already decided that bundle's fate, and this delete would override
+    # its refusal through the symlink. FAIL CLOSED, the same shape as the
+    # install-side guard: an unresolvable folder is a reason to leave the
+    # bundle alone and say so, never a license to delete through it.
     _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
     _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
-    if [ -d "$HOME/Applications/Kosmos.app" ] && { [ -z "$_home_apps_phys" ] || [ "$_home_apps_phys" != "$_sys_apps_phys" ]; }; then
-      info "removing the Kosmos app from $HOME/Applications"
-      rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
+    if [ -d "$HOME/Applications/Kosmos.app" ]; then
+      if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ] && [ "$_home_apps_phys" != "$_sys_apps_phys" ]; then
+        info "removing the Kosmos app from $HOME/Applications"
+        rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
+      elif [ -z "$_home_apps_phys" ] || [ -z "$_sys_apps_phys" ]; then
+        info "note: could not check the Applications folder inside your home folder; the Kosmos icon there was left alone."
+      fi
     fi
     # Probe residue from any earlier run goes too; -f keeps an unmatched
     # glob harmless.
@@ -768,7 +794,23 @@ LAUNCH
 step "Adding Kosmos to your Applications."
 resolve_app_dir
 mkdir -p "$APP_DIR" || die "Could not create $APP_DIR. Check that it is writable."
+APP_MADE=no
 if make_app "$APP_DIR/Kosmos.app"; then
+  APP_MADE=yes
+elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
+  # ⚠️ A WRITABLE FOLDER IS NOT A CREATABLE BUNDLE. The mkdir probe proves
+  # POSIX write on the directory; a root-owned leftover Kosmos.app or a
+  # TCC App Management denial can still fail the bundle write inside it.
+  # Before 2026-08-13 the icon reliably landed in ~/Applications, so
+  # ending with NO icon anywhere would be strictly worse than the
+  # discoverability bug this branch fixes. One retry into the per-user
+  # folder before giving up.
+  APP_DIR="$HOME/Applications"
+  if mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
+    APP_MADE=yes
+  fi
+fi
+if [ "$APP_MADE" = "yes" ]; then
   # The sentence names where the icon ACTUALLY went. "you will find it in
   # Applications" was printed on the run that put it in ~/Applications, and
   # the tester could not find it -- a true sentence read as a false one.
@@ -803,7 +845,11 @@ if make_app "$APP_DIR/Kosmos.app"; then
     fi
   else
     if [ "$APP_OTHER_OWNER" = "yes" ]; then
-      info "another account on this Mac already has Kosmos in Applications, so yours went to the"
+      # Claims only what the failed ownership match observed: "not created
+      # by this install" covers another account's Kosmos AND a third-party
+      # app carrying the name, where "another account has Kosmos" would
+      # assert something never established.
+      info "something else already has the Kosmos spot in Applications, so yours went to the"
       info "Applications folder inside your home folder, as Kosmos (or type Kosmos into Spotlight)"
     else
       info "you will find it in the Applications folder inside your home folder, as Kosmos"
@@ -849,11 +895,11 @@ printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s 
 # /usr/bin/open made this block the one new behavior the suite could not
 # see at all.
 OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
-if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && [ -x "$OPEN_CMD" ]; then
+# command -v rather than -x: it resolves a bare command name as well as a
+# path, so an override like KOSMOS_OPEN_CMD=open does not silently no-op.
+if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && command -v "$OPEN_CMD" >/dev/null 2>&1; then
   "$OPEN_CMD" "http://127.0.0.1:$PORT/" >/dev/null 2>&1 || true
 fi
-
-
 }
 
 main "$@"
