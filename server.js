@@ -1041,8 +1041,15 @@ const server = http.createServer((req, res) => {
     let st;
     try { st = connect.state(); }
     catch (err) {
+      /**
+       * ⚠️ NOT `stuck`: the page paints stuck as "we could not finish
+       * connecting Claude", a settled sentence about an attempt that may
+       * never have happened. "We cannot tell where the flow is" is a third
+       * answer; the page has no panel for `unsure` on purpose, so the static
+       * verdict stands. (Defensive only -- state() never throws today.)
+       */
       st = {
-        phase: 'stuck',
+        phase: 'unsure',
         because: 'we could not work out where the connection attempt is',
         tail: String((err && err.message) || err),
       };

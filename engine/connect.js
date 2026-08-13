@@ -602,6 +602,18 @@ async function start() {
   const bin = claudeBinPath();
   let haveBinary = false;
   try { fs.accessSync(bin, fs.constants.X_OK); haveBinary = true; } catch { /* not installed yet */ }
+  /**
+   * ⚠️ EXECUTABLE IS NOT WORKING. A cancel or crash mid-`claude install` can
+   * leave a truncated launcher that passes X_OK forever -- and trusting it
+   * skipped the re-download, so every Try again dead-ended on the same
+   * broken binary, and the offered manual path (Terminal, claude) was the
+   * SAME broken binary. One --version probe turns "a file is there" into
+   * "the thing runs"; a probe failure re-downloads.
+   */
+  if (haveBinary) {
+    const probe = await run(bin, ['--version'], { timeout: 15000 });
+    if (!probe.ok) haveBinary = false;
+  }
 
   /**
    * ⚠️ EVERY ASYNC ARM OF A FLOW CARRIES ITS OWNING DRIVER, and teardown
@@ -750,6 +762,14 @@ async function launchSignin(owner) {
    * quoted form died instantly). Single-argument commands are the form that
    * goes through a shell; keep this multi-arg and keep it bare.
    */
+  // ⚠️ The two sandbox seams travel together or not at all: a run with the
+  // CONFIG override set but the DIR unset drives the CLI at the REAL config
+  // while subscription reads the override, so a successful login would end
+  // in "we cannot see the connection yet". Loud, because it is silent.
+  if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG && !process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR) {
+    console.warn('connect: AGENT_WORKFORCE_CLAUDE_CONFIG is set without AGENT_WORKFORCE_CLAUDE_CONFIG_DIR; '
+      + 'the sign-in will write a config the checker is not reading');
+  }
   const cmd = [];
   if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR) {
     cmd.push('env', `CLAUDE_CONFIG_DIR=${process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR}`);
@@ -1251,6 +1271,7 @@ function resetForTests() {
   if (driver && driver.timer) clearInterval(driver.timer);
   driver = null;
   activeRequest = null;
+  activeChild = null; // a stale handle must not be killable by the next test's flow
   mem = { phase: PHASE.IDLE };
 }
 

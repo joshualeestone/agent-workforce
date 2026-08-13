@@ -91,7 +91,9 @@ test('the state route never 500s, even when the engine itself throws', async () 
   try {
     const got = await req('/api/connect');
     assert.equal(got.status, 200, 'a state question was answered with an error status');
-    assert.equal(json(got).phase, 'stuck');
+    // `unsure`, not `stuck`: the page paints stuck as a failed ATTEMPT, and
+    // an engine crash is "we cannot tell", which is a third answer.
+    assert.equal(json(got).phase, 'unsure');
     assert.match(json(got).tail, /engine on fire/, 'the reason was swallowed');
   } finally {
     connect.state = real;

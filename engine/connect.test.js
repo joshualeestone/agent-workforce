@@ -309,6 +309,64 @@ test('cancel mid-download aborts the stream and leaves nothing behind', async (t
   assert.deepEqual(leftovers, [], `the cancelled download left: ${leftovers.join(', ')}`);
 });
 
+test('a fresh download sweeps other versions\' leftovers', async (t) => {
+  /**
+   * ⚠️ A server death between a download's rename and its install strands a
+   * verified binary that only a same-version retry would otherwise clean; a
+   * version bump before the retry stranded ~281MB permanently.
+   */
+  const binary = crypto.randomBytes(32 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = await serveRelease(t, { version: '9.9.5', binary, checksum });
+  t.after(() => { delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE; });
+
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, `claude-0.0.1-${connect.platformKey()}`), 'stale corpse');
+  fs.writeFileSync(nodePath.join(dir, 'claude-0.0.2-x.part'), 'stale partial');
+
+  await connect.download();
+  const left = fs.readdirSync(dir).sort();
+  assert.deepEqual(left, [`claude-9.9.5-${connect.platformKey()}`],
+    `stale leftovers survived the fresh download: ${left.join(', ')}`);
+  fs.rmSync(nodePath.join(dir, `claude-9.9.5-${connect.platformKey()}`), { force: true });
+});
+
+driverTest('a binary that exists but does not run is re-downloaded, not trusted', async () => {
+  /**
+   * ⚠️ EXECUTABLE IS NOT WORKING: a truncated launcher from an interrupted
+   * install passes X_OK forever, and trusting it dead-ended every Try again
+   * on the same broken binary. The probe turns "a file is there" into "the
+   * thing runs"; a probe failure must route to the download path.
+   */
+  const broken = nodePath.join(SANDBOX, 'broken-claude');
+  fs.writeFileSync(broken, '#!/no/such/interpreter\n');
+  fs.chmodSync(broken, 0o755);
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = broken;
+
+  const term = fakeTerminal();
+  const calls = [];
+  connect.setRunner((file, args) => {
+    calls.push([file, args[0]]);
+    if (file === broken && args[0] === '--version') return { ok: false, stdout: '', stderr: 'exec format error' };
+    return term.runner(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  // The probe failed, so the flow must be DOWNLOADING (or stuck on the
+  // fixture-less download), never a sign-in phase driven by the broken file.
+  await until(() => {
+    const p = connect.state().phase;
+    return p === connect.PHASE.DOWNLOADING || p === connect.PHASE.STUCK;
+  }, 5000);
+  assert.ok(calls.some(([f, a]) => f === broken && a === '--version'),
+    'the existing binary was trusted without ever being run');
+  const p = connect.state().phase;
+  assert.notEqual(String(p).startsWith('signin'), true,
+    'a broken binary was handed to the sign-in flow');
+});
+
 /* ── the driver, against a scripted terminal ─────────────────────────────── */
 
 /**
