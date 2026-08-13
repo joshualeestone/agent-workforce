@@ -9,7 +9,8 @@
 # .Kosmos.app.stage.<pid> folder beside its spot and renamed into place,
 # with the replaced icon renamed aside as .Kosmos.app.old.<pid> until the
 # swap completes (an interrupted run can leave either hidden folder
-# behind; --uninstall sweeps both). macOS may show its own one-time
+# behind; --uninstall sweeps both when it can prove they are this
+# install's own, and names anything it leaves). macOS may show its own one-time
 # "Terminal wants to manage apps" dialog for the icon step. It never
 # touches any other app. A fresh
 # install finishes by opening your browser at the Kosmos dashboard;
@@ -224,7 +225,8 @@ PORT="${KOSMOS_PORT:-4317}"
 # The port is baked into the same unquoted launcher heredoc the
 # KOSMOS_HOME character guard protects, so it gets the same posture:
 # anything but digits is refused in a sentence (reproduced in review: a
-# crafted KOSMOS_PORT ran a command at click time).
+# crafted KOSMOS_PORT ran a command at click time). The '' arm is
+# unreachable belt (the :- default already replaced an empty value).
 case "$PORT" in
   ''|*[!0-9]*)
     printf '\n  KOSMOS_PORT must be a number. Unset it and run again.\n\n' >&2
@@ -542,7 +544,20 @@ uninstall() {
   # reaching into the machine's REAL Applications folders would delete a
   # real install out from under the person running the test.
   if [ -n "${KOSMOS_APP_DIR:-}" ]; then
-    [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
+    # The SAME ownership gate as every other destructive site: the header
+    # promise ("anything the uninstall cannot PROVE this installer
+    # created is left alone and named") is unconditional, and the
+    # override path is not an exemption. -e OR -L like every sibling, so
+    # a dangling link is named rather than silently surviving.
+    if [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; then
+      if [ ! -L "$APP_DIR/Kosmos.app" ] && [ ! -L "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" ] \
+         && grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+        info "removing the Kosmos app"
+        rm -rf "$APP_DIR/Kosmos.app" 2>/dev/null || info "note: could not remove $APP_DIR/Kosmos.app; drag it to the Trash to finish."
+      else
+        info "note: the Kosmos.app in $APP_DIR could not be proven to belong to this install and was left alone."
+      fi
+    fi
     for _res in "$APP_DIR"/.Kosmos.app.stage.* "$APP_DIR"/.Kosmos.app.old.*; do
       { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
       if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
@@ -974,6 +989,17 @@ make_app() {
   aside="$(dirname "$app")/.Kosmos.app.old.$$"
   rm -rf "$aside" 2>/dev/null || true
   if [ -e "$app" ] || [ -L "$app" ]; then
+    # ⚠️ RE-VERIFIED IMMEDIATELY BEFORE THE RENAME: ownership was proved
+    # at resolve time, and in a shared folder the occupant can change
+    # between then and now. The displaced bundle gets deleted, so the
+    # proof must be contemporaneous with the displacement, or the header
+    # sentence "only ever replaces a Kosmos icon it can prove it created"
+    # holds only usually.
+    if [ -L "$app" ] || [ -L "$app/Contents/MacOS/Kosmos" ] \
+       || ! grep -qF ":-$KOSMOS_HOME}\"" "$app/Contents/MacOS/Kosmos" 2>/dev/null; then
+      rm -rf "$stage" 2>/dev/null || true
+      return 1
+    fi
     if ! mv "$app" "$aside" 2>/dev/null; then
       rm -rf "$stage" 2>/dev/null || true
       return 1
@@ -1164,6 +1190,16 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
   fi
   if [ "$_retry_ok" = "yes" ]; then
     APP_DIR="$HOME/Applications"
+    # The system-folder outcome is recorded HERE, before the retry can
+    # branch away: on the home-foreign leg the transcript otherwise went
+    # quiet about Applications entirely, right after the TCC warm-up set
+    # the expectation that an icon would land there. The reason is
+    # "swap", not "probe": this account could write the folder.
+    if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
+      APP_SYS_STALE=swap
+    else
+      APP_SYS_FAILED=yes
+    fi
     # The same home-folder ownership gate as the direct path above: the
     # retry must not replace an occupant it cannot prove is ours either.
     if { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
@@ -1173,22 +1209,6 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
       APP_HOME_FOREIGN=yes
     elif mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
       APP_MADE=yes
-      # The retry only ever fires when an existing bundle could not be
-      # replaced, so a survivor is the TYPICAL outcome here, not an edge:
-      # without this flag the transcript names the home icon and says
-      # nothing about the one Finder's sidebar actually shows. The reason
-      # is "swap", not "probe": THIS account could write the folder, the
-      # bundle itself would not move, and the sentence must not blame the
-      # account for a cause never observed.
-      if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
-        APP_SYS_STALE=swap
-      else
-        # No survivor means the write itself was refused (a TCC denial is
-        # the likely real-world shape); the transcript must still explain
-        # why Applications was skipped after the warm-up sentence set the
-        # expectation.
-        APP_SYS_FAILED=yes
-      fi
     fi
   fi
 fi
@@ -1302,6 +1322,9 @@ elif [ "$APP_HOME_FOREIGN" = "yes" ]; then
   if [ "$APP_OTHER_OWNER" = "yes" ]; then
     info "(something else also has the Kosmos spot in Applications; it was left alone too)"
   fi
+  if [ "$APP_SYS_STALE" = "swap" ]; then
+    info "(the Kosmos icon already in Applications could not be replaced; it is still there and still works)"
+  fi
   info "Open Kosmos with the dashboard address below (worth bookmarking)."
 elif [ "$APP_SKIP_ICON" = "yes" ]; then
   # The fail-closed leg of the divert's aliasing guard: something not ours
@@ -1327,9 +1350,31 @@ step "Starting Kosmos."
 KOSMOS_SAY_INDENT="     " "$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start. What it said is above; it is safe to paste the install line again."
 ok
 
-printf '\n  Kosmos is running.\n'
-printf '  Open it and it will walk you through connecting your AI account.\n'
-printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
+# ⚠️ PROVE THE BOARD ON THE PORT IS THIS INSTALL'S OWN. cmd_start's
+# healthy() accepts ANY board identifying as Kosmos on the port, so on a
+# Mac where another account's Kosmos already holds it, a fresh install
+# "succeeds" without ever starting its own board -- and the closing
+# sentences (and the browser open below) would present the OTHER
+# install's board as the result of this one. Measured in review: a fresh
+# install onto an occupied port printed "Kosmos is running" and opened a
+# stranger's board. The pidfile cmd_start writes for a board it actually
+# started is the proof; no pidfile with a live pid means the port is
+# someone else's.
+BOARD_OURS=no
+if [ -f "$KOSMOS_HOME/board.pid" ] && kill -0 "$(cat "$KOSMOS_HOME/board.pid" 2>/dev/null)" 2>/dev/null; then
+  BOARD_OURS=yes
+fi
+
+if [ "$BOARD_OURS" = "yes" ]; then
+  printf '\n  Kosmos is running.\n'
+  printf '  Open it and it will walk you through connecting your AI account.\n'
+  printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
+else
+  printf '\n  Kosmos is installed, but another Kosmos on this Mac is already using port %s,\n' "$PORT"
+  printf '  so this install did not start its own board. If that is another account%ss\n' "'"
+  printf '  Kosmos, each account runs its own; start yours on a different port, like:\n'
+  printf '    KOSMOS_PORT=4318 kosmos start\n\n'
+fi
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
 
 # ⚠️ A FRESH INSTALL ENDS LOOKING AT KOSMOS, NOT AT A PROMPT. Measured on the
@@ -1341,12 +1386,12 @@ printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s 
 # Best-effort by design (`|| true`): over ssh or headless, `open` fails and
 # the URL two lines up is still the whole answer.
 #
-# Opening the RAW URL does not reopen the squatter argument the make_app
-# comment settles ("a squatter on the port must not be opened and called
-# Kosmos"): by this line, `kosmos start` above has already identity-checked
-# the port and died in a sentence if a stranger held it, so the URL here is
-# only ever reached when the thing answering is Kosmos. (install/kosmos's
-# cmd_open is the other place this URL is spelled; keep the two together.)
+# Opening the RAW URL is safe because the gate below requires BOARD_OURS:
+# the pidfile proof above established that the thing answering the port
+# is the board THIS install started, not merely something identifying as
+# Kosmos (cmd_start's healthy() cannot tell those apart, which is exactly
+# why the pidfile is the instrument). (install/kosmos's cmd_open is the
+# other place this URL is spelled; keep the two together.)
 #
 # Two knobs, each doing exactly one job. KOSMOS_NO_OPEN: any non-empty
 # value suppresses the open (yes, even "no" or "0" -- it is an internal
@@ -1365,7 +1410,7 @@ OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
 # one carve-out -- a set KOSMOS_OPEN_CMD re-enables it -- because the
 # probe passes are exactly where the recording stub must be allowed to
 # observe the open.
-if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && [ -z "${KOSMOS_APP_DIR:-}" ] \
+if [ "$BOARD_OURS" = "yes" ] && [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && [ -z "${KOSMOS_APP_DIR:-}" ] \
    && { [ -z "${KOSMOS_SYS_APP_DIR:-}" ] || [ -n "${KOSMOS_OPEN_CMD:-}" ]; } \
    && command -v "$OPEN_CMD" >/dev/null 2>&1; then
   # </dev/null: the spawned process must not inherit the curl|sh pipe --

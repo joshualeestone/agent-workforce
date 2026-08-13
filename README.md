@@ -17,8 +17,9 @@ Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 The icon goes to `/Applications` when the user can write there without a
 password (it proves ownership before ever replacing a bundle there),
 falling back to `~/Applications`. It never replaces an occupant of
-either folder that it cannot prove is its own; in two shapes (something
-foreign in the system spot with the home folder aliased to it, or a
+either folder that it cannot prove is its own; in three shapes
+(something foreign in the system spot with the home folder aliased to
+it, a foreign spot whose surroundings cannot even be checked, or a
 foreign Kosmos.app already in `~/Applications`) that means no icon is
 written at all, and the transcript says so. A fresh install ends by opening the
 dashboard in the browser (updates stay quiet; `KOSMOS_NO_OPEN=1`

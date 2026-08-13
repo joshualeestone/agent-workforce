@@ -129,6 +129,7 @@ printf '#!/bin/sh\necho "$@" >> "%s/launcher.log"\nexit 0\n' "$SB" > "$SB/fakeho
 chmod +x "$SB/fakehome/bin/kosmos"
 RC=0; KOSMOS_HOME="$SB/fakehome" "$SB/apps/Kosmos.app/Contents/MacOS/Kosmos" > /dev/null 2>&1 || RC=$?
 chk "launcher passes its own account and opens" "[ $RC -eq 0 ] && grep -qx 'open' \"$SB/launcher.log\""
+chk "the launcher bakes this install's port" "grep -q \"KOSMOS_PORT:-$PORT\" \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\""
 # The NEGATIVE control: the refusal is the guard's whole purpose, and
 # without this the entire uid block could be deleted while the suite
 # stayed green. A copy with a wrong baked uid must refuse (exit 1) and
@@ -226,6 +227,7 @@ chk "transcript names Applications" "grep -q 'you will find it in Applications, 
 chk "stale home-folder icon cleaned up" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 chk "the move is named in the transcript" "grep -q 'icon moved here' \"$SB/probe1.log\""
 chk "no probe residue in the system folder" "[ -z \"\$(ls -A \"$SYS_OK\" | grep -v '^Kosmos.app\$')\" ]"
+chk "the TCC warm-up prints for a system-folder icon" "grep -q 'manage apps' \"$SB/probe1.log\""
 chk "fresh install opened the dashboard" "[ \"\$(wc -l < \"$SB/opened.log\" 2>/dev/null | tr -d ' ')\" = \"1\" ] && grep -q \"127.0.0.1:$PORT\" \"$SB/opened.log\""
 
 # The update run through the same probe env must NOT open the browser.
@@ -254,6 +256,7 @@ else
   chk "app fell back to the home folder" "[ -x \"$SBH/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "transcript names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/probe2.log\""
   chk "no probe residue in the read-only folder" "[ -z \"\$(ls -A \"$SYS_RO\")\" ]"
+  chk "no TCC warm-up when the icon goes to the home folder" "! grep -q 'manage apps' \"$SB/probe2.log\""
   chk "KOSMOS_NO_OPEN suppressed the fresh-install open" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"1\" ]"
   chmod 755 "$SYS_RO"
 fi
@@ -684,6 +687,39 @@ chk "the system spot is named too" "grep -q 'something else also has the Kosmos 
 # TCC denial the harness cannot produce) and make_app's restore-failure
 # note (the slot would have to become unwritable between two renames in
 # one run). Both legs are reasoned and hand-verified, not pinned.
+
+echo "== the KOSMOS_PORT guard refuses in a sentence =="
+RC=0; KOSMOS_PORT="80abc" sh < "$SETUP" > "$SB/portg1.log" 2>&1 || RC=$?
+chk "a non-numeric KOSMOS_PORT is refused" "[ $RC -eq 2 ] && grep -q 'KOSMOS_PORT must be a number' \"$SB/portg1.log\""
+RC=0; KOSMOS_PORT="4317}\"; echo PWNED; :\"" sh < "$SETUP" > "$SB/portg2.log" 2>&1 || RC=$?
+chk "an injection-shaped KOSMOS_PORT is refused" "[ $RC -eq 2 ] && ! grep -q PWNED \"$SB/portg2.log\""
+
+echo "== the override uninstall proves ownership too =="
+# The KOSMOS_APP_DIR branch used to delete any Kosmos.app by name; the
+# header bound is unconditional, so a stranger's bundle in the override
+# dir must survive, named.
+APPS_F="$SB/apps-foreign"
+mkdir -p "$APPS_F/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# override stranger\nKOSMOS_HOME="${KOSMOS_HOME:-/not/ours/override}"\n' > "$APPS_F/Kosmos.app/Contents/MacOS/Kosmos"
+RC=0; KOSMOS_APP_DIR="$APPS_F" KOSMOS_HOME="$SB/home25" KOSMOS_BIN_DIR="$SB/bin25" sh -s -- --uninstall < "$SETUP" > "$SB/ovf-un.log" 2>&1 || RC=$?
+chk "override-foreign uninstall exits 0" "[ $RC -eq 0 ]"
+chk "the override stranger survives" "grep -q 'override stranger' \"$APPS_F/Kosmos.app/Contents/MacOS/Kosmos\""
+chk "the override stranger is named" "grep -q 'could not be proven to belong to this install' \"$SB/ovf-un.log\""
+
+echo "== a stranger's board on the port is never presented as this install's =="
+# cmd_start's healthy() accepts any Kosmos-identifying board, so a fresh
+# install onto an occupied port must say so, not print "Kosmos is
+# running", and must NOT open a browser onto the stranger's board.
+export KOSMOS_HOME="$SB/home26" KOSMOS_BIN_DIR="$SB/bin26" KOSMOS_APP_DIR="$SB/apps26"
+RC=0; cat "$SETUP" | sh > "$SB/first-board.log" 2>&1 || RC=$?
+chk "first board install exits 0" "[ $RC -eq 0 ]"
+export KOSMOS_HOME="$SB/home27" KOSMOS_BIN_DIR="$SB/bin27" KOSMOS_APP_DIR="$SB/apps27"
+OPENED_BEFORE_STRANGER="$(wc -l < "$SB/opened.log" | tr -d ' ')"
+RC=0; cat "$SETUP" | KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
+chk "occupied-port install exits 0" "[ $RC -eq 0 ]"
+chk "the occupied port is named, not claimed" "grep -q 'already using port' \"$SB/stranger-board.log\" && ! grep -q 'Kosmos is running.' \"$SB/stranger-board.log\""
+chk "no browser was opened onto the stranger's board" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_STRANGER\" ]"
+"$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
 
 echo "== the production open default is real =="
 # Every observing pass substitutes the recording stub, and command -v
