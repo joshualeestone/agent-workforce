@@ -171,8 +171,8 @@ if cp "$HERE/dist/tmux-arm64.tar.gz" "$HERE/dist/tmux-arm64.tar.gz.sha256" \
   RC=0; cat "$SETUP" | sh > "$SB/dl-install.log" 2>&1 || RC=$?
   chk "download-path install exits 0" "[ $RC -eq 0 ]"
   chk "download-path board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
-  "$SB/bin/kosmos" stop > /dev/null 2>&1
-  sh -s -- --uninstall < "$SETUP" > /dev/null 2>&1
+  "$SB/bin/kosmos" stop > /dev/null 2>&1 || true
+  sh -s -- --uninstall < "$SETUP" > /dev/null 2>&1 || true
   printf 'x' >> "$SB/dist/kosmos-arm64.tar.gz"
   RC=0; cat "$SETUP" | sh > "$SB/tamper.log" 2>&1 || RC=$?
   chk "tampered download refuses" "[ $RC -ne 0 ]"
@@ -361,7 +361,7 @@ else
   chk "retry landed the icon in the home folder" "[ -x \"$SBH5/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "retry sentence names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/wedge.log\""
   chk "the unmovable bundle was never gutted" "[ -f \"$SYS_WEDGE/Kosmos.app/Contents/MacOS/Kosmos\" ]"
-  chk "the surviving system icon is named" "grep -q 'could not be updated from this account' \"$SB/wedge.log\""
+  chk "the surviving system icon is named" "grep -q 'could not be replaced (something is holding it)' \"$SB/wedge.log\""
   chk "no stage or aside residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
   chflags nouchg "$SYS_WEDGE/Kosmos.app"
   "$SB/bin7/kosmos" stop > /dev/null 2>&1 || true
@@ -385,11 +385,18 @@ else
   chk "deep-locked reinstall exits 0" "[ $RC -eq 0 ]"
   chk "the visible slot holds a complete bundle" "[ -x \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "the new bundle is provably ours" "grep -q \":-$SB/home19}\\\"\" \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\""
+  chk "the locked aside is named at install time" "grep -q 'could not remove the leftover hidden folder' \"$SB/deep.log\""
   "$SB/bin19/kosmos" stop > /dev/null 2>&1 || true
-  chmod -R u+w "$SYS_DEEP" 2>/dev/null || true
+  # ⚠️ The lock STAYS for the uninstall. The first version of this pass
+  # unlocked before uninstalling, which undid the exact condition under
+  # test and let a silent best-effort sweep read as a kept promise. The
+  # served header says the sweep names what it cannot remove; hold it to
+  # that.
   RC=0; HOME="$SBH17" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_DEEP" sh -s -- --uninstall < "$SETUP" > "$SB/deep-un.log" 2>&1 || RC=$?
   chk "deep-world uninstall exits 0" "[ $RC -eq 0 ]"
   chk "deep-world slot fully cleared" "[ ! -e \"$SYS_DEEP/Kosmos.app\" ]"
+  chk "surviving locked residue is gone or named" "[ -z \"\$(ls -A \"$SYS_DEEP\" 2>/dev/null | grep '.Kosmos.app.old')\" ] || grep -q 'could not remove the leftover hidden folder' \"$SB/deep-un.log\""
+  chmod -R u+w "$SYS_DEEP" 2>/dev/null || true
 
   echo "== a survivor is NAMED (positive control for the could-not-remove note) =="
   # Without this pass the survivor-note branches could be deleted whole and
@@ -562,6 +569,30 @@ else
   chk "the unreachable system icon is named" "grep -q 'could not be updated from this account' \"$SB/stale-sys.log\""
   chmod 755 "$SYS_RO3"
   "$SB/bin17/kosmos" stop > /dev/null 2>&1 || true
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP foreign-home-fallback leg: running as root"
+  SKIPS=$((SKIPS + 1))
+else
+  echo "== the home folder gets the same ownership gate =="
+  # The one path that used to replace without proof: probe fails, the
+  # fallback targets ~/Applications, and a stranger's Kosmos.app already
+  # sits there. No icon may be written, the stranger stays byte-identical,
+  # and the sentence says so.
+  SYS_RO6="$SB/sysro6"
+  mkdir -p "$SYS_RO6"
+  chmod 555 "$SYS_RO6"
+  SBH20="$SB/foreign-fallback-home"
+  mkdir -p "$SBH20/Applications/Kosmos.app/Contents/MacOS"
+  printf '#!/bin/bash\n# their home app\nKOSMOS_HOME="${KOSMOS_HOME:-/their/place}"\n' > "$SBH20/Applications/Kosmos.app/Contents/MacOS/Kosmos"
+  export KOSMOS_HOME="$SB/home22" KOSMOS_BIN_DIR="$SB/bin22"
+  RC=0; cat "$SETUP" | HOME="$SBH20" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO6" sh > "$SB/foreign-fb.log" 2>&1 || RC=$?
+  chk "foreign-fallback install exits 0" "[ $RC -eq 0 ]"
+  chk "the stranger's home app is untouched" "grep -q 'their home app' \"$SBH20/Applications/Kosmos.app/Contents/MacOS/Kosmos\""
+  chk "no icon was written over it" "grep -q 'left alone and no icon was created' \"$SB/foreign-fb.log\""
+  chmod 755 "$SYS_RO6"
+  "$SB/bin22/kosmos" stop > /dev/null 2>&1 || true
 fi
 
 echo "== the open gate's sandbox belt, and a file-shadowed Applications =="
