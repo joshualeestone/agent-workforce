@@ -66,6 +66,15 @@ PREFIX="$OUT/tmux-floor-prefix"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Refuse in a sentence, not a 20-line configure log, when the toolchain is
+# absent (this is a BUILD-machine script; the user path never needs one).
+for t in cc make; do
+  command -v "$t" >/dev/null 2>&1 || {
+    echo "FAIL: '$t' is not available. Install the Xcode command line tools (xcode-select --install) and re-run." >&2
+    exit 1
+  }
+done
+
 echo "==> building for macOS $FLOOR (MACOSX_DEPLOYMENT_TARGET)"
 
 TRUST_LINES=""
@@ -204,39 +213,68 @@ for lib in libncursesw libevent_core libutf8proc; do
     exit 1
   fi
 done
-# ⚠️ A REAL SESSION, NOT ONLY -V. tmux -V passed the ABI-mismatched build;
-# new-session is what actually drives ncurses and resolves terminfo, which
-# is precisely what this script changes. An ISOLATED socket, never the
-# user's server. (Baking /usr/share/terminfo removes the fallback
+# ⚠️ A REAL SESSION THROUGH A PTY, NOT ONLY -V. tmux -V passed the
+# ABI-mismatched build, and a DETACHED new-session never attaches a client
+# so it never consults terminfo either (measured: a bogus TERM passes
+# detached, fails only under a pty). `script -q /dev/null` provides the
+# pty and TERM is pinned so the lookup is deterministic. An ISOLATED
+# socket, never the user's server. A minos stamp is a promise, not a run:
+# whether these artifacts LOAD on a real 13.x boot, and whether the needed
+# terminfo ENTRIES exist there, are the two halves of the clean-machine
+# debt named in the plan. (Baking /usr/share/terminfo removes the fallback
 # assumption; whether the needed ENTRIES exist there on a floor-age macOS
 # is what the clean-machine test still owes us -- there is no second
 # directory to fall back to now, on purpose.)
+# expect provides the pty (it ships in base macOS; `script -q` needs a
+# parent tty and fails headless -- measured). Paths travel as env vars so
+# spaces survive the -c string.
 _sock="$WORK/smoke-sock"
-if "$PREFIX/bin/tmux" -S "$_sock" new-session -d -s floorsmoke 2>"$WORK/tmux-smoke.err"    && "$PREFIX/bin/tmux" -S "$_sock" list-panes -a >/dev/null 2>&1; then
+export SMOKE_TMUX="$PREFIX/bin/tmux" SMOKE_SOCK="$_sock"
+if TERM=xterm-256color /usr/bin/expect -c 'spawn -noecho $env(SMOKE_TMUX) -S $env(SMOKE_SOCK) new-session -d -s floorsmoke; expect eof' > "$WORK/tmux-smoke.err" 2>&1 \
+   && "$PREFIX/bin/tmux" -S "$_sock" list-panes -a >/dev/null 2>&1; then
   "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
-  echo "    a real session starts, lists, and dies cleanly"
+  echo "    a real session (pty-attached) starts, lists, and dies cleanly"
 else
   "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
   echo "FAIL: the built tmux cannot run a real session:" >&2
   cat "$WORK/tmux-smoke.err" >&2
   exit 1
 fi
-# ⚠️ COUNTED, so the sweep cannot pass by finding nothing: a glob over a
-# library that was never installed would otherwise skip it silently and
-# still print ok -- the green-on-blind shape this repo bans.
-_checked=0
-for f in "$PREFIX/bin/tmux" "$PREFIX"/lib/libevent_core*.dylib "$PREFIX"/lib/libncursesw*.dylib "$PREFIX"/lib/libutf8proc*.dylib; do
-  [ -f "$f" ] || continue
-  case "$f" in *.dylib) file -b "$f" | grep -q dynamically || continue ;; esac
-  minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
-  echo "    $(basename "$f"): minos $minos"
-  [ "$minos" = "$FLOOR" ] || { echo "FAIL: $(basename "$f") stamped $minos, wanted $FLOOR" >&2; exit 1; }
-  _checked=$((_checked + 1))
-done
-# tmux + at least one dylib each of the three libraries (versioned +
-# unversioned symlink copies both match, so >= 4 real files).
-[ "$_checked" -ge 4 ] || { echo "FAIL: only $_checked artifacts found to check; a library is missing from the prefix." >&2; exit 1; }
+# ⚠️ THE CONTROL THAT PROVES THE INSTRUMENT SEES TERMINFO: a bogus TERM
+# must FAIL under the same pty. Without this, a smoke that silently
+# stopped consulting terminfo (the detached-session mistake this block
+# replaces) would keep passing while covering nothing.
+export SMOKE_SOCK="$WORK/smoke-sock-ctl"
+if TERM=kosmos-bogus-term-xyz /usr/bin/expect -c 'spawn -noecho $env(SMOKE_TMUX) -S $env(SMOKE_SOCK) new-session -d -s floorctl; expect eof' 2>/dev/null | grep -q "unsuitable terminal"; then
+  "$PREFIX/bin/tmux" -S "$WORK/smoke-sock-ctl" kill-server 2>/dev/null || true
+  echo "    control: a bogus TERM is refused, so the smoke genuinely consults terminfo"
+else
+  "$PREFIX/bin/tmux" -S "$WORK/smoke-sock-ctl" kill-server 2>/dev/null || true
+  echo "FAIL: the bogus-TERM control did not refuse; the session smoke is not consulting terminfo." >&2
+  exit 1
+fi
+# ⚠️ COUNTED PER LIBRARY, so the sweep cannot pass by finding nothing: an
+# aggregate threshold would still pass with a whole library missing (two
+# files per surviving library), which is the green-on-blind shape this
+# repo bans. Each glob must match at least one real Mach-O file.
+check_floor() {
+  local label="$1"; shift
+  local found=0 f minos
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    case "$f" in *.dylib) file -b "$f" | grep -q dynamically || continue ;; esac
+    minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
+    [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
+    echo "    $(basename "$f"): minos $minos"
+    [ "$minos" = "$FLOOR" ] || { echo "FAIL: $(basename "$f") stamped $minos, wanted $FLOOR" >&2; exit 1; }
+    found=$((found + 1))
+  done
+  [ "$found" -ge 1 ] || { echo "FAIL: no $label artifact found to check; it is missing from the prefix." >&2; exit 1; }
+}
+check_floor "tmux"     "$PREFIX/bin/tmux"
+check_floor "libevent" "$PREFIX"/lib/libevent_core*.dylib
+check_floor "ncurses"  "$PREFIX"/lib/libncursesw*.dylib
+check_floor "utf8proc" "$PREFIX"/lib/libutf8proc*.dylib
 
 # ⚠️ LICENCES HARVESTED FROM THE PINNED SOURCES THEMSELVES, so the shipped
 # notices are the upstream text of the exact versions built, not a
@@ -257,7 +295,7 @@ else
   echo "    (tmux tarball has no COPYING; bundler falls back to the typed ISC notice)"
 fi
 {
-  echo "tmux:     $TMUX_VERSION"
+  echo "tmux-src: $TMUX_VERSION"
   echo "libevent: $LIBEVENT_VERSION (core only)"
   echo "ncurses:  $NCURSES_VERSION"
   echo "utf8proc: $UTF8PROC_VERSION"

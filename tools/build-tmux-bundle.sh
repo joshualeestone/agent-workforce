@@ -18,7 +18,11 @@
 #      browser download sets. Gatekeeper's notarisation check applies to apps
 #      being LAUNCHED, not to a command-line binary a script executes.
 #
-#   2. A STATIC BUILD IS NOT REQUIRED EITHER. tmux links against exactly three
+#   2. (Historical framing -- see the source-kinds note below: the RELEASE
+#      path now compiles from source via build-tmux-from-source.sh, so the
+#      release toolchain does include a compiler; what stays true is that
+#      the USER's machine never needs one.) A STATIC BUILD IS NOT REQUIRED
+#      EITHER. tmux links against exactly three
 #      non-system libraries (utf8proc, ncursesw, libevent_core). Everything else
 #      it needs is in /usr/lib, which is on every Mac. So the binary and those
 #      three dylibs can simply be copied and their load paths rewritten to
@@ -224,6 +228,13 @@ _srcroot="$(cd "$(dirname "$SRC_TMUX")/.." && pwd)"
 if [ -d "$_srcroot/share/kosmos-licenses" ]; then
   mkdir -p "$OUT/licenses"
   cp "$_srcroot/share/kosmos-licenses/"* "$OUT/licenses/"
+elif [ -z "${KOSMOS_ALLOW_MINOS:-}" ]; then
+  # ⚠️ A RELEASE without the harvested texts would ship the typed summary
+  # alone, which is KNOWN incomplete (it lacks libevent's arc4random block
+  # and utf8proc's Unicode data licence). Release builds therefore require
+  # the source-build prefix's licences; only marked test builds may skip.
+  echo "FAIL: no harvested licences at $_srcroot/share/kosmos-licenses; a release must be built from tools/build-tmux-from-source.sh's prefix." >&2
+  exit 1
 fi
 NOTICES="$(dirname "${BASH_SOURCE[0]}")/third-party-notices.txt"
 if [ ! -f "$NOTICES" ]; then
