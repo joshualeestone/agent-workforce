@@ -363,6 +363,13 @@ function fetchFile(url, dest, onProgress, redirects, track) {
       let got = 0;
       res.on('data', (c) => {
         got += c.length;
+        // The metadata fetch caps at 1MB; the binary gets a bound too. The
+        // checksum already stops execution; this stops a misbehaving service
+        // from filling the disk before the verdict ever runs.
+        if (got > 1024 * 1024 * 1024) {
+          req.destroy(new Error('the download grew past any plausible size, so we stopped'));
+          return;
+        }
         hash.update(c);
         if (onProgress) onProgress(got, total);
       });
@@ -847,6 +854,10 @@ async function tickBody(owner) {
   // was zeroed on the very tick that incremented it and the escalation could
   // never fire. Caught by the test timing out, not by reading the diff.
   if (seen.kind !== 'blank') driver.blankTicks = 0;
+  // The rejection grace resets whenever the paste prompt is NOT on screen: a
+  // mid-clear tick between two prompt sightings otherwise resumed the count
+  // from its stale value and shortened the grace.
+  if (seen.kind !== 'awaiting-code') driver.rejectTicks = 0;
 
   /**
    * ⚠️ ACT ONCE PER SCREEN, where "screen" is the kind plus the text itself.

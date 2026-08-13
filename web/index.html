@@ -4501,8 +4501,10 @@ function frConnStopWatch() {
   if (FR_CONN_TIMER) { clearInterval(FR_CONN_TIMER); FR_CONN_TIMER = null; }
 }
 
+let FR_CONN_FAILS = 0;
 function frConnWatch() {
   if (FR_CONN_TIMER) return;
+  FR_CONN_FAILS = 0;
   FR_CONN_TIMER = setInterval(async () => {
     // ⚠️ Same hazard the engine's tick guards one layer down: a slow answer
     // resolving after a newer one would paint an older phase over the
@@ -4511,9 +4513,29 @@ function frConnWatch() {
     let st;
     try {
       const res = await fetch('/api/connect', { cache: 'no-store' });
-      if (!res.ok) return;   // a blip; the next tick asks again
+      if (!res.ok) throw new Error('status ' + res.status);
       st = await res.json();
-    } catch { return; }
+    } catch {
+      /**
+       * ⚠️ BOUNDED, like every silent-failure shape the engine owns. A dead
+       * server left the last panel ("Downloading Claude…", frozen bar)
+       * standing forever with nothing successfully polling it -- the one
+       * remaining screen asserting a state nobody was checking. After ~10s
+       * of failures the screen says so honestly; the poll keeps trying, and
+       * a success repaints reality.
+       */
+      FR_CONN_FAILS += 1;
+      if (FR_CONN_FAILS === 10 && FR_STEP === 3) {
+        FR_CONN_LAST = null;
+        document.getElementById('fr-sub').innerHTML = frCheckRow({
+          state: 'unknown',
+          title: 'We cannot see the connection attempt right now',
+          detail: 'Kosmos stopped answering. It may be restarting; this screen keeps trying.',
+        });
+      }
+      return;
+    }
+    FR_CONN_FAILS = 0;
     if (seq !== FR_CONN_SEQ) return;
     // ⚠️ Only paint if they are still here — same rule as frRecheck. The flow
     // itself continues server-side; it is the PAINT that must not land on
