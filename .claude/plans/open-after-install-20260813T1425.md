@@ -37,6 +37,16 @@ from one that failed.
 3. **Uninstall sweeps both default icon locations** (pre-change installs
    wrote the home folder), each bounded by the fixed leaf name, and a
    surviving icon is named, never silently skipped.
+4. **The generated .app refuses clicks from a different account**, by a
+   baked-uid compare (not an under-HOME proxy, which false-alarmed on
+   KOSMOS_HOME overrides). On a multi-account Mac the shared icon shows a
+   dialog pointing the other account at the install line instead of
+   starting the installing account's private tree. This is the one
+   user-visible modal the distributed .app ships. Relatedly, the swap
+   that replaces an existing icon renames it aside
+   (.Kosmos.app.old.<pid>) rather than rm -rf'ing in place, so a
+   partially-deletable old bundle can never be gutted into an unprovable
+   husk; the visible slot always holds a complete bundle.
 
 ## Testability constraints (the design's spine)
 

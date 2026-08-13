@@ -37,7 +37,7 @@ SB="$(mktemp -d)"
 # The board-kill list is a glob, not a hardcoded home/home2/... list: a
 # future pass that adds a seventh sandbox home must not silently leak a
 # board process onto the operator's machine.
-trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then kill "$(cat "$_p")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
+trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then kill "$(cat "$_p")" 2>/dev/null || true; fi; done; chflags -R nouchg "$SB" 2>/dev/null || true; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
 # A free port, probed rather than assumed: several agents and a real board
@@ -104,6 +104,18 @@ chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q run
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
 chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
+# The generated launcher, actually executed: the account guard must PASS
+# for the account that installed (a uid compare, exactly the leg the old
+# under-HOME proxy false-alarmed on), the env KOSMOS_HOME override must be
+# honored, and `open` must be what it invokes. The stub home keeps the
+# real board and the real browser out of it. The refusal leg needs a
+# second uid and stays hand-verified; this pins the leg every real click
+# takes.
+mkdir -p "$SB/fakehome/bin"
+printf '#!/bin/sh\necho "$@" >> "%s/launcher.log"\nexit 0\n' "$SB" > "$SB/fakehome/bin/kosmos"
+chmod +x "$SB/fakehome/bin/kosmos"
+RC=0; KOSMOS_HOME="$SB/fakehome" "$SB/apps/Kosmos.app/Contents/MacOS/Kosmos" > /dev/null 2>&1 || RC=$?
+chk "launcher passes its own account and opens" "[ $RC -eq 0 ] && grep -qx 'open' \"$SB/launcher.log\""
 
 echo "== update (stale file must not survive; board must restart) =="
 touch "$SB/home/app/engine/stale-marker.js"
@@ -317,13 +329,15 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   echo "== a bundle that cannot be replaced sends the icon to the home folder =="
   # The retry leg: the system folder is writable (the probe passes) but the
-  # bundle inside it cannot be replaced (its own dir is write-locked, the
-  # shape a root-owned leftover takes). The ownership line matches, so the
-  # divert does not fire; make_app must fail on the swap, clean its stage,
-  # and the retry must land the icon in the home folder.
+  # bundle inside it cannot be moved aside (user-immutable, the flag a
+  # leftover can carry; rename fails EPERM on an immutable source, and
+  # chflags binds even root, unlike the chmod shapes). The ownership line
+  # matches, so the divert does not fire; make_app must fail on the swap,
+  # clean its stage AND its aside, leave the old bundle whole, and the
+  # retry must land the icon in the home folder.
   SYS_WEDGE="$SB/syswedge"
   seed_kosmos_bundle "$SYS_WEDGE" "$SB/home7"
-  chmod 555 "$SYS_WEDGE/Kosmos.app"
+  chflags uchg "$SYS_WEDGE/Kosmos.app"
   SBH5="$SB/wedge-home"
   mkdir -p "$SBH5"
   export KOSMOS_HOME="$SB/home7" KOSMOS_BIN_DIR="$SB/bin7"
@@ -331,9 +345,35 @@ else
   chk "wedge install exits 0" "[ $RC -eq 0 ]"
   chk "retry landed the icon in the home folder" "[ -x \"$SBH5/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "retry sentence names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/wedge.log\""
-  chk "no stage residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
-  chmod 755 "$SYS_WEDGE/Kosmos.app"
+  chk "the unmovable bundle was never gutted" "[ -f \"$SYS_WEDGE/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "no stage or aside residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
+  chflags nouchg "$SYS_WEDGE/Kosmos.app"
   "$SB/bin7/kosmos" stop > /dev/null 2>&1 || true
+
+  echo "== a deep-locked old bundle can no longer wedge the slot =="
+  # The reproduced husk: rm -rf on a bundle with one unwritable nested
+  # directory deletes the launcher, then dies, leaving a husk no later
+  # ownership check can prove and no uninstall will touch. The rename-
+  # aside swap must leave the VISIBLE slot holding a complete bundle at
+  # every moment; the locked residue may survive only under the hidden
+  # aside name.
+  SYS_DEEP="$SB/sysdeep"
+  seed_kosmos_bundle "$SYS_DEEP" "$SB/home19"
+  mkdir -p "$SYS_DEEP/Kosmos.app/Contents/Resources/sub"
+  touch "$SYS_DEEP/Kosmos.app/Contents/Resources/sub/keep"
+  chmod 555 "$SYS_DEEP/Kosmos.app/Contents/Resources/sub"
+  SBH17="$SB/deep-home"
+  mkdir -p "$SBH17"
+  export KOSMOS_HOME="$SB/home19" KOSMOS_BIN_DIR="$SB/bin19"
+  RC=0; cat "$SETUP" | HOME="$SBH17" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_DEEP" sh > "$SB/deep.log" 2>&1 || RC=$?
+  chk "deep-locked reinstall exits 0" "[ $RC -eq 0 ]"
+  chk "the visible slot holds a complete bundle" "[ -x \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "the new bundle is provably ours" "grep -q \":-$SB/home19}\\\"\" \"$SYS_DEEP/Kosmos.app/Contents/MacOS/Kosmos\""
+  "$SB/bin19/kosmos" stop > /dev/null 2>&1 || true
+  chmod -R u+w "$SYS_DEEP" 2>/dev/null || true
+  RC=0; HOME="$SBH17" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_DEEP" sh -s -- --uninstall < "$SETUP" > "$SB/deep-un.log" 2>&1 || RC=$?
+  chk "deep-world uninstall exits 0" "[ $RC -eq 0 ]"
+  chk "deep-world slot fully cleared" "[ ! -e \"$SYS_DEEP/Kosmos.app\" ]"
 
   echo "== a survivor is NAMED (positive control for the could-not-remove note) =="
   # Without this pass the survivor-note branches could be deleted whole and
@@ -433,6 +473,25 @@ else
   "$SB/bin13/kosmos" stop > /dev/null 2>&1 || true
 fi
 
+echo "== a link entry at the SYSTEM path is never claimed =="
+# The install-side mirror of the uninstall's -L discipline: a symlink
+# whose target cannot be stat'd (dangling here; another user's mode-700
+# home in the field) fails -e, and an -e-only occupancy gate would let
+# the probe claim the slot and rm -rf the link. The install must divert
+# and leave the link byte-identical.
+SYS_LNK="$SB/syslnk"
+mkdir -p "$SYS_LNK"
+ln -s "$SB/nowhere/Kosmos.app" "$SYS_LNK/Kosmos.app"
+SBH18="$SB/lnk-home"
+mkdir -p "$SBH18"
+export KOSMOS_HOME="$SB/home20" KOSMOS_BIN_DIR="$SB/bin20"
+RC=0; cat "$SETUP" | HOME="$SBH18" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_LNK" sh > "$SB/syslnk.log" 2>&1 || RC=$?
+chk "system-link install exits 0" "[ $RC -eq 0 ]"
+chk "the link entry survives untouched" "[ -L \"$SYS_LNK/Kosmos.app\" ] && [ \"\$(readlink \"$SYS_LNK/Kosmos.app\")\" = \"$SB/nowhere/Kosmos.app\" ]"
+chk "the install diverted to the home folder" "[ -x \"$SBH18/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "the divert names the occupied spot" "grep -q 'something else already has the Kosmos spot' \"$SB/syslnk.log\""
+"$SB/bin20/kosmos" stop > /dev/null 2>&1 || true
+
 echo "== a link entry is decided by its target, and each skip sentence is its own =="
 # The unknown-skip leg: a dangling home Applications symlink plus a foreign
 # system bundle. The install must refuse to guess, write no icon, and say
@@ -462,7 +521,7 @@ export KOSMOS_HOME="$SB/home16" KOSMOS_BIN_DIR="$SB/bin16"
 RC=0; HOME="$SBH14" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK5" sh -s -- --uninstall < "$SETUP" > "$SB/link-un.log" 2>&1 || RC=$?
 chk "link uninstall exits 0" "[ $RC -eq 0 ]"
 chk "our link swept with its bundle" "[ ! -e \"$SBH14/Applications/Kosmos.app\" ] && [ ! -L \"$SBH14/Applications/Kosmos.app\" ]"
-chk "the link sweep is named" "grep -q 'removing the Kosmos link' \"$SB/link-un.log\""
+chk "the link sweep is named" "grep -q 'removing a link that pointed at the removed Kosmos app' \"$SB/link-un.log\""
 ln -s "$SB/somewhere-else/Kosmos.app" "$SBH14/Applications/Kosmos.app"
 RC=0; HOME="$SBH14" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK5" sh -s -- --uninstall < "$SETUP" > "$SB/link-un2.log" 2>&1 || RC=$?
 chk "foreign link survives" "[ -L \"$SBH14/Applications/Kosmos.app\" ]"
@@ -487,6 +546,41 @@ else
   chk "the unreachable system icon is named" "grep -q 'could not be updated from this account' \"$SB/stale-sys.log\""
   chmod 755 "$SYS_RO3"
   "$SB/bin17/kosmos" stop > /dev/null 2>&1 || true
+fi
+
+echo "== the open gate's sandbox belt, and a file-shadowed Applications =="
+# The [ -z KOSMOS_APP_DIR ] clause in the open gate: a fresh sandboxed
+# install with the suppressor CLEARED must still not open. Without this
+# pass the belt could be deleted and the suite would stay green, because
+# every other override pass inherits the global KOSMOS_NO_OPEN.
+OPENED_LINES_BEFORE="$(wc -l < "$SB/opened.log" | tr -d ' ')"
+export KOSMOS_HOME="$SB/home18" KOSMOS_BIN_DIR="$SB/bin18"
+RC=0; cat "$SETUP" | KOSMOS_APP_DIR="$SB/apps18" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/belt.log" 2>&1 || RC=$?
+chk "belt install exits 0" "[ $RC -eq 0 ]"
+chk "the verbatim override alone suppresses the open" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_LINES_BEFORE\" ]"
+"$SB/bin18/kosmos" stop > /dev/null 2>&1 || true
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP file-shadowed leg: running as root (the read-only probe dir does not bind)"
+  SKIPS=$((SKIPS + 1))
+else
+  # ~/Applications exists as a regular FILE and the probe fails: the icon
+  # step used to die here, aborting before "Starting Kosmos" on a run
+  # that could still deliver a working install. It must finish, say the
+  # give-up sentence, and leave the board running.
+  SYS_RO5="$SB/sysro5"
+  mkdir -p "$SYS_RO5"
+  chmod 555 "$SYS_RO5"
+  SBH19="$SB/file-home"
+  mkdir -p "$SBH19"
+  touch "$SBH19/Applications"
+  export KOSMOS_HOME="$SB/home21" KOSMOS_BIN_DIR="$SB/bin21"
+  RC=0; cat "$SETUP" | HOME="$SBH19" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO5" sh > "$SB/fileapps.log" 2>&1 || RC=$?
+  chk "file-shadowed Applications does not abort the install" "[ $RC -eq 0 ]"
+  chk "the give-up sentence prints for the shadowed folder" "grep -q 'could not create the app icon, but Kosmos itself is fine' \"$SB/fileapps.log\""
+  chk "the board still came up" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
+  "$SB/bin21/kosmos" stop > /dev/null 2>&1 || true
+  chmod 755 "$SYS_RO5"
 fi
 
 echo "== the operator's real folders were never touched =="
