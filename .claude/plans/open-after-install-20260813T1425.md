@@ -42,8 +42,15 @@ from one that failed.
   fallback against disposable directories; the fallback leg is what a
   standard (non-admin) user lives on, and a fallback that can only run where
   the primary works is untested by construction.
-- tools/test-install.sh grew from 22 to 55 assertions (the count the
-  harness itself prints): probe success (system folder, honest sentences,
+- tools/test-install.sh grew from 22 to 68 assertions (the count the
+  harness itself prints; 68 on a non-root run, root skips the
+  chmod-denial legs loudly). Beyond the list below, later review rounds
+  added: the foreign-plus-aliased world (no icon at all rather than
+  writing through the symlink onto a stranger's app), the staged bundle
+  build (a bundle write that dies partway can no longer wedge the
+  Applications slot), the wedge-retry leg, a positive control for the could-not-remove
+  survivor note, an mtime pin proving the override bypasses the probe,
+  and before/after hashes of the operator's REAL Applications folders. probe success (system folder, honest sentences,
   stale-icon cleanup with the move named, no residue, the fresh-install
   open via a recording stub), probe failure (home folder, no residue in
   the read-only dir, the KOSMOS_NO_OPEN suppressor), the override-bypasses-

@@ -84,6 +84,7 @@ SYS_APP_DIR="${KOSMOS_SYS_APP_DIR:-/Applications}"
 # or the safe per-user default, which is all the uninstall path needs.
 APP_DIR="${KOSMOS_APP_DIR:-$HOME/Applications}"
 APP_OTHER_OWNER=no
+APP_SKIP_ICON=no
 resolve_app_dir() {
   # The verbatim override is a sandbox: no probing, no fallback.
   [ -n "${KOSMOS_APP_DIR:-}" ] && { APP_DIR="$KOSMOS_APP_DIR"; return 0; }
@@ -109,12 +110,32 @@ resolve_app_dir() {
   if [ -e "$SYS_APP_DIR/Kosmos.app" ] \
      && ! grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
     APP_OTHER_OWNER=yes
+    # ⚠️ THE DIVERT ITSELF NEEDS THE ALIASING GUARD. "Send the icon to the
+    # per-user folder instead" is only an escape if the per-user folder is
+    # a DIFFERENT folder: with ~/Applications symlinked to the system one,
+    # writing "to the home folder" resolves straight back onto the foreign
+    # bundle this branch just refused to claim, and make_app's opening
+    # rm -rf would destroy it under a sentence saying it was left alone.
+    # Same physical folder, or existing-but-unresolvable: no icon at all,
+    # said honestly, fail closed. A home Applications folder that does not
+    # exist yet cannot alias anything, so the divert proceeds and creates
+    # it.
+    if [ -e "$HOME/Applications" ] || [ -L "$HOME/Applications" ]; then
+      _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
+      _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
+      if [ -z "$_home_apps_phys" ] || [ -z "$_sys_apps_phys" ] || [ "$_home_apps_phys" = "$_sys_apps_phys" ]; then
+        APP_SKIP_ICON=yes
+      fi
+    fi
     return 0
   fi
   # Old probe residue is cleaned before probing (the rmdir below is
   # best-effort, so a bizarre failure could have left one), which keeps
   # litter from ever accumulating; -f makes an unmatched glob harmless.
   rm -rf "$SYS_APP_DIR"/.kosmos-write-probe.* 2>/dev/null || true
+  # /bin/mkdir and /bin/rmdir by absolute path: the probe's answer decides
+  # where an rm -rf will later point, so it must not be answerable by
+  # whatever a user's PATH puts in front of mkdir.
   if /bin/mkdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null; then
     /bin/rmdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null \
       || rm -rf "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null || true
@@ -432,6 +453,7 @@ uninstall() {
   # real install out from under the person running the test.
   if [ -n "${KOSMOS_APP_DIR:-}" ]; then
     [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
+    rm -rf "$APP_DIR"/.Kosmos.app.stage.* 2>/dev/null || true
   else
     # The SYSTEM folder is shared between accounts, so its icon is deleted
     # only after PROVING OWNERSHIP the same way the tmux session kill does:
@@ -465,15 +487,29 @@ uninstall() {
     _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
     if [ -d "$HOME/Applications/Kosmos.app" ]; then
       if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ] && [ "$_home_apps_phys" != "$_sys_apps_phys" ]; then
-        info "removing the Kosmos app from $HOME/Applications"
-        rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
-      elif [ -z "$_home_apps_phys" ] || [ -z "$_sys_apps_phys" ]; then
+        # The same ownership token as the system folder: uninstalling
+        # Kosmos must not delete somebody's unrelated app that happens to
+        # carry the name, even in the per-user folder.
+        if grep -qF ":-$KOSMOS_HOME}\"" "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+          info "removing the Kosmos app from $HOME/Applications"
+          rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
+        else
+          info "note: the Kosmos.app in the Applications folder inside your home folder was not created by this install and was left alone."
+        fi
+      elif [ -z "$_home_apps_phys" ]; then
+        # The fail-closed note names the folder that actually failed the
+        # check; blaming the home folder when the system one was the
+        # unresolvable side would claim something never observed.
         info "note: could not check the Applications folder inside your home folder; the Kosmos icon there was left alone."
+      elif [ -z "$_sys_apps_phys" ]; then
+        info "note: could not check $SYS_APP_DIR, so the Kosmos icon in the Applications folder inside your home folder was left alone."
       fi
     fi
-    # Probe residue from any earlier run goes too; -f keeps an unmatched
-    # glob harmless.
+    # Probe and stage residue from any earlier run goes too; -f keeps an
+    # unmatched glob harmless. The stage sweep is what keeps a bundle
+    # build that died mid-write from surviving the documented uninstall.
     rm -rf "$SYS_APP_DIR"/.kosmos-write-probe.* 2>/dev/null || true
+    rm -rf "$SYS_APP_DIR"/.Kosmos.app.stage.* "$HOME/Applications"/.Kosmos.app.stage.* 2>/dev/null || true
   fi
   # The shared supervisor is app plumbing (the same argument as the launchd
   # jobs) and goes; the STORE next to it is the user's agent records and
@@ -710,13 +746,48 @@ esac
 # Gatekeeper never runs. MEASURED: a locally-created .app has no extended
 # attributes at all and macOS reports it as a proper application bundle. We still
 # ship one terminal line. That line just leaves an icon behind.
+# ⚠️ STAGED, LIKE EVERY OTHER SWAP IN THIS FILE. The bundle is built complete
+# in a hidden sibling and renamed into place, because a build that dies
+# between mkdir and the launcher write used to leave a launcher-less husk at
+# the real path -- which every later run's ownership check read as foreign
+# (divert forever) and which --uninstall refused to touch for the same
+# reason: a permanently wedged Applications slot the documented uninstall
+# could not reach, on the file whose header promises reversibility. The
+# stage is cleaned on every failure path, and uninstall sweeps stage
+# residue too.
 make_app() {
   # ⚠️ TWO STATEMENTS, NOT ONE. `local app="$1" target="$app/Contents"` looks fine
   # and fails under `set -u`: bash does not make `app` visible to later
   # assignments in the SAME `local` statement, so `$app` is unbound and the whole
   # step dies. Measured, after the installer reported "app: unbound variable" and
   # created nothing.
+  local app="$1"
+  local stage
+  stage="$(dirname "$app")/.Kosmos.app.stage.$$"
+  rm -rf "$stage" 2>/dev/null || true
+  if ! build_app_bundle "$stage"; then
+    rm -rf "$stage" 2>/dev/null || true
+    return 1
+  fi
+  # The destructive window is now only this rm+mv pair, with the complete
+  # bundle already sitting next to its target.
+  rm -rf "$app" 2>/dev/null || { rm -rf "$stage" 2>/dev/null || true; return 1; }
+  mv "$stage" "$app" || { rm -rf "$stage" 2>/dev/null || true; return 1; }
+
+  # ⚠️ TELL macOS THE APP EXISTS. A freshly created bundle is not in the
+  # LaunchServices database, and until it is, it can show a generic icon or
+  # behave oddly when opened. Measured: straight after creation, lsregister knew
+  # nothing about it.
   #
+  # On a machine that has run this before, this is also what makes a REPLACED
+  # bundle pick up a new icon instead of the cached old one. Failure here is not
+  # fatal, the app still works, so it never aborts the install.
+  local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
+  return 0
+}
+
+build_app_bundle() {
   # ⚠️ EVERY STEP CARRIES ITS OWN `|| return 1`. This function runs as an `if`
   # condition, and that DISABLES `set -e` for its whole body (measured: a
   # failing mkdir inside it did not abort, and the caller printed success
@@ -729,7 +800,6 @@ make_app() {
   local ver
   ver="$(KOSMOS_PKG="$KOSMOS_HOME/app/package.json" \
     "$KOSMOS_HOME/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null)" || ver="0.0.0"
-  rm -rf "$app" || return 1
   mkdir -p "$target/MacOS" "$target/Resources" || return 1
 
   cat > "$target/Info.plist" <<PLIST || return 1
@@ -777,25 +847,17 @@ LAUNCH
   # one. (CFBundleIconFile pointing at a file that is absent is harmless:
   # macOS falls back to the generic icon either way.)
   [ -f "$KOSMOS_HOME/app/assets/Kosmos.icns" ] && cp "$KOSMOS_HOME/app/assets/Kosmos.icns" "$target/Resources/Kosmos.icns"
-
-  # ⚠️ TELL macOS THE APP EXISTS. A freshly created bundle is not in the
-  # LaunchServices database, and until it is, it can show a generic icon or
-  # behave oddly when opened. Measured: straight after creation, lsregister knew
-  # nothing about it.
-  #
-  # On a machine that has run this before, this is also what makes a REPLACED
-  # bundle pick up a new icon instead of the cached old one. Failure here is not
-  # fatal, the app still works, so it never aborts the install.
-  local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-  [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
   return 0
 }
 
 step "Adding Kosmos to your Applications."
 resolve_app_dir
-mkdir -p "$APP_DIR" || die "Could not create $APP_DIR. Check that it is writable."
 APP_MADE=no
-if make_app "$APP_DIR/Kosmos.app"; then
+if [ "$APP_SKIP_ICON" = "yes" ]; then
+  : # said below, where the not-made sentences live
+elif ! mkdir -p "$APP_DIR"; then
+  die "Could not create $APP_DIR. Check that it is writable."
+elif make_app "$APP_DIR/Kosmos.app"; then
   APP_MADE=yes
 elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
   # ⚠️ A WRITABLE FOLDER IS NOT A CREATABLE BUNDLE. The mkdir probe proves
@@ -804,10 +866,24 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
   # Before 2026-08-13 the icon reliably landed in ~/Applications, so
   # ending with NO icon anywhere would be strictly worse than the
   # discoverability bug this branch fixes. One retry into the per-user
-  # folder before giving up.
-  APP_DIR="$HOME/Applications"
-  if mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
-    APP_MADE=yes
+  # folder before giving up -- guarded by the same aliasing test as the
+  # divert, because "retry in the home folder" is only a retry when the
+  # home folder is a different folder.
+  _retry_ok=no
+  if [ ! -e "$HOME/Applications" ] && [ ! -L "$HOME/Applications" ]; then
+    _retry_ok=yes
+  else
+    _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
+    _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
+    if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ] && [ "$_home_apps_phys" != "$_sys_apps_phys" ]; then
+      _retry_ok=yes
+    fi
+  fi
+  if [ "$_retry_ok" = "yes" ]; then
+    APP_DIR="$HOME/Applications"
+    if mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
+      APP_MADE=yes
+    fi
   fi
 fi
 if [ "$APP_MADE" = "yes" ]; then
@@ -835,11 +911,21 @@ if [ "$APP_MADE" = "yes" ]; then
       _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
       _app_dir_phys="$(cd "$APP_DIR" 2>/dev/null && pwd -P)" || _app_dir_phys=""
       if [ -n "$_home_apps_phys" ] && [ -n "$_app_dir_phys" ] && [ "$_home_apps_phys" != "$_app_dir_phys" ]; then
-        if rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null; then
-          info "note: the Kosmos icon moved here from the Applications folder inside your home folder."
-          info "If Kosmos was in your Dock, remove it and drag the new one in."
+        # ⚠️ AND ONLY WITH PROOF OF OWNERSHIP, the same anchored token as
+        # everywhere else: "the stale icon this script wrote before
+        # 2026-08-13" is the only bundle this cleanup exists for, and a
+        # genuine one always carries the launcher line. Anything else
+        # named Kosmos.app in the user's own folder is theirs, is left
+        # alone, and is named.
+        if grep -qF ":-$KOSMOS_HOME}\"" "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+          if rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null; then
+            info "note: the Kosmos icon moved here from the Applications folder inside your home folder."
+            info "If Kosmos was in your Dock, remove it and drag the new one in."
+          else
+            info "note: an older Kosmos icon is still in the Applications folder inside your home folder; drag it to the Trash."
+          fi
         else
-          info "note: an older Kosmos icon is still in the Applications folder inside your home folder; drag it to the Trash."
+          info "note: a Kosmos.app not created by this install is in the Applications folder inside your home folder; it was left alone."
         fi
       fi
     fi
@@ -857,6 +943,15 @@ if [ "$APP_MADE" = "yes" ]; then
     fi
   fi
   ok
+elif [ "$APP_SKIP_ICON" = "yes" ]; then
+  # The fail-closed leg of the divert's aliasing guard: something not ours
+  # holds the system spot AND the home Applications folder is (or cannot be
+  # proven not to be) the same physical folder, so there is nowhere an icon
+  # can go without touching a stranger's app. Say so; the dashboard address
+  # in the closing lines still opens Kosmos.
+  info "something else already has the Kosmos spot in Applications, and this Mac has no"
+  info "separate home Applications folder to use instead, so no icon was created."
+  info "Open Kosmos with the dashboard address below (worth bookmarking)."
 else
   info "could not create the app icon, but Kosmos itself is fine"
 fi
@@ -884,7 +979,8 @@ printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s 
 # comment settles ("a squatter on the port must not be opened and called
 # Kosmos"): by this line, `kosmos start` above has already identity-checked
 # the port and died in a sentence if a stranger held it, so the URL here is
-# only ever reached when the thing answering is Kosmos.
+# only ever reached when the thing answering is Kosmos. (install/kosmos's
+# cmd_open is the other place this URL is spelled; keep the two together.)
 #
 # Two knobs, each doing exactly one job. KOSMOS_NO_OPEN: any non-empty
 # value suppresses the open (yes, even "no" or "0" -- it is an internal

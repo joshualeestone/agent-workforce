@@ -34,7 +34,10 @@ if [ ! -d "$TMUX_SRC" ] || [ ! -d "$KOS_SRC" ]; then
 fi
 
 SB="$(mktemp -d)"
-trap 'for _h in home home2 home3 home4 home5 home6; do if [ -f "$SB/$_h/board.pid" ]; then kill "$(cat "$SB/$_h/board.pid")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
+# The board-kill list is a glob, not a hardcoded home/home2/... list: a
+# future pass that adds a seventh sandbox home must not silently leak a
+# board process onto the operator's machine.
+trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then kill "$(cat "$_p")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
 # A free port, probed rather than assumed: several agents and a real board
@@ -58,6 +61,16 @@ export KOSMOS_NO_OPEN=1
 # removing directories in the real /Applications.
 mkdir -p "$SB/sysnever"
 export KOSMOS_SYS_APP_DIR="$SB/sysnever"
+# The directory's fractional mtime, not its contents: a probe that mkdirs
+# and then rmdirs leaves the folder empty, so an emptiness check cannot
+# fail for the thing it names. A create-and-remove does move the mtime.
+SYSNEVER_MTIME="$(stat -f %Fm "$SB/sysnever")"
+# A convention-not-enforcement net for the operator's REAL folders: the
+# probe passes below run with KOSMOS_APP_DIR deliberately empty, relying on
+# every such invocation also overriding HOME. Snapshot the real folders and
+# fail loudly at the end if anything changed them.
+REAL_HOME_APPS_BEFORE="$(ls -A "$HOME/Applications" 2>/dev/null | shasum | cut -d' ' -f1)"
+REAL_SYS_APPS_BEFORE="$(ls -A /Applications 2>/dev/null | shasum | cut -d' ' -f1)"
 cat > "$SB/open-stub" <<EOS
 #!/bin/sh
 echo "\$@" >> "$SB/opened.log"
@@ -77,7 +90,7 @@ chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
-chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
+chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 
 echo "== update (stale file must not survive; board must restart) =="
 touch "$SB/home/app/engine/stale-marker.js"
@@ -139,7 +152,14 @@ SYS_OK="$SB/sysapps"
 mkdir -p "$SBH" "$SYS_OK"
 # A stale icon from a pre-2026-08-13 install: the system-folder install must
 # clean it up, or the machine keeps two Kosmos icons, one of them dead-stale.
-mkdir -p "$SBH/Applications/Kosmos.app"
+# The fixture is a REAL bundle carrying the launcher line, because the
+# cleanup (rightly) demands proof of ownership before deleting; a bare
+# directory would pin nothing but the ownership refusal.
+seed_kosmos_bundle() { # $1 = Applications dir, $2 = the KOSMOS_HOME it bakes
+  mkdir -p "$1/Kosmos.app/Contents/MacOS"
+  printf '#!/bin/bash\nKOSMOS_HOME="${KOSMOS_HOME:-%s}"\n' "$2" > "$1/Kosmos.app/Contents/MacOS/Kosmos"
+}
+seed_kosmos_bundle "$SBH/Applications" "$SB/home2"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 # KOSMOS_NO_OPEN is cleared and the open command is the recording stub, so
 # this pass also pins the one behavior a hardcoded /usr/bin/open hid from
@@ -166,7 +186,7 @@ if [ "$(id -u)" -eq 0 ]; then
   # environment reason. Skip loudly and seed the icon the sweep pass below
   # expects the fallback install to have left.
   echo "SKIP fallback leg: running as root, chmod 555 does not deny root"
-  mkdir -p "$SBH/Applications/Kosmos.app"
+  seed_kosmos_bundle "$SBH/Applications" "$SB/home3"
 else
   SYS_RO="$SB/sysro"
   mkdir -p "$SYS_RO"
@@ -244,6 +264,71 @@ chk "foreign bundle untouched" "grep -q 'not ours' \"$SYS_FOREIGN/Kosmos.app/Con
 chk "our app went to the home folder instead" "[ -x \"$SBH4/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "the divert speaks its own sentence" "grep -q 'something else already has the Kosmos spot' \"$SB/divert.log\""
 "$SB/bin6/kosmos" stop > /dev/null 2>&1 || true
+
+echo "== foreign bundle PLUS aliased folders: no icon at all, said honestly =="
+# The composed case: something not ours holds the system spot AND the home
+# Applications folder is a symlink to the same place. "Divert to the home
+# folder" would write straight back through the link onto the bundle the
+# ownership check just refused, so the only honest outcome is no icon,
+# with a sentence, and the stranger's app byte-identical.
+SYSALIAS2="$SB/sysalias2"
+mkdir -p "$SYSALIAS2/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# stranger\nKOSMOS_HOME="${KOSMOS_HOME:-/not/ours/at/all}"\n' > "$SYSALIAS2/Kosmos.app/Contents/MacOS/Kosmos"
+SBH7="$SB/alias-foreign-home"
+mkdir -p "$SBH7"
+ln -s "$SYSALIAS2" "$SBH7/Applications"
+export KOSMOS_HOME="$SB/home9" KOSMOS_BIN_DIR="$SB/bin9"
+RC=0; cat "$SETUP" | HOME="$SBH7" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS2" sh > "$SB/alias-foreign.log" 2>&1 || RC=$?
+chk "foreign-aliased install exits 0" "[ $RC -eq 0 ]"
+chk "the stranger's app is byte-identical" "grep -q 'stranger' \"$SYSALIAS2/Kosmos.app/Contents/MacOS/Kosmos\""
+chk "no icon was written anywhere" "[ \"\$(ls -A \"$SYSALIAS2\" | grep -cv '^Kosmos.app\$')\" = \"0\" ]"
+chk "the skip speaks its own sentence" "grep -q 'no icon was created' \"$SB/alias-foreign.log\""
+"$SB/bin9/kosmos" stop > /dev/null 2>&1 || true
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP wedge and survivor-note legs: running as root, chmod denials do not bind"
+else
+  echo "== a bundle that cannot be replaced sends the icon to the home folder =="
+  # The retry leg: the system folder is writable (the probe passes) but the
+  # bundle inside it cannot be replaced (its own dir is write-locked, the
+  # shape a root-owned leftover takes). The ownership line matches, so the
+  # divert does not fire; make_app must fail on the swap, clean its stage,
+  # and the retry must land the icon in the home folder.
+  SYS_WEDGE="$SB/syswedge"
+  seed_kosmos_bundle "$SYS_WEDGE" "$SB/home7"
+  chmod 555 "$SYS_WEDGE/Kosmos.app"
+  SBH5="$SB/wedge-home"
+  mkdir -p "$SBH5"
+  export KOSMOS_HOME="$SB/home7" KOSMOS_BIN_DIR="$SB/bin7"
+  RC=0; cat "$SETUP" | HOME="$SBH5" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_WEDGE" sh > "$SB/wedge.log" 2>&1 || RC=$?
+  chk "wedge install exits 0" "[ $RC -eq 0 ]"
+  chk "retry landed the icon in the home folder" "[ -x \"$SBH5/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "retry sentence names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/wedge.log\""
+  chk "no stage residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
+  chmod 755 "$SYS_WEDGE/Kosmos.app"
+  "$SB/bin7/kosmos" stop > /dev/null 2>&1 || true
+
+  echo "== a survivor is NAMED (positive control for the could-not-remove note) =="
+  # Without this pass the survivor-note branches could be deleted whole and
+  # the suite would stay green: the note was only ever asserted absent. A
+  # write-locked containing folder makes the owner's own rm fail, which
+  # must produce the sentence, not silence.
+  SYS_LOCKED="$SB/syslocked"
+  seed_kosmos_bundle "$SYS_LOCKED" "$SB/home8"
+  chmod 555 "$SYS_LOCKED"
+  export KOSMOS_HOME="$SB/home8" KOSMOS_BIN_DIR="$SB/bin8"
+  SBH6="$SB/locked-home"
+  mkdir -p "$SBH6"
+  RC=0; HOME="$SBH6" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_LOCKED" sh -s -- --uninstall < "$SETUP" > "$SB/locked-un.log" 2>&1 || RC=$?
+  chk "locked uninstall exits 0" "[ $RC -eq 0 ]"
+  chk "the survivor is named" "grep -q 'could not remove' \"$SB/locked-un.log\""
+  chk "the survivor survives" "[ -d \"$SYS_LOCKED/Kosmos.app\" ]"
+  chmod 755 "$SYS_LOCKED"
+fi
+
+echo "== the operator's real folders were never touched =="
+chk "real home Applications unchanged" "[ \"\$(ls -A \"$HOME/Applications\" 2>/dev/null | shasum | cut -d' ' -f1)\" = \"$REAL_HOME_APPS_BEFORE\" ]"
+chk "real /Applications unchanged" "[ \"\$(ls -A /Applications 2>/dev/null | shasum | cut -d' ' -f1)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
 
 echo
 echo "$PASS passed, $FAIL failed"
