@@ -4745,7 +4745,11 @@ function frPaintConnect(st) {
 
   if (phase === 'downloading') {
     box.innerHTML = '<div class="fr-ctitle">Downloading Claude&#8230;</div>'
-      + '<div class="fr-progress"><div class="fr-progress-fill" id="fr-conn-fill" style="width:0%"></div></div>'
+      // Static progressbar semantics, no live chatter: the phase change was
+      // announced once; a screen reader can QUERY the value without being
+      // spoken over every second.
+      + '<div class="fr-progress" id="fr-conn-bar" role="progressbar" aria-label="Download progress" '
+      + 'aria-valuemin="0" aria-valuemax="100"><div class="fr-progress-fill" id="fr-conn-fill" style="width:0%"></div></div>'
       + '<div class="fr-cdetail" id="fr-conn-prog"></div>'
       + '<div class="fr-cdetail">This is the one big download. Everything after it is quick.</div>';
     frConnPaintProgress(st.progress);
@@ -4869,13 +4873,17 @@ function frConnPaintProgress(progress) {
   if (!fill || !line) return;
   const got = (progress && progress.got) || 0;
   const total = progress && progress.total;
+  const bar = document.getElementById('fr-conn-bar');
   if (total) {
-    fill.style.width = Math.min(100, Math.round((got / total) * 100)) + '%';
+    const pct = Math.min(100, Math.round((got / total) * 100));
+    fill.style.width = pct + '%';
     line.textContent = frMB(got) + ' of ' + frMB(total);
+    if (bar && bar.setAttribute) bar.setAttribute('aria-valuenow', String(pct));
   } else {
     // No Content-Length: an honest count beats a bar pretending to know.
     fill.style.width = '0%';
     line.textContent = frMB(got) + ' so far';
+    if (bar && bar.removeAttribute) bar.removeAttribute('aria-valuenow');
   }
 }
 

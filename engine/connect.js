@@ -898,7 +898,10 @@ async function tickBody(owner) {
   // every classification including 'blank', so the counter it exists to feed
   // was zeroed on the very tick that incremented it and the escalation could
   // never fire. Caught by the test timing out, not by reading the diff.
-  if (seen.kind !== 'blank') owner.blankTicks = 0;
+  if (seen.kind !== 'blank') {
+    owner.blankTicks = 0;
+    if (seen.kind !== 'unknown') owner.everSaw = true;
+  }
   // The rejection grace resets whenever the paste prompt is NOT on screen: a
   // mid-clear tick between two prompt sightings otherwise resumed the count
   // from its stale value and shortened the grace.
@@ -950,7 +953,11 @@ async function tickBody(owner) {
       // 4.5x the unknown grace (45s in production): blanks are legitimate
       // between screens, so the bound is generous -- but it exists.
       if (owner.blankTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 4.5) / TICK_MS))) {
-        becomeStuck(owner, 'Claude never drew its sign-in screen', 'the window stayed blank');
+        // The sentence claims only what THIS flow observed: "never drew" is
+        // false once any screen was recognised earlier in the flow.
+        becomeStuck(owner, owner.everSaw
+          ? 'the sign-in window went blank and stayed blank'
+          : 'Claude never drew its sign-in screen', 'the window stayed blank');
       }
       return;
     case 'theme':
@@ -1185,11 +1192,14 @@ async function finishConnected(owner, sub) {
   const d = driver;
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
+  const memBefore = mem;
   await killSession();
-  // ⚠️ The one write that crossed an await unguarded: a cancel or fresh
-  // start landing inside the kill above owns the record now, and a stale
-  // CONNECTED must not clobber it -- same rule as every sibling path.
-  if (driver) return;
+  // ⚠️ The one write that crossed an await unguarded: a fresh START owns the
+  // record now (driver set), and a CANCEL that landed inside the kill above
+  // wrote its own record (mem replaced -- writeState swaps the object, so
+  // identity detects it where a null driver cannot). Either way the stale
+  // CONNECTED stays unwritten; the reader answers connected on the next ask.
+  if (driver || mem !== memBefore) return;
   writeState({ phase: PHASE.CONNECTED, plan: sub.plan || null, startedOnce: true });
 }
 

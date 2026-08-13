@@ -57,6 +57,13 @@ which commands. So they were re-verified, and the record is here:
   The guard that refuses to read that screen as login evidence cannot be
   tested until a real capture of one exists; fixture discipline forbids
   inventing its text.
+- **Cancel mid-install on the test machine, once, on purpose.** The
+  cancel-kills-install wiring (`activeChild`) is deliberately unreachable by
+  tests: the dry-run interlock forbids any suite from executing a real child,
+  which is the same mechanism that keeps tests from spawning real agents. The
+  1GB download bound shares the gap (a fixture that large is not a test).
+  Both are one manual exercise each during pass 1: start a connect on the
+  Mini, cancel during "Setting Claude up", verify no launcher landed.
 
 ## What this does NOT verify, said now so it cannot look covered later
 
