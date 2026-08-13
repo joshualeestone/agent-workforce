@@ -204,12 +204,26 @@ const ACTIVE_PHASES = [
  * declaring its flow interrupted from pid inequality alone asserts a death
  * nobody checked -- signal 0 asks the kernel (EPERM = exists, not ours =
  * alive). And a live pid is not proof of a live FLOW: pids get recycled, so
- * "alive" only counts while the record is also fresh -- an hour without a
- * single write is not a flow anybody is running. (Sign-in phases legitimately
- * sit unwritten while a person dawdles in a browser tab, hence an hour and
- * not a minute.) One helper, because `state()` (reporting) and `cancel()`
+ * "alive" only counts while the record is also FRESH. Freshness is safe to
+ * demand because the owning driver heartbeats its record (see tickBody), so
+ * even a person dawdling at the paste prompt keeps their record stamped.
+ * One helper, because `state()` (reporting) and `cancel()`/`start()`
  * (refusing to destroy) must agree about whose flow it is.
  */
+/**
+ * The freshness policy, injectable so tests can drive it instead of reading
+ * comments about it. The bound is three missed heartbeats: the owning driver
+ * stamps its record every HEARTBEAT_MS while alive (including a person
+ * dawdling at the paste prompt), so a record older than FRESH_BOUND_MS
+ * belongs to a flow whose driver stopped -- whatever its recycled pid says.
+ */
+let HEARTBEAT_MS = 5 * 60 * 1000;
+let FRESH_BOUND_MS = 15 * 60 * 1000;
+function setFreshnessForTests(boundMs, heartbeatMs) {
+  FRESH_BOUND_MS = boundMs || 15 * 60 * 1000;
+  HEARTBEAT_MS = heartbeatMs || 5 * 60 * 1000;
+}
+
 function foreignLiveFlow(disk) {
   if (!disk || !ACTIVE_PHASES.includes(disk.phase) || disk.pid === process.pid) return false;
   let alive = false;
@@ -221,7 +235,7 @@ function foreignLiveFlow(disk) {
   if (!disk.updatedAt) return false;
   const ageMs = Date.now() - Date.parse(disk.updatedAt);
   if (!Number.isFinite(ageMs)) return false;
-  return alive && ageMs <= 60 * 60 * 1000;
+  return alive && ageMs <= FRESH_BOUND_MS;
 }
 
 function state() {
@@ -274,7 +288,7 @@ function redirectDowngrades(fromUrl, location) {
 }
 
 /** GET a small text/json body, following redirects. */
-function fetchText(url, redirects) {
+function fetchText(url, redirects, track) {
   const left = redirects === undefined ? 5 : redirects;
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('http:') ? http : https;
@@ -285,7 +299,7 @@ function fetchText(url, redirects) {
           reject(new Error('the download service redirected to an insecure address, so we stopped'));
           return;
         }
-        resolve(fetchText(new URL(res.headers.location, url).toString(), left - 1));
+        resolve(fetchText(new URL(res.headers.location, url).toString(), left - 1, track));
         return;
       }
       if (res.statusCode !== 200) {
@@ -303,13 +317,15 @@ function fetchText(url, redirects) {
     req.on('error', reject);
     // ⚠️ Tracked like the big fetch: a cancel that lands during the /latest or
     // manifest GET must abort it, or download() runs on to fetch 281MB for a
-    // flow nobody wants any more.
+    // flow nobody wants any more. `track` additionally hands the handle to
+    // the OWNING FLOW, whose identity the module global cannot carry.
     activeRequest = req;
+    if (track) track(req);
   });
 }
 
 /** Stream a large file to disk, hashing as it lands, reporting progress. */
-function fetchFile(url, dest, onProgress, redirects) {
+function fetchFile(url, dest, onProgress, redirects, track) {
   const left = redirects === undefined ? 5 : redirects;
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('http:') ? http : https;
@@ -320,7 +336,7 @@ function fetchFile(url, dest, onProgress, redirects) {
           reject(new Error('the download service redirected to an insecure address, so we stopped'));
           return;
         }
-        resolve(fetchFile(new URL(res.headers.location, url).toString(), dest, onProgress, left - 1));
+        resolve(fetchFile(new URL(res.headers.location, url).toString(), dest, onProgress, left - 1, track));
         return;
       }
       if (res.statusCode !== 200) {
@@ -341,11 +357,11 @@ function fetchFile(url, dest, onProgress, redirects) {
       out.on('finish', () => resolve({ sha256: hash.digest('hex'), bytes: got }));
       res.on('error', (e) => { out.destroy(); reject(e); });
       out.on('error', reject);
-      activeRequest = req;
     });
     req.setTimeout(600000, () => { req.destroy(new Error('the download stalled')); });
     req.on('error', reject);
     activeRequest = req;
+    if (track) track(req);
   });
 }
 
@@ -369,9 +385,9 @@ function platformKey() {
  * way, but restart is simpler to reason about and the file downloads once
  * (measured: 281MB, 9 seconds on this machine's connection).
  */
-async function download(onProgress) {
+async function download(onProgress, track) {
   const base = downloadBase();
-  const version = (await fetchText(`${base}/latest`)).trim();
+  const version = (await fetchText(`${base}/latest`, undefined, track)).trim();
   activeRequest = null; // finished; "set" must keep meaning "in flight"
   /**
    * ⚠️ FULLY ANCHORED, because this string is interpolated into URLs and into
@@ -384,7 +400,7 @@ async function download(onProgress) {
     throw new Error('the download service did not answer with a version');
   }
   let manifest;
-  try { manifest = JSON.parse(await fetchText(`${base}/${version}/manifest.json`)); }
+  try { manifest = JSON.parse(await fetchText(`${base}/${version}/manifest.json`, undefined, track)); }
   catch { throw new Error('the download service answered with something we could not read'); }
   activeRequest = null;
   const plat = platformKey();
@@ -416,7 +432,7 @@ async function download(onProgress) {
     }
   } catch { /* nothing stale to clean */ }
 
-  const got = await fetchFile(`${base}/${version}/${plat}/claude`, part, onProgress);
+  const got = await fetchFile(`${base}/${version}/${plat}/claude`, part, onProgress, undefined, track);
   activeRequest = null;
   if (got.sha256 !== want) {
     try { fs.unlinkSync(part); } catch { /* already gone */ }
@@ -575,20 +591,30 @@ async function runFlow(owner, haveBinary) {
     let downloaded;
     try {
       let lastProgressWrite = 0;
+      /**
+       * ⚠️ THE FLOW HOLDS ITS OWN REQUEST HANDLE. The module-global
+       * `activeRequest` carries no identity, and a first version of the
+       * orphan-abort below destroyed "the active request" -- which, after a
+       * cancel-then-restart, was the SUCCESSOR flow's request. Each flow
+       * tracks its own handle and only ever destroys that.
+       */
+      const myReq = { current: null };
+      const track = (req) => { myReq.current = req; };
       downloaded = await download((got, total) => {
         /**
          * ⚠️ A CANCELLED FLOW'S DOWNLOAD ABORTS ITSELF AT THE NEXT CHUNK.
          * Cancel can land in the momentary gaps where no request handle is
-         * registered; without this, the orphaned download ran to completion
-         * and its path-based renames could collide with a successor flow's
-         * in-progress file. Destroying from inside the progress callback
-         * (never throwing -- an exception in a 'data' listener does not
-         * reject the promise, it kills the process) closes the window at
-         * chunk granularity. Residual, documented as accepted: the handful
-         * of chunkless milliseconds between the metadata GETs.
+         * registered globally; without this, the orphaned download ran to
+         * completion and its path-based renames could collide with a
+         * successor flow's in-progress file. Destroying from inside the
+         * progress callback (never throwing -- an exception in a 'data'
+         * listener does not reject the promise, it kills the process)
+         * closes the window at chunk granularity, and destroying OUR OWN
+         * handle can never hit anybody else's. Residual, documented as
+         * accepted: the chunkless milliseconds between the metadata GETs.
          */
         if (driver !== owner) {
-          if (activeRequest) { try { activeRequest.destroy(new Error('cancelled')); } catch { /* ending anyway */ } }
+          if (myReq.current) { try { myReq.current.destroy(new Error('cancelled')); } catch { /* ending anyway */ } }
           return;
         }
         if (mem.phase !== PHASE.DOWNLOADING) return;
@@ -604,7 +630,7 @@ async function runFlow(owner, haveBinary) {
         }
         lastProgressWrite = now;
         writeState({ ...mem, progress: { got, total } });
-      });
+      }, track);
     } catch (err) {
       // A death mid-stream leaves a .part behind, and a retry only sweeps the
       // SAME version's partial -- a version bump between attempts would
@@ -732,7 +758,7 @@ async function tickBody(owner) {
     // Explicit like foreignLiveFlow, not through coercion: a record missing
     // its stamp gets one now, and an unparseable stamp is treated as due.
     const age = mem.updatedAt ? Date.now() - Date.parse(mem.updatedAt) : Infinity;
-    if (!Number.isFinite(age) || age > 5 * 60 * 1000) writeState({ ...mem });
+    if (!Number.isFinite(age) || age > HEARTBEAT_MS) writeState({ ...mem });
   }
   const cap = await tmux(['capture-pane', '-p', '-J', '-t', PANE_TARGET]);
   if (driver !== owner) return; // cancelled or replaced while we were looking
@@ -1113,6 +1139,6 @@ module.exports = {
   state, start, submitCode, cancel,
   classifyPane, extractOauthUrl, tailOf, validCode, redirectDowngrades,
   download, platformKey,
-  setRunner, setDryRun, setTickInterval, setUnknownGrace, resetForTests,
+  setRunner, setDryRun, setTickInterval, setUnknownGrace, setFreshnessForTests, resetForTests,
   STATE_FILE,
 };

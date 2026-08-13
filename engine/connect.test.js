@@ -360,7 +360,7 @@ driverTest('a rejected code is not a dead end: the screen asks again and a secon
   let codes = 0;
   term.onCode = () => {
     codes += 1;
-    if (codes === 1) { term.screen = SCREEN_PASTE; return; }   // rejected: prompt again
+    if (codes <= 2) { term.screen = SCREEN_PASTE; return; }   // rejected: prompt again
     writeClaudeConfig(CONNECTED_CONFIG);
     term.screen = SCREEN_LOGIN_DONE;
   };
@@ -374,12 +374,48 @@ driverTest('a rejected code is not a dead end: the screen asks again and a secon
   // The rejection surfaces: back to awaiting-code, with the reason carried.
   await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE
     && /did not work/.test(connect.state().because || ''), 15000);
+  assert.doesNotMatch(connect.state().because, /still/,
+    'the first rejection already used the escalated sentence, so the second cannot differ');
+
+  // ⚠️ A SECOND identical failure must produce a DIFFERENT sentence: the page
+  // repaints (and a screen reader re-announces) only when the reason text
+  // changes, so an identical retry failure would otherwise show and say
+  // nothing at all.
+  assert.equal(connect.submitCode('secondCode#22222').ok, true);
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE
+    && /still did not work/.test(connect.state().because || ''), 15000);
 
   // And a corrected code is ACCEPTED and completes the flow.
-  const second = connect.submitCode('secondCode#22222');
-  assert.equal(second.ok, true, second.because);
+  const third = connect.submitCode('thirdCode#333333');
+  assert.equal(third.ok, true, third.because);
   await until(() => connect.state().phase === connect.PHASE.CONNECTED, 10000);
-  assert.equal(codes, 2, 'the second code was accepted but never typed into the terminal');
+  assert.equal(codes, 3, 'the third code was accepted but never typed into the terminal');
+});
+
+driverTest('the owning driver heartbeats its record while parked', async () => {
+  /**
+   * ⚠️ THE FRESHNESS BOUND IS ONLY SAFE BECAUSE OF THIS. A flow parked at
+   * the paste prompt writes no phase changes; without the heartbeat, its
+   * record ages past the bound and a second server would treat the LIVE
+   * flow as interrupted -- and cancel could then kill it. Policy injected,
+   * not read from comments: heartbeat 50ms for the test.
+   */
+  connect.setFreshnessForTests(60 * 1000, 50);
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  try {
+    await connect.start();
+    await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+    const first = JSON.parse(fs.readFileSync(connect.STATE_FILE(), 'utf8')).updatedAt;
+    await new Promise((r) => setTimeout(r, 250));
+    const later = JSON.parse(fs.readFileSync(connect.STATE_FILE(), 'utf8'));
+    assert.equal(later.phase, 'signin-awaiting-code', 'the phase moved; this test needs a parked flow');
+    assert.ok(Date.parse(later.updatedAt) > Date.parse(first),
+      'the parked record was never re-stamped, so a second server would age it out');
+  } finally {
+    connect.setFreshnessForTests(null, null);
+  }
 });
 
 driverTest('a code that starts with a dash is typed literally, not read as tmux flags', async () => {
