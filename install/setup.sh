@@ -4,8 +4,12 @@
 # user can write there without a password (macOS admin accounts can), and
 # into the Applications folder inside your home folder otherwise. In
 # /Applications it only ever replaces a Kosmos icon it can prove it created
-# itself (by the icon's own contents), and its write check creates and
-# removes one empty hidden folder there. It never touches any other app.
+# itself (by the icon's own contents); its write check creates and removes
+# one empty hidden folder there; and the icon is assembled in a hidden
+# .Kosmos.app.stage.<pid> folder beside its spot and renamed into place
+# (an interrupted run can leave that staging folder behind; --uninstall
+# sweeps it). macOS may show its own one-time "Terminal wants to manage
+# apps" dialog for the icon step. It never touches any other app.
 #
 # ⚠️ THE SHEBANG SAYS sh BECAUSE THE PAGE SAYS sh. This file's contract is
 # the interpreter the marketing line actually invokes: macOS /bin/sh, which
@@ -85,6 +89,7 @@ SYS_APP_DIR="${KOSMOS_SYS_APP_DIR:-/Applications}"
 APP_DIR="${KOSMOS_APP_DIR:-$HOME/Applications}"
 APP_OTHER_OWNER=no
 APP_SKIP_ICON=no
+APP_SKIP_REASON=""
 resolve_app_dir() {
   # The verbatim override is a sandbox: no probing, no fallback.
   [ -n "${KOSMOS_APP_DIR:-}" ] && { APP_DIR="$KOSMOS_APP_DIR"; return 0; }
@@ -123,8 +128,15 @@ resolve_app_dir() {
     if [ -e "$HOME/Applications" ] || [ -L "$HOME/Applications" ]; then
       _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
       _sys_apps_phys="$(cd "$SYS_APP_DIR" 2>/dev/null && pwd -P)" || _sys_apps_phys=""
-      if [ -z "$_home_apps_phys" ] || [ -z "$_sys_apps_phys" ] || [ "$_home_apps_phys" = "$_sys_apps_phys" ]; then
+      # The two skip reasons get distinct sentences: "same folder" was
+      # OBSERVED only on the equal-paths leg; the unresolvable legs know
+      # merely that the folder could not be checked, and the sentence must
+      # not claim more than that.
+      if [ -n "$_home_apps_phys" ] && [ -n "$_sys_apps_phys" ]; then
+        [ "$_home_apps_phys" = "$_sys_apps_phys" ] && { APP_SKIP_ICON=yes; APP_SKIP_REASON=same; }
+      else
         APP_SKIP_ICON=yes
+        APP_SKIP_REASON=unknown
       fi
     fi
     return 0
@@ -461,7 +473,12 @@ uninstall() {
     # the predicate, one account's uninstall would delete another
     # account's working icon. The HOME folder needs no predicate -- it is
     # per-user by construction.
-    if [ -d "$SYS_APP_DIR/Kosmos.app" ]; then
+    # -e OR -L, matching the install-side gate: a dangling symlink named
+    # Kosmos.app is residue too, and -d alone leaves it invisible forever
+    # on the path whose header promises the machine is returned to before.
+    # (Ownership cannot be proven through a dangling link, so the refusal
+    # note prints; that is honest, and the note names the survivor.)
+    if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
       # The same anchored token as resolve_app_dir: the closing `}"` keeps
       # two homes in a prefix relationship from cross-matching, because
       # this grep is the sole gate on an rm -rf in a shared folder.
@@ -765,6 +782,14 @@ make_app() {
   local stage
   stage="$(dirname "$app")/.Kosmos.app.stage.$$"
   rm -rf "$stage" 2>/dev/null || true
+  # ⚠️ mkdir WITHOUT -p, by absolute path, as the stage's first act: -p
+  # follows a symlink planted at this predictable name and would build the
+  # bundle at the link's target, then install the link itself as
+  # Kosmos.app. A bare mkdir fails on ANYTHING already at the path,
+  # including a symlink slipped in after the rm above. (In /Applications
+  # the planter is already an admin, so this is hardening rather than a
+  # live hole; it costs one word.)
+  /bin/mkdir "$stage" 2>/dev/null || return 1
   if ! build_app_bundle "$stage"; then
     rm -rf "$stage" 2>/dev/null || true
     return 1
@@ -852,6 +877,16 @@ LAUNCH
 
 step "Adding Kosmos to your Applications."
 resolve_app_dir
+# ⚠️ THE ONE DIALOG THIS RUN CAN SHOW IS NAMED BEFORE IT CAN APPEAR. On
+# some macOS versions, App Management (TCC) asks whether Terminal may
+# manage apps the first time anything writes a bundle into /Applications.
+# The person this file is written for was promised no password and no
+# surprises; an unexplained system dialog mid-run reads as "something went
+# wrong". A denial is handled below (the icon falls back to the home
+# folder), so this sentence is the only missing piece.
+if [ "$APP_SKIP_ICON" != "yes" ] && [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
+  info "if your Mac asks whether Terminal can manage apps, that is this step; Allow puts the icon in Applications"
+fi
 APP_MADE=no
 if [ "$APP_SKIP_ICON" = "yes" ]; then
   : # said below, where the not-made sentences live
@@ -918,6 +953,11 @@ if [ "$APP_MADE" = "yes" ]; then
         # named Kosmos.app in the user's own folder is theirs, is left
         # alone, and is named.
         if grep -qF ":-$KOSMOS_HOME}\"" "$HOME/Applications/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+          # Unregister the dead path first (the mirror of the lsregister -f
+          # on the new one), so Spotlight and Open With stop offering it;
+          # best-effort for the same reason registration is.
+          _lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+          [ -x "$_lsreg" ] && "$_lsreg" -u "$HOME/Applications/Kosmos.app" >/dev/null 2>&1 || true
           if rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null; then
             info "note: the Kosmos icon moved here from the Applications folder inside your home folder."
             info "If Kosmos was in your Dock, remove it and drag the new one in."
@@ -947,10 +987,16 @@ elif [ "$APP_SKIP_ICON" = "yes" ]; then
   # The fail-closed leg of the divert's aliasing guard: something not ours
   # holds the system spot AND the home Applications folder is (or cannot be
   # proven not to be) the same physical folder, so there is nowhere an icon
-  # can go without touching a stranger's app. Say so; the dashboard address
-  # in the closing lines still opens Kosmos.
-  info "something else already has the Kosmos spot in Applications, and this Mac has no"
-  info "separate home Applications folder to use instead, so no icon was created."
+  # can go without touching a stranger's app. Say so, claiming only what
+  # the resolve actually observed; the dashboard address in the closing
+  # lines still opens Kosmos.
+  if [ "$APP_SKIP_REASON" = "same" ]; then
+    info "something else already has the Kosmos spot in Applications, and this Mac's home"
+    info "Applications folder is the same folder, so no icon was created."
+  else
+    info "something else already has the Kosmos spot in Applications, and the Applications"
+    info "folder inside your home folder could not be checked, so no icon was created."
+  fi
   info "Open Kosmos with the dashboard address below (worth bookmarking)."
 else
   info "could not create the app icon, but Kosmos itself is fine"
@@ -994,7 +1040,7 @@ OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
 # command -v rather than -x: it resolves a bare command name as well as a
 # path, so an override like KOSMOS_OPEN_CMD=open does not silently no-op.
 if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && command -v "$OPEN_CMD" >/dev/null 2>&1; then
-  "$OPEN_CMD" "http://127.0.0.1:$PORT/" >/dev/null 2>&1 || true
+  "$OPEN_CMD" "http://127.0.0.1:$PORT" >/dev/null 2>&1 || true
 fi
 }
 

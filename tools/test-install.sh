@@ -69,8 +69,14 @@ SYSNEVER_MTIME="$(stat -f %Fm "$SB/sysnever")"
 # probe passes below run with KOSMOS_APP_DIR deliberately empty, relying on
 # every such invocation also overriding HOME. Snapshot the real folders and
 # fail loudly at the end if anything changed them.
-REAL_HOME_APPS_BEFORE="$(ls -A "$HOME/Applications" 2>/dev/null | shasum | cut -d' ' -f1)"
-REAL_SYS_APPS_BEFORE="$(ls -A /Applications 2>/dev/null | shasum | cut -d' ' -f1)"
+# Names alone cannot see an in-place replacement (the single most likely
+# real-folder mutation on a dev machine with a real Kosmos install), so the
+# snapshot hashes name + mtime + size of every top-level entry.
+real_apps_fingerprint() {
+  find "$1" -maxdepth 1 -exec stat -f '%N %m %z' {} \; 2>/dev/null | sort | shasum | cut -d' ' -f1
+}
+REAL_HOME_APPS_BEFORE="$(real_apps_fingerprint "$HOME/Applications")"
+REAL_SYS_APPS_BEFORE="$(real_apps_fingerprint /Applications)"
 cat > "$SB/open-stub" <<EOS
 #!/bin/sh
 echo "\$@" >> "$SB/opened.log"
@@ -210,7 +216,7 @@ RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninst
 chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 chk "another install's system icon left alone" "[ -d \"$SYS_OK/Kosmos.app\" ]"
-chk "the refusal speaks a sentence" "grep -q 'was not created by this install' \"$SB/probe-un.log\""
+chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK was not created by this install\" \"$SB/probe-un.log\""
 # The OWNER's uninstall takes it.
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
@@ -326,9 +332,88 @@ else
   chmod 755 "$SYS_LOCKED"
 fi
 
+echo "== the cleanup and uninstall notes each have a driving pass =="
+# A foreign Kosmos.app in the HOME folder at cleanup time: the system-folder
+# install must leave it and name it (setup.sh's "not created by this
+# install is in the Applications folder inside your home folder").
+SBH9="$SB/foreign-home"
+mkdir -p "$SBH9/Applications/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# theirs\nKOSMOS_HOME="${KOSMOS_HOME:-/not/ours}"\n' > "$SBH9/Applications/Kosmos.app/Contents/MacOS/Kosmos"
+SYS_OK3="$SB/sysok3"
+mkdir -p "$SYS_OK3"
+export KOSMOS_HOME="$SB/home10" KOSMOS_BIN_DIR="$SB/bin10"
+RC=0; cat "$SETUP" | HOME="$SBH9" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK3" sh > "$SB/fhome.log" 2>&1 || RC=$?
+chk "foreign-home install exits 0" "[ $RC -eq 0 ]"
+chk "foreign home bundle survives the cleanup" "grep -q 'theirs' \"$SBH9/Applications/Kosmos.app/Contents/MacOS/Kosmos\""
+chk "the foreign home bundle is named" "grep -q 'not created by this install is in the Applications folder inside your home folder' \"$SB/fhome.log\""
+"$SB/bin10/kosmos" stop > /dev/null 2>&1 || true
+# Its uninstall drives the home-folder refusal note too.
+RC=0; HOME="$SBH9" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK3" sh -s -- --uninstall < "$SETUP" > "$SB/fhome-un.log" 2>&1 || RC=$?
+chk "foreign-home uninstall exits 0" "[ $RC -eq 0 ]"
+chk "home refusal speaks its sentence" "grep -q 'inside your home folder was not created by this install' \"$SB/fhome-un.log\""
+chk "foreign home bundle survives uninstall" "[ -d \"$SBH9/Applications/Kosmos.app\" ]"
+
+# An unresolvable SYSTEM folder on uninstall: the fail-closed note must
+# name the side that failed the check, and the home icon must survive.
+SBH10="$SB/nosys-home"
+mkdir -p "$SBH10"
+seed_kosmos_bundle "$SBH10/Applications" "$SB/home11"
+export KOSMOS_HOME="$SB/home11" KOSMOS_BIN_DIR="$SB/bin11"
+RC=0; HOME="$SBH10" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SB/no-such-sys" sh -s -- --uninstall < "$SETUP" > "$SB/nosys-un.log" 2>&1 || RC=$?
+chk "no-sys uninstall exits 0" "[ $RC -eq 0 ]"
+chk "fail-closed note names the system folder" "grep -q \"could not check $SB/no-such-sys\" \"$SB/nosys-un.log\""
+chk "home icon left alone under fail-closed" "[ -d \"$SBH10/Applications/Kosmos.app\" ]"
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP chmod-denial note legs: running as root"
+else
+  # The move-cleanup's OWN failure note: a write-locked home Applications
+  # makes the stale icon undeletable, and the survivor must be named
+  # ("an older Kosmos icon is still...").
+  SBH11="$SB/locked-stale-home"
+  seed_kosmos_bundle "$SBH11/Applications" "$SB/home12"
+  # Lock the INNERMOST directory, not Applications: rm -rf deletes
+  # depth-first, so an outer lock lets the launcher be deleted before the
+  # failure, and the next run reads the gutted husk as foreign (measured:
+  # the first version of this pass locked Applications and the uninstall
+  # printed the refusal note instead of the could-not-remove note). With
+  # MacOS/ locked the launcher survives every failed rm, so ownership
+  # stays provable across both runs.
+  chmod 555 "$SBH11/Applications/Kosmos.app/Contents/MacOS"
+  SYS_OK4="$SB/sysok4"
+  mkdir -p "$SYS_OK4"
+  export KOSMOS_HOME="$SB/home12" KOSMOS_BIN_DIR="$SB/bin12"
+  RC=0; cat "$SETUP" | HOME="$SBH11" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK4" sh > "$SB/stale-locked.log" 2>&1 || RC=$?
+  chk "locked-stale install exits 0" "[ $RC -eq 0 ]"
+  chk "undeletable stale icon is named" "grep -q 'an older Kosmos icon is still' \"$SB/stale-locked.log\""
+  "$SB/bin12/kosmos" stop > /dev/null 2>&1 || true
+
+  # The home-folder "could not remove" on uninstall: the folder stays
+  # locked so the home sweep's rm fails and must name the survivor.
+  RC=0; HOME="$SBH11" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK4" sh -s -- --uninstall < "$SETUP" > "$SB/locked-home-un.log" 2>&1 || RC=$?
+  chmod -R u+w "$SBH11" 2>/dev/null || true
+  chk "locked-home uninstall exits 0" "[ $RC -eq 0 ]"
+  chk "home survivor is named" "grep -q \"could not remove $SBH11/Applications/Kosmos.app\" \"$SB/locked-home-un.log\""
+
+  # The last give-up sentence: probe fails AND the home folder cannot take
+  # a bundle either; Kosmos itself must still install and say so.
+  SYS_RO2="$SB/sysro2"
+  mkdir -p "$SYS_RO2"
+  chmod 555 "$SYS_RO2"
+  SBH12="$SB/no-icon-home"
+  mkdir -p "$SBH12/Applications"
+  chmod 555 "$SBH12/Applications"
+  export KOSMOS_HOME="$SB/home13" KOSMOS_BIN_DIR="$SB/bin13"
+  RC=0; cat "$SETUP" | HOME="$SBH12" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO2" sh > "$SB/noicon.log" 2>&1 || RC=$?
+  chk "no-icon install exits 0" "[ $RC -eq 0 ]"
+  chk "the give-up sentence prints" "grep -q 'could not create the app icon, but Kosmos itself is fine' \"$SB/noicon.log\""
+  chmod 755 "$SYS_RO2" "$SBH12/Applications"
+  "$SB/bin13/kosmos" stop > /dev/null 2>&1 || true
+fi
+
 echo "== the operator's real folders were never touched =="
-chk "real home Applications unchanged" "[ \"\$(ls -A \"$HOME/Applications\" 2>/dev/null | shasum | cut -d' ' -f1)\" = \"$REAL_HOME_APPS_BEFORE\" ]"
-chk "real /Applications unchanged" "[ \"\$(ls -A /Applications 2>/dev/null | shasum | cut -d' ' -f1)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
+chk "real home Applications unchanged" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"
+chk "real /Applications unchanged" "[ \"\$(real_apps_fingerprint /Applications)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
 
 echo
 echo "$PASS passed, $FAIL failed"
