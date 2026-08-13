@@ -1031,6 +1031,9 @@ async function tickBody(owner) {
       if ((seen.kind === 'login-done' || seen.kind === 'repl')
         && (mem.phase === PHASE.SIGNIN_BROWSER_OPEN || mem.phase === PHASE.SIGNIN_AWAITING_CODE
           || mem.phase === PHASE.SIGNIN_LAUNCHING)) {
+        // A code accepted moments before the browser finished on its own
+        // must not be typed unprompted if the prompt ever comes back.
+        driver.pendingCode = null;
         writeState({ phase: PHASE.SIGNIN_COMPLETING, url: mem.url || null, startedOnce: true });
         return;
       }

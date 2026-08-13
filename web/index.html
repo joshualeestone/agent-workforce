@@ -4562,6 +4562,11 @@ async function frConnectStart() {
 
 async function frConnCancel() {
   frConnStopWatch();
+  // ⚠️ Invalidate any in-flight poll answer, same as frConnectStart: a stale
+  // pre-cancel answer resolving after the repaint below would paint the
+  // ended flow's panel (with a dead Cancel button) over the fresh verdict,
+  // with no watcher running.
+  FR_CONN_SEQ += 1;
   let refused = null;
   try {
     const res = await fetch('/api/connect/cancel', { method: 'POST' });
