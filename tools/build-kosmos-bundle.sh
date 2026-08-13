@@ -31,6 +31,11 @@
 # Output: <out>/kosmos-<arch>.tar.gz plus the staged tree it was made from.
 
 set -euo pipefail
+# One EXIT trap, registered before anything can create a temp resource: six
+# exit-1 paths once sat between the download's mktemp and a trap that was
+# "folded in" later, each leaking ~150MB of Node tarball per failed build.
+TMP=""; SMOKE_LOG=""; SMOKE_ROOTS=""
+trap 'rm -rf "${TMP:-}" "${SMOKE_LOG:-}" "${SMOKE_ROOTS:-}"' EXIT
 
 NODE_VERSION="${KOSMOS_NODE_VERSION:-24.19.0}"
 OUT="${1:-dist}"
@@ -131,38 +136,8 @@ chmod +x "$STAGE/runtime/bin/node"
 # tmux from this Mac stamps minos 26.0 and would load on nothing older),
 # so the floor is read out of the artifact with otool and compared, not
 # assumed. KOSMOS_ALLOW_MINOS=1 overrides for LOCAL TEST BUILDS ONLY.
-FLOOR="$(cat "$(dirname "$0")/macos-floor")"
-case "$FLOOR" in
-  [0-9]*.[0-9]|[0-9]*.[0-9][0-9]) ;;
-  *) echo "FAIL: tools/macos-floor must be MAJOR.MINOR (got '$FLOOR')" >&2; exit 1 ;;
-esac
-FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
-check_minos() {
-  local f="$1" minos major minor
-  minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
-  # Cannot-read refuses, same rule as the tmux builder: a gate that passes
-  # what it cannot see is the green-on-blind shape this repo bans.
-  if [ -z "$minos" ]; then
-    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
-      echo "    WARN: cannot read a deployment target from $(basename "$f") (allowed: TEST BUILD)"
-      return 0
-    fi
-    echo "FAIL: cannot read a deployment target from $(basename "$f"); refusing to certify the floor." >&2
-    exit 1
-  fi
-  major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
-  if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
-    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
-      echo "    WARN: $(basename "$f") needs macOS $minos > floor $FLOOR_MAJOR.$FLOOR_MINOR (allowed: TEST BUILD)"
-    else
-      echo "FAIL: $(basename "$f") requires macOS $minos, above the installer's $FLOOR_MAJOR.$FLOOR_MINOR floor." >&2
-      echo "      Source a binary built for the floor, or KOSMOS_ALLOW_MINOS=1 for a local test build." >&2
-      exit 1
-    fi
-  fi
-}
-check_minos "$STAGE/runtime/bin/node"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/floor-gate.sh"
+floor_gate "$STAGE/runtime/bin/node"
 
 # ---- smoke test -------------------------------------------------------------
 # ⚠️ THE STAGED TREE IS WHAT GETS TESTED, not the repo, AND A REAL REQUEST IS
@@ -174,18 +149,19 @@ check_minos "$STAGE/runtime/bin/node"
 # real board on this machine.
 echo "==> smoke test: the staged app boots and serves its page"
 SMOKE_LOG="$(mktemp)"
-# One EXIT trap owns every temp resource (a second `trap ... EXIT` replaces
-# the first, so the download branch's trap is folded in here).
-trap 'rm -rf "${TMP:-}" "${SMOKE_LOG:-}" "${SMOKE_ROOTS:-}"' EXIT
-# ⚠️ Disposable roots: without these the staged server points at the BUILD
-# MACHINE'S live store, launchd directory and tmux fleet. Today's server
-# only reads on GET /, so nothing is mutated -- but that is a property of
-# the current server, not of this test, and a future boot-time write must
-# land in a throwaway, never in the operator's real data.
+# ⚠️ Disposable roots for ALL FIVE of the app's roots: without these the
+# staged server points at the BUILD MACHINE'S live store, launchd
+# directory, tmux fleet, claude config and config-root scan. Today's
+# server only reads on GET /, so nothing is mutated -- but that is a
+# property of the current server, not of this test, and a future
+# boot-time write must land in a throwaway, never in the operator's real
+# data. If the app grows a sixth root, it must be added here.
 SMOKE_ROOTS="$(mktemp -d)"
 PORT=0 AGENT_WORKFORCE_DATA="$SMOKE_ROOTS/data" \
   AGENT_WORKFORCE_LAUNCH="$SMOKE_ROOTS/launch" \
   AGENT_WORKFORCE_WORKERS="$SMOKE_ROOTS/workers" \
+  AGENT_WORKFORCE_CONFIG_ROOT="$SMOKE_ROOTS/config" \
+  AGENT_WORKFORCE_CLAUDE_CONFIG="$SMOKE_ROOTS/claude.json" \
   "$STAGE/runtime/bin/node" "$STAGE/app/server.js" > "$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
 SMOKE_URL=""

@@ -127,8 +127,17 @@ cmd_start() {
   if port_taken_by_stranger; then
     die "Another app on this Mac is already using port $PORT, so Kosmos cannot start there. Quit that app and run 'kosmos start' again."
   fi
+  # ⚠️ A recorded board that is alive but not answering on THIS port must
+  # not be silently orphaned: overwriting the pidfile with a new launch
+  # leaves the old process unreachable by stop forever (its only exit a
+  # reboot), and the new one dies on the taken port anyway.
+  local _oldpid
+  if _oldpid="$(running_pid)"; then
+    die "A Kosmos board from this install is already running (process $_oldpid) but is not answering on port $PORT. Stop it first with 'kosmos stop', then start again."
+  fi
   [ -x "$NODE" ] || die "Kosmos looks incomplete: the runtime is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
   [ -f "$APP" ]  || die "Kosmos looks incomplete: the app is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
+  [ -x "$KOSMOS_HOME/tmux/bin/tmux" ] || die "Kosmos looks incomplete: its terminal manager is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
   mkdir -p "$LOG_DIR"
   say "Bringing the board up."
   # Detached from this terminal, with everything it prints kept in a log so a
@@ -210,7 +219,7 @@ cmd_version() {
   if [ -x "$NODE" ] && [ -f "$KOSMOS_HOME/app/package.json" ]; then
     # The path travels as an environment variable, never interpolated into
     # the JS source: a quote or backslash in a path must stay a path.
-    KOSMOS_PKG="$KOSMOS_HOME/app/package.json" "$NODE" -p 'require(process.env.KOSMOS_PKG).version'
+    KOSMOS_PKG="$KOSMOS_HOME/app/package.json" "$NODE" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version'
   else
     die "Kosmos looks incomplete here."
   fi

@@ -45,4 +45,6 @@ credentials.json
 node_modules/
 .DS_Store
 *.log
+# Build output: bundle staging trees and ~40MB tarballs redistributing
+# third-party binaries. Never source, never committed by accident.
 dist/

@@ -15,7 +15,9 @@ tmux bundle and the Kosmos bundle (the app + a pinned Node runtime + the
 Kosmos.app (icon artwork pending: it shows the generic app icon until the
 Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 `kosmos start|stop|restart|status|open|version` manages it after that.
-`sh -s -- --uninstall` reverses everything except the agents' own files.
+`sh -s -- --uninstall` reverses everything except the agents' own folders
+and the AgentWorkforce store (profiles, avatars, commitments): user work
+and records about it stay; the app and its plumbing go.
 Apple silicon, macOS 13.5+ (gated in a sentence, and the builders refuse
 to pack a release artifact above that floor; note the tmux bundle still
 needs re-sourcing against the floor before a release build can pack at

@@ -74,12 +74,17 @@ KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
 # where nothing beyond a clean Mac may be assumed.
 verify_download() {
   local file="$1" url="$2" want got
-  curl -fsL -m 30 "$url.sha256" -o "$file.sha256" 2>/dev/null || { info "the download's checksum file is missing"; return 1; }
+  curl -fsL -m 30 "$url.sha256" -o "$file.sha256" 2>/dev/null || {
+    info "the download could not be verified (its verification file is missing)."
+    info "This usually means the download site is mid-update. Wait a minute, then paste the install line again."
+    return 1
+  }
   want="$(awk '{print $1; exit}' "$file.sha256")"
   got="$(shasum -a 256 "$file" | awk '{print $1}')"
   rm -f "$file.sha256"
   if [ -z "$want" ] || [ "$want" != "$got" ]; then
-    info "the download did not arrive intact (checksum mismatch)"
+    info "the download did not arrive intact."
+    info "Paste the install line again; if it keeps happening, the download site may be mid-update."
     return 1
   fi
   return 0
@@ -100,6 +105,10 @@ reachable() {
 fetch_tmux() {
   local dest="$1"
   local stage="$dest.stage.$$"
+  # Sweep leftovers from interrupted PREVIOUS attempts (each run stages
+  # under a fresh $$, so an interrupt -- not a failure path -- accumulates
+  # ~130MB per Ctrl-C otherwise, invisibly, forever).
+  rm -rf "$dest".stage.* 2>/dev/null || true
   # ⚠️ EVERY failure path removes the stage. Returning without cleanup left a
   # partial stage directory behind per attempt (a new $$ each run), so a
   # flaky connection accumulated half-downloads in the user's install.
@@ -157,6 +166,7 @@ fetch_tmux() {
 install_kosmos() {
   local dest="$1"
   local stage="$dest/.kosmos.stage.$$"
+  rm -rf "$dest"/.kosmos.stage.* 2>/dev/null || true
   rm -rf "$stage"
   mkdir -p "$stage" || { rm -rf "$stage"; return 1; }
   if [ -n "${KOSMOS_SRC:-}" ]; then
@@ -295,7 +305,7 @@ uninstall() {
     _label="$(basename "$_plist" .plist)"
     _name="${_label#com.kosmos.agent.}"
     _agents_stopped=yes
-    info "stopping the background job for $_name"
+    info "removing the background job for $_name"
     # ⚠️ enable BEFORE bootout, the order the app's own runbook uses. The
     # app's Remove path runs `launchctl disable`, which writes a per-user
     # override keyed on the LABEL that outlives the plist. Booting out and
@@ -314,14 +324,30 @@ uninstall() {
     # -t sam` killing samantha-discord (bin/agent-supervisor.sh records the
     # incident). The = forces an exact match, the same form every engine
     # call site uses.
+    # ...and only after PROVING OWNERSHIP the way the supervisor does: the
+    # session must carry @kosmos_agent naming itself, or a user's own
+    # `tmux new -s notes` would die for sharing a name with an agent's
+    # leftover plist.
     if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
-      "$KOSMOS_HOME/tmux/bin/tmux" kill-session -t "=$_name" 2>/dev/null || true
+      _owner="$("$KOSMOS_HOME/tmux/bin/tmux" show-options -t "=$_name" -v @kosmos_agent 2>/dev/null)" || _owner=""
+      if [ "$_owner" = "$_name" ]; then
+        "$KOSMOS_HOME/tmux/bin/tmux" kill-session -t "=$_name" 2>/dev/null || true
+      fi
     fi
     rm -f "$_plist"
   done
   if [ -d "$KOSMOS_HOME" ]; then
-    info "deleting $KOSMOS_HOME"
-    rm -rf "$KOSMOS_HOME"
+    # ⚠️ REFUSE TO DELETE A FOLDER THAT IS NOT A KOSMOS INSTALL. KOSMOS_HOME
+    # is overridable by design, and the one catastrophic misuse is pointing
+    # it at a real folder (KOSMOS_HOME=$HOME) on the uninstall path: every
+    # other destructive path here is bounded by a fixed leaf name, and this
+    # one must be bounded by evidence.
+    if [ -x "$KOSMOS_HOME/bin/kosmos" ] || [ -f "$KOSMOS_HOME/VERSION" ]; then
+      info "deleting $KOSMOS_HOME"
+      rm -rf "$KOSMOS_HOME"
+    else
+      info "note: $KOSMOS_HOME does not look like a Kosmos install, so it was left alone."
+    fi
   fi
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
   [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
@@ -456,9 +482,20 @@ mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check 
 if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
   info "pausing Kosmos for the update"
   "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
-  if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
-    die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
-  fi
+  # Identity, not a bare 200: naming a stranger "a Kosmos board" hands out
+  # advice ('kosmos stop') that the very next command refuses, and every
+  # rerun reproduces it. Same lesson the kosmos command's health check
+  # carries; the advice differs by who is actually on the port.
+  _pausebody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _pausebody=""
+  case "$_pausebody" in
+    *"Agent Workforce"*|*Kosmos*)
+      die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+      ;;
+    "") ;;
+    *)
+      die "Another app on this Mac is using port $PORT, which Kosmos needs. Quit that app, then paste the install line again."
+      ;;
+  esac
 fi
 
 step "Setting up the pieces Kosmos needs."
@@ -526,7 +563,7 @@ ok
 # whose shell does not look there, and silently not working is the worst outcome.
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: add $BIN_DIR to your PATH to run 'kosmos' from anywhere" ;;
+  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; use the Kosmos app icon instead (created below), which needs no setup" ;;
 esac
 
 # ---- the front door -----------------------------------------------------------
@@ -564,7 +601,7 @@ make_app() {
   # installed bundle itself, so the plist cannot drift from package.json.
   local ver
   ver="$(KOSMOS_PKG="$KOSMOS_HOME/app/package.json" \
-    "$KOSMOS_HOME/runtime/bin/node" -p 'require(process.env.KOSMOS_PKG).version' 2>/dev/null)" || ver="0.0.0"
+    "$KOSMOS_HOME/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null)" || ver="0.0.0"
   rm -rf "$app" || return 1
   mkdir -p "$target/MacOS" "$target/Resources" || return 1
 

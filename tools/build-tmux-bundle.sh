@@ -202,37 +202,8 @@ otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
 # silently. Until a tmux built against the floor SDK is sourced, a release
 # build of this bundle FAILS here on purpose; KOSMOS_ALLOW_MINOS=1 permits
 # a LOCAL TEST BUILD only.
-FLOOR="$(cat "$(dirname "$0")/macos-floor")"
-case "$FLOOR" in
-  [0-9]*.[0-9]|[0-9]*.[0-9][0-9]) ;;
-  *) echo "FAIL: tools/macos-floor must be MAJOR.MINOR (got '$FLOOR')" >&2; exit 1 ;;
-esac
-FLOOR_MAJOR="${FLOOR%%.*}"; FLOOR_MINOR="${FLOOR#*.}"
-for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
-  minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
-  [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
-  # ⚠️ CANNOT-READ REFUSES. A gate that passes what it cannot see is the
-  # green-on-blind failure shape this repo's README bans; both load-command
-  # spellings are parsed above, so an empty result means something new.
-  if [ -z "$minos" ]; then
-    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
-      echo "    WARN: cannot read a deployment target from $(basename "$f") (allowed: TEST BUILD)"
-      continue
-    fi
-    echo "FAIL: cannot read a deployment target from $(basename "$f"); refusing to certify the floor." >&2
-    exit 1
-  fi
-  major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
-  if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
-    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
-      echo "    WARN: $(basename "$f") needs macOS $minos > floor $FLOOR_MAJOR.$FLOOR_MINOR (allowed: TEST BUILD)"
-    else
-      echo "FAIL: $(basename "$f") requires macOS $minos, above the installer's $FLOOR_MAJOR.$FLOOR_MINOR floor." >&2
-      echo "      Source binaries built for the floor (see the header), or KOSMOS_ALLOW_MINOS=1 for a local test build." >&2
-      exit 1
-    fi
-  fi
-done
+. "$(dirname "${BASH_SOURCE[0]}")/lib/floor-gate.sh"
+floor_gate "$OUT/bin/tmux" "$OUT"/lib/*.dylib
 
 # ---- what shipped, recorded ---------------------------------------------------
 # The Node half of a release is pinned and checksummed; the tmux half must at
@@ -246,7 +217,7 @@ done
 # ---- third-party notices -------------------------------------------------------
 # The tarball redistributes tmux, ncurses, libevent and utf8proc binaries;
 # all four licences require their notices to travel with the binaries.
-NOTICES="$(dirname "$0")/third-party-notices.txt"
+NOTICES="$(dirname "${BASH_SOURCE[0]}")/third-party-notices.txt"
 if [ ! -f "$NOTICES" ]; then
   echo "FAIL: $NOTICES is missing; the bundle may not ship binaries without their licence notices." >&2
   exit 1
