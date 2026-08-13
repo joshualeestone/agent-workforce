@@ -48,6 +48,21 @@ done
 export KOSMOS_HOME="$SB/home" KOSMOS_BIN_DIR="$SB/bin" KOSMOS_APP_DIR="$SB/apps"
 export KOSMOS_TMUX_SRC="$TMUX_SRC" KOSMOS_SRC="$KOS_SRC" KOSMOS_PORT="$PORT"
 export AGENT_WORKFORCE_DATA="$SB/data" AGENT_WORKFORCE_LAUNCH="$SB/launch"
+# A test that steals the operator's browser is a test nobody runs twice:
+# every pass suppresses the fresh-install open unless it deliberately
+# substitutes the recording stub below to assert the open itself.
+export KOSMOS_NO_OPEN=1
+# Points the system-folder probe at a directory that must stay EMPTY for
+# every pass that sets KOSMOS_APP_DIR: the override must bypass the probe
+# entirely, or every sandboxed run on a dev machine would be creating and
+# removing directories in the real /Applications.
+mkdir -p "$SB/sysnever"
+export KOSMOS_SYS_APP_DIR="$SB/sysnever"
+cat > "$SB/open-stub" <<EOS
+#!/bin/sh
+echo "\$@" >> "$SB/opened.log"
+EOS
+chmod +x "$SB/open-stub"
 
 PASS=0; FAIL=0
 chk() {
@@ -62,6 +77,7 @@ chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
+chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 
 echo "== update (stale file must not survive; board must restart) =="
 touch "$SB/home/app/engine/stale-marker.js"
@@ -125,32 +141,61 @@ mkdir -p "$SBH" "$SYS_OK"
 # clean it up, or the machine keeps two Kosmos icons, one of them dead-stale.
 mkdir -p "$SBH/Applications/Kosmos.app"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
-RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh > "$SB/probe1.log" 2>&1 || RC=$?
+# KOSMOS_NO_OPEN is cleared and the open command is the recording stub, so
+# this pass also pins the one behavior a hardcoded /usr/bin/open hid from
+# the suite: a fresh install invokes the open, an update does not.
+RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe1.log" 2>&1 || RC=$?
 chk "probe install exits 0" "[ $RC -eq 0 ]"
 chk "app landed in the system folder" "[ -x \"$SYS_OK/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "transcript names Applications" "grep -q 'you will find it in Applications, as Kosmos' \"$SB/probe1.log\""
 chk "stale home-folder icon cleaned up" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
+chk "the move is named in the transcript" "grep -q 'icon moved here' \"$SB/probe1.log\""
 chk "no probe residue in the system folder" "[ -z \"\$(ls -A \"$SYS_OK\" | grep -v '^Kosmos.app\$')\" ]"
+chk "fresh install opened the dashboard" "[ \"\$(wc -l < \"$SB/opened.log\" 2>/dev/null | tr -d ' ')\" = \"1\" ] && grep -q \"127.0.0.1:$PORT\" \"$SB/opened.log\""
+
+# The update run through the same probe env must NOT open the browser.
+RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe1b.log" 2>&1 || RC=$?
+chk "probe update exits 0" "[ $RC -eq 0 ]"
+chk "update did not open the dashboard" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"1\" ]"
 "$SB/bin2/kosmos" stop > /dev/null 2>&1 || true
 
-SYS_RO="$SB/sysro"
-mkdir -p "$SYS_RO"
-chmod 555 "$SYS_RO"
 export KOSMOS_HOME="$SB/home3" KOSMOS_BIN_DIR="$SB/bin3"
-RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO" sh > "$SB/probe2.log" 2>&1 || RC=$?
-chk "fallback install exits 0" "[ $RC -eq 0 ]"
-chk "app fell back to the home folder" "[ -x \"$SBH/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
-chk "transcript names the home folder" "grep -q 'Applications folder inside your home folder' \"$SB/probe2.log\""
-chk "no probe residue in the read-only folder" "[ -z \"\$(ls -A \"$SYS_RO\")\" ]"
-chmod 755 "$SYS_RO"
+if [ "$(id -u)" -eq 0 ]; then
+  # chmod 555 does not deny root, so the probe would succeed against the
+  # "read-only" folder and every fallback assertion would fail for an
+  # environment reason. Skip loudly and seed the icon the sweep pass below
+  # expects the fallback install to have left.
+  echo "SKIP fallback leg: running as root, chmod 555 does not deny root"
+  mkdir -p "$SBH/Applications/Kosmos.app"
+else
+  SYS_RO="$SB/sysro"
+  mkdir -p "$SYS_RO"
+  chmod 555 "$SYS_RO"
+  # KOSMOS_NO_OPEN stays exported here: a fresh install with the suppressor
+  # set must stay quiet, which pins the suppressor itself.
+  RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO" KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe2.log" 2>&1 || RC=$?
+  chk "fallback install exits 0" "[ $RC -eq 0 ]"
+  chk "app fell back to the home folder" "[ -x \"$SBH/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "transcript names the home folder" "grep -q 'Applications folder inside your home folder' \"$SB/probe2.log\""
+  chk "no probe residue in the read-only folder" "[ -z \"\$(ls -A \"$SYS_RO\")\" ]"
+  chk "KOSMOS_NO_OPEN suppressed the fresh-install open" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"1\" ]"
+  chmod 755 "$SYS_RO"
+fi
 
-# The uninstall sweep must clear BOTH default locations (older installs wrote
-# the home folder, newer prefer the system one) -- seed the system folder
-# with the pass-1 app still there and the home folder with pass-2's.
+echo "== the uninstall sweep proves ownership before deleting =="
+# The system-folder icon was installed by the home2 install; this uninstall
+# runs as the home3 install, so the sweep must take the per-user icon and
+# REFUSE the shared one it does not own, in a sentence.
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un.log" 2>&1 || RC=$?
 chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
-chk "system-folder icon swept" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
 chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
+chk "another install's system icon left alone" "[ -d \"$SYS_OK/Kosmos.app\" ]"
+chk "the refusal speaks a sentence" "grep -q 'belongs to a different install' \"$SB/probe-un.log\""
+# The OWNER's uninstall takes it.
+export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
+RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
+chk "owner uninstall exits 0" "[ $RC -eq 0 ]"
+chk "system-folder icon swept by its owner" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
 
 echo
 echo "$PASS passed, $FAIL failed"
