@@ -615,6 +615,11 @@ async function start() {
     if (!probe.ok) haveBinary = false;
   }
 
+  // ⚠️ The probe was an AWAIT between the top guard and the claim below: two
+  // rapid starts could both pass the guard and race the same .part path.
+  // Re-check before claiming; the second caller adopts the first's flow.
+  if (driver) return state();
+
   /**
    * ⚠️ EVERY ASYNC ARM OF A FLOW CARRIES ITS OWNING DRIVER, and teardown
    * compares IDENTITY, not existence. The defect this closes: work parked on
@@ -1168,6 +1173,10 @@ async function finishConnected(owner, sub) {
   driver = null;
   if (d && d.timer) clearInterval(d.timer);
   await killSession();
+  // ⚠️ The one write that crossed an await unguarded: a cancel or fresh
+  // start landing inside the kill above owns the record now, and a stale
+  // CONNECTED must not clobber it -- same rule as every sibling path.
+  if (driver) return;
   writeState({ phase: PHASE.CONNECTED, plan: sub.plan || null, startedOnce: true });
 }
 
