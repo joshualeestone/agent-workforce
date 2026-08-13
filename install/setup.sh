@@ -144,7 +144,8 @@ fetch_tmux() {
   # nothing and says nothing; without this line the first symptom is a board
   # that reads every agent as unknown, which nobody would ever trace to dyld.
   if ! "$stage/bin/tmux" -V >/dev/null 2>&1; then
-    info "the copy of tmux will not run on this Mac"
+    info "the copy of tmux will not run on this Mac."
+    info "That is a problem with the download itself, not with your Mac or your network; trying again will not fix it. We need to publish a corrected download."
     rm -rf "$stage"
     return 1
   fi
@@ -202,6 +203,12 @@ install_kosmos() {
     rm -rf "$dest/$part" || { rm -rf "$stage"; return 1; }
     mv "$stage/$part" "$dest/$part" || { rm -rf "$stage"; return 1; }
   done
+  # The bundle's VERSION record rides along (what shipped, traceable to a
+  # binary); optional so an older bundle without one still installs.
+  if [ -f "$stage/VERSION" ]; then
+    rm -f "$dest/VERSION"
+    mv "$stage/VERSION" "$dest/VERSION" || { rm -rf "$stage"; return 1; }
+  fi
   rm -rf "$stage"
   return 0
 }
@@ -231,7 +238,7 @@ die()   {
 # fifo spelling is plain POSIX and behaves identically; it is unlinked as
 # soon as both ends are open, so nothing is left behind.
 start_log() {
-  mkdir -p "$LOG_DIR"
+  mkdir -p "$LOG_DIR" || die "Could not create $KOSMOS_HOME. Check that your home folder is writable."
   printf '\n=== kosmos install %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG"
   _pipe="$LOG_DIR/.log.pipe.$$"
   rm -f "$_pipe"
@@ -262,8 +269,8 @@ uninstall() {
     # than glossed: the files still come off, but an orphan process would
     # keep the port and answer errors from a deleted tree, so the user
     # hears about it and gets the way out.
-    if curl -fsS -m 2 "http://127.0.0.1:${KOSMOS_PORT:-4317}/" >/dev/null 2>&1; then
-      info "note: something is still answering on port ${KOSMOS_PORT:-4317} that this uninstall could not stop."
+    if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+      info "note: something is still answering on port $PORT that this uninstall could not stop."
       info "It was not started by the kosmos command. Quit it, or restart your Mac, to finish."
     fi
   fi
@@ -341,6 +348,14 @@ uninstall() {
   fi
   exit 0
 }
+
+# ⚠️ EVERYTHING SIDE-EFFECTFUL LIVES IN main, INVOKED ON THE LAST LINE.
+# A `curl | sh` reader executes stdin incrementally, so a connection dropped
+# mid-file would otherwise run the script's PREFIX and then die with a raw
+# syntax error -- half an install performed by a truncated download. With
+# the wrapper, a truncated file parses (or fails to parse) without ever
+# having done anything: main only runs if the closing line arrived.
+main() {
 
 # ⚠️ AN UNRECOGNISED FLAG REFUSES, IT DOES NOT INSTALL. The one argument
 # this script takes is the one that UNDOES the install; a typo in it
@@ -433,6 +448,19 @@ mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check 
 # We ship our own rather than asking for Homebrew, which would mean sudo and a
 # multi-gigabyte developer-tools download in front of someone who was told this
 # takes one line. Ours is ~2MB, lives in this folder, and touches nothing else.
+# ⚠️ THE PAUSE HAPPENS BEFORE THE tmux SWAP, not between tmux and Kosmos:
+# swapping tmux under a live board leaves a window where the binary the
+# board polls does not exist (every agent reads as unknown), and a version
+# change would strand the running tmux server on a protocol the new client
+# cannot speak.
+if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
+  info "pausing Kosmos for the update"
+  "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+  if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+    die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+  fi
+fi
+
 step "Setting up the pieces Kosmos needs."
 # ⚠️ FETCHED ON EVERY RUN, not only the first. The old guard skipped this
 # whole step when a tmux was already present, which froze every machine at
@@ -443,7 +471,7 @@ info "installing a private copy of tmux (about 2MB, nothing system-wide)"
 # URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
 # signed, and saying "signed" would overclaim). Kept as a function so the
 # clean-machine test can point it at a local file.
-fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager. The line above says why. It is safe to paste the install line and try again."
+fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager. The lines above say why, and whether trying again can help."
 ok
 
 # ⚠️ TERMINFO IS PINNED RATHER THAN TRUSTED. The bundled ncurses carries a
@@ -487,18 +515,8 @@ step "Installing Kosmos."
 # "Kosmos is running" while the machine keeps executing the previous
 # version until a reboot. Stopping first also closes the window where the
 # live server's web/index.html is deleted out from under it mid-install.
-if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
-  info "pausing Kosmos for the update"
-  "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
-  # ⚠️ stop can REFUSE (a board it did not start, a lost pidfile), and
-  # swapping the tree under a still-live server means the old process keeps
-  # serving while the closing start sees a healthy port and calls it done:
-  # the update that did not happen, reported as one that did. Refuse here,
-  # in a sentence, instead.
-  if curl -fsS -m 2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
-    die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
-  fi
-fi
+# (The board was already paused above, before the tmux swap; a refused
+# pause has already refused the whole update in a sentence.)
 install_kosmos "$KOSMOS_HOME" || die "Could not install Kosmos. The line above says why. It is safe to paste the install line and try again."
 ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos"
 info "installed to $KOSMOS_HOME"
@@ -560,6 +578,7 @@ make_app() {
   <key>CFBundleExecutable</key><string>Kosmos</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$ver</string>
+  <key>CFBundleVersion</key><string>$ver</string>
   <key>CFBundleIconFile</key><string>Kosmos</string>
   <key>LSMinimumSystemVersion</key><string>$MACOS_FLOOR_MAJOR.$MACOS_FLOOR_MINOR</string>
   <key>LSUIElement</key><false/>
@@ -581,7 +600,7 @@ KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
 # on a non-default port produced an icon that opened the default one.
 export KOSMOS_PORT="\${KOSMOS_PORT:-$PORT}"
 if ! "\$KOSMOS_HOME/bin/kosmos" open >/dev/null 2>&1; then
-  /usr/bin/osascript -e 'display alert "Kosmos could not start" message "Something went wrong bringing Kosmos up. The details are in $KOSMOS_HOME/logs/board.log. Reinstalling usually fixes it: paste the install line into Terminal again." as critical' >/dev/null 2>&1
+  /usr/bin/osascript -e 'display alert "Kosmos could not start" message "Something went wrong bringing Kosmos up. Reinstalling usually fixes it: paste the install line into Terminal again." as critical' >/dev/null 2>&1
   exit 1
 fi
 LAUNCH
@@ -626,3 +645,8 @@ printf '\n  Kosmos is running.\n'
 printf '  Open it and it will walk you through connecting your AI account.\n'
 printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
+
+
+}
+
+main "$@"

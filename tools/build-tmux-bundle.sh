@@ -146,6 +146,14 @@ echo "==> ad-hoc signing"
 codesign -f -s - "$OUT"/lib/*.dylib "$OUT/bin/tmux" 2>&1 | sed 's/^/    /'
 
 echo "==> verifying"
+# ⚠️ THE FINISHED BINARY MUST RUN. codesign -v checks the signature, not
+# that the relocated dylibs load; this file's own history is a plausible
+# bundle that would not execute, caught only by running it. The VERSION
+# heredoc's `|| echo unknown` must never be the only execution test.
+"$OUT/bin/tmux" -V >/dev/null 2>&1 || {
+  echo "FAIL: the finished tmux does not run after relocation and re-signing." >&2
+  exit 1
+}
 # ⚠️ EVERY binary in the bundle, not only tmux: collect() is recursive
 # precisely because a bundled dylib can depend on another non-system one,
 # and repoint() silences install_name_tool, so a dylib that kept a Homebrew

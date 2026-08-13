@@ -16,8 +16,10 @@ Kosmos.app (icon artwork pending: it shows the generic app icon until the
 Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 `kosmos start|stop|restart|status|open|version` manages it after that.
 `sh -s -- --uninstall` reverses everything except the agents' own files.
-Apple silicon, macOS 13.5+ (gated in a sentence, and every built artifact
-is gated against the same floor).
+Apple silicon, macOS 13.5+ (gated in a sentence, and the builders refuse
+to pack a release artifact above that floor; note the tmux bundle still
+needs re-sourcing against the floor before a release build can pack at
+all, which is tracked in the branch plan).
 
 Release artifacts are produced by `tools/build-tmux-bundle.sh` and
 `tools/build-kosmos-bundle.sh` (each emits its tarball plus the `.sha256`

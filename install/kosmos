@@ -62,6 +62,16 @@ export PATH="$KOSMOS_HOME/tmux/bin:$PATH"
 # ships /usr/share/terminfo, and pinning converts the documented fallback
 # assumption into a fact.
 export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
+# ⚠️ THE APP IS TOLD WHERE ITS tmux IS, EXPLICITLY. PATH only fixes the
+# engine's bare `tmux` calls (reading the board); agent CREATION and the
+# first-run machine check resolve their tmux as AGENT_WORKFORCE_TMUX_BIN
+# falling back to /opt/homebrew/bin/tmux -- which exists on every dev
+# machine and on NO clean Mac this installer targets. Without this export
+# the very first thing a new user does after pasting the line (create an
+# agent) refuses, and the generated launchd plists bake the Homebrew path.
+# Unfindable by testing on a machine with Homebrew tmux; found by reading
+# the resolution chain.
+export AGENT_WORKFORCE_TMUX_BIN="${AGENT_WORKFORCE_TMUX_BIN:-$KOSMOS_HOME/tmux/bin/tmux}"
 
 # The installer sets KOSMOS_SAY_INDENT so this command's narration nests as
 # detail under the installer's own step lines instead of reading as new
@@ -180,6 +190,11 @@ cmd_status() {
     local pid
     pid="$(running_pid)" || pid=""
     if [ -n "$pid" ]; then say "Kosmos is running at $URL"; else say "Kosmos is running at $URL (started outside this command)"; fi
+  elif port_taken_by_stranger; then
+    # The same answer start would give, so two adjacent commands cannot
+    # hand out advice the next one refuses.
+    say "Kosmos is not running, and another app is using port $PORT, so 'kosmos start' will refuse. Quit that app first."
+    exit 1
   else
     say "Kosmos is not running. Start it with: kosmos start"
     exit 1

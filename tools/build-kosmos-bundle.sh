@@ -84,7 +84,6 @@ else
   TARBALL="node-v$NODE_VERSION-darwin-$NARCH.tar.gz"
   BASE="https://nodejs.org/dist/v$NODE_VERSION"
   TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
   echo "==> downloading node v$NODE_VERSION ($NARCH) from nodejs.org"
   curl -fL --progress-bar "$BASE/$TARBALL" -o "$TMP/$TARBALL"
   curl -fsSL "$BASE/SHASUMS256.txt" -o "$TMP/SHASUMS256.txt"
@@ -175,6 +174,9 @@ check_minos "$STAGE/runtime/bin/node"
 # real board on this machine.
 echo "==> smoke test: the staged app boots and serves its page"
 SMOKE_LOG="$(mktemp)"
+# One EXIT trap owns every temp resource (a second `trap ... EXIT` replaces
+# the first, so the download branch's trap is folded in here).
+trap 'rm -rf "${TMP:-}" "${SMOKE_LOG:-}" "${SMOKE_ROOTS:-}"' EXIT
 # ⚠️ Disposable roots: without these the staged server points at the BUILD
 # MACHINE'S live store, launchd directory and tmux fleet. Today's server
 # only reads on GET /, so nothing is mutated -- but that is a property of
@@ -222,10 +224,19 @@ rm -f "$SMOKE_LOG"
 rm -rf "$SMOKE_ROOTS"
 
 # ---- the tarball ------------------------------------------------------------
+# What shipped, recorded, same argument as the tmux bundle and stronger
+# here: this is the half that changes between releases, package.json is a
+# static 0.1.0, and a user report must be traceable to a binary.
+{
+  echo "app:    $(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'require(process.env.KOSMOS_PKG).version' 2>/dev/null || echo '?'))"
+  echo "node:   $("$STAGE/runtime/bin/node" --version)"
+  echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ) on macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
+} > "$STAGE/VERSION"
+
 echo "==> packing"
 TARBALL_OUT="$OUT/kosmos-$ARCH.tar.gz"
 rm -f "$TARBALL_OUT"
-tar -czf "$TARBALL_OUT" -C "$STAGE" bin app runtime
+tar -czf "$TARBALL_OUT" -C "$STAGE" bin app runtime VERSION
 # ⚠️ The .sha256 is what install/setup.sh verifies before extracting; a
 # tarball published without it refuses to install, on purpose.
 ( cd "$OUT" && shasum -a 256 "$(basename "$TARBALL_OUT")" > "$(basename "$TARBALL_OUT").sha256" )
