@@ -44,10 +44,35 @@ set -euo pipefail
 KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
 BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
 # ⚠️ Overridable for the same reason the sources are: the sandboxed test of
-# this installer must not write an app icon into the real ~/Applications of
-# the machine it runs on. Everything this script writes goes under a root the
-# test can point somewhere disposable.
-APP_DIR="${KOSMOS_APP_DIR:-$HOME/Applications}"
+# this installer must not write an app icon into the real Applications
+# folders of the machine it runs on. Everything this script writes goes
+# under a root the test can point somewhere disposable. When the override is
+# set it is used VERBATIM -- no probing, no fallback -- so a sandbox stays a
+# sandbox.
+#
+# ⚠️ WITHOUT the override, the icon goes to /Applications when this user can
+# write there without a password, and only otherwise to ~/Applications.
+# Measured on the first real clean-machine run (2026-08-13): the icon went
+# to ~/Applications, the tester opened Finder's Applications (which shows
+# /Applications), and concluded it "did not put it in my applications". For
+# this installer's audience, an app that is not where people look does not
+# exist. macOS gives admin users group write on /Applications, so the common
+# case needs no password; the probe is an actual mkdir, not `-w`, because
+# ACLs can make `-w` lie in both directions.
+# SYS_APP_DIR is overridable ONLY so the harness can drive the probe AND its
+# fallback against disposable directories -- a fallback that can only run
+# where the primary works is untested by construction, and the probe's
+# failure leg is exactly the one a standard (non-admin) user will live on.
+SYS_APP_DIR="${KOSMOS_SYS_APP_DIR:-/Applications}"
+if [ -n "${KOSMOS_APP_DIR:-}" ]; then
+  APP_DIR="$KOSMOS_APP_DIR"
+else
+  APP_DIR="$HOME/Applications"
+  if /bin/mkdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null; then
+    /bin/rmdir "$SYS_APP_DIR/.kosmos-write-probe.$$" 2>/dev/null || true
+    APP_DIR="$SYS_APP_DIR"
+  fi
+fi
 # The port everything below names. Overridable for the sandboxed installer
 # test; the app icon and the closing sentences bake in whatever was installed.
 PORT="${KOSMOS_PORT:-4317}"
@@ -350,7 +375,24 @@ uninstall() {
     fi
   fi
   # The icon goes too, or uninstall leaves a dead app that opens nothing.
-  [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
+  # BOTH default locations are swept -- installs before 2026-08-13 wrote
+  # ~/Applications, newer ones prefer /Applications -- each bounded by the
+  # fixed leaf name. Under a test override only the override dir is
+  # touched: KOSMOS_APP_DIR set means a sandbox, and a sandboxed uninstall
+  # reaching into the machine's REAL Applications folders would delete a
+  # real install out from under the person running the test.
+  if [ -n "${KOSMOS_APP_DIR:-}" ]; then
+    [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
+  else
+    for _appdir in "$SYS_APP_DIR" "$HOME/Applications"; do
+      if [ -d "$_appdir/Kosmos.app" ]; then
+        info "removing the Kosmos app from $_appdir"
+        # A standard user cannot delete from /Applications; an icon that
+        # survives is NAMED, never silently skipped.
+        rm -rf "$_appdir/Kosmos.app" 2>/dev/null || info "note: could not remove $_appdir/Kosmos.app; drag it to the Trash to finish."
+      fi
+    done
+  fi
   # The shared supervisor is app plumbing (the same argument as the launchd
   # jobs) and goes; the STORE next to it is the user's agent records and
   # stays, and the closing sentence names where.
@@ -668,10 +710,27 @@ LAUNCH
 }
 
 step "Adding Kosmos to your Applications."
-mkdir -p "$APP_DIR" || die "Could not create $APP_DIR. Check that your home folder is writable."
+mkdir -p "$APP_DIR" || die "Could not create $APP_DIR. Check that it is writable."
 if make_app "$APP_DIR/Kosmos.app"; then
-  info "you will find it in Applications, as Kosmos"
+  # The sentence names where the icon ACTUALLY went. "you will find it in
+  # Applications" was printed on the run that put it in ~/Applications, and
+  # the tester could not find it -- a true sentence read as a false one.
+  if [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
+    info "you will find it in Applications, as Kosmos"
+  else
+    info "you will find it in the Applications folder inside your home folder, as Kosmos"
+    info "(or type Kosmos into Spotlight)"
+  fi
   ok
+  # An earlier install may have left the icon in ~/Applications (that was
+  # the only place this script wrote before 2026-08-13). Once the icon
+  # lives in the system folder, the old one is a second, staler Kosmos in
+  # the place nobody looks -- removed, bounded by the fixed leaf name.
+  # Never under the verbatim override: a KOSMOS_APP_DIR sandbox must not
+  # reach into the home folder at all.
+  if [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ] && [ -d "$HOME/Applications/Kosmos.app" ]; then
+    rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || true
+  fi
 else
   info "could not create the app icon, but Kosmos itself is fine"
 fi
@@ -685,6 +744,21 @@ printf '\n  Kosmos is running.\n'
 printf '  Open it and it will walk you through connecting your AI account.\n'
 printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
+
+# ⚠️ A FRESH INSTALL ENDS LOOKING AT KOSMOS, NOT AT A PROMPT. Measured on the
+# first real clean-machine run (2026-08-13): every step succeeded and the
+# tester's report opened with "It did not open the window or the app" --
+# for this installer's audience, a URL printed in a transcript is not a
+# running product. Fresh installs only: yanking the browser on an update
+# would punish exactly the people who already know where the board is.
+# Best-effort by design (`|| true`): over ssh or headless, `open` fails and
+# the URL two lines up is still the whole answer. Gated so that ANY sandbox
+# override, or the explicit KOSMOS_NO_OPEN, suppresses it -- the installer
+# harness runs real installs on shared dev machines, and a test that steals
+# the operator's browser is a test nobody runs twice.
+if [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}${KOSMOS_NO_OPEN:-}" ] && [ -x /usr/bin/open ]; then
+  /usr/bin/open "http://127.0.0.1:$PORT/" >/dev/null 2>&1 || true
+fi
 
 
 }

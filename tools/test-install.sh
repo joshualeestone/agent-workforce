@@ -34,7 +34,7 @@ if [ ! -d "$TMUX_SRC" ] || [ ! -d "$KOS_SRC" ]; then
 fi
 
 SB="$(mktemp -d)"
-trap 'if [ -f "$SB/home/board.pid" ]; then kill "$(cat "$SB/home/board.pid")" 2>/dev/null || true; fi; rm -rf "$SB"' EXIT
+trap 'for _h in home home2 home3; do if [ -f "$SB/$_h/board.pid" ]; then kill "$(cat "$SB/$_h/board.pid")" 2>/dev/null || true; fi; done; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
 # A free port, probed rather than assumed: several agents and a real board
@@ -108,6 +108,49 @@ RC=0; cat "$SETUP" | sh > "$SB/tamper.log" 2>&1 || RC=$?
 chk "tampered download refuses" "[ $RC -ne 0 ]"
 chk "tamper refusal speaks a sentence" "grep -q 'did not arrive intact' \"$SB/tamper.log\""
 chk "no stage residue after refusal" "[ -z \"\$(ls -d \"$SB/home\"/.kosmos.stage.* 2>/dev/null)\" ]"
+
+echo "== the Applications probe (system folder when writable, home when not) =="
+# ⚠️ These passes leave KOSMOS_APP_DIR EMPTY on purpose -- they exercise the
+# very branches that override bypasses -- so every OTHER root the probe code
+# can touch is pointed into the sandbox instead: KOSMOS_SYS_APP_DIR replaces
+# /Applications and HOME replaces the real home. A fallback that only ever
+# runs where the primary works is untested by construction; the probe's
+# failure leg is the one a standard (non-admin) user lives on.
+export KOSMOS_TMUX_SRC="$TMUX_SRC" KOSMOS_SRC="$KOS_SRC"
+unset KOSMOS_RELEASE_BASE
+SBH="$SB/probe-home"
+SYS_OK="$SB/sysapps"
+mkdir -p "$SBH" "$SYS_OK"
+# A stale icon from a pre-2026-08-13 install: the system-folder install must
+# clean it up, or the machine keeps two Kosmos icons, one of them dead-stale.
+mkdir -p "$SBH/Applications/Kosmos.app"
+export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
+RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh > "$SB/probe1.log" 2>&1 || RC=$?
+chk "probe install exits 0" "[ $RC -eq 0 ]"
+chk "app landed in the system folder" "[ -x \"$SYS_OK/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "transcript names Applications" "grep -q 'you will find it in Applications, as Kosmos' \"$SB/probe1.log\""
+chk "stale home-folder icon cleaned up" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
+chk "no probe residue in the system folder" "[ -z \"\$(ls -A \"$SYS_OK\" | grep -v '^Kosmos.app\$')\" ]"
+"$SB/bin2/kosmos" stop > /dev/null 2>&1 || true
+
+SYS_RO="$SB/sysro"
+mkdir -p "$SYS_RO"
+chmod 555 "$SYS_RO"
+export KOSMOS_HOME="$SB/home3" KOSMOS_BIN_DIR="$SB/bin3"
+RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_RO" sh > "$SB/probe2.log" 2>&1 || RC=$?
+chk "fallback install exits 0" "[ $RC -eq 0 ]"
+chk "app fell back to the home folder" "[ -x \"$SBH/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "transcript names the home folder" "grep -q 'Applications folder inside your home folder' \"$SB/probe2.log\""
+chk "no probe residue in the read-only folder" "[ -z \"\$(ls -A \"$SYS_RO\")\" ]"
+chmod 755 "$SYS_RO"
+
+# The uninstall sweep must clear BOTH default locations (older installs wrote
+# the home folder, newer prefer the system one) -- seed the system folder
+# with the pass-1 app still there and the home folder with pass-2's.
+RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un.log" 2>&1 || RC=$?
+chk "sweep uninstall exits 0" "[ $RC -eq 0 ]"
+chk "system-folder icon swept" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
+chk "home-folder icon swept" "[ ! -d \"$SBH/Applications/Kosmos.app\" ]"
 
 echo
 echo "$PASS passed, $FAIL failed"
