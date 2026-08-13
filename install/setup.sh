@@ -78,10 +78,15 @@ KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
 # substitution at CLICK time. Same posture as the KOSMOS_HOME=$HOME
 # guard on the uninstall path: the catastrophic misuses of an override
 # are refused in a sentence, not survived.
+# The closing brace is refused for a THIRD mechanism: the launcher bakes
+# the value inside ${KOSMOS_HOME:-<value>}, so a } in the value closes the
+# expansion early and the launcher runs fine while resolving the WRONG
+# home -- an icon that alerts "could not start" forever, reproduced in
+# review with /tmp/ku}rt resolving to /tmp/kurt}.
 case "$KOSMOS_HOME" in
   *"
-"*|*'"'*|*'$'*|*'`'*|*'\'*)
-    printf '\n  KOSMOS_HOME contains a character (newline, quote, dollar, backtick or backslash) that would defeat the safety checks below. Unset it and run again.\n\n' >&2
+"*|*'"'*|*'$'*|*'`'*|*'\'*|*'}'*)
+    printf '\n  KOSMOS_HOME contains a character (newline, quote, dollar, backtick, backslash or }) that would defeat the safety checks below. Unset it (or fix the home folder it defaults from) and run again.\n\n' >&2
     exit 2
     ;;
 esac
@@ -122,6 +127,7 @@ APP_OTHER_OWNER=no
 APP_SKIP_ICON=no
 APP_SKIP_REASON=""
 APP_SYS_STALE=no
+APP_SYS_FAILED=no
 APP_HOME_FOREIGN=no
 resolve_app_dir() {
   # The verbatim override is a sandbox: no probing, no fallback.
@@ -150,8 +156,13 @@ resolve_app_dir() {
   # mode-700 home) fails -e alone, and the probe would then claim the slot
   # and rm -rf the link -- install failing destructive on exactly the
   # multi-account shape the uninstall below refuses. Measured in review.
+  # A LINK ENTRY IS NEVER OURS: this installer never creates links, and
+  # grep would follow one onto whatever it points at, claiming a user's
+  # link to our own bundle and silently deleting it. Linkness decides
+  # first; only a real directory earns the content check.
   if { [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; } \
-     && ! grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+     && { [ -L "$SYS_APP_DIR/Kosmos.app" ] \
+          || ! grep -qF ":-$KOSMOS_HOME}\"" "$SYS_APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
     APP_OTHER_OWNER=yes
     # ⚠️ THE DIVERT ITSELF NEEDS THE ALIASING GUARD. "Send the icon to the
     # per-user folder instead" is only an escape if the per-user folder is
@@ -497,7 +508,12 @@ uninstall() {
     # it at a real folder (KOSMOS_HOME=$HOME) on the uninstall path: every
     # other destructive path here is bounded by a fixed leaf name, and this
     # one must be bounded by evidence.
-    if [ -x "$KOSMOS_HOME/bin/kosmos" ] || [ -f "$KOSMOS_HOME/VERSION" ]; then
+    # A bare VERSION file proves nothing about this installer (common
+    # enough that KOSMOS_HOME=$HOME plus a ~/VERSION would have deleted
+    # the home folder); the VERSION leg exists for PARTIAL installs, and
+    # a partial install always has one of our trees beside it.
+    if [ -x "$KOSMOS_HOME/bin/kosmos" ] \
+       || { [ -f "$KOSMOS_HOME/VERSION" ] && { [ -d "$KOSMOS_HOME/app" ] || [ -d "$KOSMOS_HOME/tmux" ]; }; }; then
       info "deleting $KOSMOS_HOME"
       rm -rf "$KOSMOS_HOME"
     else
@@ -932,8 +948,15 @@ make_app() {
   # On a machine that has run this before, this is also what makes a REPLACED
   # bundle pick up a new icon instead of the cached old one. Failure here is not
   # fatal, the app still works, so it never aborts the install.
-  local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-  [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
+  # ⚠️ NEVER FROM A SANDBOX: lsregister writes the operator's REAL
+  # machine-global LaunchServices database, under the production bundle
+  # id. Measured after harness runs: dozens of dead mktemp paths
+  # registered against com.chaoskosmos.kosmos. Any override set means a
+  # harness, and a harness must leave that database alone.
+  if [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ]; then
+    local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
+  fi
   return 0
 }
 
@@ -1039,7 +1062,8 @@ elif ! mkdir -p "$APP_DIR" 2>/dev/null; then
   :
 elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" != "$SYS_APP_DIR" ] \
      && { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
-     && ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+     && { [ -L "$APP_DIR/Kosmos.app" ] \
+          || ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
   # ⚠️ THE HOME FOLDER GETS THE SAME OWNERSHIP GATE AS EVERY OTHER
   # destructive site. This was the one path left that replaced an
   # occupant without proof -- while the uninstall sweep and the stale
@@ -1075,7 +1099,8 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
     # The same home-folder ownership gate as the direct path above: the
     # retry must not replace an occupant it cannot prove is ours either.
     if { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
-       && ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; then
+       && { [ -L "$APP_DIR/Kosmos.app" ] \
+            || ! grep -qF ":-$KOSMOS_HOME}\"" "$APP_DIR/Kosmos.app/Contents/MacOS/Kosmos" 2>/dev/null; }; then
       APP_HOME_FOREIGN=yes
     elif mkdir -p "$APP_DIR" 2>/dev/null && make_app "$APP_DIR/Kosmos.app"; then
       APP_MADE=yes
@@ -1088,6 +1113,12 @@ elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" = "$SYS_APP_DIR" ]; then
       # account for a cause never observed.
       if [ -e "$SYS_APP_DIR/Kosmos.app" ] || [ -L "$SYS_APP_DIR/Kosmos.app" ]; then
         APP_SYS_STALE=swap
+      else
+        # No survivor means the write itself was refused (a TCC denial is
+        # the likely real-world shape); the transcript must still explain
+        # why Applications was skipped after the warm-up sentence set the
+        # expectation.
+        APP_SYS_FAILED=yes
       fi
     fi
   fi
@@ -1137,8 +1168,10 @@ if [ "$APP_MADE" = "yes" ]; then
             # the failure leg present-but-unregistered: a bundle the note
             # tells the user to go find that Spotlight says does not
             # exist. Best-effort for the same reason registration is.
-            _lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-            [ -x "$_lsreg" ] && "$_lsreg" -u "$HOME/Applications/Kosmos.app" >/dev/null 2>&1 || true
+            if [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ]; then
+              _lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+              [ -x "$_lsreg" ] && "$_lsreg" -u "$HOME/Applications/Kosmos.app" >/dev/null 2>&1 || true
+            fi
             info "note: the Kosmos icon moved here from the Applications folder inside your home folder."
             info "If Kosmos was in your Dock, remove it and drag the new one in."
           else
@@ -1175,8 +1208,15 @@ if [ "$APP_MADE" = "yes" ]; then
         info "note: the older Kosmos icon in Applications could not be updated from this account;"
         info "use the new one (the old one may be out of date)"
       elif [ "$APP_SYS_STALE" = "swap" ]; then
-        info "note: the older Kosmos icon in Applications could not be replaced (something is holding it);"
-        info "use the new one (the old one may be out of date)"
+        # "could not be replaced" and nothing more: this leg fires on ANY
+        # make_app failure in a writable system folder (an immutable
+        # bundle, a TCC denial, a failed stage), and the transcript must
+        # not name a cause it never observed.
+        info "note: the older Kosmos icon in Applications could not be replaced; use the"
+        info "new one (the old one may be out of date)"
+      elif [ "$APP_SYS_FAILED" = "yes" ]; then
+        info "note: macOS did not let this install put the icon into Applications this time;"
+        info "the one in your home folder works the same"
       fi
     fi
   fi

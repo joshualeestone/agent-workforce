@@ -18,6 +18,10 @@
 # every root is under mktemp, and nothing touches launchd or tmux state
 # outside the sandbox (the launchd dir is overridden; the tmux ownership
 # predicate keeps session kills away from anything not marked ours).
+# LaunchServices too: setup.sh skips lsregister whenever a sandbox
+# override is set, so sandbox bundles never enter the operator's real
+# machine-global database (dozens of dead mktemp paths had registered
+# under the production bundle id before that gate existed).
 
 set -euo pipefail
 
@@ -361,7 +365,7 @@ else
   chk "retry landed the icon in the home folder" "[ -x \"$SBH5/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "retry sentence names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/wedge.log\""
   chk "the unmovable bundle was never gutted" "[ -f \"$SYS_WEDGE/Kosmos.app/Contents/MacOS/Kosmos\" ]"
-  chk "the surviving system icon is named" "grep -q 'could not be replaced (something is holding it)' \"$SB/wedge.log\""
+  chk "the surviving system icon is named" "grep -q 'could not be replaced; use the' \"$SB/wedge.log\""
   chk "no stage or aside residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
   chflags nouchg "$SYS_WEDGE/Kosmos.app"
   "$SB/bin7/kosmos" stop > /dev/null 2>&1 || true
@@ -496,7 +500,7 @@ else
   "$SB/bin13/kosmos" stop > /dev/null 2>&1 || true
 fi
 
-echo "== a link entry at the SYSTEM path is never claimed =="
+echo "== a link entry at the SYSTEM path is never claimed (dangling or resolvable) =="
 # The install-side mirror of the uninstall's -L discipline: a symlink
 # whose target cannot be stat'd (dangling here; another user's mode-700
 # home in the field) fails -e, and an -e-only occupancy gate would let
@@ -514,6 +518,24 @@ chk "the link entry survives untouched" "[ -L \"$SYS_LNK/Kosmos.app\" ] && [ \"\
 chk "the install diverted to the home folder" "[ -x \"$SBH18/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "the divert names the occupied spot" "grep -q 'something else already has the Kosmos spot' \"$SB/syslnk.log\""
 "$SB/bin20/kosmos" stop > /dev/null 2>&1 || true
+# The RESOLVABLE case: a user's link pointing at a bundle whose launcher
+# would pass the ownership grep. Deciding by content would claim and
+# replace the link; deciding by linkness must divert and leave both the
+# link and its target byte-identical.
+SYS_LNK2="$SB/syslnk2"
+REALB="$SB/realbundle"
+mkdir -p "$SYS_LNK2"
+seed_kosmos_bundle "$REALB" "$SB/home23"
+ln -s "$REALB/Kosmos.app" "$SYS_LNK2/Kosmos.app"
+SBH21="$SB/lnk2-home"
+mkdir -p "$SBH21"
+export KOSMOS_HOME="$SB/home23" KOSMOS_BIN_DIR="$SB/bin23"
+RC=0; cat "$SETUP" | HOME="$SBH21" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_LNK2" sh > "$SB/syslnk2.log" 2>&1 || RC=$?
+chk "resolvable-link install exits 0" "[ $RC -eq 0 ]"
+chk "the resolvable link survives untouched" "[ -L \"$SYS_LNK2/Kosmos.app\" ] && [ \"\$(readlink \"$SYS_LNK2/Kosmos.app\")\" = \"$REALB/Kosmos.app\" ]"
+chk "the link's target survives untouched" "[ -f \"$REALB/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+chk "the resolvable-link install diverted home" "[ -x \"$SBH21/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+"$SB/bin23/kosmos" stop > /dev/null 2>&1 || true
 
 echo "== a link entry is decided by its target, and each skip sentence is its own =="
 # The unknown-skip leg: a dangling home Applications symlink plus a foreign
@@ -594,6 +616,30 @@ else
   chmod 755 "$SYS_RO6"
   "$SB/bin22/kosmos" stop > /dev/null 2>&1 || true
 fi
+
+echo "== the KOSMOS_HOME delete gate demands Kosmos-specific evidence =="
+# A bare VERSION file is not proof: KOSMOS_HOME pointed at a folder
+# holding one (the shape of KOSMOS_HOME=$HOME with a stray ~/VERSION)
+# must be refused in a sentence, with the folder left intact.
+NOTKOS="$SB/not-kosmos"
+mkdir -p "$NOTKOS"
+printf '1.0\n' > "$NOTKOS/VERSION"
+printf 'precious\n' > "$NOTKOS/user-data.txt"
+RC=0; KOSMOS_HOME="$NOTKOS" KOSMOS_BIN_DIR="$SB/bin-nk" sh -s -- --uninstall < "$SETUP" > "$SB/notkos.log" 2>&1 || RC=$?
+chk "not-a-Kosmos-install uninstall exits 0" "[ $RC -eq 0 ]"
+chk "the folder is refused in a sentence" "grep -q 'does not look like a Kosmos install' \"$SB/notkos.log\""
+chk "the folder survives with its contents" "grep -q 'precious' \"$NOTKOS/user-data.txt\""
+
+echo "== the KOSMOS_HOME character guard refuses in a sentence =="
+# Brand-new safety code protecting every grep -F ownership gate from
+# failing open; each refused class must exit 2 with the sentence and
+# without installing anything.
+RC=0; KOSMOS_HOME="$SB/evil\"quote" sh < "$SETUP" > "$SB/guard1.log" 2>&1 || RC=$?
+chk "a quote in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard1.log\""
+RC=0; KOSMOS_HOME="$SB/evil}brace" sh < "$SETUP" > "$SB/guard2.log" 2>&1 || RC=$?
+chk "a closing brace in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard2.log\""
+RC=0; KOSMOS_HOME="$(printf '%s\n%s' "$SB/evil" "line")" sh < "$SETUP" > "$SB/guard3.log" 2>&1 || RC=$?
+chk "a newline in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard3.log\""
 
 echo "== the open gate's sandbox belt, and a file-shadowed Applications =="
 # The [ -z KOSMOS_APP_DIR ] clause in the open gate: a fresh sandboxed
