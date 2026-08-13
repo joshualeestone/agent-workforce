@@ -770,9 +770,18 @@ async function launchSignin(owner) {
     console.warn('connect: AGENT_WORKFORCE_CLAUDE_CONFIG is set without AGENT_WORKFORCE_CLAUDE_CONFIG_DIR; '
       + 'the sign-in will write a config the checker is not reading');
   }
-  const cmd = [];
+  /**
+   * ⚠️ ALWAYS MULTI-ARG: tmux runs a SINGLE argument through a shell but
+   * executes MULTIPLE arguments as argv (both halves measured on 3.6a) --
+   * and without the unconditional `env` prefix, production (no sandbox env)
+   * was the single-arg shell form while only the multi-arg argv form had
+   * ever been live-verified. `env` with no assignments is a plain exec of
+   * what follows, so every launch now takes the one measured form, and a
+   * claude path containing a space survives on both.
+   */
+  const cmd = ['env'];
   if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR) {
-    cmd.push('env', `CLAUDE_CONFIG_DIR=${process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR}`);
+    cmd.push(`CLAUDE_CONFIG_DIR=${process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR}`);
   }
   cmd.push(claudeBinPath());
 

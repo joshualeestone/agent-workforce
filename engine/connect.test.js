@@ -826,6 +826,40 @@ driverTest('a partial redraw cannot walk the phase backwards from the paste prom
   await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
 });
 
+driverTest('a persistently failing capture earns "window closed"; a blip does not', async () => {
+  /**
+   * ⚠️ `!cap.ok` also covers a spawn failure on a loaded machine and the
+   * exec timeout -- declaring "the sign-in window closed" off ONE transient
+   * error was a settled sentence about a state nobody verified. A session
+   * that is truly gone keeps failing; the short run of failures earns the
+   * sentence honestly. Both halves pinned here.
+   */
+  const term = fakeTerminal();
+  let failCaptures = false;
+  const base = term.runner.bind(term);
+  connect.setRunner((file, args) => {
+    if (args[0] === 'capture-pane' && failCaptures) {
+      return { ok: false, stdout: '', stderr: "can't find pane: =kosmos-connect:" };
+    }
+    return base(file, args);
+  });
+  connect.setDryRun(false);
+
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // One blip's worth of failures must NOT close the flow.
+  failCaptures = true;
+  await new Promise((r) => setTimeout(r, 120));
+  assert.notEqual(connect.state().phase, connect.PHASE.STUCK,
+    'a transient capture failure was declared a closed window');
+
+  // Persistent failure earns the sentence (threshold ~3s wall-clock).
+  await until(() => connect.state().phase === connect.PHASE.STUCK, 15000);
+  assert.match(connect.state().because, /window closed/,
+    'persistent capture failure went stuck for the wrong reason: ' + connect.state().because);
+});
+
 driverTest('a code is refused while nothing is asking for one', async () => {
   const refusedCold = connect.submitCode('abCD1234#efGH5678');
   assert.equal(refusedCold.ok, false);

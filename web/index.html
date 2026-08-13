@@ -4567,7 +4567,19 @@ function frConnWatch() {
       return;
     }
     frPaintConnect(st);
-    if (!frConnActive(st.phase)) frConnStopWatch();
+    if (!frConnActive(st.phase)) {
+      frConnStopWatch();
+      /**
+       * ⚠️ A phase the painter has no panel for (the defensive `unsure`,
+       * or anything a future engine adds) must not strand the LAST panel
+       * on screen with nothing checking it -- stuck and interrupted paint
+       * their own panels; everything else hands back to the real verdict.
+       */
+      if (st.phase !== 'stuck' && st.phase !== 'interrupted') {
+        FR_CONN_LAST = null;
+        frConnSettle();
+      }
+    }
   }, 1000);
 }
 
