@@ -25,24 +25,15 @@
 #      `@executable_path`, which is what this script does. No compiler, no
 #      autotools, no build dependencies. The result is ~1.8MB.
 #
-# ⚠️ THE TWO STRINGS THAT SURVIVE, and why only one of them matters.
-# After rewriting, `strings` still finds two /opt/homebrew paths. Neither is a
-# link path (`otool -L` is clean), so neither affects loading:
-#
-#   tmux     /opt/homebrew/etc/tmux.conf:~/.tmux.conf:...
-#            The config search path. That file will not exist on a clean Mac and
-#            tmux falls through to the user's own paths. Harmless.
-#
-#   ncurses  /opt/homebrew/Cellar/ncurses/<v>/share/terminfo
-#            ⚠️ THIS ONE COULD BITE. It is the compiled-in terminfo directory,
-#            and it will not exist on a clean Mac. macOS does ship
-#            /usr/share/terminfo (verified: xterm-256color is present), and
-#            ncurses is expected to fall back to it, BUT that fallback is an
-#            assumption rather than something measured here.
-#
-#            So we do not rely on it: the installer pins TERMINFO_DIRS to the
-#            system location. That converts an unknown into a known, which is
-#            cheaper than testing the unknown on every macOS version.
+# ⚠️ COMPILED-IN PATHS DEPEND ON THE SOURCE TMUX, and this script accepts
+# two kinds. A RELEASE build takes tools/build-tmux-from-source.sh's
+# floor-targeted prefix, whose artifacts carry no build-machine paths at
+# all (measured with strings: config path is /etc/tmux.conf:..., terminfo
+# is /usr/share/terminfo baked in). A HOMEBREW-sourced TEST build carries
+# two /opt/homebrew strings -- the tmux config search path (harmless; the
+# file will not exist on a clean Mac) and ncurses' compiled-in Cellar
+# terminfo directory (would bite, which is why the installer pins
+# TERMINFO_DIRS to the system location regardless of which build shipped).
 #
 # Usage:  tools/build-tmux-bundle.sh [output-dir]        (default: dist)
 # Output: <out>/tmux-bundle/{bin,lib,VERSION,THIRD-PARTY-NOTICES.txt} and
@@ -212,11 +203,28 @@ floor_gate "$OUT/bin/tmux" "$OUT"/lib/*.dylib
   echo "tmux:   $("$OUT/bin/tmux" -V 2>/dev/null || echo unknown)"
   echo "source: $SRC_TMUX"
   echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ) on macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
+  # The dependency versions a CVE response needs, when the source build
+  # recorded them (BUILD-INFO lives beside the prefix's bin/).
+  _srcroot="$(cd "$(dirname "$SRC_TMUX")/.." && pwd)"
+  [ -f "$_srcroot/BUILD-INFO" ] && cat "$_srcroot/BUILD-INFO"
+  # A test build must say so IN THE ARTIFACT: the console warning dies with
+  # the console, while the tarball is shaped exactly like a release.
+  [ -n "${KOSMOS_ALLOW_MINOS:-}" ] && echo "build:  TEST BUILD (KOSMOS_ALLOW_MINOS floor override in effect)"
 } > "$OUT/VERSION"
 
 # ---- third-party notices -------------------------------------------------------
 # The tarball redistributes tmux, ncurses, libevent and utf8proc binaries;
 # all four licences require their notices to travel with the binaries.
+# ⚠️ Harvested upstream licence texts (from the exact pinned sources, via
+# build-tmux-from-source.sh) ride along verbatim when present -- the
+# hand-typed notices file is the summary, the harvested files are the
+# authoritative texts (the typed file had missed libevent's arc4random ISC
+# block and utf8proc's Unicode data licence).
+_srcroot="$(cd "$(dirname "$SRC_TMUX")/.." && pwd)"
+if [ -d "$_srcroot/share/kosmos-licenses" ]; then
+  mkdir -p "$OUT/licenses"
+  cp "$_srcroot/share/kosmos-licenses/"* "$OUT/licenses/"
+fi
 NOTICES="$(dirname "${BASH_SOURCE[0]}")/third-party-notices.txt"
 if [ ! -f "$NOTICES" ]; then
   echo "FAIL: $NOTICES is missing; the bundle may not ship binaries without their licence notices." >&2
@@ -243,6 +251,8 @@ cp "$NOTICES" "$OUT/THIRD-PARTY-NOTICES.txt"
 # this file next to it bricks the install on purpose.
 ARCH="$(uname -m)"
 TARBALL="$OUTDIR/tmux-$ARCH.tar.gz"
-tar -czf "$TARBALL" -C "$OUT" bin lib VERSION THIRD-PARTY-NOTICES.txt
+_extra=""
+[ -d "$OUT/licenses" ] && _extra="licenses"
+tar -czf "$TARBALL" -C "$OUT" bin lib VERSION THIRD-PARTY-NOTICES.txt $_extra
 ( cd "$(dirname "$TARBALL")" && shasum -a 256 "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256" )
 echo "==> packed: $(du -sh "$TARBALL" | cut -f1) at $TARBALL (+ .sha256)"

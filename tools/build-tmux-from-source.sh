@@ -19,7 +19,12 @@
 # against the SHA-256 recorded below before anything is compiled. To bump
 # a version: change the version, run with KOSMOS_TRUST_FIRST_FETCH=1 once
 # (it prints the measured hash and refuses to finish), record the printed
-# hash here, run clean. A release build never runs on trust.
+# hash here, run clean. A release build never runs on an unrecorded hash.
+# ⚠️ HONEST LIMIT: the recorded hashes are trust-on-first-use, measured by
+# this script from an https fetch (downgrade-proof via --proto), not
+# cross-checked against upstream signatures. Cross-checking against the
+# projects' published signatures/hashes is the upgrade, on the release
+# security list beside artifact signing.
 #
 # Output: a self-contained prefix at <out>/tmux-floor-prefix whose
 # bin/tmux links the three freshly built dylibs. Feed it to the bundler:
@@ -71,7 +76,7 @@ fetch() {
   local name="$1" url="$2" want="$3" got
   local file="$WORK/$name.tar.gz"
   echo "==> fetching $name from $url"
-  curl -fL --progress-bar "$url" -o "$file"
+  curl -fL --proto '=https' --proto-redir '=https' --progress-bar "$url" -o "$file"
   got="$(shasum -a 256 "$file" | awk '{print $1}')"
   if [ -z "$want" ]; then
     if [ -n "${KOSMOS_TRUST_FIRST_FETCH:-}" ]; then
@@ -98,6 +103,10 @@ fetch utf8proc "$UTF8PROC_URL" "$UTF8PROC_SHA"
 
 if [ -n "${KOSMOS_TRUST_FIRST_FETCH:-}" ]; then
   echo ""
+  if [ -z "$TRUST_LINES" ]; then
+    echo "All hashes are already recorded; nothing to measure. Run without the flag."
+    exit 1
+  fi
   echo "Measured hashes -- record these in $(basename "$0") and re-run clean:"
   echo "$TRUST_LINES"
   echo ""
@@ -123,8 +132,8 @@ echo "==> libevent $LIBEVENT_VERSION (core only)"
 unpack libevent
 ( cd "$WORK/libevent-$LIBEVENT_VERSION" \
   && ./configure --prefix="$PREFIX" --disable-openssl --disable-static --quiet \
-  && make include/event2/event-config.h --quiet \
-  && make libevent_core.la --quiet \
+  && make include/event2/event-config.h \
+  && make libevent_core.la \
   && mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" \
   && cp -RP .libs/libevent_core*.dylib "$PREFIX/lib/" \
   && cp -R include/. "$PREFIX/include/" \
@@ -137,9 +146,10 @@ echo "==> ncurses $NCURSES_VERSION (wide, shared, system terminfo)"
 # installer pins TERMINFO_DIRS against; building with the macOS path baked
 # in removes the assumption instead of papering it (the pin stays as belt
 # and braces). And only libs+headers are installed: `make install` also
-# writes a terminfo DATABASE, which dies on APFS's case-insensitive
-# directories (terminfo's 6d/ vs 4d/ entries collide -- measured), and we
-# must not ship a database we tell the loader never to read.
+# writes a terminfo DATABASE, whose install died on this filesystem (tic
+# failed writing an entry -- measured; the exact collision mechanism was
+# not established and does not matter here), and we must not ship a
+# database we tell the loader never to read.
 unpack ncurses
 ( cd "$WORK/ncurses-$NCURSES_VERSION" \
   && ./configure --prefix="$PREFIX" --with-shared --without-normal --without-debug \
@@ -148,8 +158,8 @@ unpack ncurses
        --with-default-terminfo-dir=/usr/share/terminfo \
        --with-terminfo-dirs=/usr/share/terminfo \
        --enable-pc-files --with-pkg-config-libdir="$PREFIX/lib/pkgconfig" \
-  && make -j"$NCPU" --quiet \
-  && make install.libs install.includes --quiet ) > "$WORK/ncurses.log" 2>&1 \
+  && make -j"$NCPU" \
+  && make install.libs install.includes ) > "$WORK/ncurses.log" 2>&1 \
   || { echo "FAIL: ncurses build. Log tail:"; tail -20 "$WORK/ncurses.log"; exit 1; }
 
 echo "==> utf8proc $UTF8PROC_VERSION"
@@ -174,8 +184,8 @@ unpack tmux
      LIBNCURSES_CFLAGS="-I$PREFIX/include/ncursesw" \
      LIBNCURSES_LIBS="-L$PREFIX/lib -lncursesw" \
      ./configure --prefix="$PREFIX" --enable-utf8proc --quiet \
-  && make -j"$NCPU" --quiet \
-  && make install --quiet ) > "$WORK/tmux.log" 2>&1 \
+  && make -j"$NCPU" \
+  && make install ) > "$WORK/tmux.log" 2>&1 \
   || { echo "FAIL: tmux build. Log tail:"; tail -30 "$WORK/tmux.log"; exit 1; }
 
 # ⚠️ VERIFY WHAT WAS JUST BUILT: it runs, and every artifact carries the
@@ -183,12 +193,38 @@ unpack tmux
 # the deployment target fails HERE, not on a customer's Mac.
 "$PREFIX/bin/tmux" -V >/dev/null || { echo "FAIL: built tmux does not run" >&2; exit 1; }
 echo "    $("$PREFIX/bin/tmux" -V) built"
-# Compile-against and link-against must be the same ncurses.
-if ! otool -L "$PREFIX/bin/tmux" | grep -q "$PREFIX/lib/libncursesw"; then
-  echo "FAIL: tmux linked a different ncurses than it was compiled against:" >&2
-  otool -L "$PREFIX/bin/tmux" | grep -i curses >&2
+# ⚠️ Compile-against and link-against must be the same library, for ALL
+# THREE dependencies, not only the one that already bit us: the build
+# machine has Homebrew copies of each, and a silent wrong-library link
+# passed tmux -V once already (the ncurses incident recorded above).
+for lib in libncursesw libevent_core libutf8proc; do
+  if ! otool -L "$PREFIX/bin/tmux" | grep -qF "$PREFIX/lib/$lib"; then
+    echo "FAIL: tmux did not link the $lib it was compiled against:" >&2
+    otool -L "$PREFIX/bin/tmux" >&2
+    exit 1
+  fi
+done
+# ⚠️ A REAL SESSION, NOT ONLY -V. tmux -V passed the ABI-mismatched build;
+# new-session is what actually drives ncurses and resolves terminfo, which
+# is precisely what this script changes. An ISOLATED socket, never the
+# user's server. (Baking /usr/share/terminfo removes the fallback
+# assumption; whether the needed ENTRIES exist there on a floor-age macOS
+# is what the clean-machine test still owes us -- there is no second
+# directory to fall back to now, on purpose.)
+_sock="$WORK/smoke-sock"
+if "$PREFIX/bin/tmux" -S "$_sock" new-session -d -s floorsmoke 2>"$WORK/tmux-smoke.err"    && "$PREFIX/bin/tmux" -S "$_sock" list-panes -a >/dev/null 2>&1; then
+  "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
+  echo "    a real session starts, lists, and dies cleanly"
+else
+  "$PREFIX/bin/tmux" -S "$_sock" kill-server 2>/dev/null || true
+  echo "FAIL: the built tmux cannot run a real session:" >&2
+  cat "$WORK/tmux-smoke.err" >&2
   exit 1
 fi
+# ⚠️ COUNTED, so the sweep cannot pass by finding nothing: a glob over a
+# library that was never installed would otherwise skip it silently and
+# still print ok -- the green-on-blind shape this repo bans.
+_checked=0
 for f in "$PREFIX/bin/tmux" "$PREFIX"/lib/libevent_core*.dylib "$PREFIX"/lib/libncursesw*.dylib "$PREFIX"/lib/libutf8proc*.dylib; do
   [ -f "$f" ] || continue
   case "$f" in *.dylib) file -b "$f" | grep -q dynamically || continue ;; esac
@@ -196,7 +232,37 @@ for f in "$PREFIX/bin/tmux" "$PREFIX"/lib/libevent_core*.dylib "$PREFIX"/lib/lib
   [ -n "$minos" ] || minos="$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{v=1} v && /version/{print $2; exit}')"
   echo "    $(basename "$f"): minos $minos"
   [ "$minos" = "$FLOOR" ] || { echo "FAIL: $(basename "$f") stamped $minos, wanted $FLOOR" >&2; exit 1; }
+  _checked=$((_checked + 1))
 done
+# tmux + at least one dylib each of the three libraries (versioned +
+# unversioned symlink copies both match, so >= 4 real files).
+[ "$_checked" -ge 4 ] || { echo "FAIL: only $_checked artifacts found to check; a library is missing from the prefix." >&2; exit 1; }
+
+# ⚠️ LICENCES HARVESTED FROM THE PINNED SOURCES THEMSELVES, so the shipped
+# notices are the upstream text of the exact versions built, not a
+# hand-typed approximation (the hand-typed file missed libevent's
+# arc4random ISC block and utf8proc's Unicode data licence). The bundler
+# ships these verbatim when present. BUILD-INFO records the four versions
+# a CVE response needs to map a bundle to affected code.
+mkdir -p "$PREFIX/share/kosmos-licenses"
+cp "$WORK/libevent-$LIBEVENT_VERSION/LICENSE" "$PREFIX/share/kosmos-licenses/libevent-$LIBEVENT_VERSION.txt"
+cp "$WORK/ncurses-$NCURSES_VERSION/COPYING" "$PREFIX/share/kosmos-licenses/ncurses-$NCURSES_VERSION.txt"
+cp "$WORK/utf8proc-$UTF8PROC_VERSION/LICENSE.md" "$PREFIX/share/kosmos-licenses/utf8proc-$UTF8PROC_VERSION.txt"
+if [ -f "$WORK/tmux-$TMUX_VERSION/COPYING" ]; then
+  cp "$WORK/tmux-$TMUX_VERSION/COPYING" "$PREFIX/share/kosmos-licenses/tmux-$TMUX_VERSION.txt"
+else
+  # tmux carries per-file ISC headers rather than a top-level licence file
+  # in some releases; the hand-typed ISC notice in third-party-notices.txt
+  # remains the fallback the bundler uses.
+  echo "    (tmux tarball has no COPYING; bundler falls back to the typed ISC notice)"
+fi
+{
+  echo "tmux:     $TMUX_VERSION"
+  echo "libevent: $LIBEVENT_VERSION (core only)"
+  echo "ncurses:  $NCURSES_VERSION"
+  echo "utf8proc: $UTF8PROC_VERSION"
+  echo "floor:    $FLOOR"
+} > "$PREFIX/BUILD-INFO"
 
 echo "==> ok: floor-targeted prefix at $PREFIX"
 echo "    next: TMUX_SOURCE=$PREFIX/bin/tmux tools/build-tmux-bundle.sh $OUT"

@@ -19,13 +19,15 @@ Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 and the AgentWorkforce store (profiles, avatars, commitments): user work
 and records about it stay; the app and its plumbing go.
 Apple silicon, macOS 13.5+ (gated in a sentence, and the builders refuse
-to pack a release artifact above that floor; note the tmux bundle still
-needs re-sourcing against the floor before a release build can pack at
-all, which is tracked in the branch plan).
+to pack a release artifact above that floor).
 
-Release artifacts are produced by `tools/build-tmux-bundle.sh` and
+Release artifacts are produced in two steps: `tools/build-tmux-from-source.sh`
+first (compiles tmux and its three libraries against the floor in
+tools/macos-floor; a Homebrew-copied tmux inherits the build machine's
+macOS as its minimum and the gate refuses it), then
+`TMUX_SOURCE=<prefix>/bin/tmux tools/build-tmux-bundle.sh` and
 `tools/build-kosmos-bundle.sh` (each emits its tarball plus the `.sha256`
-the installer requires) and published under chaoskosmos.com/dist.
+the installer requires), published under chaoskosmos.com/dist.
 
 ## Status: Phase 1
 
