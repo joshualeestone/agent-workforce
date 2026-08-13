@@ -16,7 +16,10 @@ Kosmos.app (icon artwork pending: it shows the generic app icon until the
 Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
 The icon goes to `/Applications` when the user can write there without a
 password (it proves ownership before ever replacing a bundle there),
-falling back to `~/Applications`; a fresh install ends by opening the
+falling back to `~/Applications`; in the rare case where something
+foreign holds the system spot AND `~/Applications` is (or cannot be
+proven not to be) the same physical folder, no icon is written at all
+and the transcript says so. A fresh install ends by opening the
 dashboard in the browser (updates stay quiet; `KOSMOS_NO_OPEN=1`
 suppresses it). `kosmos start|stop|restart|status|open|version` manages
 it after that.

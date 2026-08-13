@@ -108,14 +108,25 @@ chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ \"\$(stat -f %Fm \"$SB/sysne
 # for the account that installed (a uid compare, exactly the leg the old
 # under-HOME proxy false-alarmed on), the env KOSMOS_HOME override must be
 # honored, and `open` must be what it invokes. The stub home keeps the
-# real board and the real browser out of it. The refusal leg needs a
-# second uid and stays hand-verified; this pins the leg every real click
-# takes.
+# real board and the real browser out of it. The refusal leg is driven
+# just below by a copy with a wrong baked uid, since a real second uid is
+# not available to the harness.
 mkdir -p "$SB/fakehome/bin"
 printf '#!/bin/sh\necho "$@" >> "%s/launcher.log"\nexit 0\n' "$SB" > "$SB/fakehome/bin/kosmos"
 chmod +x "$SB/fakehome/bin/kosmos"
 RC=0; KOSMOS_HOME="$SB/fakehome" "$SB/apps/Kosmos.app/Contents/MacOS/Kosmos" > /dev/null 2>&1 || RC=$?
 chk "launcher passes its own account and opens" "[ $RC -eq 0 ] && grep -qx 'open' \"$SB/launcher.log\""
+# The NEGATIVE control: the refusal is the guard's whole purpose, and
+# without this the entire uid block could be deleted while the suite
+# stayed green. A copy with a wrong baked uid must refuse (exit 1) and
+# invoke nothing. osascript is swapped for /usr/bin/true in the copy so
+# the alert never reaches the operator's screen on a GUI dev machine.
+sed -e 's|!= "[0-9][0-9]*"|!= "99999"|' -e 's|/usr/bin/osascript|/usr/bin/true|' \
+  "$SB/apps/Kosmos.app/Contents/MacOS/Kosmos" > "$SB/other-account-launcher"
+chmod +x "$SB/other-account-launcher"
+LNS_BEFORE="$(wc -l < "$SB/launcher.log" | tr -d ' ')"
+RC=0; KOSMOS_HOME="$SB/fakehome" "$SB/other-account-launcher" > /dev/null 2>&1 || RC=$?
+chk "launcher refuses a different account" "[ $RC -eq 1 ] && [ \"\$(wc -l < \"$SB/launcher.log\" | tr -d ' ')\" = \"$LNS_BEFORE\" ]"
 
 echo "== update (stale file must not survive; board must restart) =="
 touch "$SB/home/app/engine/stale-marker.js"
@@ -132,11 +143,13 @@ chk "typo flag refuses instead of installing" "echo \"\$OUT\" | grep -q 'The onl
 
 echo "== uninstall reverses the machine =="
 printf '<plist/>' > "$SB/launch/com.kosmos.agent.tiharness.plist"
+mkdir -p "$SB/apps/.Kosmos.app.stage.333" "$SB/apps/.Kosmos.app.old.444"
 RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall.log" 2>&1 || RC=$?
 chk "uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home gone" "[ ! -d \"$SB/home\" ]"
 chk "symlink gone" "[ ! -e \"$SB/bin/kosmos\" ] && [ ! -L \"$SB/bin/kosmos\" ]"
 chk "app gone" "[ ! -d \"$SB/apps/Kosmos.app\" ]"
+chk "override-branch stage and aside residue swept" "[ ! -e \"$SB/apps/.Kosmos.app.stage.333\" ] && [ ! -e \"$SB/apps/.Kosmos.app.old.444\" ]"
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
 chk "user data untouched" "[ -d \"$SB/data\" ]"
 chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
@@ -247,13 +260,15 @@ chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK was not created by thi
 # The OWNER's uninstall takes it. Probe and stage residue are seeded first
 # so the sweep the served header PROMISES ("--uninstall sweeps it") is
 # pinned rather than assumed, in both folders.
-mkdir -p "$SYS_OK/.Kosmos.app.stage.999" "$SYS_OK/.kosmos-write-probe.777" "$SBH/Applications/.Kosmos.app.stage.888"
+mkdir -p "$SYS_OK/.Kosmos.app.stage.999" "$SYS_OK/.kosmos-write-probe.777" "$SYS_OK/.Kosmos.app.old.111" \
+  "$SBH/Applications/.Kosmos.app.stage.888" "$SBH/Applications/.Kosmos.app.old.222"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
 chk "owner uninstall exits 0" "[ $RC -eq 0 ]"
 chk "system-folder icon swept by its owner" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
 chk "stage and probe residue swept from the system folder" "[ -z \"\$(ls -A \"$SYS_OK\")\" ]"
 chk "stage residue swept from the home folder" "[ ! -e \"$SBH/Applications/.Kosmos.app.stage.888\" ]"
+chk "aside residue swept from the home folder" "[ ! -e \"$SBH/Applications/.Kosmos.app.old.222\" ]"
 
 echo "== aliased folders (~/Applications symlinked to the system folder) =="
 # The failure this pins: with ~/Applications a symlink to the system
@@ -346,6 +361,7 @@ else
   chk "retry landed the icon in the home folder" "[ -x \"$SBH5/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
   chk "retry sentence names the home folder" "grep -q 'you will find it in the Applications folder inside your home folder' \"$SB/wedge.log\""
   chk "the unmovable bundle was never gutted" "[ -f \"$SYS_WEDGE/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+  chk "the surviving system icon is named" "grep -q 'could not be updated from this account' \"$SB/wedge.log\""
   chk "no stage or aside residue in the wedged folder" "[ -z \"\$(ls -A \"$SYS_WEDGE\" | grep -v '^Kosmos.app\$')\" ]"
   chflags nouchg "$SYS_WEDGE/Kosmos.app"
   "$SB/bin7/kosmos" stop > /dev/null 2>&1 || true
