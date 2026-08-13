@@ -31,9 +31,10 @@ from one that failed.
    default; KOSMOS_OPEN_CMD substitutes the harness's recording stub;
    best-effort, fresh installs only). Updates stay quiet. Suppressed by
    KOSMOS_NO_OPEN or by the verbatim KOSMOS_APP_DIR sandbox override
-   (KOSMOS_SYS_APP_DIR alone does not suppress it; the harness's global
-   `export KOSMOS_NO_OPEN=1` is what keeps every pass quiet, and it is
-   load-bearing).
+   (KOSMOS_SYS_APP_DIR also suppresses it unless KOSMOS_OPEN_CMD
+   re-enables the recording stub; the harness's global
+   `export KOSMOS_NO_OPEN=1` is a redundant second belt, asserted as
+   such).
 3. **Uninstall sweeps both default icon locations** (pre-change installs
    wrote the home folder), each bounded by the fixed leaf name, and a
    surviving icon is named, never silently skipped.

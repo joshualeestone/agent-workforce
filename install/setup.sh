@@ -221,6 +221,16 @@ resolve_app_dir() {
 # The port everything below names. Overridable for the sandboxed installer
 # test; the app icon and the closing sentences bake in whatever was installed.
 PORT="${KOSMOS_PORT:-4317}"
+# The port is baked into the same unquoted launcher heredoc the
+# KOSMOS_HOME character guard protects, so it gets the same posture:
+# anything but digits is refused in a sentence (reproduced in review: a
+# crafted KOSMOS_PORT ran a command at click time).
+case "$PORT" in
+  ''|*[!0-9]*)
+    printf '\n  KOSMOS_PORT must be a number. Unset it and run again.\n\n' >&2
+    exit 2
+    ;;
+esac
 LOG_DIR="$KOSMOS_HOME/logs"
 LOG="$LOG_DIR/install.log"
 
@@ -535,7 +545,17 @@ uninstall() {
     [ -d "$APP_DIR/Kosmos.app" ] && { info "removing the Kosmos app"; rm -rf "$APP_DIR/Kosmos.app"; }
     for _res in "$APP_DIR"/.Kosmos.app.stage.* "$APP_DIR"/.Kosmos.app.old.*; do
       { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
-      rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
+      if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
+         && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+        rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
+      else
+        # "could not be proven": a foreign account's aside fails the grep,
+        # but so does OUR OWN aside after its best-effort cleanup gutted
+        # the launcher out of it (measured in the deep-locked world), and
+        # "not created by this install" would be false there. Claim only
+        # the failed proof.
+        info "note: the leftover hidden folder $_res could not be proven to belong to this install and was left alone."
+      fi
     done
   else
     _sys_swept=no
@@ -619,7 +639,10 @@ uninstall() {
       elif [ -z "$_home_apps_phys" ]; then
         # The fail-closed note names the folder that actually failed the
         # check; blaming the home folder when the system one was the
-        # unresolvable side would claim something never observed.
+        # unresolvable side would claim something never observed. (This
+        # leg is believed unreachable -- seeing the entry already needs
+        # the search bit cd needs -- and is kept as defense; no driving
+        # pass is possible.)
         info "note: could not check the Applications folder inside your home folder; the Kosmos icon there was left alone."
       elif [ -z "$_sys_apps_phys" ]; then
         info "note: could not check $SYS_APP_DIR, so the Kosmos icon in the Applications folder inside your home folder was left alone."
@@ -635,10 +658,25 @@ uninstall() {
     # account's in-flight install could lose its hidden stage to this
     # sweep; bounded, rare.)
     rm -rf "$SYS_APP_DIR"/.kosmos-write-probe.* 2>/dev/null || true
+    # ⚠️ WITH THE SAME OWNERSHIP PROOF as the visible bundle: an aside can
+    # be another ACCOUNT'S only surviving icon (the restore-failure note
+    # sends them to it by name), and residue that carries no provable
+    # launcher is left and named rather than deleted, per the header's
+    # stated bound.
     for _res in "$SYS_APP_DIR"/.Kosmos.app.stage.* "$SYS_APP_DIR"/.Kosmos.app.old.* \
                 "$HOME/Applications"/.Kosmos.app.stage.* "$HOME/Applications"/.Kosmos.app.old.*; do
       { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
-      rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
+      if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
+         && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+        rm -rf "$_res" 2>/dev/null || info "note: could not remove the leftover hidden folder $_res; drag it to the Trash to finish."
+      else
+        # "could not be proven": a foreign account's aside fails the grep,
+        # but so does OUR OWN aside after its best-effort cleanup gutted
+        # the launcher out of it (measured in the deep-locked world), and
+        # "not created by this install" would be false there. Claim only
+        # the failed proof.
+        info "note: the leftover hidden folder $_res could not be proven to belong to this install and was left alone."
+      fi
     done
   fi
   # The shared supervisor is app plumbing (the same argument as the launchd
@@ -898,9 +936,19 @@ make_app() {
   # Sweep SIBLING pids too, the same opening move as fetch_tmux and
   # install_kosmos and for the same reason: every interrupted run would
   # otherwise leave a complete hidden bundle copy accumulating under a
-  # fresh pid until an uninstall the user may never run. (Same accepted
+  # fresh pid until an uninstall the user may never run. WITH the
+  # ownership proof, because an aside in a SHARED folder can be another
+  # account's only surviving icon; a foreign or unprovable residue is
+  # skipped silently here (the uninstall names them). (Same accepted
   # two-accounts-at-the-same-instant race as the probe sweep.)
-  rm -rf "$appdir"/.Kosmos.app.stage.* "$appdir"/.Kosmos.app.old.* 2>/dev/null || true
+  local _res
+  for _res in "$appdir"/.Kosmos.app.stage.* "$appdir"/.Kosmos.app.old.*; do
+    { [ -e "$_res" ] || [ -L "$_res" ]; } || continue
+    if [ ! -L "$_res" ] && [ ! -L "$_res/Contents/MacOS/Kosmos" ] \
+       && grep -qF ":-$KOSMOS_HOME}\"" "$_res/Contents/MacOS/Kosmos" 2>/dev/null; then
+      rm -rf "$_res" 2>/dev/null || true
+    fi
+  done
   rm -rf "$stage" 2>/dev/null || true
   # ⚠️ mkdir WITHOUT -p, by absolute path, as the stage's first act: -p
   # follows a symlink planted at this predictable name and would build the
@@ -1061,10 +1109,7 @@ resolve_app_dir
 # apps". The person this file is written for was promised no password and
 # no surprises; an unexplained system dialog mid-run reads as "something
 # went wrong". A denial is handled below (the icon falls back to the home
-# folder). Printed only on the first system-folder write to avoid
-# re-raising a resolved worry every update; if the dialog ever fires on a
-# REPLACE instead, the fallback still covers the denial, just without
-# this warm-up sentence.
+# folder).
 # On every system-folder write, not only the first: App Management is
 # documented for MODIFYING an installed bundle, so the replace case is
 # the one MOST likely to raise the dialog, and the earlier

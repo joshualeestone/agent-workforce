@@ -100,6 +100,15 @@ chk() {
   else FAIL=$((FAIL + 1)); echo "FAIL  $1"; fi
 }
 
+seed_kosmos_bundle() { # $1 = Applications dir, $2 = the KOSMOS_HOME it bakes
+  mkdir -p "$1/Kosmos.app/Contents/MacOS"
+  printf '#!/bin/bash\nKOSMOS_HOME="${KOSMOS_HOME:-%s}"\n' "$2" > "$1/Kosmos.app/Contents/MacOS/Kosmos"
+}
+seed_residue() { # $1 = full residue path, $2 = the KOSMOS_HOME it bakes
+  mkdir -p "$1/Contents/MacOS"
+  printf '#!/bin/bash\nKOSMOS_HOME="${KOSMOS_HOME:-%s}"\n' "$2" > "$1/Contents/MacOS/Kosmos"
+}
+
 echo "== install (piped into sh, local sources, port $PORT) =="
 RC=0; cat "$SETUP" | sh > "$SB/install.log" 2>&1 || RC=$?
 chk "install exits 0" "[ $RC -eq 0 ]"
@@ -147,7 +156,8 @@ chk "typo flag refuses instead of installing" "echo \"\$OUT\" | grep -q 'The onl
 
 echo "== uninstall reverses the machine =="
 printf '<plist/>' > "$SB/launch/com.kosmos.agent.tiharness.plist"
-mkdir -p "$SB/apps/.Kosmos.app.stage.333" "$SB/apps/.Kosmos.app.old.444"
+seed_residue "$SB/apps/.Kosmos.app.stage.333" "$SB/home"
+seed_residue "$SB/apps/.Kosmos.app.old.444" "$SB/home"
 RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall.log" 2>&1 || RC=$?
 chk "uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home gone" "[ ! -d \"$SB/home\" ]"
@@ -204,10 +214,6 @@ mkdir -p "$SBH" "$SYS_OK"
 # The fixture is a REAL bundle carrying the launcher line, because the
 # cleanup (rightly) demands proof of ownership before deleting; a bare
 # directory would pin nothing but the ownership refusal.
-seed_kosmos_bundle() { # $1 = Applications dir, $2 = the KOSMOS_HOME it bakes
-  mkdir -p "$1/Kosmos.app/Contents/MacOS"
-  printf '#!/bin/bash\nKOSMOS_HOME="${KOSMOS_HOME:-%s}"\n' "$2" > "$1/Kosmos.app/Contents/MacOS/Kosmos"
-}
 seed_kosmos_bundle "$SBH/Applications" "$SB/home2"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 # KOSMOS_NO_OPEN is cleared and the open command is the recording stub, so
@@ -264,13 +270,23 @@ chk "the refusal speaks a sentence" "grep -q \"in $SYS_OK was not created by thi
 # The OWNER's uninstall takes it. Probe and stage residue are seeded first
 # so the sweep the served header PROMISES ("--uninstall sweeps it") is
 # pinned rather than assumed, in both folders.
-mkdir -p "$SYS_OK/.Kosmos.app.stage.999" "$SYS_OK/.kosmos-write-probe.777" "$SYS_OK/.Kosmos.app.old.111" \
-  "$SBH/Applications/.Kosmos.app.stage.888" "$SBH/Applications/.Kosmos.app.old.222"
+# The swept residue must be PROVABLY OURS (the sweep now demands the same
+# launcher token as the visible bundle); one foreign aside is seeded too
+# and must survive, named, because an aside can be another account's only
+# surviving icon.
+seed_residue "$SYS_OK/.Kosmos.app.stage.999" "$SB/home2"
+seed_residue "$SYS_OK/.Kosmos.app.old.111" "$SB/home2"
+seed_residue "$SYS_OK/.Kosmos.app.old.333" "/another/accounts/kosmos"
+seed_residue "$SBH/Applications/.Kosmos.app.stage.888" "$SB/home2"
+seed_residue "$SBH/Applications/.Kosmos.app.old.222" "$SB/home2"
+mkdir -p "$SYS_OK/.kosmos-write-probe.777"
 export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 RC=0; HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" sh -s -- --uninstall < "$SETUP" > "$SB/probe-un2.log" 2>&1 || RC=$?
 chk "owner uninstall exits 0" "[ $RC -eq 0 ]"
 chk "system-folder icon swept by its owner" "[ ! -d \"$SYS_OK/Kosmos.app\" ]"
-chk "stage and probe residue swept from the system folder" "[ -z \"\$(ls -A \"$SYS_OK\")\" ]"
+chk "our stage and probe residue swept from the system folder" "[ ! -e \"$SYS_OK/.Kosmos.app.stage.999\" ] && [ ! -e \"$SYS_OK/.kosmos-write-probe.777\" ] && [ ! -e \"$SYS_OK/.Kosmos.app.old.111\" ]"
+chk "the foreign aside survives" "[ -d \"$SYS_OK/.Kosmos.app.old.333\" ]"
+chk "the foreign aside is named" "grep -q '.Kosmos.app.old.333 could not be proven to belong to this install' \"$SB/probe-un2.log\""
 chk "stage residue swept from the home folder" "[ ! -e \"$SBH/Applications/.Kosmos.app.stage.888\" ]"
 chk "aside residue swept from the home folder" "[ ! -e \"$SBH/Applications/.Kosmos.app.old.222\" ]"
 
@@ -399,7 +415,10 @@ else
   RC=0; HOME="$SBH17" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_DEEP" sh -s -- --uninstall < "$SETUP" > "$SB/deep-un.log" 2>&1 || RC=$?
   chk "deep-world uninstall exits 0" "[ $RC -eq 0 ]"
   chk "deep-world slot fully cleared" "[ ! -e \"$SYS_DEEP/Kosmos.app\" ]"
-  chk "surviving locked residue is gone or named" "[ -z \"\$(ls -A \"$SYS_DEEP\" 2>/dev/null | grep '.Kosmos.app.old')\" ] || grep -q 'could not remove the leftover hidden folder' \"$SB/deep-un.log\""
+  # The aside here is OUR OWN, gutted unprovable by its best-effort
+  # cleanup dying on the locked dir; either it is gone, or the transcript
+  # names it (as unremovable, or as unprovable, whichever was observed).
+  chk "surviving locked residue is gone or named" "[ -z \"\$(ls -A \"$SYS_DEEP\" 2>/dev/null | grep '.Kosmos.app.old')\" ] || grep -Eq 'could not remove the leftover hidden folder|could not be proven to belong to this install' \"$SB/deep-un.log\""
   chmod -R u+w "$SYS_DEEP" 2>/dev/null || true
 
   echo "== a survivor is NAMED (positive control for the could-not-remove note) =="
@@ -641,6 +660,30 @@ RC=0; KOSMOS_HOME="$SB/evil}brace" sh < "$SETUP" > "$SB/guard2.log" 2>&1 || RC=$
 chk "a closing brace in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard2.log\""
 RC=0; KOSMOS_HOME="$(printf '%s\n%s' "$SB/evil" "line")" sh < "$SETUP" > "$SB/guard3.log" 2>&1 || RC=$?
 chk "a newline in KOSMOS_HOME is refused" "[ $RC -eq 2 ] && grep -q 'would defeat the safety checks' \"$SB/guard3.log\""
+
+echo "== both folders foreign: both named, both untouched =="
+# Foreign in the system spot AND a foreign Kosmos.app in the home folder:
+# the divert has nowhere to write, both refusals must speak, and both
+# strangers stay byte-identical.
+SYS_F3="$SB/sysforeign3"
+mkdir -p "$SYS_F3/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# stranger3\nKOSMOS_HOME="${KOSMOS_HOME:-/not/ours/3}"\n' > "$SYS_F3/Kosmos.app/Contents/MacOS/Kosmos"
+SBH22="$SB/dual-foreign-home"
+mkdir -p "$SBH22/Applications/Kosmos.app/Contents/MacOS"
+printf '#!/bin/bash\n# their home app 2\nKOSMOS_HOME="${KOSMOS_HOME:-/their/place/2}"\n' > "$SBH22/Applications/Kosmos.app/Contents/MacOS/Kosmos"
+export KOSMOS_HOME="$SB/home24" KOSMOS_BIN_DIR="$SB/bin24"
+RC=0; cat "$SETUP" | HOME="$SBH22" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_F3" sh > "$SB/dual.log" 2>&1 || RC=$?
+chk "dual-foreign install exits 0" "[ $RC -eq 0 ]"
+chk "the home stranger survives" "grep -q 'their home app 2' \"$SBH22/Applications/Kosmos.app/Contents/MacOS/Kosmos\""
+chk "the system stranger survives" "grep -q 'stranger3' \"$SYS_F3/Kosmos.app/Contents/MacOS/Kosmos\""
+chk "the home refusal speaks" "grep -q 'not created by this install is in the Applications folder inside' \"$SB/dual.log\""
+chk "the system spot is named too" "grep -q 'something else also has the Kosmos spot' \"$SB/dual.log\""
+"$SB/bin24/kosmos" stop > /dev/null 2>&1 || true
+# NOT drivable here, recorded rather than implied: the APP_SYS_FAILED
+# sentence (a refused write into a writable, empty system folder needs a
+# TCC denial the harness cannot produce) and make_app's restore-failure
+# note (the slot would have to become unwritable between two renames in
+# one run). Both legs are reasoned and hand-verified, not pinned.
 
 echo "== the production open default is real =="
 # Every observing pass substitutes the recording stub, and command -v
