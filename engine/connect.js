@@ -347,6 +347,10 @@ function fetchFile(url, dest, onProgress, redirects, track) {
       const total = Number(res.headers['content-length']) || null;
       const hash = crypto.createHash('sha256');
       const out = fs.createWriteStream(dest);
+      // A cancel arrives via req.destroy(), whose rejection path did not
+      // close the write stream -- one leaked fd on the .part per cancelled
+      // download (the sweep unlinks the path, the fd lived on).
+      req.on('error', () => { try { out.destroy(); } catch { /* already closed */ } });
       let got = 0;
       res.on('data', (c) => {
         got += c.length;
@@ -827,11 +831,13 @@ async function tickBody(owner) {
    * ⚠️ A RECOGNISED SCREEN THAT NEVER MOVES IS A THIRD KIND OF HANG. Unknown
    * screens get 10s and blank panes 45s, but a theme screen that we pressed
    * Enter on and that keeps sitting there had NO bound at all -- "Getting
-   * the sign-in ready" forever over a wedged CLI. Only the choosing screens
-   * count: the paste prompt and the browser wait legitimately sit unchanged
-   * for as long as a person dawdles.
+   * the sign-in ready" forever over a wedged CLI. The screens we PRESS KEYS
+   * on count (theme, login-method, and press-enter -- a pre-login
+   * announcement wedged after its Enter had no other exit); the paste prompt
+   * and the browser wait legitimately sit unchanged for as long as a person
+   * dawdles.
    */
-  if (seen.kind === 'theme' || seen.kind === 'login-method') {
+  if (seen.kind === 'theme' || seen.kind === 'login-method' || seen.kind === 'press-enter') {
     if (sig === driver.lastSig) {
       driver.sameTicks = (driver.sameTicks || 0) + 1;
       if (driver.acted === sig && driver.sameTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 6) / TICK_MS))) {
@@ -924,6 +930,10 @@ async function tickBody(owner) {
       driver.rejectTicks = 0;
       if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE) {
         writeState({ phase: PHASE.SIGNIN_AWAITING_CODE, url: seen.url || mem.url || null, startedOnce: true });
+      } else if (seen.url && !mem.url) {
+        // The URL can render a capture-tick later than the prompt; without
+        // this the fallback link never surfaces for the whole phase.
+        writeState({ ...mem, url: seen.url });
       }
       if (driver.pendingCode && driver.lastActed !== 'code') {
         driver.lastActed = 'code';

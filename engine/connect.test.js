@@ -244,6 +244,71 @@ test('a stuck install does not strand the 281MB download in app data', async (t)
   assert.deepEqual(leftovers, [], `the failed install stranded: ${leftovers.join(', ')}`);
 });
 
+test('cancel mid-download aborts the stream and leaves nothing behind', async (t) => {
+  /**
+   * ⚠️ THE PATHS WHOSE REGRESSIONS THE COMMENTS THEMSELVES DOCUMENT (the
+   * .part sweep "shipped one iteration without the guard") had no test: every
+   * download test ran to completion, and the cancel tests ran under DRY_RUN
+   * where no download exists. This one drives a REAL slow download through
+   * start(), cancels mid-stream, and asks the disk and the state afterwards.
+   */
+  connect.resetForTests();
+  clearClaudeConfig();
+  subscription.resetCache();
+  const binary = crypto.randomBytes(400 * 1024);
+  const checksum = crypto.createHash('sha256').update(binary).digest('hex');
+  // A server that trickles the binary so the cancel has a mid-stream to land in.
+  const paths = {
+    '/latest': () => Buffer.from('9.9.6'),
+    '/9.9.6/manifest.json': () => Buffer.from(JSON.stringify({ platforms: { [connect.platformKey()]: { checksum } } })),
+  };
+  const server = http.createServer((req, res) => {
+    if (paths[req.url]) {
+      const body = paths[req.url]();
+      res.writeHead(200, { 'content-length': body.length });
+      res.end(body);
+      return;
+    }
+    res.writeHead(200, { 'content-length': binary.length });
+    let sent = 0;
+    const drip = setInterval(() => {
+      if (sent >= binary.length) { clearInterval(drip); res.end(); return; }
+      res.write(binary.subarray(sent, sent + 16 * 1024));
+      sent += 16 * 1024;
+    }, 30);
+    res.on('close', () => clearInterval(drip));
+  });
+  await new Promise((r) => { server.listen(0, '127.0.0.1', r); });
+  t.after(() => server.close());
+  process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE = `http://127.0.0.1:${server.address().port}`;
+  process.env.AGENT_WORKFORCE_CLAUDE_BIN = nodePath.join(SANDBOX, 'no-such-claude-2');
+  connect.setRunner(() => ({ ok: true, stdout: '' }));
+  connect.setDryRun(false);
+  t.after(async () => {
+    await connect.cancel().catch(() => {});
+    connect.resetForTests();
+    connect.setRunner(null);
+    delete process.env.AGENT_WORKFORCE_CLAUDE_DOWNLOAD_BASE;
+    delete process.env.AGENT_WORKFORCE_CLAUDE_BIN;
+  });
+
+  await connect.start();
+  await until(() => {
+    const st = connect.state();
+    return st.phase === connect.PHASE.DOWNLOADING && st.progress && st.progress.got > 0;
+  }, 10000);
+
+  const st = await connect.cancel();
+  assert.equal(st.phase, connect.PHASE.IDLE);
+  // Give any orphaned continuation a moment to do its worst, then look.
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(connect.state().phase, connect.PHASE.IDLE,
+    'something overwrote the cancel after the fact');
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_DATA, 'AgentWorkforce', 'downloads');
+  const leftovers = (() => { try { return fs.readdirSync(dir); } catch { return []; } })();
+  assert.deepEqual(leftovers, [], `the cancelled download left: ${leftovers.join(', ')}`);
+});
+
 /* ── the driver, against a scripted terminal ─────────────────────────────── */
 
 /**
