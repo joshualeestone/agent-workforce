@@ -740,6 +740,34 @@ test('a version answer that tries to steer the file path is refused', async (t) 
     'a path-traversal version string was accepted into the download path');
 });
 
+driverTest('a partial redraw cannot walk the phase backwards from the paste prompt', async () => {
+  /**
+   * ⚠️ The paste screen contains the "Use the url below" line too, so a
+   * capture landing mid-repaint (prompt line not yet drawn) classifies as
+   * browser-open. The unguarded version regressed the phase -- rebuilding
+   * the panel under the person's typing, and (worse) bypassing the one arm
+   * that resets the typed-code guard, so a later code was accepted but never
+   * typed: a livelock only Cancel escaped.
+   */
+  const term = fakeTerminal();
+  connect.setRunner(term.runner);
+  connect.setDryRun(false);
+  await connect.start();
+  await until(() => connect.state().phase === connect.PHASE.SIGNIN_AWAITING_CODE);
+
+  // The mid-repaint frame: browser-open text, no paste prompt.
+  term.screen = SCREEN_SPINNER;
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(connect.state().phase, connect.PHASE.SIGNIN_AWAITING_CODE,
+    'a partial redraw regressed the phase from the paste prompt');
+
+  // The full screen returns, and a code still works end to end.
+  term.screen = SCREEN_PASTE;
+  const put = connect.submitCode('abCD1234#efGH5678');
+  assert.equal(put.ok, true, put.because);
+  await until(() => connect.state().phase === connect.PHASE.CONNECTED, 5000);
+});
+
 driverTest('a code is refused while nothing is asking for one', async () => {
   const refusedCold = connect.submitCode('abCD1234#efGH5678');
   assert.equal(refusedCold.ok, false);

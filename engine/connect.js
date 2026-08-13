@@ -826,22 +826,22 @@ async function tickBody(owner) {
      * sentence about a state nobody verified. A session that is truly gone
      * keeps failing, so a short run of failures earns the sentence honestly.
      */
-    driver.captureFails = (driver.captureFails || 0) + 1;
-    if (driver.captureFails > Math.max(3, Math.ceil(3000 / TICK_MS))) {
+    owner.captureFails = (owner.captureFails || 0) + 1;
+    if (owner.captureFails > Math.max(3, Math.ceil(3000 / TICK_MS))) {
       becomeStuck(owner, 'the sign-in window closed before Claude finished',
         tailOf(cap.stderr || '') || 'it is no longer there');
     }
     return;
   }
-  driver.captureFails = 0;
+  owner.captureFails = 0;
   const seen = classifyPane(cap.stdout);
 
   if (seen.kind === 'unknown') {
-    driver.unknownTicks += 1;
+    owner.unknownTicks += 1;
     // ⚠️ A grace period, not tolerance: the TUI redraws between screens and a
     // capture can land mid-paint. ~10s of never recognising anything is a
     // different fact, and it is reported rather than waited out forever.
-    if (driver.unknownTicks > Math.max(3, Math.ceil(UNKNOWN_GRACE_MS / TICK_MS))) {
+    if (owner.unknownTicks > Math.max(3, Math.ceil(UNKNOWN_GRACE_MS / TICK_MS))) {
       /**
        * ⚠️ THE CONFIG OUTRANKS THE SCREEN IN BOTH DIRECTIONS. A future CLI
        * whose post-login wording drifts from our recognisers classifies as
@@ -859,16 +859,16 @@ async function tickBody(owner) {
     }
     return;
   }
-  driver.unknownTicks = 0;
+  owner.unknownTicks = 0;
   // ⚠️ NOT reset on blank itself -- the first version of this line ran for
   // every classification including 'blank', so the counter it exists to feed
   // was zeroed on the very tick that incremented it and the escalation could
   // never fire. Caught by the test timing out, not by reading the diff.
-  if (seen.kind !== 'blank') driver.blankTicks = 0;
+  if (seen.kind !== 'blank') owner.blankTicks = 0;
   // The rejection grace resets whenever the paste prompt is NOT on screen: a
   // mid-clear tick between two prompt sightings otherwise resumed the count
   // from its stale value and shortened the grace.
-  if (seen.kind !== 'awaiting-code') driver.rejectTicks = 0;
+  if (seen.kind !== 'awaiting-code') owner.rejectTicks = 0;
 
   /**
    * ⚠️ ACT ONCE PER SCREEN, where "screen" is the kind plus the text itself.
@@ -890,19 +890,19 @@ async function tickBody(owner) {
    * dawdles.
    */
   if (seen.kind === 'theme' || seen.kind === 'login-method' || seen.kind === 'press-enter') {
-    if (sig === driver.lastSig) {
-      driver.sameTicks = (driver.sameTicks || 0) + 1;
-      if (driver.acted === sig && driver.sameTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 6) / TICK_MS))) {
+    if (sig === owner.lastSig) {
+      owner.sameTicks = (owner.sameTicks || 0) + 1;
+      if (owner.acted === sig && owner.sameTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 6) / TICK_MS))) {
         becomeStuck(owner, 'Claude is not moving past its first screens', tailOf(cap.stdout));
         return;
       }
     } else {
-      driver.sameTicks = 0;
+      owner.sameTicks = 0;
     }
   } else {
-    driver.sameTicks = 0;
+    owner.sameTicks = 0;
   }
-  driver.lastSig = sig;
+  owner.lastSig = sig;
 
   switch (seen.kind) {
     case 'blank':
@@ -912,28 +912,38 @@ async function tickBody(owner) {
        * the screen and hangs must not leave "Getting the sign-in ready" on
        * screen forever, which is progress nobody is producing.
        */
-      driver.blankTicks = (driver.blankTicks || 0) + 1;
+      owner.blankTicks = (owner.blankTicks || 0) + 1;
       // 4.5x the unknown grace (45s in production): blanks are legitimate
       // between screens, so the bound is generous -- but it exists.
-      if (driver.blankTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 4.5) / TICK_MS))) {
+      if (owner.blankTicks > Math.max(5, Math.ceil((UNKNOWN_GRACE_MS * 4.5) / TICK_MS))) {
         becomeStuck(owner, 'Claude never drew its sign-in screen', 'the window stayed blank');
       }
       return;
     case 'theme':
-      if (driver.acted !== sig) {
-        driver.acted = sig;
+      if (owner.acted !== sig) {
+        owner.acted = sig;
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
       }
       return;
     case 'login-method':
-      if (driver.acted !== sig) {
-        driver.acted = sig;
+      if (owner.acted !== sig) {
+        owner.acted = sig;
         // Option 1, "Claude account with subscription", is already selected.
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
       }
       return;
     case 'browser-open':
-      if (mem.phase !== PHASE.SIGNIN_BROWSER_OPEN) {
+      /**
+       * ⚠️ NEVER BACKWARDS. The paste screen contains the "Use the url
+       * below" line too, so a mid-repaint capture missing only the prompt
+       * line classifies as browser-open -- and an unconditional write here
+       * regressed the phase from awaiting-code (rebuilding the panel under
+       * the person's typing) and from completing (bypassing the one arm that
+       * resets the typed-code guard, leaving a later code accepted but never
+       * typed: a livelock only Cancel escaped). Forward from launching only;
+       * anything else keeps its phase and at most gains the URL.
+       */
+      if (mem.phase === PHASE.SIGNIN_LAUNCHING) {
         writeState({ phase: PHASE.SIGNIN_BROWSER_OPEN, url: seen.url || null, startedOnce: true });
       } else if (seen.url && !mem.url) {
         writeState({ ...mem, url: seen.url });
@@ -949,16 +959,16 @@ async function tickBody(owner) {
        * the CLI's processing time (the prompt stays up briefly after Enter).
        */
       if (mem.phase === PHASE.SIGNIN_COMPLETING) {
-        driver.rejectTicks = (driver.rejectTicks || 0) + 1;
-        if (driver.rejectTicks > Math.max(3, Math.ceil(6000 / TICK_MS))) {
-          driver.rejectTicks = 0;
-          driver.lastActed = null;   // a new code may be typed
+        owner.rejectTicks = (owner.rejectTicks || 0) + 1;
+        if (owner.rejectTicks > Math.max(3, Math.ceil(6000 / TICK_MS))) {
+          owner.rejectTicks = 0;
+          owner.lastActed = null;   // a new code may be typed
           // ⚠️ The completing-wait counters too: without these, the 60s
           // config wait and the 8s REPL bound were budgets per FLOW, not per
           // attempt, and a retried sign-in could be declared stuck early.
-          driver.waitTicks = 0;
-          driver.replTicks = 0;
-          driver.rejectCount = (driver.rejectCount || 0) + 1;
+          owner.waitTicks = 0;
+          owner.replTicks = 0;
+          owner.rejectCount = (owner.rejectCount || 0) + 1;
           writeState({
             phase: PHASE.SIGNIN_AWAITING_CODE,
             url: seen.url || mem.url || null,
@@ -969,9 +979,9 @@ async function tickBody(owner) {
              * changes: an identical retry failure would otherwise show and
              * say nothing at all.
              */
-            because: !driver.codeTyped
+            because: !owner.codeTyped
               ? 'the sign-in did not finish on its own, so paste the code from your browser here'
-              : (driver.rejectCount > 1
+              : (owner.rejectCount > 1
                 ? 'that code still did not work; make sure you are copying the newest one'
                 : 'that code did not work, so check it and paste it again'),
             startedOnce: true,
@@ -979,19 +989,22 @@ async function tickBody(owner) {
         }
         return;
       }
-      driver.rejectTicks = 0;
+      owner.rejectTicks = 0;
       if (mem.phase !== PHASE.SIGNIN_AWAITING_CODE) {
+        // Entering the paste prompt fresh: any stale typed-code guard from a
+        // path that bypassed the rejection arm must not eat the next code.
+        owner.lastActed = null;
         writeState({ phase: PHASE.SIGNIN_AWAITING_CODE, url: seen.url || mem.url || null, startedOnce: true });
       } else if (seen.url && !mem.url) {
         // The URL can render a capture-tick later than the prompt; without
         // this the fallback link never surfaces for the whole phase.
         writeState({ ...mem, url: seen.url });
       }
-      if (driver.pendingCode && driver.lastActed !== 'code') {
-        driver.lastActed = 'code';
-        driver.codeTyped = true;
-        const code = driver.pendingCode;
-        driver.pendingCode = null;
+      if (owner.pendingCode && owner.lastActed !== 'code') {
+        owner.lastActed = 'code';
+        owner.codeTyped = true;
+        const code = owner.pendingCode;
+        owner.pendingCode = null;
         // ⚠️ `--` ends option parsing: the allowed charset includes `-`, and a
         // code starting with one would otherwise be read by tmux as flags.
         const typed = await tmux(['send-keys', '-t', PANE_TARGET, '-l', '--', code]);
@@ -1033,8 +1046,8 @@ async function tickBody(owner) {
         // Claude may still be mid-onboarding in the pane (security notes and
         // the like). Walk it forward so the NEXT run of claude -- an agent's
         // first start -- does not begin at a screen nobody is watching.
-        if (asksEnter && driver.acted !== sig) {
-          driver.acted = sig;
+        if (asksEnter && owner.acted !== sig) {
+          owner.acted = sig;
           await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
           return;
         }
@@ -1042,15 +1055,15 @@ async function tickBody(owner) {
         // a late-flipping config finished on the next tick and killed the
         // session mid-onboarding, skipping the walk-forward this comment
         // promises.
-        if (seen.kind === 'repl' || (driver.settleTicks || 0) > 4) {
+        if (seen.kind === 'repl' || (owner.settleTicks || 0) > 4) {
           await finishConnected(owner, sub);
           return;
         }
-        driver.settleTicks = (driver.settleTicks || 0) + 1;
+        owner.settleTicks = (owner.settleTicks || 0) + 1;
         return;
       }
-      if (asksEnter && driver.acted !== sig) {
-        driver.acted = sig;
+      if (asksEnter && owner.acted !== sig) {
+        owner.acted = sig;
         await tmux(['send-keys', '-t', PANE_TARGET, 'Enter']);
         return;
       }
@@ -1071,7 +1084,7 @@ async function tickBody(owner) {
           || mem.phase === PHASE.SIGNIN_LAUNCHING)) {
         // A code accepted moments before the browser finished on its own
         // must not be typed unprompted if the prompt ever comes back.
-        driver.pendingCode = null;
+        owner.pendingCode = null;
         writeState({ phase: PHASE.SIGNIN_COMPLETING, url: mem.url || null, startedOnce: true });
         return;
       }
@@ -1084,8 +1097,8 @@ async function tickBody(owner) {
          * it already wrote what it was going to write.
          */
         if (seen.kind === 'repl') {
-          driver.replTicks = (driver.replTicks || 0) + 1;
-          if (driver.replTicks > Math.max(3, Math.ceil(8000 / TICK_MS))) {
+          owner.replTicks = (owner.replTicks || 0) + 1;
+          if (owner.replTicks > Math.max(3, Math.ceil(8000 / TICK_MS))) {
             /**
              * ⚠️ TWO DIFFERENT TRUE SENTENCES. `none` here is POSITIVE
              * knowledge -- a signed-in free plan, likely the most common
@@ -1108,8 +1121,8 @@ async function tickBody(owner) {
         // Text says logged in but the config has not flipped yet; give it a
         // bounded wait rather than forever. Its OWN counter, distinct from
         // the post-connected settle above.
-        driver.waitTicks = (driver.waitTicks || 0) + 1;
-        if (driver.waitTicks > Math.ceil(60000 / TICK_MS)) {
+        owner.waitTicks = (owner.waitTicks || 0) + 1;
+        if (owner.waitTicks > Math.ceil(60000 / TICK_MS)) {
           becomeStuck(owner, 'Claude says it signed in, but we cannot see the connection yet',
             'the settings file has not caught up; Check again in a moment, or try once more');
         }
@@ -1145,7 +1158,7 @@ function becomeStuck(owner, because, tail) {
   if (d && d.timer) clearInterval(d.timer);
   if (activeRequest) { try { activeRequest.destroy(); } catch { /* already ended */ } activeRequest = null; }
   if (activeChild) { try { activeChild.kill(); } catch { /* already exited */ } activeChild = null; }
-  killSession().catch(() => { /* it may never have existed */ });
+  killSession(); // fire-and-forget: run() resolves {ok:false} and never rejects
   writeState({ phase: PHASE.STUCK, because, tail: tail || null, startedOnce: true });
 }
 
