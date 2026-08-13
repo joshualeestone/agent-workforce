@@ -104,6 +104,31 @@ chmod +x "$STAGE/runtime/bin/node"
 "$STAGE/runtime/bin/node" --version >/dev/null || {
   echo "FAIL: the staged node does not run" >&2; exit 1; }
 
+# ⚠️ THE DEPLOYMENT FLOOR IS GATED AT BUILD TIME. The installer refuses
+# machines below macOS 13.5 in a sentence; that number is only honest if no
+# shipped binary demands MORE. A binary copied off a new build machine
+# quietly inherits that machine's OS as its minimum (measured: a Homebrew
+# tmux from this Mac stamps minos 26.0 and would load on nothing older),
+# so the floor is read out of the artifact with otool and compared, not
+# assumed. KOSMOS_ALLOW_MINOS=1 overrides for LOCAL TEST BUILDS ONLY.
+FLOOR_MAJOR=13; FLOOR_MINOR=5
+check_minos() {
+  local f="$1" minos major minor
+  minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
+  [ -n "$minos" ] || { echo "    (no LC_BUILD_VERSION on $(basename "$f"); skipping floor check)"; return 0; }
+  major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
+  if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
+    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+      echo "    WARN: $(basename "$f") needs macOS $minos > floor $FLOOR_MAJOR.$FLOOR_MINOR (allowed: TEST BUILD)"
+    else
+      echo "FAIL: $(basename "$f") requires macOS $minos, above the installer's $FLOOR_MAJOR.$FLOOR_MINOR floor." >&2
+      echo "      Source a binary built for the floor, or KOSMOS_ALLOW_MINOS=1 for a local test build." >&2
+      exit 1
+    fi
+  fi
+}
+check_minos "$STAGE/runtime/bin/node"
+
 # ---- smoke test -------------------------------------------------------------
 # ⚠️ THE STAGED TREE IS WHAT GETS TESTED, not the repo, AND A REAL REQUEST IS
 # MADE. "The process stayed alive" cannot catch the ship list missing a file
@@ -127,6 +152,7 @@ smoke_fail() {
   echo "FAIL: $1" >&2
   sed 's/^/    /' "$SMOKE_LOG" >&2
   kill "$SMOKE_PID" 2>/dev/null || true
+  rm -f "$SMOKE_LOG"
   exit 1
 }
 [ -n "$SMOKE_URL" ] || smoke_fail "the staged app never announced a port. It said:"
@@ -140,7 +166,11 @@ case "$PAGE" in
   *"Agent Workforce"*|*Kosmos*) ;;
   *) smoke_fail "the staged app answered with something that is not its own page:" ;;
 esac
-kill "$SMOKE_PID" 2>/dev/null; wait "$SMOKE_PID" 2>/dev/null || true
+# `|| true` on the kill as well: a smoke server that answered and then
+# exited on its own makes a bare kill fail, and under set -e that aborted
+# the build AFTER the smoke test had passed.
+kill "$SMOKE_PID" 2>/dev/null || true
+wait "$SMOKE_PID" 2>/dev/null || true
 echo "    boots, answers at $SMOKE_URL, and serves its own page"
 rm -f "$SMOKE_LOG"
 

@@ -1,5 +1,12 @@
-#!/bin/bash
+#!/bin/sh
 # Kosmos installer. One line, no sudo, nothing outside your home folder.
+#
+# ⚠️ THE SHEBANG SAYS sh BECAUSE THE PAGE SAYS sh. This file's contract is
+# the interpreter the marketing line actually invokes: macOS /bin/sh, which
+# is bash 3.2 in POSIX mode (the Darwin gate below runs before anything
+# non-POSIX, so a Linux dash never gets past the first sentence). `local`
+# and `set -o pipefail` are safe under macOS sh specifically, and that is
+# the only sh this file supports.
 #
 #   curl -fsSL https://chaoskosmos.com/setup | sh
 #
@@ -57,9 +64,12 @@ KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
 
 # ⚠️ EVERY DOWNLOAD IS CHECKSUM-VERIFIED before anything is extracted. The
 # build publishes a .sha256 next to each tarball; a mismatch, a truncated
-# download, or a missing checksum file all refuse in a sentence. HTTPS alone
-# says who you talked to, not that the bytes are the ones the build made --
-# and this line is pasted by people who cannot audit what it fetched.
+# download, or a missing checksum file all refuse in a sentence.
+# ⚠️ WHAT THIS IS AND IS NOT: the checksum travels from the SAME origin over
+# the SAME channel as the tarball, so it catches corruption, truncation and
+# a half-updated CDN -- it adds nothing against a compromised origin, which
+# already served this very script. Signing with a key that does not travel
+# beside the artifact is the upgrade, and is on the launch security list.
 # ⚠️ shasum, not sha256sum: macOS ships shasum, and this is the user path
 # where nothing beyond a clean Mac may be assumed.
 verify_download() {
@@ -82,23 +92,26 @@ verify_download() {
 fetch_tmux() {
   local dest="$1"
   local stage="$dest.stage.$$"
+  # ⚠️ EVERY failure path removes the stage. Returning without cleanup left a
+  # partial stage directory behind per attempt (a new $$ each run), so a
+  # flaky connection accumulated half-downloads in the user's install.
   rm -rf "$stage"
-  mkdir -p "$stage" || return 1
+  mkdir -p "$stage" || { rm -rf "$stage"; return 1; }
   if [ -n "${KOSMOS_TMUX_SRC:-}" ]; then
     info "using local copy: $KOSMOS_TMUX_SRC"
-    [ -d "$KOSMOS_TMUX_SRC" ] || return 1
-    cp -R "$KOSMOS_TMUX_SRC/." "$stage/" || return 1
+    [ -d "$KOSMOS_TMUX_SRC" ] || { rm -rf "$stage"; return 1; }
+    cp -R "$KOSMOS_TMUX_SRC/." "$stage/" || { rm -rf "$stage"; return 1; }
   else
     local url="$KOSMOS_RELEASE_BASE/tmux-$ARCH.tar.gz"
     info "downloading from $url"
     # ⚠️ Progress is ON. `curl -fsSL` is silent, and several minutes of nothing
     # is the failure this whole file is written against.
-    curl -fL --progress-bar "$url" -o "$stage/tmux.tar.gz" || return 1
-    verify_download "$stage/tmux.tar.gz" "$url" || return 1
-    tar -xzf "$stage/tmux.tar.gz" -C "$stage" || return 1
+    curl -fL --progress-bar "$url" -o "$stage/tmux.tar.gz" || { rm -rf "$stage"; return 1; }
+    verify_download "$stage/tmux.tar.gz" "$url" || { rm -rf "$stage"; return 1; }
+    tar -xzf "$stage/tmux.tar.gz" -C "$stage" || { rm -rf "$stage"; return 1; }
     rm -f "$stage/tmux.tar.gz"
   fi
-  [ -x "$stage/bin/tmux" ] || return 1
+  [ -x "$stage/bin/tmux" ] || { rm -rf "$stage"; return 1; }
 
   # ⚠️ VERIFY THE THING WE JUST PLACED, rather than assuming the copy worked.
   # An arm64 binary with a broken signature does not run at all, and the failure
@@ -109,8 +122,17 @@ fetch_tmux() {
     rm -rf "$stage"
     return 1
   fi
-  rm -rf "$dest" || return 1
-  mv "$stage" "$dest" || return 1
+  # ⚠️ AND VERIFY IT RUNS ON THIS MAC, the same check the Node runtime gets
+  # at build time. A binary built against a newer macOS than this one loads
+  # nothing and says nothing; without this line the first symptom is a board
+  # that reads every agent as unknown, which nobody would ever trace to dyld.
+  if ! "$stage/bin/tmux" -V >/dev/null 2>&1; then
+    info "the copy of tmux will not run on this Mac"
+    rm -rf "$stage"
+    return 1
+  fi
+  rm -rf "$dest" || { rm -rf "$stage"; return 1; }
+  mv "$stage" "$dest" || { rm -rf "$stage"; return 1; }
   return 0
 }
 
@@ -118,24 +140,24 @@ install_kosmos() {
   local dest="$1"
   local stage="$dest/.kosmos.stage.$$"
   rm -rf "$stage"
-  mkdir -p "$stage" || return 1
+  mkdir -p "$stage" || { rm -rf "$stage"; return 1; }
   if [ -n "${KOSMOS_SRC:-}" ]; then
     info "using local copy: $KOSMOS_SRC"
-    [ -d "$KOSMOS_SRC" ] || return 1
-    cp -R "$KOSMOS_SRC/." "$stage/" || return 1
+    [ -d "$KOSMOS_SRC" ] || { rm -rf "$stage"; return 1; }
+    cp -R "$KOSMOS_SRC/." "$stage/" || { rm -rf "$stage"; return 1; }
   else
     local url="$KOSMOS_RELEASE_BASE/kosmos-$ARCH.tar.gz"
     info "downloading from $url"
-    curl -fL --progress-bar "$url" -o "$stage/kosmos.tar.gz" || return 1
-    verify_download "$stage/kosmos.tar.gz" "$url" || return 1
-    tar -xzf "$stage/kosmos.tar.gz" -C "$stage" || return 1
+    curl -fL --progress-bar "$url" -o "$stage/kosmos.tar.gz" || { rm -rf "$stage"; return 1; }
+    verify_download "$stage/kosmos.tar.gz" "$url" || { rm -rf "$stage"; return 1; }
+    tar -xzf "$stage/kosmos.tar.gz" -C "$stage" || { rm -rf "$stage"; return 1; }
     rm -f "$stage/kosmos.tar.gz"
   fi
   # ⚠️ THE STAGE IS VERIFIED, THEN SWAPPED. On the update path the old
   # bundle already satisfies checks against $dest, so a failed copy used to
   # read as a successful update: the check must look at what just arrived,
-  # never at what was already there. Only the bundle\'s three components are
-  # replaced; tmux/, logs/ and the pidfile are the machine\'s own state.
+  # never at what was already there. Only the bundle's three components are
+  # replaced; tmux/, logs/ and the pidfile are the machine's own state.
   [ -x "$stage/bin/kosmos" ] || { rm -rf "$stage"; return 1; }
   [ -x "$stage/runtime/bin/node" ] || { rm -rf "$stage"; return 1; }
   [ -f "$stage/app/server.js" ] || { rm -rf "$stage"; return 1; }
@@ -207,18 +229,34 @@ uninstall() {
       rm -f "$BIN_DIR/$f"
     fi
   done
-  # ⚠️ THE AGENTS\' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
+  # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
   # one launchd job per agent (com.kosmos.agent.*), set to start at every
   # login. With Kosmos gone there is no UI left to manage them, and "left
   # alone" would mean invisible processes restarting forever with a manual
   # launchctl recipe as the only exit. The jobs are app plumbing; the
-  # agents\' FILES are user work and stay.
+  # agents' FILES are user work and stay.
   _agents_dir="${AGENT_WORKFORCE_LAUNCH:-$HOME/Library/LaunchAgents}"
   for _plist in "$_agents_dir"/com.kosmos.agent.*.plist; do
     [ -e "$_plist" ] || continue
     _label="$(basename "$_plist" .plist)"
-    info "stopping the background job for ${_label#com.kosmos.agent.}"
+    _name="${_label#com.kosmos.agent.}"
+    info "stopping the background job for $_name"
+    # ⚠️ enable BEFORE bootout, the order the app's own runbook uses. The
+    # app's Remove path runs `launchctl disable`, which writes a per-user
+    # override keyed on the LABEL that outlives the plist. Booting out and
+    # deleting the plist while that override stands leaves a machine where
+    # a reinstalled Kosmos creates an agent with the same name and launchd
+    # silently refuses to start it, with nothing on disk to explain why.
+    /bin/launchctl enable "gui/$(id -u)/$_label" 2>/dev/null || true
     /bin/launchctl bootout "gui/$(id -u)/$_label" 2>/dev/null || true
+    # The agent itself runs in a detached tmux session that outlives its
+    # launchd job; with Kosmos gone it would keep running against a tmux
+    # binary deleted out from under it. Killed BY NAME, one session per
+    # plist found, never kill-server: on a machine with other tmux use,
+    # the server is not ours to kill.
+    if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
+      "$KOSMOS_HOME/tmux/bin/tmux" kill-session -t "$_name" 2>/dev/null || true
+    fi
     rm -f "$_plist"
   done
   if [ -d "$KOSMOS_HOME" ]; then
@@ -231,7 +269,7 @@ uninstall() {
   # files, and anything under ~/work. Uninstalling the app must never delete
   # somebody's work, and an installer that cleans up too enthusiastically is
   # worse than one that leaves a folder behind.
-  printf '\n  Kosmos is removed. Your agents\047 files were left alone; their background jobs were stopped.\n\n'
+  printf '\n  Kosmos is removed. Your agents were stopped; their files were left alone.\n\n'
   exit 0
 }
 
@@ -256,6 +294,9 @@ printf '\n  Installing Kosmos\n'
 printf '  This takes a couple of minutes and does not need your password.\n'
 
 step "Checking this Mac."
+# (A second Darwin check, deliberately: the one at the top of the file runs
+# before the log exists and protects the shell from non-bash sh; this one
+# puts the refusal INTO the narrated transcript for the supported flow.)
 case "$(uname -s)" in
   Darwin) ;;
   *) die "Kosmos runs on macOS. This looks like $(uname -s)." ;;
@@ -268,7 +309,25 @@ case "$ARCH" in
   arm64) ;;
   *) die "Kosmos needs a Mac with Apple silicon (M1 or newer). This Mac is $ARCH." ;;
 esac
-info "macOS $(sw_vers -productVersion 2>/dev/null || echo '?') on $ARCH"
+# ⚠️ THE macOS FLOOR IS GATED HERE, IN A SENTENCE, NOT DISCOVERED AT THE
+# LAST STEP. The shipped Node runtime is built with minos 13.5 (measured
+# with otool on the artifact), so on an older macOS the entire narrated
+# install would succeed and then die at "Starting Kosmos." with a log
+# nobody reads -- the exact opposite of the named-refusal rule above. The
+# build gates its artifacts against this same floor, so the number here
+# and the binaries cannot drift apart silently.
+MACOS_FLOOR_MAJOR=13
+MACOS_FLOOR_MINOR=5
+_osver="$(sw_vers -productVersion 2>/dev/null || echo 0.0)"
+_osmajor="${_osver%%.*}"
+_osrest="${_osver#*.}"
+_osminor="${_osrest%%.*}"
+case "$_osmajor" in (*[!0-9]*|'') _osmajor=0 ;; esac
+case "$_osminor" in (*[!0-9]*|'') _osminor=0 ;; esac
+if [ "$_osmajor" -lt "$MACOS_FLOOR_MAJOR" ] || { [ "$_osmajor" -eq "$MACOS_FLOOR_MAJOR" ] && [ "$_osminor" -lt "$MACOS_FLOOR_MINOR" ]; }; then
+  die "Kosmos needs macOS $MACOS_FLOOR_MAJOR.$MACOS_FLOOR_MINOR or newer. This Mac is on $_osver. Updating macOS in System Settings gets you there."
+fi
+info "macOS $_osver on $ARCH"
 ok
 
 # ⚠️ IDEMPOTENT, AND IT SAYS SO. Somebody who is not sure whether it worked will
@@ -288,16 +347,16 @@ mkdir -p "$KOSMOS_HOME" "$BIN_DIR"
 # multi-gigabyte developer-tools download in front of someone who was told this
 # takes one line. Ours is ~2MB, lives in this folder, and touches nothing else.
 step "Setting up the pieces Kosmos needs."
-if [ -x "$KOSMOS_HOME/tmux/bin/tmux" ]; then
-  info "the terminal manager is already here"
-else
-  info "installing a private copy of tmux (about 2MB, nothing system-wide)"
-  # On a release this fetches the checksum-verified bundle from the release
-  # URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
-  # signed, and saying "signed" would overclaim). Kept as a function so the
-  # clean-machine test can point it at a local file.
-  fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager."
-fi
+# ⚠️ FETCHED ON EVERY RUN, not only the first. The old guard skipped this
+# whole step when a tmux was already present, which froze every machine at
+# whatever tmux its FIRST install shipped -- no path to ever deliver a fix.
+# The staged swap makes re-fetching safe, and the download is ~700KB.
+info "installing a private copy of tmux (about 2MB, nothing system-wide)"
+# On a release this fetches the checksum-verified bundle from the release
+# URL (the binaries inside carry ad-hoc signatures; nothing here is Apple-
+# signed, and saying "signed" would overclaim). Kept as a function so the
+# clean-machine test can point it at a local file.
+fetch_tmux "$KOSMOS_HOME/tmux" || die "Could not set up the terminal manager."
 ok
 
 # ⚠️ TERMINFO IS PINNED RATHER THAN TRUSTED. The bundled ncurses carries a
@@ -396,7 +455,7 @@ make_app() {
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$ver</string>
   <key>CFBundleIconFile</key><string>Kosmos</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.5</string>
   <key>LSUIElement</key><false/>
 </dict></plist>
 PLIST
@@ -419,8 +478,13 @@ fi
 LAUNCH
   chmod +x "$target/MacOS/Kosmos" || return 1
 
-  # The icon is optional so the installer never fails for the want of artwork.
-  [ -f "$KOSMOS_HOME/Kosmos.icns" ] && cp "$KOSMOS_HOME/Kosmos.icns" "$target/Resources/Kosmos.icns"
+  # The icon is optional so the installer never fails for the want of
+  # artwork; it ships inside the bundle at app/assets/ when it exists. Until
+  # the artwork lands the app shows the generic icon -- tracked on the
+  # launch list, since the icon rationale above is only satisfied by a real
+  # one. (CFBundleIconFile pointing at a file that is absent is harmless:
+  # macOS falls back to the generic icon either way.)
+  [ -f "$KOSMOS_HOME/app/assets/Kosmos.icns" ] && cp "$KOSMOS_HOME/app/assets/Kosmos.icns" "$target/Resources/Kosmos.icns"
 
   # ⚠️ TELL macOS THE APP EXISTS. A freshly created bundle is not in the
   # LaunchServices database, and until it is, it can show a generic icon or

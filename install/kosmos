@@ -94,7 +94,12 @@ running_pid() {
   pid="$(cat "$PIDFILE" 2>/dev/null)" || return 1
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  ps -p "$pid" -o command= 2>/dev/null | grep -q "app/server.js" || return 1
+  # Pipe-free for the same pipefail/SIGPIPE reason healthy() documents;
+  # ps output is one short line, but the pattern is banned, not the size.
+  case "$(ps -p "$pid" -o command= 2>/dev/null)" in
+    *"app/server.js"*) ;;
+    *) return 1 ;;
+  esac
   printf '%s' "$pid"
 }
 
@@ -112,12 +117,12 @@ cmd_start() {
   say "Bringing the board up."
   # Detached from this terminal, with everything it prints kept in a log so a
   # problem produces a transcript rather than a vanished window.
-  # ⚠️ stdin FROM /dev/null AND FD 3 CLOSED, measured against the installer:
-  # setup.sh saves its screen stream on fd 3, the server inherited it, and a
-  # `curl | sh` install then NEVER RETURNED -- the terminal sat open until
-  # the server died, because the shell's pipe could not reach EOF while the
-  # server held the descriptor. The server needs no terminal and no
-  # installer plumbing; it gets neither.
+  # ⚠️ stdin FROM /dev/null AND FD 3 CLOSED. An earlier installer saved its
+  # screen stream on fd 3; the server inherited it and a `curl | sh` install
+  # NEVER RETURNED -- the shell's pipe could not reach EOF while the server
+  # held the descriptor (measured). The installer no longer opens fd 3, but
+  # any CALLER might: the server needs no terminal and no caller's plumbing,
+  # so it gets neither, whoever launched it.
   PORT="$PORT" nohup "$NODE" "$APP" </dev/null >> "$BOARD_LOG" 2>&1 3>&- &
   printf '%s' "$!" > "$PIDFILE"
   # ⚠️ WAIT FOR THE BOARD TO ANSWER, NOT FOR THE PROCESS TO EXIST. A pid that

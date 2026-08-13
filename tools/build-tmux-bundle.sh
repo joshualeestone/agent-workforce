@@ -44,12 +44,18 @@
 #            system location. That converts an unknown into a known, which is
 #            cheaper than testing the unknown on every macOS version.
 #
-# Usage:  tools/build-tmux-bundle.sh [output-dir]
-# Output: <out>/bin/tmux and <out>/lib/*.dylib, ad-hoc signed, relocatable.
+# Usage:  tools/build-tmux-bundle.sh [output-dir]        (default: dist)
+# Output: <out>/tmux-bundle/{bin,lib,VERSION,THIRD-PARTY-NOTICES.txt} and
+#         <out>/tmux-<arch>.tar.gz (+ .sha256), ad-hoc signed, relocatable.
 
 set -euo pipefail
 
-OUT="${1:-dist/tmux-bundle}"
+# ⚠️ Same argument shape as build-kosmos-bundle.sh: $1 is the OUTPUT dir;
+# the staged bundle lands in a subdirectory and the tarball beside it. The
+# old shape ($1 = the bundle dir, tarball in its PARENT) wrote artifacts one
+# level above where the caller pointed.
+OUTDIR="${1:-dist}"
+OUT="$OUTDIR/tmux-bundle"
 SRC_TMUX="${TMUX_SOURCE:-$(command -v tmux || true)}"
 
 if [ -z "$SRC_TMUX" ] || [ ! -x "$SRC_TMUX" ]; then
@@ -136,11 +142,17 @@ echo "==> ad-hoc signing"
 codesign -f -s - "$OUT"/lib/*.dylib "$OUT/bin/tmux" 2>&1 | sed 's/^/    /'
 
 echo "==> verifying"
-if otool -L "$OUT/bin/tmux" | tail -n +2 | awk '{print $1}' | grep -qE '^/opt/|^/usr/local/'; then
-  echo "FAIL: a Homebrew load path survived. This bundle would break on a clean Mac." >&2
-  otool -L "$OUT/bin/tmux" >&2
-  exit 1
-fi
+# ⚠️ EVERY binary in the bundle, not only tmux: collect() is recursive
+# precisely because a bundled dylib can depend on another non-system one,
+# and repoint() silences install_name_tool, so a dylib that kept a Homebrew
+# load path would otherwise pass this build and break on a clean Mac.
+for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
+  if otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -qE '^/opt/|^/usr/local/'; then
+    echo "FAIL: a Homebrew load path survived in $(basename "$f"). This bundle would break on a clean Mac." >&2
+    otool -L "$f" >&2
+    exit 1
+  fi
+done
 # ⚠️ VERIFY THE SIGNATURE EXPLICITLY. This is the step that was silently skipped
 # when the script died early, and an unsigned arm64 binary will not execute at
 # all. Checking it here turns that failure from "mysterious crash on a stranger's
@@ -153,12 +165,56 @@ echo "==> ok: $(du -sh "$OUT" | cut -f1) at $OUT"
 echo "    load paths:"
 otool -L "$OUT/bin/tmux" | tail -n +2 | sed 's/^/      /'
 
+# ---- the deployment floor, gated ---------------------------------------------
+# ⚠️ A binary copied off a build machine inherits that machine's OS as its
+# minimum: this exact bundle, built from this Mac's Homebrew tmux, stamps
+# minos 26.0 (measured with otool) and dyld would load it on NOTHING older,
+# while the installer promises macOS 13.5. The floor is read out of every
+# artifact and compared, so the promise and the binaries cannot drift apart
+# silently. Until a tmux built against the floor SDK is sourced, a release
+# build of this bundle FAILS here on purpose; KOSMOS_ALLOW_MINOS=1 permits
+# a LOCAL TEST BUILD only.
+FLOOR_MAJOR=13; FLOOR_MINOR=5
+for f in "$OUT/bin/tmux" "$OUT"/lib/*.dylib; do
+  minos="$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{v=1} v && /minos/{print $2; exit}')"
+  [ -n "$minos" ] || continue
+  major="${minos%%.*}"; minor="${minos#*.}"; minor="${minor%%.*}"
+  if [ "$major" -gt "$FLOOR_MAJOR" ] || { [ "$major" -eq "$FLOOR_MAJOR" ] && [ "$minor" -gt "$FLOOR_MINOR" ]; }; then
+    if [ -n "${KOSMOS_ALLOW_MINOS:-}" ]; then
+      echo "    WARN: $(basename "$f") needs macOS $minos > floor $FLOOR_MAJOR.$FLOOR_MINOR (allowed: TEST BUILD)"
+    else
+      echo "FAIL: $(basename "$f") requires macOS $minos, above the installer's $FLOOR_MAJOR.$FLOOR_MINOR floor." >&2
+      echo "      Source binaries built for the floor (see the header), or KOSMOS_ALLOW_MINOS=1 for a local test build." >&2
+      exit 1
+    fi
+  fi
+done
+
+# ---- what shipped, recorded ---------------------------------------------------
+# The Node half of a release is pinned and checksummed; the tmux half must at
+# least RECORD what a user got, or no report is ever traceable to a binary.
+{
+  echo "tmux:   $("$OUT/bin/tmux" -V 2>/dev/null || echo unknown)"
+  echo "source: $SRC_TMUX"
+  echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ) on macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
+} > "$OUT/VERSION"
+
+# ---- third-party notices -------------------------------------------------------
+# The tarball redistributes tmux, ncurses, libevent and utf8proc binaries;
+# all four licences require their notices to travel with the binaries.
+NOTICES="$(dirname "$0")/third-party-notices.txt"
+if [ ! -f "$NOTICES" ]; then
+  echo "FAIL: $NOTICES is missing; the bundle may not ship binaries without their licence notices." >&2
+  exit 1
+fi
+cp "$NOTICES" "$OUT/THIRD-PARTY-NOTICES.txt"
+
 # ---- the tarball the installer downloads, and its checksum -------------------
 # ⚠️ The .sha256 is not decoration: install/setup.sh REFUSES a download whose
 # checksum file is missing or mismatched, so publishing the tarball without
 # this file next to it bricks the install on purpose.
 ARCH="$(uname -m)"
-TARBALL="$(dirname "$OUT")/tmux-$ARCH.tar.gz"
-tar -czf "$TARBALL" -C "$OUT" bin lib
+TARBALL="$OUTDIR/tmux-$ARCH.tar.gz"
+tar -czf "$TARBALL" -C "$OUT" bin lib VERSION THIRD-PARTY-NOTICES.txt
 ( cd "$(dirname "$TARBALL")" && shasum -a 256 "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256" )
 echo "==> packed: $(du -sh "$TARBALL" | cut -f1) at $TARBALL (+ .sha256)"
