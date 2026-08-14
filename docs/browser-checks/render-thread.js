@@ -669,13 +669,32 @@ async function main() {
       const ids = ['pj-screen', 'pj-question-text', 'pj-say', 'pj-send', 'pj-thread-who'];
       return ids.map((id) => {
         const el = document.getElementById(id);
-        if (!el) return { id, there: false };
-        el.focus();
-        return { id, there: true, focused: document.activeElement === el, hidden: el.hidden };
+        if (!el) return { id, there: false, tabIndex: null };
+        return { id, there: true, tabIndex: el.tabIndex, hidden: el.hidden };
       });
     });
+    /**
+     * ⚠️ THE FIRST VERSION MEASURED THE WRONG THING, twice over, and passed
+     * with `tabindex="0"` DELETED from the page.
+     *
+     * `el.focus()` asks whether an element can be focused PROGRAMMATICALLY,
+     * which a scrollable div can be either way — it says nothing about whether
+     * a person pressing Tab will ever reach it. And Chromium 127+ makes
+     * keyboard-focusable scrollers automatic, so the browser under the check
+     * disagreed with the browser the product opens in: the installer opens the
+     * DEFAULT browser, which on this machine is Safari, where the attribute is
+     * load-bearing. A check that passes on the one engine nobody opens this app
+     * in is not a check.
+     *
+     * `tabIndex` is the property the attribute actually sets, read off the live
+     * element, and it is the same answer in every engine. The missing-id case
+     * is a FAILURE now too: `!f.there || …` passed for an id that is not on the
+     * page at all, so renaming an element would have left it reporting itself
+     * reachable forever.
+     */
     for (const f of focusable) {
-      check(!f.there || f.hidden || f.focused, `${f.id} can be reached from the keyboard`);
+      check(f.there === true && f.tabIndex >= 0,
+        `${f.id} is reachable from the keyboard (tabIndex ${f.tabIndex})`);
     }
   } finally {
     await browser.close();

@@ -435,18 +435,18 @@ test('an unreadable thread file is an ERROR, never an empty conversation', () =>
   const file = chat.threadFile('damaged', 'casey');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '{ not json at all');
-  assert.throws(() => chat.readThread('damaged', 'casey'), (err) => err.code === 'UNREADABLE');
+  assert.throws(() => chat.readThread('damaged', 'casey'), (err) => err.code === 'UNPARSEABLE');
   // And the shape is checked too: a file that parses but is not a thread must
   // not read as "you have said nothing to this agent".
   fs.writeFileSync(file, JSON.stringify({ agent: 'casey' }));
-  assert.throws(() => chat.readThread('damaged', 'casey'), (err) => err.code === 'UNREADABLE');
+  assert.throws(() => chat.readThread('damaged', 'casey'), (err) => err.code === 'UNPARSEABLE');
 });
 
 test('a thread filed under a different agent is refused rather than rendered as this one’s', () => {
   const file = chat.threadFile('mixed', 'casey');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ project: 'mixed', agent: 'mara', messages: [{ text: 'not casey’s' }] }));
-  assert.throws(() => chat.readThread('mixed', 'casey'), (err) => err.code === 'UNREADABLE');
+  assert.throws(() => chat.readThread('mixed', 'casey'), (err) => err.code === 'UNPARSEABLE');
 });
 
 test('a full thread REFUSES to record rather than dropping the oldest thing the person wrote', () => {
@@ -1348,7 +1348,73 @@ test('an unconfirmed send does not also assert WHERE the message is sitting', ()
     const verdict = chat.deliver('casey', 'hello', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.UNCONFIRMED);
     assert.equal(verdict.paneNote, 'it was mid-task');
-    assert.ok(!/sits in its composer/.test(verdict.paneNote + ' ' + verdict.because),
-      'the unconfirmed verdict still says where the message is sitting');
+    /**
+     * ⚠️ THIS ASSERTION COULD NOT FAIL, and the reason is one letter of tense.
+     * It searched for "sits in its composer" across the note AND the reason —
+     * but the reason says "may be SITTING in its composer unsent", which never
+     * matched, and the note it was really about no longer contains the clause
+     * at all. A negative assertion aimed at text that cannot appear is a green
+     * tick for nothing.
+     *
+     * What it means is: the NOTE stops asserting where the message ended up,
+     * while the REASON is still allowed to say "may be sitting" — because that
+     * one is hedged, and hedged is the whole difference.
+     */
+    assert.equal(verdict.paneNote, 'it was mid-task');
+    assert.ok(!/composer/.test(verdict.paneNote),
+      'the note still says where the message ended up');
+    assert.match(verdict.because, /may be sitting in its composer unsent/,
+      'the hedged reason is allowed to say it, and is the control that this text exists at all');
   });
+});
+
+test('a file we cannot READ right now is not treated as a file that is DAMAGED', () => {
+  /**
+   * ⚠️ THE DESTRUCTIVE CONFLATION, and it was measured before it was fixed:
+   * `chmod 000` on a healthy six-message thread plus one send renamed the good
+   * conversation aside as `.damaged` and replaced it with an empty one, while
+   * the screen asserted damage that nothing had established.
+   *
+   * `readThread` throws for four reasons and only three of them mean the file
+   * is bad. A `readFileSync` that failed — EACCES here, EMFILE or EIO on a
+   * loaded machine — says nothing at all about the CONTENTS. The repair for
+   * genuine damage is destructive, so it must never fire for a transient
+   * problem that the next send will simply not have.
+   */
+  const file = chat.threadFile('unreadablenow', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (const text of ['one', 'two', 'three']) {
+    chat.appendMessage('unreadablenow', 'casey', { text, delivery: { state: chat.DELIVERY.PLACED } });
+  }
+  const before = fs.readFileSync(file, 'utf8');
+
+  fs.chmodSync(file, 0o000);
+  let refused;
+  try {
+    // The control: the read really is failing for this reason, not another.
+    assert.throws(() => chat.readThread('unreadablenow', 'casey'), (err) => err.code === 'UNREADABLE');
+    refused = chat.appendMessage('unreadablenow', 'casey', {
+      text: 'while unreadable', delivery: { state: chat.DELIVERY.PLACED },
+    });
+  } finally {
+    fs.chmodSync(file, 0o644);
+  }
+
+  assert.equal(refused.recorded, false, 'a message was recorded over a file we could not read');
+  assert.match(refused.because, /cannot read this conversation/);
+  assert.equal(refused.supersededBecause, null,
+    'a file we merely could not read was reported as an earlier one set aside');
+  // ⚠️ NOTHING MOVED. The whole defect was the good file being renamed away.
+  const asides = fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.damaged'));
+  assert.deepEqual(asides, [], 'an intact conversation was set aside as damaged');
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the conversation was rewritten');
+
+  // And the next send, once the transient problem is gone, just works.
+  const after = chat.appendMessage('unreadablenow', 'casey', {
+    text: 'after it cleared', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(after.recorded, true);
+  assert.deepEqual(chat.readThread('unreadablenow', 'casey').messages.map((m) => m.text),
+    ['one', 'two', 'three', 'after it cleared'], 'the history did not survive the transient failure');
 });

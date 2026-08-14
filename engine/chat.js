@@ -891,12 +891,12 @@ function readThread(projectId, agent, bornAt) {
     parsed = JSON.parse(raw);
   } catch {
     const damaged = new Error('this conversation is there but we cannot make sense of it');
-    damaged.code = 'UNREADABLE';
+    damaged.code = 'UNPARSEABLE';
     throw damaged;
   }
   if (!parsed || !Array.isArray(parsed.messages)) {
     const damaged = new Error('this conversation is there but we cannot make sense of it');
-    damaged.code = 'UNREADABLE';
+    damaged.code = 'UNPARSEABLE';
     throw damaged;
   }
   /**
@@ -907,7 +907,7 @@ function readThread(projectId, agent, bornAt) {
    */
   if (parsed.agent !== String(agent)) {
     const wrong = new Error('this conversation is filed under a different agent');
-    wrong.code = 'UNREADABLE';
+    wrong.code = 'UNPARSEABLE';
     throw wrong;
   }
   /**
@@ -1156,7 +1156,7 @@ function appendLocked(projectId, agent, entry, bornAt) {
       }
       existing = { messages: [] };
       supersededBecause = 'an earlier project had this name; its messages have been kept aside.';
-    } else if (err && err.code === 'UNREADABLE') {
+    } else if (err && err.code === 'UNPARSEABLE') {
       /**
        * ⚠️ A DAMAGED FILE LOCKED RECORDING OUT FOREVER, and the argument
        * against that is already written three paragraphs up: refusing forever
@@ -1170,6 +1170,21 @@ function appendLocked(projectId, agent, entry, bornAt) {
        * this conversation starts again. The suffix differs from the
        * `projectBornAt` one on purpose, so the two kinds of aside can never be
        * mistaken for each other on disk or collide.
+       *
+       * ⚠️ `UNPARSEABLE`, NOT `UNREADABLE`, AND THE SPLIT IS THE WHOLE POINT.
+       * The first version of this branch caught both, and `readThread` throws
+       * `UNREADABLE` for a `readFileSync` that failed on an INTACT file —
+       * EACCES, EMFILE, EIO. Measured: `chmod 000` on a healthy six-message
+       * thread plus one send renamed it aside as `.damaged` and replaced the
+       * conversation with an empty one, while the screen asserted damage
+       * nothing had established. A transient permission problem is not a
+       * corrupt file, and the destructive repair for one must never fire for
+       * the other.
+       *
+       * `readThread` was already writing two different SENTENCES for these two
+       * cases ("we cannot read this conversation right now" versus "it is there
+       * but we cannot make sense of it"); the distinction existed in the prose
+       * and not in the code. It is in the code now.
        */
       const moved = supersede(projectId, agent, 'damaged');
       if (!moved.ok) {
@@ -1334,3 +1349,18 @@ module.exports = {
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,
 };
+
+/**
+ * ⚠️ READABLE, so a fixture can ASSERT this seam is armed the way it believes.
+ *
+ * `engine/create.js` exports its own `DRY_RUN`, and `thread-server.js` asserts
+ * it — which is exactly what caught that file one line away from making a real
+ * launchd job on this machine. The same fixture then called
+ * `chat.setDryRun(false)` with no way to check what it had done, so two seams
+ * in one file were held to different standards, and the one that types into a
+ * live agent was the unguarded one.
+ *
+ * A GETTER rather than the flag's value: it changes at runtime, and a snapshot
+ * exported at load would answer about the past.
+ */
+Object.defineProperty(module.exports, 'DRY_RUN', { get: () => DRY_RUN, enumerable: true });

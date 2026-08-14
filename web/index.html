@@ -4220,9 +4220,25 @@ function paintThread(body) {
      * key we can file under. Sending WORKS; only the keeping does not, and the
      * difference is the whole sentence.
      */
+    /**
+     * ⚠️ IT SAYS ONLY WHAT IT KNOWS: the KEEPING. An earlier version added
+     * "Messages you send are delivered to its session" — a standing,
+     * present-tense promise about DELIVERY, from a state that fires purely on
+     * the SHAPE OF THE NAME and knows nothing about whether the agent is
+     * reachable. Measured: a member `MyBot` with no such session answers
+     * `could_not` on every send, while this line kept promising delivery. On
+     * that screen the promise sat between a membership row reading "we have
+     * never seen an agent by this name" and a viewport reading "we cannot see
+     * its screen" — three statements about one agent, one of them ours and
+     * wrong. It is in the committed screenshot, which I looked at and read for
+     * the new sentence rather than against the rest of the page.
+     *
+     * Whether a message got there is the per-send verdict's job, and that
+     * verdict is already correct on every path. This line stays out of it.
+     */
     setLive(msgs, '<p class="fhint">Kosmos cannot keep a conversation for an agent named '
       + esc(body.agent && body.agent.sessionName ? body.agent.sessionName : name)
-      + '. Messages you send are delivered to its session, and are not kept here.</p>');
+      + '; nothing sent here is kept.</p>');
   } else if (body.messages === null) {
     // ⚠️ `null` is "we could not read them", which is NOT "you have said
     // nothing". Painting an empty list here would be the same failure as

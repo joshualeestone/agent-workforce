@@ -1035,6 +1035,13 @@ test('an agent whose name cannot be FILED under is told the truth, not the two f
         assert.deepEqual(body.messages, [], `${name}: an empty list is the honest shape when no file exists`);
         assert.equal(body.historyOther, false, `${name}: this is not an earlier project's conversation`);
         assert.match(body.historyBecause, /agent name we can keep a thread under/);
+        // ⚠️ AND IT PROMISES NOTHING ABOUT DELIVERY. This state fires on the
+        // SHAPE OF THE NAME and knows nothing about whether the agent is
+        // reachable — a member with no such session answers could_not on every
+        // send, so a standing 'messages are delivered' promise here is false
+        // exactly when the person most needs the screen to be right.
+        assert.ok(!/delivered/i.test(JSON.stringify(body)),
+          );
 
         // ⚠️ AND SENDING STILL WORKS. The words reach the agent's session; only
         // the keeping does not, and the send-time answer says both.

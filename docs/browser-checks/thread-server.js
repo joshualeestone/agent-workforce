@@ -182,7 +182,17 @@ chat.setRunner((args) => {
   }
   return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
 });
+/**
+ * ⚠️ ASSERTED, LIKE THE CREATION SEAM BELOW. `setDryRun(false)` was called here
+ * with nothing to check it against — so the seam that TYPES INTO A LIVE AGENT
+ * was the unguarded one, while its neighbour (which only makes folders) was
+ * the one whose state this file verifies. That asymmetry is backwards. `chat`
+ * exports its flag now, and both seams answer for themselves.
+ */
 chat.setDryRun(false);
+if (chat.DRY_RUN !== false) {
+  throw new Error('chat is still in dry-run: this fixture would report deliveries it never made. Refusing.');
+}
 
 /**
  * The CREATION seam, armed the other way round.
