@@ -864,3 +864,63 @@ test('the folder route answers as JSON with a query string, like every sibling',
   const res = await req('/api/project-folder?name=Lease&t=1');
   assert.ok(res.type.includes('application/json'), res.type);
 });
+
+test('a send we could not confirm is NOT reported as a failure, or the person sends it twice', async () => {
+  reset();
+  /**
+   * ⚠️ THE WHOLE POINT OF THE THIRD STATE, at the route. The text reached the
+   * composer and the Enter did not go through — so "could not deliver" is both
+   * untrue and dangerous: the obvious next thing a person does is send it
+   * again, and on a permission prompt the second copy answers a question the
+   * first one already answered.
+   */
+  await withThread(fleet.agent('zeta', { state: 'idle' }),
+    [said(), { ran: true, spawnFailed: false, status: 1, out: '', err: 'no current session' }],
+    async ({ project }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'answer this' }));
+      assert.equal(body.delivery.state, 'unconfirmed');
+      assert.notEqual(body.delivery.state, 'could_not');
+      assert.match(body.delivery.because, /may be sitting in its composer unsent/);
+      // ⚠️ The route carries the FACT. Where to look is the page's sentence,
+      // asserted on the rendered page by docs/browser-checks/render-thread.js —
+      // an engine that also gave instructions produced three of them, stacked,
+      // pointing somewhere different each time.
+      assert.ok(!/screen is below|conversation above/i.test(body.delivery.because));
+      // And it is kept that way, so a later read does not turn it back into a
+      // failure the person would act on.
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(back.messages[0].delivery.state, 'unconfirmed');
+    });
+});
+
+test('a send that never reached tmux IS a failure, because re-sending is the right thing to do', async () => {
+  reset();
+  // The other side of the line: nothing was typed, so the person should send
+  // again — and the verdict is the one that tells them so.
+  await withThread(fleet.agent('zeta', { state: 'idle' }),
+    [{ ran: false, spawnFailed: true, status: null, out: '', err: 'ENOENT' }],
+    async ({ project }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'hello' }));
+      assert.equal(body.delivery.state, 'could_not');
+    });
+});
+
+test('the verdict says what the agent was doing, and keeps saying it on every later read', async () => {
+  reset();
+  // ⚠️ "Placed into zeta's session" is exactly true and invites the wrong
+  // inference — that zeta is reading it. A Claude that is mid-task does not
+  // consume its composer until it finishes.
+  await withThread(fleet.agent('zeta', { state: 'working' }), [said(), said(), said('screen')],
+    async ({ project, board }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'have a look at the lease' }));
+      assert.equal(body.delivery.state, 'placed');
+      // Against the card the fixture really produced, so the thread and the
+      // agent's own card cannot disagree about what it was doing.
+      assert.equal(body.delivery.paneState, board.card('zeta').state);
+      assert.match(body.delivery.paneNote, /mid-task/);
+
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.match(back.messages[0].delivery.paneNote, /mid-task/,
+        '"why did nothing happen?" is asked an hour later, so the note has to survive the read');
+    });
+});

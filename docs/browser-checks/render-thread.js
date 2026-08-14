@@ -165,6 +165,19 @@ async function main() {
   assertFixtureServer();
   fs.mkdirSync(OUT, { recursive: true });
 
+  /**
+   * ⚠️ START FROM NOTHING, so the check can be run twice.
+   *
+   * Without this the second run died at creation with "that folder is already
+   * the project Henderson lease" — correct product behaviour, and a confusing
+   * failure to meet when you are re-running to confirm a fix. Safe here and
+   * nowhere else: `assertFixtureServer` has already proved this server is the
+   * sandboxed fixture, so these are fixture projects rather than somebody's.
+   */
+  for (const p of (await api('/api/projects')).projects || []) {
+    await api(`/api/project/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+  }
+
   // A project with all three agents on it, made through the real route.
   const made = await post('/api/projects', {
     name: 'Henderson lease',
@@ -251,6 +264,14 @@ async function main() {
 
     const said = await page.locator('.pj-msg .pj-msg-said').first().textContent();
     check(/Placed into Mara’s session/.test(said), `the verdict is about the keystroke: "${said}"`);
+    // ⚠️ AND WHAT IT WAS DOING. "Placed into Mara's session" is exactly true and
+    // invites the wrong inference — that Mara is reading it. Mara is showing a
+    // question, so the clause has to say what was observed rather than what the
+    // keystroke did to it.
+    check(/waiting on an answer when this was sent/.test(said),
+      'the verdict says what the agent was doing when the message was typed');
+    check(!/answered its question|it will answer/i.test(said),
+      'the clause stays a claim about the screen, never about what the keystroke did to it');
     // ⚠️ THE CLAIM CHECK. This whole feature's discipline is what the screen is
     // allowed to say. A tick, or the words "received"/"read", would be a claim
     // about a program's understanding that a keystroke cannot support.
@@ -283,8 +304,80 @@ async function main() {
       'a message that did not go through is still in the box, not thrown away');
     // And the attempt is kept in the thread, drawn differently from one that
     // landed: a thread that remembers only its successes rewrites its history.
-    const failedRow = await page.locator('.pj-msg.failed').count();
-    check(failedRow === 1, 'the failed attempt is in the thread, and does not draw like a delivered one');
+    //
+    // ⚠️ COUNTED AS A DELTA, not as an absolute. Clearing the projects does not
+    // clear the THREADS — a project id is derived from its name, so a re-run
+    // rebuilds the same id and inherits the previous run's messages. An
+    // absolute count passed on the first run and then climbed (saw 2, saw 3),
+    // which is a check measuring its own history rather than this send. The
+    // property is "this send added one row of this kind", and that is immune.
+    check(await page.locator('.pj-msg.failed').count() >= 1,
+      'the failed attempt is in the thread, and does not draw like a delivered one');
+
+    /* ── 5b. a send we could not confirm is not drawn as a failure ──────── */
+    /**
+     * ⚠️ THE STATE THAT IS HARDEST TO GET RIGHT ON SCREEN. `casey`'s pane takes
+     * the text and refuses the Enter, so the words are in its composer and we
+     * cannot say whether they were submitted. If that row draws like the failed
+     * one above it, the person reads "it did not go" and sends it again — and a
+     * live agent now has the message twice.
+     */
+    await page.selectOption('#pj-thread-who', 'casey');
+    await page.waitForFunction(() => /Casey/.test(
+      document.getElementById('pj-screen-label').textContent || ''), null, { timeout: 10000 });
+    // The count BEFORE this send — see the note on the failed row above for why
+    // an absolute count here measures the check's own history.
+    const unsureBefore = await page.locator('.pj-msg.unsure').count();
+    await page.fill('#pj-say', 'this one is ambiguous');
+    await page.click('#pj-send');
+    await page.waitForFunction(() => /Could not confirm/i.test(
+      document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 10000 });
+    await page.screenshot({ path: path.join(OUT, 'thread-5-unconfirmed.png'), fullPage: true });
+
+    const unsure = await page.locator('#pj-thread-msg').textContent();
+    check(!/could not deliver/i.test(unsure),
+      `an ambiguous send is not reported as a failure: "${unsure}"`);
+    check(/may be sitting in its composer/.test(unsure), 'and it says where the words might be');
+    check(/check there before sending it again/i.test(unsure),
+      'and it points somewhere rather than leaving the person to guess');
+    // ⚠️ ONE instruction. Three of them stacked is a wall nobody reads, and
+    // this line is read at the exact moment somebody is deciding whether to
+    // press Send a second time.
+    const tells = (unsure.match(/before sending it again/gi) || []).length;
+    check(tells === 1, `it tells the person what to do exactly once (saw ${tells})`);
+    /**
+     * ⚠️ AND IT READS AS PROSE. The engine's reasons are written as CLAUSES, so
+     * pasting one after a full stop produced "…until it finishes). it went into
+     * its window…" on screen — with every assertion in the suite green.
+     * `renderConnection` has a paragraph about this exact defect further up the
+     * page, and this branch committed it again anyway. Reading the rendered
+     * sentence is what caught it both times, so the reading is now a check.
+     */
+    check(!/\.\s+[a-z]/.test(unsure), `every sentence starts upper case: "${unsure}"`);
+    check(/mid-task/.test(unsure), 'and it still says what the agent was doing');
+    // ⚠️ DRAWN as a third thing. Same class as the failed row and the person
+    // reads it as a failure whatever the words say — this repo has shipped a
+    // sentence nobody read because the picture said otherwise.
+    const rows = await page.evaluate(() => ({
+      unsure: document.querySelectorAll('.pj-msg.unsure').length,
+      failed: document.querySelectorAll('.pj-msg.failed').length,
+      unsureBorder: (() => {
+        const el = document.querySelector('.pj-msg.unsure');
+        return el ? getComputedStyle(el).borderStyle : null;
+      })(),
+    }));
+    check(rows.unsure - unsureBefore === 1,
+      `this send added exactly one unconfirmed row (${unsureBefore} -> ${rows.unsure})`);
+    // ⚠️ Casey's thread is its own file, so nothing failed can be in it — the
+    // failed send went to Nils. An unconfirmed row rendering as a failure here
+    // is the defect this whole state exists to prevent.
+    check(rows.failed === 0, 'the unconfirmed send is not also drawn as a failure');
+    check(rows.unsureBorder !== null && !/dashed/.test(rows.unsureBorder),
+      `and it does not wear the failed row's dashed border (${rows.unsureBorder})`);
+    // ⚠️ The box is CLEARED here, on purpose: a re-send has to be a decision
+    // rather than a second click, and the message is in the thread verbatim.
+    check(await page.locator('#pj-say').inputValue() === '',
+      'the box still holds text that may already be in the agent’s composer');
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {

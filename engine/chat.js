@@ -17,6 +17,8 @@
  * | we put this text into that pane | ✅ | tmux took it and said so |
  * | this is what that pane shows right now | ✅ | we captured it a moment ago |
  * | we could not deliver, and why | ✅ | the failure is ours to report |
+ * | we typed it and cannot tell whether it landed | ✅ | our own blind spot, stated |
+ * | what the pane was doing when we typed | ✅ | the board's own verdict, at that moment |
  * | the agent **read** it, received it, or will act on it | ❌ | never |
  *
  * The fourth is false in three separate ways, which is why it gets a paragraph
@@ -59,12 +61,37 @@ const store = require('./store');
 const status = require('./status');
 
 /**
- * Where a send got to. Two values and no third, because unlike a status read
- * there is no "we did not look": a send either happened or it did not, and the
- * reason travels with the refusal.
+ * Where a send got to. THREE values, and the third is the one that matters.
+ *
+ * ⚠️ AN EARLIER VERSION OF THIS BLOCK HAD TWO, and said so proudly: "unlike a
+ * status read there is no 'we did not look' — a send either happened or it did
+ * not". That is wrong about the only part of this module that touches another
+ * program. We drive tmux, and tmux can take a keystroke and then fail to tell
+ * us so: a timed-out call may have delivered, and an Enter we could not send
+ * leaves the person's words sitting in a live composer.
+ *
+ * With two states those cases render as failure — and the person does the
+ * obvious thing, which is send it again. Now the agent has the message twice,
+ * and on the screen this feature exists for (a permission prompt) the second
+ * copy answers a question the first one already answered. **The verdict has to
+ * make re-sending feel unnecessary exactly when it is**, which is a thing only
+ * a third state can say.
+ *
+ * The line between them is not "how bad it was". It is one checkable fact:
+ *
+ *   COULD_NOT    — NOTHING of the person's text reached the pane. Re-sending is
+ *                  safe, and is what they should do.
+ *   UNCONFIRMED  — something may have. Re-sending may duplicate it. Look at the
+ *                  screen, which is on this very page, before deciding.
+ *   PLACED       — tmux took the text and the Enter, and said so.
+ *
+ * Every refusal that happens BEFORE the first keystroke (a bad message, a pane
+ * we will not type into, a roster we could not read) is `COULD_NOT` by that
+ * rule, and the tests assert the invariant rather than the enumeration.
  */
 const DELIVERY = {
   PLACED: 'placed',
+  UNCONFIRMED: 'unconfirmed',
   COULD_NOT: 'could_not',
 };
 
@@ -138,27 +165,75 @@ function tmuxBin() {
 }
 
 /**
- * One tmux call. Returns the same `{ran, status, out, err}` shape
- * `status.shDetail` produces, so a caller can tell "we could not run tmux at
- * all" from "tmux ran and refused" — which are two different sentences to the
- * person, and the second one is the one that names the pane.
+ * One tmux call. Returns the `{ran, status, out, err}` shape `status.shDetail`
+ * produces, plus one field of its own — see `spawnFailed`.
+ *
+ * ⚠️ `spawnFailed` IS THE THIRD OUTCOME, and it exists because two very
+ * different things both arrive as `ran: false`:
+ *
+ *   - tmux could not be EXECUTED (it is not on PATH, it is not executable). The
+ *     process never started, so nothing was typed anywhere. That is a definite
+ *     answer.
+ *   - tmux was executed and did not come back inside the timeout. It may have
+ *     delivered the keystroke and been slow to exit. That is NOT a definite
+ *     answer, and reporting it as a failure is what makes somebody re-send a
+ *     message that already landed.
+ *
+ * Collapsing the two is exactly the "cannot tell a failure from a thing I could
+ * not see" shape this codebase is built against, and here it costs the person a
+ * duplicate message in a live agent's composer.
  */
 function tmux(args) {
   if (runner) return runner(args);
   if (DRY_RUN) {
-    return { ran: false, status: null, out: '', err: 'this copy of Kosmos is running without permission to type into agents' };
+    return {
+      ran: false,
+      spawnFailed: true, // nothing was executed, so nothing was typed
+      status: null,
+      out: '',
+      err: 'this copy of Kosmos is running without permission to type into agents',
+    };
   }
   try {
-    return { ran: true, status: 0, out: execFileSync(tmuxBin(), args, { encoding: 'utf8', timeout: 5000 }), err: '' };
+    return { ran: true, spawnFailed: false, status: 0, out: execFileSync(tmuxBin(), args, { encoding: 'utf8', timeout: 5000 }), err: '' };
   } catch (e) {
     const code = e && typeof e.status === 'number' ? e.status : null;
     return {
       ran: code !== null,
+      spawnFailed: code === null && spawnFailure(e),
       status: code,
       out: (e && e.stdout && e.stdout.toString()) || '',
       err: (e && e.stderr && e.stderr.toString()) || '',
     };
   }
+}
+
+/**
+ * Did this `execFileSync` failure mean the process NEVER STARTED?
+ *
+ * ⚠️ PURE AND EXPORTED, so it can be tested against errors a real
+ * `execFileSync` really threw rather than against a fixture of what I remember
+ * it throwing. The whole three-state distinction rests on this one boolean: get
+ * it wrong towards `true` and a slow tmux is reported as "your message did not
+ * arrive", which is the duplicate-send this feature is guarding against.
+ *
+ * ⚠️ MEASURED, on this machine, Node v25.6.1 — because the exit status alone
+ * cannot answer it. Both of the first two rows carry `status: null`:
+ *
+ *   ENOENT   (no such binary)   code ENOENT     status null  signal null
+ *   ETIMEDOUT (killed at the timeout)           status null  signal SIGTERM
+ *   a non-zero exit             code undefined  status 3     signal null
+ *   EACCES   (not executable)   code EACCES     status null  signal null
+ *
+ * So the discriminator is the SIGNAL: a child killed by one was running. Note
+ * `killed` was `undefined` in every row above, so a check written on that
+ * property alone would have called a timeout a spawn failure — which is the
+ * defect this function exists to prevent, and it is why the signal is read
+ * first.
+ */
+function spawnFailure(err) {
+  if (!err) return true;
+  return !(err.signal || err.killed);
 }
 
 /* ── what may be sent ────────────────────────────────────────────────────── */
@@ -276,50 +351,131 @@ function paneTarget(card) {
 /* ── the send ────────────────────────────────────────────────────────────── */
 
 /**
+ * What the agent was doing when we typed into it.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE NO-QUEUE DESIGN IS HONEST ABOUT THE SEND AND
+ * MISLEADING ABOUT THE READ. "Placed into casey's session just now" is exactly
+ * true and invites precisely the wrong inference: that casey is now reading it.
+ * A Claude that is mid-task does not consume its composer until it finishes, so
+ * a message sent to a working agent sits there — possibly for minutes. Without
+ * this clause the person waits, sees nothing happen, and concludes the feature
+ * is broken.
+ *
+ * ⚠️ THE STATE IS THE BOARD'S, not a second reading. It comes off the roster
+ * card the send was authorised against — the same `classify` verdict the agent's
+ * own card shows — so the thread and the card cannot disagree about what an
+ * agent was doing. And it is a claim about WHEN THIS WAS SENT, not about now:
+ * the roster is one observation, taken at the start of the request, and the
+ * wording says so rather than implying a live reading.
+ *
+ * ⚠️ `unknown` GETS A SENTENCE TOO. It is the state that must never read as
+ * fine, and silence here would render identically to an idle agent.
+ */
+function waitingNote(state) {
+  switch (state) {
+    case 'working':
+      return 'it was mid-task, so this sits in its composer until it finishes';
+    case 'needs_you':
+      // Deliberately weaker than "this answered its question". We observed a
+      // question on its screen; what its interface did with the keystroke is
+      // not something we watched.
+      return 'it was waiting on an answer when this was sent';
+    case 'rate_limited':
+      return 'it was paused on a usage limit, so it may not act on this until that clears';
+    case 'idle':
+      return 'it was sitting at its prompt';
+    default:
+      return 'we could not tell what it was doing when this was sent';
+  }
+}
+
+/**
  * Put one message into one agent's session.
  *
  * ⚠️ NEVER THROWS, and never claims more than a keystroke. The return is a
- * verdict a screen can render as-is: `placed` means tmux accepted both sends,
- * `could_not` carries the reason. Neither says the agent knows anything.
+ * verdict a screen can render as-is. See `DELIVERY` for the three states and
+ * for the one fact that separates them: whether anything of the person's text
+ * could have reached the pane. None of them says the agent knows anything.
  */
 function deliver(sessionName, raw, roster) {
   const at = new Date().toISOString();
   const problem = messageProblem(raw);
-  if (problem) return { state: DELIVERY.COULD_NOT, because: problem, at };
+  if (problem) return { state: DELIVERY.COULD_NOT, because: problem, at, paneState: null, paneNote: null };
 
   const allowed = addressable(sessionName, roster);
-  if (!allowed.ok) return { state: DELIVERY.COULD_NOT, because: allowed.because, at };
+  if (!allowed.ok) {
+    return { state: DELIVERY.COULD_NOT, because: allowed.because, at, paneState: null, paneNote: null };
+  }
 
   const text = cleanMessage(raw);
   const target = paneTarget(allowed.card);
+  // Read BEFORE the send, from the card the send was authorised against, so the
+  // note describes the pane we typed into rather than whatever it became while
+  // we were typing.
+  const paneState = allowed.card.state || null;
+  const paneNote = waitingNote(paneState);
 
   // ⚠️ TWO CALLS, in this order, never one. `-l` types characters literally, so
   // folding Enter into the same call would type the five letters E-n-t-e-r.
   // connect.js sends a sign-in code exactly this way for exactly this reason.
   const typed = tmux(['send-keys', '-t', target, '-l', '--', text]);
-  if (!typed.ran || typed.status !== 0) {
+  if (typed.ran && typed.status !== 0) {
+    // tmux ran and refused: it did not type anything. Re-sending is safe.
     return {
       state: DELIVERY.COULD_NOT,
       because: refusalReason(typed, 'we could not type it into its window'),
-      at,
+      at, paneState, paneNote,
+    };
+  }
+  if (!typed.ran && typed.spawnFailed) {
+    // tmux never started, so no keystroke exists. Also safe to re-send.
+    return {
+      state: DELIVERY.COULD_NOT,
+      because: refusalReason(typed, 'we could not reach tmux to type it'),
+      at, paneState, paneNote,
+    };
+  }
+  if (!typed.ran) {
+    /**
+     * ⚠️ THE AMBIGUOUS ONE, AND THE REASON THIS STATE EXISTS. tmux was started
+     * and did not answer inside the timeout — which it can do having already
+     * delivered the keystroke. Rendering that as a failure is what makes
+     * somebody re-send, and this send may have landed.
+     */
+    return {
+      state: DELIVERY.UNCONFIRMED,
+      // ⚠️ THE FACT ONLY. What to DO about it belongs to the screen, which
+      // knows where its own viewport is; a module that also gave instructions
+      // produced a three-clause wall on screen, each clause telling the person
+      // to look somewhere different.
+      because: 'we typed it in and its window did not answer us in time, so we cannot tell whether it arrived',
+      at, paneState, paneNote,
     };
   }
   const entered = tmux(['send-keys', '-t', target, 'Enter']);
   if (!entered.ran || entered.status !== 0) {
     /**
-     * ⚠️ A DISTINCT, WORSE STATE, and it gets its own sentence. The text is
-     * sitting in the agent's composer unsent — so "we could not deliver it" is
-     * true but incomplete, and the person needs to know something of theirs is
-     * on that screen. Collapsing this into the generic failure would leave them
-     * to discover a half-typed message later and wonder who wrote it.
+     * ⚠️ EVERYTHING PAST THE FIRST KEYSTROKE IS UNCONFIRMED, whatever the
+     * second call said, and the previous version of this branch got it wrong in
+     * a way worth keeping written down. It answered `could_not` with the
+     * sentence "it is sitting there unsent" — two over-claims in one line. The
+     * text HAD gone in, so "could not deliver" invited a re-send that would
+     * duplicate it; and "sitting there unsent" is a settled claim about where
+     * somebody's words are, made in the one case where we could not read the
+     * pane to find out. The pane may have taken the Enter and died, or never
+     * seen it.
+     *
+     * What we know is exactly this: we typed it, and we cannot say whether it
+     * was submitted. The screen is on the same page, so the honest instruction
+     * is to look rather than to guess for them.
      */
     return {
-      state: DELIVERY.COULD_NOT,
-      because: refusalReason(entered, 'it went into its window but we could not press Enter, so it is sitting there unsent'),
-      at,
+      state: DELIVERY.UNCONFIRMED,
+      because: refusalReason(entered, 'it went into its window and we could not press Enter, so it may be sitting in its composer unsent'),
+      at, paneState, paneNote,
     };
   }
-  return { state: DELIVERY.PLACED, because: null, at };
+  return { state: DELIVERY.PLACED, because: null, at, paneState, paneNote };
 }
 
 /**
@@ -531,6 +687,16 @@ function appendMessage(projectId, agent, entry) {
       delivery: {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
+        /**
+         * ⚠️ THE PANE'S STATE IS KEPT WITH THE MESSAGE, not just shown once.
+         * "It was mid-task when you sent this" is the answer to the question
+         * somebody asks an hour later — why did nothing happen? — and a note
+         * that lives only in the moment of sending cannot answer it. It is a
+         * record of what was observed then, which is why the sentence is past
+         * tense and stays past tense on every later read.
+         */
+        paneState: (entry && entry.delivery && entry.delivery.paneState) || null,
+        paneNote: (entry && entry.delivery && entry.delivery.paneNote) || null,
       },
     }],
   };
@@ -589,7 +755,7 @@ function looksLikeManager(role) {
 module.exports = {
   DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget,
-  deliver, viewport, questionIn,
+  deliver, viewport, questionIn, waitingNote, spawnFailure,
   threadFile, readThread, appendMessage,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,

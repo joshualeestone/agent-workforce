@@ -271,6 +271,14 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* A message that did not get there does not draw like one that did. */
 .pj-msg.failed { border-style: dashed; }
 .pj-msg.failed .pj-msg-said { color: var(--label); }
+/* ⚠️ AND ONE WE COULD NOT CONFIRM DRAWS AS NEITHER. It is not a failure — the
+   text may already be in that agent's composer — so it must not wear the
+   failed row's dashed border, which reads as "this did not happen" and is what
+   makes somebody send it again. A left rule marks it as needing a look, the
+   same vocabulary `.pj-question` uses for the other thing on this screen that
+   wants the person's eyes. */
+.pj-msg.unsure { border-left: 2px solid var(--warn-ink); }
+.pj-msg.unsure .pj-msg-said { color: var(--label); }
 .pj-say { margin-top: var(--space-5); }
 #pj-say { flex: 1 1 auto; }
 /* The one-click route from a card that says "Needs you". 24px minimum, WCAG 2.2
@@ -4015,18 +4023,61 @@ function pjWhen(at) {
   }
 }
 
+/**
+ * One message, and what became of it.
+ *
+ * ⚠️ THREE STATES, DRAWN AS THREE THINGS. `unconfirmed` is not a flavour of
+ * failure: it means the text may already be in that agent's composer, so a row
+ * that looked like a failure would invite the re-send that duplicates it. It
+ * gets its own class and its own sentence, and the sentence points at the
+ * screen further down this page rather than guessing on the person's behalf.
+ *
+ * ⚠️ AND THE VERDICT IS A SENTENCE, not a tick. A tick beside a message is read
+ * as "it arrived and was understood", and all we know is that tmux took the
+ * keystroke.
+ */
 function pjMsg(m, name) {
   const d = (m && m.delivery) || {};
-  const placed = d.state === 'placed';
-  // ⚠️ THE SENTENCE, not a tick. A tick beside a message is read as "it arrived
-  // and was understood", and all we know is that tmux took the keystroke.
-  const said = placed
-    ? 'Placed into ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + '.'
-    : 'Could not deliver: ' + esc(d.because || 'we could not put it into its session') + '.';
-  return '<div class="pj-msg' + (placed ? '' : ' failed') + '">'
+  // The pane's state when we typed. "Placed into casey's session" is exactly
+  // true and invites the wrong inference — that casey is reading it — so a
+  // message sent to a busy agent says where it is sitting.
+  const note = d.paneNote ? ' (' + esc(d.paneNote) + ')' : '';
+  let said;
+  let mark;
+  if (d.state === 'placed') {
+    mark = '';
+    said = 'Placed into ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + note + '.';
+  } else if (d.state === 'unconfirmed') {
+    mark = ' unsure';
+    // A row is history, so it states what happened and stops. The instruction
+    // about what to do lives in the live message line, once.
+    said = 'Could not confirm this reached ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + note + '. '
+      + esc(pjSentence(d.because || 'we typed it and could not tell whether it arrived'));
+  } else {
+    mark = ' failed';
+    said = 'Could not deliver: ' + esc(d.because || 'we could not put it into its session') + '.';
+  }
+  return '<div class="pj-msg' + mark + '">'
     + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
     + '<span class="pj-msg-said">' + said + '</span>'
     + '</div>';
+}
+
+/**
+ * A `because` from the engine, made into a sentence.
+ *
+ * ⚠️ THE ENGINE'S REASONS ARE WRITTEN AS CLAUSES, and pasting one straight
+ * after a full stop produces exactly what `renderConnection` has a paragraph
+ * about further up this file: "…until it finishes). it went into its window…".
+ * That defect shipped once on this branch too, and every assertion passed —
+ * caught by reading the rendered sentence, which is the whole reason the render
+ * check exists. Same fix as the precedent: capitalise and terminate at the point
+ * of use, and leave the engine's strings alone so they still compose elsewhere.
+ */
+function pjSentence(because) {
+  const said = String(because || '').trim();
+  if (!said) return '';
+  return said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.');
 }
 
 /** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
@@ -4216,18 +4267,41 @@ async function pjSend() {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not send that');
     const name = pjNameOf(p, who);
-    const placed = body.delivery && body.delivery.state === 'placed';
-    if (placed) {
-      // ⚠️ Cleared only on a delivery that happened. Emptying the box after a
-      // failure throws away what the person wrote at the exact moment they most
-      // need it back.
+    const state = (body.delivery && body.delivery.state) || 'could_not';
+    const note = (body.delivery && body.delivery.paneNote) ? ' (' + body.delivery.paneNote + ')' : '';
+    // ⚠️ RECORDING AND DELIVERING ARE TWO ACTS. A message that went through and
+    // could not be written down must say both, or the thread quietly loses a
+    // message it delivered.
+    const kept = body.recorded ? '' : ' We could not add it to this conversation'
+      + (body.recordedBecause ? ' (' + body.recordedBecause + ')' : '') + '.';
+
+    /**
+     * ⚠️ THE BOX KEEPS YOUR TEXT EXACTLY WHEN RE-SENDING IS SAFE, which is the
+     * whole rule and is worth stating as one:
+     *
+     *   placed       — it went. Clear it.
+     *   could_not    — nothing was typed, so sending again is the right thing to
+     *                  do and emptying the box would throw the person's words
+     *                  away at the moment they most need them.
+     *   unconfirmed  — it may already be in that agent's composer. Clearing is
+     *                  deliberate: it makes a re-send a decision rather than a
+     *                  second click, which is what stops the same message
+     *                  arriving twice. Nothing is lost — it is in the thread
+     *                  above, verbatim, and the sentence says so.
+     */
+    if (state === 'placed') {
       box.value = '';
-      msg.textContent = 'Placed into ' + name + '’s session just now.'
-        // ⚠️ RECORDING AND DELIVERING ARE TWO ACTS. A message that went through
-        // and could not be written down must say both, or the thread quietly
-        // loses a message it delivered.
-        + (body.recorded ? '' : ' We could not add it to this conversation'
-          + (body.recordedBecause ? ' (' + body.recordedBecause + ')' : '') + '.');
+      msg.textContent = 'Placed into ' + name + '’s session just now' + note + '.' + kept;
+    } else if (state === 'unconfirmed') {
+      box.value = '';
+      // ⚠️ ONE instruction, not three. The first version stacked the engine's
+      // "look at its screen" on top of the page's "it is in the conversation
+      // above" on top of "it may be sitting in its composer unsent" — a wall
+      // that sent the person to three different places. The engine states the
+      // fact; this line says the one thing to do about it.
+      msg.textContent = 'Could not confirm this reached ' + name + '’s session' + note + '. '
+        + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
+        + ' Its screen is below — check there before sending it again. Your message is kept above.' + kept;
     } else {
       msg.textContent = 'Could not deliver: '
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.';

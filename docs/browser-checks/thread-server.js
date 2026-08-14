@@ -113,8 +113,8 @@ chat.setRunner((args) => {
     const target = String(args[args.length - 3] || '').replace(/^=/, '');
     const screen = SCREENS[target];
     return screen === undefined
-      ? { ran: true, status: 1, out: '', err: `can't find pane: ${target}` }
-      : { ran: true, status: 0, out: screen, err: '' };
+      ? { ran: true, spawnFailed: false, status: 1, out: '', err: `can't find pane: ${target}` }
+      : { ran: true, spawnFailed: false, status: 0, out: screen, err: '' };
   }
   if (args[0] === 'send-keys') {
     process.stdout.write('SEND-KEYS ' + JSON.stringify(args) + '\n');
@@ -127,11 +127,22 @@ chat.setRunner((args) => {
      * is the commonest real cause.
      */
     if (String(args[2] || '').includes('nils')) {
-      return { ran: true, status: 1, out: '', err: "can't find pane: =nils-discord:0.0" };
+      return { ran: true, spawnFailed: false, status: 1, out: '', err: "can't find pane: =nils-discord:0.0" };
     }
-    return { ran: true, status: 0, out: '', err: '' };
+    /**
+     * ⚠️ AND ONE AGENT PRODUCES THE AMBIGUOUS OUTCOME, which is the state that
+     * is hardest to get right on screen and therefore the one most worth
+     * looking at. `casey` takes the text and then fails on the Enter — so the
+     * words are in its composer and we cannot say whether they were submitted.
+     * A fixture with only success and only failure would photograph two thirds
+     * of this feature.
+     */
+    if (String(args[2] || '').includes('casey') && args[args.length - 1] === 'Enter') {
+      return { ran: true, spawnFailed: false, status: 1, out: '', err: 'no current session' };
+    }
+    return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
   }
-  return { ran: true, status: 0, out: '', err: '' };
+  return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
 });
 chat.setDryRun(false);
 

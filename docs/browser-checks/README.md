@@ -186,3 +186,39 @@ everywhere they look and wrong on this screen, whose terminal boxes sit on
 text on it measured 1.00 and the check reported two failures on a page that has
 none. `flatten()` composites the whole stack. A false failure is cheaper than a
 false pass and still costs the next person an hour.
+
+### The three delivery states
+
+`thread-server.js` arranges one agent per outcome, because a fixture where every
+send succeeds photographs a third of this feature:
+
+| agent | what its pane does | verdict |
+|---|---|---|
+| `mara` | takes both sends | `placed` |
+| `nils` | refuses the text (`can't find pane`) | `could_not` |
+| `casey` | takes the text, refuses the Enter | `unconfirmed` |
+
+The middle column is the whole distinction: `could_not` means **nothing** of the
+person's text reached the pane, so re-sending is safe. `unconfirmed` means it may
+already be in that agent's composer, and a screen that draws it as a failure is
+what makes somebody send it twice — on a permission prompt, the second copy
+answers a question the first one already answered.
+
+**What the second round of this check caught**, again none of it visible to an
+assertion that reads source:
+
+- The engine's `because` strings are written as CLAUSES, so pasting one after a
+  full stop rendered "…until it finishes). it went into its window…". This is
+  the defect `renderConnection` has a whole paragraph about further up
+  `web/index.html`, committed again on the branch that quotes it. The check now
+  asserts no sentence starts lower case.
+- Three stacked instructions ("look at its screen", "it is in the conversation
+  above", "it may be sitting in its composer unsent") pointing the person at
+  three different places, in the message they read while deciding whether to
+  press Send again. The engine states the fact; the page gives the one
+  instruction. The check counts them.
+- Two of the row counts were absolutes, and clearing the projects does not clear
+  the THREADS — a project id is derived from its name, so a re-run rebuilds the
+  same id and inherits the previous run's messages. The counts climbed on every
+  run (1, then 2, then 3). They are deltas now, which is the property that was
+  meant all along: *this send* added one row.

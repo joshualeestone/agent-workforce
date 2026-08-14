@@ -1706,6 +1706,13 @@ const server = http.createServer((req, res) => {
          * a message that was not sent, which is what one merged boolean would
          * have done. Same reason create and delete each carry two try blocks.
          */
+        /**
+         * ⚠️ THE VERDICT IS PASSED THROUGH WHOLE, three states and all, and
+         * nothing here narrows it to a boolean. `unconfirmed` is not a flavour
+         * of failure: it means the text may already be in that agent's
+         * composer, so a screen that folded it into `could_not` would invite
+         * the re-send that duplicates it. See `DELIVERY` in engine/chat.js.
+         */
         const delivery = chat.deliver(name, body.text, roster);
         const kept = chat.appendMessage(id, name, { text: body.text, at: delivery.at, delivery });
         sendJson(res, 200, {

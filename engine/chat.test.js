@@ -58,8 +58,12 @@ function fakeTmux(answers) {
   return fn;
 }
 
-function ok(out) { return { ran: true, status: 0, out: out || '', err: '' }; }
-function refused(err) { return { ran: true, status: 1, out: '', err: err || 'no' }; }
+function ok(out) { return { ran: true, spawnFailed: false, status: 0, out: out || '', err: '' }; }
+function refused(err) { return { ran: true, spawnFailed: false, status: 1, out: '', err: err || 'no' }; }
+/** tmux was executed and did not answer in time: it may have delivered. */
+function timedOut() { return { ran: false, spawnFailed: false, status: null, out: '', err: 'timed out' }; }
+/** tmux never started, so no keystroke exists. */
+function neverRan() { return { ran: false, spawnFailed: true, status: null, out: '', err: 'ENOENT' }; }
 
 /** Arm the seam with a scripted tmux, the only way this suite may "send". */
 function arm(answers) {
@@ -217,12 +221,21 @@ test('tmux refusing the text is a could_not that carries what tmux said', () => 
   });
 });
 
-test('text that landed but could not be SUBMITTED gets its own sentence, because something of theirs is on that screen', () => {
+test('text that landed but could not be SUBMITTED is UNCONFIRMED, not a failure', () => {
+  /**
+   * ⚠️ THIS TEST USED TO ASSERT THE OPPOSITE, and it was wrong in the way the
+   * third state exists to fix. It expected `could_not` with "it is sitting
+   * there unsent" — so the screen told somebody their message had not gone,
+   * about a send whose text had demonstrably reached the composer. The obvious
+   * next thing a person does is send it again, and now a live agent has it
+   * twice; on a permission prompt, the second copy answers a question the first
+   * one already answered.
+   */
   withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
     arm([ok(), refused('no current session')]);
     const verdict = chat.deliver('casey', 'hello', board.agents);
-    assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
-    assert.match(verdict.because, /sitting there unsent/);
+    assert.equal(verdict.state, chat.DELIVERY.UNCONFIRMED);
+    assert.match(verdict.because, /may be sitting in its composer unsent/);
   });
 });
 
@@ -512,4 +525,214 @@ test('the manager match is loose on purpose: a role is a sentence somebody typed
   assert.ok(!chat.looksLikeManager('researcher'));
   assert.ok(!chat.looksLikeManager(''));
   assert.ok(!chat.looksLikeManager(null));
+});
+
+/* ── three states, and the fact that separates them ──────────────────────── */
+
+/**
+ * ⚠️ THE INVARIANT, ASSERTED AS AN INVARIANT rather than as a list of cases.
+ *
+ * `could_not` means NOTHING of the person's text reached the pane, so
+ * re-sending is safe and is what they should do. Anything else that went wrong
+ * is `unconfirmed`. An enumeration of today's failure paths would go on passing
+ * the day somebody adds a fourth one on the wrong side of that line; this
+ * asserts the line itself, over every outcome the seam can produce.
+ */
+test('could_not NEVER means "we typed it and cannot tell": that is what unconfirmed is for', () => {
+  const outcomes = [
+    ['tmux refused the text', [refused("can't find pane")], chat.DELIVERY.COULD_NOT, 0],
+    ['tmux could not be run at all', [neverRan()], chat.DELIVERY.COULD_NOT, 0],
+    ['tmux took the text and did not answer', [timedOut()], chat.DELIVERY.UNCONFIRMED, 1],
+    ['the text landed and Enter was refused', [ok(), refused('no current session')], chat.DELIVERY.UNCONFIRMED, 1],
+    ['the text landed and Enter did not answer', [ok(), timedOut()], chat.DELIVERY.UNCONFIRMED, 1],
+    ['the text landed and Enter could not be run', [ok(), neverRan()], chat.DELIVERY.UNCONFIRMED, 1],
+    ['both went through', [ok(), ok()], chat.DELIVERY.PLACED, 1],
+  ];
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    for (const [what, answers, expected, mayHaveLanded] of outcomes) {
+      chat.resetForTests();
+      arm(answers.slice());
+      const verdict = chat.deliver('casey', 'hello', board.agents);
+      assert.equal(verdict.state, expected, `${what}: expected ${expected}, got ${verdict.state}`);
+      // The invariant, stated the other way round: a could_not is only allowed
+      // where nothing could possibly be on that screen.
+      if (verdict.state === chat.DELIVERY.COULD_NOT) {
+        assert.equal(mayHaveLanded, 0,
+          `${what}: answered could_not for a send whose text may have reached the pane`);
+      }
+    }
+  });
+});
+
+test('every refusal BEFORE the first keystroke is could_not, because re-sending is the right thing to do', () => {
+  // Nothing was typed on any of these paths, so the person should send again —
+  // and the verdict has to be the one that says so.
+  withFleet([
+    fleet.agent('casey', { state: 'stopped' }),
+    fleet.agent('mara', { state: 'needs_you', inMode: '1' }),
+  ], (board) => {
+    const before = [
+      ['an empty message', () => chat.deliver('casey', '   ', board.agents)],
+      ['a roster we could not read', () => chat.deliver('casey', 'hi', null)],
+      ['a name we cannot see', () => chat.deliver('nobody', 'hi', board.agents)],
+      ['a pane with no Claude in it', () => chat.deliver('casey', 'hi', board.agents)],
+      ['a pane in copy-mode', () => chat.deliver('mara', 'hi', board.agents)],
+    ];
+    for (const [what, send] of before) {
+      chat.resetForTests();
+      const tmux = arm([]);
+      assert.equal(send().state, chat.DELIVERY.COULD_NOT, what);
+      assert.equal(tmux.calls.length, 0, `${what}: something was typed on a path that refuses`);
+    }
+  });
+});
+
+test('an unconfirmed send states the FACT and hedges it, and leaves the instruction to the screen', () => {
+  /**
+   * ⚠️ TWO THINGS, and the second is a division of labour worth keeping.
+   *
+   * The sentence this replaced was "it is sitting there unsent" — a settled
+   * claim about where somebody's words are, made in the exact case where we
+   * could not read the pane to find out. It hedges now.
+   *
+   * And it stops there. A first version also appended "Its screen is below;
+   * look there before sending it again", which is an instruction from a module
+   * that does not know what is on the screen — and the page adds its own, so
+   * the person got three clauses pointing at three different places. The engine
+   * says what happened; the page says what to do about it, once. That split is
+   * asserted from both ends: here, and in `docs/browser-checks/render-thread.js`.
+   */
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    arm([ok(), refused("can't find pane: =casey-discord:0.0")]);
+    const verdict = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.UNCONFIRMED);
+    assert.match(verdict.because, /may be sitting in its composer unsent/);
+    assert.match(verdict.because, /can't find pane/, 'and it still carries what tmux said');
+    assert.ok(!/\bis sitting there\b/.test(verdict.because),
+      'it states where the words are as a certainty');
+    assert.ok(!/screen is below|look there|conversation above/i.test(verdict.because),
+      'the engine is telling the person where to look, which is the page’s job and the page also does it');
+  });
+});
+
+test('a timeout is not a spawn failure, and only one of them may say nothing was typed', () => {
+  // ⚠️ Both arrive as `ran: false` from execFileSync, and collapsing them is
+  // what turns "tmux was slow" into "your message did not arrive". The engine
+  // reads `spawnFailed`, which is set from the SIGNAL rather than inferred from
+  // a null exit status.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    chat.resetForTests(); arm([timedOut()]);
+    assert.equal(chat.deliver('casey', 'hi', board.agents).state, chat.DELIVERY.UNCONFIRMED);
+    chat.resetForTests(); arm([neverRan()]);
+    assert.equal(chat.deliver('casey', 'hi', board.agents).state, chat.DELIVERY.COULD_NOT);
+  });
+});
+
+/* ── what the pane was doing when we typed ───────────────────────────────── */
+
+test('the verdict carries what the agent was doing, taken from the board’s own verdict', () => {
+  /**
+   * ⚠️ WHY THIS LINE EXISTS. "Placed into casey's session just now" is exactly
+   * true and invites the wrong inference — that casey is reading it. A Claude
+   * that is mid-task does not consume its composer until it finishes, so the
+   * message sits there, and without this the person waits, sees nothing, and
+   * concludes the feature is broken.
+   */
+  withFleet([fleet.agent('casey', { state: 'working' })], (board) => {
+    arm([ok(), ok()]);
+    const verdict = chat.deliver('casey', 'have a look at the lease', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.PLACED);
+    // ⚠️ Against the card the fixture really produced, so the thread and the
+    // agent's own card cannot disagree about what it was doing.
+    assert.equal(verdict.paneState, board.card('casey').state);
+    assert.equal(verdict.paneState, 'working');
+    assert.match(verdict.paneNote, /mid-task/);
+    assert.match(verdict.paneNote, /sits in its composer until it finishes/);
+  });
+});
+
+test('an idle agent says so, so the two cases are told apart rather than both going unsaid', () => {
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    arm([ok(), ok()]);
+    const verdict = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(verdict.paneState, 'idle');
+    assert.match(verdict.paneNote, /sitting at its prompt/);
+    assert.ok(!/mid-task/.test(verdict.paneNote));
+  });
+});
+
+test('answering a question says what was OBSERVED, not what the keystroke did to it', () => {
+  // "It was waiting on an answer when this was sent" is a claim about a screen
+  // we read. "This answered its question" would be a claim about what a TUI did
+  // with a keystroke, which nobody watched.
+  withFleet([fleet.agent('mara', { state: 'needs_you' })], (board) => {
+    arm([ok(), ok()]);
+    const verdict = chat.deliver('mara', '1', board.agents);
+    assert.equal(verdict.paneState, 'needs_you');
+    assert.match(verdict.paneNote, /waiting on an answer when this was sent/);
+    assert.ok(!/answered/.test(verdict.paneNote), 'it claims the keystroke answered the question');
+  });
+});
+
+test('a state we could not read gets a sentence too, and never renders as an idle one', () => {
+  // `unknown` is the state that must never read as fine, and silence here would
+  // render identically to an agent sitting quietly at its prompt.
+  const said = chat.waitingNote('unknown');
+  assert.match(said, /could not tell what it was doing/);
+  assert.notEqual(said, chat.waitingNote('idle'));
+  // And an unrecognised value from a future detector falls to the same honest
+  // answer rather than to nothing at all.
+  assert.equal(chat.waitingNote('some_future_state'), said);
+  assert.equal(chat.waitingNote(null), said);
+});
+
+test('a rate-limited agent is told apart from a busy one, because the wait has a different cause', () => {
+  assert.match(chat.waitingNote('rate_limited'), /usage limit/);
+  assert.notEqual(chat.waitingNote('rate_limited'), chat.waitingNote('working'));
+});
+
+test('the note is kept WITH the message, so "why did nothing happen" is answerable later', () => {
+  const kept = chat.appendMessage('notes', 'casey', {
+    text: 'have a look at the lease',
+    delivery: {
+      state: chat.DELIVERY.PLACED,
+      because: null,
+      paneState: 'working',
+      paneNote: chat.waitingNote('working'),
+    },
+  });
+  assert.equal(kept.recorded, true);
+  const back = chat.readThread('notes', 'casey').messages[0];
+  assert.equal(back.delivery.paneState, 'working');
+  assert.match(back.delivery.paneNote, /mid-task/);
+});
+
+test('a slow tmux and a missing tmux are told apart from what execFileSync REALLY throws', () => {
+  /**
+   * ⚠️ AGAINST REAL ERRORS, not a fixture of what I remember Node throwing.
+   * The whole three-state distinction rests on this one boolean, and both of
+   * the cases it separates arrive with `status: null` — so a check written from
+   * memory, on the exit status or on `killed`, would have called a slow tmux a
+   * missing one and reported a delivered message as undelivered.
+   *
+   * These throw for real, here, so the day Node changes shape this fails
+   * instead of quietly reclassifying every timeout.
+   */
+  const { execFileSync } = require('node:child_process');
+  const caught = (fn) => { try { fn(); return null; } catch (err) { return err; } };
+
+  const missing = caught(() => execFileSync('/definitely/not/tmux', ['x'], { encoding: 'utf8', timeout: 5000 }));
+  assert.ok(missing, 'the control: running a binary that is not there has to throw');
+  assert.equal(chat.spawnFailure(missing), true, 'a binary that does not exist did start something');
+
+  const notExecutable = caught(() => execFileSync('/etc/hosts', [], { encoding: 'utf8', timeout: 5000 }));
+  assert.ok(notExecutable, 'the control: running a non-executable has to throw');
+  assert.equal(chat.spawnFailure(notExecutable), true);
+
+  // ⚠️ THE ONE THAT MATTERS. A process killed at the timeout WAS RUNNING, and
+  // may have done its work before we gave up on it.
+  const slow = caught(() => execFileSync('/bin/sleep', ['5'], { encoding: 'utf8', timeout: 200 }));
+  assert.ok(slow, 'the control: a command that outlives its timeout has to throw');
+  assert.equal(chat.spawnFailure(slow), false,
+    'a tmux that was merely slow is being reported as one that never ran');
 });
