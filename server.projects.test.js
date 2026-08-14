@@ -809,6 +809,12 @@ test('sending places the text into the agent’s own session, and says only that
         `the route answered a verdict the engine does not define: ${body.delivery.state}`);
       assert.equal(body.delivery.state, 'placed');
       assert.equal(body.recorded, true);
+      // The POST answers a VERDICT, not the record (round 38): it used to
+      // carry the whole thread (up to 1000 rows, ~2MB) in a `messages`
+      // field nothing read, on the sibling of the GET that round 36 had
+      // just bounded with TAIL. The page refreshes through the GET.
+      assert.ok(!('messages' in body),
+        'the POST response carries the thread again, an unread unbounded payload');
       /**
        * ⚠️ THE VOCABULARY IS ASSERTED, because the whole discipline of this
        * feature is what the answer is allowed to CLAIM: anything meaning

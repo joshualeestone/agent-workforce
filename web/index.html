@@ -4754,8 +4754,13 @@ async function pjSend() {
   // recipient mid-flight cleared the sent-line and then the landing
   // verdict named the previous agent under a picker showing a different
   // one -- two true things on screen disagreeing. paintThreadPicker
-  // recomputes this from the member list on the next paint, so the
-  // disable lasts exactly as long as the flight.
+  // recomputes this from the member list on the next paint -- which is
+  // the loadThread INSIDE the verdict handling, so the disable lasts
+  // until the first repaint after the verdict is painted, not to the end
+  // of the flight's finally (round 38 corrected this sentence: the old
+  // wording described a PJ_SENDING term the picker line does not have;
+  // safe because the verdict is on screen before that repaint and the
+  // change handler clears PJ_SENT_LINE).
   document.getElementById('pj-thread-who').disabled = true;
   msg.textContent = 'Sending…';
   const name = pjNameOf(p, who);
@@ -4882,8 +4887,17 @@ async function pjSend() {
        sentProject is retired IF it still holds exactly the text this send
        took, so returning to that project does not re-offer words the agent
        already has. Anything the person typed on top survives. */
+    /* ⚠️ TWO gates, deliberately unequal (round 38). The box clear keys on
+       the PROJECT alone: after leave-and-return to the SAME project, the
+       box holds this project's restored draft -- the very text this send
+       just placed -- and gating the clear on the full flightMoved() left
+       delivered words sitting armed in the box under no verdict line, an
+       invitation to send them twice. The paint gate below keeps BOTH
+       terms, because the thread view really was reset by the navigation.
+       A different project's draft is protected by the project term; text
+       typed on top is protected by the exact-match guard. */
     const clearSent = () => {
-      if (!flightMoved() && box.value.trim() === text) box.value = '';
+      if (PJ_CURRENT === sentProject && box.value.trim() === text) box.value = '';
       if ((PJ_DRAFTS[sentProject] || '').trim() === text) delete PJ_DRAFTS[sentProject];
     };
     if (state === 'placed') {

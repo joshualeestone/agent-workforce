@@ -423,7 +423,13 @@ function paneTarget(card) {
  * always `0` or `1`, so putting it last keeps the shape readable.
  */
 const VERIFY_KEYS = ['command', 'claim', 'inMode'];
-const VERIFY_FORMAT = VERIFY_KEYS
+/* A FUNCTION, not a require-time constant (round 38): `verifyAtSend`'s
+   column guard re-reads `status.PANE_COLUMNS` at call time, and a constant
+   computed at load can outlive the shape it describes -- the exported copy
+   and the guard could disagree about the same columns. Derived on demand,
+   the two cannot fork; the export below is a getter for the same reason
+   `DRY_RUN`'s is. */
+const verifyFormat = () => VERIFY_KEYS
   .map((key) => (status.PANE_COLUMNS.find((c) => c.key === key) || {}).fmt)
   .join('\t');
 
@@ -449,7 +455,7 @@ function verifyAtSend(card) {
     // send on the machine. Better to say so than to fail closed in silence.
     return { ok: false, because: 'we cannot work out how to check its window before typing, so we did not type anything' };
   }
-  const got = tmux(['display-message', '-p', '-t', paneTarget(card), VERIFY_FORMAT]);
+  const got = tmux(['display-message', '-p', '-t', paneTarget(card), verifyFormat()]);
   if (!got.ran || got.status !== 0) {
     return {
       ok: false,
@@ -1464,7 +1470,7 @@ function looksLikeManager(role) {
 module.exports = {
   DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget, wireText,
-  deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend, VERIFY_FORMAT,
+  deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend,
   threadFile, readThread, appendMessage, supersede, withThreadLock,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,
@@ -1484,3 +1490,5 @@ module.exports = {
  * exported at load would answer about the past.
  */
 Object.defineProperty(module.exports, 'DRY_RUN', { get: () => DRY_RUN, enumerable: true });
+// Same live-read contract as DRY_RUN, for the same fixture-assertable reason.
+Object.defineProperty(module.exports, 'VERIFY_FORMAT', { get: verifyFormat, enumerable: true });

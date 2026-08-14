@@ -2759,8 +2759,8 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // holds exactly that text.
     [/if \(inThread\) clearSent\(\);/,
      'the unconfirmed clear must still be gated on recorded (rounds 29/34/37)'],
-    [/if \(!flightMoved\(\) && box\.value\.trim\(\) === text\) box\.value = '';/,
-     'the box clear lost its sent-text or flight guard, so a verdict can delete words this send never took (rounds 29/37)'],
+    [/if \(PJ_CURRENT === sentProject && box\.value\.trim\(\) === text\) box\.value = '';/,
+     'the box clear must key on the takeoff PROJECT (not the full flight gate) plus the sent text: too narrow deletes another project\u2019s words, too wide leaves delivered words armed for a duplicate send (rounds 29/37/38)'],
     [/if \(\(PJ_DRAFTS\[sentProject\] \|\| ''\)\.trim\(\) === text\) delete PJ_DRAFTS\[sentProject\];/,
      'the parked-draft clear must key on the TAKEOFF project and the exact sent text (rounds 34/37: a programmatic clear fires no input event, so the map kept the sent text)'],
     // A bare clock time is only true today; a thread keeps a thousand rows.

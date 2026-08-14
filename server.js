@@ -1906,7 +1906,11 @@ const server = http.createServer((req, res) => {
           // Said out loud when an earlier project of this name had a
           // conversation: it was kept, and it is not this project's.
           supersededBecause: kept.supersededBecause || null,
-          messages: kept.messages || null,
+          // No `messages` here (round 38): nothing read it -- the page
+          // refreshes through the GET, which is also where the round-36
+          // TAIL bound lives. Carrying the whole record on the POST was
+          // both an unread API surface and an unbounded ~2MB payload the
+          // GET had already been bounded against.
           agentsUnreadable: roster === null,
         });
       })
