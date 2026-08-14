@@ -34,8 +34,19 @@ process.env.HOME = HOME;
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
+// ⚠️ THE FOURTH ROOT, and it is new on this branch. Creating a project with no
+// folder makes one under `~/Kosmos/Projects` — so without this the suite would
+// leave real directories in the operator's home, named after test fixtures. The
+// rule is every root the code writes to, and the code grew one.
+process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ Belt AND braces, same as chat.test.js (round 24): the echo stub above
+// is justified in-file for create.js and remove.js, so without this line
+// the only thing keeping a test process from typing into live agents was a
+// variable whose stated purpose is a different module. chat.js reads this
+// from its first require.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 // ⚠️ THAT VARIABLE DOES NOT STUB THE STATUS ENGINE, and a comment here used to
 // claim it did. `engine/status.js` calls `sh('tmux', …)` directly and never
@@ -424,16 +435,32 @@ test('a corrupt store does not kill the board, on any projects route', async () 
   // The app that watches the fleet dying on a plain read is worse than every
   // state the guards around it protect.
   await withCorruptStore(async () => {
+    // ⚠️ The THREAD routes are in this list. Its first version enumerated
+    // five routes under a name promising "any projects route", and the two
+    // thread routes plus the folder preview were not among them -- round 14
+    // replaced the thread GET's unreadable-500 with a 200 carrying an empty
+    // conversation and the suite stayed green. An enumerating test's name is
+    // a promise about the enumeration.
     const routes = [
       ['/api/projects', undefined],
       ['/api/project/anything', undefined],
       ['/api/project/anything/agent/mara', { method: 'POST', headers: { origin: base } }],
       ['/api/project/anything/agent/mara', { method: 'DELETE', headers: { origin: base } }],
       ['/api/project/anything', { method: 'DELETE', headers: { origin: base } }],
+      ['/api/project/anything/thread/mara', undefined],
+      ['/api/project/anything/thread/mara', {
+        method: 'POST', headers: { origin: base, 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'hello' }),
+      }],
     ];
     for (const [p, opts] of routes) {
       const res = await req(p, opts);
-      assert.ok(res.status >= 400, `${p} answered ${res.status}`);
+      // Exactly 500 (round 37): server.js argues at length that a store WE
+      // cannot read must not answer 400, because 400 puts "we will not
+      // overwrite your projects file" in front of somebody as if it were a
+      // complaint about what they had typed. `>= 400` could not hold that
+      // line -- inverting the status pick left it green.
+      assert.equal(res.status, 500, `${p} answered ${res.status}, and an unreadable store is OUR fault, not the request's`);
       assert.ok(res.type.includes('application/json'), `${p} must still answer as JSON`);
       assert.ok(!/"projects":\s*\[\]/.test(res.body), `${p} must not report an empty list for a store it cannot read`);
     }
@@ -591,4 +618,668 @@ test('an agent the person removed does not appear on a project row', async () =>
     try { fs.rmSync(path.join(require('./engine/store').ROOT, 'removed.json')); } catch { /* never written */ }
     board.restore();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Talking to ONE agent on ONE project
+//
+// ⚠️ EVERY TEST BELOW ARMS THE tmux SEAM EXPLICITLY, and that is not optional
+// here the way it is elsewhere in this file. `AGENT_WORKFORCE_TMUX_BIN` is
+// `/bin/echo` for these tests, and `/bin/echo` EXITS ZERO — so an unarmed send
+// would report `placed` for a keystroke that reached nothing, which is the one
+// verdict this whole feature exists not to invent. The seam is installed per
+// test and torn down in a `finally`, because a leaked runner would let a later
+// test in this process type into whatever tmux is really on the machine.
+// ---------------------------------------------------------------------------
+
+const chat = require('./engine/chat');
+
+/**
+ * Arm the chat seam with a scripted tmux, and hand back what was called.
+ *
+ * ⚠️ THE JUST-BEFORE-SENDING PROBE IS ANSWERED SEPARATELY, and healthy by
+ * default. `deliver` asks the pane about itself immediately before typing (see
+ * `verifyAtSend` in engine/chat.js), so without this the first scripted answer
+ * would be eaten by a read-only check and every send test would be measuring a
+ * refusal instead of the send it was written for. Tests that care about the
+ * probe pass one.
+ */
+function armChat(answers, probe) {
+  const calls = [];
+  const answerProbe = probe === undefined
+    ? { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' }
+    : probe;
+  chat.setRunner((args) => {
+    calls.push(args);
+    if (args[0] === 'display-message') return answerProbe;
+    return answers.length ? answers.shift() : { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+  });
+  chat.setDryRun(false);
+  // The sends only, so an assertion about what was typed is not confused by the
+  // read-only probe in front of it.
+  calls.sends = () => calls.filter((args) => args[0] === 'send-keys');
+  return calls;
+}
+const said = (out) => ({ ran: true, spawnFailed: false, status: 0, out: out || '', err: '' });
+
+/**
+ * A project with one agent on it, and the seam armed. Always torn down.
+ *
+ * ⚠️ THE THREAD STORE IS CLEARED TOO, and finding out why was worth the
+ * paragraph. `reset()` removes `projects.json` only, and a project id is
+ * derived from its NAME — so every test here rebuilt the SAME id and inherited
+ * the previous test's messages. Three tests read another test's history and two
+ * of them asserted the wrong verdict off it. A fixture that carries state
+ * between tests is measuring a world the next test did not arrange.
+ */
+async function withThread(spec, answers, fn) {
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  const calls = armChat(answers);
+  try {
+    const made = json(await post('/api/projects', {
+      name: 'Thread ' + spec.name, folder: folder('thread-' + spec.name), agents: [spec.name],
+    })).project;
+    return await fn({ board, calls, project: made });
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
+}
+
+test('the thread shows what the agent’s screen shows, labelled as the screen and not as speech', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'working' }), [said('Reading the lease\n· Working\n')],
+    async ({ project, calls }) => {
+      const res = await req(`/api/project/${project.id}/thread/zeta`);
+      assert.equal(res.status, 200);
+      const body = json(res);
+      assert.equal(body.agent.sessionName, 'zeta');
+      assert.equal(body.viewport.text, 'Reading the lease\n· Working');
+      assert.equal(body.viewport.because, null);
+      assert.deepEqual(body.messages, [], 'nothing has been said to it yet');
+      assert.equal(body.asking, false);
+      assert.equal(body.question, null);
+      // The capture is a capture, pinned to the exact pane.
+      assert.equal(calls[0][0], 'capture-pane');
+      assert.ok(calls[0].includes('-J'));
+      assert.ok(calls[0].some((a) => typeof a === 'string' && a.startsWith('=zeta-discord:')));
+    });
+});
+
+test('an agent the board calls "Needs you" hands the thread the question region', async () => {
+  reset();
+  // The stranded state: from the card that says "Needs you", the thread has to
+  // be able to show WHAT it is asking. Same screen, same markers.
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('I want to delete the old build folder.\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n')],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.agent.state, 'needs_you');
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the thread must not be empty under a card that says it is asking');
+      assert.match(body.question.text, /Do you want to proceed\?/);
+      assert.match(body.question.text, /delete the old build folder/);
+      assert.equal(body.questionBecause, null);
+    });
+});
+
+test('a card that says "Needs you" over a screen we cannot read SAYS so, rather than showing nothing', async () => {
+  reset();
+  // The two reads are milliseconds apart and the pane redraws between them. A
+  // silent empty question box under a "Needs you" card is the stranded state
+  // rebuilt one step further in.
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [{ ran: true, status: 1, out: '', err: 'no server running' }],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      // ⚠️ The COULD-NOT-READ sentence, not the not-in-the-capture one. One
+      // string used to serve both facts, so a failed capture rendered as a
+      // claim about what IS on a screen nobody read (round 14). The two
+      // sentences are asserted apart here and in the test below.
+      assert.match(body.questionBecause, /could not read its screen just now/);
+      assert.doesNotMatch(body.questionBecause, /cannot find the question on its screen/);
+      assert.equal(body.viewport.text, null);
+      assert.match(body.viewport.because, /could not read its window/);
+    });
+});
+
+test('a "Needs you" card over a READABLE screen missing the markers says that, not could-not-read', async () => {
+  reset();
+  // The other half of the split: the capture SUCCEEDED and the question
+  // markers are not in it (the pane redrew between the two reads).
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('an ordinary screen with no prompt on it')],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      assert.match(body.questionBecause, /cannot find the question on its screen/);
+      assert.doesNotMatch(body.questionBecause, /could not read its screen/);
+      assert.ok(body.viewport.text != null, 'control: the screen really was read');
+    });
+});
+
+test('a POST to a project that is not there is the 404 sentence, not a raw throw', async () => {
+  reset();
+  // Round 14: deleting this guard left the suite green -- the GET sibling was
+  // covered "on both verbs" in name only. Without it the caller gets a 400
+  // carrying a raw TypeError string.
+  const res = await post('/api/project/never-existed/thread/zeta', { text: 'hello' });
+  assert.equal(res.status, 404);
+  assert.match(json(res).error, /no project by that name/);
+  assert.ok(!/TypeError|undefined/.test(json(res).error), 'our sentence, never a raw throw');
+});
+
+test('a blind roster reaches BOTH thread routes as agentsUnreadable, never as an empty fleet', async () => {
+  reset();
+  // Round 14: hardcoding agentsUnreadable:false on both thread routes left
+  // the suite green -- fleet.blind() was only ever pointed at /api/projects.
+  let blind = null;
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      try {
+        blind = fleet.blind();
+        const got = json(await req(`/api/project/${project.id}/thread/zeta`));
+        assert.equal(got.agentsUnreadable, true, 'the GET must say the look failed');
+        const sent = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'while blind' }));
+        assert.equal(sent.agentsUnreadable, true, 'the POST must say the look failed');
+      } finally {
+        if (blind) blind.restore();
+      }
+    });
+});
+
+test('sending places the text into the agent’s own session, and says only that', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said()],
+    async ({ project, calls }) => {
+      const res = await post(`/api/project/${project.id}/thread/zeta`, { text: 'have a look at the lease' });
+      assert.equal(res.status, 200);
+      const body = json(res);
+      // ⚠️ Membership FIRST, then the exact state (round 24): asserted the
+      // other way round, the membership check sat below a line that had
+      // already pinned 'placed', so it could only fail if the line above
+      // already had -- unfalsifiable, inside the docblock diagnosing
+      // exactly that shape.
+      assert.ok(Object.values(chat.DELIVERY).includes(body.delivery.state),
+        `the route answered a verdict the engine does not define: ${body.delivery.state}`);
+      assert.equal(body.delivery.state, 'placed');
+      assert.equal(body.recorded, true);
+      // The POST answers a VERDICT, not the record (round 38): it used to
+      // carry the whole thread (up to 1000 rows, ~2MB) in a `messages`
+      // field nothing read, on the sibling of the GET that round 36 had
+      // just bounded with TAIL. The page refreshes through the GET.
+      assert.ok(!('messages' in body),
+        'the POST response carries the thread again, an unread unbounded payload');
+      /**
+       * ⚠️ THE VOCABULARY IS ASSERTED, because the whole discipline of this
+       * feature is what the answer is allowed to CLAIM: anything meaning
+       * "received", "read" or "delivered to the agent" would be a claim about a
+       * program's understanding that a keystroke cannot support.
+       *
+       * ⚠️ AGAINST THE ENGINE'S OWN SET, and the previous version of this line
+       * was wrong twice over. It hard-coded `['placed', 'could_not']` under a
+       * comment calling them "the only two verdicts" — which had stopped being
+       * true when `unconfirmed` landed, so the enumeration was stale — and it
+       * sat three lines below an assertion that the state equals `placed`, so
+       * it could not have failed whatever the set said. An unfalsifiable check
+       * guarding a stale fact is worse than no check: it reads as coverage.
+       */
+      const sends = calls.sends();
+      assert.equal(sends[0][0], 'send-keys');
+      assert.equal(sends[0][sends[0].length - 1], 'have a look at the lease');
+      assert.deepEqual(sends[1].slice(-1), ['Enter']);
+      // And the pane was asked about itself first, read-only, before any keystroke.
+      assert.equal(calls[0][0], 'display-message');
+    });
+});
+
+test('reusing a project name moves the earlier conversation aside, and the ROUTE says so', async () => {
+  reset();
+  // ⚠️ The engine's supersededBecause was pinned (engine/chat.test.js) and
+  // the route forwarding it was pinned by nothing: nulling the field in
+  // server.js left 718 tests green (round 24) while the page lost the one
+  // sentence accounting for a file renamed on somebody's disk. This drives
+  // the whole story over routes: same name, freed id, second conversation.
+  const spec = fleet.agent('zeta', { state: 'idle' });
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  armChat([said(), said()]);
+  try {
+    const first = json(await post('/api/projects', {
+      name: 'Twice told', folder: folder('twice-told'), agents: ['zeta'] })).project;
+    const one = json(await post(`/api/project/${first.id}/thread/zeta`, { text: 'to the first' }));
+    assert.equal(one.recorded, true);
+    assert.equal(one.supersededBecause, null, 'nothing to move aside on a fresh conversation');
+    await req(`/api/project/${first.id}`, { method: 'DELETE', headers: { origin: base } });
+    armChat([said(), said()]);
+    const second = json(await post('/api/projects', {
+      name: 'Twice told', folder: folder('twice-told'), agents: ['zeta'] })).project;
+    // The control that makes this the supersede case at all: the reused
+    // name takes the freed id, so the second conversation lands on the
+    // first one's file.
+    assert.equal(second.id, first.id, 'the reused name must take the freed id for this test to test anything');
+    const two = json(await post(`/api/project/${second.id}/thread/zeta`, { text: 'to the second' }));
+    assert.equal(two.recorded, true);
+    assert.match(String(two.supersededBecause), /kept aside/,
+      'the route must carry the moved-aside sentence to the page');
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
+});
+
+test('what was sent is kept, with the verdict on sending it, and read back on the next look', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'first thing' });
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.messages.length, 1);
+      assert.equal(body.messages[0].text, 'first thing');
+      assert.equal(body.messages[0].delivery.state, 'placed');
+      assert.ok(body.messages[0].at);
+    });
+});
+
+test('a send that could NOT be delivered is recorded too, so the thread does not rewrite its own history', async () => {
+  reset();
+  // A pane we cannot tie to the name: refused before tmux is touched, and the
+  // attempt is still the person's to see later.
+  await withThread(fleet.stranger('zeta', { state: 'working' }), [],
+    async ({ project, calls }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'are you there' }));
+      assert.equal(body.delivery.state, 'could_not');
+      assert.match(body.delivery.because, /cannot tell that it is this agent/);
+      assert.equal(body.recorded, true);
+      assert.equal(calls.sends().length, 0, 'nothing was typed anywhere');
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(back.messages[0].delivery.state, 'could_not');
+    });
+});
+
+test('an empty message is refused before anything is looked up', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    const res = await post(`/api/project/${project.id}/thread/zeta`, { text: '   ' });
+    assert.equal(res.status, 400);
+    assert.match(json(res).error, /write something to send/);
+    assert.equal(calls.sends().length, 0);
+  });
+});
+
+test('a thread for an agent that is not on the project is a 404, on both verbs', async () => {
+  reset();
+  // ⚠️ A ROUTING RULE, NOT A PERMISSION. Nothing here confines an agent to a
+  // project. What it refuses is turning this route into a general "type into
+  // any agent on this machine" endpoint that merely takes a project id.
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    const got = await req(`/api/project/${project.id}/thread/nobody-here`);
+    assert.equal(got.status, 404);
+    assert.match(json(got).error, /not on this project/);
+    const sent = await post(`/api/project/${project.id}/thread/nobody-here`, { text: 'hello' });
+    assert.equal(sent.status, 404);
+    assert.equal(calls.sends().length, 0, 'a refused route types nothing');
+  });
+});
+
+test('a thread on a project that does not exist is a 404, not a blank screen', async () => {
+  reset();
+  const got = await req('/api/project/no-such-project/thread/zeta');
+  assert.equal(got.status, 404);
+  assert.match(json(got).error, /no project by that name/);
+});
+
+test('sending is a WRITE, so another website cannot fire it', async () => {
+  /**
+   * ⚠️ THE STRONGEST WRITE ON THIS SERVER, asserted rather than inherited. Every
+   * other route here got its cross-site guard by being a POST and was tested
+   * for it; this one arrived later and would have inherited the guard silently
+   * — the new-sibling-does-not-inherit shape this repo has shipped before
+   * (the removal routes joined neither the borrowed-name gate nor its "every
+   * write route" test).
+   *
+   * ⚠️ AND THE STATUS IS ASSERTED, not merely "not 200". A 404 would also
+   * satisfy `notEqual(200)` while meaning the guard never ran at all — the
+   * refusal has to be the cross-site one, on a route and a project that exist.
+   */
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    // The control: the same request from this origin is accepted, so the
+    // refusal below is the guard and not a broken route.
+    const fine = await post(`/api/project/${project.id}/thread/zeta`, { text: 'from the page itself' });
+    assert.equal(fine.status, 200, 'the control: this route works from its own page');
+
+    const res = await req(`/api/project/${project.id}/thread/zeta`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
+      body: JSON.stringify({ text: 'do something regrettable' }),
+    });
+    assert.equal(res.status, 403, `a cross-site POST was answered ${res.status}, not refused`);
+    assert.equal(calls.sends().length, 2,
+      'a cross-site request reached an agent’s keyboard (the control send is the only one expected)');
+  });
+});
+
+test('a conversation we cannot read is reported as unreadable, never as nothing said', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'something worth keeping' });
+      // The control: it reads back before the file is damaged.
+      assert.equal(json(await req(`/api/project/${project.id}/thread/zeta`)).messages.length, 1);
+
+      const file = chat.threadFile(project.id, 'zeta');
+      fs.writeFileSync(file, '{ not json');
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.messages, null, 'null is "we could not read them"; [] would be a claim');
+      assert.match(body.historyBecause, /cannot make sense of it/);
+      // ⚠️ The OTHER TWO channels are asserted off, here and in each
+      // sibling: the three history sentences were built to be mutually
+      // exclusive, and nothing held that -- round 14 set all three true in
+      // one arm and the suite stayed green, which is the all-three-sentences
+      // -on-one-screen collapse this branch was built around.
+      assert.equal(body.historyOther, false);
+      assert.equal(body.historyUnfilable, false);
+      // And the rest of the screen still renders: the agent's side is a
+      // different object with a different owner, and it failed nothing.
+      assert.equal(body.agent.sessionName, 'zeta');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Creating a project without a folder picker
+// ---------------------------------------------------------------------------
+
+test('a project created with no folder gets one made for it, and says where', async () => {
+  reset();
+  const res = await post('/api/projects', { name: 'No picker' });
+  assert.equal(res.status, 200);
+  const made = json(res).project;
+  assert.equal(made.folder, path.join(projects.projectsRoot(), 'No picker'));
+  assert.equal(made.folderState.state, projects.FOLDER.READABLE, 'and it is really there');
+});
+
+test('the route says where a project WOULD go, and makes nothing while it answers', async () => {
+  // ⚠️ ONE derivation. The add screen shows this path before creating, and a
+  // copy of the rule in the page would drift from the directory on disk the
+  // first time the rule changed.
+  const res = await req('/api/project-folder?name=' + encodeURIComponent('Q3/Q4 planning'));
+  assert.equal(res.status, 200);
+  const body = json(res);
+  assert.equal(body.problem, null);
+  // "Asking must not create" is asserted BEFORE the act-agreement check
+  // below, because that check performs the act. The order is the test.
+  assert.ok(body.path && !fs.existsSync(body.path), 'asking must not create');
+  // Agreement with the act, not a restated spelling (round 37, same shape as
+  // the case-correction test below): `path.join(root, 'Q3-Q4 planning')`
+  // re-derived the `/ -> -` fold in the test, so the pair could drift from
+  // the directory the button actually makes and both would stay green.
+  assert.equal(body.path, projects.makeFolder('Q3/Q4 planning'),
+    'the route previewed one path and the act produced another');
+});
+
+test('a name we cannot make a folder out of comes back as a SENTENCE at 200, not an error', async () => {
+  // It goes under a field somebody is still typing in. A 500 there would make
+  // the screen catch and render an error state over a half-typed name.
+  const res = await req('/api/project-folder?name=' + encodeURIComponent('..'));
+  assert.equal(res.status, 200);
+  assert.equal(json(res).path, null);
+  assert.match(json(res).problem, /already has a meaning/);
+});
+
+test('a path-hostile name is refused by the create route too, with a sentence', async () => {
+  reset();
+  const res = await post('/api/projects', { name: '..' });
+  assert.equal(res.status, 400);
+  assert.match(json(res).error, /already has a meaning/);
+  assert.ok(!/Error:|at Object\./.test(json(res).error), 'our sentence, never a raw throw');
+});
+
+test('the folder route answers as JSON with a query string, like every sibling', async () => {
+  const res = await req('/api/project-folder?name=Lease&t=1');
+  assert.ok(res.type.includes('application/json'), res.type);
+});
+
+test('a send we could not confirm is NOT reported as a failure, or the person sends it twice', async () => {
+  reset();
+  /**
+   * ⚠️ THE WHOLE POINT OF THE THIRD STATE, at the route. The text reached the
+   * composer and the Enter did not go through — so "could not deliver" is both
+   * untrue and dangerous: the obvious next thing a person does is send it
+   * again, and on a permission prompt the second copy answers a question the
+   * first one already answered.
+   */
+  await withThread(fleet.agent('zeta', { state: 'idle' }),
+    [said(), { ran: true, spawnFailed: false, status: 1, out: '', err: 'no current session' }],
+    async ({ project }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'answer this' }));
+      assert.equal(body.delivery.state, 'unconfirmed');
+      assert.notEqual(body.delivery.state, 'could_not');
+      assert.match(body.delivery.because, /may be sitting in its composer unsent/);
+      // ⚠️ The route carries the FACT. Where to look is the page's sentence,
+      // asserted on the rendered page by docs/browser-checks/render-thread.js —
+      // an engine that also gave instructions produced three of them, stacked,
+      // pointing somewhere different each time.
+      assert.ok(!/screen is below|conversation above/i.test(body.delivery.because));
+      // And it is kept that way, so a later read does not turn it back into a
+      // failure the person would act on.
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(back.messages[0].delivery.state, 'unconfirmed');
+    });
+});
+
+test('a send that never reached tmux IS a failure, because re-sending is the right thing to do', async () => {
+  reset();
+  // The other side of the line: nothing was typed, so the person should send
+  // again — and the verdict is the one that tells them so.
+  await withThread(fleet.agent('zeta', { state: 'idle' }),
+    [{ ran: false, spawnFailed: true, status: null, out: '', err: 'ENOENT' }],
+    async ({ project }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'hello' }));
+      assert.equal(body.delivery.state, 'could_not');
+    });
+});
+
+test('the verdict says what the agent was doing, and keeps saying it on every later read', async () => {
+  reset();
+  // ⚠️ "Placed into zeta's session" is exactly true and invites the wrong
+  // inference — that zeta is reading it. A Claude that is mid-task does not
+  // consume its composer until it finishes.
+  await withThread(fleet.agent('zeta', { state: 'working' }), [said(), said(), said('screen')],
+    async ({ project, board }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'have a look at the lease' }));
+      assert.equal(body.delivery.state, 'placed');
+      // Against the card the fixture really produced, so the thread and the
+      // agent's own card cannot disagree about what it was doing.
+      assert.equal(body.delivery.paneState, board.card('zeta').state);
+      assert.match(body.delivery.paneNote, /mid-task/);
+
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.match(back.messages[0].delivery.paneNote, /mid-task/,
+        '"why did nothing happen?" is asked an hour later, so the note has to survive the read');
+    });
+});
+
+test('a project reusing an earlier name says its OWN conversation is empty, not that we cannot read it', async () => {
+  /**
+   * ⚠️ THREE FALSE SENTENCES CAME OUT OF ONE COLLAPSED BRANCH. Reported through
+   * the same channel as a corrupt file, this state told the person "We cannot
+   * read what you have sent this agent" — we read it perfectly well and chose
+   * not to show it — and then "this is not saying you have sent nothing", which
+   * manufactures the opposite wrong idea, because for THIS project they have
+   * sent nothing and that is the useful fact.
+   *
+   * Withheld and unreadable are different answers, so they travel separately.
+   */
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'said to the first project' });
+      // The control: this project reads its own message back.
+      assert.equal(json(await req(`/api/project/${project.id}/thread/zeta`)).messages.length, 1);
+
+      // Re-stamp the stored thread as belonging to an EARLIER project of this
+      // name, which is what a remove-and-recreate leaves behind.
+      const file = chat.threadFile(project.id, 'zeta');
+      const was = JSON.parse(fs.readFileSync(file, 'utf8'));
+      was.projectBornAt = '2020-01-01T00:00:00.000Z';
+      fs.writeFileSync(file, JSON.stringify(was));
+
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.historyOther, true, 'the withheld state is not distinguished from unreadable');
+      assert.deepEqual(body.messages, [],
+        'this project has genuinely sent nothing, and an empty list is the true answer');
+      assert.equal(body.historyBecause, null,
+        'a state we read and withheld must not be reported as one we could not read');
+      assert.equal(body.historyUnfilable, false, 'the channels stay mutually exclusive');
+    });
+});
+
+test('the folder-preview ROUTE answers the case-corrected path, not the raw derivation', async () => {
+  // ⚠️ The route's docblock is where "the path shown is the path the act
+  // produces" is promised, and swapping folderPathPreview back to
+  // folderPathFor there failed nothing (round 13) -- the engine function was
+  // covered, its one caller was not. Same volume-portable shape as the
+  // engine test: the assertion is agreement with the act, not a spelling.
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
+  const body = json(await req('/api/project-folder?name=lease'));
+  assert.equal(body.problem, null);
+  assert.equal(body.exists, true, 'an existing folder must preview as ADOPT, not make (round 17)');
+  assert.equal(body.path, projects.makeFolder('lease'),
+    'the route previewed one path and the act produced another');
+  const fresh = json(await req('/api/project-folder?name=Entirely%20new%20here'));
+  assert.equal(fresh.exists, false, 'control: a fresh name previews as make');
+});
+
+test('the folder-preview ROUTE carries the blocked arm, not just the engine', async () => {
+  // ⚠️ Same round-13 shape as the test above: the engine's third arm is
+  // covered (engine/projects.test.js), but `blocked: preview.blocked || null`
+  // in the route was held by nothing -- hardcoding `blocked: null` there left
+  // the whole suite green while the add screen went back to promising
+  // "Kosmos will make this at X" over a path makeFolder refuses (round 37).
+  reset();
+  fs.writeFileSync(path.join(projects.projectsRoot(), 'Occupied'), 'a file, not a folder');
+  const body = json(await req('/api/project-folder?name=Occupied'));
+  assert.equal(typeof body.blocked, 'string',
+    'a FILE at the path must reach the page as the engine\'s own refusal sentence');
+  assert.ok(body.blocked.length > 0, 'the refusal is a sentence, not an empty flag');
+  // The control, so this cannot pass by the route answering blocked for
+  // everything: a makeable name previews with the arm empty.
+  const clear = json(await req('/api/project-folder?name=Makeable%20here'));
+  assert.equal(clear.blocked, null, 'control: a makeable path previews unblocked');
+});
+
+test('an undecodable segment on the THREAD verbs is refused, both verbs', async () => {
+  // The plain project route's %ZZ test does not cover these: each verb calls
+  // decodeSegment on its own two segments and answers its own 400 (round 37).
+  const got = await req('/api/project/%ZZ/thread/zeta');
+  assert.equal(got.status, 400);
+  assert.ok(got.type.includes('application/json'));
+  const posted = await req('/api/project/abc/thread/%ZZ', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ text: 'hello' }),
+  });
+  assert.equal(posted.status, 400);
+  assert.ok(posted.type.includes('application/json'));
+});
+
+test('the POST route really stamps projectBornAt, read off the file it wrote', async () => {
+  /**
+   * ⚠️ THE WIRING, not the guard. The engine's reuse guard is well covered,
+   * but every test of it re-stamped the file BY HAND, overwriting whatever
+   * the route had written -- so dropping `project.createdAt` from the route's
+   * appendMessage call left the whole suite green (measured, round 12) while
+   * every new thread was born with projectBornAt null, which makes the
+   * mismatch check inert for all of them: a recreated project of the same
+   * name would inherit the earlier project's conversation, the exact defect
+   * the guard exists for. This reads the file the route ACTUALLY wrote.
+   */
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'stamp me' });
+      const was = JSON.parse(fs.readFileSync(chat.threadFile(project.id, 'zeta'), 'utf8'));
+      assert.ok(project.createdAt, 'control: the project carries a createdAt to stamp');
+      assert.equal(was.projectBornAt, project.createdAt,
+        'the route must stamp the thread with the project’s own birth time');
+    });
+});
+
+test('an agent whose name cannot be FILED under is told the truth, not the two false sentences', async () => {
+  /**
+   * ⚠️ THE CASE THAT SLIPPED PAST EVERY EARLIER ROUND. `chat.threadFile`
+   * refuses an agent whose session name is not already its own store key — a
+   * capital or a dot — which is exactly what adopting the pre-existing
+   * `-discord` fleet produces, and exactly the capitalised names Josh asked to
+   * be able to use. The refusal is RIGHT: relaxing it would fold `MyBot` and
+   * `mybot` onto one file, which is the case-collision blocker this branch
+   * already killed.
+   *
+   * What was wrong was the reporting. The refusal went down the same channel as
+   * a corrupt file, so the screen said "We cannot read what you have sent this
+   * agent" (there is no file to read, and never will be) and "this is not
+   * saying you have sent nothing" (nothing is kept for this agent anywhere).
+   * Both false, in opposite directions, on the one screen this branch built to
+   * stop exactly that.
+   *
+   * ⚠️ The "corrupt file" test does NOT cover this, which is how it slipped:
+   * that one plants a damaged file under a filable name.
+   */
+  for (const name of ['MyBot', 'my.bot']) {
+    reset();
+    await withThread(fleet.agent(name, { state: 'idle' }), [said(), said(), said('screen')],
+      async ({ project }) => {
+        const body = json(await req(`/api/project/${project.id}/thread/${encodeURIComponent(name)}`));
+        assert.equal(body.historyUnfilable, true, `${name}: the unfilable state has no channel of its own`);
+        assert.deepEqual(body.messages, [], `${name}: an empty list is the honest shape when no file exists`);
+        assert.equal(body.historyOther, false, `${name}: this is not an earlier project's conversation`);
+        // historyBecause is non-null here BY DESIGN (the unfilable sentence
+        // rides that channel); exclusivity for this arm is the Other flag.
+        assert.match(body.historyBecause, /agent name we can keep a thread under/);
+        // ⚠️ AND IT PROMISES NOTHING ABOUT DELIVERY. This state fires on the
+        // SHAPE OF THE NAME and knows nothing about whether the agent is
+        // reachable — a member with no such session answers could_not on every
+        // send, so a standing 'messages are delivered' promise here is false
+        // exactly when the person most needs the screen to be right.
+        assert.ok(!/delivered/i.test(JSON.stringify(body)),
+          `${name}: the unfilable answer promises delivery it cannot know about`);
+
+        // ⚠️ AND SENDING STILL WORKS. The words reach the agent's session; only
+        // the keeping does not, and the send-time answer says both.
+        const sent = json(await post(`/api/project/${project.id}/thread/${encodeURIComponent(name)}`,
+          { text: 'this reaches you but is not kept' }));
+        assert.equal(sent.delivery.state, 'placed', `${name}: delivery must not be collateral damage`);
+        assert.equal(sent.recorded, false, `${name}: nothing can be recorded under this name`);
+        assert.match(sent.recordedBecause, /agent name we can keep a thread under/);
+      });
+  }
+});
+
+test('the thread GET returns a bounded tail with the older count stated, never the whole 1000', async () => {
+  // ⚠️ Round 36: the poll fetched the entire array every five seconds; at
+  // the engine's own ceilings that is ~2MB of parse-and-stringify per tick
+  // on a synchronous server. The tail is 200 and `olderCount` carries the
+  // truth the page states.
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project }) => {
+    const chat = require('./engine/chat');
+    for (let i = 0; i < 205; i += 1) {
+      chat.appendMessage(project.id, 'zeta', {
+        text: 'row ' + i, delivery: { state: chat.DELIVERY.PLACED },
+      }, project.createdAt);
+    }
+    const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+    assert.equal(body.messages.length, 200, 'the tail must be bounded');
+    assert.equal(body.olderCount, 5, 'and the count of unshown rows stated');
+    assert.equal(body.messages[0].text, 'row 5', 'the tail is the NEWEST 200');
+    assert.equal(body.messages[199].text, 'row 204');
+  });
 });

@@ -19,7 +19,8 @@
  *   SB=$(mktemp -d)
  *   PORT=4399 AGENT_WORKFORCE_DATA="$SB/data" \
  *     AGENT_WORKFORCE_WORKERS="$SB/workers" \
- *     AGENT_WORKFORCE_LAUNCH="$SB/launch" node server.js &
+ *     AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+ *     AGENT_WORKFORCE_PROJECTS="$SB/projects" node server.js &
  *
  *   PW=$(mktemp -d); cd "$PW" && npm init -y && npm i playwright \
  *     && npx playwright install chromium
@@ -329,6 +330,13 @@ async function main() {
   await shot('5-add', async (page) => {
     await page.click('#pj-new');
     await page.waitForTimeout(600);
+    // ⚠️ The advanced route starts CLOSED now -- the default path is a name and
+    // no picker at all -- so the browser has to be opened before it can be
+    // walked. When this line was missing the walk below clicked a control
+    // inside a hidden panel, which is this check photographing a screen that
+    // no longer exists.
+    await page.click('#pj-advanced');
+    await page.waitForTimeout(500);
     // Walk in and choose, so the screenshot shows a real chosen folder rather
     // than the opening state -- and so a regression that re-selects whatever
     // is being looked at would show up here.
@@ -362,6 +370,87 @@ async function main() {
     await page.click('#pj-use');
     await page.waitForTimeout(300);
   });
+
+  // 5b. Backing out of the advanced route FORGETS the pick.
+  //     ⚠️ Asserted as the SYMPTOM, not the mechanism: the failure was a
+  //     project created at the folder the person had just backed out of, under
+  //     a line reading "Kosmos will make this at ~/Kosmos/Projects/<name>". So
+  //     this drives pick -> back out -> Add and asks the engine where the
+  //     project actually went. The two sentence checks on the way are the
+  //     visible half of the same promise: while a folder is picked exactly one
+  //     line says where the project will be, and after backing out the screen
+  //     is back to the default story.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    // ctx.close lives in a finally (round 27): an assertion throw anywhere
+    // in this block used to leak the context, unlike the sibling blocks.
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.click('#pj-new');
+      await page.waitForTimeout(400);
+      await page.click('#pj-advanced');
+      await page.waitForTimeout(500);
+      await page.click('button[data-into$="kosmos-demo"]');
+      await page.waitForTimeout(300);
+      await page.click('#pj-use');
+      await page.waitForTimeout(200);
+      const picked = await page.evaluate(() => ({
+        chosen: document.getElementById('pj-chosen').textContent,
+        willBe: document.getElementById('pj-will-be').textContent.trim(),
+      }));
+      if (!picked.chosen.includes('kosmos-demo')) {
+        throw new Error('pressing "Use this folder" did not put the folder in the chosen line: ' + picked.chosen);
+      }
+      if (picked.willBe) {
+        throw new Error('with a folder picked, the default-path line still speaks -- two sentences about '
+          + 'where the project will be, one of them wrong: ' + JSON.stringify(picked));
+      }
+      // CONTROL for the back-out check: the pick was really in force just now,
+      // so the clearing asserted below is a change this click caused, not a
+      // state the screen was already in.
+      await page.click('#pj-advanced');
+      await page.waitForTimeout(200);
+      const after = await page.evaluate(() => ({
+        chosen: document.getElementById('pj-chosen').textContent,
+        willBe: document.getElementById('pj-will-be').textContent.trim(),
+      }));
+      if (after.chosen.includes('kosmos-demo') || !after.willBe) {
+        throw new Error('closing the advanced route did not forget the pick on screen: ' + JSON.stringify(after));
+      }
+      // ⚠️ PROBE, DON'T INFER, before the one create in this file that uses
+      // the DEFAULT path (round 23): unlike thread-server.js, this check
+      // drives whatever server it is pointed at, and against one started
+      // without AGENT_WORKFORCE_PROJECTS this click would build a real
+      // directory under ~/Kosmos/Projects that the DELETE below never
+      // removes (remove rewrites the record and deliberately never touches
+      // folders). The route answers with the exact path the server would
+      // use, so the refusal is keyed on reality, not on the header comment.
+      const os = require('node:os');
+      const probe = await api('/api/project-folder?name=' + encodeURIComponent('Backout check'));
+      if (String(probe.path || '').startsWith(os.homedir() + '/Kosmos')) {
+        throw new Error('refusing the default-path create: the server would build '
+          + probe.path + ' inside the operator\'s real home. Start the server with '
+          + 'AGENT_WORKFORCE_PROJECTS pointed at a scratch dir.');
+      }
+      await page.fill('#pj-name', 'Backout check');
+      await page.click('#pj-create');
+      await page.waitForTimeout(800);
+      const { projects } = await api('/api/projects');
+      const made = projects.find((p) => p.name === 'Backout check');
+      if (!made) throw new Error('the back-out project was not created at all');
+      try {
+        if (String(made.folder || '').includes('kosmos-demo')) {
+          throw new Error('backing out of the folder route did NOT back out: the project was created at '
+            + made.folder + ' while the screen promised the default path.');
+        }
+      } finally {
+        await api('/api/project/' + encodeURIComponent(made.id), { method: 'DELETE' });
+      }
+    } finally {
+      await ctx.close();
+    }
+  }
 
   // 6a. The removal question. ⚠️ A confirmation is exactly the control that can
   //     ship invisible -- this repo once had 316 tests and two blind reviews
@@ -457,6 +546,35 @@ async function main() {
         out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
       }
       return out;
+    });
+    // ⚠️ A typed draft SURVIVES Back-then-reopen OF THE SAME PROJECT
+    // (round 34): the round-33 switch-time park read PJ_CURRENT after the
+    // back button had nulled it, so this exact sequence deleted the words
+    // at green checks. The park now happens on the input event, and this
+    // drives the sequence that used to eat it. Set-and-dispatch rather
+    // than fill() (fill waits for actionability and the box can be
+    // disabled here); and the SAME project is re-opened -- the first
+    // version of this check typed in one project and asserted in another,
+    // and correctly read an empty box that was a different project's
+    // (empty) draft.
+    const draftProject = await page.evaluate(() => {
+      const b = document.getElementById('pj-say');
+      b.value = 'a draft typed and then navigated away from';
+      b.dispatchEvent(new Event('input', { bubbles: true }));
+      return PJ_CURRENT;
+    });
+    await page.click('#pj-back');
+    await page.waitForTimeout(200);
+    await page.click('[data-project="' + draftProject + '"]');
+    await page.waitForTimeout(400);
+    const draftBack = await page.evaluate(() => document.getElementById('pj-say').value);
+    if (draftBack !== 'a draft typed and then navigated away from') {
+      throw new Error('the draft did not survive Back-then-reopen: box reads ' + JSON.stringify(draftBack));
+    }
+    await page.evaluate(() => {
+      const b = document.getElementById('pj-say');
+      b.value = '';
+      b.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await page.click('#pj-back');
     await page.waitForTimeout(200);

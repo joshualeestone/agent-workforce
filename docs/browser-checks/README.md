@@ -32,6 +32,7 @@ PORT=4399 \
   AGENT_WORKFORCE_DATA="$SB/data" \
   AGENT_WORKFORCE_WORKERS="$SB/workers" \
   AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+  AGENT_WORKFORCE_PROJECTS="$SB/projects" \
   node server.js &
 
 # 2. playwright, installed OUTSIDE this repo
@@ -47,10 +48,12 @@ NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/click-first-run.js 
   "$SB/data/AgentWorkforce/first-run.json"
 ```
 
-⚠️ **Sandbox the roots.** `click-first-run.js` drives the real completion flag
-through the real route. Run unsandboxed and it writes to
+⚠️ **Sandbox the roots — all FOUR of them.** `click-first-run.js` drives the
+real completion flag through the real route. Run unsandboxed and it writes to
 `~/Library/Application Support/AgentWorkforce/`, which is the flag the live
-board reads.
+board reads. And `AGENT_WORKFORCE_PROJECTS` is a root the server WRITES to
+(adding a project on the default path makes its folder there): leave it unset
+and a test click creates directories in the operator's real ~/Kosmos/Projects.
 
 ⚠️ **Headed by default.** Set `HEADED=0` for a machine with no console session.
 Headless renders through SwiftShader rather than the real compositor, so a
@@ -142,3 +145,133 @@ The detail panel calls the instructions a "special purpose" and names no file.
 ⚠️ **Restart the server after editing `web/index.html`.** It caches the page at
 startup, so an in-place edit does not reach the browser. A mutation test that skips
 this reports a false PASS: measured, while checking that the AA guard bites.
+
+## render-thread.js
+
+The project thread: the question, the picker, the viewport, a send that lands
+and a send that does not, in light and dark.
+
+⚠️ **It must be pointed at `thread-server.js`, never at `node server.js`.** This
+screen SENDS. Against a plain server on this machine, pressing Send types into a
+live agent's conversation. `thread-server.js` stubs the pane source and `chat`'s
+tmux runner so a Send reaches a log line and goes no further, and the check
+refuses to run unless it can read that server's own announcement of the stub in
+the log it is handed.
+
+    SB=$(mktemp -d)
+    PORT=4421 AGENT_WORKFORCE_DATA="$SB/data" \
+      AGENT_WORKFORCE_WORKERS="$SB/workers" \
+      AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+      AGENT_WORKFORCE_PROJECTS="$SB/kosmos-projects" \
+      node docs/browser-checks/thread-server.js > /tmp/threadsrv.log &
+
+    NODE_PATH=/path/to/playwright/node_modules \
+      node docs/browser-checks/render-thread.js \
+        http://127.0.0.1:4421 /tmp/threadshots /tmp/threadsrv.log
+
+**What it caught on its first run**, neither of which any text assertion could
+see:
+
+- A delivery that FAILED said "Could not deliver: can't find pane" for a few
+  milliseconds and then went silent, because the refresh after the send cleared
+  the message line — and the five-second poll cleared it again on every tick.
+  The person pressed Send, the message did not arrive, and the screen ended up
+  saying nothing at all: the stranded state this feature exists to remove,
+  rebuilt inside the fix for it.
+- The verdict line under each message measured **3.04:1** in light mode, under
+  this project's 4.5:1 floor, on the one sentence that says whether a message
+  got there.
+
+⚠️ **And its contrast checker had the alpha bug the others still have**, in the
+BACKGROUND rather than the foreground: the sibling checks take the first
+background that is not fully transparent and treat it as opaque, which is fine
+everywhere they look and wrong on this screen, whose terminal boxes sit on
+`--attn-bg` — a 3.5%-black veil. Read as opaque it is near-black, so near-black
+text on it measured 1.00 and the check reported two failures on a page that has
+none. `flatten()` composites the whole stack. A false failure is cheaper than a
+false pass and still costs the next person an hour.
+
+### The three delivery states
+
+`thread-server.js` arranges one agent per outcome, because a fixture where every
+send succeeds photographs a third of this feature:
+
+| agent | what its pane does | verdict |
+|---|---|---|
+| `mara` | takes both sends | `placed` |
+| `nils` | refuses the text (`can't find pane`) | `could_not` |
+| `casey` | takes the text, refuses the Enter | `unconfirmed` |
+
+The middle column is the whole distinction: `could_not` means **nothing** of the
+person's text reached the pane, so re-sending is safe. `unconfirmed` means it may
+already be in that agent's composer, and a screen that draws it as a failure is
+what makes somebody send it twice — on a permission prompt, the second copy
+answers a question the first one already answered.
+
+**What the second round of this check caught**, again none of it visible to an
+assertion that reads source:
+
+- The engine's `because` strings are written as CLAUSES, so pasting one after a
+  full stop rendered "…until it finishes). it went into its window…". This is
+  the defect `renderConnection` has a whole paragraph about further up
+  `web/index.html`, committed again on the branch that quotes it. The check now
+  asserts no sentence starts lower case.
+- Three stacked instructions ("look at its screen", "it is in the conversation
+  above", "it may be sitting in its composer unsent") pointing the person at
+  three different places, in the message they read while deciding whether to
+  press Send again. The engine states the fact; the page gives the one
+  instruction. The check counts them.
+- Two of the row counts were absolutes, and clearing the projects does not clear
+  the THREADS — a project id is derived from its name, so a re-run rebuilds the
+  same id and lands on the previous run's file. The counts climbed on every run
+  (1, then 2, then 3). They are deltas now, which is the property that was meant
+  all along: *this send* added one row.
+
+  ⚠️ **The mechanism underneath that has since changed, and the paragraph above
+  described the old one.** A thread now carries the project's `createdAt`, so a
+  re-run's freshly created project no longer INHERITS the earlier run's
+  messages — the first send supersedes them, renaming the earlier file aside and
+  starting clean. Deltas are still the right instrument, for a better reason:
+  they measure *this send* regardless of what any previous run left on disk, and
+  they keep working whether the earlier thread is inherited, superseded, or
+  absent. A count that only happened to be right because of how the store
+  behaved last month is a count waiting to be wrong.
+
+## Screenshot provenance, including the four nothing regenerates
+
+Every `docs/screenshots/thread-*.png` is emitted by `render-thread.js` under the
+same filename it is committed as, so the whole set can be regenerated by running
+the check. That is the rule this directory operates on: **a screenshot in the
+repo is evidence only if the next person can reproduce it.**
+
+Four PNGs are exceptions, and naming them is the only honest way to keep the
+rule meaningful:
+
+| file | captured | reproduced by |
+|---|---|---|
+| `project-add-1-name-only.png` | 2026-08-13, by hand | nothing |
+| `project-add-2-advanced-folder.png` | 2026-08-13, by hand | nothing |
+| `agent-name-1-capitals-fine.png` | 2026-08-13, by hand | nothing |
+| `agent-name-2-background-notice.png` | 2026-08-13, by hand | nothing |
+
+They were driven manually against `thread-server.js` (the add-project flow and
+the create-an-agent flow) with one-off Playwright scripts that were not kept.
+They are **aging risks**: nothing fails when the screens they show change, so
+they will go stale silently, and the first person to notice will be somebody who
+trusted them.
+
+⚠️ **Automating them is design-pass work, not a fix to slip in.** The
+add-project and create-agent flows each need their own fixture arrangement and
+their own assertions, which is a check of comparable size to `render-thread.js`
+rather than an extra step inside it. Recorded here so the exception is a known,
+dated, deliberate one rather than a silent violation of the rule two paragraphs
+up — and so whoever does that pass knows exactly which four files it owes.
+
+### thread-8-unfilable.png
+
+**No longer an exception.** It was hand-captured on 2026-08-14 and is now emitted
+by `render-thread.js` like every other `thread-*.png`, because the regression
+test for the defect it shows had been written one layer away from it — asserting
+on the route payload while the defect was a page SENTENCE, so reverting the
+exact string left the suite green. Driving the screen fixed the guard and made
+the screenshot regenerable in the same move. One exception fewer.

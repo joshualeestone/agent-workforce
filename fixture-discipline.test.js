@@ -62,9 +62,30 @@ test('paneRoster() emits exactly the fields the suite believes it emits', () => 
   }
 });
 
+test('the fields chat reads off a card are fields snapshot() really emits', () => {
+  /* The chat engine became a card consumer on this branch, and it is the
+     ONLY module that types into a live agent's session -- a renamed card
+     field here does not mis-render a label, it refuses (or worse,
+     mis-verifies) a send. Same tripwire discipline as the projects list
+     below (round 40). */
+  const READ_BY_CHAT = ['sessionName', 'session', 'isNamedOurs', 'target', 'isAgentPane', 'isAgentSession', 'state'];
+  const board = fleet.install([fleet.agent('mara', { state: 'working' })]);
+  try {
+    const card = board.card('mara');
+    for (const field of READ_BY_CHAT) {
+      assert.ok(field in card, `chat reads \`${field}\`, and a real card must carry it`);
+    }
+  } finally {
+    board.restore();
+  }
+});
+
 test('the fields the projects engine reads off a card are fields snapshot() really emits', () => {
   // The seam, stated as the list of fields `engine/projects.js#describe` reads.
-  const READ_BY_PROJECTS = ['sessionName', 'name', 'state', 'because', 'isNamedOurs'];
+  // `role` and `profile` joined when describe() grew profileRole (round 40:
+  // the branch widened the seam and the tripwire was not widened with it,
+  // which is the one failure this file exists to make loud).
+  const READ_BY_PROJECTS = ['sessionName', 'name', 'state', 'because', 'isNamedOurs', 'role', 'profile'];
   const board = fleet.install([fleet.agent('mara', { state: 'working' })]);
   try {
     const card = board.card('mara');

@@ -79,11 +79,32 @@ process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 // LaunchAgents`, and it would then start an agent on their next login. The
 // sandbox has to be in place before the hazard arrives, not after.
 process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-launch-'));
+// ⚠️ AND THE PROJECTS ROOT (round 37), for the same reason as LAUNCH above:
+// this server now requires `engine/projects`, whose root defaults to
+// `~/Kosmos/Projects` and whose create path calls `makeFolder` -- a real
+// mkdir under the operator's home. No test in this file drives a
+// `/api/project*` or `/api/folders` route today, which is exactly the state
+// LAUNCH was in when its warning was written: the sandbox has to be in place
+// before the hazard arrives, not after. `server.projects.test.js` and the
+// thread fixture both already do this.
+process.env.AGENT_WORKFORCE_PROJECTS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-projects-'));
+// HOME too: `/api/folders` browses from the home directory when asked for
+// its default start, so an unsandboxed HOME would list the operator's real
+// home into a test. Directories only, nothing written -- but a listing is
+// still a read of somebody's disk that no test here means to make.
+process.env.HOME = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-home-'));
 // And the two programs an agent is made of, so a route test does not depend on
 // whether the machine running the suite happens to have Claude installed where
 // this one does.
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ Belt AND braces for the CHAT engine too (round 26): this branch made
+// `require('./server')` pull in engine/chat, which arms itself from this
+// variable at load. Without it, the only thing between a stray thread-route
+// test and a live agent's composer is the TMUX_BIN stub above, whose stated
+// in-file purpose is create.js and remove.js. Both sibling suites carry
+// this line.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 // ⚠️ ARM DRY-RUN FOR THE REMOVAL ENGINE, at load, before `server.js` requires
 // it. `remove` defaults to NOT dry-run (it must, or the product removes nothing
 // while reporting success), so what keeps `launchctl` off this machine during a
@@ -2690,6 +2711,84 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // The removed list is part of the board, so it refreshes with it.
     [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],
+
+    /* ---- project chat, this branch ---------------------------------------
+       ⚠️ Round 13 measured that every one of these reverts with all 707
+       tests green: render-thread.js and render-projects.js hold some of
+       them, but neither runs under `yarn test`, so this list is what CI
+       actually enforces. Same rule as above: a pin is for a fix nothing
+       else can catch. */
+
+    // The tie half of the "See the question" gate -- defence-in-depth, and
+    // this pin is its ONLY enforcement: the pipeline currently forces an
+    // untied pane's state to unknown upstream, so no fixture can produce the
+    // untied-needs_you shape and no render check can hold the gate. If the
+    // upstream refusal ever changes, this gate is what stops a borrowed-name
+    // pane offering a button into a thread that will refuse it silently.
+    [/a\.state === 'needs_you' && a\.isNamedOurs/,
+     'the answer button lost its tie gate, so a borrowed-name pane promises a question '
+     + 'the thread cannot show'],
+    // Without the IME guard, Enter mid-composition sends a half-composed
+    // first word to a live agent on every Japanese, Chinese or Korean send.
+    [/e\.isComposing \|\| e\.keyCode === 229/,
+     'the IME composition guard is gone, so Enter mid-composition sends half a word'],
+    // "We could not look" is not "it is on none": without this branch a failed
+    // projects read renders a definite "not on a project yet, add it to one".
+    [/if \(PJ_READ_FAILED\)/,
+     'pjAnswerFrom filters a list that a failed read never refreshed, and states the result as fact'],
+    [/PJ_READ_FAILED = true;/,
+     'the failed-read flag is never raised, so the honest branch above is dead code'],
+    // The unconfirmed-and-unrecorded case: the box is the ONLY copy of the
+    // person's words, and clearing it loses them under a sentence promising
+    // they were kept.
+    // ⚠️ The pin holds the FACT'S SOURCE, not just the guard line: round 16
+    // set `inThread = true` one line above the guard and the old pin
+    // (/if \(inThread\) box\.value/) matched on while the defect returned.
+    // Same widening on the two pins below, for the same measured reason.
+    [/const inThread = body\.recorded === true;/,
+     'inThread no longer derives from recorded, so an unrecorded unconfirmed send wipes the only copy'],
+    // The park handler itself: typed words are filed per project at the
+    // keystroke, which is what makes every navigation order draft-safe
+    // (round 34: the switch-time park read PJ_CURRENT after Back had
+    // nulled it, and this exact sequence deleted typed words).
+    [/PJ_DRAFTS\[PJ_CURRENT\] = v;/,
+     'the input-handler park is gone, so a navigation order can delete typed words again'],
+    // Round 37 moved the clear into `clearSent`, keyed on the TAKEOFF
+    // project: the box only when the flight has not moved and still shows
+    // the sent text, the parked draft under sentProject only when it still
+    // holds exactly that text.
+    [/if \(inThread\) clearSent\(\);/,
+     'the unconfirmed clear must still be gated on recorded (rounds 29/34/37)'],
+    [/if \(PJ_CURRENT === sentProject && box\.value\.trim\(\) === text\) box\.value = '';/,
+     'the box clear must key on the takeoff PROJECT (not the full flight gate) plus the sent text: too narrow deletes another project\u2019s words, too wide leaves delivered words armed for a duplicate send (rounds 29/37/38)'],
+    [/if \(\(PJ_DRAFTS\[sentProject\] \|\| ''\)\.trim\(\) === text\) delete PJ_DRAFTS\[sentProject\];/,
+     'the parked-draft clear must key on the TAKEOFF project and the exact sent text (rounds 34/37: a programmatic clear fires no input event, so the map kept the sent text)'],
+    // The pick toggle must keep setLive's memory in step with its in-place
+    // aria-checked flip, or the next poll rebuilds the list under the
+    // focused button (round 39).
+    [/__lastLive = addAgentsHtml\(\)/,
+     'the pick toggle no longer refreshes setLive\u2019s stored string, so the poll repaints over keyboard focus'],
+    // The transport branch returns before pjSend's finally, so it carries
+    // its own focus rescue (round 39).
+    [/const sbtn = document\.getElementById\('pj-send'\);/,
+     'the connection-failure branch lost its focus rescue, stranding keyboard users on <body>'],
+    /* ⚠️ The page branches on the bare literals 'placed'/'unconfirmed'
+       (round 39): it cannot import chat.DELIVERY, and any state the page
+       does not recognise falls into the failed arm -- "Could not deliver",
+       the one reading that invites a re-send into a live composer. Two
+       halves hold the pact: the pins here prove the page still compares
+       those exact literals, and the assertions in the test body below
+       prove the ENGINE still spells its states that way, so renaming a
+       DELIVERY value without updating the page turns this test red. */
+    [/d\.state === 'placed'/,
+     "the row renderer no longer compares the engine's exact 'placed' literal"],
+    [/state === 'unconfirmed'/,
+     "the page no longer compares the engine's exact 'unconfirmed' literal"],
+    // A bare clock time is only true today; a thread keeps a thousand rows.
+    [/then\.toDateString\(\) !== now\.toDateString\(\)/,
+     'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
+    [/return 'at ' \+ time \+ ' on '/,
+     'the calendar-day branch no longer returns a dated form, so its condition decides nothing'],
   ];
 
   /**
@@ -2705,6 +2804,15 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
   for (const [re, why] of pins) {
     assert.match(raw, re, why);
   }
+
+  // The engine half of the literal pact (round 39; see the delivery pins
+  // above): if either value is renamed, this fails and names the page as
+  // the other place to change.
+  const chatEngine = require('./engine/chat');
+  assert.equal(chatEngine.DELIVERY.PLACED, 'placed',
+    "chat.DELIVERY.PLACED moved; web/index.html compares the literal 'placed' and must move with it");
+  assert.equal(chatEngine.DELIVERY.UNCONFIRMED, 'unconfirmed',
+    "chat.DELIVERY.UNCONFIRMED moved; web/index.html compares the literal 'unconfirmed' and must move with it");
 });
 
 
@@ -3466,4 +3574,206 @@ test('the completion route is a write, so another website cannot fire it', async
   });
   assert.equal(cross.status, 403, 'a cross-site POST was accepted');
   assert.match(cross.type, /application\/json/);
+});
+
+test('the display name is writable through the profile route, and a blank cannot erase it', async () => {
+  // ⚠️ Round 32: the record WINS over the instruction file, creation was
+  // the only writer, and the PUT whitelisted role only -- so a
+  // Kosmos-created agent had a permanently unchangeable name, and the old
+  // rename path (editing the identity line) silently stopped working.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const put = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '  Seraph  ' }),
+    });
+    assert.equal(put.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraph', 'trimmed and stored');
+    // A blank is dropped rather than stored: a person cannot un-name an
+    // agent by accident, and the record keeps the last real name.
+    const blank = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '   ' }),
+    });
+    assert.equal(blank.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraph', 'a blank overwrote the name');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('renaming through the identity line updates the record; mangling it cannot un-name', async () => {
+  // ⚠️ Round 33: the record wins over the file, so the in-product edit of
+  // `You are **X**` -- the one rename path a person had -- was a silent
+  // no-op that still said "Saved." A PARSEABLE new name is a deliberate
+  // act and the record follows it; an unparseable line updates nothing,
+  // which is the accident the record exists to survive.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    store.writeProfile('angel', { displayName: 'Angel' });
+    const cur = await req('/api/agent/angel/instructions');
+    const version = JSON.parse(cur.body).version;
+    const renamed = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\n', version }),
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraphina',
+      'a deliberate rename through the identity line did not reach the record');
+    // The accident control: a save whose line no longer parses leaves the
+    // name alone rather than blanking it.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    const mangled = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'no identity line at all\n', version: v2 }),
+    });
+    assert.equal(mangled.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraphina',
+      'an unparseable line must not un-name the agent');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('an unrelated instructions save does not revert a profile-route rename', async () => {
+  // ⚠️ Round 37: the rename-follow used to key on "the line PARSES to a name
+  // that differs from the record", which is also true when the person renamed
+  // through the PROFILE route and then saved a paragraph edit -- the untouched
+  // identity line still reads the old name, and following it silently undid
+  // the rename. The follow now keys on the LINE ITSELF changing.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // The file says Seraphina; the person then renames to Sera via the
+    // profile route.
+    const v0 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\nParagraph.\n', version: v0 }),
+    });
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Sera' }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Sera', 'control: the profile rename landed');
+    // An edit that leaves the identity line ALONE must leave the name alone.
+    const v1 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    const unrelated = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\nA DIFFERENT paragraph.\n', version: v1 }),
+    });
+    assert.equal(unrelated.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Sera',
+      'a paragraph edit reverted a rename made through the profile route');
+    // The control that keeps the follow alive: editing the LINE still renames.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Serafina**, a tester.\nA DIFFERENT paragraph.\n', version: v2 }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Serafina',
+      'control: a deliberate line edit must still reach the record');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('a profile store that cannot be written does not un-save the instructions', async () => {
+  // ⚠️ Round 40 blocker: the rename-follow's writeProfile ran unguarded
+  // AFTER instructions.write had committed, so a store failure fell to the
+  // route's .catch -- a landed save answered 400 with a raw errno and an
+  // internal temp path in the message. The store is broken FOR REAL here
+  // (profiles dir read-only, so readProfile succeeds and writeProfile
+  // throws), and the save must still answer 200 with no errno anywhere.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    store.writeProfile('angel', { displayName: 'Guarded' });
+    const v = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    fs.chmodSync(store.PROFILES, 0o555);
+    try {
+      const put = await req('/api/agent/angel/instructions', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'You are **Renamed-under-failure**, a tester.\n', version: v }),
+      });
+      assert.equal(put.status, 200,
+        'a committed save was reported as failed because the follow could not be recorded');
+      assert.ok(!/EACCES|EROFS|errno|\.tmp/.test(put.body),
+        'an errno or internal path reached the response: ' + put.body.slice(0, 200));
+    } finally {
+      fs.chmodSync(store.PROFILES, 0o755);
+    }
+    // Control: with the store healthy again, the follow still works.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Healthy**, a tester.\n', version: v2 }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Healthy',
+      'control: the follow must still work when the store is writable');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('the 80-character cap holds on BOTH display-name writers, and no record is conjured', async () => {
+  // ⚠️ Round 37: the cap at each writer records a measured defect (an
+  // identity line can carry ~3,900 characters into the capture) and neither
+  // site was held by a test -- removing either `.slice(0, 80)` was green.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  const long = 'N'.repeat(200);
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' })
+    + '\n' + fleet.line({ session: 'newbie-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // Writer 1: the profile route.
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: long }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'N'.repeat(80),
+      'the profile route stored an uncapped name');
+    // Writer 2: the rename-follow on the instructions route.
+    const v = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **' + long + 'X**, a tester.\n', version: v }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'N'.repeat(80),
+      'the rename-follow stored an uncapped name');
+    // ⚠️ The precondition is behaviour, not decoration: an agent with no
+    // displayName on record keeps having none after an identity-line save.
+    // The record-wins rule exists for agents Kosmos CREATED; for the
+    // pre-existing fleet the file line IS the name, and a follow that
+    // conjured a record would freeze every legacy agent's name at whatever
+    // the line said the day someone saved an edit.
+    fs.mkdirSync(nodePath.join(WORKERS, 'newbie'), { recursive: true });
+    const nv = JSON.parse((await req('/api/agent/newbie/instructions')).body).version;
+    const put = await req('/api/agent/newbie/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Newbie**, a tester.\n', version: nv }),
+    });
+    assert.equal(put.status, 200);
+    const rec = store.readProfile('newbie');
+    assert.ok(!rec || typeof rec.displayName === 'undefined',
+      'an identity-line save conjured a display-name record for a legacy agent');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
 });

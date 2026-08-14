@@ -18,9 +18,25 @@ const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-projects-'));
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
+// ⚠️ THE FOURTH ROOT, and it is new on this branch. Creating a project with no
+// folder makes one under `~/Kosmos/Projects` — so without this the suite would
+// leave real directories in the operator's home, named after test fixtures. The
+// rule is every root the code writes to, and the code grew one.
+process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
+// ⚠️ Belt-and-braces like chat.test.js and server.projects.test.js (round
+// 40): this suite pulls in engine/chat transitively (projects requires
+// chat), so without this the chat module sits in that process with dry-run
+// unarmed against the host's real tmux. Latent today -- only the pure
+// defaultAgentFor runs -- but this file is the one doing the requiring,
+// and the sandbox has to be in place before the hazard arrives.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 const test = require('node:test');
-const assert = require('node:assert');
+// `strict` (round 40): the loose default let `assert.equal(x, null)` pass
+// on undefined -- the exact class the blocked/exists assertions in this
+// file were individually hardened against in round 37. The file-level
+// default now matches the 13 sibling suites.
+const assert = require('node:assert/strict');
 
 const projects = require('./projects');
 const store = require('./store');
@@ -680,6 +696,11 @@ test('a folder path with a newline in it is one line in the block', () => {
   // A newline is a legal character in a macOS path, so the path is untrusted
   // for exactly the same reason the name is.
   const body = projects.blockBody([{ name: 'Fine', folder: '/tmp/a\n\n## Not a heading' }]);
+  // Presence first (round 37): absence alone also passes when the folder path
+  // is dropped from the block entirely, which is a different defect wearing a
+  // green test. The same shape as the name test above: kept, made inert.
+  const line = body.split('\n').find((l) => l.startsWith('- '));
+  assert.ok(line && line.includes('Not a heading'), 'the path text is kept, just made inert');
   assert.ok(!body.includes('\n\n## Not a heading'));
 });
 
@@ -945,4 +966,316 @@ test('a session that merely shares a name is not permission to write', () => {
   // The control: the tied card IS permitted, or the gate is just "refuse".
   const tied = projects.syncAgent('borrowed', cards([fleet.agent('borrowed')]));
   assert.equal(tied.state, projects.TOLD.TOLD);
+});
+
+// ---------------------------------------------------------------------------
+// Making the folder ourselves
+//
+// ⚠️ THE POINT OF THIS BLOCK, in one sentence: naming a project must not send
+// somebody into the macOS file picker, because the first folder anyone opens
+// there is Desktop or Documents and that is what raises the system's "Kosmos
+// wants to access files in your Documents folder" prompt.
+// ---------------------------------------------------------------------------
+
+test('a project with no folder gets one made for it, inside a folder Kosmos owns', () => {
+  reset();
+  const made = projects.create({ name: 'Henderson lease' });
+  assert.equal(made.folder, path.join(projects.projectsRoot(), 'Henderson lease'));
+  assert.ok(fs.statSync(made.folder).isDirectory(), 'and it is really there');
+  // The whole reason this exists: nothing was chosen, so nothing was opened.
+  assert.equal(projects.folderState(made.folder).state, projects.FOLDER.READABLE);
+});
+
+test('the parent folders are made too, so a first-ever project does not need one to exist', () => {
+  reset();
+  const root = projects.projectsRoot();
+  fs.rmSync(root, { recursive: true, force: true });
+  assert.ok(!fs.existsSync(root), 'the control: nothing is there before');
+  const made = projects.create({ name: 'First one' });
+  assert.ok(fs.statSync(made.folder).isDirectory());
+});
+
+test('a folder that is already there is ADOPTED, and nothing in it is touched', () => {
+  reset();
+  const dest = path.join(projects.projectsRoot(), 'Already here');
+  fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(path.join(dest, 'their-notes.md'), 'the person’s own work');
+  const made = projects.create({ name: 'Already here' });
+  assert.equal(made.folder, dest);
+  assert.equal(fs.readFileSync(path.join(dest, 'their-notes.md'), 'utf8'), 'the person’s own work',
+    'this product does not delete anybody’s work, on this path either');
+});
+
+test('a FILE where the folder would go is refused rather than overwritten', () => {
+  reset();
+  fs.mkdirSync(projects.projectsRoot(), { recursive: true });
+  const clash = path.join(projects.projectsRoot(), 'A file');
+  fs.writeFileSync(clash, 'not a folder');
+  assert.throws(() => projects.create({ name: 'A file' }), /already a file with that name/);
+  assert.equal(fs.readFileSync(clash, 'utf8'), 'not a folder', 'and it is still theirs');
+});
+
+test('path-hostile names are REFUSED, not sanitised into a different folder', () => {
+  // ⚠️ `..` is the one that matters: stripped, it would silently make a folder
+  // somewhere else entirely. `create.js` refuses agent names on the same
+  // principle — a name that quietly becomes a different path is a folder
+  // somebody cannot find, or one they did not mean to write in.
+  for (const bad of ['..', '.', '.hidden', '   ', '/', '//', 'x'.repeat(61), 'bell\u0007name']) {
+    assert.ok(projects.folderNameProblem(bad), `expected a refusal for ${JSON.stringify(bad)}`);
+    assert.throws(() => projects.folderNameFor(bad), /name/, `expected a throw for ${JSON.stringify(bad)}`);
+  }
+  // The control: an ordinary name is not refused, so the rule is not simply
+  // refusing everything.
+  assert.equal(projects.folderNameProblem('Henderson lease'), null);
+});
+
+test('a name that would escape the projects folder cannot, and the proof is the resolved path', () => {
+  // Asserted on where it RESOLVES rather than on the spelling, which is the
+  // only check a symlink or a clever separator cannot walk past.
+  for (const bad of ['../../etc', '..', '../elsewhere']) {
+    assert.ok(projects.folderNameProblem(bad) || !path.relative(
+      projects.projectsRoot(), projects.folderPathFor(bad),
+    ).startsWith('..'), `${bad} escaped the projects folder`);
+  }
+  // ⚠️ The resolution arm must actually RUN (round 24): every input above
+  // is refused by folderNameProblem, so the left arm short-circuited and
+  // folderPathFor was never called -- a test named for the resolved path
+  // that only ever exercised the refusal. These names are asserted
+  // unrefused first (the control), then resolved, and the resolution must
+  // stay inside the root.
+  for (const tricky of ['Q3/Q4 planning', 'dots.mid.name', '  padded  ']) {
+    assert.equal(projects.folderNameProblem(tricky), null,
+      `${tricky} must pass the name check so the resolution arm is the one being tested`);
+    assert.ok(!path.relative(projects.projectsRoot(), projects.folderPathFor(tricky)).startsWith('..'),
+      `${tricky} resolved outside the projects folder`);
+  }
+});
+
+test('a separator becomes a dash rather than a refusal, because people really type "Q3/Q4"', () => {
+  assert.equal(projects.folderNameFor('Q3/Q4 planning'), 'Q3-Q4 planning');
+  assert.equal(projects.folderNameFor('a\\b'), 'a-b');
+  // ⚠️ `:` is a separator on a Mac even though POSIX takes it (round 21,
+  // measured with NSFileManager displayNameAtPath): stored as `Q3:Q4`,
+  // Finder shows `Q3/Q4` -- the path on screen would not be the name they
+  // find. Same fold, same reason.
+  assert.equal(projects.folderNameFor('Q3:Q4 planning'), 'Q3-Q4 planning');
+  assert.ok(projects.folderNameProblem(':::'), 'a name that is only colons has no folder name in it');
+  // ⚠️ AND THE DERIVATION STAYS INSIDE THE ROOT. A replacement that produced a
+  // separator by another route would be worse than the refusal it replaced.
+  const made = path.join(projects.projectsRoot(), projects.folderNameFor('Q3/Q4 planning'));
+  assert.equal(path.dirname(made), projects.projectsRoot());
+});
+
+test('the name the person typed is kept, even when the folder name had to differ', () => {
+  reset();
+  const made = projects.create({ name: 'Q3/Q4 planning' });
+  assert.equal(made.name, 'Q3/Q4 planning', 'what they called it is what it is called');
+  assert.equal(path.basename(made.folder), 'Q3-Q4 planning', 'and the folder is the derived one');
+});
+
+test('folderPathFor makes NOTHING, so typing into a name box leaves no trail of empty folders', () => {
+  const p = projects.folderPathFor('Never created');
+  assert.ok(!fs.existsSync(p), 'asking where it would go must not put it there');
+});
+
+test('an unreadable parent leaves the asked-for spelling alone, rather than throwing', () => {
+  // trueChildName's readdir-failure arm: mutation-verified uncovered in
+  // round 14. An unreadable projects root must degrade to the name as
+  // asked, not crash the preview.
+  reset();
+  fs.mkdirSync(projects.projectsRoot(), { recursive: true });
+  fs.chmodSync(projects.projectsRoot(), 0o000);
+  try {
+    const p = projects.folderPathPreview('lease');
+    assert.ok(p.path.endsWith('/lease'), 'the spelling stays as asked when the listing cannot be read');
+  } finally {
+    fs.chmodSync(projects.projectsRoot(), 0o755);
+  }
+});
+
+test('an over-long name on the default path meets the SAME sentence the preview showed', () => {
+  // Round 18: this guard was the one survivor of a 34-mutation battery --
+  // correct and held by nothing. Reachable through the UI despite the
+  // field's maxlength, because pjChoose assigns the name programmatically
+  // from a folder basename. The property: the sentence at the button is
+  // the sentence the preview line has been printing, never cleanName's
+  // different one.
+  reset();
+  const long = 'x'.repeat(121);
+  assert.throws(() => projects.create({ name: long }),
+    /too long to make a folder out of; keep it to 60 characters/,
+    'the default path must speak folderNameProblem’s sentence first');
+  // Control: with a folder GIVEN, cleanName's own cap still speaks, so the
+  // guard above is ordering, not a swallow of the other refusal.
+  assert.throws(() => projects.create({ name: long, folder: folder('longname-target') }),
+    /longer than a project name should be/);
+});
+
+test('the previewed path IS the path the act produces, case correction included', () => {
+  // ⚠️ Volume-portable on purpose, the same lesson create.test.js records: on
+  // a case-insensitive disk `lease` beside an existing `Lease` ADOPTS that
+  // folder, on a case-sensitive one they are two entries -- so the assertion
+  // is not "it says Lease" but "the sentence matches the act", which is the
+  // property the preview exists for on both kinds of volume.
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
+  const previewed = projects.folderPathPreview('lease');
+  const made = projects.makeFolder('lease');
+  assert.equal(previewed.path, made,
+    'the screen said one path and the filesystem got another');
+  // The act distinction travels with the path: this folder existed, so the
+  // screen must say ADOPT, and a fresh name must say MAKE (round 17: the
+  // preview claimed "make" over a folder adoption).
+  assert.equal(previewed.exists, true, 'an existing folder previews as existing');
+  const fresh = projects.folderPathPreview('Never previewed into being');
+  assert.strictEqual(fresh.exists, false, 'a fresh name previews as not existing');
+  assert.ok(!fs.existsSync(fresh.path),
+    'and the preview itself still makes nothing');
+  // ⚠️ The THIRD arm (round 23): a FILE at the path is neither make nor
+  // adopt -- makeFolder will refuse it -- and folding it into exists:false
+  // had the preview promising "will make" about an act already refused.
+  // The preview's sentence must be makeFolder's own, so the two cannot
+  // drift apart, and the throw is asserted alongside so the pair is
+  // proven against the same filesystem state.
+  fs.writeFileSync(path.join(projects.projectsRoot(), 'Ledger'), 'a file');
+  const blockedPreview = projects.folderPathPreview('Ledger');
+  assert.equal(blockedPreview.exists, false, 'a file does not preview as an adoptable folder');
+  assert.ok(blockedPreview.blocked && /already a file/.test(blockedPreview.blocked),
+    'the preview carries the refusal for a file at the path');
+  assert.throws(() => projects.makeFolder('Ledger'), /already a file/,
+    'and makeFolder refuses with the same sentence the preview showed');
+  // strictEqual, in a loose file (round 37): `assert.equal(x, null)` also
+  // passes for `undefined`, so a folderPathPreview that stopped emitting the
+  // `blocked` field entirely kept both of these green. The planted-file case
+  // above proves the field can carry a refusal; these two prove the OTHER
+  // arms still carry an explicit null rather than nothing.
+  assert.strictEqual(fresh.blocked, null, 'a fresh name is not blocked');
+  assert.strictEqual(previewed.blocked, null, 'an adoptable folder is not blocked');
+});
+
+test('a folder that cannot be made is refused in our words, with no errno and no machine path', () => {
+  // ⚠️ makeFolder interpolated err.message raw (round 24): an EACCES put
+  // an errno and an absolute /var path on the person's screen, the exact
+  // shape the appendMessage sentence two files over pins absent.
+  reset();
+  fs.chmodSync(projects.projectsRoot(), 0o555);
+  try {
+    assert.throws(() => projects.makeFolder('Walled off'),
+      (err) => {
+        assert.match(err.message, /could not make a folder/);
+        assert.doesNotMatch(err.message, /EACCES|EPERM|ENOENT|\/var\/folders|\/Users\//,
+          `a machine's sentence reached the person: ${err.message}`);
+        return true;
+      });
+  } finally {
+    fs.chmodSync(projects.projectsRoot(), 0o755);
+  }
+});
+
+test('a second project of the same name meets the duplicate refusal, not a silent second folder', () => {
+  reset();
+  projects.create({ name: 'Twice' });
+  assert.throws(() => projects.create({ name: 'Twice' }), /already the project/);
+});
+
+test('pointing at a folder you already have still works, and is untouched by any of this', () => {
+  reset();
+  const dir = folder('somewhere-else');
+  const made = projects.create({ name: 'Existing work', folder: dir });
+  assert.equal(made.folder, dir);
+  assert.ok(!fs.existsSync(path.join(projects.projectsRoot(), 'Existing work')),
+    'and no folder was made for it under the Kosmos root');
+});
+
+test('"Lease" and "lease" are ONE project on a case-insensitive volume, not two over one folder', () => {
+  /**
+   * ⚠️ REPRODUCED BEFORE IT WAS FIXED, and the failure was data corruption
+   * rather than cosmetics: `fs.realpathSync` does not canonicalise case, so the
+   * duplicate guard compared `…/Lease` against `…/lease`, found no match, and
+   * made a SECOND project over the SAME directory. Both projects' members were
+   * then told the same folder under two names, and the add screen printed a
+   * spelling Finder will never show.
+   *
+   * ⚠️ ASSERTED THROUGH THE DIRECTORY LISTING, the same instrument
+   * `create.test.js` uses for the identical volume lesson: `existsSync` cannot
+   * tell these apart here, so a check built on it would measure the filesystem
+   * rather than the code.
+   */
+  reset();
+  const first = projects.create({ name: 'Lease' });
+  const listing = fs.readdirSync(projects.projectsRoot()).filter((e) => e.toLowerCase() === 'lease');
+  assert.deepEqual(listing, ['Lease'], 'the control: exactly one folder, spelled the way it was typed');
+
+  // The other spelling. On this volume it is the same directory.
+  assert.throws(() => projects.create({ name: 'lease' }), /already the project/,
+    'the second spelling made a second project over the same folder');
+
+  assert.equal(projects.readAll().length, 1, 'two rows exist for one directory');
+  assert.deepEqual(
+    fs.readdirSync(projects.projectsRoot()).filter((e) => e.toLowerCase() === 'lease'),
+    ['Lease'],
+    'a second folder was created beside the first',
+  );
+  // And the stored path is the spelling that is really on disk, so what the
+  // screen shows is what Finder shows.
+  assert.equal(path.basename(first.folder), 'Lease');
+});
+
+test('an adopted folder is stored under the spelling the filesystem uses, not the one we derived', () => {
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Henderson Lease'), { recursive: true });
+  const made = projects.create({ name: 'henderson lease' });
+  assert.equal(path.basename(made.folder), 'Henderson Lease',
+    'the project points at a spelling that does not exist on disk');
+  assert.equal(made.name, 'henderson lease', 'and what the person called it is untouched');
+});
+
+test('the same folder reached by two spellings of a MIDDLE segment is still one project', () => {
+  // The advanced "use a folder you already have" route takes a typed path, so
+  // the case difference can be anywhere in it — not only in the project name.
+  reset();
+  const parent = path.join(WORK, 'Mixed-Case-Parent');
+  fs.mkdirSync(path.join(parent, 'work'), { recursive: true });
+  projects.create({ name: 'One', folder: path.join(parent, 'work') });
+  assert.throws(
+    () => projects.create({ name: 'Two', folder: path.join(WORK, 'mixed-case-parent', 'work') }),
+    /already the project/,
+    'two projects were made over one directory reached by two spellings',
+  );
+});
+
+test('a long-but-ordinary project name yields an id a thread can actually be filed under', () => {
+  /**
+   * ⚠️ THE DEFECT THIS PINS: `cleanName` allows 120 characters, `safeKey` keeps
+   * every one of them, and `engine/chat.js` will not file a thread under an id
+   * longer than its cap. So a project like this DELIVERED messages and recorded
+   * none — with the sentence "that is not a project we can read", about a
+   * project the same screen had just created and listed. Three caps that had
+   * never been introduced to each other.
+   */
+  reset();
+  const chat = require('./chat');
+  const long = 'Henderson lease renegotiation and schedule of dilapidations for the north building 2026';
+  assert.ok(long.length > 64 && long.length <= 120, 'the fixture has to be a name cleanName accepts');
+  // ⚠️ VIA THE ADVANCED ROUTE, which is the path that reaches this. Naming a
+  // project caps the derived FOLDER name at 60, so the long name is only
+  // storable when the person supplies a folder they already have — and that
+  // route never consults folderNameProblem, which is exactly why the caps could
+  // disagree without anybody noticing.
+  const made = projects.create({ name: long, folder: folder('long-name') });
+  assert.equal(made.name, long, 'what they called it is untouched');
+  // The id is what the thread is filed under, and the thread module must take it.
+  assert.doesNotThrow(() => chat.threadFile(made.id, 'casey'),
+    'a project this app just made cannot keep a conversation');
+  assert.ok(made.id.length <= 64);
+});
+
+test('two long names sharing their first 64 characters stay two projects', () => {
+  // Bounding the id must not make one project silently replace another.
+  reset();
+  const stem = 'Henderson lease renegotiation and schedule of dilapidations for the ';
+  const a = projects.create({ name: stem + 'north building', folder: folder('long-a') });
+  const b = projects.create({ name: stem + 'south building', folder: folder('long-b') });
+  assert.notEqual(a.id, b.id);
+  assert.equal(projects.readAll().length, 2);
 });

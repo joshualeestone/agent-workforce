@@ -144,6 +144,13 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
 .flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
 .fhint { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
+/* ⚠️ The PROJECTS panel's hints carry load-bearing sentences ("nothing sent
+   here is kept", "it is not a transcript"), and --label-3 at this size is
+   3.04:1 on the light ground -- under the 4.5 AA floor (round 20). Scoped
+   here rather than changing .fhint globally: the other screens' hints are
+   the recorded design-pass deferral, but the copy THIS branch added does
+   not get to ship under it. --label-2 reads 5.74:1 light / 7+:1 dark. */
+#panel-projects .fhint { color: var(--label-2); }
 .frow { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
 .frow input[type=text] { flex: 1; min-width: 220px; font: var(--text-body) var(--font-ui);
                          padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
@@ -222,7 +229,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
-.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+   reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
+   floor this project holds as a hard rule. "It is only a scannable caption"
+   was the recorded defence, and the floor does not have a caption exemption. */
+.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
 .pj-member.unseen { border-style: dashed; }
 /* ⚠️ 24px minimum, because this is the only destructive control on the row and
@@ -232,6 +243,69 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member .drop { margin-left: auto; background: none; border: 0; cursor: pointer;
   font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
   min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
+/* --- the thread --------------------------------------------------------- */
+#pj-thread-who { font: var(--text-body) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* ⚠️ `overflow: auto` and NOT `white-space: pre-wrap`. A Claude permission
+   prompt draws its options in columns, and wrapping them at the panel width
+   turns the thing the person has to read into a jumble. The box scrolls
+   sideways instead, and `tabindex="0"` is what makes a scrollable region
+   reachable from the keyboard (WCAG 2.1 SC 2.1.1 — this project's floor is AA,
+   and a pane somebody cannot scroll is a pane they cannot read). */
+.pj-screen { font: var(--text-caption) var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--label); background: var(--attn-bg);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-control);
+  padding: var(--space-4) var(--space-5); margin-top: var(--space-3);
+  max-height: 320px; overflow: auto; white-space: pre; }
+/* The question is the reason the person came, so it is not the same weight as
+   the ambient screen below it. */
+.pj-question { margin: var(--space-5) 0; padding-left: var(--space-4);
+  border-left: 2px solid var(--warn-ink); }
+.pj-question .pj-screen { max-height: 240px; }
+.pj-viewport { margin-top: var(--space-6); }
+.pj-msgs { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-5) 0; }
+.pj-msg { padding: var(--space-4) var(--space-5); border: 0.5px solid var(--separator);
+  border-radius: var(--radius-control); }
+/* ⚠️ `overflow-wrap: anywhere` on BOTH message spans (round 21, measured): a
+   single unbroken token -- a URL, an absolute path, a git SHA, exactly what
+   people type to agents -- stretched the whole page 1262px sideways at 1280,
+   dragging the header and tabs with it. Same declaration as `.task`; the
+   `because` line can carry a pane target or a path out of stderr, so it
+   needs it too. */
+.pj-msg .pj-msg-text { display: block; font: var(--text-body) var(--font-ui); color: var(--label);
+  overflow-wrap: anywhere; }
+/* ⚠️ The verdict is a SENTENCE under every message, never a tick. A tick would
+   be read as "it got there and was understood", and all we know is that tmux
+   took the keystroke. */
+/* ⚠️ `--label-2`, NOT `--label-3`, and it was measured rather than chosen.
+   `--label-3` is `rgba(0,0,0,0.42)`, which at this size is 3.04:1 on the page
+   background — under the 4.5:1 this project's floor requires, in light mode,
+   on the one line that tells somebody whether their message got there. (Round
+   37 brought `.pj-member small` up to the same token: the caption-vs-verdict
+   distinction this comment used to draw does not exempt anything from AA.) */
+.pj-msg .pj-msg-said { display: block; font: var(--text-caption) var(--font-ui);
+  color: var(--label-2); margin-top: 2px; overflow-wrap: anywhere; }
+/* A message that did not get there does not draw like one that did. */
+.pj-msg.failed { border-style: dashed; }
+.pj-msg.failed .pj-msg-said { color: var(--label); }
+/* ⚠️ AND ONE WE COULD NOT CONFIRM DRAWS AS NEITHER. It is not a failure — the
+   text may already be in that agent's composer — so it must not wear the
+   failed row's dashed border, which reads as "this did not happen" and is what
+   makes somebody send it again. A left rule marks it as needing a look, the
+   same vocabulary `.pj-question` uses for the other thing on this screen that
+   wants the person's eyes. */
+.pj-msg.unsure { border-left: 2px solid var(--warn-ink); }
+.pj-msg.unsure .pj-msg-said { color: var(--label); }
+.pj-say { margin-top: var(--space-5); }
+#pj-say { flex: 1 1 auto; }
+/* The one-click route from a card that says "Needs you". 24px minimum, WCAG 2.2
+   SC 2.5.8, the same floor as the Take-off control. */
+.card-answer { display: inline-block; margin-top: var(--space-3); cursor: pointer;
+  font: var(--text-callout) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); min-height: 24px;
+  padding: var(--space-3) var(--space-4); }
 .pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
 .pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
   border-radius: var(--radius-control); }
@@ -246,6 +320,14 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
   padding: var(--space-4) var(--space-5); margin: 0; }
 .pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
+.pj-advanced { margin: var(--space-5) 0; }
+/* A real <button>, styled as a link. ⚠️ NOT an <a> without an href: that is not
+   focusable and not announced as a control, so the whole advanced route would
+   be unreachable from the keyboard — and this is the ONLY way to a project
+   whose work lives somewhere else. 24px minimum, WCAG 2.2 SC 2.5.8. */
+.linkish { background: none; border: 0; cursor: pointer; padding: var(--space-3) 0;
+  min-height: 24px; font: var(--text-callout) var(--font-ui); color: var(--label-2);
+  text-decoration: underline; }
 .pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
@@ -952,12 +1034,18 @@ svg { display: block; }
            here is a second definition of the same fact, and the two would
            disagree eventually. So this is copy, and the refusal a person sees
            is the server's own sentence. -->
-      <div class="fhint">Lower case letters, numbers, hyphens and underscores.
-        It becomes the name of its folder, so it is the one thing that is
-        awkward to change later.</div>
+      <!-- ⚠️ THE CAPITAL IS FINE NOW, and this copy had to change with the
+           rule. It used to read "Lower case letters …", which was true of the
+           machinery and was the sentence a person met when they typed their
+           agent's name the way they would write a colleague's. Capitals are
+           kept for what you see; the machine quietly uses the lower-case form
+           for its folder and its window. -->
+      <div class="fhint">Letters, numbers, hyphens and underscores. Capitals are
+        fine: you will see it written the way you type it, and the folder it
+        gets on this computer uses the lower-case form.</div>
       <div class="frow">
         <input type="text" id="create-name" autocomplete="off" spellcheck="false"
-               placeholder="casey">
+               placeholder="Casey">
         <button class="btn" id="create-go" type="button">Create it</button>
       </div>
       <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
@@ -978,6 +1066,15 @@ svg { display: block; }
     <div class="ticks" id="made-ticks"></div>
     <p class="vh" id="made-say" role="status" aria-live="polite"></p>
     <div class="stale-note" id="made-warn" hidden></div>
+    <!-- ⚠️ SAID BEFORE macOS SAYS IT. The agent is kept alive by a launchd job,
+         so the operating system posts its own "background item added" notice
+         and lists it under Login Items. Meeting that unexplained, minutes after
+         installing something, reads as a security warning about software you
+         did not know was running — and a person who then turns it off has
+         switched their own agent off without knowing that is what they did.
+         Shown only on a creation that actually happened; see `made-bg` in the
+         script. -->
+    <div class="stale-note" id="made-bg" hidden></div>
     <div class="first-action" id="made-first" hidden></div>
     <div class="frow" style="margin-top: var(--space-7);">
       <button class="btn" id="made-done" type="button" hidden>See it on the board</button>
@@ -1026,13 +1123,72 @@ svg { display: block; }
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
     </div>
 
-    <div class="field">
-      <span class="flabel">Talking to them isn't built yet.</span>
-      <p class="fhint">This is where you'll give them work and read what they say
-         back, the way you would message a person. It needs one thing we haven't
-         settled: when five agents are on a project, who answers. Everything
-         answering at once and nothing answering are the same bug, so the room
-         waits until that has a rule.</p>
+    <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
+         the room was waiting on exactly this question: when five agents are on a
+         project, who answers. The answer is ONE of them, chosen here. Everything
+         answering at once and nothing answering are the same bug. -->
+    <div class="field" id="pj-thread">
+      <!-- No id: nothing read the one it carried (round 25), the same
+           unread-surface rule as the thread payload's agents copy. -->
+      <span class="flabel">Talk to one of them</span>
+      <p class="fhint">Every message goes to the one agent you pick. The others
+         are on the project and are not in this conversation.</p>
+      <div class="frow">
+        <select id="pj-thread-who" aria-label="Which agent this message goes to"></select>
+      </div>
+
+      <!-- The question, when the board says this agent is asking one. First,
+           because it is why the person came. -->
+      <div class="pj-question" id="pj-question" hidden>
+        <span class="flabel" id="pj-question-label"></span>
+        <!-- ⚠️ `pre`, and it is not a style choice: this is terminal output, so
+             the columns a Claude prompt draws its options in only line up in a
+             monospaced, whitespace-preserving box. -->
+        <!-- ⚠️ NAMED, because it is FOCUSABLE. A tabindex="0" pre is a stop on
+             the keyboard tour, and a stop that announces only its contents (a
+             wall of terminal text) tells a screen-reader user nothing about
+             where they have landed. role="region" + aria-labelledby borrows the
+             heading already above it, so the tour announces "Mara is waiting on
+             an answer…" before reading the pane. WCAG AA is this project's
+             floor, so this is in scope rather than a later pass. -->
+        <pre class="pj-screen" id="pj-question-text" tabindex="0"
+             role="region" aria-labelledby="pj-question-label"></pre>
+      </div>
+
+      <!-- What we have sent, and how each one went. Ours to keep, because we
+           wrote it; the screen below is not. -->
+      <div class="pj-msgs" id="pj-msgs"></div>
+
+      <div class="frow pj-say">
+        <input type="text" id="pj-say" maxlength="2000"
+               placeholder="Type a message" aria-label="Type a message for this agent">
+        <button class="btn" id="pj-send" type="button">Send</button>
+      </div>
+      <!-- ⚠️ NOT aria-live (round 30): the poll re-renders the verdict as
+           it AGES, and a live region re-announced the whole sentence at
+           every minute boundary for the first hour. New sentences are
+           spoken once through the hidden announcer below; the aging
+           repaint stays silent. -->
+      <p class="fmsg" id="pj-thread-msg"></p>
+      <p class="vh" id="pj-thread-say" role="status" aria-live="polite"></p>
+
+      <!-- ⚠️ THE AGENT'S SIDE IS A VIEWPORT, NOT A TRANSCRIPT, and the heading
+           says so in words rather than in a tooltip. Nothing here parses the
+           terminal into who-said-what: a parser that guesses wrong puts words in
+           the agent's mouth, and Claude Code redraws, wraps and prints tool
+           output that reads exactly like prose. -->
+      <div class="pj-viewport">
+        <span class="flabel" id="pj-screen-label">Its screen</span>
+        <!-- ⚠️ The hint ships EMPTY and the pre ships HIDDEN: the affirmative
+             "as it looks right now" sentence used to be baked into the
+             static markup, so the first open of any project rendered an
+             empty terminal box under a claim about a screen nobody had read
+             yet. The runtime paint owns both; the markup asserts nothing. -->
+        <p class="fhint" id="pj-screen-hint"></p>
+        <!-- Named for the same reason as the question box above. -->
+        <pre class="pj-screen" id="pj-screen" tabindex="0" hidden
+             role="region" aria-labelledby="pj-screen-label"></pre>
+      </div>
     </div>
 
     <div class="field">
@@ -1064,7 +1220,49 @@ svg { display: block; }
     <button class="back" id="pj-add-back" type="button">← All projects</button>
     <h2>Add a project</h2>
 
+    <!-- ⚠️ NAMING IT IS THE WHOLE DEFAULT PATH, and the reason is a permission
+         dialog rather than a preference. Making the folder the FIRST decision
+         sent every new person into the file picker, and the first folder anyone
+         opens there is Desktop or Documents — which is what raises macOS's
+         "Kosmos wants to access files in your Documents folder" prompt, three
+         screens into a product somebody is still deciding whether to trust.
+         So: type a name, and Kosmos makes the folder inside one it owns. -->
     <div class="field">
+      <span class="flabel">What do you call it?</span>
+      <div class="frow">
+        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
+             disappears the moment somebody types. -->
+        <!-- ⚠️ 120 MATCHES cleanName, not the 60-character cap on a DERIVED
+             folder name, and the difference is deliberate. The 60 applies only
+             when Kosmos makes the folder; the advanced route accepts a name up
+             to 120 against a folder you already have. Capping the field at 60
+             would refuse a legitimate name on that path, and the live line
+             below is the real gate either way -- it shows the exact path, or
+             the refusal, before anything is made. -->
+        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
+               aria-label="What you call this project">
+      </div>
+      <!-- ⚠️ THE PATH IS SHOWN BEFORE ANYTHING IS MADE. The folder name is
+           derived from what is typed (slashes become dashes), and a derivation
+           the person cannot see is a folder they cannot find. `aria-live`
+           because it changes under a field they are still typing in. -->
+      <!-- Not aria-live (round 34): this repaints on a 150ms debounce
+           while the person TYPES the name, so a live region read the
+           whole derived path aloud through every keystroke -- the same
+           repaint-announcement defect round 30 fixed on the verdict
+           line. A screen reader reaches the settled line in reading
+           order once typing is done. -->
+      <p class="pj-chosen" id="pj-will-be"></p>
+    </div>
+
+    <!-- The advanced route, one link away: for work that already lives
+         somewhere else. Not removed, and not the default. -->
+    <p class="pj-advanced">
+      <button class="linkish" id="pj-advanced" type="button" aria-expanded="false"
+              aria-controls="pj-folder-field">Or use a folder you already have</button>
+    </p>
+
+    <div class="field" id="pj-folder-field" hidden>
       <span class="flabel">Which folder is this project's work in?</span>
       <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
          own files in it</b> — everything it keeps lives somewhere else.</p>
@@ -1103,18 +1301,6 @@ svg { display: block; }
         <button class="btn" id="pj-path-go" type="button">Use that path</button>
       </div>
       <p class="pj-chosen" id="pj-chosen">No folder chosen yet.</p>
-    </div>
-
-    <div class="field">
-      <span class="flabel">What do you call it?</span>
-      <div class="frow">
-        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
-             disappears the moment somebody types. Its sibling below already had
-             an aria-label, so this was an omission rather than a house
-             pattern. -->
-        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
-               aria-label="What you call this project">
-      </div>
     </div>
 
     <div class="field">
@@ -1351,6 +1537,35 @@ function card(a) {
         ? '<div class="note">Nearly full. It will soon forget the earlier part of this conversation, including anything it agreed to do.</div>'
         : '');
 
+  /**
+   * ⚠️ THE ONE CLICK OUT OF THE STRANDED STATE. This card is where the product
+   * failed a first run: it said "Needs you — the pane is showing a question"
+   * and offered nowhere to see the question or answer it. The button is only on
+   * the state that means somebody is waiting, and it says what it will show
+   * rather than what it will do to the agent.
+   */
+  // ⚠️ GATED ON THE TIE, not only the state -- as DEFENCE-IN-DEPTH.
+  // Measured (round 13): today's pipeline already forces an untied pane's
+  // state to `unknown` upstream (capture is refused for a pane we cannot
+  // tie), so needs_you cannot currently arrive on a borrowed-name card. The
+  // gate exists for the day that upstream refusal changes: without it, a
+  // stranger's `tmux new -s casey` reading needs_you would offer a button
+  // into a thread that refuses untied members (describe forces them to
+  // `unknown`, the question sentence never fires) -- a promise the next
+  // screen silently cannot keep, which is the exact stranded state this
+  // button was built to remove. Held by the source pin in server.test.js,
+  // because no render check can drive a shape the producer refuses to
+  // produce.
+  const answer = a.state === 'needs_you' && a.isNamedOurs
+    // ⚠️ NAMED, like the pencil button two lines up. On a board of thirteen
+    // agents a screen-reader user hears "See the question" thirteen times with
+    // nothing saying whose; the visible label stays short and the accessible
+    // name carries the agent. The accessible name CONTAINS the visible
+    // label verbatim (round 24): "See <name>'s question" broke SC 2.5.3, a
+    // voice-control user saying the words on the button got no match.
+    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}" data-answer-name="${esc(a.name)}" aria-label="See the question ${esc(a.name)} is showing">See the question</button>`
+    : '';
+
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
     <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
     <div class="ringwrap">${ring(a)}</div>
@@ -1361,6 +1576,7 @@ function card(a) {
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}
       <div class="why">${esc(a.because)}</div>
+      ${answer}
     </div>
   </div>`;
 }
@@ -1976,6 +2192,11 @@ function setWritesOffered(a, tied) {
 }
 
 document.getElementById('grid').addEventListener('click', (e) => {
+  // ⚠️ FIRST, because it is INSIDE the card. Checked after `.card` it would
+  // never fire at all: the card's own handler matches the same click and opens
+  // the detail panel instead, which is the screen this button exists to skip.
+  const answer = e.target.closest('[data-answer]');
+  if (answer) { pjAnswerFrom(answer.dataset.answer, answer.dataset.answerName); return; }
   const card = e.target.closest('.card');
   if (card) openDetail(card.dataset.agent);
 });
@@ -2184,7 +2405,14 @@ async function loadInstructions(sessionName) {
  * MutationObserver: three mutations in sixteen seconds for one distinct string.
  */
 function setLive(el, html) {
-  if (el.innerHTML === html) return;
+  // Compared against the string we last WROTE, not against innerHTML
+  // (round 34): serialization does not escape quotes in text nodes the
+  // way esc() does, so any message or name containing a double quote
+  // made the comparison miss forever -- the node rebuilt every poll,
+  // which on the recipient picker closed an open dropdown every five
+  // seconds.
+  if (el.__lastLive === html) return;
+  el.__lastLive = html;
   el.innerHTML = html;
 }
 
@@ -3330,6 +3558,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
   document.getElementById('made-head').textContent = 'Making ' + name;
   document.getElementById('made-first').hidden = true;
   document.getElementById('made-warn').hidden = true;
+  document.getElementById('made-bg').hidden = true;
   document.getElementById('made-done').hidden = true;
   document.getElementById('made-retry').hidden = true;
   paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' });
@@ -3372,7 +3601,41 @@ document.getElementById('create-go').addEventListener('click', async () => {
     return;
   }
 
-  await watchForAgent(name, result, attempt);
+  /**
+   * ⚠️ SHOWN ON A CREATION THAT HAPPENED, AND ONLY THEN. A `partial` rolls
+   * everything back — no job, nothing to appear in Login Items — so warning
+   * about a background item there would describe something that does not exist,
+   * on the screen whose stated rule is that every line is reported or watched.
+   * That is why this sits below the partial branch rather than beside the
+   * heading.
+   */
+  // ⚠️ "a new background item", NOT "Kosmos" (round 23): macOS names the
+  // notice from the registered bundle, which install/setup.sh sets up --
+  // on a from-source `node server.js` run (a documented way to run) there
+  // is no bundle under our id and macOS names the executable instead.
+  // This screen has not observed which of those worlds it is in, so the
+  // sentence claims only what the creation itself did.
+  // "may", not "will" (round 27): macOS posts that notice the FIRST time
+  // an item appears under our identifier -- create.js records this at the
+  // plist -- so for the second and later agents the screen was predicting
+  // a notice that may not arrive. The Login Items half is true either way.
+  document.getElementById('made-bg').innerHTML =
+    '<b>macOS may mention a new background item.</b> That is your agent '
+    + 'staying alive between logins (named Kosmos when the app is installed, '
+    + 'or after the program that runs it on a from-source setup). It appears '
+    + 'under Login Items in System Settings, and turning it off there stops '
+    + 'the agent from starting.';
+  document.getElementById('made-bg').hidden = false;
+
+  /**
+   * ⚠️ WATCHED BY THE MACHINE NAME, SPOKEN BY THE TYPED ONE. The board files an
+   * agent under its slug, so somebody who typed `Casey` would have this poll for
+   * a `Casey` that will never appear and then be told their agent could not be
+   * seen coming up — a successful creation reported as a failure, on the last
+   * screen of the flow. `result.name` is the engine's own answer for which name
+   * that is; falling back to what was typed keeps an older server working.
+   */
+  await watchForAgent(result.name || name, result, attempt);
 });
 
 /**
@@ -3424,6 +3687,11 @@ function boardCanSeeIt(a) {
  * NOT treated as failure here; the structural facts are.
  */
 async function watchForAgent(name, result, attempt) {
+  // ⚠️ MATCH ON `name` (the board's key), SPEAK `shown`. They differ the moment
+  // somebody types a capital, and using one for both would either look for a
+  // `Casey` the board will never list or head the screen with `casey` after the
+  // person carefully typed their agent's name.
+  const shown = result.shownAs || name;
   // The token from before the request, so one creation is one attempt from the
   // click to the last poll.
   const mine = attempt;
@@ -3442,7 +3710,7 @@ async function watchForAgent(name, result, attempt) {
     const found = agents.find((a) => a.sessionName === name);
     if (boardCanSeeIt(found)) {
       paintMade(result.steps, { state: 'done', text: 'The board can see it running' });
-      document.getElementById('made-head').textContent = name + ' is running';
+      document.getElementById('made-head').textContent = shown + ' is running';
       if (result.firstAction) {
         const box = document.getElementById('made-first');
         box.innerHTML = '<b>Something to give it first</b><q>' + esc(result.firstAction) + '</q>';
@@ -3459,7 +3727,7 @@ async function watchForAgent(name, result, attempt) {
   // nothing about why — we do not know why, and the plausible guess is the
   // thing this codebase is written against.
   paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' });
-  document.getElementById('made-head').textContent = name + ' has not come up';
+  document.getElementById('made-head').textContent = shown + ' has not come up';
   const warn = document.getElementById('made-warn');
   /**
    * ⚠️ DO NOT OVERWRITE A PARTIAL'S REASON WITH THIS ONE.
@@ -3519,10 +3787,68 @@ async function watchForAgent(name, result, attempt) {
 
 let PROJECTS = [];
 let PJ_AGENTS_UNREADABLE = false;
+// ⚠️ Whether the LAST projects read succeeded. PROJECTS is deliberately never
+// emptied on failure (see loadProjects), so the array alone cannot say "we
+// could not look" -- and a caller filtering a stale-or-initial [] would render
+// "there is nothing" for "we could not see". pjAnswerFrom is that caller.
+let PJ_READ_FAILED = false;
+// Unsent words, parked per project AS TYPED (rounds 33-34). Only the DOM
+// box and this map ever hold a draft; nothing is written to disk. Sites
+// that clear the box programmatically (a send that took the text) also
+// clear the entry, because a programmatic clear fires no input event.
+const PJ_DRAFTS = {};
+// The last project opened, for openProject's same-project skip; survives
+// the Back button on purpose (round 36).
+let PJ_LAST_OPENED = null;
 let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
 let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
 let PJ_ADD_AGENTS = [];     // the agents ticked in the add flow
+/**
+ * The thread's state, declared HERE with the rest of the projects state rather
+ * than beside its own functions four hundred lines down.
+ *
+ * ⚠️ `let` is not hoisted, and `openProject` — which sits above those
+ * functions — assigns `PJ_WHO`. That works only while nothing can call it
+ * during synchronous evaluation of this script. `WATCH` carries the same note
+ * at the top of this file for the same reason: one programmatic click during
+ * load, or making this a module, turns a below-the-use declaration into a
+ * ReferenceError that silently kills the screen.
+ */
+let PJ_WHO = null;          // the agent this project's thread is addressed to
+let PJ_SENDING = false;     // a send is in flight; guards double-sends and the poll
+// The last sentence `loadThread` itself wrote into the thread's message line.
+// It clears only that one, so a poll cannot wipe a send's verdict — see the
+// note in `loadThread`.
+let PJ_THREAD_NOTE = null;
+/**
+ * The last send's verdict line, kept so it can AGE.
+ *
+ * ⚠️ IT SAID "just now" FOREVER. The sentence was written once, at the moment
+ * of sending, with the phrase baked in — while the message row a few pixels
+ * above it re-rendered on every poll and moved on to "2 minutes ago". Two
+ * claims about one send, on one screen, disagreeing; and the one that never
+ * moved was the one the person had just read.
+ *
+ * `{ at, render }` is what makes it re-renderable: `render` takes the aged
+ * phrase and rebuilds the same sentence, so the poll can restate it exactly as
+ * the rows are restated. `shown` is the text we last wrote, so a re-render only
+ * ever replaces OUR sentence and never something a later error put there.
+ */
+let PJ_SENT_LINE = null;
+// Ordering guard, the same one `loadProjects` and `pjBrowse` take: the
+// 5-second poll and a click can be in flight together, and a stale answer must
+// not repaint a thread the person has since switched away from.
+let PJ_THREAD_GEN = 0;
+/* Navigation generation, bumped by every openProject (round 37). PJ_THREAD_GEN
+   cannot serve pjSend as a staleness key because the 5-second poll bumps it,
+   which would retire every verdict whose flight outlasted one tick. This one
+   moves only when the person moves. A send captures it (with the project id)
+   at takeoff; a verdict may paint only if neither moved, because a flight can
+   honestly run ~15s (three 5s tmux timeouts plus the record lock) and Back is
+   deliberately not disabled during it -- so "Placed into Mara's session" was
+   landing on a DIFFERENT project's thread and aging there. */
+let PJ_NAV_GEN = 0;
 
 function pjView(which) {
   for (const v of ['list', 'one', 'add']) {
@@ -3639,10 +3965,15 @@ let PJ_GEN = 0;
 
 async function loadProjects() {
   const mine = ++PJ_GEN;
+  // Returns whether THIS call's read is the one that landed (true on either
+  // outcome, success or recorded failure; false when a newer call retired
+  // it). Callers that branch on PJ_READ_FAILED right after awaiting need to
+  // know the flag is their read's, not a predecessor's -- see pjAnswerFrom
+  // (round 21).
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
-    if (mine !== PJ_GEN) return;
+    if (mine !== PJ_GEN) return false;
     // ⚠️ Checked BEFORE anything is assigned. The first version of this fix
     // assigned PROJECTS and then threw, so the comment claiming "PROJECTS is
     // not clobbered on failure" described a guard that was not there -- a
@@ -3654,8 +3985,10 @@ async function loadProjects() {
     if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'we cannot read your projects right now');
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+    PJ_READ_FAILED = false;
   } catch {
-    if (mine !== PJ_GEN) return;
+    if (mine !== PJ_GEN) return false;
+    PJ_READ_FAILED = true;
     // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
     // add-member and remove-member paths call this from the one-project view,
     // where `#pj-list` is hidden -- so a failed refresh left the member list
@@ -3678,10 +4011,11 @@ async function loadProjects() {
     // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
     // open project as "there is no project by that name" on a transient
     // network failure -- turning "we could not look" into "it is gone".
-    return;
+    return true;
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  return true;
 }
 
 function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
@@ -3730,8 +4064,11 @@ function paintOneProject() {
   // pressing the button would then rewrite the wrong agent's instruction file.
   // Repainting only on change also stops the native popup being closed
   // mid-choice.
-  if (sel.innerHTML !== html) {
+  // Stored-string compare here too (round 35), same quote round-trip as
+  // the thread picker.
+  if (sel.__lastPicker !== html) {
     const chosen = sel.value;
+    sel.__lastPicker = html;
     sel.innerHTML = html;
     if (chosen && free.some((a) => a.sessionName === chosen)) sel.value = chosen;
   }
@@ -3751,11 +4088,1047 @@ function openProject(id) {
     pjView('list');
     return;
   }
+  /* ⚠️ "Fresh" is scoped to SWITCHING projects (round 31): re-opening the
+     project already on screen used to run these same clears, so typing a
+     draft, pressing back, and clicking the same project again silently
+     deleted the words -- the never-delete rule, broken by navigation. On
+     a same-project re-open every cleared thing is already correct for
+     this project, so the whole reset is skipped. */
+  /* Keyed on the last project OPENED, not on PJ_CURRENT (round 36): the
+     Back button nulls PJ_CURRENT, so a PJ_CURRENT-keyed `switching` was
+     always true on the only user-facing route back to the list -- the
+     round-31 same-project skip never fired from the UI, and a picked
+     recipient reverted to the default across Back-then-reopen. PJ_LAST
+     survives Back because nothing but this function writes it. */
+  const switching = PJ_LAST_OPENED !== id;
+  PJ_LAST_OPENED = id;
+  // Every arrival is a move, including re-opening the same project: a verdict
+  // from a send that took off before this navigation belongs to a thread view
+  // the switching-clear machinery above has since reset, so it may not paint
+  // (round 37 -- see PJ_NAV_GEN).
+  PJ_NAV_GEN += 1;
+  /* ⚠️ A draft survives NAVIGATION, per project (rounds 33-34): the words
+     are parked into PJ_DRAFTS as they are TYPED (the input handler on the
+     box), not at switch time -- the round-33 switch-time park read
+     PJ_CURRENT after the back button had already nulled it, so the most
+     ordinary path (type, Back, re-open) still deleted the words, under a
+     comment claiming that exact case fixed. Parking at the keystroke
+     makes the class unreachable: no navigation order can miss it,
+     because there is nothing left to do at navigation time. The restore
+     below is the only other half. */
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
+  // ⚠️ The thread starts fresh on every OTHER project. Carrying the last
+  // project's recipient over would open a conversation addressed to
+  // whoever the person happened to be talking to on a different piece of
+  // work, and `pjThreadWho` would only catch it when that agent is not on
+  // this project — so the dangerous half (it IS on both) would be silent.
+  if (switching) {
+    PJ_WHO = null;
+    PJ_SENT_LINE = null;
+    document.getElementById('pj-thread-msg').textContent = '';
+    document.getElementById('pj-say').value = PJ_DRAFTS[id] || '';
+    /**
+     * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
+     * synchronously below, but the thread body waits a full route round trip
+     * (which fans out to tmux) -- so without this, the NEW project's name sat
+     * over the PREVIOUS project's conversation, screen capture and question
+     * for the whole fetch: cross-project misattribution, the thing
+     * projectBornAt closes on the stored path, reappearing on the painted
+     * one. PJ_THREAD_GEN retires late RESPONSES; it cannot clear a stale
+     * PAINT. The interim is the honest not-looked-yet state, not a blank
+     * terminal (see the screen-hint rule at paintThread).
+     */
+    setLive(document.getElementById('pj-msgs'), '');
+    document.getElementById('pj-question').hidden = true;
+    document.getElementById('pj-screen').hidden = true;
+    document.getElementById('pj-screen-hint').textContent = '';
+    // The heading too (round 22): it is written in exactly one place
+    // (paintThread), so without this reset a project with no agents kept
+    // "What Mara's screen shows right now" from the LAST thread over an
+    // empty area -- a heading naming an agent that is not on this project.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
+  }
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
+  loadThread();
+}
+
+/* --- the thread ---------------------------------------------------------- *
+ *
+ * ⚠️ WHAT THIS SCREEN MAY SAY, and it is the whole design. We put text into a
+ * pane and we captured what that pane shows. We did NOT inform a program, and
+ * nothing here may read as though we did: the verdict under a message is
+ * "placed into casey's session", never "casey received it". A keystroke
+ * reaching a terminal is not evidence that anything read it.
+ *
+ * ⚠️ AND THE AGENT'S SIDE IS THE SCREEN, NOT SPEECH. There are no bubbles for
+ * the agent, deliberately. Parsing a TUI into who-said-what guesses, and the
+ * first wrong guess puts words in the agent's mouth under its own name.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Who this project's thread is addressed to.
+ *
+ * ⚠️ The DEFAULT is not worked out here. `/api/projects` carries
+ * `defaultAgent`, decided by `chat.defaultAgentFor` — one rule, server-side,
+ * because a copy in this file would drift from the one the routes use and the
+ * two would disagree about who a message goes to.
+ */
+function pjThreadWho(p) {
+  const on = (p.agents || []).map((a) => a.sessionName);
+  if (PJ_WHO && on.includes(PJ_WHO)) return PJ_WHO;
+  // ⚠️ A pin whose agent LEFT the project is dropped, not parked (round
+  // 31): parked, it silently re-aimed the picker back to the departed
+  // agent the moment they were re-added -- the recipient changing under
+  // the person mid-sentence, the exact failure pjPinWho exists to
+  // prevent, arriving from the other direction. Dropping it lets the
+  // fallback below be re-pinned as the new deliberate state.
+  if (PJ_WHO && !on.includes(PJ_WHO)) PJ_WHO = null;
+  return p.defaultAgent || null;
+}
+
+/**
+ * Pin the recipient once one has resolved for this project.
+ *
+ * ⚠️ THE DEFAULT SEEDS THE PICKER; IT NEVER RE-AIMS IT. Without this the
+ * recipient could change UNDER the person mid-sentence, and the mechanism is
+ * ordinary: `defaultAgent` is re-derived server-side on every five-second poll,
+ * and `describe` withholds an agent's role while its pane is untied. An agent
+ * RESTARTING is untied for a moment — so the manager drops out of the manager
+ * check, the default falls to whoever is first on the project, and the next
+ * repaint moves the picker. Somebody typing a sentence to Mara finishes it
+ * addressed to Nils.
+ *
+ * Pinning is safe because it is not sticky against the person: `pjThreadWho`
+ * still falls back when the pinned agent is no longer ON the project, and
+ * changing the picker sets `PJ_WHO` outright. `openProject` clears it, so a
+ * different project starts from its own default.
+ */
+function pjPinWho(who) {
+  if (who && !PJ_WHO) PJ_WHO = who;
+  return who;
+}
+
+/** The name to SPEAK for a member. Act on the machine name, speak this one. */
+function pjNameOf(p, sessionName) {
+  const m = (p.agents || []).find((a) => a.sessionName === sessionName);
+  return (m && m.name) || sessionName;
+}
+
+/**
+ * When something happened, said as weakly as we actually know it.
+ *
+ * "Just now" is a claim about a minute, and a wall-clock time is a claim about
+ * a moment; nothing here rounds a five-minute-old send into "just now".
+ */
+/**
+ * `pjWhen` with a leading space, or nothing at all.
+ *
+ * ⚠️ `pjWhen` legitimately answers an EMPTY STRING — an unparseable or missing
+ * timestamp is a thing we cannot say, and inventing "just now" for it would be
+ * this screen asserting a moment nobody recorded. But the callers interpolate
+ * it mid-sentence, so an empty answer left "…into Casey’s session  (it was
+ * mid-task)" with a doubled space, or "…session ." with a dangling one. The
+ * space belongs to the value, not to the sentence.
+ */
+function pjWhenPart(at) {
+  const said = pjWhen(at);
+  return said ? ' ' + said : '';
+}
+
+function pjWhen(at) {
+  const when = Date.parse(at);
+  if (!Number.isFinite(when)) return '';
+  const secs = Math.round((Date.now() - when) / 1000);
+  if (secs < 0) return 'just now';          // a clock that moved; do not invent a future
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return mins === 1 ? 'a minute ago' : mins + ' minutes ago';
+  try {
+    const then = new Date(when);
+    const time = then.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    // ⚠️ A bare clock time is only TRUE today. A thread keeps up to a
+    // thousand messages, so "at 3:42 PM" on a three-day-old row reads as
+    // this afternoon -- a false time claim, the exact class rule 5 exists
+    // for. Compared by calendar day, not by 24 hours, because "yesterday at
+    // 11 PM" is not today at any hour.
+    const now = new Date();
+    if (then.toDateString() !== now.toDateString()) {
+      return 'at ' + time + ' on '
+        + then.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    return 'at ' + time;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * One message, and what became of it.
+ *
+ * ⚠️ THREE STATES, DRAWN AS THREE THINGS. `unconfirmed` is not a flavour of
+ * failure: it means the text may already be in that agent's composer, so a row
+ * that looked like a failure would invite the re-send that duplicates it. It
+ * gets its own class and its own sentence, and the sentence points at the
+ * screen further down this page rather than guessing on the person's behalf.
+ *
+ * ⚠️ AND THE VERDICT IS A SENTENCE, not a tick. A tick beside a message is read
+ * as "it arrived and was understood", and all we know is that tmux took the
+ * keystroke.
+ */
+function pjMsg(m, name) {
+  const d = (m && m.delivery) || {};
+  // The pane's state when we typed. "Placed into casey's session" is exactly
+  // true and invites the wrong inference — that casey is reading it — so a
+  // message sent to a busy agent says where it is sitting.
+  const note = d.paneNote ? ' (' + esc(d.paneNote) + ')' : '';
+  let said;
+  let mark;
+  if (d.state === 'placed') {
+    mark = '';
+    said = 'Placed into ' + esc(name) + '’s session' + esc(pjWhenPart(m.at)) + note + '.';
+  } else if (d.state === 'unconfirmed') {
+    mark = ' unsure';
+    // A row is history, so it states what happened and stops. The instruction
+    // about what to do lives in the live message line, once.
+    said = 'Could not confirm this reached ' + esc(name) + '’s session' + esc(pjWhenPart(m.at)) + note + '. '
+      + esc(pjSentence(d.because || 'we typed it and could not tell whether it arrived'));
+  } else {
+    mark = ' failed';
+    /**
+     * ⚠️ TIMED, LIKE EVERY OTHER ROW. This one was the only un-timed entry in
+     * the thread, and the comment authorising that (on the live line, where
+     * leaving the time off IS right) said "the row below carries the time" —
+     * which was simply false, because this is that row. On a thread holding
+     * several failures the person could not tell which failure belonged to
+     * which send.
+     *
+     * The live line still carries no time, for its own reason: "Could not
+     * deliver just now" reads as "not at this moment". A row is history and
+     * says when.
+     */
+    // No paneNote on this arm, DELIBERATELY (round 39 made the asymmetry a
+    // comment): `because` already carries the refusal whole ("it is waiting
+    // on an answer from you"), and the pane state is usually the same fact
+    // -- appending "(it was mid-task)" to a sentence explaining why nothing
+    // was typed restates it. placed/unconfirmed append the note because
+    // there it adds what the verdict alone cannot say. The live line holds
+    // the same asymmetry.
+    // Through pjSentence like the unconfirmed arm above (round 40): this
+    // was the one arm gluing a raw clause to its own full stop, so a
+    // because that already ends in punctuation doubled the stop.
+    said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
+      + esc(pjSentence(d.because || 'we could not put it into its session'));
+  }
+  return '<div class="pj-msg' + mark + '">'
+    + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
+    + '<span class="pj-msg-said">' + said + '</span>'
+    + '</div>';
+}
+
+/**
+ * A `because` from the engine, made into a sentence.
+ *
+ * ⚠️ THE ENGINE'S REASONS ARE WRITTEN AS CLAUSES, and pasting one straight
+ * after a full stop produces exactly what `renderConnection` has a paragraph
+ * about further up this file: "…until it finishes). it went into its window…".
+ * That defect shipped once on this branch too, and every assertion passed —
+ * caught by reading the rendered sentence, which is the whole reason the render
+ * check exists. Same fix as the precedent: capitalise and terminate at the point
+ * of use, and leave the engine's strings alone so they still compose elsewhere.
+ */
+function pjSentence(because) {
+  const said = String(because || '').trim();
+  if (!said) return '';
+  return said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.');
+}
+
+/**
+ * Speak a NEW thread sentence once, without making the visible line live.
+ * The visible #pj-thread-msg ages its verdict on every poll (round 30):
+ * making IT the live region re-announced the unchanged verdict at every
+ * minute boundary. Writers of new sentences call this beside their write;
+ * the aging repaint deliberately does not.
+ */
+let PJ_SAY_TIMER = null;
+function pjAnnounce(text) {
+  const say = document.getElementById('pj-thread-say');
+  if (!say) return;
+  // A pending re-announce is cancelled first (round 36): without this,
+  // two announces inside the 80ms window let the OLDER sentence land
+  // last, and the spoken announcement contradicted the visible line.
+  if (PJ_SAY_TIMER) { clearTimeout(PJ_SAY_TIMER); PJ_SAY_TIMER = null; }
+  // The SAME sentence twice still announces (round 33): pressing Send
+  // twice and meeting the same refusal spoke nothing the second time,
+  // which is "nothing happened" -- the reading this screen works hardest
+  // to prevent. A live region only fires on change, so the repeat is
+  // blanked and re-set a beat later.
+  if (say.textContent === text) {
+    say.textContent = '';
+    PJ_SAY_TIMER = setTimeout(() => { PJ_SAY_TIMER = null; say.textContent = text; }, 80);
+  } else {
+    say.textContent = text;
+  }
+}
+
+/** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
+function pjSetScreen(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+function paintThreadPicker(p, who) {
+  const sel = document.getElementById('pj-thread-who');
+  const members = p.agents || [];
+  const html = members.length
+    ? members.map((m) => '<option value="' + esc(m.sessionName) + '">' + esc(m.name) + '</option>').join('')
+    : '<option value="">no agents on this project yet</option>';
+  // The person's CHOICE survives a repaint, the same guard the add-an-agent
+  // picker beside it carries: rebuilding options resets a select to index 0, so
+  // somebody who picked an agent and paused for five seconds would be typing to
+  // a different one.
+  // Stored-string compare, not innerHTML round-trip (round 35): esc()
+  // writes &quot; where serialization reads back a bare quote, so a name
+  // containing one made this rebuild fire every poll and close an open
+  // dropdown mid-choice -- the setLive fix of round 34, applied to the
+  // element its comment named and which had not been migrated.
+  if (sel.__lastPicker !== html) {
+    sel.__lastPicker = html;
+    sel.innerHTML = html;
+  }
+  if (who && sel.value !== who) sel.value = who;
+  sel.disabled = !members.length;
+  document.getElementById('pj-say').disabled = !members.length;
+  document.getElementById('pj-send').disabled = !members.length || PJ_SENDING;
+}
+
+function paintThread(body) {
+  const p = pjById(PJ_CURRENT);
+  if (!p || !body) return;
+  const name = pjNameOf(p, body.agent && body.agent.sessionName);
+
+  /* The question, when the board says this agent is asking one. */
+  const qWrap = document.getElementById('pj-question');
+  const qText = document.getElementById('pj-question-text');
+  const qLabel = document.getElementById('pj-question-label');
+  if (body.asking && body.question) {
+    qLabel.textContent = name + ' is waiting on an answer. This is the part of its screen that asked:';
+    pjSetScreen(qText, body.question.text);
+    qWrap.hidden = false;
+  } else if (body.asking) {
+    /**
+     * ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is the
+     * stranded state this whole feature exists to remove, rebuilt one step
+     * further in. The two reads differ in moment, flags and depth, so this is
+     * genuinely reachable.
+     *
+     * ⚠️ AND THE ROUTE'S OWN SENTENCE IS USED. `questionBecause` exists for
+     * exactly this case and was published and never read, while this branch
+     * composed its own wording — two derivations of one explanation, which
+     * drift the first time either is edited. The fallback covers an older
+     * server that does not send the field.
+     */
+    // ⚠️ "Its whole screen is below" ONLY when a screen will actually be
+    // below: with the capture failed, the screen block twenty lines down
+    // hides itself and says we could not read the window -- and this line
+    // was still pointing at it. The same viewport test that block uses
+    // decides the pointer here, so the two sentences cannot disagree.
+    qLabel.textContent = name + ' is waiting on an answer, and '
+      + (body.questionBecause
+        || 'we cannot find the question on its screen right now')
+      + '.'
+      + (body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
+    pjSetScreen(qText, '');
+    /* ⚠️ Focus is RESCUED before either hide (round 31): round 30 moves
+       focus INTO qText, and hiding a focused element drops focus to
+       <body> with nothing announced -- the stranded-keyboard state,
+       rebuilt by the poll five seconds after the fix for it. The message
+       box is the deliberate landing: always visible, and the natural
+       next action after reading a question is answering it. */
+    if (qText.contains(document.activeElement) || qText === document.activeElement) {
+      document.getElementById('pj-say').focus();
+    }
+    qText.hidden = true;
+    qWrap.hidden = false;
+  } else {
+    if (qWrap.contains(document.activeElement)) {
+      document.getElementById('pj-say').focus();
+    }
+    qWrap.hidden = true;
+    qText.hidden = false;
+  }
+  // The un-hide for the question branch above (its qText.hidden = true is
+  // the no-question arm); kept out here so one line closes all three arms.
+  if (body.asking && body.question) qText.hidden = false;
+
+  /* What we have sent. */
+  const msgs = document.getElementById('pj-msgs');
+  if (body.historyUnfilable) {
+    /**
+     * ⚠️ A NAME WE CANNOT FILE UNDER IS A THIRD STATE, and reported through
+     * either of the others it produced sentences that are false in BOTH
+     * directions: "We cannot read what you have sent this agent" (there is no
+     * file to read, and never will be) and "this is not saying you have sent
+     * nothing" (nothing is kept for this agent, here or anywhere).
+     *
+     * It is reachable for exactly the agents Josh asked to be able to name the
+     * way he writes them — a capital or a dot puts a session name outside the
+     * key we can file under. Sending WORKS; only the keeping does not, and the
+     * difference is the whole sentence.
+     */
+    /**
+     * ⚠️ IT SAYS ONLY WHAT IT KNOWS: the KEEPING. An earlier version added
+     * "Messages you send are delivered to its session" — a standing,
+     * present-tense promise about DELIVERY, from a state that fires purely on
+     * the SHAPE OF THE NAME and knows nothing about whether the agent is
+     * reachable. Measured: a member `MyBot` with no such session answers
+     * `could_not` on every send, while this line kept promising delivery. On
+     * that screen the promise sat between a membership row reading "we have
+     * never seen an agent by this name" and a viewport reading "we cannot see
+     * its screen" — three statements about one agent, one of them ours and
+     * wrong. It is in the committed screenshot, which I looked at and read for
+     * the new sentence rather than against the rest of the page.
+     *
+     * Whether a message got there is the per-send verdict's job, and that
+     * verdict is already correct on every path. This line stays out of it.
+     */
+    // The SESSION name is the unfilable thing, so it is what gets named --
+    // but the display name every other sentence speaks is tied beside it
+    // (round 31), or a "MyBot" that the picker calls something else reads
+    // as a stranger.
+    setLive(msgs, '<p class="fhint">Kosmos cannot keep a conversation for an agent named '
+      + esc(body.agent && body.agent.sessionName ? body.agent.sessionName : name)
+      + (body.agent && body.agent.sessionName && name && name !== body.agent.sessionName
+        ? ' (the ' + esc(name) + ' in the picker above)' : '')
+      + '; nothing sent here is kept.</p>');
+  } else if (body.messages === null) {
+    // ⚠️ `null` is "we could not read them", which is NOT "you have said
+    // nothing". Painting an empty list here would be the same failure as
+    // rendering "No projects yet" over an unreadable projects file.
+    // ⚠️ Through `pjSentence`, and with no full stop of its own: the engine's
+    // clauses are lower-case and unterminated, so this call site was printing
+    // "…we cannot see it. this conversation is there but we cannot make sense
+    // of it.." — a lower-case sentence AND a doubled stop, in one line.
+    setLive(msgs, '<div class="err">We cannot read what you have sent this agent. '
+      + 'This is not saying you have sent nothing, it is saying we cannot see it.'
+      + (body.historyBecause ? '<br>' + esc(pjSentence(body.historyBecause)) : '') + '</div>');
+  } else if (body.historyOther) {
+    /**
+     * ⚠️ A DISTINCT STATE, AND EVERY WORD OF THE OTHER ONE WAS WRONG HERE.
+     *
+     * This is a NEW project that happens to have the name an earlier one had.
+     * Its own conversation is genuinely empty, and an earlier project's
+     * messages are kept aside on disk. Reported through the unreadable branch,
+     * the screen said "We cannot read what you have sent this agent" — false,
+     * we read it and chose not to show it — and then "this is not saying you
+     * have sent nothing", which manufactures the opposite wrong idea, because
+     * for THIS project they have sent nothing and that is the useful fact.
+     */
+    setLive(msgs, '<p class="fhint">You have not sent ' + esc(name)
+      + ' anything from this project yet. An earlier project with this name had a '
+      // ⚠️ NOT "kept aside" — nothing has been moved yet. The aside happens on
+      // the first SEND to this project, so at read time the true statement is
+      // the engine's own: those messages are still on this computer. Claiming
+      // the move before it happens describes a file operation that has not run.
+      + 'conversation. Those messages are still on this computer.</p>');
+  } else if (!body.messages.length) {
+    setLive(msgs, '<p class="fhint">You have not sent ' + esc(name) + ' anything from here yet.</p>');
+  } else {
+    // The tail is BOUNDED by the route (round 36), and the page says so
+    // rather than implying the visible list is the whole record.
+    setLive(msgs, (body.olderCount
+      ? '<p class="fhint">The first ' + body.olderCount + ' messages of this conversation are kept on this computer and not shown here.</p>'
+      : '') + body.messages.map((m) => pjMsg(m, name)).join(''));
+  }
+
+  /* Its screen. ⚠️ The HEADING follows the read (round 30, measured): set
+     unconditionally, it stacked "What stopped's screen shows right now"
+     directly over "We cannot see its screen right now" for any member
+     whose agent has gone -- the ordinary state, not an exotic one. Every
+     pointer around it was already gated on the same read; the bold line
+     above them was the one that was missed. */
+  const screen = document.getElementById('pj-screen');
+  const hint = document.getElementById('pj-screen-hint');
+  if (body.viewport && body.viewport.text !== null && body.viewport.text !== undefined) {
+    document.getElementById('pj-screen-label').textContent = 'What ' + name + '’s screen shows right now';
+    pjSetScreen(screen, body.viewport.text);
+    screen.hidden = false;
+    hint.textContent = 'This is the window it is running in, as it looks right now. '
+      + 'It is not a transcript, and it is not what the agent said to you.';
+  } else {
+    // The non-claiming static heading: naming the agent here would still
+    // promise a screen the next line says we could not read.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
+    screen.hidden = true;
+    // ⚠️ The reason, in place of the screen. An empty box would read as an
+    // agent sitting at a blank terminal, which is a claim about its screen we
+    // did not make.
+    // The clause becomes its own pjSentence rather than a raw splice
+    // (round 25): a stderr line ending in a stop would double it.
+    hint.textContent = 'We cannot see its screen right now.'
+      + ((body.viewport && body.viewport.because) ? ' ' + pjSentence(body.viewport.because) : '');
+  }
+}
+
+async function loadThread() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  /**
+   * ⚠️ THE GENERATION IS TAKEN BEFORE THE NO-RECIPIENT BRANCH, which is the
+   * early return the counter exists for: it used to be taken after it, so
+   * taking the last agent off a project, while a fetch for that agent was
+   * still in flight, let the stale answer land and repaint a departed
+   * agent's thread over "Put an agent on this project". (The `!p` return
+   * above sits before the bump and is fine without it: a stale response's
+   * paintThread re-checks pjById(PJ_CURRENT) and bails. Round 26: this
+   * sentence used to say "before ANY early return", which described code
+   * that does not exist.)
+   */
+  const mine = ++PJ_THREAD_GEN;
+  // Pinned the first time one resolves, so a poll cannot re-aim the picker
+  // while somebody is typing. See pjPinWho.
+  const who = pjPinWho(pjThreadWho(p));
+  paintThreadPicker(p, who);
+  if (!who) {
+    // Nobody to talk to is a real state, and it is the first one a new project
+    // is in. Say what to do rather than showing an empty conversation.
+    setLive(document.getElementById('pj-msgs'),
+      '<p class="fhint">Put an agent on this project and you can talk to it here.</p>');
+    document.getElementById('pj-question').hidden = true;
+    document.getElementById('pj-screen').hidden = true;
+    document.getElementById('pj-screen-hint').textContent = '';
+    // Same heading reset as openProject's clear (round 22): the poll takes
+    // this branch within a tick of the last agent leaving the project, and
+    // the heading otherwise keeps naming the departed agent.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
+    return;
+  }
+  let body;
+  let gone = false;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
+      + '/thread/' + encodeURIComponent(who));
+    gone = res.status === 404;
+    body = await res.json();
+    if (mine !== PJ_THREAD_GEN) return;
+    if (!res.ok) throw new Error(body.error || 'we could not read this conversation right now');
+  } catch (err) {
+    if (mine !== PJ_THREAD_GEN) return;
+    // ⚠️ THE PAINTED THREAD IS LEFT EXACTLY AS IT WAS. Repainting it empty
+    // would turn "we could not look" into "there is nothing here", which is the
+    // failure this app is built against. (A `PJ_THREAD` global used to be
+    // assigned here to carry that; nothing ever read it, so the reasoning is
+    // kept and the variable is gone.) Through
+    // the same change-guard as everything else, because the poll re-enters
+    // here every five seconds. (Round 34: this line used to say "and this
+    // is an aria-live region" -- round 30 made the verdict line non-live,
+    // with announcements going through pjAnnounce, so the guard's job now
+    // is only avoiding pointless repaints.)
+    //
+    // ⚠️ A 404 IS A FACT, NOT A BLIND SPOT. "That agent is not on this
+    // project" and "there is no project by that name" are things the server
+    // ESTABLISHED, so framing them as "we cannot read" claims a doubt nobody
+    // has -- and it is reachable: removing the agent in another window 404s
+    // the next 5-second poll. The two frames get two sentences, and the
+    // engine's clause goes through pjSentence either way, because a lowercase
+    // clause after a full stop was the exact defect pjSentence was written
+    // for and this catch had reintroduced it.
+    const msg = document.getElementById('pj-thread-msg');
+    // Only an ENGINE clause is repeated to the person. A rejected fetch's
+    // err.message is a browser internals string ("Failed to fetch"), which is
+    // the errno rule's territory: not something a person can act on.
+    const note = gone
+      ? 'This conversation is not here any more. ' + pjSentence((body && body.error) || 'what it belonged to changed')
+      : 'We cannot read this conversation right now.'
+        + (body && body.error ? ' ' + pjSentence(body.error) : '');
+    /* ⚠️ A standing SEND VERDICT outranks this note (round 29): writing
+       over it broke the pairing the success path depends on -- the next
+       good poll cleared this note to empty, the shown-text match then
+       failed, and PJ_SENT_LINE was dropped with nothing in its place. A
+       could_not that also failed to record ended as a full box over a
+       blank line: the stranded state, rebuilt by a connection blip. The
+       verdict already tells the person more than this note would. */
+    if (!(PJ_SENT_LINE && msg.textContent === PJ_SENT_LINE.shown)) {
+      if (msg.textContent !== note) { msg.textContent = note; pjAnnounce(note); }
+      // Remembered, so the next successful read clears THIS sentence and
+      // not whatever a send has since written in its place.
+      PJ_THREAD_NOTE = note;
+    }
+    return;
+  }
+  /**
+   * ⚠️ ONLY THIS FUNCTION'S OWN NOTE IS CLEARED, and finding out why cost a
+   * render check. Clearing the line outright wiped the sentence `pjSend` had
+   * just written — so a delivery that FAILED said "Could not deliver: can't
+   * find pane" for a few milliseconds and then went silent, and the 5-second
+   * poll wiped it again on every tick. The person pressed Send, their message
+   * did not arrive, and the screen ended up saying nothing at all: the stranded
+   * state this whole feature exists to remove, rebuilt inside the fix for it.
+   * Not visible to any assertion that reads source.
+   */
+  const line = document.getElementById('pj-thread-msg');
+  if (PJ_THREAD_NOTE && line.textContent === PJ_THREAD_NOTE) line.textContent = '';
+  PJ_THREAD_NOTE = null;
+  /**
+   * ⚠️ THE LAST SEND'S VERDICT AGES WITH THE ROWS. Only OUR sentence is
+   * replaced — matched against what we last wrote — so a poll can never
+   * overwrite an error somebody else put on this line, and a verdict the person
+   * has navigated away from is dropped rather than resurrected.
+   */
+  if (PJ_SENT_LINE && line.textContent === PJ_SENT_LINE.shown) {
+    const aged = PJ_SENT_LINE.render(pjWhenPart(PJ_SENT_LINE.at));
+    if (aged !== PJ_SENT_LINE.shown) { line.textContent = aged; PJ_SENT_LINE.shown = aged; }
+  } else if (PJ_SENT_LINE) {
+    // (The preceding branch already took textContent === shown, so no
+    // inequality test is needed here -- one used to sit in this condition
+    // and a reader had to re-derive that it was dead. Round 26.)
+    PJ_SENT_LINE = null;
+  }
+  paintThread(body);
+}
+
+document.getElementById('pj-thread-who').addEventListener('change', (e) => {
+  PJ_WHO = e.target.value || null;
+  // Cleared, because it describes the conversation being left rather than the
+  // one being opened — the stamp with it, or the poll would restate a verdict
+  // about a different agent's send.
+  document.getElementById('pj-thread-msg').textContent = '';
+  PJ_SENT_LINE = null;
+  loadThread();
+});
+
+async function pjSend() {
+  // ⚠️ ONE send at a time. Two clicks on a slow tmux would type the same
+  // message into the agent twice, and the second one lands after the agent has
+  // already started on the first.
+  if (PJ_SENDING) return;
+  const p = pjById(PJ_CURRENT);
+  if (!p) {
+    // ⚠️ SAYS SO rather than returning silently, which is what "nothing
+    // happened" looks like from the outside — somebody presses Send, their
+    // words stay in the box, and the screen offers no account of it. Reachable:
+    // the project can be removed in another window between the poll and the
+    // click, and the list this reads is refreshed every five seconds.
+    document.getElementById('pj-thread-msg').textContent =
+      'We cannot see this project any more, so we did not send that. Your message is still here.';
+    pjAnnounce('We cannot see this project any more, so we did not send that. Your message is still here.');
+    return;
+  }
+  const who = pjThreadWho(p);
+  const box = document.getElementById('pj-say');
+  const msg = document.getElementById('pj-thread-msg');
+  const text = box.value.trim();
+  if (!who) { msg.textContent = 'There is no agent on this project to send that to.'; pjAnnounce(msg.textContent); return; }
+  /* ⚠️ The send goes to the agent the PICKER NAMES, or not at all (round
+     32): the resolved recipient and the visible picker can disagree for
+     up to a poll tick -- loadProjects replaces PROJECTS while the picker
+     still shows an agent just removed, so pjThreadWho falls back to the
+     default and the message would be typed into a DIFFERENT live agent's
+     session than the name on screen. "Typing to Mara, delivered to Nils",
+     the exact failure the pin exists to prevent, reached from the data
+     side. On mismatch: repaint, refuse, keep the words. */
+  const shown = document.getElementById('pj-thread-who').value;
+  if (shown && shown !== who) {
+    paintThreadPicker(p, who);
+    msg.textContent = 'Who this goes to just changed, so we did not send it. '
+      + 'Check the name above and press Send again. Your message is still in the box.';
+    pjAnnounce(msg.textContent);
+    return;
+  }
+  if (!text) { msg.textContent = 'Write something to send.'; pjAnnounce(msg.textContent); return; }
+
+  PJ_SENDING = true;
+  /* ⚠️ THE FLIGHT REMEMBERS WHERE IT TOOK OFF (round 37). Back is not
+     disabled during a send, and a flight can honestly run ~15s -- so its
+     verdict was landing on whatever thread is open when it returns: press
+     Send on project A, press Back, open project B, and B's thread said
+     "Placed into Mara's session" about a send B never made, and the poll
+     kept aging it there. This is the cross-project misattribution class the
+     switching-clear in openProject closes on the painted path, reached
+     through time instead of through a stale response. A verdict may paint
+     only if the person has not moved: same project AND no navigation since
+     takeoff (PJ_NAV_GEN catches leave-and-return to the same project, whose
+     thread view the switching-clear has since reset). The words are never
+     lost either way -- recorded sends are in the thread, unplaced words
+     stay parked in PJ_DRAFTS under the project they belong to. */
+  const sentProject = PJ_CURRENT;
+  const sentNav = PJ_NAV_GEN;
+  const flightMoved = () => PJ_CURRENT !== sentProject || PJ_NAV_GEN !== sentNav;
+  // Whether Send itself was focused, so the finally can put focus back:
+  // disabling the focused element drops focus to <body>, and a keyboard
+  // user lost their tab position for the whole flight (round 36).
+  const sendHadFocus = document.activeElement === document.getElementById('pj-send');
+  document.getElementById('pj-send').disabled = true;
+  // The PICKER holds still during a send too (round 27): changing the
+  // recipient mid-flight cleared the sent-line and then the landing
+  // verdict named the previous agent under a picker showing a different
+  // one -- two true things on screen disagreeing. paintThreadPicker
+  // recomputes this from the member list on the next paint -- which is
+  // the loadThread INSIDE the verdict handling, so the disable lasts
+  // until the first repaint after the verdict is painted, not to the end
+  // of the flight's finally (round 38 corrected this sentence: the old
+  // wording described a PJ_SENDING term the picker line does not have;
+  // safe because the verdict is on screen before that repaint and the
+  // change handler clears PJ_SENT_LINE).
+  document.getElementById('pj-thread-who').disabled = true;
+  msg.textContent = 'Sending…';
+  const name = pjNameOf(p, who);
+  let res, body;
+  try {
+    res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
+      + '/thread/' + encodeURIComponent(who), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    body = await res.json();
+  } catch {
+    /**
+     * ⚠️ A REJECTED FETCH IS THE TRANSPORT'S OWN `unconfirmed`, NOT A REFUSAL.
+     * The POST may have been fully processed (typed into the agent's session
+     * AND recorded) before the connection died on the way back -- so a raw
+     * "Failed to fetch" beside a still-full box is an invitation to press Send
+     * again, and the second copy answers a question the first already
+     * answered: the exact duplicate this feature's three delivery states exist
+     * to prevent, rebuilt one layer down. So it reads like the unconfirmed
+     * verdict: no claim it was or was not sent, the box keeps the only copy we
+     * are sure of, and the person is pointed at the screen below before any
+     * re-send. The browser's exception string stays off the screen (errno
+     * rule). No time phrase: we observed no delivery moment to stamp.
+     */
+    // ⚠️ The pointer is GATED on the screen block actually being on the
+    // page (round 22): with the last capture failed, that block hides
+    // itself and says we could not read the window -- and this sentence
+    // was still pointing at it. The connection failure that produced this
+    // sentence is likely to fail the refresh below too, so the gate reads
+    // the current paint, and the fallback instructs without pointing.
+    // "lost contact", not "the connection failed" (round 30): this branch
+    // is also reached when the connection succeeded and the BODY did not
+    // parse, so the old sentence named a cause it had not observed.
+    // Gated on the flight not having moved (round 37): this sentence names
+    // the takeoff project's agent and promises "still in the box below",
+    // and both are about a thread the person may have left. The words stay
+    // parked in PJ_DRAFTS under the project they belong to either way.
+    if (!flightMoved()) {
+      msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
+        + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
+        + (document.getElementById('pj-screen').hidden
+          ? 'Before sending it again, check whether it already arrived. '
+          : 'Its screen is below. Check there before sending it again. ')
+        + 'Your message is still in the box below.';
+      pjAnnounce(msg.textContent);
+    }
+    PJ_SENDING = false;
+    // Mirroring the picker, exactly as the finally below does (round 21): an
+    // unconditional re-enable armed the button over an empty picker whenever
+    // the loadThread underneath took its no-project early exit and repainted
+    // nothing.
+    document.getElementById('pj-send').disabled =
+      document.getElementById('pj-thread-who').disabled;
+    // The refresh CAN still settle it: if the send landed and was recorded,
+    // the thread above will show it. Own try, so a repaint problem can never
+    // replace the one sentence the person needs. Skipped when the flight
+    // moved: the open thread is a different project's, and its own poll
+    // owns its refresh.
+    if (!flightMoved()) { try { await loadThread(); } catch { /* the verdict line stays */ } }
+    // The finally below never runs for this branch (round 39): it returns
+    // out of the FIRST try, so a keyboard user who pressed Send into a
+    // connection failure was left focused on <body> -- the stranded state
+    // rounds 30/31/35/36 closed on the other four paths. Same rescue,
+    // same gates.
+    if (sendHadFocus && !flightMoved()) {
+      const sbtn = document.getElementById('pj-send');
+      if (!sbtn.disabled) sbtn.focus();
+      else document.getElementById('pj-say').focus();
+    }
+    return;
+  }
+  try {
+    if (!res.ok) throw new Error(body.error || 'we could not send that');
+    const state = (body.delivery && body.delivery.state) || 'could_not';
+    const note = (body.delivery && body.delivery.paneNote) ? ' (' + body.delivery.paneNote + ')' : '';
+    // ⚠️ RECORDING AND DELIVERING ARE TWO ACTS. A message that went through and
+    // could not be written down must say both, or the thread quietly loses a
+    // message it delivered.
+    const kept = body.recorded ? '' : ' We could not add it to this conversation'
+      + (body.recordedBecause ? ' (' + body.recordedBecause + ')' : '') + '.';
+    /**
+     * ⚠️ SAID OUT LOUD, because it is a file being MOVED on somebody's disk.
+     *
+     * The first message sent to a project that reuses an earlier project's name
+     * renames that earlier conversation aside. The route has always reported it
+     * and the page never read the field — so the move happened silently, and
+     * the only screen that could have mentioned it said nothing. A write to
+     * somebody's data that no sentence accounts for is exactly what this
+     * codebase is built against.
+     */
+    const moved = body.supersededBecause ? ' ' + pjSentence(body.supersededBecause) : '';
+
+    /**
+     * ⚠️ THE BOX KEEPS YOUR TEXT EXACTLY WHEN RE-SENDING IS SAFE, **OR WHEN IT
+     * IS THE ONLY COPY LEFT**, and the second half was the premise of the first
+     * version's own comment and was never checked:
+     *
+     *   placed       — it went into the agent's composer and was submitted.
+     *                  Clear it. Even unrecorded, the words reached the agent,
+     *                  so nothing claims they are somewhere they are not.
+     *   could_not    — nothing was typed, so sending again is the right thing to
+     *                  do and emptying the box would throw the person's words
+     *                  away at the moment they most need them.
+     *   unconfirmed  — it may already be in that agent's composer, so clearing
+     *                  makes a re-send a decision rather than a second click.
+     *                  ⚠️ THAT ONLY HOLDS IF WE RECORDED IT. "Nothing is lost —
+     *                  it is in the thread above" was written as a certainty and
+     *                  the code never asked. With `recorded: false` the box was
+     *                  cleared AND the thread had nothing: the words existed
+     *                  NOWHERE, under a sentence promising they were kept. When
+     *                  we did not record it, the box IS the only copy and it
+     *                  keeps it — and the sentence stops making the promise.
+     */
+    const inThread = body.recorded === true;
+    // ⚠️ Each verdict is a FUNCTION of how long ago it was, not a string with
+    // the phrase baked in — see PJ_SENT_LINE. The poll re-renders it exactly as
+    // it re-renders the rows, so the two can never disagree about one send.
+    const at = (body.delivery && body.delivery.at) || new Date().toISOString();
+    let render = null;
+    /* ⚠️ The clear is GUARDED against what is in the box NOW (round 29):
+       the box stays enabled during a flight that can honestly run many
+       seconds (three 5s tmux timeouts plus the record lock), so someone
+       who pressed Enter and started typing the next message had it
+       silently deleted when the verdict landed -- the never-delete rule
+       this branch holds on disk, broken in the one place the words are
+       only in the DOM. Only the text this send took is cleared. */
+    /* ⚠️ The clear acts on the TAKEOFF project's copies, not the open box
+       (round 37): with the flight moved, the box holds a DIFFERENT
+       project's draft, and clearing it -- or deleting PJ_DRAFTS under
+       PJ_CURRENT -- destroys words this send never touched. When the send
+       was placed (or unconfirmed-but-recorded), the parked draft under
+       sentProject is retired IF it still holds exactly the text this send
+       took, so returning to that project does not re-offer words the agent
+       already has. Anything the person typed on top survives. */
+    /* ⚠️ TWO gates, deliberately unequal (round 38). The box clear keys on
+       the PROJECT alone: after leave-and-return to the SAME project, the
+       box holds this project's restored draft -- the very text this send
+       just placed -- and gating the clear on the full flightMoved() left
+       delivered words sitting armed in the box under no verdict line, an
+       invitation to send them twice. The paint gate below keeps BOTH
+       terms, because the thread view really was reset by the navigation.
+       A different project's draft is protected by the project term; text
+       typed on top is protected by the exact-match guard. */
+    const clearSent = () => {
+      if (PJ_CURRENT === sentProject && box.value.trim() === text) box.value = '';
+      if ((PJ_DRAFTS[sentProject] || '').trim() === text) delete PJ_DRAFTS[sentProject];
+    };
+    if (state === 'placed') {
+      clearSent();
+      render = (when) => 'Placed into ' + name + '’s session' + when + note + '.' + moved + kept;
+    } else if (state === 'unconfirmed') {
+      if (inThread) clearSent();
+      // ⚠️ ONE instruction, not three. The first version stacked the engine's
+      // "look at its screen" on top of the page's "it is in the conversation
+      // above" on top of "it may be sitting in its composer unsent" — a wall
+      // that sent the person to three different places. The engine states the
+      // fact; this line says the one thing to do about it.
+      render = (when) => 'Could not confirm this reached ' + name + '’s session' + when + note + '. '
+        + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
+        // Gated like the question label's pointer (round 22): an
+        // unconfirmed send is a tmux that did not answer, and that is the
+        // same tmux whose capture just failed -- the screen block may be
+        // hidden behind "we cannot see its screen right now".
+        + (document.getElementById('pj-screen').hidden
+          ? ' Before sending it again, check whether it already arrived.'
+          : ' Its screen is below. Check there before sending it again.')
+        + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')
+        + moved + kept;
+    } else {
+      /**
+       * ⚠️ NO TIME PHRASE ON THIS LIVE LINE, deliberately. "Could not deliver
+       * just now: …" reads as "not at this moment", which is a different and
+       * wrong claim — it suggests trying again in a second might work. The
+       * defect this addresses is a FALSE time claim, not the absence of one,
+       * and this line needs no stamp to stay true: nothing was typed and the
+       * person's text is still in the box in front of them.
+       *
+       * ⚠️ An earlier version of this note also said "the row below carries
+       * the time", which was FALSE — the row was the one un-timed entry in the
+       * whole thread, so on a thread with several failures nobody could tell
+       * which failure belonged to which send. The row carries it now (see
+       * `pjMsg`), and this sentence no longer leans on something it had not
+       * checked.
+       */
+      render = () => 'Could not deliver: '
+        + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;
+    }
+    // The paint itself is the gated act (round 37): everything above only
+    // computed strings and retired the takeoff project's spent draft. With
+    // the flight moved, this verdict describes a thread that is not on
+    // screen, so it paints nowhere -- the recorded row IS the account of
+    // what happened, visible when that project is next opened.
+    if (!flightMoved()) {
+      msg.textContent = render(pjWhenPart(at));
+      pjAnnounce(msg.textContent);
+      PJ_SENT_LINE = { at, render, shown: msg.textContent };
+      // Own try: the verdict above is committed, and a repaint problem in the
+      // refresh must not replace it with an exception string.
+      try { await loadThread(); } catch { /* the verdict line stays */ }
+    }
+  } catch (err) {
+    // Through pjSentence, like loadThread's sibling catch: a 400 carries an
+    // engine clause ("that message has characters we will not type…"), and
+    // rendering it lowercase and unterminated is the clause-after-full-stop
+    // defect pjSentence was written for.
+    // Same round-37 gate as the success path: this sentence explains a
+    // refusal of a send made from the takeoff project, and it may not land
+    // on whatever thread is open now.
+    if (!flightMoved()) {
+      msg.textContent = pjSentence(err.message) || 'We could not send that.';
+      pjAnnounce(msg.textContent);
+      /* ⚠️ The picker is REPAINTED here too (round 28): this path never ran
+         loadThread, so the send-time disable was still on the picker, the
+         finally mirrored it onto Send, and both controls sat dead until the
+         next poll -- a sentence telling the person to fix their text above a
+         button they could not press for five seconds. Same own-try shape as
+         the success path: the sentence above is committed and outlives any
+         repaint problem. */
+      try { await loadThread(); } catch { /* the sentence stays */ }
+    }
+  } finally {
+    PJ_SENDING = false;
+    // The PICKER owns the button's no-recipient state: the refresh inside
+    // the try may have just disabled both because the last agent left the
+    // project, and an unconditional re-enable here put an armed button over
+    // an empty picker (round 19). PJ_SENDING is false by now, so mirroring
+    // the picker reproduces paintThreadPicker's own rule.
+    document.getElementById('pj-send').disabled =
+      document.getElementById('pj-thread-who').disabled;
+    // The focus rescue, fourth of its kind in this file (round 36): back
+    // onto the button when it is pressable again, onto the box when the
+    // repaint left it disabled (empty picker). Skipped when the flight
+    // moved (round 37) -- yanking focus into the thread controls of a
+    // project the person deliberately left, or onto the list view, is the
+    // opposite of a rescue.
+    if (sendHadFocus && !flightMoved()) {
+      const btn = document.getElementById('pj-send');
+      if (!btn.disabled) btn.focus();
+      else document.getElementById('pj-say').focus();
+    }
+  }
+}
+
+document.getElementById('pj-send').addEventListener('click', pjSend);
+// The park itself (round 34): every keystroke files the draft under the
+// open project, so no navigation order can lose it.
+document.getElementById('pj-say').addEventListener('input', (e) => {
+  if (!PJ_CURRENT) return;
+  const v = e.target.value;
+  if (v.trim()) PJ_DRAFTS[PJ_CURRENT] = v;
+  else delete PJ_DRAFTS[PJ_CURRENT];
+});
+document.getElementById('pj-say').addEventListener('keydown', (e) => {
+  // Enter sends, because this is a message box and that is what a message box
+  // does. There is no multi-line message to protect: the engine collapses
+  // whitespace, since a newline reaching the pane submits half a message.
+  //
+  // ⚠️ EXCEPT WHILE AN INPUT METHOD IS COMPOSING. Typing Japanese, Chinese or
+  // Korean, the Enter that CONFIRMS the candidate reaches this handler as an
+  // ordinary Enter — so the first word somebody types would be sent to their
+  // agent half-composed, every time, and the rest of the sentence with it. The
+  // two checks are one rule with two spellings: `isComposing` is the standard
+  // one, and keyCode 229 is what older WebKit reports for the same keystroke.
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  pjSend();
+});
+
+/**
+ * From a card that says "Needs you" to the question, in one click.
+ *
+ * ⚠️ THE STRANDED STATE THIS EXISTS TO MAKE IMPOSSIBLE: a card saying an agent
+ * is showing a question, with no way to see or answer it. So every ending here
+ * lands somewhere that says what to do next — including the two that cannot
+ * open a thread at all.
+ */
+async function pjAnswerFrom(sessionName, displayName) {
+  // Act on the machine name, SPEAK the display name -- the same split the
+  // capitalised-names change made everywhere else. The card carries both;
+  // falling back to the machine name only when no display name arrived.
+  const spoken = displayName || sessionName;
+  // If our read was retired by a newer caller (the 5-second poll can start
+  // between the await and the branch below), ask once more so the
+  // PJ_READ_FAILED we branch on belongs to a read at least as fresh as this
+  // click. If the retry retires too, the flag and PROJECTS are still a
+  // consistent pair from the last completed read -- the sentence picked
+  // matches the list shown, it is just a moment older (round 21).
+  if (!(await loadProjects())) await loadProjects();
+  showTab('projects');
+  // ⚠️ "We could not look" is NOT "it is on none". loadProjects leaves
+  // PROJECTS untouched on failure, so filtering it after a failed read would
+  // say "not on a project yet, add it to one" -- a definite instruction built
+  // on a read that did not happen, directly under a list saying we cannot see
+  // the projects at all. The two sentences cannot both be on screen.
+  if (PJ_READ_FAILED) {
+    PJ_CURRENT = null;
+    pjView('list');
+    document.getElementById('pj-list-msg').textContent =
+      'We could not check which projects ' + spoken + ' is on just now, so we cannot '
+      + 'open its conversation from here. This is not saying it has none.';
+    return;
+  }
+  const on = PROJECTS.filter((p) => (p.agents || []).some((m) => m.sessionName === sessionName));
+  if (!on.length) {
+    PJ_CURRENT = null;
+    pjView('list');
+    // Named, and told what would fix it. "Nothing happened" is what a silent
+    // return looks like from the outside.
+    document.getElementById('pj-list-msg').textContent =
+      spoken + ' is not on a project yet, so there is no conversation to open here. '
+      + 'Add it to a project and you can answer it.';
+    return;
+  }
+  openProject(on[0].id);
+  if (PJ_CURRENT !== on[0].id) return;   // openProject bailed and said why
+  // ⚠️ Same two lines the picker's change handler runs, for the same
+  // reason (round 32): the standing verdict describes the conversation
+  // being LEFT, and without this the single-project case kept re-rendering
+  // "Placed into Casey's session" under a picker now showing Mara (the
+  // multi-project arm below happened to overwrite it, so the common case
+  // was the uncovered one).
+  PJ_SENT_LINE = null;
+  document.getElementById('pj-thread-msg').textContent = '';
+  PJ_WHO = sessionName;
+  await loadThread();
+  /* ⚠️ Focus MOVES to the question (round 30, measured): the card that
+     carried the button is torn down on the tab switch, so activation left
+     document.activeElement on <body> -- a keyboard or screen-reader user
+     landed nowhere and had to re-traverse the page to reach the question
+     they clicked for. Guarded on the question actually having painted, so
+     the no-question arm does not focus a hidden element; the pre is
+     already tabindex=0 with role=region and a name, so landing there
+     announces whose question it is. */
+  /* Guarded on the TEXT BOX, not the wrapper (round 35): the
+     asking-but-no-question arm shows the wrapper while hiding the box,
+     and .focus() on a hidden element is a no-op -- the stranded-keyboard
+     state again, one arm over from where round 30 closed it. In that arm
+     the deliberate landing is the message box, same as paintThread's own
+     rescue. */
+  const qt = document.getElementById('pj-question-text');
+  const qw = document.getElementById('pj-question');
+  if (qt && qt.hidden === false && qw && !qw.hidden) qt.focus();
+  else document.getElementById('pj-say').focus();
+  if (on.length > 1) {
+    // ⚠️ Said, because we chose. Opening one of three projects silently is a
+    // decision the person did not make and cannot see. Registered as the
+    // poll's note (round 29) so it is cleared by the same pairing that
+    // clears every other transient sentence, instead of sitting under
+    // later unrelated activity on an aria-live region forever.
+    const chose = pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
+      + on[0].name + '.';
+    document.getElementById('pj-thread-msg').textContent = chose;
+    pjAnnounce(chose);
+    PJ_THREAD_NOTE = chose;
+  }
 }
 
 /* --- adding one -------------------------------------------------------- */
@@ -3858,6 +5231,11 @@ function pjChoose(p) {
     name.value = p.split('/').filter(Boolean).pop() || '';
     name.dataset.auto = '1';
   }
+  // ⚠️ One voice per fact: with a folder picked, the chosen-line above is the
+  // sentence that says where this project will be, and pjWillBe silences the
+  // default-path line — otherwise the screen carries "This project will be
+  // <picked>" and "Kosmos will make a folder" at once, one of them wrong.
+  pjWillBe();
 }
 
 /**
@@ -3894,7 +5272,19 @@ function paintAddAgents() {
     setLive(box, '<p class="fhint">We cannot see any agents on this computer right now.</p>');
     return;
   }
-  setLive(box, LAST.map((a) => {
+  setLive(box, addAgentsHtml());
+}
+
+/* One builder for the picker list, used by the paint AND by the in-place
+   toggle (round 39). setLive compares against the string it last wrote, so
+   an in-place aria-checked flip left __lastLive holding the pre-click
+   markup -- the next poll rebuilt the list and destroyed the focused
+   button, the exact defect the in-place update exists to prevent. The
+   toggle now recomputes this string and refreshes __lastLive so the poll
+   sees agreement. (Serialized innerHTML cannot stand in for it: the
+   round-34 quote-escaping mismatch is why setLive stores strings at all.) */
+function addAgentsHtml() {
+  return LAST.map((a) => {
     const on = PJ_ADD_AGENTS.includes(a.sessionName);
     return '<button class="pick" type="button" role="checkbox" aria-checked="' + (on ? 'true' : 'false')
       + '" data-pick="' + esc(a.sessionName) + '">'
@@ -3902,7 +5292,7 @@ function paintAddAgents() {
       + '<span><b>' + esc(a.name) + '</b>'
       + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
       + '</button>';
-  }).join(''));
+  }).join('');
 }
 
 function openAddProject() {
@@ -3914,9 +5304,128 @@ function openAddProject() {
   name.dataset.auto = '1';
   document.getElementById('pj-add-msg').textContent = '';
   document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
+  // The advanced route starts closed on every arrival, so a person who opened
+  // it once does not meet the file picker again the next time they add a
+  // project.
+  pjShowFolderPicker(false);
+  pjWillBe();
   paintAddAgents();
   pjView('add');
-  pjBrowse(null);
+  // ⚠️ The folder browser is NOT loaded here any more. Listing a directory is
+  // the cheap half; the expensive half is that this screen's whole point is
+  // that a new person never meets a file picker at all, and loading one behind
+  // a closed panel is loading one. It is fetched when the advanced link is
+  // opened, and not before.
+}
+
+/** Open or close the "use a folder you already have" route. */
+function pjShowFolderPicker(open) {
+  const field = document.getElementById('pj-folder-field');
+  const link = document.getElementById('pj-advanced');
+  field.hidden = !open;
+  link.setAttribute('aria-expanded', String(Boolean(open)));
+  link.textContent = open ? 'Never mind, let Kosmos make the folder' : 'Or use a folder you already have';
+  // Re-listed on EVERY open (round 34): PJ_HERE survives across add-flow
+  // sessions, so the cached listing could show a directory as it was
+  // minutes ago -- "Nothing else in here" as a claim about the past.
+  if (open) pjBrowse(PJ_HERE);
+  // ⚠️ Closing the route FORGETS the pick. The closing link promises "let
+  // Kosmos make the folder", and the create handler only insists on a pick
+  // while the panel is visible — so a pick that survived the close would be
+  // sent silently while the screen says the default path. Backing out of the
+  // decision must undo the decision.
+  if (!open && PJ_PICKED) {
+    PJ_PICKED = null;
+    document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
+  }
+  // ⚠️ The will-be line follows the panel on EVERY transition,
+  // unconditionally and LAST (round 25): the round-24 version refreshed it
+  // on open and on close-with-a-pick, so closing with NOTHING picked left
+  // "Pick a folder below" standing over a panel no longer on the page --
+  // under a comment claiming it followed both ways. One call after all
+  // state has settled is the form that cannot miss a transition.
+  pjWillBe();
+}
+
+/**
+ * Where this project's folder will be, said before it is made.
+ *
+ * ⚠️ THE PATH COMES FROM THE ENGINE, over a route, rather than being assembled
+ * here. The folder name is DERIVED from what was typed — slashes become dashes
+ * — and two derivations of one question is this codebase's worst habit. If this
+ * file built the string, the sentence on screen and the directory on disk would
+ * disagree the first time the rule changed, and the person would be looking for
+ * a folder that is not there.
+ */
+let PJ_WILLBE_GEN = 0;
+async function pjWillBe() {
+  const line = document.getElementById('pj-will-be');
+  // ⚠️ With a folder picked, this line says NOTHING. The chosen-line owns the
+  // where-sentence then; two sentences answering "where will this project be"
+  // is two derivations of one question, and one of them would be wrong. The
+  // generation bump also retires any default-path fetch already in flight, so
+  // a slow answer cannot land after the pick and resurrect the wrong sentence.
+  if (PJ_PICKED) {
+    PJ_WILLBE_GEN += 1;
+    line.textContent = '';
+    return;
+  }
+  // ⚠️ With the folder panel OPEN and nothing picked, the button refuses
+  // ("choose the folder, or close that") -- so a default-path sentence here
+  // promised a make the engine had already decided not to perform (round
+  // 24, the round-23 preview class one screen up). The line hedges to the
+  // decision actually in front of them instead of asserting an act.
+  if (!document.getElementById('pj-folder-field').hidden) {
+    PJ_WILLBE_GEN += 1;
+    line.textContent = 'Pick a folder below, or close that and Kosmos will make one for you.';
+    return;
+  }
+  const typed = document.getElementById('pj-name').value;
+  if (!typed.trim()) {
+    // ⚠️ The bump too, like BOTH siblings above (round 26): without it a
+    // fetch in flight for a name typed a moment ago still matches the
+    // generation, lands after this default sentence, and paints a path
+    // for a name that has been cleared -- over an empty name box, on the
+    // screen whose contract is that the path shown is the path the act
+    // produces.
+    PJ_WILLBE_GEN += 1;
+    line.textContent = 'Kosmos will make a folder for it, inside a folder of its own. '
+      + 'Nothing of yours is touched.';
+    return;
+  }
+  const mine = ++PJ_WILLBE_GEN;
+  try {
+    const res = await fetch('/api/project-folder?name=' + encodeURIComponent(typed));
+    const body = await res.json();
+    if (mine !== PJ_WILLBE_GEN) return;
+    // ⚠️ MAKE and ADOPT are different acts, one sentence each. This line
+    // said "will make" over a folder makeFolder was about to ADOPT (the
+    // person's existing folder and its contents becoming the project), on
+    // the screen whose contract is that the path is stated before anything
+    // is done. The route carries `exists` for exactly this fork.
+    // Through pjSentence, not a hand-rolled capitalise-and-stop: the copy
+    // here dropped the terminal-punctuation guard, which is the doubled-stop
+    // defect pjSentence exists for (round 19; latent, since no current
+    // folder sentence ends in punctuation).
+    line.textContent = body.problem
+      ? pjSentence(body.problem)
+      // The third arm before the other two (round 23): a FILE already at
+      // the path means neither make nor adopt -- the engine will refuse --
+      // and the preview says so now rather than promising a make the
+      // button cannot deliver.
+      : (body.blocked
+        ? pjSentence(body.blocked) + ' Pick another name.'
+        : (body.exists
+          ? 'Kosmos will use the folder already at ' + body.path + ', and put nothing of its own in it.'
+          : 'Kosmos will make this at ' + body.path + '.'));
+  } catch {
+    if (mine !== PJ_WILLBE_GEN) return;
+    // ⚠️ NOT silence, and not a guessed path. "We could not work out where"
+    // is the honest sentence; printing a path we did not get from the engine
+    // would be this screen asserting something nobody checked.
+    line.textContent = 'We could not work out where this would go just now. '
+      + 'Adding it will still tell you.';
+  }
 }
 
 /* --- wiring ------------------------------------------------------------ */
@@ -3955,6 +5464,10 @@ document.getElementById('pj-add-agents').addEventListener('click', (e) => {
   // update is announced -- a keyboard user gets no confirmation the pick
   // registered at all.
   btn.setAttribute('aria-checked', String(!on));
+  // Keep setLive's memory in step with the DOM just changed (round 39):
+  // without this the next poll's paintAddAgents sees __lastLive differing
+  // from the freshly-computed markup and rebuilds the list, dropping focus.
+  document.getElementById('pj-add-agents').__lastLive = addAgentsHtml();
 });
 
 document.getElementById('pj-use').addEventListener('click', () => {
@@ -3972,12 +5485,35 @@ document.getElementById('pj-path-go').addEventListener('click', () => {
   pjChoose(typed);
 });
 
-document.getElementById('pj-name').addEventListener('input', (e) => { e.target.dataset.auto = '0'; });
+// A short debounce, because this fires a fetch per keystroke at a synchronous
+// single-threaded server. PJ_WILLBE_GEN already keeps it CORRECT (stale
+// answers are retired); this just makes 30 keystrokes cost one request. The
+// other callers (open, pick, back-out) stay immediate on purpose: each is a
+// single act whose sentence should change with it.
+let PJ_WILLBE_TIMER = null;
+document.getElementById('pj-name').addEventListener('input', (e) => {
+  e.target.dataset.auto = '0';
+  clearTimeout(PJ_WILLBE_TIMER);
+  PJ_WILLBE_TIMER = setTimeout(pjWillBe, 150);
+});
+
+document.getElementById('pj-advanced').addEventListener('click', () => {
+  pjShowFolderPicker(document.getElementById('pj-folder-field').hidden);
+});
 
 document.getElementById('pj-create').addEventListener('click', async () => {
   const msg = document.getElementById('pj-add-msg');
   const btn = document.getElementById('pj-create');
-  if (!PJ_PICKED) { msg.textContent = 'Choose the folder this project is in first.'; return; }
+  // ⚠️ The old requirement, kept EXACTLY where it still applies and nowhere
+  // else. Somebody who opened the folder route and browsed without pressing
+  // "Use this folder" would otherwise have a project made at the default path
+  // while a folder browser sat open on screen — a decision they were visibly in
+  // the middle of, taken for them. On the default path there is nothing to
+  // choose, and the line under the name field already says where it will go.
+  if (!PJ_PICKED && !document.getElementById('pj-folder-field').hidden) {
+    msg.textContent = 'Choose the folder this project is in, or close that and Kosmos will make one for you.';
+    return;
+  }
   btn.disabled = true;
   msg.textContent = 'Adding it…';
   try {
@@ -3986,7 +5522,10 @@ document.getElementById('pj-create').addEventListener('click', async () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: document.getElementById('pj-name').value,
-        folder: PJ_PICKED,
+        // ⚠️ Left OUT rather than sent as null on the default path: the engine
+        // branches on the field being absent, and `folder: null` is a caller
+        // saying "this project lives nowhere" rather than "you choose".
+        ...(PJ_PICKED ? { folder: PJ_PICKED } : {}),
         agents: PJ_ADD_AGENTS,
       }),
     });
@@ -3999,7 +5538,10 @@ document.getElementById('pj-create').addEventListener('click', async () => {
     // into the person's face about a project that exists.
     openProject((body.project && body.project.id) || body.id);
   } catch (err) {
-    msg.textContent = err.message;
+    // Through pjSentence like every other engine `because` on this screen
+    // (round 20): the engine's reasons are clauses, and this catch was the
+    // one place still pasting a lowercase clause in as a whole sentence.
+    msg.textContent = pjSentence(err.message) || 'We could not add that project.';
   } finally {
     btn.disabled = false;
   }
@@ -4016,7 +5558,9 @@ document.getElementById('pj-one-add-go').addEventListener('click', async () => {
     if (!res.ok) throw new Error(body.error || 'we could not change that project');
     await loadProjects();
   } catch (err) {
-    msg.textContent = err.message;
+    // Through pjSentence like every sibling on this screen (round 24): the
+    // engine's reasons are clauses.
+    msg.textContent = pjSentence(err.message) || 'We could not change that project.';
   }
 });
 
@@ -4039,11 +5583,13 @@ document.getElementById('pj-one-agents').addEventListener('click', async (e) => 
     // on, with nothing on screen. Worse than nobody checking: we checked, we
     // were told, and we dropped the answer.
     if (body.told && body.told.state === 'could_not') {
-      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts — '
-        + body.told.because + '.';
+      // The engine's clause becomes its own sentence via pjSentence rather
+      // than being spliced mid-sentence with hand punctuation (round 24).
+      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
+        + pjSentence(body.told.because);
     }
   } catch (err) {
-    msg.textContent = err.message;
+    msg.textContent = pjSentence(err.message) || 'We could not change that project.';
   }
 });
 
@@ -4122,6 +5668,13 @@ document.getElementById('pj-one-remove-go').addEventListener('click', async () =
 // on the add flow being closed so a refresh cannot repaint the folder browser
 // out from under somebody mid-choice.
 setInterval(() => {
+  /* ⚠️ A hidden TAB polls nothing (round 33): with a project open this
+     tick makes three snapshot fan-outs on a single-threaded server whose
+     tmux calls block, so a wedged pane stalls every request on the
+     machine three times per tick -- for a page nobody is looking at. The
+     first visible tick repaints everything, so nothing is stale when
+     they return. */
+  if (document.hidden) return;
   const panel = document.getElementById('panel-projects');
   if (!panel || panel.hidden) return;
   if (!document.getElementById('pj-add-view').hidden) return;
@@ -4129,6 +5682,31 @@ setInterval(() => {
   // is how somebody answers a different question than the one they read.
   if (!document.getElementById('pj-one-confirm').hidden) return;
   loadProjects();
+  /**
+   * ⚠️ The thread rides the SAME cadence, not a second timer. Its two live
+   * values are the agent's screen and whether it is asking something, and both
+   * change on their own — a viewport painted once goes on asserting a screen
+   * that stopped being true, which is the failure this whole app is built
+   * against. Not while a send is in flight: that would repaint the list from
+   * underneath the send's own refresh.
+   *
+   * ⚠️ KNOWN COST, DEFERRED DELIBERATELY: with a project open this tick makes
+   * THREE `snapshot()` fan-outs — `/api/status` for the board, `/api/projects`
+   * for the row, and `/api/project/:id/thread/:agent` for this — and each one
+   * is a `list-panes` plus a `capture-pane` per agent on the machine. On a
+   * thirteen-agent fleet that is ~39 captures every five seconds to paint one
+   * conversation.
+   *
+   * Left as it is tonight because the shape of the fix is a real design
+   * decision rather than a tidy-up: coalescing them means one roster read
+   * shared ACROSS requests, and a roster shared across requests is a roster
+   * that can be stale for one of them — which is the "two derivations of one
+   * question" hazard pointed the other way, and the reason each route reads
+   * its own today. It is self-healing (nothing accumulates) and cheap on the
+   * small fleets this ships for. Follow-up work, named here so it is a
+   * decision rather than an oversight.
+   */
+  if (!document.getElementById('pj-one-view').hidden && !PJ_SENDING) loadThread();
 }, 5000);
 
 /* ==========================================================================

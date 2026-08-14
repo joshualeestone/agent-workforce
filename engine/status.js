@@ -937,13 +937,17 @@ function isClaudeRunning(command) {
  */
 const SPINNER = /[⠀-⣿]/;
 
-const NEEDS_YOU_MARKERS = [
+// Frozen (round 29): this is exported as the live array the classifier
+// itself reads, so a consumer pushing into it would rewrite the board's
+// definition of needs_you from outside. Freezing makes the one-derivation
+// contract structural instead of conventional.
+const NEEDS_YOU_MARKERS = Object.freeze([
   /Do you want to proceed/i,
   /Would you like to/i,
   /\bAllow\b.*\?/,
   /permission to/i,
   /❯\s*1\.\s*Yes/,
-];
+]);
 
 const RATE_LIMIT_MARKERS = [
   /rate limit/i,
@@ -1425,6 +1429,18 @@ function readModel(agentName, exactSession) {
  * and `server.js` states the same risk accurately at `knownAgent`. The real fix
  * is one identity per agent instead of a name sanitised in one place and taken
  * verbatim in another, which reaches the avatar and profile stores too.
+ *
+ * ⚠️ AND THE DISPLAY NAME IS NOW ON THAT LIST. `readIdentity` reads
+ * `store.readProfile(sessionName)` for the name a person typed at creation, and
+ * `readProfile` resolves through `safeKey` — while the file read three lines
+ * below it joins the session name VERBATIM. So the same split runs through this
+ * one function: for a colliding pair, the recorded display name comes from one
+ * agent's profile and the instruction file from the other's, and the card would
+ * show `mybot`'s name over `my.bot`'s role. It is the mildest consumer of the
+ * collision (a wrong label, not a cross-agent write) and it is named here
+ * because the list of things this defect reaches is the whole argument for
+ * fixing it properly, and a list that quietly stops being complete stops making
+ * that argument.
  */
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
@@ -1447,7 +1463,38 @@ const IDENTITY_OVERRIDES = {
 
 function readIdentity(sessionName) {
   const override = IDENTITY_OVERRIDES[sessionName];
-  if (override) return { ...override, derived: true, source: 'override' };
+  if (override) return { ...override, derived: true };
+
+  /**
+   * ⚠️ THE RECORD BEFORE THE FILE, and the order is the point.
+   *
+   * An agent created as `Casey` runs as `casey` everywhere the machine looks —
+   * session, launchd label, folder — and is called Casey everywhere a person
+   * looks. `create` writes the display name here as well as into the first line
+   * of the instruction file, and this prefers the record because the file
+   * belongs to the PERSON: they can rewrite that line, and a display name that
+   * vanishes when somebody edits their own instructions is not a name.
+   *
+   * ⚠️ It cannot make an agent anonymous. A profile with no `displayName` — every
+   * agent that existed before this was written — falls straight through to the
+   * file exactly as before, which is how `claudebot` still reads `Splinter`.
+   * `role` deliberately still comes from the file below: the profile's own
+   * `role` field is what a person types into the detail panel, and the board
+   * already prefers that separately, one level up.
+   */
+  /* ⚠️ Known limit, recorded rather than fixed (round 40): readProfile
+     swallows read errors and answers as if no record exists, so an
+     UNREADABLE profile is indistinguishable from an absent one and the
+     name silently falls back to the instruction file's identity line for
+     as long as the blip lasts. Accepted because the fallback is the
+     agent's own boot name (never an invented one), the record wins again
+     on the next poll, and a per-card hedge sentence for a transient read
+     failure would flap on and off every five seconds. If profiles ever
+     carry state whose stale reading is dangerous rather than cosmetic,
+     readProfile needs a third answer before that lands. */
+  const remembered = store.readProfile(sessionName);
+  const recorded = remembered && typeof remembered.displayName === 'string'
+    ? remembered.displayName.trim() : '';
 
   const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
 
@@ -1467,13 +1514,26 @@ function readIdentity(sessionName) {
   // `instructions.js` already requires this one, so anything shared has to live
   // underneath or the require becomes a cycle.
   const got = readWorkerFile(file, WORKERS_DIR);
-  if (!got.ok) return { displayName: sessionName, role: null, derived: false };
+  // ⚠️ `derived: true` when we have a recorded name even though the file is
+  // unreadable, because `derived` answers "did we find a real name for this
+  // one, or is this the machine name?" — and a recorded name IS a real name.
+  // Answering false would put the card's "machine name" flag on an agent whose
+  // name the person themselves typed.
+  if (!got.ok) {
+    return recorded
+      ? { displayName: recorded, role: null, derived: true }
+      : { displayName: sessionName, role: null, derived: false };
+  }
   const text = got.buf.toString('utf8').slice(0, 4000);
 
   const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
-  if (!m) return { displayName: sessionName, role: null, derived: false };
+  if (!m) {
+    return recorded
+      ? { displayName: recorded, role: null, derived: true }
+      : { displayName: sessionName, role: null, derived: false };
+  }
 
-  const displayName = m[1].trim();
+  const displayName = recorded || m[1].trim();
   let role = (m[3] || '')
     .replace(/\*\*/g, '')          // instruction files are markdown; strip emphasis
     .replace(/^(the|a|an)\s+/i, '')
@@ -1482,6 +1542,12 @@ function readIdentity(sessionName) {
     .trim();
   if (role.length > 60) role = role.slice(0, 60).trim();
 
+  // No `source` field (round 22): it had no consumer anywhere -- snapshot
+  // builds the card from displayName/derived/role, the page never read it,
+  // no test pinned it -- and its justifying comment claimed an every-branch
+  // completeness two fallbacks did not have. Unread API surface is the same
+  // thing round 19 removed from the thread payload; where a name came from
+  // is answered by `derived` for the one question the page asks.
   return { displayName, role: role || null, derived: true };
 }
 
@@ -1715,6 +1781,13 @@ module.exports = {
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
   setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,
+  // ⚠️ EXPORTED so `engine/chat.js` can show the person the part of the screen
+  // that produced the NEEDS_YOU verdict. It is exported rather than copied for
+  // the reason `countAgents` is: a private second copy is two derivations of
+  // one question, this codebase's worst habit, and the copy would drift the
+  // first time a marker is added here. The card that says "Needs you" and the
+  // thread that shows the question must never be able to disagree.
+  NEEDS_YOU_MARKERS,
 };
 
 if (require.main === module) {

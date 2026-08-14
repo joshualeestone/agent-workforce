@@ -7,8 +7,12 @@
  * commitments each agent says it is holding, and the instruction file each
  * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
  * worker directory, a startup script and a launchd job, and loads that job.
- * It can now stop and remove an agent, and put one back. It cannot yet send
- * input to one.
+ * It can now stop and remove an agent, and put one back. And it TYPES INTO
+ * ONE: `POST /api/project/:id/thread/:agent` places a line of text into that
+ * agent's own tmux session. That is the strongest thing in this file, so read
+ * `engine/chat.js`'s header for what it may and may not claim about it — the
+ * short version is that a keystroke reaching a terminal is never evidence that
+ * an agent read anything.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -17,7 +21,10 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot, paneRoster, countAgents } = require('./engine/status');
+// `STATE` travels with them: the thread route compares a member's state, and a
+// literal there is a comparison that silently stops matching the day the engine
+// renames one.
+const { snapshot, paneRoster, countAgents, STATE } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -35,6 +42,7 @@ const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
+const chat = require('./engine/chat');
 const os = require('node:os');
 
 /**
@@ -1142,6 +1150,18 @@ const server = http.createServer((req, res) => {
         // Only fields we know. An unrecognised key is dropped rather than
         // stored, so the profile cannot become a junk drawer.
         if (typeof patch.role === 'string') clean.role = patch.role.slice(0, 80);
+        // ⚠️ displayName is writable HERE because the record now WINS over
+        // the instruction file (round 32): creation writes it, readIdentity
+        // prefers it, and with no route accepting it a Kosmos-created agent
+        // had a permanently unchangeable name -- editing the file's
+        // identity line, which used to rename the board, silently did
+        // nothing with no sentence saying why. One-line trim: an
+        // empty-after-trim name is dropped rather than stored, so a person
+        // cannot blank an agent into anonymity by accident; the file line
+        // remains the fallback for agents with no record.
+        if (typeof patch.displayName === 'string' && patch.displayName.trim()) {
+          clean.displayName = patch.displayName.trim().slice(0, 80);
+        }
         sendJson(res, 200, store.writeProfile(name, clean));
       })
       .catch((err) => sendJson(res, 400, { error: String(err.message) }));
@@ -1266,7 +1286,71 @@ const server = http.createServer((req, res) => {
         // `version` is the sha256 the editor was last shown. Passing it through lets
         // the engine refuse a save that would overwrite an edit made since,
         // rather than silently picking the version in the textarea.
-        sendJson(res, 200, instructions.write(name, patch.text, patch.version, sessionOf(name)));
+        /* ⚠️ The rename-follow keys on the LINE CHANGING, not on the line
+           disagreeing with the record (round 37). "Parses to a name that
+           differs from the record" is also true when the person renamed
+           through the PROFILE route and then saved an unrelated paragraph
+           edit: the untouched identity line still reads the old name, and
+           following it silently reverted the profile rename. So the
+           pre-save file's identity line is read first, and the record
+           follows only a save in which that line itself moved -- the one
+           observable act that distinguishes "they edited the name" from
+           "they edited something else". Read-before-write is not atomic
+           with the write, but the same person racing their own two saves
+           lands on whichever save carried the line change, which is the
+           behaviour either order promises. */
+        const wrote = instructions.write(name, patch.text, patch.version, sessionOf(name));
+        /* The pre-save line comes from the WRITE's own read (round 39), not
+           a second read here: the round-37 version read the file twice, and
+           in the window between them a transient read failure came back as
+           exists:false -- which this parse would take for "no identity
+           line", making an unrelated paragraph save satisfy "the line
+           changed" and revert a profile-route rename through the
+           could-not-look path. write.hadIdentityText is null ONLY for a
+           positively absent file (unreadable pre-files make write throw),
+           so the create path still follows and the unknown state cannot. */
+        const lineHad = (() => {
+          const m = wrote.hadIdentityText && wrote.hadIdentityText.match(/You are \*\*([^*]+)\*\*/);
+          return m ? m[1].trim().slice(0, 80) : null;
+        })();
+        /* ⚠️ A DELIBERATE rename through the identity line updates the
+           RECORD (round 33): the record wins over the file so an
+           accidental mangle cannot un-name an agent, but that made the
+           in-product edit of `You are **X**` -- the only rename path a
+           person had -- a silent no-op that still reported "Saved." The
+           split that honours both: a saved line that PARSES to a
+           different name is a deliberate act and the record follows it;
+           a line that no longer parses updates nothing, so the name
+           survives exactly the accident the record exists for. */
+        // (No wrote.ok guard: instructions.write THROWS on every failure
+        // path, so reaching here means the save landed -- round 34
+        // removed a decorative precondition that could never be false.)
+        {
+          const m = String(patch.text).slice(0, 4000).match(/You are \*\*([^*]+)\*\*/);
+          // Same 80-char cap the profile route applies (round 34): the
+          // identity line can carry ~3,900 characters into the capture,
+          // and uncapped it became the agent's name on every card.
+          const typed = m && m[1].trim().slice(0, 80);
+          if (typed && typed !== lineHad) {
+            /* ⚠️ Guarded, because the SAVE ALREADY LANDED (round 40): a
+               throw out of the profile store here fell to the route's
+               .catch, which answered 400 with the raw message -- so a
+               committed instructions save was reported as a failed one,
+               with an errno and an internal temp path printed into the
+               editor's message line. Two rules broken at once (recording
+               failure reported as act failure; errnos on screen). Same
+               posture as create.js's own display-name write: a rename we
+               could not record is a card that keeps its old name, not a
+               failure. */
+            try {
+              const had = store.readProfile(name);
+              if (had && typeof had.displayName === 'string' && had.displayName !== typed) {
+                store.writeProfile(name, { displayName: typed });
+              }
+            } catch { /* the save succeeded; the follow is best-effort */ }
+          }
+        }
+        sendJson(res, 200, wrote);
       })
       // The message reaches the person verbatim, so it says what to do rather
       // than naming an exception.
@@ -1348,6 +1432,40 @@ const server = http.createServer((req, res) => {
         because: 'we cannot read the agents on this computer right now, so we are not saying anything about how they are doing',
       });
     }
+    return;
+  }
+
+  /**
+   * Where a project of this name WOULD go, before anything is made.
+   *
+   * ⚠️ ONE derivation, and this route is why. The add screen has to show the
+   * exact path before it creates anything — a folder name derived from what was
+   * typed, without showing the derivation, is a folder the person cannot find.
+   * The page could compute it, and then the string on screen and the directory
+   * on disk would be two answers to one question, drifting the first time the
+   * rule changes. So the engine answers and the page renders.
+   *
+   * ⚠️ ANSWERS 200 EITHER WAY. A name we cannot make a folder out of is a
+   * renderable state — the sentence goes under the field the person is still
+   * typing in — not an error the screen has to catch.
+   */
+  if (pathname === '/api/project-folder' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let asked = '';
+    try { asked = new URL(req.url, ROUTING_BASE).searchParams.get('name') || ''; } catch { asked = ''; }
+    const problem = projects.folderNameProblem(asked);
+    if (problem) { sendJson(res, 200, { path: null, problem }); return; }
+    // ⚠️ `folderPathPreview`, which does NOT create anything (it only lists
+    // the parent). Somebody typing into a name box must not leave a trail of
+    // empty directories behind them; the folder is made once, by `create`,
+    // when they press the button. The preview carries makeFolder's own
+    // case correction, so the path shown is the path the act produces.
+    const preview = projects.folderPathPreview(asked);
+    // `exists` rides along so the page can say ADOPT instead of MAKE for a
+    // folder that is already there -- two different acts, one sentence each.
+    // `blocked` is the third arm (a FILE at the path): the preview speaks
+    // makeFolder's refusal before the button is pressed, instead of
+    // promising a make the engine will refuse (round 23).
+    sendJson(res, 200, { path: preview.path, exists: preview.exists, blocked: preview.blocked || null, problem: null });
     return;
   }
 
@@ -1545,6 +1663,285 @@ const server = http.createServer((req, res) => {
   }
 
   /**
+   * --- talking to ONE agent on ONE project ---------------------------------
+   *
+   * ⚠️ THE MEMBERSHIP CHECK IS A ROUTING RULE, NOT A PERMISSION, and the
+   * difference has to be said out loud on this branch. Nothing in this product
+   * confines an agent to a project (`engine/projects.js` says so at length),
+   * and this does not start. What it does is refuse to make THIS route a
+   * general "type into any agent on the machine" endpoint that merely happens
+   * to take a project id: a thread belongs to a project and an agent on it, so
+   * an agent that is not on the project has no thread here to read or write.
+   * The gate that decides whether a keystroke may reach a session at all is
+   * `chat.addressable`, and it is about the PANE, not the project.
+   *
+   * ⚠️ Both halves answer renderable state on every path. A viewport we could
+   * not capture, a history file we could not read, and an agent we cannot tie
+   * to a session are each a sentence rather than a blank screen.
+   */
+  const thread = pathname.match(/^\/api\/project\/([^/]+)\/thread\/([^/]+)$/);
+  if (thread && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(thread[1]);
+    const name = decodeSegment(thread[2]);
+    if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    // ⚠️ ONE roster read for the whole request, like every sibling route here.
+    // Two `tmux list-panes` calls can disagree, and the disagreement is exactly
+    // the sentence this app exists not to say — a viewport captured from one
+    // look reported beside a membership described from another.
+    const roster = safeRoster();
+    let project;
+    try {
+      project = projects.get(id, roster);
+    } catch (err) {
+      sendJson(res, 500, {
+        error: String((err && err.message) || 'we cannot read your projects right now'),
+        projectsUnreadable: true,
+      });
+      return;
+    }
+    if (!project) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    const member = (project.agents || []).find((m) => m.sessionName === name) || null;
+    if (!member) { sendJson(res, 404, { error: 'that agent is not on this project' }); return; }
+
+    /**
+     * ⚠️ THE HISTORY AND THE VIEWPORT FAIL SEPARATELY, because they are
+     * different objects with different owners. The messages are OURS — we wrote
+     * them — and an unreadable record is reported as unreadable rather than as
+     * an empty conversation, the same refusal `/api/projects` makes for the
+     * projects file. The viewport is the AGENT's screen, live-only, and its
+     * failure says so in its own sentence.
+     */
+    let messages = null;
+    let historyBecause = null;
+    /**
+     * ⚠️ "WE WITHHELD IT" IS NOT "WE COULD NOT READ IT", and collapsing the two
+     * put three false sentences on one screen.
+     *
+     * A thread belonging to an EARLIER project of this name is one we read
+     * perfectly well and chose not to show. Reported through the same channel as
+     * a corrupt file, the page said "We cannot read what you have sent this
+     * agent" (false — we read it) and then "this is not saying you have sent
+     * nothing" (false the other way — for THIS project they have sent nothing,
+     * and that is exactly the fact to state).
+     *
+     * So the two travel separately. `historyOther` means: this project's own
+     * conversation is empty, and an earlier one of the same name has messages
+     * kept aside.
+     */
+    let historyOther = false;
+    /**
+     * ⚠️ A THIRD CHANNEL, because a name we CANNOT FILE UNDER is a third fact.
+     *
+     * `chat.threadFile` refuses an agent whose session name is not already its
+     * own store key — a capital or a dot, which is exactly what the pre-existing
+     * `-discord` agents adoption produces and exactly what Josh asked for when
+     * he asked for capitalised names. The refusal is right (relaxing it would
+     * reintroduce the `MyBot`/`mybot` collision this branch already killed), but
+     * routing it into `historyBecause` produced, again, the two false sentences
+     * `historyOther` exists to have removed: "We cannot read what you have sent
+     * this agent" (there is no file to read) and "this is not saying you have
+     * sent nothing" (nothing is kept, here or anywhere).
+     *
+     * So it gets its own channel and its own vocabulary. Sending still WORKS —
+     * `deliver` places the words in the agent's session — and the send-time line
+     * already says the message was not added to the conversation. What this
+     * flags is the standing fact behind that: for this agent, nothing is kept,
+     * and nothing will be.
+     */
+    let historyUnfilable = false;
+    try {
+      // ⚠️ The project's own birth date goes in, so a thread written for an
+      // EARLIER project that had this name is refused rather than shown under
+      // this one. Ids are derived from names and a removal frees the id.
+      messages = chat.readThread(id, name, project.createdAt).messages;
+    } catch (err) {
+      if (err && err.code === 'OTHER_PROJECT') {
+        historyOther = true;
+        // Empty is the TRUE answer for this project: it is a new project and
+        // nothing has been sent to this agent from it.
+        messages = [];
+      } else if (err && err.code === 'BAD_THREAD') {
+        historyUnfilable = true;
+        // There is no file and there never will be one, so an empty list is
+        // the honest shape — the sentence beside it carries the standing fact.
+        // ⚠️ BAD_THREAD can also mean a bad PROJECT id (chat.js throws it for
+        // either half of the key), and the page renders this channel as a
+        // sentence about the AGENT'S name. Unreachable today with ~3 chars of
+        // margin: cleanName caps a project name at 120, safeKey only strips,
+        // idFor adds a short counter, and PROJECT_ID allows 128 (the raised
+        // bound is pinned by a test). If ids ever grow, branch this on which
+        // half failed before the margin is spent.
+        messages = [];
+        // Set for API consumers and pinned by the route test's own-words
+        // assertion; the PAGE does not read it on this arm (it composes the
+        // named sentence itself and branches on historyUnfilable first).
+        // ⚠️ This is a STATED EXCEPTION to the no-unread-surface rule that
+        // removed the payload's agents copy (round 19) and readIdentity's
+        // source (round 22): those had no reader anywhere, while this field
+        // keeps the GET contract uniform across its three history arms for
+        // any non-page consumer -- the field exists on the other two arms
+        // for the page, so absence HERE would be the special case (round
+        // 26, kept deliberately).
+        historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
+      } else {
+        historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+      }
+    }
+    const view = chat.viewport(name, roster);
+    /**
+     * ⚠️ The question region is offered only when the BOARD says this agent is
+     * asking one, so the thread cannot contradict the card that sent the person
+     * here. And when the board says so while the markers are not in the capture
+     * — the pane redraws, and the two reads are milliseconds apart — that is
+     * said plainly rather than rendered as no question at all.
+     */
+    // The engine's own constant, not a literal: a state renamed there must move
+    // this with it rather than leaving a comparison that silently never matches.
+    // ⚠️ The `member.tied &&` conjunct is defence-in-depth the same way the
+    // page's button gate is: today's pipeline forces an untied member's
+    // state to `unknown` upstream, so no fixture can drive tied=false
+    // together with NEEDS_YOU and no test can hold this conjunct (round 14
+    // measured its removal green). It stays for the day the upstream gating
+    // changes; there is no route-level pin for it, on purpose recorded here.
+    const asking = member.tied && member.state === STATE.NEEDS_YOU;
+    const question = asking && view.text ? chat.questionIn(view.text) : null;
+    /**
+     * ⚠️ TWO DIFFERENT FACTS, TWO SENTENCES. "We read its screen and the
+     * question is not in the capture" and "we could not read its screen at
+     * all" were one string here, so a failed capture rendered as a claim
+     * about what IS on a screen nobody read -- with the page then adding
+     * "its whole screen is below" over a screen it was hiding. The exact
+     * collapse this branch fixed three times elsewhere, on the one screen
+     * the feature exists for.
+     */
+    // The page composes "<name> is waiting on an answer, and <clause>", so
+    // the clause must not restate that premise -- "its card says it is
+    // asking something, and we could not read..." doubled back on itself on
+    // screen (round 15). One derivation of the sentence, on this side.
+    const questionBecause = (asking && !question)
+      ? (view.text == null
+        ? 'we could not read its screen just now to show the question'
+        : 'we cannot find the question on its screen right now')
+      : null;
+    /* ⚠️ The poll gets a BOUNDED tail (round 36): at the engine's own
+       ceilings a full thread is a ~2MB parse-and-stringify every five
+       seconds on a synchronous server that can already block on tmux in
+       the same request path. The last 200 ride; `olderCount` says how
+       many the file still keeps, so the page can state the truth instead
+       of implying the visible list is everything. */
+    const TAIL = 200;
+    const olderCount = Array.isArray(messages) && messages.length > TAIL
+      ? messages.length - TAIL : 0;
+    if (olderCount) messages = messages.slice(-TAIL);
+    sendJson(res, 200, {
+      project: { id: project.id, name: project.name },
+      agent: member,
+      messages,
+      olderCount,
+      historyBecause,
+      // See the block above: withheld is not unreadable, and the page says a
+      // different sentence for each.
+      historyOther,
+      // The third channel: this agent's name cannot be filed under at all.
+      historyUnfilable,
+      // (An `agents` copy of the membership used to ride here; nothing read
+      // it -- the picker builds from the projects poll -- so it was dropped
+      // rather than left as surface with no consumer. Round 19.)
+      viewport: view,
+      asking,
+      question,
+      questionBecause,
+      // Carried for contract parity with the projects routes and held by
+      // the blind-roster test; the page's fleet-unreadable sentence on this
+      // screen is rendered from the projects payload (PJ_AGENTS_UNREADABLE),
+      // not from this field.
+      agentsUnreadable: roster === null,
+    });
+    return;
+  }
+
+  if (thread && req.method === 'POST') {
+    const id = decodeSegment(thread[1]);
+    const name = decodeSegment(thread[2]);
+    if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        // Refused before anything is looked up, so a message we would never
+        // send does not cost a tmux fan-out.
+        const problem = chat.messageProblem(body.text);
+        if (problem) throw new Error(problem);
+
+        const roster = safeRoster();
+        let project;
+        try {
+          project = projects.get(id, roster);
+        } catch (err) {
+          const unreadable = new Error(String((err && err.message) || 'we cannot read your projects right now'));
+          unreadable.status = 500;
+          throw unreadable;
+        }
+        if (!project) {
+          const missing = new Error('there is no project by that name');
+          missing.status = 404;
+          throw missing;
+        }
+        if (!(project.agents || []).some((m) => m.sessionName === name)) {
+          const notOn = new Error('that agent is not on this project');
+          notOn.status = 404;
+          throw notOn;
+        }
+
+        /**
+         * ⚠️ DELIVER FIRST, THEN RECORD THE VERDICT WITH IT — and record even a
+         * failure. "I asked casey this and it did not get there" is a thing the
+         * person needs to be able to see later; a thread that remembers only
+         * the successes quietly rewrites its own history.
+         *
+         * ⚠️ AND THE TWO ANSWERS ARE REPORTED SEPARATELY. A message that WAS
+         * placed and could not be written down must not come back looking like
+         * a message that was not sent, which is what one merged boolean would
+         * have done. Same reason create and delete each carry two try blocks.
+         */
+        /**
+         * ⚠️ THE VERDICT IS PASSED THROUGH WHOLE, three states and all, and
+         * nothing here narrows it to a boolean. `unconfirmed` is not a flavour
+         * of failure: it means the text may already be in that agent's
+         * composer, so a screen that folded it into `could_not` would invite
+         * the re-send that duplicates it. See `DELIVERY` in engine/chat.js.
+         */
+        const delivery = chat.deliver(name, body.text, roster);
+        const kept = chat.appendMessage(id, name, { text: body.text, at: delivery.at, delivery }, project.createdAt);
+        sendJson(res, 200, {
+          delivery,
+          recorded: kept.recorded === true,
+          recordedBecause: kept.because || null,
+          // Said out loud when an earlier project of this name had a
+          // conversation: it was kept, and it is not this project's.
+          supersededBecause: kept.supersededBecause || null,
+          // No `messages` here (round 38): nothing read it -- the page
+          // refreshes through the GET, which is also where the round-36
+          // TAIL bound lives. Carrying the whole record on the POST was
+          // both an unread API surface and an unbounded ~2MB payload the
+          // GET had already been bounded against.
+          agentsUnreadable: roster === null,
+        });
+      })
+      // The UNREADABLE arm here is defensive, not live: deliver and
+      // appendMessage never throw by contract, and projects.get's failure is
+      // rewrapped with an explicit .status above, which wins first. Kept so
+      // this catch matches its siblings if a throwing read is ever added.
+      .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  /**
    * --- choosing a folder ---------------------------------------------------
    *
    * A browser cannot hand back a real path. `<input webkitdirectory>` withholds
@@ -1707,7 +2104,15 @@ const server = http.createServer((req, res) => {
  * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. There is no
  * authentication of any kind.
  *
- * ⚠️ AND IT CREATES AGENTS, which is the most powerful thing behind this bind
+ * ⚠️ AND IT TYPES INTO RUNNING AGENTS. `POST /api/project/:id/thread/:agent`
+ * puts arbitrary text plus a separate Enter into a live agent's Claude
+ * session -- on a permission prompt, that is an unauthenticated caller
+ * answering on behalf of an agent started with
+ * `--dangerously-skip-permissions`. Added 2026-08-14, and added to THIS
+ * paragraph the same day, for the reason the next paragraph records about
+ * the last capability that went unlisted.
+ *
+ * ⚠️ AND IT CREATES AGENTS, which was the most powerful thing behind this bind
  * and was missing from this list while it was true. `POST /api/agents` installs
  * a launchd job with RunAtLoad and KeepAlive that starts Claude with
  * `--dangerously-skip-permissions` at every login, and whose instruction file

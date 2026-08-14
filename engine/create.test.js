@@ -98,6 +98,8 @@ create.setRunner(null);
 const roles = require('./roles');
 const status = require('./status');
 const fleet = require('../test-support/fleet');
+// The profile store, which is where a created agent's DISPLAY name is recorded.
+const store = require('./store');
 
 /**
  * A runner that records instead of executing.
@@ -135,12 +137,60 @@ test('a name that cannot address an agent is refused before anything is made', (
   //     a request naming one reached the other.
   //   - a leading `_` survives safeKey and is refused by safeServiceName and
   //     safeTarget, so the agent is created and then unreachable.
-  for (const bad of ['', '  ', 'My.Bot', 'MyBot', '_bot', '-bot', 'a', 'has space', 'emoji🙂']) {
+  for (const bad of ['', '  ', 'My.Bot', '_bot', '-bot', 'a', 'has space', 'emoji🙂']) {
     assert.ok(create.nameProblem(bad), `'${bad}' was accepted as a name`);
   }
-  for (const good of ['fixture-agent', 'casey-2', 'my_bot', 'a1']) {
+  // ⚠️ A CAPITAL IS NO LONGER A REFUSAL, and `MyBot` moved from the list above
+  // to this one on purpose. It used to be answered with "use lower case, so the
+  // name is the same everywhere it appears" — a true sentence about the
+  // machinery, and the wrong thing to say to somebody naming a colleague. The
+  // capital is now the DISPLAY name and `slugFor` supplies the machine one, so
+  // `Casey` is a name you can type and `My.Bot` is still refused because its
+  // slug is not a name we can build an agent out of.
+  for (const good of ['fixture-agent', 'casey-2', 'my_bot', 'a1', 'MyBot', 'Casey']) {
     assert.equal(create.nameProblem(good), null, `'${good}' was refused`);
   }
+});
+
+test('the display name and the machine name differ ONLY in case, which is what makes the split safe', () => {
+  /**
+   * ⚠️ THE LOAD-BEARING PROPERTY OF 6b. The display name is written into the
+   * instruction file an agent boots from — the most powerful write in the
+   * product — so if it could differ from the slug by anything other than case,
+   * this feature would have opened an injection surface into that file.
+   *
+   * It cannot, and the reason is that `nameProblem` validates the SLUG against
+   * `NAME_RE`, which admits only `[a-z0-9_-]`. Lower-casing is the only
+   * transform between the two, so an accepted display name is made of exactly
+   * those characters with some upper-cased. Asserted as a property over the
+   * same alphabet the shell-safety test uses, rather than trusted.
+   */
+  const alphabet = ' \t\n\'"`$();|&<>*?![]{}\\/#~^%+=:,.@abzAZ09_-*';
+  let accepted = 0;
+  for (const ch of alphabet) {
+    for (const candidate of [`a${ch}b`, `${ch}ab`, `ab${ch}`, `A${ch}B`]) {
+      if (create.nameProblem(candidate) !== null) continue;
+      accepted += 1;
+      const shown = create.cleanName(candidate);
+      /* ⚠️ Pinned to the CANDIDATE, not to each other (round 37). The old
+         assertion here was `shown.toLowerCase() === slugFor(candidate)`,
+         and since `slugFor` is defined as `cleanName(x).toLowerCase()` that
+         reduces to an identity no implementation of `cleanName` can fail --
+         the load-bearing property was held by nothing. The raw candidate is
+         the independent reference: the display name must be the typed name
+         (trimmed, nothing stripped), and the machine name must be exactly
+         that lower-cased. A `cleanName` that started STRIPPING (the safeKey
+         hole: `My.Bot` silently becoming the agent `mybot`) now fails both
+         lines instead of passing both. */
+      assert.equal(shown, candidate.trim(),
+        `'${candidate}' is shown as something other than what was typed`);
+      assert.equal(create.slugFor(candidate), candidate.trim().toLowerCase(),
+        `'${candidate}' is shown as something that is not just the machine name in another case`);
+      assert.match(shown, /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
+        `'${candidate}' would put something other than a name into the file an agent boots from`);
+    }
+  }
+  assert.ok(accepted > 0, 'no candidate was accepted, so the assertions above never ran');
 });
 
 test('a refused name creates nothing at all', () => {
@@ -335,11 +385,18 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
   });
   create.setDryRun(false);
 
-  const r = create.createAgent({ ...BINS, name: 'dud', role: 'writer' });
+  const r = create.createAgent({ ...BINS, name: 'dud', role: 'writer', displayName: 'Dudley' });
   assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'a failed start was reported as success');
   assert.match(r.because, /could not start/);
   assert.ok(r.steps.some((s) => s.label === 'started it' && !s.ok),
     'the failing step is not visible in the record');
+  // ⚠️ And NO display-name record survives the rollback (round 25): the
+  // profile write used to happen mid-flow, and rollBack removes the plist
+  // and worker dir but deliberately not profiles -- so a rolled-back
+  // creation left "Dudley" waiting to dress any future agent under the
+  // same slug. The write now happens only at CREATED.
+  assert.equal(store.readProfile('dud').displayName, undefined,
+    'a rolled-back creation left a display name for an agent that never existed');
 
   // ⚠️ And the files it DID write are still reported as written. A person whose
   // agent did not start needs to know what is on their computer -- "it all
@@ -526,7 +583,13 @@ test('a name never becomes shell text, and the validator still holds if it ever 
         // was answering about a string nobody would use and safety rested on
         // every caller happening to trim the same way. `cleanName` is now the
         // one trim, and this asserts the thing that actually matters.
-        assert.match(create.cleanName(candidate), /^[a-z0-9][a-z0-9_-]*$/,
+        // ⚠️ `slugFor`, NOT `cleanName`, and the change is the whole of 6b in
+        // one line. The name that becomes a directory, a service label and a
+        // tmux session is the SLUG; `cleanName` now answers with the display
+        // name, capitals and all. Asserting the display name here would be this
+        // test measuring a string the machine never uses — which is the failure
+        // shape `test-support/fleet` exists to make impossible one file over.
+        assert.match(create.slugFor(candidate), /^[a-z0-9][a-z0-9_-]*$/,
           `'${candidate}' was accepted as a name, and it still becomes a directory, `
           + 'a service label and a tmux session');
       }
@@ -1238,4 +1301,171 @@ test('the supervisor trims its own log rather than growing it forever', () => {
   assert.doesNotMatch(stderr, /integer expression expected/,
     'an unreadable log makes the supervisor emit a bash error');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The capital, and where it does and does not go
+//
+// ⚠️ WHAT THIS BLOCK IS FOR. Somebody naming a colleague types `Casey`, and the
+// product used to answer "use lower case, so the name is the same everywhere it
+// appears" — a true sentence about the machinery, said to the wrong person. The
+// capital now survives as the display name and the machinery uses the slug, so
+// the thing worth testing is exactly which name reaches which place.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a capitalised name makes its folder, job and session under the LOWER-CASE name', () => {
+  const calls = recorder();
+  create.setDryRun(false);
+
+  const r = create.createAgent({ ...BINS, name: 'Bex', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+
+  // Everything the operating system touches.
+  assert.ok(fs.existsSync(create.workerDir('bex')), 'the folder is not under the machine name');
+  assert.ok(fs.existsSync(create.plistPath('bex')), 'the job is not under the machine name');
+  assert.equal(create.serviceLabel('bex'), 'com.kosmos.agent.bex');
+  /**
+   * ⚠️ ASSERTED ON THE DIRECTORY LISTING, NOT ON `existsSync('Bex')`, and the
+   * first version of this line was wrong in a way worth recording. macOS's
+   * default volume is case-INSENSITIVE: `existsSync(workerDir('Bex'))` answers
+   * true for a folder that is really named `bex`, so the check could not
+   * distinguish the thing it was written to distinguish. It would have passed on
+   * a case-sensitive volume and failed here for a correct implementation —
+   * a measurement of the filesystem rather than of the code.
+   *
+   * The listing says what the name on disk actually IS, on either kind of
+   * volume, and that is the property: one folder, spelled lower case.
+   */
+  const named = fs.readdirSync(process.env.AGENT_WORKFORCE_WORKERS)
+    .filter((entry) => entry.toLowerCase() === 'bex');
+  assert.deepEqual(named, ['bex'],
+    'the folder on disk is not the lower-case name, or there is more than one of it');
+
+  // And the session tmux is asked for. The supervisor takes the agent as its
+  // first argument, so this is the name the window will be called.
+  const launched = calls.find(([, args]) => Array.isArray(args) && args.includes('bootstrap'));
+  assert.ok(launched, 'nothing was bootstrapped, so the assertions above are about nothing');
+  const plist = fs.readFileSync(create.plistPath('bex'), 'utf8');
+  assert.match(plist, /<string>bex<\/string>/, 'the supervisor is passed the machine name');
+  assert.doesNotMatch(plist, /<string>Bex<\/string>/, 'the typed name reached the launchd job');
+});
+
+test('and it is CALLED Casey: the instruction file and the stored record both say so', () => {
+  recorder();
+  create.setDryRun(false);
+  const r = create.createAgent({ ...BINS, name: 'Delia', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+
+  const text = fs.readFileSync(create.instructionFile('delia'), 'utf8');
+  assert.match(text, /You are \*\*Delia\*\*, a project manager/,
+    'the file the agent boots from calls it by the machine name');
+
+  // The second record, which is what survives the person editing that file.
+  assert.equal(store.readProfile('delia').displayName, 'Delia');
+
+  // And the answer carries both, so no screen has to derive either.
+  assert.equal(r.name, 'delia');
+  assert.equal(r.shownAs, 'Delia');
+  assert.match(r.because, /^Delia is set up/, 'the sentence a person reads uses the name they typed');
+});
+
+test('the board reads the typed name back, and keeps reading it after the file is edited', () => {
+  recorder();
+  create.setDryRun(false);
+  assert.equal(create.createAgent({ ...BINS, name: 'Rhona', role: 'pm' }).outcome, create.OUTCOME.CREATED);
+
+  // The control: it reads back at all.
+  assert.equal(status.readIdentity('rhona').displayName, 'Rhona');
+
+  // ⚠️ THE CASE THE STORED RECORD EXISTS FOR. The instruction file belongs to
+  // the PERSON, and they may rewrite its first line. A display name that
+  // vanishes when somebody edits their own instructions is not a name.
+  fs.writeFileSync(create.instructionFile('rhona'), '# my own notes\n\nnothing about who I am\n', 'utf8');
+  const after = status.readIdentity('rhona');
+  assert.equal(after.displayName, 'Rhona', 'the name did not survive an edit to the file');
+  assert.equal(after.derived, true,
+    'a name the person typed themselves must not be flagged on the card as a machine name');
+
+  // ⚠️ AND THE PRECEDENCE ITSELF, on a file that PARSES to a different name.
+  // The edited-file case above exits through the no-match branch, so it never
+  // reaches the `recorded || parsed` line -- measured in round 13, reducing
+  // that line to the parsed name alone left the suite green. This file
+  // parses fine and disagrees, which is the one shape that can catch it:
+  // "one wins, stated" is only true if the stored name beats a readable file.
+  fs.writeFileSync(create.instructionFile('rhona'),
+    'You are **Completely Different**, a bricklayer.\n', 'utf8');
+  const disagree = status.readIdentity('rhona');
+  assert.equal(disagree.displayName, 'Rhona',
+    'a parseable file must not out-rank the name the person typed');
+  assert.equal(disagree.role, 'bricklayer',
+    'control: the file WAS parsed (its role came through), so the name above was a choice, not a fallback');
+});
+
+test('an agent with no stored name is UNCHANGED: it still reads its name out of its file', () => {
+  // ⚠️ The whole existing fleet is in this state, and this is the assertion
+  // that says the change is additive. `claudebot` reads `Splinter` out of its
+  // instruction file and nothing on this branch renames anything on disk.
+  const dir = create.workerDir('legacybot');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, 'CLAUDE.md'), 'You are **Splinter**, a project manager.\n', 'utf8');
+  assert.equal(store.readProfile('legacybot').displayName, undefined, 'the control: nothing is recorded');
+  const identity = status.readIdentity('legacybot');
+  assert.equal(identity.displayName, 'Splinter');
+  assert.equal(identity.role, 'project manager');
+  assert.equal(identity.derived, true);
+});
+
+test('two spellings of one name are ONE agent, not two', () => {
+  // ⚠️ The hazard the split introduces if the slug is not the key everywhere:
+  // `Casey` and `casey` would be two folders, two jobs, two sessions and one
+  // very confused person. The second creation must meet the existing one.
+  recorder();
+  create.setDryRun(false);
+  assert.equal(create.createAgent({ ...BINS, name: 'Wren', role: 'pm' }).outcome, create.OUTCOME.CREATED);
+  const again = create.createAgent({ ...BINS, name: 'wren', role: 'pm' });
+  assert.equal(again.outcome, create.OUTCOME.REFUSED);
+  assert.match(again.because, /already/);
+});
+
+test('the launchd job says WHOSE background item it is, so macOS names Kosmos and not bash', () => {
+  /**
+   * ⚠️ WHAT THIS PREVENTS, in the words of the notice it changes. macOS posts a
+   * "background item added" notification for every launchd job and lists it
+   * under Login Items. With nothing to attribute the job to it names the
+   * executable — so the person is told `bash` was added as a background item,
+   * and later that `bash` is running in the background on their Mac. Minutes
+   * after installing something. The honest reading of that is alarming, and the
+   * thing it describes is their own agent staying alive between logins.
+   */
+  const plist = create.plistFor('fixture-agent', '/bin/echo', '/bin/echo');
+  assert.match(plist, /<key>AssociatedBundleIdentifiers<\/key>/);
+  // ⚠️ The identifier is the one the INSTALLER registers the bundle under. A
+  // plist pointing at an identifier no bundle claims attributes the job to
+  // nothing, which is the state this key exists to leave.
+  // ⚠️ EXTRACTED FROM BOTH SIDES AND COMPARED, never a literal held in this
+  // test: the first version asserted a hardcoded string against each file
+  // separately, which passed when the installer's real CFBundleIdentifier
+  // changed (a stale mention elsewhere in the file satisfied includes()) and
+  // FAILED when both sides were renamed consistently -- silent on the
+  // disagreement it exists to catch, red on a correct change (round 14).
+  const inPlist = (plist.match(/<key>AssociatedBundleIdentifiers<\/key>\s*<array><string>([^<]+)<\/string>/) || [])[1];
+  assert.ok(inPlist, 'control: the plist really carries an identifier to compare');
+  const setup = fs.readFileSync(nodePath.join(__dirname, '..', 'install', 'setup.sh'), 'utf8');
+  const inSetup = (setup.match(/<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/) || [])[1];
+  assert.ok(inSetup, 'control: the installer really registers a CFBundleIdentifier to compare');
+  assert.equal(inPlist, inSetup,
+    'the plist attributes the job to an identifier the installer does not register');
+  // And the job still parses as a plist: an array in the wrong place is a file
+  // launchd silently refuses to load, which is an agent that never starts.
+  const file = nodePath.join(SANDBOX, 'bundle-id-check.plist');
+  fs.writeFileSync(file, plist, 'utf8');
+  // Guarded on platform (round 40): plutil is macOS-only, and launchd -- the
+  // consumer this lint stands in for -- exists only there too, so on another
+  // OS the honest outcome is a skip, not an ENOENT masquerading as a failure.
+  if (process.platform === 'darwin') {
+    const read = require('node:child_process').execFileSync(
+      '/usr/bin/plutil', ['-lint', file], { encoding: 'utf8' },
+    );
+    assert.match(read, /OK/, 'launchd would refuse this plist, so the agent would never start');
+  }
 });

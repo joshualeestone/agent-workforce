@@ -37,9 +37,17 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const store = require('./store');
 const instructions = require('./instructions');
+// ⚠️ ONE rule for who answers, and it lives with the thread rather than being
+// re-derived in the page. `web/index.html` ships as one file with no import
+// mechanism, so a picker that worked out its own default would be a second
+// answer to "who answers on this project" — this codebase's worst habit, and
+// the exact question the screen this replaced said it was waiting on. So the
+// project publishes the answer and the page renders it.
+const chat = require('./chat');
 
 const FILE = 'projects.json';
 
@@ -156,10 +164,36 @@ function writeAll(list) {
  * same way get distinguished by a counter rather than one silently replacing
  * the other — "Q3" and "q3." must not be the same project.
  */
+/**
+ * ⚠️ BOUNDED, because an id is a KEY IN A FILENAME further downstream and the
+ * caps did not line up.
+ *
+ * `cleanName` allows a 120-character project name and `safeKey` keeps every
+ * ASCII alphanumeric in it, while `engine/chat.js` USED TO file a thread only
+ * under an id of 80 characters or fewer. So a project with a
+ * long-but-perfectly-ordinary name DELIVERED messages and never RECORDED one,
+ * and the sentence it showed for that was "that is not a project we can read" —
+ * about a project it had just created, listed, and typed into. Three caps, no
+ * relationship between them, and the only symptom was a conversation that
+ * silently kept nothing.
+ *
+ * (Past tense on purpose: that limit is 128 now, raised so records already on
+ * somebody's disk are not refused. Both halves of the fix are needed — this
+ * bound stops NEW ids growing, the raised limit stops OLD ones being rejected —
+ * and a note that described the old cap in the present tense would send the
+ * next reader looking for a mismatch that has been closed.)
+ *
+ * 64 is comfortably under the thread key's limit and long enough that no
+ * readable name reaches it. The counter still disambiguates, so two long names
+ * that share their first 64 characters become `<base>` and `<base>-2` rather
+ * than one project silently replacing the other.
+ */
+const MAX_ID = 64;
+
 function idFor(name, taken) {
   let base;
   try {
-    base = store.safeKey(name);
+    base = store.safeKey(name).slice(0, MAX_ID);
   } catch {
     // ⚠️ NOT an error. `safeKey` keeps `[a-z0-9_-]` only, so it yields nothing
     // for a name written in Cyrillic, Japanese, or anything else without ASCII
@@ -202,12 +236,50 @@ function idFor(name, taken) {
  * decision about what a project IS, not a passing correction. The sentence was
  * the defect.
  */
+/**
+ * The resolved path, canonicalised the way the FILESYSTEM spells it.
+ *
+ * ⚠️ `realpathSync.native`, NOT `realpathSync`, AND THIS IS A DATA-CORRUPTION
+ * FIX RATHER THAN A TIDY-UP. Measured on this machine, 2026-08-13, in a temp
+ * directory containing one real folder named `Lease`:
+ *
+ *     fs.realpathSync('…/lease')         → '…/lease'   (case preserved as asked)
+ *     fs.realpathSync.native('…/lease')  → '…/Lease'   (canonicalised)
+ *     statSync of both                    → the same inode
+ *
+ * Node's JS implementation resolves symlinks and does not canonicalise case;
+ * the native one goes through the OS `realpath(3)`, which does. On macOS's
+ * default case-INSENSITIVE volume that difference was making `Lease` and
+ * `lease` two projects over ONE directory: the duplicate check compares `real`,
+ * the two spellings never matched, and the person ended up with two rows whose
+ * agents both write into the same folder — and an add screen naming a spelling
+ * Finder will never show them.
+ *
+ * ⚠️ AND IT IS EXACT ON BOTH KINDS OF VOLUME, which is why this beats
+ * case-folding on `process.platform === 'darwin'`. On a case-SENSITIVE volume
+ * `Lease` and `lease` are genuinely two directories, and the native call
+ * answers each as itself — so they stay two projects, correctly. Case-folding
+ * would have refused the second one, a false refusal invented by a rule that
+ * guessed at the volume instead of asking it.
+ *
+ * (The case-sensitive half is reasoned from what `realpath(3)` returns, not
+ * measured: this machine has no case-sensitive volume to test on. Said plainly
+ * rather than left to read as though both halves were run.)
+ *
+ * Falls back to the JS implementation if the native one is unavailable, so a
+ * platform without it degrades to today's behaviour rather than throwing.
+ */
+function resolveReal(given) {
+  if (typeof fs.realpathSync.native === 'function') return fs.realpathSync.native(given);
+  return fs.realpathSync(given);
+}
+
 function folderState(folder) {
   const given = String(folder || '');
   if (!given) return { state: FOLDER.MISSING, because: 'no folder was recorded for this project', real: null };
   let real = given;
   try {
-    real = fs.realpathSync(given);
+    real = resolveReal(given);
   } catch (err) {
     if (err && err.code === 'ENOENT') {
       return { state: FOLDER.MISSING, because: 'this folder is not there any more, or it was moved', real: null };
@@ -262,6 +334,24 @@ function folderState(folder) {
  * shipped once already, in Remove, and was caught by a blind review rather than
  * by the suite. **Act on the machine name, speak the display name.**
  */
+/**
+ * The role a PERSON set on this agent, if they set one.
+ *
+ * ⚠️ `hasOwnProperty` rather than a plain `profile.role`, and the reason is the
+ * fixture harness in `test-support/fleet.js` — which is right to complain. A
+ * profile is a free-form record: `store.readProfile` answers `{}` for an agent
+ * nobody has edited, so `profile.role` is a read of a key that legitimately may
+ * be absent, and the harness cannot tell that apart from the wrong-shape reads
+ * it exists to catch (it caught six of those on this very feature, where
+ * `describe` read `name`, `state` and `because` off a producer that emits none
+ * of them). Asking whether the key is there says which of the two this is.
+ */
+function profileRole(card) {
+  const profile = card && card.profile;
+  if (!profile || typeof profile !== 'object') return null;
+  return Object.prototype.hasOwnProperty.call(profile, 'role') ? profile.role : null;
+}
+
 function describe(project, roster) {
   const cards = Array.isArray(roster) ? roster : [];
   // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
@@ -315,6 +405,19 @@ function describe(project, roster) {
       // honour it, or the row still says "1 working" about a pane we cannot
       // tie to anybody.
       tied: Boolean(card && card.isNamedOurs),
+      // ⚠️ Carried so the thread can open on the project's MANAGER without a
+      // second read of the board. Gated on `tied` like every other value taken
+      // off a card here: a role read off a pane we cannot tie to this name is
+      // somebody else's role, and it would decide who a person's message is
+      // addressed to. The person-set role wins over the derived one, the same
+      // order the detail panel already uses.
+      // ⚠️ DEFENCE-IN-DEPTH, like the page's button gate and the route's
+      // asking conjunct: snapshot() already nulls role and profile on an
+      // untied card, so this gate is unreachable through today's producer
+      // and no test can hold it live (round 15 measured its removal green;
+      // the gate-bites test in chat.test.js holds it with a produced card
+      // whose tie flag is deliberately flipped).
+      role: (card && card.isNamedOurs) ? (profileRole(card) || card.role || null) : null,
       // ⚠️ `unknown` for an untied pane, for the same reason the board refuses
       // to read its model or its transcript: whatever that pane is doing, we
       // have not established it is this agent doing it.
@@ -349,6 +452,9 @@ function describe(project, roster) {
     folder: project.folder,
     folderState: folderState(project.folder),
     agents: members,
+    // Who this project's thread opens on. Published rather than left to the
+    // caller for the reason given above the `chat` require.
+    defaultAgent: chat.defaultAgentFor(members),
     // ⚠️ Deliberately NOT a health summary. It counts what is on screen so the
     // list row can say "1 needs you" the way the page does, and it carries
     // `unseen` beside the counts so a row can never quietly report that
@@ -418,11 +524,243 @@ function cleanName(name) {
   return title;
 }
 
-function create({ name, folder, agents, roster } = {}) {
-  const title = cleanName(name);
+/* ---------------------------------------------------------------------------
+ * Making the folder ourselves
+ *
+ * ⚠️ WHY THIS EXISTS, and it is a permission dialog rather than a preference.
+ * Naming a project and then being made to point at a folder sent every new
+ * person into the macOS file picker, and the first folder anyone opens there is
+ * Desktop or Documents — which is exactly what raises the system's "Kosmos
+ * wants to access files in your Documents folder" prompt. A person setting up a
+ * product for the first time, three screens in, being asked by the operating
+ * system whether to let it read their documents. Most say no, and the ones who
+ * say yes have been taught that this app wants their files.
+ *
+ * So the DEFAULT asks for a name and makes `~/Kosmos/Projects/<name>` itself.
+ * Nothing outside a folder Kosmos owns, and no picker. Pointing at a folder you
+ * already have is still there, one link away, for the people whose work is
+ * somewhere else — see the note on `create`.
+ * ------------------------------------------------------------------------- */
 
-  const given = String(folder == null ? '' : folder).trim();
-  if (!given) throw new Error('choose the folder this project lives in');
+/**
+ * Where Kosmos makes project folders when it makes them itself.
+ *
+ * Overridable so a test can point it somewhere disposable. Without that, the
+ * suite would create real directories in the operator's home — the same rule
+ * every other root in this codebase is held to.
+ */
+function projectsRoot() {
+  return process.env.AGENT_WORKFORCE_PROJECTS
+    || path.join(os.homedir(), 'Kosmos', 'Projects');
+}
+
+/**
+ * The FOLDER name for a project called this, or a refusal.
+ *
+ * ⚠️ REFUSES rather than sanitises, for everything that could point the write
+ * somewhere else. `create.js` refuses agent names on the same principle and for
+ * the same reason: this string becomes a path, and a name that is quietly
+ * changed into a different path is a folder somebody cannot find, or worse, one
+ * they did not mean to write in. `..` is the case that matters and it is
+ * refused outright — stripping it would silently make a DIFFERENT folder.
+ *
+ * ⚠️ SEPARATORS ARE THE ONE EXCEPTION, and they are replaced rather than
+ * refused, because "Q3/Q4 planning" is a name a person really types and
+ * refusing it teaches them the product is fussy about punctuation. The
+ * replacement is not silent: the add screen shows the exact path before
+ * anything is made, so what lands on disk is on screen first.
+ */
+/**
+ * The one fold. Validation and production both call THIS, because deriving
+ * the separator fold twice was the two-derivations habit this file keeps
+ * warning about, one function apart (round 16: removing the fold from the
+ * validator failed nothing, because the producer had its own copy).
+ */
+function foldSeparators(raw) {
+  // ⚠️ `:` folds with the slashes (round 21, measured on this machine):
+  // macOS stores a colon in the POSIX name but Finder RENDERS it as `/`, so
+  // `Q3:Q4 planning` previews here as one name and appears in Finder as
+  // `Q3/Q4 planning` -- and the path shown is meant to be the path they
+  // find. The reverse mapping is the same legacy HFS rule that makes `/`
+  // unusable, so all three fold to the same `-`.
+  return raw.split('/').join('-').split('\\').join('-').split(':').join('-').trim();
+}
+
+function folderNameProblem(name) {
+  const raw = oneLine(name);
+  if (!raw) return 'give this project a name';
+  // ⚠️ CHECKED BEFORE THE FOLD, NOT AFTER, and the difference is a real hole a
+  // test found. Folding first turns `/` into `-`, which is not empty — so a
+  // project named `/` sailed past the emptiness check and got a folder called
+  // `-`. Harmless as an escape (it stays inside the root) and nonsense as a
+  // folder somebody has to find later. Ask whether there is a NAME in there
+  // before asking what it folds to.
+  if (!raw.split('/').join('').split('\\').join('').split(':').join('').trim()) {
+    return 'that name is only slashes or colons, so there is no folder name in it';
+  }
+  const folded = foldSeparators(raw);
+  if (!folded) return 'that name is only slashes or colons, so there is no folder name in it';
+  // `.` and `..` ARE the current and parent directory; a leading dot is a
+  // hidden folder the person would never see again in Finder.
+  if (folded === '.' || folded === '..') return 'that name means a folder that already has a meaning on this computer';
+  if (folded.startsWith('.')) return 'a name starting with a dot makes a folder your Mac hides, so pick another';
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(folded)) return 'that name has characters we cannot make a folder out of';
+  if (folded.length > 60) return 'that name is too long to make a folder out of; keep it to 60 characters';
+  return null;
+}
+
+function folderNameFor(name) {
+  const problem = folderNameProblem(name);
+  if (problem) throw new Error(problem);
+  return foldSeparators(oneLine(name));
+}
+
+/** The exact path a project of this name would get, so a screen can show it. */
+function folderPathFor(name) {
+  return path.join(projectsRoot(), folderNameFor(name));
+}
+
+/**
+ * The path a screen may SHOW for this name: folderPathFor, with the same
+ * one-segment case correction makeFolder will apply when the button is
+ * pressed. Read-only (trueChildName only lists the parent; nothing is made).
+ *
+ * ⚠️ Without this, the preview and the act can disagree in case: on macOS's
+ * case-insensitive volume, typing `lease` beside an existing `Lease` shows
+ * "Kosmos will make this at …/lease" and then ADOPTS `…/Lease` -- a sentence
+ * about where a folder will be that the act does not match, on the screen
+ * whose whole job is saying the path before anything is made.
+ */
+function folderPathPreview(name) {
+  const dest = folderPathFor(name);
+  const corrected = path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+  // ⚠️ WHETHER IT ALREADY EXISTS travels with the path, because "make" and
+  // "adopt" are different acts and the screen was claiming the first while
+  // makeFolder performed the second (round 17): a person typing `lease`
+  // beside their existing Lease folder was told Kosmos WILL MAKE a folder,
+  // and pressing Add adopted the folder and its contents. Same statSync
+  // shape makeFolder itself uses; a stat we cannot take reads as
+  // not-existing, which errs toward the weaker claim.
+  // ⚠️ THREE arms, because makeFolder has three (round 23): a FILE at the
+  // derived path is neither make nor adopt -- makeFolder will refuse it --
+  // and folding it into exists:false had the preview promising "will make
+  // this at X" about an act the engine had already decided not to perform.
+  // `blocked` carries makeFolder's own refusal sentence so the preview and
+  // the button speak identically.
+  let there = null;
+  try { there = fs.statSync(corrected); } catch { there = null; }
+  const exists = !!(there && there.isDirectory());
+  const blocked = (there && !there.isDirectory())
+    ? 'there is already a file with that name where this project’s folder would go'
+    : null;
+  return { path: corrected, exists, blocked };
+}
+
+/**
+ * Make it, or adopt it if it is already there.
+ *
+ * ⚠️ AN EXISTING FOLDER IS ADOPTED, NOT REPLACED, and nothing in it is touched.
+ * Same rule as everywhere else here: this product does not delete anybody's
+ * work. A person who made `~/Kosmos/Projects/Henderson lease` themselves gets
+ * the folder they made. A FILE by that name is refused, because there is
+ * nothing sensible to do with it and overwriting it is not on the list.
+ */
+function makeFolder(name) {
+  const dest = folderPathFor(name);
+  let there = null;
+  try { there = fs.statSync(dest); } catch { there = null; }
+  if (there && !there.isDirectory()) {
+    throw new Error('there is already a file with that name where this project’s folder would go');
+  }
+  if (!there) {
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+    } catch (err) {
+      // ⚠️ The errno and its absolute path stay OFF the screen (round 24):
+      // this sentence goes to the person verbatim, and the branch's own
+      // rule two files over (appendMessage's sentence, with a test pinning
+      // /EISDIR|\/var\/folders/ absent) is that a raw err.message is a
+      // machine's sentence in a person's mouth. The one useful word is
+      // whether it is a permissions wall, said in ours.
+      const denied = err && (err.code === 'EACCES' || err.code === 'EPERM');
+      throw new Error(denied
+        ? 'we could not make a folder for this project: this Mac would not let us write there'
+        : 'we could not make a folder for this project');
+    }
+  }
+  /**
+   * ⚠️ THE SPELLING THE FILESYSTEM USES — FOR THE ONE SEGMENT WE DERIVED, and
+   * not a single character more.
+   *
+   * On macOS's case-insensitive volume, a project called `lease` next to an
+   * existing folder called `Lease` ADOPTS that folder — `statSync` finds it,
+   * because they are the same directory — and returning `dest` would store
+   * `…/lease`, naming a folder Finder will never show them.
+   *
+   * ⚠️ AND IT IS DELIBERATELY NOT `resolveReal(dest)`, which was the first
+   * version of this line and was wrong in a way the tests caught immediately:
+   * a full resolve also follows SYMLINKS, so on this machine it rewrote
+   * `/var/folders/…` to `/private/var/folders/…`. `folderState`'s own docstring
+   * settles that question — showing the stored path is defensible because it is
+   * the path the person picked, and swapping to the resolved one "is a product
+   * decision about what a project IS, not a passing correction". Fixing a case
+   * bug is not licence to make that decision quietly.
+   *
+   * So: the parent is left exactly as it was (it comes from the person's home
+   * directory, which they recognise), and only the last segment — the part
+   * derived from their typed name — is corrected against the parent's own
+   * listing. That is the same instrument `create.test.js` uses for the identical
+   * volume lesson, and it is exact on both kinds of volume: on a case-sensitive
+   * one, `Lease` and `lease` are two entries and each matches itself.
+   */
+  return path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+}
+
+/**
+ * How this directory really spells a child of this name.
+ *
+ * Answers the asked-for name unchanged when the listing cannot be read, or when
+ * it does not hold exactly one case-insensitive match — an ambiguous answer is
+ * not one to act on, and inventing a spelling is worse than keeping theirs.
+ */
+function trueChildName(parent, name) {
+  let entries;
+  try { entries = fs.readdirSync(parent); } catch { return name; }
+  const wanted = name.toLowerCase();
+  const matches = entries.filter((entry) => entry.toLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] : name;
+}
+
+/**
+ * @param {string} [folder] the folder to point at. LEFT OUT on the default
+ *   path, which makes `~/Kosmos/Projects/<name>` instead — see the block above
+ *   `projectsRoot`. Supplying one is the "use a folder you already have" route,
+ *   which is still fully supported and is the only way to reach work that lives
+ *   somewhere else.
+ */
+function create({ name, folder, agents, roster } = {}) {
+  const asked = String(folder == null ? '' : folder).trim();
+  // ⚠️ On the default path the FOLDER-NAME refusal comes first, because it
+  // is the sentence the person has been reading: the preview line under the
+  // name box speaks folderNameProblem's words, and a name over both caps
+  // used to meet cleanName's DIFFERENT sentence at the button after the
+  // preview had said the 60-character one all along (round 16). One name,
+  // one sentence, whichever screen it appears on.
+  if (!asked) {
+    const problem = folderNameProblem(name);
+    if (problem) throw new Error(problem);
+  }
+  const title = cleanName(name);
+  // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
+  // project of the same name meets "that folder is already the project X"
+  // rather than a fresh empty directory nobody asked for. `makeFolder` adopts
+  // an existing folder, so the retry is idempotent either way. The cost of
+  // this ordering is accepted, not overlooked: if readAll/writeAll throws
+  // after the mkdir, an empty folder is left with no project pointing at it.
+  // That folder is exactly what the person's retry will adopt, so it is a
+  // parked spot, not a leak.
+  const given = asked || makeFolder(title);
   if (!path.isAbsolute(given)) throw new Error('that needs to be the full path to a folder');
 
   // ⚠️ Checked at creation AND on every read, and neither one is redundant.
@@ -820,4 +1158,6 @@ module.exports = {
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
+  projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
+  folderPathPreview, makeFolder,
 };
