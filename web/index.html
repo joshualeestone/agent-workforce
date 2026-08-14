@@ -1153,11 +1153,14 @@ svg { display: block; }
            output that reads exactly like prose. -->
       <div class="pj-viewport">
         <span class="flabel" id="pj-screen-label">Its screen</span>
-        <p class="fhint" id="pj-screen-hint">This is the window it is running in,
-           as it looks right now. It is not a transcript, and it is not what the
-           agent said to you.</p>
+        <!-- ⚠️ The hint ships EMPTY and the pre ships HIDDEN: the affirmative
+             "as it looks right now" sentence used to be baked into the
+             static markup, so the first open of any project rendered an
+             empty terminal box under a claim about a screen nobody had read
+             yet. The runtime paint owns both; the markup asserts nothing. -->
+        <p class="fhint" id="pj-screen-hint"></p>
         <!-- Named for the same reason as the question box above. -->
-        <pre class="pj-screen" id="pj-screen" tabindex="0"
+        <pre class="pj-screen" id="pj-screen" tabindex="0" hidden
              role="region" aria-labelledby="pj-screen-label"></pre>
       </div>
     </div>
@@ -4017,6 +4020,21 @@ function openProject(id) {
   PJ_SENT_LINE = null;
   document.getElementById('pj-thread-msg').textContent = '';
   document.getElementById('pj-say').value = '';
+  /**
+   * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
+   * synchronously below, but the thread body waits a full route round trip
+   * (which fans out to tmux) -- so without this, the NEW project's name sat
+   * over the PREVIOUS project's conversation, screen capture and question
+   * for the whole fetch: cross-project misattribution, the thing
+   * projectBornAt closes on the stored path, reappearing on the painted
+   * one. PJ_THREAD_GEN retires late RESPONSES; it cannot clear a stale
+   * PAINT. The interim is the honest not-looked-yet state, not a blank
+   * terminal (see the screen-hint rule at paintThread).
+   */
+  setLive(document.getElementById('pj-msgs'), '');
+  document.getElementById('pj-question').hidden = true;
+  document.getElementById('pj-screen').hidden = true;
+  document.getElementById('pj-screen-hint').textContent = '';
   pjCloseConfirm();
   paintOneProject();
   pjView('one');

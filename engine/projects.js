@@ -411,6 +411,12 @@ function describe(project, roster) {
       // somebody else's role, and it would decide who a person's message is
       // addressed to. The person-set role wins over the derived one, the same
       // order the detail panel already uses.
+      // ⚠️ DEFENCE-IN-DEPTH, like the page's button gate and the route's
+      // asking conjunct: snapshot() already nulls role and profile on an
+      // untied card, so this gate is unreachable through today's producer
+      // and no test can hold it live (round 15 measured its removal green;
+      // the gate-bites test in chat.test.js holds it with a produced card
+      // whose tie flag is deliberately flipped).
       role: (card && card.isNamedOurs) ? (profileRole(card) || card.role || null) : null,
       // ⚠️ `unknown` for an untied pane, for the same reason the board refuses
       // to read its model or its transcript: whatever that pane is doing, we

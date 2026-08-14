@@ -44,10 +44,19 @@ for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WOR
   // version of this guard rejected only ~/Library and ~ itself, so
   // AGENT_WORKFORCE_PROJECTS=~/Kosmos/Projects sailed through a guard whose
   // whole job was stopping exactly that.
-  if (real.startsWith(path.join(os.homedir(), 'Library'))
-      || real === os.homedir()
-      || real === path.join(os.homedir(), 'Kosmos')
-      || real.startsWith(path.join(os.homedir(), 'Kosmos') + path.sep)) {
+  // ⚠️ `~/work` is refused too -- WORKERS' real default is ~/work/workers,
+  // which is where the live fleet's instruction files boot from, and the
+  // first version of this list covered every root EXCEPT the one whose harm
+  // the header names. Refusals are per-root prefixes rather than a blanket
+  // "anything under $HOME" because the sandboxes themselves may legitimately
+  // live under $HOME on machines whose tmp is elsewhere.
+  for (const banned of ['Library', 'Kosmos', 'work']) {
+    const root = path.join(os.homedir(), banned);
+    if (real === root || real.startsWith(root + path.sep)) {
+      throw new Error(`${key} points at ${real}, which is not a sandbox. Refusing.`);
+    }
+  }
+  if (real === os.homedir()) {
     throw new Error(`${key} points at ${real}, which is not a sandbox. Refusing.`);
   }
 }
@@ -272,9 +281,18 @@ if (create.DRY_RUN !== true) {
 const { start } = require('../../server');
 require('../../engine/firstrun').complete();
 
-start(Number(process.env.PORT) || 4421).then(() => {
-  process.stdout.write(`thread-server: fixture fleet on ${process.env.PORT || 4421}\n`);
-  process.stdout.write(`thread-server: ${board.agents.map((a) => `${a.name}=${a.state}`).join(' ')}\n`);
+start(Number(process.env.PORT) || 4421).then(async () => {
+  const port = Number(process.env.PORT) || 4421;
+  process.stdout.write(`thread-server: fixture fleet on ${port}\n`);
+  // ⚠️ The roster line is read back from the SERVER'S OWN /api/status, not
+  // from board.agents: the two can disagree (the route forces an untied
+  // pane's state to unknown while the install snapshot carries the spec
+  // state), and render-thread.js compares this line against what the
+  // driven server serves to prove the server IS this fixture. An
+  // announcement the server itself would contradict fails that identity
+  // check against the genuine fixture.
+  const served = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
+  process.stdout.write(`thread-server: ${(served.agents || []).map((a) => `${a.name}=${a.state}`).join(' ')}\n`);
   // ⚠️ Published for the same reason the port is: a check that needs to reach
   // into this server's store must be able to prove WHICH store, rather than
   // being handed a path and trusting it. See assertFixtureServer.

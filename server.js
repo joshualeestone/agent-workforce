@@ -1682,6 +1682,13 @@ const server = http.createServer((req, res) => {
         historyUnfilable = true;
         // There is no file and there never will be one, so an empty list is
         // the honest shape — the sentence beside it carries the standing fact.
+        // ⚠️ BAD_THREAD can also mean a bad PROJECT id (chat.js throws it for
+        // either half of the key), and the page renders this channel as a
+        // sentence about the AGENT'S name. Unreachable today with ~3 chars of
+        // margin: cleanName caps a project name at 120, safeKey only strips,
+        // idFor adds a short counter, and PROJECT_ID allows 128 (the raised
+        // bound is pinned by a test). If ids ever grow, branch this on which
+        // half failed before the margin is spent.
         messages = [];
         historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
       } else {
@@ -1715,10 +1722,14 @@ const server = http.createServer((req, res) => {
      * collapse this branch fixed three times elsewhere, on the one screen
      * the feature exists for.
      */
+    // The page composes "<name> is waiting on an answer, and <clause>", so
+    // the clause must not restate that premise -- "its card says it is
+    // asking something, and we could not read..." doubled back on itself on
+    // screen (round 15). One derivation of the sentence, on this side.
     const questionBecause = (asking && !question)
       ? (view.text == null
-        ? 'its card says it is asking something, and we could not read its screen just now to show the question'
-        : 'its card says it is asking something, but we cannot find the question on its screen right now')
+        ? 'we could not read its screen just now to show the question'
+        : 'we cannot find the question on its screen right now')
       : null;
     sendJson(res, 200, {
       project: { id: project.id, name: project.name },

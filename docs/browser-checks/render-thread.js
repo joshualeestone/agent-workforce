@@ -151,6 +151,7 @@ function assertFixtureServer() {
    * to the port being driven.
    */
   const announced = text.match(/thread-server: fixture fleet on (\d+)/);
+  const fleetLine = text.match(/thread-server: ((?:[^\s=]+=[^\s]+ ?)+)/);
   if (!announced) {
     throw new Error(`${LOG} is not a thread-server log, so nothing proves this server's send seam is stubbed. Refusing.`);
   }
@@ -161,6 +162,35 @@ function assertFixtureServer() {
       `${LOG} is the log of a fixture server on port ${announced[1]}, but this check is driving `
       + `${BASE}. Nothing proves the server being driven has its send seam stubbed, and a send `
       + 'against a real one types into a live agent. Refusing.',
+    );
+  }
+  return fleetLine ? fleetLine[1].trim() : null;
+}
+
+/**
+ * ⚠️ THE SERVER ANSWERING THE PORT, not only the log beside it. The port
+ * comparison above still passes when a fixture died and a plain
+ * `node server.js` took the same port next to the stale log -- the exact
+ * one-layer-in version of the hazard the docstring above records. The
+ * fixture's ROSTER is its identity: it announces its invented fleet in the
+ * log, and a real server on this machine answers /api/status with the LIVE
+ * fleet, which cannot equal the fixture's names and states. So the roster
+ * the driven server actually serves is compared against the announcement
+ * before anything presses Send.
+ */
+async function assertDrivenServerIsTheFixture(announcedFleet) {
+  if (!announcedFleet) {
+    throw new Error('the fixture log carries no fleet announcement line, so the driven server cannot be identified. Refusing.');
+  }
+  const res = await fetch(BASE + '/api/status');
+  const body = await res.json();
+  const served = (body.agents || []).map((a) => `${a.name}=${a.state}`).sort().join(' ');
+  const wanted = announcedFleet.split(/\s+/).sort().join(' ');
+  if (served !== wanted) {
+    throw new Error(
+      'the server being driven does not serve the fixture fleet the log announces '
+      + `(served: ${served || '(nothing)'} | announced: ${wanted}). A real server here would mean `
+      + 'Send types into a live agent. Refusing.',
     );
   }
 }
@@ -239,7 +269,8 @@ async function reallyVisible(page, selector) {
 }
 
 async function main() {
-  assertFixtureServer();
+  const announcedFleet = assertFixtureServer();
+  await assertDrivenServerIsTheFixture(announcedFleet);
   fs.mkdirSync(OUT, { recursive: true });
 
   /**
