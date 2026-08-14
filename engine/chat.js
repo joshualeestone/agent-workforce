@@ -790,7 +790,10 @@ function questionIn(text) {
   // A few lines of run-up, because a Claude permission prompt states what it is
   // asking about above the line that matches.
   const from = Math.max(0, at - 6);
-  return { text: lines.slice(from).join('\n').replace(/\s+$/, ''), line: at };
+  // ⚠️ The TEXT only. A `line` index used to ride along and nothing ever
+  // read it — and a line number counted against a capture the caller does not
+  // hold is not a thing anybody could use safely anyway.
+  return { text: lines.slice(from).join('\n').replace(/\s+$/, '') };
 }
 
 /* ── what is ours to keep ────────────────────────────────────────────────── */
@@ -962,9 +965,31 @@ function readThread(projectId, agent, bornAt) {
  */
 const LOCK_STALE_MS = 10 * 1000;
 
+const LOCK_WAIT_MS = 2000;
+
+/**
+ * Pause without a subprocess.
+ *
+ * ⚠️ THIS WAS `execFileSync('/bin/sleep')` AND IT BROKE THE MODULE'S CONTRACT.
+ * `appendMessage` promises never to throw — a recording failure is REPORTED,
+ * because it is reached with a message that has already been delivered. An
+ * unguarded subprocess spawn breaks that promise the moment the machine is out
+ * of process slots or `/bin/sleep` is not where it is expected: the throw
+ * escapes to the route's 400 handler and a DELIVERED message is reported to the
+ * person as a failed send. That is precisely the inversion the contract exists
+ * to prevent, introduced by the fix for a different one.
+ *
+ * `Atomics.wait` on a private buffer blocks this thread for the timeout with no
+ * process, no file descriptor and nothing to throw.
+ */
+const PARK = new Int32Array(new SharedArrayBuffer(4));
+function pauseMs(ms) {
+  Atomics.wait(PARK, 0, 0, ms);
+}
+
 function withThreadLock(file, fn) {
   const lock = file + '.lock';
-  const until = Date.now() + 2000;
+  const until = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
       fs.mkdirSync(lock);
@@ -976,25 +1001,76 @@ function withThreadLock(file, fn) {
         // recording failure is reported, never raised at a delivered message.
         return { ok: false, because: 'we could not get exclusive access to this conversation' };
       }
+      /**
+       * ⚠️ THE DEADLINE COVERS THIS BRANCH TOO, and the first version's did not.
+       * MEASURED: with a leftover lock directory that is not empty — a
+       * `.DS_Store` inside one left by a crash is enough — `rmdirSync` throws
+       * ENOTEMPTY, the catch swallowed it, `continue` re-entered `mkdirSync`,
+       * the age was still stale, and the loop ran forever. Inside the
+       * synchronous POST handler, on a single-threaded server: every request on
+       * the machine wedged behind one thread, with "Sending…" on screen. A
+       * fifteen-second spin was measured before it was killed by hand.
+       */
+      if (Date.now() > until) {
+        return { ok: false, because: lockedBecause() };
+      }
       let age = 0;
       try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { age = Infinity; }
       if (age > LOCK_STALE_MS) {
-        try { fs.rmdirSync(lock); } catch { /* somebody else broke it first */ }
+        /**
+         * ⚠️ STOLEN BY RENAME, NOT BY `rmdir`, and that is what makes the break
+         * safe against a second breaker. Two writers can both measure the same
+         * lock as stale; with `rmdir` they both removed it and both proceeded —
+         * the second one demolishing the FIRST one's brand-new, perfectly
+         * fresh lock and walking straight into the critical section beside it.
+         * The interleave the lock exists to prevent, reachable only through the
+         * path that repairs it.
+         *
+         * `rename` of a path can only succeed ONCE: the loser gets ENOENT and
+         * goes back around, finds the winner's fresh lock, and waits like any
+         * other contender. It also copes with the non-empty directory that
+         * `rmdir` could not, which is the deadlock above.
+         */
+        const aside = `${lock}.${process.pid}.${Date.now()}.stale`;
+        try {
+          fs.renameSync(lock, aside);
+        } catch {
+          // Somebody else won the steal, or the lock vanished under us. Either
+          // way the next turn of the loop reads the world as it now is.
+          pauseMs(20);
+          continue;
+        }
+        // Ours to clean up, and `rm -r` because the thing that made the old
+        // path deadlock was a directory with something in it.
+        try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* debris, not fatal */ }
         continue;
       }
-      if (Date.now() > until) {
-        return { ok: false, because: 'another window is writing to this conversation right now' };
-      }
-      // Busy-wait deliberately: this is a sub-millisecond critical section and
-      // the module is otherwise synchronous, so there is no loop to yield to.
-      execFileSync('/bin/sleep', ['0.02']);
+      pauseMs(20);
     }
   }
   try {
     return { ok: true, value: fn() };
   } finally {
-    try { fs.rmdirSync(lock); } catch { /* already gone */ }
+    try { fs.rmSync(lock, { recursive: true, force: true }); } catch { /* already gone */ }
   }
+}
+
+/**
+ * ⚠️ ONE SENTENCE, BECAUSE WE CANNOT TELL THE TWO APART. The wait is 2s and a
+ * lock is only called stale after 10s, so for eight seconds a lock left behind
+ * by a window that CRASHED was being described as "another window is writing to
+ * this conversation right now" — a confident claim about a process that is not
+ * running.
+ *
+ * A first fix branched on the lock's age, and that branch was almost never
+ * taken: by the time we give up, we have waited the full 2s, so the lock is
+ * essentially always older than the wait. A distinction that is real in
+ * principle and unreachable in practice is worse than none, because it reads as
+ * though something was determined. We waited, somebody else holds it, and we do
+ * not know whether they are still there — so that is what it says.
+ */
+function lockedBecause() {
+  return 'this conversation is locked by another window, or by one that stopped part-way through a send';
 }
 
 function appendMessage(projectId, agent, entry, bornAt) {

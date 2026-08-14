@@ -1528,7 +1528,11 @@ function readIdentity(sessionName) {
     .trim();
   if (role.length > 60) role = role.slice(0, 60).trim();
 
-  return { displayName, role: role || null, derived: true };
+  // ⚠️ `source` ON EVERY BRANCH, including this one. It was set only on the
+  // fallbacks, so the field was absent exactly where a reader most wants it —
+  // on a success, where it answers whether this name came from the record the
+  // person typed or from parsing the agent's own instruction file.
+  return { displayName, role: role || null, derived: true, source: recorded ? 'profile' : 'file' };
 }
 
 function safeAvatar(name) {

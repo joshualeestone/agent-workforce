@@ -219,4 +219,8 @@ require('../../engine/firstrun').complete();
 start(Number(process.env.PORT) || 4421).then(() => {
   process.stdout.write(`thread-server: fixture fleet on ${process.env.PORT || 4421}\n`);
   process.stdout.write(`thread-server: ${board.agents.map((a) => `${a.name}=${a.state}`).join(' ')}\n`);
+  // ⚠️ Published for the same reason the port is: a check that needs to reach
+  // into this server's store must be able to prove WHICH store, rather than
+  // being handed a path and trusting it. See assertFixtureServer.
+  process.stdout.write(`thread-server: data ${process.env.AGENT_WORKFORCE_DATA}\n`);
 });

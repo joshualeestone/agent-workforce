@@ -165,6 +165,54 @@ function assertFixtureServer() {
   }
 }
 
+/**
+ * The data directory of the server we are DRIVING, from its own announcement.
+ *
+ * ⚠️ Read from the log rather than taken as an argument, for the same reason
+ * the port is: two of the checks below reach into the server's store to arrange
+ * a state, and a path handed in on faith could be any store on the machine —
+ * including the operator's real one. `assertFixtureServer` has already tied
+ * this log to the port being driven, so the path in it belongs to the server we
+ * are talking to.
+ */
+function fixtureStore() {
+  const said = fs.readFileSync(LOG, 'utf8').match(/thread-server: data (.+)/);
+  return said ? said[1].trim() : null;
+}
+
+/**
+ * The engine's thread module, pointed at the FIXTURE store.
+ *
+ * ⚠️ THE ENV MUST BE SET BEFORE THE REQUIRE, AND THIS IS WHY IT IS A FUNCTION.
+ * `engine/store.js` resolves its root ONCE, at require time. A first version of
+ * the checks below set `AGENT_WORKFORCE_DATA` and then required — the wrong way
+ * round — so `threadFile` resolved against the operator's REAL application
+ * support directory, and the check planted a lock directory in it. It was
+ * removed by the step's own `finally`, and it left an empty `chats/` folder
+ * behind in somebody's real store. A browser check reaching outside its
+ * sandbox is the same defect this whole file exists to prevent in the product.
+ *
+ * ⚠️ AND IT REFUSES rather than trusting the ordering held. The resolved path
+ * is compared to the fixture store the server announced, so if this is ever
+ * called too late, or the env is lost, it stops instead of writing somewhere
+ * real. The rule this repo already applies to its suites — sandbox every root
+ * the code writes to — applies to the tools that inspect it.
+ */
+function fixtureChat(store) {
+  if (!store) throw new Error('the fixture server did not announce its data dir; refusing to touch any store');
+  process.env.AGENT_WORKFORCE_DATA = store;
+  // eslint-disable-next-line global-require
+  const chat = require('../../engine/chat');
+  const probe = chat.threadFile('sandboxprobe', 'casey');
+  if (!path.resolve(probe).startsWith(path.resolve(store))) {
+    throw new Error(
+      `engine/chat resolved a thread path to ${probe}, which is OUTSIDE the fixture store ${store}. `
+      + 'Its root was fixed at require time, before AGENT_WORKFORCE_DATA was set. Refusing to write anywhere.',
+    );
+  }
+  return chat;
+}
+
 function sentKeys() {
   return fs.readFileSync(LOG, 'utf8')
     .split('\n')
@@ -452,6 +500,83 @@ async function main() {
     check(flip.before === flip.after,
       `the picker stayed on the agent being typed to (${flip.before} -> ${flip.after})`);
     check(flip.after !== 'nils', 'a restarting agent did not re-aim the message at somebody else');
+
+    /* ── 5d. a message we could not RECORD is not claimed to be kept ────── */
+    /**
+     * ⚠️ THE STATE WHERE THE WORDS EXIST NOWHERE. An `unconfirmed` send used to
+     * clear the box AND say "Your message is kept above" — while the sentence
+     * two clauses later said we could NOT add it to the conversation. Both
+     * copies gone, under a promise that one was safe.
+     *
+     * Driven for real: a lock directory is planted beside this thread's file, so
+     * the route's own recording genuinely fails and the page meets the answer it
+     * would meet on the day two windows collided.
+     */
+    const store = fixtureStore();
+    if (store) {
+      const chat = fixtureChat(store);
+      await page.selectOption('#pj-thread-who', 'casey');
+      await page.waitForFunction(() => /Casey/.test(
+        document.getElementById('pj-screen-label').textContent || ''), null, { timeout: 10000 });
+
+      const lock = chat.threadFile(id, 'casey') + '.lock';
+      fs.mkdirSync(lock, { recursive: true });
+      try {
+        await page.fill('#pj-say', 'this one cannot be written down');
+        await page.click('#pj-send');
+        await page.waitForFunction(() => /Could not confirm/i.test(
+          document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 15000 });
+        await page.screenshot({ path: path.join(OUT, 'thread-7-unrecorded.png'), fullPage: true });
+
+        const said = await page.locator('#pj-thread-msg').textContent();
+        check(/could not add it to this conversation/i.test(said),
+          'the page says the message was not recorded');
+        check(!/kept above/.test(said),
+          'the page does not promise the message is in the thread it was never written to');
+        check(await page.locator('#pj-say').inputValue() === 'this one cannot be written down',
+          'the only remaining copy of the message is kept in the box');
+      } finally {
+        fs.rmSync(lock, { recursive: true, force: true });
+      }
+    } else {
+      check(false, 'the fixture server did not publish its data dir, so the unrecorded state was not driven');
+    }
+
+    /* ── 5e. a project that reuses an earlier project's name ────────────── */
+    /**
+     * ⚠️ COMMITTED SCREENSHOTS MUST BE REGENERABLE. `thread-6-reused-name.png`
+     * was produced by a one-off script and committed, which this file's own
+     * header forbids for exactly the reason it forbids mismatched filenames: an
+     * image nothing reproduces is an image that outlives the screen it claims to
+     * show. The state is driven here now.
+     */
+    if (store) {
+      const chat = fixtureChat(store);
+      const made = await post('/api/projects', { name: 'Reused name', agents: ['mara'] });
+      const reusedId = (made.project && made.project.id) || made.id;
+      await post(`/api/project/${reusedId}/thread/mara`, { text: 'said to the first project' });
+      const file = chat.threadFile(reusedId, 'mara');
+      const was = JSON.parse(fs.readFileSync(file, 'utf8'));
+      was.projectBornAt = '2020-01-01T00:00:00.000Z';   // an EARLIER project of this name
+      fs.writeFileSync(file, JSON.stringify(was));
+
+      await page.goto(`${BASE}?tab=projects`, { waitUntil: 'networkidle' });
+      await page.click(`[data-project="${reusedId}"]`);
+      await page.waitForFunction(() => /anything from this project/.test(
+        document.getElementById('pj-msgs').textContent || ''), null, { timeout: 10000 });
+      await page.screenshot({ path: path.join(OUT, 'thread-6-reused-name.png'), fullPage: true });
+
+      const reused = await page.locator('#pj-msgs').textContent();
+      check(!/cannot read what you have sent/i.test(reused),
+        'the withheld state does not claim we could not read what we read and chose not to show');
+      check(!/not saying you have sent nothing/i.test(reused),
+        'the withheld state does not deny the one true fact: this project has sent nothing');
+      check(/have not sent Mara anything from this project/.test(reused),
+        `the withheld state says what is true of THIS project: "${reused.trim()}"`);
+      check(!/kept aside/.test(reused),
+        'it does not claim an earlier conversation was moved aside before anything moved it');
+      check(!/\.\s+[a-z]/.test(reused), `every sentence starts upper case: "${reused.trim()}"`);
+    }
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {

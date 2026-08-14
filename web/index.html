@@ -4209,7 +4209,11 @@ function paintThread(body) {
      */
     setLive(msgs, '<p class="fhint">You have not sent ' + esc(name)
       + ' anything from this project yet. An earlier project with this name had a '
-      + 'conversation; it is kept aside on this computer.</p>');
+      // ⚠️ NOT "kept aside" — nothing has been moved yet. The aside happens on
+      // the first SEND to this project, so at read time the true statement is
+      // the engine's own: those messages are still on this computer. Claiming
+      // the move before it happens describes a file operation that has not run.
+      + 'conversation. Those messages are still on this computer.</p>');
   } else if (!body.messages.length) {
     setLive(msgs, '<p class="fhint">You have not sent ' + esc(name) + ' anything from here yet.</p>');
   } else {
@@ -4357,24 +4361,32 @@ async function pjSend() {
     const moved = body.supersededBecause ? ' ' + pjSentence(body.supersededBecause) : '';
 
     /**
-     * ⚠️ THE BOX KEEPS YOUR TEXT EXACTLY WHEN RE-SENDING IS SAFE, which is the
-     * whole rule and is worth stating as one:
+     * ⚠️ THE BOX KEEPS YOUR TEXT EXACTLY WHEN RE-SENDING IS SAFE, **OR WHEN IT
+     * IS THE ONLY COPY LEFT**, and the second half was the premise of the first
+     * version's own comment and was never checked:
      *
-     *   placed       — it went. Clear it.
+     *   placed       — it went into the agent's composer and was submitted.
+     *                  Clear it. Even unrecorded, the words reached the agent,
+     *                  so nothing claims they are somewhere they are not.
      *   could_not    — nothing was typed, so sending again is the right thing to
      *                  do and emptying the box would throw the person's words
      *                  away at the moment they most need them.
-     *   unconfirmed  — it may already be in that agent's composer. Clearing is
-     *                  deliberate: it makes a re-send a decision rather than a
-     *                  second click, which is what stops the same message
-     *                  arriving twice. Nothing is lost — it is in the thread
-     *                  above, verbatim, and the sentence says so.
+     *   unconfirmed  — it may already be in that agent's composer, so clearing
+     *                  makes a re-send a decision rather than a second click.
+     *                  ⚠️ THAT ONLY HOLDS IF WE RECORDED IT. "Nothing is lost —
+     *                  it is in the thread above" was written as a certainty and
+     *                  the code never asked. With `recorded: false` the box was
+     *                  cleared AND the thread had nothing: the words existed
+     *                  NOWHERE, under a sentence promising they were kept. When
+     *                  we did not record it, the box IS the only copy and it
+     *                  keeps it — and the sentence stops making the promise.
      */
+    const inThread = body.recorded === true;
     if (state === 'placed') {
       box.value = '';
       msg.textContent = 'Placed into ' + name + '’s session just now' + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
-      box.value = '';
+      if (inThread) box.value = '';
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
       // "look at its screen" on top of the page's "it is in the conversation
       // above" on top of "it may be sitting in its composer unsent" — a wall
@@ -4382,7 +4394,9 @@ async function pjSend() {
       // fact; this line says the one thing to do about it.
       msg.textContent = 'Could not confirm this reached ' + name + '’s session' + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
-        + ' Its screen is below — check there before sending it again. Your message is kept above.' + moved + kept;
+        + ' Its screen is below — check there before sending it again.'
+        + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')
+        + moved + kept;
     } else {
       msg.textContent = 'Could not deliver: '
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;

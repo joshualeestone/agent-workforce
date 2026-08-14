@@ -1061,7 +1061,7 @@ test('two windows sending at once do not lose a message', () => {
   fs.writeFileSync(writer, [
     "process.env.AGENT_WORKFORCE_DATA = process.argv[2];",
     "const chat = require(" + JSON.stringify(require.resolve('./chat')) + ");",
-    "const kept = chat.appendMessage('race', 'casey', {",
+    "const kept = chat.appendMessage(process.argv[4] || 'race', 'casey', {",
     "  text: process.argv[3], delivery: { state: chat.DELIVERY.PLACED },",
     "});",
     "process.stdout.write(JSON.stringify(kept.recorded));",
@@ -1113,8 +1113,74 @@ test('a lock somebody IS holding refuses rather than corrupting, and says so', (
       text: 'while held', delivery: { state: chat.DELIVERY.PLACED },
     });
     assert.equal(kept.recorded, false);
-    assert.match(kept.because, /another window is writing/);
+    assert.match(kept.because, /locked by another window, or by one that stopped/);
   } finally {
     fs.rmdirSync(file + '.lock');
   }
+});
+
+test('a leftover lock that cannot be REMOVED does not spin forever', () => {
+  /**
+   * ⚠️ MEASURED AS A HANG BEFORE IT WAS FIXED: >15 seconds of spin, killed by
+   * hand. A crash-leftover lock directory with anything inside it — a
+   * `.DS_Store` is enough — made `rmdirSync` throw ENOTEMPTY, the catch
+   * swallowed it, `continue` re-entered `mkdirSync`, the age was still stale,
+   * forever. Inside the synchronous POST handler on a single-threaded server,
+   * so it was not one conversation that wedged: it was every request on the
+   * machine, behind "Sending…".
+   *
+   * The deadline now covers the stale branch, and the steal is a rename, which
+   * does not care what is inside the directory.
+   */
+  const file = chat.threadFile('wedged', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(file + '.lock', { recursive: true });
+  fs.writeFileSync(path.join(file + '.lock', '.DS_Store'), 'debris');
+  const old = Date.now() - (60 * 1000);
+  fs.utimesSync(file + '.lock', new Date(old), new Date(old));
+
+  const started = Date.now();
+  const kept = chat.appendMessage('wedged', 'casey', {
+    text: 'after the un-removable lock', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  const took = Date.now() - started;
+
+  assert.ok(took < 5000, `it spun for ${took}ms rather than answering`);
+  assert.equal(kept.recorded, true, 'a lock with a file in it wedged the conversation for good');
+  assert.equal(chat.readThread('wedged', 'casey').messages.length, 1);
+});
+
+test('two writers that both see a stale lock do not both get inside', () => {
+  /**
+   * ⚠️ THE INTERSECTION THE EARLIER TESTS MISSED — they covered a single break
+   * and fresh contention, never both at once. Two writers can measure the same
+   * lock as stale in the same instant; when the break was an `rmdir`, both
+   * removed it and both proceeded, the second one demolishing the FIRST one's
+   * brand-new lock and walking into the critical section beside it. The
+   * interleave the lock exists to prevent, reachable only through the path that
+   * repairs it.
+   *
+   * Two REAL processes again, racing a lock that is already stale before either
+   * starts, so both take the steal path.
+   */
+  const file = chat.threadFile('stalerace', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ project: 'stalerace', agent: 'casey', messages: [] }));
+  fs.mkdirSync(file + '.lock', { recursive: true });
+  const old = Date.now() - (60 * 1000);
+  fs.utimesSync(file + '.lock', new Date(old), new Date(old));
+
+  const writer = path.join(SANDBOX, 'writer.js');   // written by the test above
+  const both = ['stale A', 'stale B'].map((text) =>
+    new Promise((resolve) => {
+      const { execFile } = require('node:child_process');
+      execFile(process.execPath, [writer, SANDBOX, text, 'stalerace'], { encoding: 'utf8' },
+        (err, out) => resolve(out));
+    }));
+
+  return Promise.all(both).then(() => {
+    const said = chat.readThread('stalerace', 'casey').messages.map((m) => m.text);
+    assert.equal(said.length, 2, `a message was lost breaking a stale lock: ${JSON.stringify(said)}`);
+    assert.ok(said.includes('stale A') && said.includes('stale B'));
+  });
 });
