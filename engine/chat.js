@@ -698,7 +698,14 @@ function refusalReason(got, fallback) {
      * program they have.
      */
     if (got && got.spawnFailed === false) {
-      return 'its window did not answer in time';
+      // ⚠️ The fallback clause SURVIVES the timeout branch. "…, so we did not
+      // type anything" is the sentence that makes this verdict a could_not
+      // rather than an unconfirmed, i.e. the reason re-sending is safe -- and
+      // the timeout was the one branch that dropped it exactly where it
+      // carries that weight.
+      return fallback
+        ? `${fallback} (its window did not answer in time)`
+        : 'its window did not answer in time';
     }
     return (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach tmux on this computer';
   }
@@ -1317,9 +1324,10 @@ function supersede(projectId, agent, kind) {
    * one server process. Measured: a second sequential damage computed the same
    * path, hit the `existsSync` guard, and answered `recorded: false` for good.
    *
-   * A millisecond stamp plus a bounded counter makes the refusal below what it
-   * was always described as — a cannot-happen guard — instead of the
-   * second-time-through path.
+   * The bounded counter is what makes the refusal below the cannot-happen
+   * guard it was always described as, instead of the second-time-through
+   * path; the millisecond stamp only spreads names across time and would be
+   * redundant on its own (a same-ms collision falls through to `.2`).
    */
   // ⚠️ The counter sits BEFORE the kind. Appending it after
   // (`...damaged.2`) breaks the property the first warning above promises:

@@ -155,10 +155,14 @@ promises nothing about delivery — that is the per-send verdict's job.
   `<file>.<stamp>.<pid>.<ms>.<kind>`, with the collision counter inserted BEFORE the
   kind (`<file>.<stamp>.<pid>.<ms>.<n>.<kind>`) while anything is in the way, up to
   fifty — so reaching that arm needs fifty asides for one project+agent, in one
-  process, inside one millisecond. (Round 9: the counter originally appended AFTER
-  the kind, so a same-millisecond second aside ended `.damaged.2` and stopped being
-  recognisable by its suffix — the intermittent 1-in-8 test failure was exactly the
-  kind-last property breaking.) Kept because overwriting the file it is
+  process, inside one millisecond. **The counter is the mechanism that makes the
+  refusal unreachable**; the millisecond stamp only spreads names across time and
+  is redundant with it (measured in round 11: removing `Date.now()` leaves every
+  chat test green, because a same-ms collision falls through to `.2`). An earlier
+  wording credited the stamp, which was the wrong half. (Round 9: the counter
+  originally appended AFTER the kind, so a same-millisecond second aside ended
+  `.damaged.2` and stopped being recognisable by its suffix — the intermittent
+  1-in-8 test failure was exactly the kind-last property breaking.) Kept because overwriting the file it is
   rescuing is the one way that function could fail at its whole job.
 
   ⚠️ **This paragraph was false when first written**, and the falsehood cost a blocker:

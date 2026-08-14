@@ -600,6 +600,22 @@ function folderPathFor(name) {
 }
 
 /**
+ * The path a screen may SHOW for this name: folderPathFor, with the same
+ * one-segment case correction makeFolder will apply when the button is
+ * pressed. Read-only (trueChildName only lists the parent; nothing is made).
+ *
+ * ⚠️ Without this, the preview and the act can disagree in case: on macOS's
+ * case-insensitive volume, typing `lease` beside an existing `Lease` shows
+ * "Kosmos will make this at …/lease" and then ADOPTS `…/Lease` -- a sentence
+ * about where a folder will be that the act does not match, on the screen
+ * whose whole job is saying the path before anything is made.
+ */
+function folderPathPreview(name) {
+  const dest = folderPathFor(name);
+  return path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+}
+
+/**
  * Make it, or adopt it if it is already there.
  *
  * ⚠️ AN EXISTING FOLDER IS ADOPTED, NOT REPLACED, and nothing in it is touched.
@@ -1078,5 +1094,6 @@ module.exports = {
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
-  projectsRoot, folderNameProblem, folderNameFor, folderPathFor, makeFolder,
+  projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
+  folderPathPreview, makeFolder,
 };

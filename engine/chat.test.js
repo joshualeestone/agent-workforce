@@ -548,6 +548,40 @@ test('a stranger holding a manager’s name does not inherit the manager’s rol
   });
 });
 
+test('describe’s OWN role gate bites: an untied card CARRYING a role still reads null', () => {
+  /**
+   * ⚠️ A PRODUCED CARD WITH ONE FIELD FLIPPED, and the flip is the point.
+   * status.js nulls `role` and `profile` on every untied card before
+   * describe runs, so the borrowed-name test above stays green with
+   * describe's own gate deleted (measured: ungating `role` fails nothing in
+   * the whole suite) -- the shape only the gate can refuse, untied AND
+   * role-bearing, is one today's producer never emits. So it is made from a
+   * REAL card: the fleet produces mara tied with her role populated, and
+   * only `isNamedOurs` is flipped. That is what defence-in-depth means, and
+   * a guard nothing can fail is not one: the day status.js stops nulling
+   * upstream, this is the test that notices describe was leaning on it.
+   */
+  withFleet([
+    fleet.agent('mara', { displayName: 'Mara', role: 'project manager', state: 'working' }),
+  ], (board) => {
+    const real = board.agents.find((a) => a.sessionName === 'mara');
+    // Presence controls: the produced card really is tied, role-bearing, and
+    // read through -- so the nulls below are the gate refusing, not dead
+    // fields or an upstream null arriving pre-stripped.
+    assert.equal(real.isNamedOurs, true, 'control: the produced card is ours');
+    assert.equal(membersOf(board, ['mara']).find((m) => m.sessionName === 'mara').role,
+      'project manager', 'control: tied, the role is read');
+    const flipped = [{ ...real, isNamedOurs: false }];
+    const row = projects.describe({
+      id: 'p', name: 'P', folder: SANDBOX, agents: ['mara'],
+      everSeen: { mara: true }, told: {},
+    }, flipped).agents.find((m) => m.sessionName === 'mara');
+    assert.equal(row.role, null, 'an untied card’s role must not decide who a message goes to');
+    assert.equal(row.state, 'unknown');
+    assert.equal(row.tied, false);
+  });
+});
+
 test('a project with nobody on it has nobody to address', () => {
   assert.equal(chat.defaultAgentFor([]), null);
   assert.equal(chat.defaultAgentFor(null), null);

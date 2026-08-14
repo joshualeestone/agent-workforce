@@ -1044,6 +1044,22 @@ test('folderPathFor makes NOTHING, so typing into a name box leaves no trail of 
   assert.ok(!fs.existsSync(p), 'asking where it would go must not put it there');
 });
 
+test('the previewed path IS the path the act produces, case correction included', () => {
+  // ⚠️ Volume-portable on purpose, the same lesson create.test.js records: on
+  // a case-insensitive disk `lease` beside an existing `Lease` ADOPTS that
+  // folder, on a case-sensitive one they are two entries -- so the assertion
+  // is not "it says Lease" but "the sentence matches the act", which is the
+  // property the preview exists for on both kinds of volume.
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
+  const previewed = projects.folderPathPreview('lease');
+  const made = projects.makeFolder('lease');
+  assert.equal(previewed, made,
+    'the screen said one path and the filesystem got another');
+  assert.ok(!fs.existsSync(projects.folderPathPreview('Never previewed into being')),
+    'and the preview itself still makes nothing');
+});
+
 test('a second project of the same name meets the duplicate refusal, not a silent second folder', () => {
   reset();
   projects.create({ name: 'Twice' });
