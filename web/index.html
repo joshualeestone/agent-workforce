@@ -1160,7 +1160,13 @@ svg { display: block; }
                placeholder="Type a message" aria-label="Type a message for this agent">
         <button class="btn" id="pj-send" type="button">Send</button>
       </div>
-      <p class="fmsg" id="pj-thread-msg" aria-live="polite"></p>
+      <!-- ⚠️ NOT aria-live (round 30): the poll re-renders the verdict as
+           it AGES, and a live region re-announced the whole sentence at
+           every minute boundary for the first hour. New sentences are
+           spoken once through the hidden announcer below; the aging
+           repaint stays silent. -->
+      <p class="fmsg" id="pj-thread-msg"></p>
+      <p class="vh" id="pj-thread-say" role="status" aria-live="polite"></p>
 
       <!-- ⚠️ THE AGENT'S SIDE IS A VIEWPORT, NOT A TRANSCRIPT, and the heading
            says so in words rather than in a tooltip. Nothing here parses the
@@ -4255,6 +4261,18 @@ function pjSentence(because) {
   return said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.');
 }
 
+/**
+ * Speak a NEW thread sentence once, without making the visible line live.
+ * The visible #pj-thread-msg ages its verdict on every poll (round 30):
+ * making IT the live region re-announced the unchanged verdict at every
+ * minute boundary. Writers of new sentences call this beside their write;
+ * the aging repaint deliberately does not.
+ */
+function pjAnnounce(text) {
+  const say = document.getElementById('pj-thread-say');
+  if (say && say.textContent !== text) say.textContent = text;
+}
+
 /** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
 function pjSetScreen(el, text) {
   if (el.textContent !== text) el.textContent = text;
@@ -4396,16 +4414,24 @@ function paintThread(body) {
     setLive(msgs, body.messages.map((m) => pjMsg(m, name)).join(''));
   }
 
-  /* Its screen. */
-  document.getElementById('pj-screen-label').textContent = 'What ' + name + '’s screen shows right now';
+  /* Its screen. ⚠️ The HEADING follows the read (round 30, measured): set
+     unconditionally, it stacked "What stopped's screen shows right now"
+     directly over "We cannot see its screen right now" for any member
+     whose agent has gone -- the ordinary state, not an exotic one. Every
+     pointer around it was already gated on the same read; the bold line
+     above them was the one that was missed. */
   const screen = document.getElementById('pj-screen');
   const hint = document.getElementById('pj-screen-hint');
   if (body.viewport && body.viewport.text !== null && body.viewport.text !== undefined) {
+    document.getElementById('pj-screen-label').textContent = 'What ' + name + '’s screen shows right now';
     pjSetScreen(screen, body.viewport.text);
     screen.hidden = false;
     hint.textContent = 'This is the window it is running in, as it looks right now. '
       + 'It is not a transcript, and it is not what the agent said to you.';
   } else {
+    // The non-claiming static heading: naming the agent here would still
+    // promise a screen the next line says we could not read.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
     screen.hidden = true;
     // ⚠️ The reason, in place of the screen. An empty box would read as an
     // agent sitting at a blank terminal, which is a claim about its screen we
@@ -4493,7 +4519,7 @@ async function loadThread() {
        blank line: the stranded state, rebuilt by a connection blip. The
        verdict already tells the person more than this note would. */
     if (!(PJ_SENT_LINE && msg.textContent === PJ_SENT_LINE.shown)) {
-      if (msg.textContent !== note) msg.textContent = note;
+      if (msg.textContent !== note) { msg.textContent = note; pjAnnounce(note); }
       // Remembered, so the next successful read clears THIS sentence and
       // not whatever a send has since written in its place.
       PJ_THREAD_NOTE = note;
@@ -4555,14 +4581,15 @@ async function pjSend() {
     // click, and the list this reads is refreshed every five seconds.
     document.getElementById('pj-thread-msg').textContent =
       'We cannot see this project any more, so we did not send that. Your message is still here.';
+    pjAnnounce('We cannot see this project any more, so we did not send that. Your message is still here.');
     return;
   }
   const who = pjThreadWho(p);
   const box = document.getElementById('pj-say');
   const msg = document.getElementById('pj-thread-msg');
   const text = box.value.trim();
-  if (!who) { msg.textContent = 'There is no agent on this project to send that to.'; return; }
-  if (!text) { msg.textContent = 'Write something to send.'; return; }
+  if (!who) { msg.textContent = 'There is no agent on this project to send that to.'; pjAnnounce(msg.textContent); return; }
+  if (!text) { msg.textContent = 'Write something to send.'; pjAnnounce(msg.textContent); return; }
 
   PJ_SENDING = true;
   document.getElementById('pj-send').disabled = true;
@@ -4604,12 +4631,16 @@ async function pjSend() {
     // was still pointing at it. The connection failure that produced this
     // sentence is likely to fail the refresh below too, so the gate reads
     // the current paint, and the fallback instructs without pointing.
+    // "lost contact", not "the connection failed" (round 30): this branch
+    // is also reached when the connection succeeded and the BODY did not
+    // parse, so the old sentence named a cause it had not observed.
     msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
-      + 'the connection to Kosmos failed while sending, so it may or may not have arrived. '
+      + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
       + (document.getElementById('pj-screen').hidden
         ? 'Before sending it again, check whether it already arrived. '
         : 'Its screen is below. Check there before sending it again. ')
       + 'Your message is still in the box below.';
+    pjAnnounce(msg.textContent);
     PJ_SENDING = false;
     // Mirroring the picker, exactly as the finally below does (round 21): an
     // unconditional re-enable armed the button over an empty picker whenever
@@ -4719,6 +4750,7 @@ async function pjSend() {
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;
     }
     msg.textContent = render(pjWhenPart(at));
+    pjAnnounce(msg.textContent);
     PJ_SENT_LINE = { at, render, shown: msg.textContent };
     // Own try: the verdict above is committed, and a repaint problem in the
     // refresh must not replace it with an exception string.
@@ -4729,6 +4761,7 @@ async function pjSend() {
     // rendering it lowercase and unterminated is the clause-after-full-stop
     // defect pjSentence was written for.
     msg.textContent = pjSentence(err.message) || 'We could not send that.';
+    pjAnnounce(msg.textContent);
     /* ⚠️ The picker is REPAINTED here too (round 28): this path never ran
        loadThread, so the send-time disable was still on the picker, the
        finally mirrored it onto Send, and both controls sat dead until the
@@ -4816,6 +4849,16 @@ async function pjAnswerFrom(sessionName, displayName) {
   if (PJ_CURRENT !== on[0].id) return;   // openProject bailed and said why
   PJ_WHO = sessionName;
   await loadThread();
+  /* ⚠️ Focus MOVES to the question (round 30, measured): the card that
+     carried the button is torn down on the tab switch, so activation left
+     document.activeElement on <body> -- a keyboard or screen-reader user
+     landed nowhere and had to re-traverse the page to reach the question
+     they clicked for. Guarded on the question actually having painted, so
+     the no-question arm does not focus a hidden element; the pre is
+     already tabindex=0 with role=region and a name, so landing there
+     announces whose question it is. */
+  const q = document.getElementById('pj-question');
+  if (q && !q.hidden) document.getElementById('pj-question-text').focus();
   if (on.length > 1) {
     // ⚠️ Said, because we chose. Opening one of three projects silently is a
     // decision the person did not make and cannot see. Registered as the
@@ -4825,6 +4868,7 @@ async function pjAnswerFrom(sessionName, displayName) {
     const chose = pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
       + on[0].name + '.';
     document.getElementById('pj-thread-msg').textContent = chose;
+    pjAnnounce(chose);
     PJ_THREAD_NOTE = chose;
   }
 }

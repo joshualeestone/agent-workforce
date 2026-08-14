@@ -295,7 +295,10 @@ async function main() {
     name: 'Henderson lease',
     folder: process.env.AGENT_WORKFORCE_DATA || require('node:os').tmpdir(),
     // MyBot is here so the unfilable-name screen can be driven; see 5f.
-    agents: ['mara', 'casey', 'nils', 'MyBot'],
+    // `stopped` has no fleet card and no fixture screen at all: it drives
+    // the screen-read-FAILED state (round 30), the ordinary state of a
+    // member whose agent has gone.
+    agents: ['mara', 'casey', 'nils', 'MyBot', 'stopped'],
   });
   const id = (made.project && made.project.id) || made.id;
 
@@ -350,6 +353,16 @@ async function main() {
 
     const question = await page.locator('#pj-question-text').textContent();
     check(/Do you want to proceed\?/.test(question), 'one click lands on the question itself, not on a panel about it');
+    // ⚠️ And FOCUS lands there too (round 30, measured): the card that
+    // carried the button is torn down on the tab switch, so activation
+    // used to leave activeElement on <body> -- a keyboard user had to
+    // re-traverse the whole page to reach the question they clicked for,
+    // and this file only ever asserted the box was REACHABLE, never that
+    // focus moved.
+    const focusedId = await page.evaluate(() => document.activeElement && document.activeElement.id);
+    check(focusedId === 'pj-question-text',
+      'and keyboard focus moves to the question, not back to the top of the document',
+      `activeElement is ${focusedId || '(body)'}`);
     check(/replace the old summary file/.test(question), 'and on the run-up that says what it is asking about');
 
     const qBox = await reallyVisible(page, '#pj-question-text');
@@ -360,7 +373,7 @@ async function main() {
     const who = await page.locator('#pj-thread-who').inputValue();
     check(who === 'mara', `the thread is addressed to one agent, and it is the one asking (${who})`);
     const options = await page.locator('#pj-thread-who option').allTextContents();
-    check(options.length === 4, 'the other agents on the project are visible in the picker, and silent');
+    check(options.length === 5, 'the other agents on the project are visible in the picker, and silent');
     check(options.includes('Mara') && options.includes('Casey'),
       'and they are named the way the rest of the app names them');
 
@@ -818,6 +831,23 @@ async function main() {
       check(f.there === true && f.tabIndex >= 0 && f.hidden === false,
         `${f.id} is reachable from the keyboard (tabIndex ${f.tabIndex}, ${f.hidden ? 'HIDDEN' : 'visible'})`);
     }
+    /* ── the screen-read-FAILED heading (round 30) ──────────────────── */
+    // ⚠️ The bold heading used to claim "What stopped's screen shows right
+    // now" directly above "We cannot see its screen right now" -- a
+    // sentence about a screen nobody read, in the ordinary gone-agent
+    // state, and nothing tested or photographed it.
+    await page.selectOption('#pj-thread-who', 'stopped');
+    await page.waitForFunction(() => /cannot see its screen/.test(
+      document.getElementById('pj-screen-hint').textContent || ''), null, { timeout: 10000 });
+    const failedState = await page.evaluate(() => ({
+      label: document.getElementById('pj-screen-label').textContent,
+      hidden: document.getElementById('pj-screen').hidden,
+    }));
+    check(failedState.hidden === true, 'a member with no readable agent shows no terminal box');
+    check(failedState.label === 'Its screen',
+      'and the heading over the absent screen claims nothing ("Its screen", no name, no "shows right now")',
+      `label reads: ${failedState.label}`);
+    await page.screenshot({ path: path.join(OUT, 'thread-9-screen-unread.png'), fullPage: true });
   } finally {
     await browser.close();
   }
