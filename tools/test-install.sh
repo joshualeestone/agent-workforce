@@ -119,6 +119,7 @@ chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "the gold-K icon landed inside the app" "[ -f \"$SB/apps/Kosmos.app/Contents/Resources/Kosmos.icns\" ]"
+chk "the bundle declares its architecture (no Rosetta prompt)" "grep -q 'LSArchitecturePriority' \"$SB/apps/Kosmos.app/Contents/Info.plist\" && grep -q 'arm64' \"$SB/apps/Kosmos.app/Contents/Info.plist\""
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
 chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 # The generated launcher, actually executed: the account guard must PASS
