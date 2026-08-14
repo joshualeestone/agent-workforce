@@ -840,7 +840,10 @@ echo "== no sandbox path entered LaunchServices =="
 # The lsregister sandbox gate had only a comment behind it; this converts
 # it into a fact. (The dump is a few seconds; it is the one machine-global
 # database a sandboxed run used to pollute.)
-chk "no sandbox path registered with LaunchServices" "! /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump 2>/dev/null | grep -qF \"$SB\""
+LSDUMP="$SB/lsdump.txt"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump > "$LSDUMP" 2>/dev/null || true
+chk "the LaunchServices dump is non-empty (the control can see)" "[ -s \"$LSDUMP\" ]"
+chk "no sandbox path registered with LaunchServices" "! grep -qF \"$SB\" \"$LSDUMP\""
 chk "sysnever still untouched at the end" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 
 echo "== the operator's real folders were never touched (top-level entries) =="

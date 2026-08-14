@@ -146,6 +146,11 @@ bundle_is_ours() {
   [ ! -L "$1/Contents" ] || return 1
   [ ! -L "$1/Contents/MacOS" ] || return 1
   [ ! -L "$1/Contents/MacOS/Kosmos" ] || return 1
+  # A regular file, or no proof: a FIFO at the leaf would block the grep
+  # forever (measured), and a hang with no sentence is the worst outcome
+  # this file is written against. Same hardening class and cost as the
+  # stage's bare mkdir.
+  [ -f "$1/Contents/MacOS/Kosmos" ] || return 1
   /usr/bin/grep -qF ":-$KOSMOS_HOME}\"" "$1/Contents/MacOS/Kosmos" 2>/dev/null
 }
 
@@ -497,6 +502,20 @@ start_log() {
 # nothing. The screen is the record here, deliberately.)
 uninstall() {
   step "Removing Kosmos."
+  # Shared by the icon removals below: unregister BEFORE deleting (a -u on
+  # an already-deleted path is likely a no-op, leaving the stale Spotlight
+  # record the call exists to clear) and re-register on a failed removal
+  # so a named survivor is not one Spotlight denies. Sandboxed runs never
+  # touch the machine-global database.
+  _lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  _lsreg_u() {
+    [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] || return 0
+    [ -x "$_lsreg" ] && "$_lsreg" -u "$1" >/dev/null 2>&1 || true
+  }
+  _lsreg_f() {
+    [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] || return 0
+    [ -x "$_lsreg" ] && "$_lsreg" -f "$1" >/dev/null 2>&1 || true
+  }
   # The board first, while the command that knows how still exists: deleting
   # the folder under a running server leaves it serving ghosts.
   if [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
@@ -600,7 +619,8 @@ uninstall() {
     if [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; then
       if bundle_is_ours "$APP_DIR/Kosmos.app"; then
         info "removing the Kosmos app"
-        rm -rf "$APP_DIR/Kosmos.app" 2>/dev/null || info "note: could not remove $APP_DIR/Kosmos.app; drag it to the Trash to finish."
+        _lsreg_u "$APP_DIR/Kosmos.app"
+        rm -rf "$APP_DIR/Kosmos.app" 2>/dev/null || { _lsreg_f "$APP_DIR/Kosmos.app"; info "note: could not remove $APP_DIR/Kosmos.app; drag it to the Trash to finish."; }
       else
         info "note: the Kosmos.app in $APP_DIR could not be proven to belong to this install and was left alone."
       fi
@@ -642,9 +662,11 @@ uninstall() {
         # that survives is NAMED, never silently skipped. The flag feeds
         # the home-folder link branch below: a link is our residue only
         # when THIS RUN removed the bundle it pointed at.
+        _lsreg_u "$SYS_APP_DIR/Kosmos.app"
         if rm -rf "$SYS_APP_DIR/Kosmos.app" 2>/dev/null; then
           _sys_swept=yes
         else
+          _lsreg_f "$SYS_APP_DIR/Kosmos.app"
           info "note: could not remove $SYS_APP_DIR/Kosmos.app; drag it to the Trash to finish."
         fi
       else
@@ -692,7 +714,8 @@ uninstall() {
         # carry the name, even in the per-user folder.
         if bundle_is_ours "$HOME/Applications/Kosmos.app"; then
           info "removing the Kosmos app from $HOME/Applications"
-          rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."
+          _lsreg_u "$HOME/Applications/Kosmos.app"
+          rm -rf "$HOME/Applications/Kosmos.app" 2>/dev/null || { _lsreg_f "$HOME/Applications/Kosmos.app"; info "note: could not remove $HOME/Applications/Kosmos.app; drag it to the Trash to finish."; }
         else
           info "note: the Kosmos.app in the Applications folder inside your home folder was not created by this install and was left alone."
         fi
@@ -1399,6 +1422,8 @@ else
   info "could not create the app icon, but Kosmos itself is fine"
   if [ "$APP_SYS_STALE" != "no" ]; then
     info "(the Kosmos icon already in Applications is still there from before)"
+  elif [ "$APP_OTHER_OWNER" = "yes" ]; then
+    info "(something else has the Kosmos spot in Applications; it was left alone)"
   fi
 fi
 
@@ -1480,7 +1505,9 @@ printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s 
 # a test nobody runs twice. KOSMOS_OPEN_CMD exists ONLY so the harness can
 # substitute a recording stub and assert both legs -- a hardcoded
 # /usr/bin/open made this block the one new behavior the suite could not
-# see at all.
+# see at all. Unguarded by choice, unlike KOSMOS_HOME and KOSMOS_PORT:
+# it is never baked into anything and anyone who can set it can already
+# run commands as this user.
 OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
 # command -v rather than -x: it resolves a bare command name as well as a
 # path, so an override like KOSMOS_OPEN_CMD=open does not silently no-op.
@@ -1500,7 +1527,7 @@ if [ "$BOARD_OURS" = "yes" ] && [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_N
   # </dev/null: the spawned process must not inherit the curl|sh pipe --
   # the same class as cmd_start's measured never-returning install.
   "$OPEN_CMD" "http://127.0.0.1:$PORT" </dev/null >/dev/null 2>&1 \
-    || printf '  note: your browser could not be opened; the address above is your dashboard.\n\n' 
+    || printf '  note: your browser could not be opened; the address above is your dashboard.\n\n'
 fi
 }
 

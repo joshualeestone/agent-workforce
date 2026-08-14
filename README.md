@@ -20,8 +20,9 @@ falling back to `~/Applications`. It never replaces an occupant of
 either folder that it cannot prove is its own; in three shapes
 (something foreign in the system spot with the home folder aliased to
 it, a foreign spot whose surroundings cannot even be checked, or a
-foreign Kosmos.app already in `~/Applications`) that means no icon is
-written at all, and the transcript says so. A fresh install that confirms its
+foreign Kosmos.app in `~/Applications` when that is where the icon was
+headed) that means no icon is written at all, and the transcript says
+so. A fresh install that confirms its
 own board is running ends by opening the dashboard in the browser
 (updates stay quiet; `KOSMOS_NO_OPEN=1` suppresses it). `kosmos start|stop|restart|status|open|version` manages
 it after that.
