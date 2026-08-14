@@ -284,7 +284,7 @@ async function main() {
      * put it, and the page must NOT be that somewhere.
      */
     check(overflow.screen === true,
-      'the terminal box does not scroll internally, so its content has to go somewhere else');
+      'the terminal box scrolls its own content sideways, rather than stretching the page');
 
     /* ── 4. sending ─────────────────────────────────────────────────────── */
     const before = sentKeys().length;
@@ -393,6 +393,12 @@ async function main() {
      * sentence is what caught it both times, so the reading is now a check.
      */
     check(!/\.\s+[a-z]/.test(unsure), `every sentence starts upper case: "${unsure}"`);
+    // ⚠️ AND THE MESSAGE LIST, not only the live line. The lower-case-clause
+    // defect reappeared in #pj-msgs at a call site that skipped pjSentence, so
+    // the assertion follows it there.
+    const msgsText = (await page.locator('#pj-msgs').textContent()) || '';
+    check(!/\.\s+[a-z]/.test(msgsText), `no sentence in the thread starts lower case: "${msgsText.slice(0, 160)}"`);
+    check(!/\.\./.test(msgsText), 'no sentence in the thread is double-stopped');
     check(/mid-task/.test(unsure), 'and it still says what the agent was doing');
     // ⚠️ DRAWN as a third thing. Same class as the failed row and the person
     // reads it as a failure whatever the words say — this repo has shipped a
@@ -416,7 +422,7 @@ async function main() {
     // ⚠️ The box is CLEARED here, on purpose: a re-send has to be a decision
     // rather than a second click, and the message is in the thread verbatim.
     check(await page.locator('#pj-say').inputValue() === '',
-      'the box still holds text that may already be in the agent’s composer');
+      'the box is cleared, so re-sending text that may already be in the composer takes a retype');
 
     /* ── 5c. the recipient cannot change under the person ───────────────── */
     /**
@@ -445,7 +451,7 @@ async function main() {
     });
     check(flip.before === flip.after,
       `the picker stayed on the agent being typed to (${flip.before} -> ${flip.after})`);
-    check(flip.after !== 'nils', 'a restarting agent re-aimed the message at somebody else');
+    check(flip.after !== 'nils', 'a restarting agent did not re-aim the message at somebody else');
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {

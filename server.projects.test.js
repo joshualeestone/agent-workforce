@@ -816,15 +816,33 @@ test('a thread on a project that does not exist is a 404, not a blank screen', a
 });
 
 test('sending is a WRITE, so another website cannot fire it', async () => {
+  /**
+   * ⚠️ THE STRONGEST WRITE ON THIS SERVER, asserted rather than inherited. Every
+   * other route here got its cross-site guard by being a POST and was tested
+   * for it; this one arrived later and would have inherited the guard silently
+   * — the new-sibling-does-not-inherit shape this repo has shipped before
+   * (the removal routes joined neither the borrowed-name gate nor its "every
+   * write route" test).
+   *
+   * ⚠️ AND THE STATUS IS ASSERTED, not merely "not 200". A 404 would also
+   * satisfy `notEqual(200)` while meaning the guard never ran at all — the
+   * refusal has to be the cross-site one, on a route and a project that exist.
+   */
   reset();
   await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    // The control: the same request from this origin is accepted, so the
+    // refusal below is the guard and not a broken route.
+    const fine = await post(`/api/project/${project.id}/thread/zeta`, { text: 'from the page itself' });
+    assert.equal(fine.status, 200, 'the control: this route works from its own page');
+
     const res = await req(`/api/project/${project.id}/thread/zeta`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
       body: JSON.stringify({ text: 'do something regrettable' }),
     });
-    assert.notEqual(res.status, 200);
-    assert.equal(calls.sends().length, 0, 'a cross-site request must not reach an agent’s keyboard');
+    assert.equal(res.status, 403, `a cross-site POST was answered ${res.status}, not refused`);
+    assert.equal(calls.sends().length, 2,
+      'a cross-site request reached an agent’s keyboard (the control send is the only one expected)');
   });
 });
 
@@ -951,5 +969,39 @@ test('the verdict says what the agent was doing, and keeps saying it on every la
       const back = json(await req(`/api/project/${project.id}/thread/zeta`));
       assert.match(back.messages[0].delivery.paneNote, /mid-task/,
         '"why did nothing happen?" is asked an hour later, so the note has to survive the read');
+    });
+});
+
+test('a project reusing an earlier name says its OWN conversation is empty, not that we cannot read it', async () => {
+  /**
+   * ⚠️ THREE FALSE SENTENCES CAME OUT OF ONE COLLAPSED BRANCH. Reported through
+   * the same channel as a corrupt file, this state told the person "We cannot
+   * read what you have sent this agent" — we read it perfectly well and chose
+   * not to show it — and then "this is not saying you have sent nothing", which
+   * manufactures the opposite wrong idea, because for THIS project they have
+   * sent nothing and that is the useful fact.
+   *
+   * Withheld and unreadable are different answers, so they travel separately.
+   */
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'said to the first project' });
+      // The control: this project reads its own message back.
+      assert.equal(json(await req(`/api/project/${project.id}/thread/zeta`)).messages.length, 1);
+
+      // Re-stamp the stored thread as belonging to an EARLIER project of this
+      // name, which is what a remove-and-recreate leaves behind.
+      const file = chat.threadFile(project.id, 'zeta');
+      const was = JSON.parse(fs.readFileSync(file, 'utf8'));
+      was.projectBornAt = '2020-01-01T00:00:00.000Z';
+      fs.writeFileSync(file, JSON.stringify(was));
+
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.historyOther, true, 'the withheld state is not distinguished from unreadable');
+      assert.deepEqual(body.messages, [],
+        'this project has genuinely sent nothing, and an empty list is the true answer');
+      assert.equal(body.historyBecause, null,
+        'a state we read and withheld must not be reported as one we could not read');
     });
 });

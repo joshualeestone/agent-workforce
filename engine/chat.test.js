@@ -852,7 +852,10 @@ test('a probe we could not run refuses the send rather than waving it through', 
   // is both true and the verdict that tells the person to send again.
   withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
     for (const answer of [refused('no server running'), timedOut(), neverRan(),
-      { ran: true, spawnFailed: false, status: 0, out: 'nonsense\n', err: '' }]) {
+      { ran: true, spawnFailed: false, status: 0, out: 'nonsense\n', err: '' },
+      // ⚠️ TOO MANY fields, not just too few: an extra one shifts every value
+      // by a column, so a claim would be read as a command.
+      { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\textra\n', err: '' }]) {
       chat.resetForTests();
       const tmux = arm([ok(), ok()], { probe: answer });
       const verdict = chat.deliver('casey', 'hello', board.agents);
@@ -1039,4 +1042,79 @@ test('wireText touches a TRAILING semicolon and nothing else', () => {
   assert.equal(chat.wireText('a path' + BACKSLASH), 'a path' + BACKSLASH);
   assert.equal(chat.wireText(''), '');
   assert.equal(chat.wireText(null), '');
+});
+
+test('two windows sending at once do not lose a message', () => {
+  /**
+   * ⚠️ THE INTERLEAVE, DRIVEN RATHER THAN DESCRIBED. `appendMessage` is a
+   * read-modify-write: both windows read a thread of N, both append their own
+   * N+1, both rename their file into place, and the second one wins. The first
+   * person's message was delivered to the agent and then vanished from the
+   * record of it — silent, and unrecoverable from the screen.
+   *
+   * Two REAL processes, because the lock is a filesystem lock and a same-process
+   * test would prove nothing about it: this module is synchronous, so nothing in
+   * one process can interleave with itself.
+   */
+  const { execFileSync } = require('node:child_process');
+  const writer = path.join(SANDBOX, 'writer.js');
+  fs.writeFileSync(writer, [
+    "process.env.AGENT_WORKFORCE_DATA = process.argv[2];",
+    "const chat = require(" + JSON.stringify(require.resolve('./chat')) + ");",
+    "const kept = chat.appendMessage('race', 'casey', {",
+    "  text: process.argv[3], delivery: { state: chat.DELIVERY.PLACED },",
+    "});",
+    "process.stdout.write(JSON.stringify(kept.recorded));",
+  ].join('\n'));
+
+  // Seed the thread, so both writers read a non-empty record and each must add
+  // to what the other wrote.
+  chat.appendMessage('race', 'casey', { text: 'first', delivery: { state: chat.DELIVERY.PLACED } });
+
+  const both = ['from window A', 'from window B'].map((text) =>
+    new Promise((resolve) => {
+      const { execFile } = require('node:child_process');
+      execFile(process.execPath, [writer, SANDBOX, text], { encoding: 'utf8' }, (err, out) => resolve(out));
+    }));
+
+  return Promise.all(both).then((answers) => {
+    assert.deepEqual(answers, ['true', 'true'], 'the control: both writers believed they recorded');
+    const said = chat.readThread('race', 'casey').messages.map((m) => m.text);
+    assert.equal(said.length, 3, `a message was lost: the thread holds ${JSON.stringify(said)}`);
+    assert.ok(said.includes('from window A'), 'window A’s message is not in the record');
+    assert.ok(said.includes('from window B'), 'window B’s message is not in the record');
+  });
+});
+
+test('a lock nobody is holding is broken rather than waited on forever', () => {
+  // A process killed between mkdir and rmdir would otherwise wedge one
+  // conversation permanently. The window the lock protects is two file
+  // operations, so anything older than the bound is debris.
+  const file = chat.threadFile('stalelock', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(file + '.lock', { recursive: true });
+  const old = Date.now() - (60 * 1000);
+  fs.utimesSync(file + '.lock', new Date(old), new Date(old));
+  const kept = chat.appendMessage('stalelock', 'casey', {
+    text: 'after the stale lock', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(kept.recorded, true, 'a dead writer’s lock wedged the conversation for good');
+  assert.equal(chat.readThread('stalelock', 'casey').messages.length, 1);
+});
+
+test('a lock somebody IS holding refuses rather than corrupting, and says so', () => {
+  // The other side of the same rule: a FRESH lock is a live writer, and the
+  // honest answer is that we did not record — never a half-merged file.
+  const file = chat.threadFile('heldlock', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(file + '.lock', { recursive: true });
+  try {
+    const kept = chat.appendMessage('heldlock', 'casey', {
+      text: 'while held', delivery: { state: chat.DELIVERY.PLACED },
+    });
+    assert.equal(kept.recorded, false);
+    assert.match(kept.because, /another window is writing/);
+  } finally {
+    fs.rmdirSync(file + '.lock');
+  }
 });

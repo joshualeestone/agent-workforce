@@ -1629,13 +1629,36 @@ const server = http.createServer((req, res) => {
      */
     let messages = null;
     let historyBecause = null;
+    /**
+     * ⚠️ "WE WITHHELD IT" IS NOT "WE COULD NOT READ IT", and collapsing the two
+     * put three false sentences on one screen.
+     *
+     * A thread belonging to an EARLIER project of this name is one we read
+     * perfectly well and chose not to show. Reported through the same channel as
+     * a corrupt file, the page said "We cannot read what you have sent this
+     * agent" (false — we read it) and then "this is not saying you have sent
+     * nothing" (false the other way — for THIS project they have sent nothing,
+     * and that is exactly the fact to state).
+     *
+     * So the two travel separately. `historyOther` means: this project's own
+     * conversation is empty, and an earlier one of the same name has messages
+     * kept aside.
+     */
+    let historyOther = false;
     try {
       // ⚠️ The project's own birth date goes in, so a thread written for an
       // EARLIER project that had this name is refused rather than shown under
       // this one. Ids are derived from names and a removal frees the id.
       messages = chat.readThread(id, name, project.createdAt).messages;
     } catch (err) {
-      historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+      if (err && err.code === 'OTHER_PROJECT') {
+        historyOther = true;
+        // Empty is the TRUE answer for this project: it is a new project and
+        // nothing has been sent to this agent from it.
+        messages = [];
+      } else {
+        historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+      }
     }
     const view = chat.viewport(name, roster);
     /**
@@ -1655,6 +1678,9 @@ const server = http.createServer((req, res) => {
       agents: project.agents || [],
       messages,
       historyBecause,
+      // See the block above: withheld is not unreadable, and the page says a
+      // different sentence for each.
+      historyOther,
       viewport: view,
       asking,
       question,

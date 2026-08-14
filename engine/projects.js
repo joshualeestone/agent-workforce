@@ -168,13 +168,20 @@ function writeAll(list) {
  * ⚠️ BOUNDED, because an id is a KEY IN A FILENAME further downstream and the
  * caps did not line up.
  *
- * `cleanName` allows a 120-character project name, `safeKey` keeps every ASCII
- * alphanumeric in it, and `engine/chat.js` will only file a thread under an id
- * of 80 characters or fewer. So a project with a long-but-perfectly-ordinary
- * name DELIVERED messages and never RECORDED one, and the sentence it showed
- * for that was "that is not a project we can read" — about a project it had
- * just created, listed, and typed into. Three caps, no relationship between
- * them, and the only symptom was a conversation that silently kept nothing.
+ * `cleanName` allows a 120-character project name and `safeKey` keeps every
+ * ASCII alphanumeric in it, while `engine/chat.js` USED TO file a thread only
+ * under an id of 80 characters or fewer. So a project with a
+ * long-but-perfectly-ordinary name DELIVERED messages and never RECORDED one,
+ * and the sentence it showed for that was "that is not a project we can read" —
+ * about a project it had just created, listed, and typed into. Three caps, no
+ * relationship between them, and the only symptom was a conversation that
+ * silently kept nothing.
+ *
+ * (Past tense on purpose: that limit is 128 now, raised so records already on
+ * somebody's disk are not refused. Both halves of the fix are needed — this
+ * bound stops NEW ids growing, the raised limit stops OLD ones being rejected —
+ * and a note that described the old cap in the present tense would send the
+ * next reader looking for a mismatch that has been closed.)
  *
  * 64 is comfortably under the thread key's limit and long enough that no
  * readable name reaches it. The counter still disambiguates, so two long names

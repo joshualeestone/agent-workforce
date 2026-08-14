@@ -4157,12 +4157,22 @@ function paintThread(body) {
     pjSetScreen(qText, body.question.text);
     qWrap.hidden = false;
   } else if (body.asking) {
-    // ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is the
-    // stranded state this whole feature exists to remove, rebuilt one step
-    // further in. The two reads are milliseconds apart and the pane redraws
-    // between them, so this is reachable.
-    qLabel.textContent = name + ' is waiting on an answer, and we cannot find the '
-      + 'question on its screen right now. Its whole screen is below.';
+    /**
+     * ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is the
+     * stranded state this whole feature exists to remove, rebuilt one step
+     * further in. The two reads differ in moment, flags and depth, so this is
+     * genuinely reachable.
+     *
+     * ⚠️ AND THE ROUTE'S OWN SENTENCE IS USED. `questionBecause` exists for
+     * exactly this case and was published and never read, while this branch
+     * composed its own wording — two derivations of one explanation, which
+     * drift the first time either is edited. The fallback covers an older
+     * server that does not send the field.
+     */
+    qLabel.textContent = name + ' is waiting on an answer, and '
+      + (body.questionBecause
+        || 'we cannot find the question on its screen right now')
+      + '. Its whole screen is below.';
     pjSetScreen(qText, '');
     qText.hidden = true;
     qWrap.hidden = false;
@@ -4178,9 +4188,28 @@ function paintThread(body) {
     // ⚠️ `null` is "we could not read them", which is NOT "you have said
     // nothing". Painting an empty list here would be the same failure as
     // rendering "No projects yet" over an unreadable projects file.
+    // ⚠️ Through `pjSentence`, and with no full stop of its own: the engine's
+    // clauses are lower-case and unterminated, so this call site was printing
+    // "…we cannot see it. this conversation is there but we cannot make sense
+    // of it.." — a lower-case sentence AND a doubled stop, in one line.
     setLive(msgs, '<div class="err">We cannot read what you have sent this agent. '
       + 'This is not saying you have sent nothing, it is saying we cannot see it.'
-      + (body.historyBecause ? '<br>' + esc(body.historyBecause) + '.' : '') + '</div>');
+      + (body.historyBecause ? '<br>' + esc(pjSentence(body.historyBecause)) : '') + '</div>');
+  } else if (body.historyOther) {
+    /**
+     * ⚠️ A DISTINCT STATE, AND EVERY WORD OF THE OTHER ONE WAS WRONG HERE.
+     *
+     * This is a NEW project that happens to have the name an earlier one had.
+     * Its own conversation is genuinely empty, and an earlier project's
+     * messages are kept aside on disk. Reported through the unreadable branch,
+     * the screen said "We cannot read what you have sent this agent" — false,
+     * we read it and chose not to show it — and then "this is not saying you
+     * have sent nothing", which manufactures the opposite wrong idea, because
+     * for THIS project they have sent nothing and that is the useful fact.
+     */
+    setLive(msgs, '<p class="fhint">You have not sent ' + esc(name)
+      + ' anything from this project yet. An earlier project with this name had a '
+      + 'conversation; it is kept aside on this computer.</p>');
   } else if (!body.messages.length) {
     setLive(msgs, '<p class="fhint">You have not sent ' + esc(name) + ' anything from here yet.</p>');
   } else {
@@ -4315,6 +4344,17 @@ async function pjSend() {
     // message it delivered.
     const kept = body.recorded ? '' : ' We could not add it to this conversation'
       + (body.recordedBecause ? ' (' + body.recordedBecause + ')' : '') + '.';
+    /**
+     * ⚠️ SAID OUT LOUD, because it is a file being MOVED on somebody's disk.
+     *
+     * The first message sent to a project that reuses an earlier project's name
+     * renames that earlier conversation aside. The route has always reported it
+     * and the page never read the field — so the move happened silently, and
+     * the only screen that could have mentioned it said nothing. A write to
+     * somebody's data that no sentence accounts for is exactly what this
+     * codebase is built against.
+     */
+    const moved = body.supersededBecause ? ' ' + pjSentence(body.supersededBecause) : '';
 
     /**
      * ⚠️ THE BOX KEEPS YOUR TEXT EXACTLY WHEN RE-SENDING IS SAFE, which is the
@@ -4332,7 +4372,7 @@ async function pjSend() {
      */
     if (state === 'placed') {
       box.value = '';
-      msg.textContent = 'Placed into ' + name + '’s session just now' + note + '.' + kept;
+      msg.textContent = 'Placed into ' + name + '’s session just now' + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
       box.value = '';
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
@@ -4342,10 +4382,10 @@ async function pjSend() {
       // fact; this line says the one thing to do about it.
       msg.textContent = 'Could not confirm this reached ' + name + '’s session' + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
-        + ' Its screen is below — check there before sending it again. Your message is kept above.' + kept;
+        + ' Its screen is below — check there before sending it again. Your message is kept above.' + moved + kept;
     } else {
       msg.textContent = 'Could not deliver: '
-        + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.';
+        + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;
     }
     await loadThread();
   } catch (err) {

@@ -430,8 +430,21 @@ function verifyAtSend(card) {
     };
   }
   const parts = String(got.out || '').replace(/\n+$/, '').split('\t');
-  if (parts.length < VERIFY_KEYS.length) {
-    return { ok: false, because: 'its window answered something we could not read, so we did not type anything' };
+  /**
+   * ⚠️ TOO MANY FIELDS IS AS WRONG AS TOO FEW, and only the second half was
+   * checked. A short answer was refused while a LONG one was silently accepted
+   * and its extras dropped — so if a value ever contained a tab, or a future
+   * tmux emitted another field, the fields would shift by one and this would
+   * read a claim as a command and a command as a session name, then hand the
+   * result to `isAgentPane` with complete confidence. Length is the only signal
+   * available that the shape is the shape we asked for, so it is checked
+   * exactly, in both directions.
+   */
+  if (parts.length !== VERIFY_KEYS.length) {
+    return {
+      ok: false,
+      because: 'its window answered in a shape we do not recognise, so we did not type anything',
+    };
   }
   const fresh = {};
   VERIFY_KEYS.forEach((key, i) => { fresh[key] = parts[i]; });
@@ -686,9 +699,11 @@ function refusalReason(got, fallback) {
  * window.
  *
  * ⚠️ THIS IS NOT THE BOARD'S CAPTURE, and the differences are load-bearing
- * rather than incidental. `status.capturePane` takes 40 lines WITHOUT `-J` and
- * `classify` reads only the last 25 of them; this takes 60 WITH `-J`, and
- * `questionIn` scans all of it. So the two can legitimately disagree about
+ * rather than incidental. `status.capturePane` asks for 40 lines of scrollback
+ * WITHOUT `-J` and `classify` reads only the last 25 of what came back; this
+ * asks for 60 WITH `-J`, and `questionIn` scans all of it. (Measured: `-S -N`
+ * returns N plus the pane height, so the request is not the size of the
+ * answer — see the note above `questionIn`.) So the two can legitimately disagree about
  * whether a question is on screen — see the note above `questionIn`, and
  * `questionBecause` on the route, which exists for exactly that case.
  */
@@ -740,10 +755,16 @@ function viewport(sessionName, roster, lines) {
  *            joins a wrapped line back together, so a marker split across the
  *            pane's right edge is one line here and two there. The board can
  *            see a question this misses, and the reverse.
- *   DEPTH  — the board captures 40 lines and `classify` then reads only the
- *            LAST 25 of them; this captures 60 and scans all of it. A question
- *            that has scrolled past line 25 is invisible to the card while
- *            still being findable here.
+ *   DEPTH  — the board asks for 40 lines of scrollback and `classify` then
+ *            reads only the LAST 25 of what came back; this asks for 60 and
+ *            scans all of it. A question that has scrolled past those last 25
+ *            lines is invisible to the card while still being findable here.
+ *            (⚠️ MEASURED: `-S -N` returns N lines of scrollback PLUS the
+ *            pane height — on a 20-row pane, `-S -40` came back with 60 lines
+ *            and `-S -60` with 80. So neither number is the size of what is
+ *            returned, and an earlier version of this note read as though it
+ *            were. The 25-line window is the part that actually bounds what
+ *            the card can see.)
  *
  * All three gaps are real and reachable, which is exactly why the route carries
  * `questionBecause` — a sentence for the case where the two reads disagree,
@@ -919,7 +940,78 @@ function readThread(projectId, agent, bornAt) {
  * recording separately. A message that went through and could not be written
  * down must not come back looking like a message that was not sent.
  */
+/**
+ * Hold the thread file while it is read, changed and written back.
+ *
+ * ⚠️ `appendMessage` IS A READ-MODIFY-WRITE, and without this two windows lose
+ * a message. Both read a thread of five, both append their own sixth, both
+ * rename their seven-message file into place, and the second one wins — the
+ * first person's message is delivered to the agent and then vanishes from the
+ * record of it. Silent, and unrecoverable from the screen.
+ *
+ * ⚠️ `mkdir` IS THE LOCK, which is the same primitive the fleet's own
+ * `claude-msg` transport uses for the same reason: it is atomic on every
+ * filesystem this product runs on, needs no cleanup daemon, and its failure
+ * mode is a refusal rather than a corrupt file. `writeFileSync` with `wx` would
+ * do as well; `mkdir` is chosen because the pattern already exists here.
+ *
+ * ⚠️ A STALE LOCK EXPIRES. A process killed between `mkdir` and `rmdir` would
+ * otherwise wedge that one conversation forever, so a lock older than the bound
+ * is broken rather than waited on — the window it protects is two file
+ * operations, so anything older is debris rather than a live writer.
+ */
+const LOCK_STALE_MS = 10 * 1000;
+
+function withThreadLock(file, fn) {
+  const lock = file + '.lock';
+  const until = Date.now() + 2000;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') {
+        // We could not even attempt the lock (an unwritable directory, say).
+        // Answering rather than throwing keeps `appendMessage`'s contract: a
+        // recording failure is reported, never raised at a delivered message.
+        return { ok: false, because: 'we could not get exclusive access to this conversation' };
+      }
+      let age = 0;
+      try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { age = Infinity; }
+      if (age > LOCK_STALE_MS) {
+        try { fs.rmdirSync(lock); } catch { /* somebody else broke it first */ }
+        continue;
+      }
+      if (Date.now() > until) {
+        return { ok: false, because: 'another window is writing to this conversation right now' };
+      }
+      // Busy-wait deliberately: this is a sub-millisecond critical section and
+      // the module is otherwise synchronous, so there is no loop to yield to.
+      execFileSync('/bin/sleep', ['0.02']);
+    }
+  }
+  try {
+    return { ok: true, value: fn() };
+  } finally {
+    try { fs.rmdirSync(lock); } catch { /* already gone */ }
+  }
+}
+
 function appendMessage(projectId, agent, entry, bornAt) {
+  // ⚠️ EVERYTHING from the read to the rename happens inside the lock. Holding
+  // it for the write alone would not help: the loss is in the gap between the
+  // read and the write, not in the write itself.
+  let file;
+  try { file = threadFile(projectId, agent); }
+  catch (err) { return { recorded: false, because: String((err && err.message) || 'we could not find that conversation') }; }
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); }
+  catch { /* the write below reports what it cannot do */ }
+  const held = withThreadLock(file, () => appendLocked(projectId, agent, entry, bornAt));
+  if (!held.ok) return { recorded: false, because: held.because };
+  return held.value;
+}
+
+function appendLocked(projectId, agent, entry, bornAt) {
   let existing;
   let supersededBecause = null;
   try {

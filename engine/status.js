@@ -1425,6 +1425,18 @@ function readModel(agentName, exactSession) {
  * and `server.js` states the same risk accurately at `knownAgent`. The real fix
  * is one identity per agent instead of a name sanitised in one place and taken
  * verbatim in another, which reaches the avatar and profile stores too.
+ *
+ * ⚠️ AND THE DISPLAY NAME IS NOW ON THAT LIST. `readIdentity` reads
+ * `store.readProfile(sessionName)` for the name a person typed at creation, and
+ * `readProfile` resolves through `safeKey` — while the file read three lines
+ * below it joins the session name VERBATIM. So the same split runs through this
+ * one function: for a colliding pair, the recorded display name comes from one
+ * agent's profile and the instruction file from the other's, and the card would
+ * show `mybot`'s name over `my.bot`'s role. It is the mildest consumer of the
+ * collision (a wrong label, not a cross-agent write) and it is named here
+ * because the list of things this defect reaches is the whole argument for
+ * fixing it properly, and a list that quietly stops being complete stops making
+ * that argument.
  */
 const WORKERS_DIR = process.env.AGENT_WORKFORCE_WORKERS || path.join(HOME, 'work', 'workers');
 
