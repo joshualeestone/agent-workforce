@@ -1740,7 +1740,6 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, {
       project: { id: project.id, name: project.name },
       agent: member,
-      agents: project.agents || [],
       messages,
       historyBecause,
       // See the block above: withheld is not unreadable, and the page says a
@@ -1748,6 +1747,9 @@ const server = http.createServer((req, res) => {
       historyOther,
       // The third channel: this agent's name cannot be filed under at all.
       historyUnfilable,
+      // (An `agents` copy of the membership used to ride here; nothing read
+      // it -- the picker builds from the projects poll -- so it was dropped
+      // rather than left as surface with no consumer. Round 19.)
       viewport: view,
       asking,
       question,
@@ -2001,7 +2003,15 @@ const server = http.createServer((req, res) => {
  * confirmation will read, and EDITS THE FILE AN AGENT BOOTS FROM. There is no
  * authentication of any kind.
  *
- * ⚠️ AND IT CREATES AGENTS, which is the most powerful thing behind this bind
+ * ⚠️ AND IT TYPES INTO RUNNING AGENTS. `POST /api/project/:id/thread/:agent`
+ * puts arbitrary text plus a separate Enter into a live agent's Claude
+ * session -- on a permission prompt, that is an unauthenticated caller
+ * answering on behalf of an agent started with
+ * `--dangerously-skip-permissions`. Added 2026-08-14, and added to THIS
+ * paragraph the same day, for the reason the next paragraph records about
+ * the last capability that went unlisted.
+ *
+ * ⚠️ AND IT CREATES AGENTS, which was the most powerful thing behind this bind
  * and was missing from this list while it was true. `POST /api/agents` installs
  * a launchd job with RunAtLoad and KeepAlive that starts Claude with
  * `--dangerously-skip-permissions` at every login, and whose instruction file

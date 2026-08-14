@@ -4636,7 +4636,13 @@ async function pjSend() {
     msg.textContent = pjSentence(err.message) || 'We could not send that.';
   } finally {
     PJ_SENDING = false;
-    document.getElementById('pj-send').disabled = false;
+    // The PICKER owns the button's no-recipient state: the refresh inside
+    // the try may have just disabled both because the last agent left the
+    // project, and an unconditional re-enable here put an armed button over
+    // an empty picker (round 19). PJ_SENDING is false by now, so mirroring
+    // the picker reproduces paintThreadPicker's own rule.
+    document.getElementById('pj-send').disabled =
+      document.getElementById('pj-thread-who').disabled;
   }
 }
 
@@ -4944,8 +4950,12 @@ async function pjWillBe() {
     // person's existing folder and its contents becoming the project), on
     // the screen whose contract is that the path is stated before anything
     // is done. The route carries `exists` for exactly this fork.
+    // Through pjSentence, not a hand-rolled capitalise-and-stop: the copy
+    // here dropped the terminal-punctuation guard, which is the doubled-stop
+    // defect pjSentence exists for (round 19; latent, since no current
+    // folder sentence ends in punctuation).
     line.textContent = body.problem
-      ? body.problem.charAt(0).toUpperCase() + body.problem.slice(1) + '.'
+      ? pjSentence(body.problem)
       : (body.exists
         ? 'Kosmos will use the folder already at ' + body.path + ', and put nothing of its own in it.'
         : 'Kosmos will make this at ' + body.path + '.');

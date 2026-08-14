@@ -1033,7 +1033,12 @@ const LOCK_WAIT_MS = 2000;
  * request on the machine stalls behind it. Bounded and rare (the lock is
  * per-thread-file and held for one read-modify-write), and far better than
  * the 15-second unbounded spin it replaced -- but a wait here is everybody
- * waiting, which is the cost to weigh before raising LOCK_WAIT_MS.
+ * waiting, which is the cost to weigh before raising LOCK_WAIT_MS. And the
+ * lock is the SMALL half of the request's blocking budget: deliver's tmux
+ * path is up to three execFileSync calls at 5s timeout each (probe, text,
+ * Enter), so a wedged tmux stalls the whole board ~15s on its own.
+ * Consistent with the codebase's synchronous design; named so the number
+ * being watched is the real one (round 19).
  */
 const PARK = new Int32Array(new SharedArrayBuffer(4));
 function pauseMs(ms) {
