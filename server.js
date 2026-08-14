@@ -1699,6 +1699,13 @@ const server = http.createServer((req, res) => {
         // Set for API consumers and pinned by the route test's own-words
         // assertion; the PAGE does not read it on this arm (it composes the
         // named sentence itself and branches on historyUnfilable first).
+        // ⚠️ This is a STATED EXCEPTION to the no-unread-surface rule that
+        // removed the payload's agents copy (round 19) and readIdentity's
+        // source (round 22): those had no reader anywhere, while this field
+        // keeps the GET contract uniform across its three history arms for
+        // any non-page consumer -- the field exists on the other two arms
+        // for the page, so absence HERE would be the special case (round
+        // 26, kept deliberately).
         historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
       } else {
         historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');

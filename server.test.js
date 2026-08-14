@@ -84,6 +84,13 @@ process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), '
 // this one does.
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ Belt AND braces for the CHAT engine too (round 26): this branch made
+// `require('./server')` pull in engine/chat, which arms itself from this
+// variable at load. Without it, the only thing between a stray thread-route
+// test and a live agent's composer is the TMUX_BIN stub above, whose stated
+// in-file purpose is create.js and remove.js. Both sibling suites carry
+// this line.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 // ⚠️ ARM DRY-RUN FOR THE REMOVAL ENGINE, at load, before `server.js` requires
 // it. `remove` defaults to NOT dry-run (it must, or the product removes nothing
 // while reporting success), so what keeps `launchctl` off this machine during a

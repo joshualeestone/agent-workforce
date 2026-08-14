@@ -4417,12 +4417,15 @@ async function loadThread() {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
   /**
-   * ⚠️ THE GENERATION IS TAKEN FIRST, BEFORE ANY EARLY RETURN. It used to be
-   * taken after the no-recipient branch below — so taking the last agent off a
-   * project, while a fetch for that agent was still in flight, let the stale
-   * answer land and repaint a departed agent's thread over "Put an agent on
-   * this project". Bumping here invalidates every read already in the air,
-   * which is the whole job of the counter.
+   * ⚠️ THE GENERATION IS TAKEN BEFORE THE NO-RECIPIENT BRANCH, which is the
+   * early return the counter exists for: it used to be taken after it, so
+   * taking the last agent off a project, while a fetch for that agent was
+   * still in flight, let the stale answer land and repaint a departed
+   * agent's thread over "Put an agent on this project". (The `!p` return
+   * above sits before the bump and is fine without it: a stale response's
+   * paintThread re-checks pjById(PJ_CURRENT) and bails. Round 26: this
+   * sentence used to say "before ANY early return", which described code
+   * that does not exist.)
    */
   const mine = ++PJ_THREAD_GEN;
   // Pinned the first time one resolves, so a poll cannot re-aim the picker
@@ -4506,7 +4509,10 @@ async function loadThread() {
   if (PJ_SENT_LINE && line.textContent === PJ_SENT_LINE.shown) {
     const aged = PJ_SENT_LINE.render(pjWhenPart(PJ_SENT_LINE.at));
     if (aged !== PJ_SENT_LINE.shown) { line.textContent = aged; PJ_SENT_LINE.shown = aged; }
-  } else if (PJ_SENT_LINE && line.textContent !== PJ_SENT_LINE.shown) {
+  } else if (PJ_SENT_LINE) {
+    // (The preceding branch already took textContent === shown, so no
+    // inequality test is needed here -- one used to sit in this condition
+    // and a reader had to re-derive that it was dead. Round 26.)
     PJ_SENT_LINE = null;
   }
   paintThread(body);
@@ -5020,6 +5026,13 @@ async function pjWillBe() {
   }
   const typed = document.getElementById('pj-name').value;
   if (!typed.trim()) {
+    // ⚠️ The bump too, like BOTH siblings above (round 26): without it a
+    // fetch in flight for a name typed a moment ago still matches the
+    // generation, lands after this default sentence, and paints a path
+    // for a name that has been cleared -- over an empty name box, on the
+    // screen whose contract is that the path shown is the path the act
+    // produces.
+    PJ_WILLBE_GEN += 1;
     line.textContent = 'Kosmos will make a folder for it, inside a folder of its own. '
       + 'Nothing of yours is touched.';
     return;
