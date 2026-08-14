@@ -2690,6 +2690,39 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // The removed list is part of the board, so it refreshes with it.
     [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],
+
+    /* ---- project chat, this branch ---------------------------------------
+       ⚠️ Round 13 measured that every one of these reverts with all 707
+       tests green: render-thread.js and render-projects.js hold some of
+       them, but neither runs under `yarn test`, so this list is what CI
+       actually enforces. Same rule as above: a pin is for a fix nothing
+       else can catch. */
+
+    // The tie half of the "See the question" gate -- defence-in-depth, and
+    // this pin is its ONLY enforcement: the pipeline currently forces an
+    // untied pane's state to unknown upstream, so no fixture can produce the
+    // untied-needs_you shape and no render check can hold the gate. If the
+    // upstream refusal ever changes, this gate is what stops a borrowed-name
+    // pane offering a button into a thread that will refuse it silently.
+    [/a\.state === 'needs_you' && a\.isNamedOurs/,
+     'the answer button lost its tie gate, so a borrowed-name pane promises a question '
+     + 'the thread cannot show'],
+    // Without the IME guard, Enter mid-composition sends a half-composed
+    // first word to a live agent on every Japanese, Chinese or Korean send.
+    [/e\.isComposing \|\| e\.keyCode === 229/,
+     'the IME composition guard is gone, so Enter mid-composition sends half a word'],
+    // "We could not look" is not "it is on none": without this branch a failed
+    // projects read renders a definite "not on a project yet, add it to one".
+    [/if \(PJ_READ_FAILED\)/,
+     'pjAnswerFrom filters a list that a failed read never refreshed, and states the result as fact'],
+    // The unconfirmed-and-unrecorded case: the box is the ONLY copy of the
+    // person's words, and clearing it loses them under a sentence promising
+    // they were kept.
+    [/if \(inThread\) box\.value = '';/,
+     'the unconfirmed clear no longer checks recorded, so an unrecorded send wipes the only copy'],
+    // A bare clock time is only true today; a thread keeps a thousand rows.
+    [/then\.toDateString\(\) !== now\.toDateString\(\)/,
+     'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
   ];
 
   /**

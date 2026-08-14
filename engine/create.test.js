@@ -1366,6 +1366,20 @@ test('the board reads the typed name back, and keeps reading it after the file i
   assert.equal(after.displayName, 'Rhona', 'the name did not survive an edit to the file');
   assert.equal(after.derived, true,
     'a name the person typed themselves must not be flagged on the card as a machine name');
+
+  // ⚠️ AND THE PRECEDENCE ITSELF, on a file that PARSES to a different name.
+  // The edited-file case above exits through the no-match branch, so it never
+  // reaches the `recorded || parsed` line -- measured in round 13, reducing
+  // that line to the parsed name alone left the suite green. This file
+  // parses fine and disagrees, which is the one shape that can catch it:
+  // "one wins, stated" is only true if the stored name beats a readable file.
+  fs.writeFileSync(create.instructionFile('rhona'),
+    'You are **Completely Different**, a bricklayer.\n', 'utf8');
+  const disagree = status.readIdentity('rhona');
+  assert.equal(disagree.displayName, 'Rhona',
+    'a parseable file must not out-rank the name the person typed');
+  assert.equal(disagree.role, 'bricklayer',
+    'control: the file WAS parsed (its role came through), so the name above was a choice, not a fallback');
 });
 
 test('an agent with no stored name is UNCHANGED: it still reads its name out of its file', () => {

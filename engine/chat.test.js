@@ -1086,6 +1086,15 @@ test('wireText touches a TRAILING semicolon and nothing else', () => {
   assert.equal(chat.wireText('const total = 0; '), 'const total = 0; ');
   assert.equal(chat.wireText('const total = 0'), 'const total = 0');
   assert.equal(chat.wireText('a path' + BACKSLASH), 'a path' + BACKSLASH);
+  // A message ENDING in backslash-semicolon: the one input where the escape
+  // could in principle defeat itself (if tmux treated backslash as a general
+  // escape, `foo` + \\ + ; would leave a bare separator and deliver `foo` +
+  // backslash). Measured 2026-08-14 against a scratch session: it does not.
+  // `foo\;` wires to `foo\\;` and the pane receives `foo\;` exactly, and
+  // `\;` wires to `\\;` arriving `\;` -- the splitter consumes one backslash
+  // to escape the final semicolon and nothing else. See the table above.
+  assert.equal(chat.wireText('foo' + BACKSLASH + ';'), 'foo' + BACKSLASH + BACKSLASH + ';');
+  assert.equal(chat.wireText(BACKSLASH + ';'), BACKSLASH + BACKSLASH + ';');
   assert.equal(chat.wireText(''), '');
   assert.equal(chat.wireText(null), '');
 });
@@ -1229,6 +1238,56 @@ test('two writers that both see a stale lock do not both get inside', () => {
     assert.equal(said.length, 2, `a message was lost breaking a stale lock: ${JSON.stringify(said)}`);
     assert.ok(said.includes('stale A') && said.includes('stale B'));
   });
+});
+
+test('the breaker that LOSES the steal stays outside, forced deterministically', () => {
+  /**
+   * ⚠️ THE RACE TEST ABOVE CANNOT RELIABLY SEE A REGRESSION. Two real
+   * processes only collide inside the steal window sometimes: measured in
+   * round 13, reverting the rename-steal to an rmdir-steal failed that test
+   * once in five runs -- a coin-flip guard for the exact interleave the lock
+   * exists to prevent, in the codebase that already paid for a 1-in-8
+   * intermittent once. So the losing interleave is FORCED here: the other
+   * breaker wins at the precise moment ours reaches for the stale lock (the
+   * rename throws ENOENT and a FRESH lock stands in the stale one's place),
+   * and the property asserted is that the loser NEVER enters -- it waits out
+   * the fresh lock like any contender and answers the honest refusal, and
+   * the winner's lock and the thread file are untouched.
+   */
+  const file = chat.threadFile('stealloser', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const lock = file + '.lock';
+  fs.mkdirSync(lock, { recursive: true });
+  const old = new Date(Date.now() - 60 * 1000);
+  fs.utimesSync(lock, old, old);
+  const realRename = fs.renameSync;
+  let steals = 0;
+  fs.renameSync = (from, to) => {
+    if (from === lock) {
+      steals += 1;
+      // The other breaker wins EXACTLY here: stale lock replaced by a fresh
+      // one before our rename lands. Freshening the mtime is that state.
+      const now = new Date();
+      fs.utimesSync(lock, now, now);
+      const err = new Error('no such file');
+      err.code = 'ENOENT';
+      throw err;
+    }
+    return realRename(from, to);
+  };
+  try {
+    const got = chat.appendMessage('stealloser', 'casey', {
+      text: 'must not be written', delivery: { state: chat.DELIVERY.PLACED },
+    });
+    assert.equal(got.recorded, false, 'the LOSER of the steal got inside the critical section');
+    assert.match(got.because, /locked by another window/);
+    assert.equal(steals, 1, 'control: the steal path really ran, exactly once');
+    assert.ok(fs.existsSync(lock), 'the winner’s fresh lock did not survive the loser');
+    assert.ok(!fs.existsSync(file), 'the loser wrote the thread file from outside the lock');
+  } finally {
+    fs.renameSync = realRename;
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
 });
 
 test('an earlier project’s messages being moved aside is reported EVEN when the write then fails', () => {

@@ -278,6 +278,29 @@ async function main() {
     check(await page.locator('.card[data-agent="nils"] .card-answer').count() === 0,
       'a card that is NOT asking anything does not offer to show a question');
 
+    /* ⚠️ THE BORROWED-NAME CARD, as the pipeline actually serves it.
+       MEASURED (round 13): an untied pane's state is forced to `unknown`
+       upstream -- capture is refused for a pane we cannot tie -- so
+       `needs_you` cannot reach an untied card through real routes, and the
+       button's tie gate (`&& a.isNamedOurs`) is defence-in-depth whose
+       enforcement lives in server.test.js's source pin, not here (a render
+       check cannot drive a shape the producer refuses to produce). What IS
+       asserted here: the untied card is on the board (the fixture's whole
+       point), the API control confirms it arrives untied with its state
+       withheld as unknown, and it carries no way into a question. */
+    const rookCard = page.locator('.card[data-agent="rook"]');
+    check(await rookCard.count() === 1, 'CONTROL: the borrowed-name card is on the board at all');
+    const rookState = await page.evaluate(async () => {
+      const body = await (await fetch('/api/status')).json();
+      const rook = (body.agents || []).find((a) => a.sessionName === 'rook');
+      return rook ? { state: rook.state, tied: rook.isNamedOurs === true } : null;
+    });
+    check(rookState !== null && rookState.tied === false && rookState.state === 'unknown',
+      'CONTROL: the pipeline serves the borrowed name UNTIED with its state withheld as unknown',
+      JSON.stringify(rookState));
+    check(await rookCard.locator('.card-answer').count() === 0,
+      'a borrowed-name card gets NO "See the question" button');
+
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose
     // own handler opens the detail panel — so a wrongly-ordered listener would
     // land somewhere plausible and this would be the only thing that noticed.

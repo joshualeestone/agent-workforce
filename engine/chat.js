@@ -296,6 +296,16 @@ function messageProblem(raw) {
  *   typed `wait;;`                    → pane `wait;`             (exactly one eaten)
  *   typed `const a = 1; const b = 2`  → unchanged  (a middle `;` is safe)
  *   typed `const total = 0; `         → unchanged  (a trailing SPACE saves it)
+ *   typed `foo\`                      → unchanged  (a lone trailing backslash is safe)
+ *   typed `foo\;`                     → pane `foo;`  (the `\` escapes the `;`: one pair, one semicolon)
+ *   typed `foo\\;` (2 backslashes)    → pane `foo\;` (so the ESCAPED form round-trips exactly)
+ *
+ * The last two rows settle the input class this function's own design lives
+ * on (measured 2026-08-14, same scratch-session instrument): a message
+ *   ending `\;` wires to `…\\;` and arrives as `…\;`, the person's text
+ * exactly. tmux's splitter consumes one backslash to escape the final
+ * semicolon and nothing else; it does not treat `\\` as a general escape
+ * that would leave a bare separator behind.
  *
  * Two different harms. The first is quiet: the text delivered is not the text
  * we checked, recorded and rendered, and the verdict still says `placed` — the

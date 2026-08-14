@@ -1509,14 +1509,18 @@ function card(a) {
    * the state that means somebody is waiting, and it says what it will show
    * rather than what it will do to the agent.
    */
-  // ⚠️ GATED ON THE TIE, not only the state. The board does not gate a card's
-  // STATE on isNamedOurs, so a borrowed-name pane (a stranger's `tmux new -s
-  // casey` with a Claude in it) can read needs_you here -- and the thread this
-  // button opens WILL refuse it (describe forces an untied member to
-  // `unknown`, so the route's question sentence never fires). A button
-  // promising a question the next screen silently cannot show is the exact
-  // stranded state this button was built to remove, borrowed-name flavour.
-  // A new sibling does not inherit the guard; it has to be given it.
+  // ⚠️ GATED ON THE TIE, not only the state -- as DEFENCE-IN-DEPTH.
+  // Measured (round 13): today's pipeline already forces an untied pane's
+  // state to `unknown` upstream (capture is refused for a pane we cannot
+  // tie), so needs_you cannot currently arrive on a borrowed-name card. The
+  // gate exists for the day that upstream refusal changes: without it, a
+  // stranger's `tmux new -s casey` reading needs_you would offer a button
+  // into a thread that refuses untied members (describe forces them to
+  // `unknown`, the question sentence never fires) -- a promise the next
+  // screen silently cannot keep, which is the exact stranded state this
+  // button was built to remove. Held by the source pin in server.test.js,
+  // because no render check can drive a shape the producer refuses to
+  // produce.
   const answer = a.state === 'needs_you' && a.isNamedOurs
     // ⚠️ NAMED, like the pencil button two lines up. On a board of thirteen
     // agents a screen-reader user hears "See the question" thirteen times with

@@ -1006,6 +1006,20 @@ test('a project reusing an earlier name says its OWN conversation is empty, not 
     });
 });
 
+test('the folder-preview ROUTE answers the case-corrected path, not the raw derivation', async () => {
+  // ⚠️ The route's docblock is where "the path shown is the path the act
+  // produces" is promised, and swapping folderPathPreview back to
+  // folderPathFor there failed nothing (round 13) -- the engine function was
+  // covered, its one caller was not. Same volume-portable shape as the
+  // engine test: the assertion is agreement with the act, not a spelling.
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
+  const body = json(await req('/api/project-folder?name=lease'));
+  assert.equal(body.problem, null);
+  assert.equal(body.path, projects.makeFolder('lease'),
+    'the route previewed one path and the act produced another');
+});
+
 test('the POST route really stamps projectBornAt, read off the file it wrote', async () => {
   /**
    * ⚠️ THE WIRING, not the guard. The engine's reuse guard is well covered,

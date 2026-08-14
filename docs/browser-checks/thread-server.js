@@ -39,7 +39,15 @@ for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WOR
     throw new Error(`${key} is not set: this would write into the real fleet's files. Refusing.`);
   }
   const real = path.resolve(set);
-  if (real.startsWith(path.join(os.homedir(), 'Library')) || real === os.homedir()) {
+  // ⚠️ `~/Kosmos` is in the refusal list by name: it is the real projects
+  // root, the very directory the comment above warns about -- and the first
+  // version of this guard rejected only ~/Library and ~ itself, so
+  // AGENT_WORKFORCE_PROJECTS=~/Kosmos/Projects sailed through a guard whose
+  // whole job was stopping exactly that.
+  if (real.startsWith(path.join(os.homedir(), 'Library'))
+      || real === os.homedir()
+      || real === path.join(os.homedir(), 'Kosmos')
+      || real.startsWith(path.join(os.homedir(), 'Kosmos') + path.sep)) {
     throw new Error(`${key} points at ${real}, which is not a sandbox. Refusing.`);
   }
 }
@@ -66,6 +74,20 @@ const SPECS = [
    * Josh asked to be able to use. Sending works; keeping does not.
    */
   fleet.agent('MyBot', { displayName: 'MyBot', role: 'writer', state: 'idle' }),
+  /**
+   * ⚠️ A BORROWED NAME in the fixture, so the untied card renders at all.
+   * MEASURED (round 13): the full pipeline forces an untied pane's state to
+   * `unknown` before the page ever sees it -- capture is refused for a pane
+   * we cannot tie, so `needs_you` cannot arrive on an untied card through
+   * real routes, and no browser check can drive that shape honestly. The
+   * button's `&& a.isNamedOurs` gate is therefore defence-in-depth (the
+   * shape only exists if the upstream gating ever changes), and the layer
+   * that holds it is the source pin in server.test.js, not a render check.
+   * What rook DOES buy here: the untied card's own rendering is on the
+   * board and in the screenshots, and the no-button assertion below covers
+   * the state the pipeline actually produces for it.
+   */
+  fleet.stranger('rook', { state: 'needs_you' }),
 ];
 
 /**

@@ -1790,6 +1790,10 @@ const server = http.createServer((req, res) => {
           agentsUnreadable: roster === null,
         });
       })
+      // The UNREADABLE arm here is defensive, not live: deliver and
+      // appendMessage never throw by contract, and projects.get's failure is
+      // rewrapped with an explicit .status above, which wins first. Kept so
+      // this catch matches its siblings if a throwing read is ever added.
       .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),
         { error: String((err && err.message) || 'we could not read that request') }));
     return;
