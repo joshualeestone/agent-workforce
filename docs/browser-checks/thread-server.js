@@ -58,6 +58,14 @@ const SPECS = [
   fleet.agent('mara', { displayName: 'Mara', role: 'project manager', state: 'needs_you' }),
   fleet.agent('casey', { displayName: 'Casey', role: 'writer', state: 'working' }),
   fleet.agent('nils', { displayName: 'Nils', role: 'researcher', state: 'idle' }),
+  /**
+   * ⚠️ A NAME THAT CANNOT BE FILED UNDER, in the fixture so the check can drive
+   * that screen. A capital puts a session name outside the store key
+   * `chat.threadFile` will file a thread under — which is exactly what adopting
+   * the pre-existing -discord fleet produces, and exactly the capitalised names
+   * Josh asked to be able to use. Sending works; keeping does not.
+   */
+  fleet.agent('MyBot', { displayName: 'MyBot', role: 'writer', state: 'idle' }),
 ];
 
 /**
@@ -92,6 +100,13 @@ const SCREENS = {
     '  ⎿  Read 220 lines',
     '',
     '· Drafting (esc to interrupt)',
+    '',
+  ].join('\n'),
+  'MyBot-discord:0.0': [
+    '● Worked for 12s',
+    '',
+    '> ',
+    '⏵⏵ accept edits on                            ? for shortcuts',
     '',
   ].join('\n'),
   'nils-discord:0.0': [

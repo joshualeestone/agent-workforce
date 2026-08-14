@@ -1301,11 +1301,18 @@ test('a supersede that cannot RENAME reports it, and records nothing', () => {
    * two projects' words into one record — so nothing is recorded, and the
    * person is told which of the two things failed.
    *
-   * ⚠️ The `existsSync` arm above it is deliberately left untested: the aside
-   * name carries the pid and a millisecond stamp, so producing a genuine
-   * collision would mean racing this process against itself. It is a guard
-   * against a state this code cannot reach, kept because overwriting the file
-   * it is rescuing is the one way this function could fail at its whole job.
+   * ⚠️ The `existsSync` arm above it is deliberately left untested, and the
+   * justification here USED TO BE FALSE — it claimed a millisecond stamp the
+   * aside name did not carry (that stamp is on the LOCK name, a different
+   * string in a different function), which is how the name was a constant and
+   * the second damage was refused for good.
+   *
+   * The name is `<file>.<stamp>.<pid>.<ms>.<kind>`, with `.2`, `.3` … appended
+   * while anything is in the way, up to fifty. So reaching that arm needs fifty
+   * asides for one project+agent, in one process, inside one millisecond —
+   * which is now genuinely unreachable rather than the second time through. It
+   * is kept because overwriting the file it is rescuing is the one way this
+   * function could fail at its whole job.
    */
   const born = '2026-01-01T00:00:00.000Z';
   const reborn = '2026-08-01T00:00:00.000Z';
@@ -1402,7 +1409,11 @@ test('a file we cannot READ right now is not treated as a file that is DAMAGED',
 
   assert.equal(refused.recorded, false, 'a message was recorded over a file we could not read');
   assert.match(refused.because, /cannot read this conversation/);
-  assert.equal(refused.supersededBecause, null,
+  // ⚠️ `strictEqual` against `?? null`: `assert.equal(undefined, null)` PASSES,
+  // so the loose form could not tell a field that is absent from one that is
+  // deliberately null — and 'absent' is exactly what a future refactor dropping
+  // the field would produce.
+  assert.strictEqual(refused.supersededBecause ?? null, null,
     'a file we merely could not read was reported as an earlier one set aside');
   // ⚠️ NOTHING MOVED. The whole defect was the good file being renamed away.
   const asides = fs.readdirSync(path.dirname(file))
@@ -1417,4 +1428,70 @@ test('a file we cannot READ right now is not treated as a file that is DAMAGED',
   assert.equal(after.recorded, true);
   assert.deepEqual(chat.readThread('unreadablenow', 'casey').messages.map((m) => m.text),
     ['one', 'two', 'three', 'after it cleared'], 'the history did not survive the transient failure');
+});
+
+test('a SECOND damaged file in one process is set aside too, not refused forever', () => {
+  /**
+   * ⚠️ THE LOCKOUT REOPENED ONE OCCURRENCE LATER. A damaged file has no
+   * `projectBornAt` to read (it will not parse), so the aside name fell back to
+   * the literal `earlier` — making `<file>.earlier.<pid>.damaged` a CONSTANT for
+   * one project+agent inside one server process. The first damage moved aside
+   * fine; the second computed the identical path, hit the existsSync guard, and
+   * answered recorded:false for good. The fix for W-corrupt-lockout had a
+   * lockout in it.
+   */
+  const file = chat.threadFile('twicedamaged', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const asides = () => fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.damaged'));
+
+  fs.writeFileSync(file, '{ damaged the first time');
+  const first = chat.appendMessage('twicedamaged', 'casey', {
+    text: 'after the first damage', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(first.recorded, true, 'the control: the first damage is handled');
+  assert.equal(asides().length, 1);
+
+  fs.writeFileSync(file, '{ damaged the second time');
+  const second = chat.appendMessage('twicedamaged', 'casey', {
+    text: 'after the second damage', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(second.recorded, true, 'a second damage locked the conversation out for good');
+  assert.match(second.supersededBecause, /damaged file was set aside/);
+
+  // ⚠️ TWO DISTINCT ASIDES on disk: neither damaged file was overwritten by the
+  // other, which is the whole reason the name has to be unique.
+  const kept = asides();
+  assert.equal(kept.length, 2, `expected two asides, saw ${JSON.stringify(kept)}`);
+  const contents = kept.map((f) => fs.readFileSync(path.join(path.dirname(file), f), 'utf8')).sort();
+  assert.deepEqual(contents, ['{ damaged the first time', '{ damaged the second time']);
+  assert.deepEqual(chat.readThread('twicedamaged', 'casey').messages.map((m) => m.text),
+    ['after the second damage']);
+});
+
+test('a supersede that cannot move a DAMAGED file says so, rather than blaming a project name', () => {
+  // Both failure returns used to say "an earlier project's messages" whatever
+  // they had been asked to move — sending somebody to look for a project they
+  // never made.
+  const file = chat.threadFile('damagedmovefail', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '{ damaged');
+
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (String(to).endsWith('.damaged')) throw new Error('EPERM: operation not permitted');
+    return realRename(from, to);
+  };
+  try {
+    const kept = chat.appendMessage('damagedmovefail', 'casey', {
+      text: 'while it cannot be moved', delivery: { state: chat.DELIVERY.PLACED },
+    });
+    assert.equal(kept.recorded, false);
+    assert.match(kept.because, /could not move the damaged file aside/);
+    assert.ok(!/earlier project/.test(kept.because),
+      `a damaged file was reported as a project-name clash: ${kept.because}`);
+  } finally {
+    fs.renameSync = realRename;
+  }
 });

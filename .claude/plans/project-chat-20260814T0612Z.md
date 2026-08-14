@@ -151,10 +151,19 @@ promises nothing about delivery — that is the per-send verdict's job.
 - **The question/viewport duplication** on a short pane, and the `--label-3` caption on
   `.pj-member small` (pre-existing, likely fails AA in light mode). Both flagged from
   round 2, both design-pass work.
-- **`supersede`'s `existsSync` arm** is untested: the aside name carries pid plus a
-  millisecond stamp, so a genuine collision would mean racing this process against
-  itself. Kept because overwriting the file it is rescuing is the one way that function
-  could fail at its whole job.
+- **`supersede`'s `existsSync` arm** is untested. The aside is
+  `<file>.<stamp>.<pid>.<ms>.<kind>`, with `.2`, `.3` … appended while anything is in
+  the way, up to fifty — so reaching that arm needs fifty asides for one project+agent,
+  in one process, inside one millisecond. Kept because overwriting the file it is
+  rescuing is the one way that function could fail at its whole job.
+
+  ⚠️ **This paragraph was false when first written**, and the falsehood cost a blocker:
+  it claimed a millisecond stamp the aside name did not carry (that stamp is on the
+  LOCK name, a different string in a different function). The name was therefore a
+  constant for one project+agent per process, and the second damaged file was refused
+  forever — the fix for the corrupt-file lockout had a lockout in it. Recorded because a
+  justification that describes code that does not exist is worse than no justification:
+  it stops the next reader checking.
 - **Four hand-captured screenshots** are reproduced by nothing; named and dated in
   `docs/browser-checks/README.md` rather than silently violating the regenerable rule.
 

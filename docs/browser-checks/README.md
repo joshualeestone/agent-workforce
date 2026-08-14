@@ -266,10 +266,9 @@ up — and so whoever does that pass knows exactly which four files it owes.
 
 ### thread-8-unfilable.png
 
-Hand-captured 2026-08-14, on `thread-server.js`, by adding a member named
-`MyBot` to a project (an agent whose session name is not its own store key —
-what adopting the pre-existing `-discord` fleet produces). Nothing regenerates
-it; the behaviour behind it IS covered by `server.projects.test.js`, which
-drives `MyBot` and `my.bot` through the real route and asserts both the new
-channel and the absence of the two false sentences. Listed with the four above
-as an aging risk for the same reason.
+**No longer an exception.** It was hand-captured on 2026-08-14 and is now emitted
+by `render-thread.js` like every other `thread-*.png`, because the regression
+test for the defect it shows had been written one layer away from it — asserting
+on the route payload while the defect was a page SENTENCE, so reverting the
+exact string left the suite green. Driving the screen fixed the guard and made
+the screenshot regenerable in the same move. One exception fewer.

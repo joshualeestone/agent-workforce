@@ -259,7 +259,8 @@ async function main() {
   const made = await post('/api/projects', {
     name: 'Henderson lease',
     folder: process.env.AGENT_WORKFORCE_DATA || require('node:os').tmpdir(),
-    agents: ['mara', 'casey', 'nils'],
+    // MyBot is here so the unfilable-name screen can be driven; see 5f.
+    agents: ['mara', 'casey', 'nils', 'MyBot'],
   });
   const id = (made.project && made.project.id) || made.id;
 
@@ -301,7 +302,7 @@ async function main() {
     const who = await page.locator('#pj-thread-who').inputValue();
     check(who === 'mara', `the thread is addressed to one agent, and it is the one asking (${who})`);
     const options = await page.locator('#pj-thread-who option').allTextContents();
-    check(options.length === 3, 'the other agents on the project are visible in the picker, and silent');
+    check(options.length === 4, 'the other agents on the project are visible in the picker, and silent');
     check(options.includes('Mara') && options.includes('Casey'),
       'and they are named the way the rest of the app names them');
 
@@ -378,6 +379,9 @@ async function main() {
     await page.selectOption('#pj-thread-who', 'nils');
     await page.waitForFunction(() => /Nils/.test(
       document.getElementById('pj-screen-label').textContent || ''), null, { timeout: 10000 });
+    // The count BEFORE this send: the comment below promises a delta and the
+    // assertion was an absolute, which is the sibling's exact lesson unapplied.
+    const failedBefore = await page.locator('.pj-msg.failed').count();
     await page.fill('#pj-say', 'and this one cannot get through');
     await page.click('#pj-send');
     await page.waitForFunction(() => /Could not deliver/i.test(
@@ -394,12 +398,14 @@ async function main() {
     //
     // ⚠️ COUNTED AS A DELTA, not as an absolute. Clearing the projects does not
     // clear the THREADS — a project id is derived from its name, so a re-run
-    // rebuilds the same id and inherits the previous run's messages. An
+    // rebuilds the same id and lands on the previous run's file (superseded on
+    // the first send now, rather than inherited). An
     // absolute count passed on the first run and then climbed (saw 2, saw 3),
     // which is a check measuring its own history rather than this send. The
     // property is "this send added one row of this kind", and that is immune.
-    check(await page.locator('.pj-msg.failed').count() >= 1,
-      'the failed attempt is in the thread, and does not draw like a delivered one');
+    const failedAfter = await page.locator('.pj-msg.failed').count();
+    check(failedAfter - failedBefore === 1,
+      `this send added exactly one failed row (${failedBefore} -> ${failedAfter})`);
 
     /* ── 5b. a send we could not confirm is not drawn as a failure ──────── */
     /**
@@ -596,6 +602,42 @@ async function main() {
         'it does not claim an earlier conversation was moved aside before anything moved it');
       check(!/\.\s+[a-z]/.test(reused), `every sentence starts upper case: "${reused.trim()}"`);
     }
+
+    /* ── 5f. a name we cannot file a conversation under ─────────────────── */
+    // Back to the project that has MyBot on it: 5e navigated to a different one.
+    await page.goto(`${BASE}?tab=projects`, { waitUntil: 'networkidle' });
+    await page.click(`[data-project="${id}"]`);
+    await page.waitForSelector('#pj-thread-who', { timeout: 10000 });
+    /**
+     * ⚠️ THE REGRESSION TEST FOR THIS LIVED IN THE WRONG LAYER. The defect was
+     * a PAGE SENTENCE — "Messages you send are delivered to its session",
+     * promised from a state that knows nothing about reachability — and the
+     * test asserted on the route PAYLOAD, so reverting the exact string left
+     * everything green. A guard aimed one layer away from the defect is not a
+     * guard.
+     *
+     * Driven on the rendered page now, which also makes
+     * `thread-8-unfilable.png` check-emitted rather than hand-captured.
+     */
+    await page.selectOption('#pj-thread-who', 'MyBot');
+    await page.waitForFunction(() => /MyBot/.test(
+      document.getElementById('pj-screen-label').textContent || ''), null, { timeout: 10000 });
+    await page.waitForFunction(() => /cannot keep a conversation/.test(
+      document.getElementById('pj-msgs').textContent || ''), null, { timeout: 10000 });
+    await page.screenshot({ path: path.join(OUT, 'thread-8-unfilable.png'), fullPage: true });
+
+    const unfilable = (await page.locator('#pj-msgs').textContent()) || '';
+    check(/nothing sent here is kept/.test(unfilable),
+      `the unfilable state says what it knows: "${unfilable.trim()}"`);
+    // ⚠️ THE STRING THAT WAS THE DEFECT. Asserted against the whole thread
+    // block, not just the one paragraph, because the promise could return
+    // anywhere in it.
+    const unfilableBlock = (await page.locator('#pj-thread').textContent()) || '';
+    check(!/delivered/i.test(unfilableBlock),
+      'the unfilable screen promises no delivery it cannot know about');
+    // Sending is still offered, because sending still works — only keeping does not.
+    check(await page.locator('#pj-say').isEnabled(),
+      'the message box is still usable for an agent whose conversation cannot be kept');
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {

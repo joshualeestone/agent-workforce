@@ -1041,7 +1041,7 @@ test('an agent whose name cannot be FILED under is told the truth, not the two f
         // send, so a standing 'messages are delivered' promise here is false
         // exactly when the person most needs the screen to be right.
         assert.ok(!/delivered/i.test(JSON.stringify(body)),
-          );
+          `${name}: the unfilable answer promises delivery it cannot know about`);
 
         // ⚠️ AND SENDING STILL WORKS. The words reach the agent's session; only
         // the keeping does not, and the send-time answer says both.

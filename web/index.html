@@ -1124,7 +1124,15 @@ svg { display: block; }
         <!-- ⚠️ `pre`, and it is not a style choice: this is terminal output, so
              the columns a Claude prompt draws its options in only line up in a
              monospaced, whitespace-preserving box. -->
-        <pre class="pj-screen" id="pj-question-text" tabindex="0"></pre>
+        <!-- ⚠️ NAMED, because it is FOCUSABLE. A tabindex="0" pre is a stop on
+             the keyboard tour, and a stop that announces only its contents (a
+             wall of terminal text) tells a screen-reader user nothing about
+             where they have landed. role="region" + aria-labelledby borrows the
+             heading already above it, so the tour announces "Mara is waiting on
+             an answer…" before reading the pane. WCAG AA is this project's
+             floor, so this is in scope rather than a later pass. -->
+        <pre class="pj-screen" id="pj-question-text" tabindex="0"
+             role="region" aria-labelledby="pj-question-label"></pre>
       </div>
 
       <!-- What we have sent, and how each one went. Ours to keep, because we
@@ -1148,7 +1156,9 @@ svg { display: block; }
         <p class="fhint" id="pj-screen-hint">This is the window it is running in,
            as it looks right now. It is not a transcript, and it is not what the
            agent said to you.</p>
-        <pre class="pj-screen" id="pj-screen" tabindex="0"></pre>
+        <!-- Named for the same reason as the question box above. -->
+        <pre class="pj-screen" id="pj-screen" tabindex="0"
+             role="region" aria-labelledby="pj-screen-label"></pre>
       </div>
     </div>
 
@@ -4117,7 +4127,20 @@ function pjMsg(m, name) {
       + esc(pjSentence(d.because || 'we typed it and could not tell whether it arrived'));
   } else {
     mark = ' failed';
-    said = 'Could not deliver: ' + esc(d.because || 'we could not put it into its session') + '.';
+    /**
+     * ⚠️ TIMED, LIKE EVERY OTHER ROW. This one was the only un-timed entry in
+     * the thread, and the comment authorising that (on the live line, where
+     * leaving the time off IS right) said "the row below carries the time" —
+     * which was simply false, because this is that row. On a thread holding
+     * several failures the person could not tell which failure belonged to
+     * which send.
+     *
+     * The live line still carries no time, for its own reason: "Could not
+     * deliver just now" reads as "not at this moment". A row is history and
+     * says when.
+     */
+    said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
+      + esc(d.because || 'we could not put it into its session') + '.';
   }
   return '<div class="pj-msg' + mark + '">'
     + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
@@ -4481,13 +4504,19 @@ async function pjSend() {
         + moved + kept;
     } else {
       /**
-       * ⚠️ NO TIME PHRASE ON THIS ONE, deliberately. "Could not deliver just
-       * now: …" reads as "not at this moment", which is a different and wrong
-       * claim — it suggests trying again in a second might work. And this
-       * verdict needs no stamp to stay true: nothing was typed, the person's
-       * text is still in the box in front of them, and the row below carries
-       * the time. The defect being fixed here is a FALSE time claim, not the
-       * absence of one.
+       * ⚠️ NO TIME PHRASE ON THIS LIVE LINE, deliberately. "Could not deliver
+       * just now: …" reads as "not at this moment", which is a different and
+       * wrong claim — it suggests trying again in a second might work. The
+       * defect this addresses is a FALSE time claim, not the absence of one,
+       * and this line needs no stamp to stay true: nothing was typed and the
+       * person's text is still in the box in front of them.
+       *
+       * ⚠️ An earlier version of this note also said "the row below carries
+       * the time", which was FALSE — the row was the one un-timed entry in the
+       * whole thread, so on a thread with several failures nobody could tell
+       * which failure belonged to which send. The row carries it now (see
+       * `pjMsg`), and this sentence no longer leans on something it had not
+       * checked.
        */
       render = () => 'Could not deliver: '
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;

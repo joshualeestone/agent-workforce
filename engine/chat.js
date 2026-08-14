@@ -1125,7 +1125,21 @@ function appendMessage(projectId, agent, entry, bornAt) {
   catch (err) { return { recorded: false, because: String((err && err.message) || 'we could not find that conversation') }; }
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); }
   catch { /* the write below reports what it cannot do */ }
-  const held = withThreadLock(file, () => appendLocked(projectId, agent, entry, bornAt));
+  /**
+   * ⚠️ THE NEVER-THROWS PROMISE IS HELD BY CODE, not by the docblock that makes
+   * it. Everything below runs with a message that has ALREADY BEEN DELIVERED,
+   * so a throw escaping here reaches the route's 400 handler and reports a
+   * delivered message as a failed send — the one inversion this contract
+   * exists to prevent. `pauseMs` was an unguarded subprocess spawn once for
+   * exactly this reason; a promise that depends on nothing inside ever throwing
+   * again is a promise waiting to be broken by the next edit.
+   */
+  let held;
+  try {
+    held = withThreadLock(file, () => appendLocked(projectId, agent, entry, bornAt));
+  } catch {
+    return { recorded: false, because: 'we could not write this conversation down on this computer' };
+  }
   if (!held.ok) return { recorded: false, because: held.because };
   return held.value;
 }
@@ -1285,12 +1299,30 @@ function supersede(projectId, agent, kind) {
     const was = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (was && was.projectBornAt) stamp = String(was.projectBornAt).replace(/[^0-9A-Za-z-]/g, '');
   } catch { /* the name is a label, not a lookup key */ }
-  // ⚠️ The KIND is in the name: a file set aside because a previous project
-  // had this name is a different thing from one set aside because it was
-  // damaged, and a person looking at the directory should be able to tell.
-  const aside = `${file}.${stamp}.${process.pid}.${kind || 'superseded'}`;
+  /**
+   * ⚠️ THE KIND is in the name: a file set aside because a previous project had
+   * this name is a different thing from one set aside because it was damaged,
+   * and a person looking at the directory should be able to tell.
+   *
+   * ⚠️ AND THE NAME MUST BE UNIQUE, which the first version was not — it
+   * reopened the very lockout it was written to fix, one occurrence later.
+   * `stamp` falls back to the literal `'earlier'` for a DAMAGED file (there is
+   * no `projectBornAt` to read out of a file that will not parse), so
+   * `<file>.earlier.<pid>.damaged` was a CONSTANT for one project+agent inside
+   * one server process. Measured: a second sequential damage computed the same
+   * path, hit the `existsSync` guard, and answered `recorded: false` for good.
+   *
+   * A millisecond stamp plus a bounded counter makes the refusal below what it
+   * was always described as — a cannot-happen guard — instead of the
+   * second-time-through path.
+   */
+  const base = `${file}.${stamp}.${process.pid}.${Date.now()}.${kind || 'superseded'}`;
+  let aside = base;
+  for (let n = 2; fs.existsSync(aside) && n <= 50; n += 1) aside = `${base}.${n}`;
   if (fs.existsSync(aside)) {
-    return { ok: false, because: 'we could not move an earlier project’s messages aside, so we did not add to them' };
+    // Fifty asides for one project+agent, in one process, inside one
+    // millisecond. Refusing beats overwriting the file we are rescuing.
+    return { ok: false, because: cannotMoveAside(kind) };
   }
   try {
     fs.renameSync(file, aside);
@@ -1298,11 +1330,21 @@ function supersede(projectId, agent, kind) {
   } catch {
     // Plain language, same rule as the write failure above: an errno and an
     // internal path are not things a person can act on.
-    return {
-      ok: false,
-      because: 'we could not move an earlier project’s messages aside, so we did not add to them',
-    };
+    return { ok: false, because: cannotMoveAside(kind) };
   }
+}
+
+/**
+ * ⚠️ THE SENTENCE FOLLOWS THE KIND. Both failure returns used to say "an
+ * earlier project's messages" whatever they had been asked to move — so a
+ * DAMAGED file that could not be renamed was reported as a project-name clash,
+ * which is a different thing that would send somebody looking for a project
+ * they never made.
+ */
+function cannotMoveAside(kind) {
+  return kind === 'damaged'
+    ? 'we could not move the damaged file aside, so we did not add to it'
+    : 'we could not move an earlier project’s messages aside, so we did not add to them';
 }
 
 /* ── who answers ─────────────────────────────────────────────────────────── */
