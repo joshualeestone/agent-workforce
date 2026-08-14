@@ -61,10 +61,13 @@ cp -R "$REPO/web" "$STAGE/app/web"
 cp "$REPO/bin/agent-supervisor.sh" "$STAGE/app/bin/"
 chmod +x "$STAGE/app/bin/agent-supervisor.sh"
 # The app icon artwork, when it exists: the installer looks for
-# app/assets/Kosmos.icns, and without this entry the icon plumbing in
-# setup.sh could never fire no matter what landed in the repo.
-if [ -d "$REPO/assets" ]; then
-  cp -R "$REPO/assets" "$STAGE/app/assets"
+# app/assets/Kosmos.icns is the ONE asset that ships, named explicitly
+# per this file's own explicit-list rule: a wildcard copy of assets/
+# would silently ship the next stray master/mock dropped in that folder
+# to every user. Build-time sources (the 1024 masters) stay repo-only.
+if [ -f "$REPO/assets/Kosmos.icns" ]; then
+  mkdir -p "$STAGE/app/assets"
+  cp "$REPO/assets/Kosmos.icns" "$STAGE/app/assets/Kosmos.icns"
 fi
 
 # ---- the command ------------------------------------------------------------
