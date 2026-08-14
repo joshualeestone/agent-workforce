@@ -1383,7 +1383,10 @@ const server = http.createServer((req, res) => {
     // empty directories behind them; the folder is made once, by `create`,
     // when they press the button. The preview carries makeFolder's own
     // case correction, so the path shown is the path the act produces.
-    sendJson(res, 200, { path: projects.folderPathPreview(asked), problem: null });
+    const preview = projects.folderPathPreview(asked);
+    // `exists` rides along so the page can say ADOPT instead of MAKE for a
+    // folder that is already there -- two different acts, one sentence each.
+    sendJson(res, 200, { path: preview.path, exists: preview.exists, problem: null });
     return;
   }
 
@@ -1690,6 +1693,9 @@ const server = http.createServer((req, res) => {
         // bound is pinned by a test). If ids ever grow, branch this on which
         // half failed before the margin is spent.
         messages = [];
+        // Set for API consumers and pinned by the route test's own-words
+        // assertion; the PAGE does not read it on this arm (it composes the
+        // named sentence itself and branches on historyUnfilable first).
         historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
       } else {
         historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
@@ -1746,6 +1752,10 @@ const server = http.createServer((req, res) => {
       asking,
       question,
       questionBecause,
+      // Carried for contract parity with the projects routes and held by
+      // the blind-roster test; the page's fleet-unreadable sentence on this
+      // screen is rendered from the projects payload (PJ_AGENTS_UNREADABLE),
+      // not from this field.
       agentsUnreadable: roster === null,
     });
     return;

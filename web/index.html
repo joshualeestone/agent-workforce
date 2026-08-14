@@ -4939,9 +4939,16 @@ async function pjWillBe() {
     const res = await fetch('/api/project-folder?name=' + encodeURIComponent(typed));
     const body = await res.json();
     if (mine !== PJ_WILLBE_GEN) return;
+    // ⚠️ MAKE and ADOPT are different acts, one sentence each. This line
+    // said "will make" over a folder makeFolder was about to ADOPT (the
+    // person's existing folder and its contents becoming the project), on
+    // the screen whose contract is that the path is stated before anything
+    // is done. The route carries `exists` for exactly this fork.
     line.textContent = body.problem
       ? body.problem.charAt(0).toUpperCase() + body.problem.slice(1) + '.'
-      : 'Kosmos will make this at ' + body.path + '.';
+      : (body.exists
+        ? 'Kosmos will use the folder already at ' + body.path + ', and put nothing of its own in it.'
+        : 'Kosmos will make this at ' + body.path + '.');
   } catch {
     if (mine !== PJ_WILLBE_GEN) return;
     // ⚠️ NOT silence, and not a guessed path. "We could not work out where"

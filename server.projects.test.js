@@ -1086,8 +1086,11 @@ test('the folder-preview ROUTE answers the case-corrected path, not the raw deri
   fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
   const body = json(await req('/api/project-folder?name=lease'));
   assert.equal(body.problem, null);
+  assert.equal(body.exists, true, 'an existing folder must preview as ADOPT, not make (round 17)');
   assert.equal(body.path, projects.makeFolder('lease'),
     'the route previewed one path and the act produced another');
+  const fresh = json(await req('/api/project-folder?name=Entirely%20new%20here'));
+  assert.equal(fresh.exists, false, 'control: a fresh name previews as make');
 });
 
 test('the POST route really stamps projectBornAt, read off the file it wrote', async () => {

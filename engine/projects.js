@@ -628,7 +628,17 @@ function folderPathFor(name) {
  */
 function folderPathPreview(name) {
   const dest = folderPathFor(name);
-  return path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+  const corrected = path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+  // ⚠️ WHETHER IT ALREADY EXISTS travels with the path, because "make" and
+  // "adopt" are different acts and the screen was claiming the first while
+  // makeFolder performed the second (round 17): a person typing `lease`
+  // beside their existing Lease folder was told Kosmos WILL MAKE a folder,
+  // and pressing Add adopted the folder and its contents. Same statSync
+  // shape makeFolder itself uses; a stat we cannot take reads as
+  // not-existing, which errs toward the weaker claim.
+  let exists = false;
+  try { exists = fs.statSync(corrected).isDirectory(); } catch { exists = false; }
+  return { path: corrected, exists };
 }
 
 /**

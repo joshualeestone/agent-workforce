@@ -1053,7 +1053,7 @@ test('an unreadable parent leaves the asked-for spelling alone, rather than thro
   fs.chmodSync(projects.projectsRoot(), 0o000);
   try {
     const p = projects.folderPathPreview('lease');
-    assert.ok(p.endsWith('/lease'), 'the spelling stays as asked when the listing cannot be read');
+    assert.ok(p.path.endsWith('/lease'), 'the spelling stays as asked when the listing cannot be read');
   } finally {
     fs.chmodSync(projects.projectsRoot(), 0o755);
   }
@@ -1069,9 +1069,15 @@ test('the previewed path IS the path the act produces, case correction included'
   fs.mkdirSync(path.join(projects.projectsRoot(), 'Lease'), { recursive: true });
   const previewed = projects.folderPathPreview('lease');
   const made = projects.makeFolder('lease');
-  assert.equal(previewed, made,
+  assert.equal(previewed.path, made,
     'the screen said one path and the filesystem got another');
-  assert.ok(!fs.existsSync(projects.folderPathPreview('Never previewed into being')),
+  // The act distinction travels with the path: this folder existed, so the
+  // screen must say ADOPT, and a fresh name must say MAKE (round 17: the
+  // preview claimed "make" over a folder adoption).
+  assert.equal(previewed.exists, true, 'an existing folder previews as existing');
+  const fresh = projects.folderPathPreview('Never previewed into being');
+  assert.equal(fresh.exists, false, 'a fresh name previews as not existing');
+  assert.ok(!fs.existsSync(fresh.path),
     'and the preview itself still makes nothing');
 });
 
