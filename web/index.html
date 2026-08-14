@@ -4055,6 +4055,11 @@ function openProject(id) {
   document.getElementById('pj-question').hidden = true;
   document.getElementById('pj-screen').hidden = true;
   document.getElementById('pj-screen-hint').textContent = '';
+  // The heading too (round 22): it is written in exactly one place
+  // (paintThread), so without this reset a project with no agents kept
+  // "What Mara's screen shows right now" from the LAST thread over an
+  // empty area -- a heading naming an agent that is not on this project.
+  document.getElementById('pj-screen-label').textContent = 'Its screen';
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
@@ -4418,6 +4423,10 @@ async function loadThread() {
     document.getElementById('pj-question').hidden = true;
     document.getElementById('pj-screen').hidden = true;
     document.getElementById('pj-screen-hint').textContent = '';
+    // Same heading reset as openProject's clear (round 22): the poll takes
+    // this branch within a tick of the last agent leaving the project, and
+    // the heading otherwise keeps naming the departed agent.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
     return;
   }
   let body;
@@ -4549,9 +4558,17 @@ async function pjSend() {
      * re-send. The browser's exception string stays off the screen (errno
      * rule). No time phrase: we observed no delivery moment to stamp.
      */
+    // ⚠️ The pointer is GATED on the screen block actually being on the
+    // page (round 22): with the last capture failed, that block hides
+    // itself and says we could not read the window -- and this sentence
+    // was still pointing at it. The connection failure that produced this
+    // sentence is likely to fail the refresh below too, so the gate reads
+    // the current paint, and the fallback instructs without pointing.
     msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
       + 'the connection to Kosmos failed while sending, so it may or may not have arrived. '
-      + 'Its screen is below. Check there before sending it again. '
+      + (document.getElementById('pj-screen').hidden
+        ? 'Before sending it again, check whether it already arrived. '
+        : 'Its screen is below. Check there before sending it again. ')
       + 'Your message is still in the box below.';
     PJ_SENDING = false;
     // Mirroring the picker, exactly as the finally below does (round 21): an
@@ -4626,7 +4643,13 @@ async function pjSend() {
       // fact; this line says the one thing to do about it.
       render = (when) => 'Could not confirm this reached ' + name + '’s session' + when + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
-        + ' Its screen is below. Check there before sending it again.'
+        // Gated like the question label's pointer (round 22): an
+        // unconfirmed send is a tmux that did not answer, and that is the
+        // same tmux whose capture just failed -- the screen block may be
+        // hidden behind "we cannot see its screen right now".
+        + (document.getElementById('pj-screen').hidden
+          ? ' Before sending it again, check whether it already arrived.'
+          : ' Its screen is below. Check there before sending it again.')
         + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')
         + moved + kept;
     } else {

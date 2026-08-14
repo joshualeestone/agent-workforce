@@ -1459,7 +1459,7 @@ const IDENTITY_OVERRIDES = {
 
 function readIdentity(sessionName) {
   const override = IDENTITY_OVERRIDES[sessionName];
-  if (override) return { ...override, derived: true, source: 'override' };
+  if (override) return { ...override, derived: true };
 
   /**
    * ⚠️ THE RECORD BEFORE THE FILE, and the order is the point.
@@ -1507,7 +1507,7 @@ function readIdentity(sessionName) {
   // name the person themselves typed.
   if (!got.ok) {
     return recorded
-      ? { displayName: recorded, role: null, derived: true, source: 'profile' }
+      ? { displayName: recorded, role: null, derived: true }
       : { displayName: sessionName, role: null, derived: false };
   }
   const text = got.buf.toString('utf8').slice(0, 4000);
@@ -1515,7 +1515,7 @@ function readIdentity(sessionName) {
   const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
   if (!m) {
     return recorded
-      ? { displayName: recorded, role: null, derived: true, source: 'profile' }
+      ? { displayName: recorded, role: null, derived: true }
       : { displayName: sessionName, role: null, derived: false };
   }
 
@@ -1528,11 +1528,13 @@ function readIdentity(sessionName) {
     .trim();
   if (role.length > 60) role = role.slice(0, 60).trim();
 
-  // ⚠️ `source` ON EVERY BRANCH, including this one. It was set only on the
-  // fallbacks, so the field was absent exactly where a reader most wants it —
-  // on a success, where it answers whether this name came from the record the
-  // person typed or from parsing the agent's own instruction file.
-  return { displayName, role: role || null, derived: true, source: recorded ? 'profile' : 'file' };
+  // No `source` field (round 22): it had no consumer anywhere -- snapshot
+  // builds the card from displayName/derived/role, the page never read it,
+  // no test pinned it -- and its justifying comment claimed an every-branch
+  // completeness two fallbacks did not have. Unread API surface is the same
+  // thing round 19 removed from the thread payload; where a name came from
+  // is answered by `derived` for the one question the page asks.
+  return { displayName, role: role || null, derived: true };
 }
 
 function safeAvatar(name) {

@@ -149,7 +149,10 @@ const SCREENS = {
   ].join('\n'),
 };
 
-const board = fleet.install(SPECS);
+// The call installs the pane source; its return value is deliberately not
+// bound (round 22): nothing here reads it, and the roster the check trusts
+// is read back from /api/status (see the announcement below).
+fleet.install(SPECS);
 // The board's own capture seam answers the same screens, so the card's state
 // and the thread's viewport are two readings of ONE fixture rather than two
 // inventions that could disagree.
