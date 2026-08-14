@@ -1299,14 +1299,20 @@ const server = http.createServer((req, res) => {
            with the write, but the same person racing their own two saves
            lands on whichever save carried the line change, which is the
            behaviour either order promises. */
-        const lineHad = (() => {
-          try {
-            const was = instructions.read(name, sessionOf(name));
-            const m = was.exists && String(was.text).slice(0, 4000).match(/You are \*\*([^*]+)\*\*/);
-            return m ? m[1].trim().slice(0, 80) : null;
-          } catch { return null; }
-        })();
         const wrote = instructions.write(name, patch.text, patch.version, sessionOf(name));
+        /* The pre-save line comes from the WRITE's own read (round 39), not
+           a second read here: the round-37 version read the file twice, and
+           in the window between them a transient read failure came back as
+           exists:false -- which this parse would take for "no identity
+           line", making an unrelated paragraph save satisfy "the line
+           changed" and revert a profile-route rename through the
+           could-not-look path. write.hadIdentityText is null ONLY for a
+           positively absent file (unreadable pre-files make write throw),
+           so the create path still follows and the unknown state cannot. */
+        const lineHad = (() => {
+          const m = wrote.hadIdentityText && wrote.hadIdentityText.match(/You are \*\*([^*]+)\*\*/);
+          return m ? m[1].trim().slice(0, 80) : null;
+        })();
         /* ⚠️ A DELIBERATE rename through the identity line updates the
            RECORD (round 33): the record wins over the file so an
            accidental mangle cannot un-name an agent, but that made the

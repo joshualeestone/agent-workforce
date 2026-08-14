@@ -4309,6 +4309,13 @@ function pjMsg(m, name) {
      * deliver just now" reads as "not at this moment". A row is history and
      * says when.
      */
+    // No paneNote on this arm, DELIBERATELY (round 39 made the asymmetry a
+    // comment): `because` already carries the refusal whole ("it is waiting
+    // on an answer from you"), and the pane state is usually the same fact
+    // -- appending "(it was mid-task)" to a sentence explaining why nothing
+    // was typed restates it. placed/unconfirmed append the note because
+    // there it adds what the verdict alone cannot say. The live line holds
+    // the same asymmetry.
     said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
       + esc(d.because || 'we could not put it into its session') + '.';
   }
@@ -4822,6 +4829,16 @@ async function pjSend() {
     // moved: the open thread is a different project's, and its own poll
     // owns its refresh.
     if (!flightMoved()) { try { await loadThread(); } catch { /* the verdict line stays */ } }
+    // The finally below never runs for this branch (round 39): it returns
+    // out of the FIRST try, so a keyboard user who pressed Send into a
+    // connection failure was left focused on <body> -- the stranded state
+    // rounds 30/31/35/36 closed on the other four paths. Same rescue,
+    // same gates.
+    if (sendHadFocus && !flightMoved()) {
+      const sbtn = document.getElementById('pj-send');
+      if (!sbtn.disabled) sbtn.focus();
+      else document.getElementById('pj-say').focus();
+    }
     return;
   }
   try {
@@ -5252,7 +5269,19 @@ function paintAddAgents() {
     setLive(box, '<p class="fhint">We cannot see any agents on this computer right now.</p>');
     return;
   }
-  setLive(box, LAST.map((a) => {
+  setLive(box, addAgentsHtml());
+}
+
+/* One builder for the picker list, used by the paint AND by the in-place
+   toggle (round 39). setLive compares against the string it last wrote, so
+   an in-place aria-checked flip left __lastLive holding the pre-click
+   markup -- the next poll rebuilt the list and destroyed the focused
+   button, the exact defect the in-place update exists to prevent. The
+   toggle now recomputes this string and refreshes __lastLive so the poll
+   sees agreement. (Serialized innerHTML cannot stand in for it: the
+   round-34 quote-escaping mismatch is why setLive stores strings at all.) */
+function addAgentsHtml() {
+  return LAST.map((a) => {
     const on = PJ_ADD_AGENTS.includes(a.sessionName);
     return '<button class="pick" type="button" role="checkbox" aria-checked="' + (on ? 'true' : 'false')
       + '" data-pick="' + esc(a.sessionName) + '">'
@@ -5260,7 +5289,7 @@ function paintAddAgents() {
       + '<span><b>' + esc(a.name) + '</b>'
       + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
       + '</button>';
-  }).join(''));
+  }).join('');
 }
 
 function openAddProject() {
@@ -5432,6 +5461,10 @@ document.getElementById('pj-add-agents').addEventListener('click', (e) => {
   // update is announced -- a keyboard user gets no confirmation the pick
   // registered at all.
   btn.setAttribute('aria-checked', String(!on));
+  // Keep setLive's memory in step with the DOM just changed (round 39):
+  // without this the next poll's paintAddAgents sees __lastLive differing
+  // from the freshly-computed markup and rebuilds the list, dropping focus.
+  document.getElementById('pj-add-agents').__lastLive = addAgentsHtml();
 });
 
 document.getElementById('pj-use').addEventListener('click', () => {

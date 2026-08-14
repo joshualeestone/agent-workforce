@@ -2763,6 +2763,27 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
      'the box clear must key on the takeoff PROJECT (not the full flight gate) plus the sent text: too narrow deletes another project\u2019s words, too wide leaves delivered words armed for a duplicate send (rounds 29/37/38)'],
     [/if \(\(PJ_DRAFTS\[sentProject\] \|\| ''\)\.trim\(\) === text\) delete PJ_DRAFTS\[sentProject\];/,
      'the parked-draft clear must key on the TAKEOFF project and the exact sent text (rounds 34/37: a programmatic clear fires no input event, so the map kept the sent text)'],
+    // The pick toggle must keep setLive's memory in step with its in-place
+    // aria-checked flip, or the next poll rebuilds the list under the
+    // focused button (round 39).
+    [/__lastLive = addAgentsHtml\(\)/,
+     'the pick toggle no longer refreshes setLive\u2019s stored string, so the poll repaints over keyboard focus'],
+    // The transport branch returns before pjSend's finally, so it carries
+    // its own focus rescue (round 39).
+    [/const sbtn = document\.getElementById\('pj-send'\);/,
+     'the connection-failure branch lost its focus rescue, stranding keyboard users on <body>'],
+    /* ⚠️ The page branches on the bare literals 'placed'/'unconfirmed'
+       (round 39): it cannot import chat.DELIVERY, and any state the page
+       does not recognise falls into the failed arm -- "Could not deliver",
+       the one reading that invites a re-send into a live composer. Two
+       halves hold the pact: the pins here prove the page still compares
+       those exact literals, and the assertions in the test body below
+       prove the ENGINE still spells its states that way, so renaming a
+       DELIVERY value without updating the page turns this test red. */
+    [/d\.state === 'placed'/,
+     "the row renderer no longer compares the engine's exact 'placed' literal"],
+    [/state === 'unconfirmed'/,
+     "the page no longer compares the engine's exact 'unconfirmed' literal"],
     // A bare clock time is only true today; a thread keeps a thousand rows.
     [/then\.toDateString\(\) !== now\.toDateString\(\)/,
      'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
@@ -2783,6 +2804,15 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
   for (const [re, why] of pins) {
     assert.match(raw, re, why);
   }
+
+  // The engine half of the literal pact (round 39; see the delivery pins
+  // above): if either value is renamed, this fails and names the page as
+  // the other place to change.
+  const chatEngine = require('./engine/chat');
+  assert.equal(chatEngine.DELIVERY.PLACED, 'placed',
+    "chat.DELIVERY.PLACED moved; web/index.html compares the literal 'placed' and must move with it");
+  assert.equal(chatEngine.DELIVERY.UNCONFIRMED, 'unconfirmed',
+    "chat.DELIVERY.UNCONFIRMED moved; web/index.html compares the literal 'unconfirmed' and must move with it");
 });
 
 

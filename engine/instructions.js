@@ -572,7 +572,7 @@ function write(agent, text, expectedVersion, exactSession) {
   // backup becomes a copy of the current file. The undo is gone, burned by a
   // click that did nothing. Comparing the bytes is the whole fix.
   if (shown && shown.exists && shown.version === versionOf(true, Buffer.from(body, 'utf8'))) {
-    return { ...read(agent), keptPrevious: false, unchanged: true };
+    return { ...read(agent), keptPrevious: false, unchanged: true, hadIdentityText: String(shown.text).slice(0, 4000) };
   }
 
   let keptPrevious = false;
@@ -722,7 +722,16 @@ function write(agent, text, expectedVersion, exactSession) {
   // The answer carries whether the backup ACTUALLY happened, rather than
   // letting the caller infer it from a file that might be a directory, a stale
   // copy from two saves ago, or a link we refused to follow.
-  return { ...read(agent, exactSession), keptPrevious };
+  /* `hadIdentityText` is the head of the PRE-save file, from the one read
+     this function already made for its own guards (round 39). The route's
+     rename-follow needs "what did the identity line say before this save",
+     and a second read at the route was a race: a transient unreadable blip
+     there returned exists:false, the follow took null for "no line", and an
+     unrelated paragraph save reverted a profile-route rename. Here there is
+     no second read to disagree: null means the file was POSITIVELY absent,
+     because an existing-but-unreadable file makes this function throw
+     before reaching either return. */
+  return { ...read(agent, exactSession), keptPrevious, hadIdentityText: shown && shown.exists ? String(shown.text).slice(0, 4000) : null };
 }
 
 module.exports = {
