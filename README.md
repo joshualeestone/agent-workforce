@@ -21,11 +21,10 @@ either folder that it cannot prove is its own; in three shapes
 (something foreign in the system spot with the home folder aliased to
 it, a foreign spot whose surroundings cannot even be checked, or a
 foreign Kosmos.app in `~/Applications` when that is where the icon was
-headed) that means no icon is written at all, and the transcript says
-so. A fresh install that confirms its
-own board is running ends by opening the dashboard in the browser
-(updates stay quiet; `KOSMOS_NO_OPEN=1` suppresses it). `kosmos start|stop|restart|status|open|version` manages
-it after that.
+headed) that means no icon is written at all, and the transcript says so. A fresh install that
+confirms its own board is running ends by opening the dashboard in the
+browser (updates stay quiet; `KOSMOS_NO_OPEN=1` suppresses it).
+`kosmos start|stop|restart|status|open|version` manages it after that.
 `sh -s -- --uninstall` reverses everything except the agents' own folders
 and the AgentWorkforce store (profiles, avatars, commitments): user work
 and records about it stay; the app and its plumbing go.

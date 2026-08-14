@@ -1,8 +1,11 @@
 #!/bin/sh
 # Kosmos installer. One line, no sudo, no password. Everything lives in your
-# home folder except the app icon, which goes to /Applications when this
+# home folder except: the app icon, which goes to /Applications when this
 # user can write there without a password (macOS admin accounts can), and
-# into the Applications folder inside your home folder otherwise. In
+# into the Applications folder inside your home folder otherwise; the
+# icon's one-line registration with macOS (so Spotlight knows it exists);
+# and, on --uninstall, the launchd bookkeeping that removes agents'
+# background jobs. In
 # /Applications it only ever replaces a Kosmos icon it can prove it created
 # itself (by the icon's own contents); its write check creates and removes
 # one empty hidden folder there; and the icon is assembled in a hidden
@@ -44,8 +47,9 @@
 #     /Applications only when this user can already write there without a
 #     password; the icon's one-line registration with macOS
 #     (LaunchServices, so Spotlight knows it exists); and, on --uninstall,
-#     the launchd enable/bootout that removes agents' background jobs. The header sentence above makes the same claim; keep the
-#     two in agreement, because this file is served verbatim at
+#     the launchd enable/bootout that removes agents' background jobs. The
+#     header sentence above lists the same three exceptions; when one
+#     list changes the other must, because this file is served verbatim at
 #     https://chaoskosmos.com/setup and these sentences are what a cautious
 #     person reads before piping it into sh.
 #   - Running it twice is safe and says so.
@@ -100,6 +104,16 @@ case "$KOSMOS_HOME" in
   /*) ;;
   *)
     printf '\n  KOSMOS_HOME must be an absolute path (a relative one would resolve against whatever folder the icon is opened from). Unset it and run again.\n\n' >&2
+    exit 2
+    ;;
+esac
+# Dot components are refused too: the ownership and board proofs compare
+# this string EXACTLY against paths the launcher and the ps table carry,
+# and /tmp/./k versus /tmp/k would fail every proof while both name the
+# same folder.
+case "$KOSMOS_HOME" in
+  */.|*/..|*/./*|*/../*)
+    printf '\n  KOSMOS_HOME must not contain . or .. path components. Unset it and run again.\n\n' >&2
     exit 2
     ;;
 esac
@@ -639,6 +653,13 @@ uninstall() {
       fi
     done
   else
+    # A hand-driven --uninstall with only the test-only KOSMOS_SYS_APP_DIR
+    # override still sweeps the REAL home Applications folder (HOME decides
+    # that side), and a prior reviewer proved the mistake is easy to make;
+    # the sweep is at least named so a mis-driven run is visible.
+    if [ -n "${KOSMOS_SYS_APP_DIR:-}" ]; then
+      info "note: the home-folder side of this sweep uses $HOME/Applications (KOSMOS_SYS_APP_DIR does not sandbox it; override HOME too in a test)"
+    fi
     _sys_swept=no
     # The SYSTEM folder is shared between accounts, so its icon is deleted
     # only after PROVING OWNERSHIP the same way the tmux session kill does:
@@ -1306,12 +1327,12 @@ if [ "$APP_MADE" = "yes" ]; then
     # folder), the "stale icon" IS the bundle written two lines up, and
     # this cleanup would delete the app it just installed while printing
     # success. Reproduced during review; the pwd -P compare is the guard.
-    # ⚠️ AND NEVER WHEN THE ENTRY ITSELF IS A SYMLINK. The folder-granular
-    # pwd -P compare cannot see a real ~/Applications containing
-    # `Kosmos.app -> /Applications/Kosmos.app`: every test below would
-    # follow the link onto the bundle just written, un-register the live
-    # app and print a move that did not happen. A link is not a stale
-    # bundle; it is left exactly as found.
+    # ⚠️ AND NEVER WHEN THE ENTRY ITSELF IS A SYMLINK. bundle_is_ours
+    # already rejects a link at the root, so without this guard nothing
+    # would be deleted; but the phys compares and the left-alone note
+    # below would still fire on a link to the bundle just written,
+    # narrating a stale icon that does not exist. A link is not a stale
+    # bundle; it is left exactly as found, silently.
     if [ -z "${KOSMOS_APP_DIR:-}" ] && [ -d "$HOME/Applications/Kosmos.app" ] && [ ! -L "$HOME/Applications/Kosmos.app" ]; then
       _home_apps_phys="$(cd "$HOME/Applications" 2>/dev/null && pwd -P)" || _home_apps_phys=""
       _app_dir_phys="$(cd "$APP_DIR" 2>/dev/null && pwd -P)" || _app_dir_phys=""
