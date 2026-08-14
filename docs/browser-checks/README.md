@@ -159,6 +159,7 @@ the log it is handed.
     PORT=4421 AGENT_WORKFORCE_DATA="$SB/data" \
       AGENT_WORKFORCE_WORKERS="$SB/workers" \
       AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+      AGENT_WORKFORCE_PROJECTS="$SB/kosmos-projects" \
       node docs/browser-checks/thread-server.js > /tmp/threadsrv.log &
 
     NODE_PATH=/path/to/playwright/node_modules \

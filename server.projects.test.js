@@ -729,12 +729,22 @@ test('sending places the text into the agent’s own session, and says only that
       const body = json(res);
       assert.equal(body.delivery.state, 'placed');
       assert.equal(body.recorded, true);
-      // ⚠️ The vocabulary is asserted, because the whole discipline of this
-      // feature is what the answer is allowed to CLAIM. `placed` and
-      // `could_not` are the only two verdicts; anything meaning "received",
-      // "read" or "delivered to the agent" would be a claim about a program's
-      // understanding that a keystroke cannot support.
-      assert.ok(['placed', 'could_not'].includes(body.delivery.state));
+      /**
+       * ⚠️ THE VOCABULARY IS ASSERTED, because the whole discipline of this
+       * feature is what the answer is allowed to CLAIM: anything meaning
+       * "received", "read" or "delivered to the agent" would be a claim about a
+       * program's understanding that a keystroke cannot support.
+       *
+       * ⚠️ AGAINST THE ENGINE'S OWN SET, and the previous version of this line
+       * was wrong twice over. It hard-coded `['placed', 'could_not']` under a
+       * comment calling them "the only two verdicts" — which had stopped being
+       * true when `unconfirmed` landed, so the enumeration was stale — and it
+       * sat three lines below an assertion that the state equals `placed`, so
+       * it could not have failed whatever the set said. An unfalsifiable check
+       * guarding a stale fact is worse than no check: it reads as coverage.
+       */
+      assert.ok(Object.values(chat.DELIVERY).includes(body.delivery.state),
+        `the route answered a verdict the engine does not define: ${body.delivery.state}`);
       const sends = calls.sends();
       assert.equal(sends[0][0], 'send-keys');
       assert.equal(sends[0][sends[0].length - 1], 'have a look at the lease');

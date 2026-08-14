@@ -21,6 +21,7 @@
  *   PORT=4421 AGENT_WORKFORCE_DATA="$SB/data" \
  *     AGENT_WORKFORCE_WORKERS="$SB/workers" \
  *     AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+ *     AGENT_WORKFORCE_PROJECTS="$SB/kosmos-projects" \
  *     node docs/browser-checks/thread-server.js > /tmp/threadsrv.log &
  *
  *   PW=/tmp/pw-projects
@@ -274,6 +275,16 @@ async function main() {
         return el.scrollWidth > el.clientWidth; })(),
     }));
     check(overflow.body <= 0, `the page does not scroll sideways (overflow ${overflow.body}px)`);
+    /**
+     * ⚠️ AND THE `pre` SCROLLS INSIDE ITSELF, which is the other half of the
+     * same property and was computed here and then never asserted — a value
+     * measured, carried, and dropped, which is indistinguishable from not
+     * measuring it. The two together are the actual requirement: this fixture's
+     * terminal line is wider than the box, so the box MUST have somewhere to
+     * put it, and the page must NOT be that somewhere.
+     */
+    check(overflow.screen === true,
+      'the terminal box does not scroll internally, so its content has to go somewhere else');
 
     /* ── 4. sending ─────────────────────────────────────────────────────── */
     const before = sentKeys().length;
@@ -406,6 +417,35 @@ async function main() {
     // rather than a second click, and the message is in the thread verbatim.
     check(await page.locator('#pj-say').inputValue() === '',
       'the box still holds text that may already be in the agent’s composer');
+
+    /* ── 5c. the recipient cannot change under the person ───────────────── */
+    /**
+     * ⚠️ THE FLIP THIS PREVENTS, and the mechanism is ordinary rather than
+     * exotic. `defaultAgent` is re-derived server-side on every five-second
+     * poll, and `describe` withholds an agent's role while its pane is untied —
+     * which an agent RESTARTING is, for a moment. So the manager drops out of
+     * the manager check, the default falls to whoever is first on the project,
+     * and the next repaint moves the picker. Somebody typing a sentence to Mara
+     * finishes it addressed to Nils, and the screen gives no sign.
+     *
+     * Driven against the real page: the poll's own answer is simulated by
+     * replacing `PROJECTS` the way a refresh would, then calling the real
+     * `loadThread`.
+     */
+    const flip = await page.evaluate(async () => {
+      const before = document.getElementById('pj-thread-who').value;
+      const project = PROJECTS.find((p) => p.id === PJ_CURRENT);
+      // Exactly what a poll would hand back mid-restart: a different default,
+      // and the previous default's role withheld because its pane is untied.
+      project.defaultAgent = 'nils';
+      const was = project.agents.find((a) => a.sessionName === before);
+      if (was) { was.tied = false; was.role = null; }
+      await loadThread();
+      return { before, after: document.getElementById('pj-thread-who').value };
+    });
+    check(flip.before === flip.after,
+      `the picker stayed on the agent being typed to (${flip.before} -> ${flip.after})`);
+    check(flip.after !== 'nils', 'a restarting agent re-aimed the message at somebody else');
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {

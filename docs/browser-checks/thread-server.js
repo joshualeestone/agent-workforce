@@ -22,6 +22,7 @@
  *   PORT=4421 AGENT_WORKFORCE_DATA="$SB/data" \
  *     AGENT_WORKFORCE_WORKERS="$SB/workers" \
  *     AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+ *     AGENT_WORKFORCE_PROJECTS="$SB/kosmos-projects" \
  *     node docs/browser-checks/thread-server.js
  */
 
@@ -66,6 +67,13 @@ const SPECS = [
  */
 const SCREENS = {
   'mara-discord:0.0': [
+    // ⚠️ ONE DELIBERATELY WIDE LINE, because a terminal really does produce
+    // them and the box has to have somewhere to put it. Without a line wider
+    // than the viewport, "the pre scrolls internally" is a property the fixture
+    // never creates — so the check asserting it would be measuring nothing, and
+    // the page-does-not-scroll-sideways check beside it would pass on a layout
+    // that has never been asked a hard question.
+    '  ⎿  /Users/someone/Kosmos/Projects/Henderson lease/schedule-of-dilapidations/north-building/appendices/2026-Q3-survey-notes-and-photographic-schedule-with-surveyor-annotations.md',
     '● I have read the lease and drafted the summary.',
     '',
     '● Write(Henderson-summary.md)',

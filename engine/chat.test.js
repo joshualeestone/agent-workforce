@@ -962,3 +962,81 @@ test('an existing conversation is not re-stamped by a read that happened to know
   const back = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(back.projectBornAt, '2026-01-01T00:00:00.000Z');
 });
+
+test('a message ending in a semicolon arrives WITH it, because tmux eats a trailing one', () => {
+  /**
+   * ⚠️ MEASURED against a real tmux 3.6a, in a scratch session created and
+   * killed for the probe — not read off the parser. What the pane really showed
+   * for a single argv element:
+   *
+   *   `const total = 0;`         → `const total = 0`   (the semicolon eaten)
+   *   `;`                        → ``                  (NOTHING arrives)
+   *   `wait;;`                   → `wait;`             (exactly one eaten)
+   *   `const a = 1; const b = 2` → unchanged           (a middle one is safe)
+   *   `const total = 0; `        → unchanged           (a trailing space saves it)
+   *
+   * tmux splits argv into a command LIST first, and a `;` at the very end of the
+   * last element is that split's separator rather than a character.
+   *
+   * ⚠️ ASSERTED ON THE ARGV HANDED TO tmux, like the leading-dash test above,
+   * because that is the half this module controls. The round-trip itself was
+   * measured live; a test cannot re-measure it without typing into a real pane.
+   */
+  const BACKSLASH = String.fromCharCode(92);
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    const tmux = arm([ok(), ok()]);
+    const verdict = chat.deliver('casey', 'const total = 0;', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.PLACED);
+    assert.equal(tmux.sends()[0][5], 'const total = 0' + BACKSLASH + ';',
+      'a trailing semicolon went to tmux unescaped, so the agent receives the message without it');
+  });
+});
+
+test('a message of exactly ";" is not a bare Enter into a live composer', () => {
+  /**
+   * ⚠️ THE DANGEROUS HALF, and it is why this is a blocker rather than a
+   * cosmetic loss. Unescaped, `;` types NOTHING — and the separate Enter still
+   * fires, so a bare submit lands in the pane. On the permission prompt this
+   * whole feature exists for, a bare submit takes the HIGHLIGHTED DEFAULT: the
+   * person sends a semicolon and answers a question they never read. And the
+   * verdict said `placed`.
+   */
+  const BACKSLASH = String.fromCharCode(92);
+  withFleet([fleet.agent('casey', { state: 'needs_you' })], (board) => {
+    const tmux = arm([ok(), ok()]);
+    chat.deliver('casey', ';', board.agents);
+    const sends = tmux.sends();
+    assert.equal(sends[0][5], BACKSLASH + ';', 'nothing would be typed, and the Enter below would answer for them');
+    assert.deepEqual(sends[1].slice(-1), ['Enter'], 'the control: the Enter really does still fire');
+  });
+});
+
+test('the escape is applied at the SEND only: the record and the screen keep the person’s own text', () => {
+  // An escape that leaked into `cleanMessage` would put a backslash in their
+  // history, in the thread on screen, and in what the length check measures.
+  assert.equal(chat.cleanMessage('const total = 0;'), 'const total = 0;');
+  assert.equal(chat.messageProblem(';'), null, 'a semicolon is a message somebody may legitimately send');
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    arm([ok(), ok()]);
+    const verdict = chat.deliver('casey', 'const total = 0;', board.agents);
+    chat.appendMessage('wire', 'casey', { text: 'const total = 0;', at: verdict.at, delivery: verdict });
+    assert.equal(chat.readThread('wire', 'casey').messages[0].text, 'const total = 0;',
+      'the escape leaked into what we keep and show');
+  });
+});
+
+test('wireText touches a TRAILING semicolon and nothing else', () => {
+  const BACKSLASH = String.fromCharCode(92);
+  // Changed, because tmux would otherwise alter or swallow them.
+  assert.equal(chat.wireText('const total = 0;'), 'const total = 0' + BACKSLASH + ';');
+  assert.equal(chat.wireText(';'), BACKSLASH + ';');
+  assert.equal(chat.wireText('wait;;'), 'wait;' + BACKSLASH + ';');
+  // Left exactly alone — measured as arriving intact, so escaping them would be
+  // this function inventing a backslash the person never typed.
+  assert.equal(chat.wireText('const a = 1; const b = 2'), 'const a = 1; const b = 2');
+  assert.equal(chat.wireText('const total = 0; '), 'const total = 0; ');
+  assert.equal(chat.wireText('const total = 0'), 'const total = 0');
+  assert.equal(chat.wireText('a path' + BACKSLASH), 'a path' + BACKSLASH);
+  assert.equal(chat.wireText(''), '');
+  assert.equal(chat.wireText(null), '');
+});

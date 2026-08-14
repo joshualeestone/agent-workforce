@@ -277,6 +277,45 @@ function messageProblem(raw) {
   return null;
 }
 
+/**
+ * The person's text, as it has to be spelled ON THE WIRE to arrive intact.
+ *
+ * ⚠️ MEASURED, on this machine, tmux 3.6a, against a scratch session created
+ * and killed for the probe — not read off the parser and not assumed. tmux
+ * splits its argv into a COMMAND LIST before running anything, and a `;` at the
+ * very end of the last element is that split's separator rather than a
+ * character. What the pane really showed:
+ *
+ *   typed `const total = 0;`          → pane `const total = 0`   (semicolon eaten)
+ *   typed `;`                         → pane ``                  (NOTHING arrives)
+ *   typed `wait;;`                    → pane `wait;`             (exactly one eaten)
+ *   typed `const a = 1; const b = 2`  → unchanged  (a middle `;` is safe)
+ *   typed `const total = 0; `         → unchanged  (a trailing SPACE saves it)
+ *
+ * Two different harms. The first is quiet: the text delivered is not the text
+ * we checked, recorded and rendered, and the verdict still says `placed` — the
+ * screen shows the person a semicolon their agent never received. The second is
+ * not quiet at all: a message of exactly `;` types NOTHING, and the separate
+ * Enter still fires, so a bare submit lands in a live composer. On the
+ * permission prompt this whole feature exists for, a bare submit takes the
+ * highlighted default. We would have reported that as `placed`.
+ *
+ * Escaping the trailing one as `\;` makes the parser hand it back as a literal.
+ * Measured to round-trip all eight cases above, including `wait;;` (sent as
+ * `wait;\;`) and a message ending in a backslash, which is untouched.
+ *
+ * ⚠️ APPLIED AT THE SEND AND NOWHERE ELSE. `cleanMessage` is what gets checked,
+ * recorded and shown, and it must stay the person's own text — an escape that
+ * leaked into the record would put a backslash in their history and in the
+ * thread on screen.
+ */
+const WIRE_SEMICOLON = String.fromCharCode(92) + ';';
+
+function wireText(text) {
+  const said = String(text == null ? '' : text);
+  return said.endsWith(';') ? said.slice(0, -1) + WIRE_SEMICOLON : said;
+}
+
 /* ── who may be sent to ──────────────────────────────────────────────────── */
 
 /**
@@ -544,7 +583,9 @@ function deliver(sessionName, raw, roster) {
   // ⚠️ TWO CALLS, in this order, never one. `-l` types characters literally, so
   // folding Enter into the same call would type the five letters E-n-t-e-r.
   // connect.js sends a sign-in code exactly this way for exactly this reason.
-  const typed = tmux(['send-keys', '-t', target, '-l', '--', text]);
+  // ⚠️ `wireText`, not `text`: a trailing `;` is tmux's command-list separator
+  // and never reaches the pane unescaped. See `wireText` for what was measured.
+  const typed = tmux(['send-keys', '-t', target, '-l', '--', wireText(text)]);
   if (typed.ran && typed.status !== 0) {
     // tmux ran and refused: it did not type anything. Re-sending is safe.
     return {
@@ -643,6 +684,13 @@ function refusalReason(got, fallback) {
  * A pane merely sharing the name is somebody else's screen, and putting it
  * under this agent's heading would be the borrowed-name defect wearing a chat
  * window.
+ *
+ * ⚠️ THIS IS NOT THE BOARD'S CAPTURE, and the differences are load-bearing
+ * rather than incidental. `status.capturePane` takes 40 lines WITHOUT `-J` and
+ * `classify` reads only the last 25 of them; this takes 60 WITH `-J`, and
+ * `questionIn` scans all of it. So the two can legitimately disagree about
+ * whether a question is on screen — see the note above `questionIn`, and
+ * `questionBecause` on the route, which exists for exactly that case.
  */
 function viewport(sessionName, roster, lines) {
   const at = new Date().toISOString();
@@ -683,13 +731,24 @@ function viewport(sessionName, roster, lines) {
  * the card that sent the person here.
  *
  * ⚠️ That is not the same as the two agreeing, and an earlier version of this
- * paragraph claimed it was. They read the pane at different moments: the card
- * comes from the roster snapshot at the top of the request and this runs on a
- * capture taken after it, so a pane that redraws in between can be classified
- * needs_you and yield no region here. That gap is real and reachable, which is
- * exactly why the route carries `questionBecause` — a sentence for the case
- * where the two reads disagree, instead of a silence that would render as no
- * question at all under a card saying there is one.
+ * paragraph claimed it was. The two reads differ in THREE ways, not one, and
+ * only the first is about timing:
+ *
+ *   MOMENT — the card comes from the roster snapshot at the top of the request;
+ *            this runs on a capture taken after it, and a TUI redraws.
+ *   FLAGS  — `status.capturePane` does NOT pass `-J`; `viewport` does. `-J`
+ *            joins a wrapped line back together, so a marker split across the
+ *            pane's right edge is one line here and two there. The board can
+ *            see a question this misses, and the reverse.
+ *   DEPTH  — the board captures 40 lines and `classify` then reads only the
+ *            LAST 25 of them; this captures 60 and scans all of it. A question
+ *            that has scrolled past line 25 is invisible to the card while
+ *            still being findable here.
+ *
+ * All three gaps are real and reachable, which is exactly why the route carries
+ * `questionBecause` — a sentence for the case where the two reads disagree,
+ * instead of a silence that would render as no question at all under a card
+ * saying there is one.
  *
  * ⚠️ AND IT IS STILL NOT A PARSER. It returns a SLICE of the same pane text,
  * from a few lines above the matching line to the end. It does not extract "the
@@ -1013,7 +1072,7 @@ function looksLikeManager(role) {
 
 module.exports = {
   DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
-  cleanMessage, messageProblem, addressable, paneTarget,
+  cleanMessage, messageProblem, addressable, paneTarget, wireText,
   deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend, VERIFY_FORMAT,
   threadFile, readThread, appendMessage, supersede,
   defaultAgentFor, looksLikeManager,

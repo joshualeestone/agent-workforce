@@ -1493,7 +1493,11 @@ function card(a) {
    * rather than what it will do to the agent.
    */
   const answer = a.state === 'needs_you'
-    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}">See the question</button>`
+    // ⚠️ NAMED, like the pencil button two lines up. On a board of thirteen
+    // agents a screen-reader user hears "See the question" thirteen times with
+    // nothing saying whose; the visible label stays short and the accessible
+    // name carries the agent.
+    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}" aria-label="See ${esc(a.name)}’s question">See the question</button>`
     : '';
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
@@ -3714,7 +3718,6 @@ let PJ_ADD_AGENTS = [];     // the agents ticked in the add flow
  * ReferenceError that silently kills the screen.
  */
 let PJ_WHO = null;          // the agent this project's thread is addressed to
-let PJ_THREAD = null;       // the last thread answer, or null if we have none
 let PJ_SENDING = false;     // a send is in flight; guards double-sends and the poll
 // The last sentence `loadThread` itself wrote into the thread's message line.
 // It clears only that one, so a poll cannot wipe a send's verdict — see the
@@ -3960,7 +3963,6 @@ function openProject(id) {
   // would only catch it when that agent is not on this project — so the
   // dangerous half (it IS on both) would be silent.
   PJ_WHO = null;
-  PJ_THREAD = null;
   document.getElementById('pj-thread-msg').textContent = '';
   document.getElementById('pj-say').value = '';
   pjCloseConfirm();
@@ -3994,6 +3996,28 @@ function pjThreadWho(p) {
   const on = (p.agents || []).map((a) => a.sessionName);
   if (PJ_WHO && on.includes(PJ_WHO)) return PJ_WHO;
   return p.defaultAgent || null;
+}
+
+/**
+ * Pin the recipient once one has resolved for this project.
+ *
+ * ⚠️ THE DEFAULT SEEDS THE PICKER; IT NEVER RE-AIMS IT. Without this the
+ * recipient could change UNDER the person mid-sentence, and the mechanism is
+ * ordinary: `defaultAgent` is re-derived server-side on every five-second poll,
+ * and `describe` withholds an agent's role while its pane is untied. An agent
+ * RESTARTING is untied for a moment — so the manager drops out of the manager
+ * check, the default falls to whoever is first on the project, and the next
+ * repaint moves the picker. Somebody typing a sentence to Mara finishes it
+ * addressed to Nils.
+ *
+ * Pinning is safe because it is not sticky against the person: `pjThreadWho`
+ * still falls back when the pinned agent is no longer ON the project, and
+ * changing the picker sets `PJ_WHO` outright. `openProject` clears it, so a
+ * different project starts from its own default.
+ */
+function pjPinWho(who) {
+  if (who && !PJ_WHO) PJ_WHO = who;
+  return who;
 }
 
 /** The name to SPEAK for a member. Act on the machine name, speak this one. */
@@ -4185,7 +4209,9 @@ function paintThread(body) {
 async function loadThread() {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
-  const who = pjThreadWho(p);
+  // Pinned the first time one resolves, so a poll cannot re-aim the picker
+  // while somebody is typing. See pjPinWho.
+  const who = pjPinWho(pjThreadWho(p));
   paintThreadPicker(p, who);
   if (!who) {
     // Nobody to talk to is a real state, and it is the first one a new project
@@ -4207,9 +4233,11 @@ async function loadThread() {
     if (!res.ok) throw new Error(body.error || 'we could not read this conversation right now');
   } catch (err) {
     if (mine !== PJ_THREAD_GEN) return;
-    // ⚠️ PJ_THREAD is deliberately NOT cleared, and the painted thread is left
-    // as it was. Blanking it would turn "we could not look" into "there is
-    // nothing here", which is the failure this app is built against. Through
+    // ⚠️ THE PAINTED THREAD IS LEFT EXACTLY AS IT WAS. Repainting it empty
+    // would turn "we could not look" into "there is nothing here", which is the
+    // failure this app is built against. (A `PJ_THREAD` global used to be
+    // assigned here to carry that; nothing ever read it, so the reasoning is
+    // kept and the variable is gone.) Through
     // the same change-guard as everything else, because the poll re-enters here
     // every five seconds and this is an aria-live region.
     const msg = document.getElementById('pj-thread-msg');
@@ -4220,7 +4248,6 @@ async function loadThread() {
     PJ_THREAD_NOTE = note;
     return;
   }
-  PJ_THREAD = body;
   /**
    * ⚠️ ONLY THIS FUNCTION'S OWN NOTE IS CLEARED, and finding out why cost a
    * render check. Clearing the line outright wiped the sentence `pjSend` had
@@ -4242,7 +4269,6 @@ document.getElementById('pj-thread-who').addEventListener('change', (e) => {
   // Cleared, because it describes the conversation being left rather than the
   // one being opened.
   document.getElementById('pj-thread-msg').textContent = '';
-  PJ_THREAD = null;
   loadThread();
 });
 
