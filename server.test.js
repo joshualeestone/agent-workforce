@@ -3689,6 +3689,47 @@ test('an unrelated instructions save does not revert a profile-route rename', as
   }
 });
 
+test('a profile store that cannot be written does not un-save the instructions', async () => {
+  // ⚠️ Round 40 blocker: the rename-follow's writeProfile ran unguarded
+  // AFTER instructions.write had committed, so a store failure fell to the
+  // route's .catch -- a landed save answered 400 with a raw errno and an
+  // internal temp path in the message. The store is broken FOR REAL here
+  // (profiles dir read-only, so readProfile succeeds and writeProfile
+  // throws), and the save must still answer 200 with no errno anywhere.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    store.writeProfile('angel', { displayName: 'Guarded' });
+    const v = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    fs.chmodSync(store.PROFILES, 0o555);
+    try {
+      const put = await req('/api/agent/angel/instructions', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'You are **Renamed-under-failure**, a tester.\n', version: v }),
+      });
+      assert.equal(put.status, 200,
+        'a committed save was reported as failed because the follow could not be recorded');
+      assert.ok(!/EACCES|EROFS|errno|\.tmp/.test(put.body),
+        'an errno or internal path reached the response: ' + put.body.slice(0, 200));
+    } finally {
+      fs.chmodSync(store.PROFILES, 0o755);
+    }
+    // Control: with the store healthy again, the follow still works.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Healthy**, a tester.\n', version: v2 }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Healthy',
+      'control: the follow must still work when the store is writable');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
 test('the 80-character cap holds on BOTH display-name writers, and no record is conjured', async () => {
   // ⚠️ Round 37: the cap at each writer records a measured defect (an
   // identity line can carry ~3,900 characters into the capture) and neither
