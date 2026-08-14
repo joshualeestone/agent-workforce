@@ -784,10 +784,14 @@ function createAgent(opts) {
    * own instructions is not a name. `readIdentity` prefers this and falls back
    * to the file, so the two cannot contradict each other — one wins, stated.
    */
-  if (!DRY_RUN && shown) {
-    try { store.writeProfile(name, { displayName: shown }); }
-    catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
-  }
+  // (The write itself happens at the CREATED return below, round 25: from
+  // here to there every step can fail into rollBack, and rollBack removes
+  // the plist and the worker directory but deliberately not profiles --
+  // the store refuses a profile-deletion API because removal-reversibility
+  // depends on profiles surviving. Writing the record only once nothing
+  // can be rolled back is what keeps a rolled-back creation from leaving a
+  // display name for an agent that never existed, waiting to dress a
+  // future stranger by the same slug.)
 
   // ⚠️ Executable, and that is not a detail. launchd runs it through
   // `/bin/bash` either way, but this file is the one an operator debugging a
@@ -902,6 +906,12 @@ function createAgent(opts) {
   // function has returned — so the thing that decides whether a person actually
   // has an agent is the board seeing it, which is watched on the screen rather
   // than asserted here. "We started it" is a claim about us.
+  // The display-name record, written only now that nothing can roll back
+  // (see the naming docblock above for why this record exists at all).
+  if (!DRY_RUN && shown) {
+    try { store.writeProfile(name, { displayName: shown }); }
+    catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
+  }
   return {
     outcome: OUTCOME.CREATED,
     because: `${shown} is set up and starting`,

@@ -1124,7 +1124,9 @@ svg { display: block; }
          project, who answers. The answer is ONE of them, chosen here. Everything
          answering at once and nothing answering are the same bug. -->
     <div class="field" id="pj-thread">
-      <span class="flabel" id="pj-thread-label">Talk to one of them</span>
+      <!-- No id: nothing read the one it carried (round 25), the same
+           unread-surface rule as the thread payload's agents copy. -->
+      <span class="flabel">Talk to one of them</span>
       <p class="fhint">Every message goes to the one agent you pick. The others
          are on the project and are not in this conversation.</p>
       <div class="frow">
@@ -4404,8 +4406,10 @@ function paintThread(body) {
     // ⚠️ The reason, in place of the screen. An empty box would read as an
     // agent sitting at a blank terminal, which is a claim about its screen we
     // did not make.
-    hint.textContent = 'We cannot see its screen right now'
-      + ((body.viewport && body.viewport.because) ? ': ' + body.viewport.because : '') + '.';
+    // The clause becomes its own pjSentence rather than a raw splice
+    // (round 25): a stderr line ending in a stop would double it.
+    hint.textContent = 'We cannot see its screen right now.'
+      + ((body.viewport && body.viewport.because) ? ' ' + pjSentence(body.viewport.because) : '');
   }
 }
 
@@ -4963,10 +4967,6 @@ function pjShowFolderPicker(open) {
   link.setAttribute('aria-expanded', String(Boolean(open)));
   link.textContent = open ? 'Never mind, let Kosmos make the folder' : 'Or use a folder you already have';
   if (open && !PJ_HERE) pjBrowse(null);
-  // The will-be line follows the panel BOTH ways (round 24): opening used
-  // to leave "Kosmos will make this at ..." standing over a button that
-  // now refuses exactly that.
-  if (open) pjWillBe();
   // ⚠️ Closing the route FORGETS the pick. The closing link promises "let
   // Kosmos make the folder", and the create handler only insists on a pick
   // while the panel is visible — so a pick that survived the close would be
@@ -4975,8 +4975,14 @@ function pjShowFolderPicker(open) {
   if (!open && PJ_PICKED) {
     PJ_PICKED = null;
     document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
-    pjWillBe();
   }
+  // ⚠️ The will-be line follows the panel on EVERY transition,
+  // unconditionally and LAST (round 25): the round-24 version refreshed it
+  // on open and on close-with-a-pick, so closing with NOTHING picked left
+  // "Pick a folder below" standing over a panel no longer on the page --
+  // under a comment claiming it followed both ways. One call after all
+  // state has settled is the form that cannot miss a transition.
+  pjWillBe();
 }
 
 /**

@@ -373,11 +373,18 @@ test('an agent that will not start is reported as PARTIAL, not as created', () =
   });
   create.setDryRun(false);
 
-  const r = create.createAgent({ ...BINS, name: 'dud', role: 'writer' });
+  const r = create.createAgent({ ...BINS, name: 'dud', role: 'writer', displayName: 'Dudley' });
   assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'a failed start was reported as success');
   assert.match(r.because, /could not start/);
   assert.ok(r.steps.some((s) => s.label === 'started it' && !s.ok),
     'the failing step is not visible in the record');
+  // ⚠️ And NO display-name record survives the rollback (round 25): the
+  // profile write used to happen mid-flow, and rollBack removes the plist
+  // and worker dir but deliberately not profiles -- so a rolled-back
+  // creation left "Dudley" waiting to dress any future agent under the
+  // same slug. The write now happens only at CREATED.
+  assert.equal(store.readProfile('dud').displayName, undefined,
+    'a rolled-back creation left a display name for an agent that never existed');
 
   // ⚠️ And the files it DID write are still reported as written. A person whose
   // agent did not start needs to know what is on their computer -- "it all
