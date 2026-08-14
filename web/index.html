@@ -1242,7 +1242,13 @@ svg { display: block; }
            derived from what is typed (slashes become dashes), and a derivation
            the person cannot see is a folder they cannot find. `aria-live`
            because it changes under a field they are still typing in. -->
-      <p class="pj-chosen" id="pj-will-be" aria-live="polite"></p>
+      <!-- Not aria-live (round 34): this repaints on a 150ms debounce
+           while the person TYPES the name, so a live region read the
+           whole derived path aloud through every keystroke -- the same
+           repaint-announcement defect round 30 fixed on the verdict
+           line. A screen reader reaches the settled line in reading
+           order once typing is done. -->
+      <p class="pj-chosen" id="pj-will-be"></p>
     </div>
 
     <!-- The advanced route, one link away: for work that already lives
@@ -2395,7 +2401,14 @@ async function loadInstructions(sessionName) {
  * MutationObserver: three mutations in sixteen seconds for one distinct string.
  */
 function setLive(el, html) {
-  if (el.innerHTML === html) return;
+  // Compared against the string we last WROTE, not against innerHTML
+  // (round 34): serialization does not escape quotes in text nodes the
+  // way esc() does, so any message or name containing a double quote
+  // made the comparison miss forever -- the node rebuilt every poll,
+  // which on the recipient picker closed an open dropdown every five
+  // seconds.
+  if (el.__lastLive === html) return;
+  el.__lastLive = html;
   el.innerHTML = html;
 }
 
@@ -3775,8 +3788,10 @@ let PJ_AGENTS_UNREADABLE = false;
 // could not look" -- and a caller filtering a stale-or-initial [] would render
 // "there is nothing" for "we could not see". pjAnswerFrom is that caller.
 let PJ_READ_FAILED = false;
-// Unsent words, parked per project across navigation (round 33). Only the
-// DOM box and this map ever hold a draft; nothing is written to disk.
+// Unsent words, parked per project AS TYPED (rounds 33-34). Only the DOM
+// box and this map ever hold a draft; nothing is written to disk. Sites
+// that clear the box programmatically (a send that took the text) also
+// clear the entry, because a programmatic clear fires no input event.
 const PJ_DRAFTS = {};
 let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
@@ -4061,18 +4076,15 @@ function openProject(id) {
      a same-project re-open every cleared thing is already correct for
      this project, so the whole reset is skipped. */
   const switching = PJ_CURRENT !== id;
-  /* ⚠️ A draft survives NAVIGATION, per project (round 33): the switching
-     branch below used to clear the box outright, so Back then a different
-     project threw typed words away with the same silence the same-project
-     case had -- the same act. The words are parked under the project they
-     were typed for and restored when it is opened again; carrying them to
-     a different recipient (the hazard the clear was for) never happens
-     because each project only ever sees its own draft. */
-  if (switching && PJ_CURRENT) {
-    const parked = document.getElementById('pj-say').value;
-    if (parked.trim()) PJ_DRAFTS[PJ_CURRENT] = parked;
-    else delete PJ_DRAFTS[PJ_CURRENT];
-  }
+  /* ⚠️ A draft survives NAVIGATION, per project (rounds 33-34): the words
+     are parked into PJ_DRAFTS as they are TYPED (the input handler on the
+     box), not at switch time -- the round-33 switch-time park read
+     PJ_CURRENT after the back button had already nulled it, so the most
+     ordinary path (type, Back, re-open) still deleted the words, under a
+     comment claiming that exact case fixed. Parking at the keystroke
+     makes the class unreachable: no navigation order can miss it,
+     because there is nothing left to do at navigation time. The restore
+     below is the only other half. */
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
   // ⚠️ The thread starts fresh on every OTHER project. Carrying the last
@@ -4552,8 +4564,11 @@ async function loadThread() {
     // failure this app is built against. (A `PJ_THREAD` global used to be
     // assigned here to carry that; nothing ever read it, so the reasoning is
     // kept and the variable is gone.) Through
-    // the same change-guard as everything else, because the poll re-enters here
-    // every five seconds and this is an aria-live region.
+    // the same change-guard as everything else, because the poll re-enters
+    // here every five seconds. (Round 34: this line used to say "and this
+    // is an aria-live region" -- round 30 made the verdict line non-live,
+    // with announcements going through pjAnnounce, so the guard's job now
+    // is only avoiding pointless repaints.)
     //
     // ⚠️ A 404 IS A FACT, NOT A BLIND SPOT. "That agent is not on this
     // project" and "there is no project by that name" are things the server
@@ -4786,10 +4801,10 @@ async function pjSend() {
        this branch holds on disk, broken in the one place the words are
        only in the DOM. Only the text this send took is cleared. */
     if (state === 'placed') {
-      if (box.value.trim() === text) box.value = '';
+      if (box.value.trim() === text) { box.value = ''; delete PJ_DRAFTS[PJ_CURRENT]; }
       render = (when) => 'Placed into ' + name + '’s session' + when + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
-      if (inThread && box.value.trim() === text) box.value = '';
+      if (inThread && box.value.trim() === text) { box.value = ''; delete PJ_DRAFTS[PJ_CURRENT]; }
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
       // "look at its screen" on top of the page's "it is in the conversation
       // above" on top of "it may be sitting in its composer unsent" — a wall
@@ -4859,6 +4874,14 @@ async function pjSend() {
 }
 
 document.getElementById('pj-send').addEventListener('click', pjSend);
+// The park itself (round 34): every keystroke files the draft under the
+// open project, so no navigation order can lose it.
+document.getElementById('pj-say').addEventListener('input', (e) => {
+  if (!PJ_CURRENT) return;
+  const v = e.target.value;
+  if (v.trim()) PJ_DRAFTS[PJ_CURRENT] = v;
+  else delete PJ_DRAFTS[PJ_CURRENT];
+});
 document.getElementById('pj-say').addEventListener('keydown', (e) => {
   // Enter sends, because this is a message box and that is what a message box
   // does. There is no multi-line message to protect: the engine collapses
@@ -5139,7 +5162,10 @@ function pjShowFolderPicker(open) {
   field.hidden = !open;
   link.setAttribute('aria-expanded', String(Boolean(open)));
   link.textContent = open ? 'Never mind, let Kosmos make the folder' : 'Or use a folder you already have';
-  if (open && !PJ_HERE) pjBrowse(null);
+  // Re-listed on EVERY open (round 34): PJ_HERE survives across add-flow
+  // sessions, so the cached listing could show a directory as it was
+  // minutes ago -- "Nothing else in here" as a claim about the past.
+  if (open) pjBrowse(PJ_HERE);
   // ⚠️ Closing the route FORGETS the pick. The closing link promises "let
   // Kosmos make the folder", and the create handler only insists on a pick
   // while the panel is visible — so a pick that survived the close would be

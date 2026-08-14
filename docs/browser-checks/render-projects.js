@@ -547,6 +547,35 @@ async function main() {
       }
       return out;
     });
+    // ⚠️ A typed draft SURVIVES Back-then-reopen OF THE SAME PROJECT
+    // (round 34): the round-33 switch-time park read PJ_CURRENT after the
+    // back button had nulled it, so this exact sequence deleted the words
+    // at green checks. The park now happens on the input event, and this
+    // drives the sequence that used to eat it. Set-and-dispatch rather
+    // than fill() (fill waits for actionability and the box can be
+    // disabled here); and the SAME project is re-opened -- the first
+    // version of this check typed in one project and asserted in another,
+    // and correctly read an empty box that was a different project's
+    // (empty) draft.
+    const draftProject = await page.evaluate(() => {
+      const b = document.getElementById('pj-say');
+      b.value = 'a draft typed and then navigated away from';
+      b.dispatchEvent(new Event('input', { bubbles: true }));
+      return PJ_CURRENT;
+    });
+    await page.click('#pj-back');
+    await page.waitForTimeout(200);
+    await page.click('[data-project="' + draftProject + '"]');
+    await page.waitForTimeout(400);
+    const draftBack = await page.evaluate(() => document.getElementById('pj-say').value);
+    if (draftBack !== 'a draft typed and then navigated away from') {
+      throw new Error('the draft did not survive Back-then-reopen: box reads ' + JSON.stringify(draftBack));
+    }
+    await page.evaluate(() => {
+      const b = document.getElementById('pj-say');
+      b.value = '';
+      b.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     await page.click('#pj-back');
     await page.waitForTimeout(200);
     await page.click('[data-project="hendersonlease"]');

@@ -1296,9 +1296,15 @@ const server = http.createServer((req, res) => {
            different name is a deliberate act and the record follows it;
            a line that no longer parses updates nothing, so the name
            survives exactly the accident the record exists for. */
-        if (wrote && wrote.ok !== false) {
+        // (No wrote.ok guard: instructions.write THROWS on every failure
+        // path, so reaching here means the save landed -- round 34
+        // removed a decorative precondition that could never be false.)
+        {
           const m = String(patch.text).slice(0, 4000).match(/You are \*\*([^*]+)\*\*/);
-          const typed = m && m[1].trim();
+          // Same 80-char cap the profile route applies (round 34): the
+          // identity line can carry ~3,900 characters into the capture,
+          // and uncapped it became the agent's name on every card.
+          const typed = m && m[1].trim().slice(0, 80);
           if (typed) {
             const had = store.readProfile(name);
             if (had && typeof had.displayName === 'string' && had.displayName !== typed) {

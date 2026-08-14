@@ -2733,8 +2733,14 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // Same widening on the two pins below, for the same measured reason.
     [/const inThread = body\.recorded === true;/,
      'inThread no longer derives from recorded, so an unrecorded unconfirmed send wipes the only copy'],
-    [/if \(inThread && box\.value\.trim\(\) === text\) box\.value = '';/,
-     'the unconfirmed clear must check recorded AND that the box still holds the sent text (round 29: typing during the flight was deleted by the landing verdict)'],
+    // The park handler itself: typed words are filed per project at the
+    // keystroke, which is what makes every navigation order draft-safe
+    // (round 34: the switch-time park read PJ_CURRENT after Back had
+    // nulled it, and this exact sequence deleted typed words).
+    [/PJ_DRAFTS\[PJ_CURRENT\] = v;/,
+     'the input-handler park is gone, so a navigation order can delete typed words again'],
+    [/if \(inThread && box\.value\.trim\(\) === text\) \{ box\.value = ''; delete PJ_DRAFTS\[PJ_CURRENT\]; \}/,
+     'the unconfirmed clear must check recorded AND the sent text AND clear the parked draft (rounds 29/34: a programmatic clear fires no input event, so the map kept the sent text)'],
     // A bare clock time is only true today; a thread keeps a thousand rows.
     [/then\.toDateString\(\) !== now\.toDateString\(\)/,
      'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
