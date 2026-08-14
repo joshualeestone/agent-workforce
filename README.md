@@ -12,8 +12,9 @@ End users install with one line, which the marketing page distributes:
 That runs `install/setup.sh`: it checksum-verifies and installs a private
 tmux bundle and the Kosmos bundle (the app + a pinned Node runtime + the
 `kosmos` command) under `~/.local/share/kosmos`, creates a locally-built
-Kosmos.app (icon artwork pending: it shows the generic app icon until the
-Kosmos.icns lands), links `~/.local/bin/kosmos`, and starts the board.
+Kosmos.app carrying the gold-K icon (assets/Kosmos.icns, generated from
+Josh's 1024px master in assets/Kosmos-1024.png), links
+`~/.local/bin/kosmos`, and starts the board.
 The icon goes to `/Applications` when the user can write there without a
 password (it proves ownership before ever replacing a bundle there),
 falling back to `~/Applications`. It never replaces an occupant of
