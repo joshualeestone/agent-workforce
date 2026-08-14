@@ -711,6 +711,8 @@ test('a timeout is not a spawn failure, and only one of them may say nothing was
     chat.resetForTests(); arm([neverRan()]);
     const failed = chat.deliver('casey', 'hi', board.agents);
     assert.equal(failed.state, chat.DELIVERY.COULD_NOT);
+    // The spawn-fail arm's paneNote, the third of the three (round 24).
+    assert.equal(failed.paneNote, 'it was sitting at its prompt');
     // ⚠️ The spawn-fail sentence keeps the caller's clause (round 20): the
     // clause is what says nothing was typed, and the raw error alone
     // ("ENOENT") sent the reader hunting with no verdict attached.
@@ -1778,6 +1780,10 @@ test('a renamed pane column refuses the send with its own sentence, before tmux 
       const out = chat.deliver('casey', 'hi', board.agents);
       assert.equal(out.state, chat.DELIVERY.COULD_NOT);
       assert.match(out.because, /cannot work out how to check its window/);
+      // This exit is the verifyAtSend arm, the one paneNote of the three
+      // that no other test reaches (round 24: nulling it alone was green
+      // until this line).
+      assert.equal(out.paneNote, 'it was sitting at its prompt');
     } finally {
       status.PANE_COLUMNS[at] = real;
     }
@@ -1792,6 +1798,12 @@ test('an agent whose pane we do not know is refused on BOTH paths, send and scre
     const sent = chat.deliver('casey', 'hi', blind);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
     assert.match(sent.because, /do not know which pane/);
+    // paneNote is null HERE by design: this refusal happens at the
+    // addressable gate, before the send was authorised against any card,
+    // and a pane claim on an unauthorised refusal would be a note about a
+    // pane nobody vetted. The authorised arms' notes are pinned in the
+    // column-rename and refused-send tests.
+    assert.equal(sent.paneNote, null);
     const seen = chat.viewport('casey', blind);
     assert.equal(seen.text, null);
     assert.match(seen.because, /do not know which pane/);
