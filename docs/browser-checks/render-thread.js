@@ -293,7 +293,11 @@ async function main() {
   // A project with all three agents on it, made through the real route.
   const made = await post('/api/projects', {
     name: 'Henderson lease',
-    folder: process.env.AGENT_WORKFORCE_DATA || require('node:os').tmpdir(),
+    // The announced store dir, NOT process.env (round 40): this process is
+    // not documented to have AGENT_WORKFORCE_DATA exported, so the fixture
+    // folder silently depended on the operator's shell. `fixtureStore()`
+    // parses the dir the server itself announced; tmpdir stays the fallback.
+    folder: fixtureStore() || require('node:os').tmpdir(),
     // MyBot is here so the unfilable-name screen can be driven; see 5f.
     // `stopped` has no fleet card and no fixture screen at all: it drives
     // the screen-read-FAILED state (round 30), the ordinary state of a
@@ -304,6 +308,13 @@ async function main() {
 
   const browser = await chromium.launch({ headless: !HEADED });
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  /* ⚠️ Console errors and page exceptions are CAPTURED and failed (round
+     40), like render-projects does: a thrown exception in this screen's
+     renderer that does not happen to stall a waitForFunction otherwise
+     goes unreported, on the renderer this branch wrote from scratch. */
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
 
   try {
     /* ── 1. the one click out of the stranded state ─────────────────────── */
@@ -689,6 +700,11 @@ async function main() {
       check(!/kept aside/.test(reused),
         'it does not claim an earlier conversation was moved aside before anything moved it');
       check(!/\.\s+[a-z]/.test(reused), `every sentence starts upper case: "${reused.trim()}"`);
+    } else {
+      // Loud, like 5d above (round 40): without this, a fixture that stops
+      // announcing its data dir silently skips the reused-name state and
+      // silently stops emitting thread-6-reused-name.png.
+      check(false, 'the fixture server did not publish its data dir, so the reused-name state was not driven');
     }
 
     /* ── 5f. a name we cannot file a conversation under ─────────────────── */
@@ -726,6 +742,59 @@ async function main() {
     // Sending is still offered, because sending still works — only keeping does not.
     check(await page.locator('#pj-say').isEnabled(),
       'the message box is still usable for an agent whose conversation cannot be kept');
+
+    /* ── 5g. a history we could not READ (the third state, driven) ──────── */
+    /**
+     * ⚠️ The trio's untested third (round 40): historyOther and
+     * historyUnfilable were both driven and photographed while
+     * `messages === null` -- the arm honesty rule 1 exists for -- was
+     * asserted nowhere. Driven for real: the thread file is made
+     * unreadable on disk, so the route's own read genuinely fails.
+     */
+    if (store) {
+      const chat = fixtureChat(store);
+      await page.selectOption('#pj-thread-who', 'casey');
+      const cfile = chat.threadFile(id, 'casey');
+      const hadMode = fs.statSync(cfile).mode;
+      fs.chmodSync(cfile, 0o000);
+      try {
+        await page.waitForFunction(() => /cannot read what you have sent/i.test(
+          document.getElementById('pj-msgs').textContent || ''), null, { timeout: 15000 });
+        await page.screenshot({ path: path.join(OUT, 'thread-10-history-unreadable.png'), fullPage: true });
+        const unread = (await page.locator('#pj-msgs').textContent()) || '';
+        check(/not saying you have sent nothing/i.test(unread),
+          `the unreadable state refuses the empty-list reading: "${unread.trim()}"`);
+        check(!/have not sent .* anything/i.test(unread),
+          'it does not claim the true-of-a-different-state "you have sent nothing"');
+        check(!/EACCES|errno|\/Users\//.test(unread),
+          'no errno and no machine path reaches the screen');
+      } finally {
+        fs.chmodSync(cfile, hadMode);
+      }
+      // Recovery is part of the state: readable again, the rows return.
+      await page.waitForFunction(() => !/cannot read what you have sent/i.test(
+        document.getElementById('pj-msgs').textContent || ''), null, { timeout: 15000 });
+    } else {
+      check(false, 'the fixture server did not publish its data dir, so the unreadable-history state was not driven');
+    }
+
+    /* ── 5h. the same screen at a NARROW width ──────────────────────────── */
+    /**
+     * ⚠️ One width is one data point (round 40): #pj-thread-who and the
+     * compose row carry min-width: 220px and the terminal viewport is
+     * white-space: pre, so the no-horizontal-overflow property asserted
+     * above was established only at 1200. 720 is a real narrow-laptop
+     * split-screen width, above the phone layouts this page does not
+     * claim, below every width the shots above used.
+     */
+    await page.setViewportSize({ width: 720, height: 900 });
+    await page.waitForTimeout(300);
+    check(await page.evaluate(() => document.body.scrollWidth - document.body.clientWidth) === 0,
+      'no horizontal page overflow on the thread screen at 720 wide',
+      String(await page.evaluate(() => document.body.scrollWidth - document.body.clientWidth)) + 'px of overflow');
+    await page.screenshot({ path: path.join(OUT, 'thread-11-narrow.png'), fullPage: true });
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.waitForTimeout(200);
 
     /* ── 6. contrast, on the rendered page, in both themes ──────────────── */
     for (const scheme of ['light', 'dark']) {
@@ -852,10 +921,20 @@ async function main() {
     await browser.close();
   }
 
+  check(pageErrors.length === 0,
+    'no console errors or page exceptions on any driven state', pageErrors.join(' | '));
+
   process.stdout.write(failures.length
     ? `\n${failures.length} failed:\n  ${failures.join('\n  ')}\n`
     : `\nall checks passed; shots in ${OUT}\n`);
   process.exit(failures.length ? 1 : 0);
 }
 
-main().catch((err) => { process.stderr.write(String(err && err.stack || err) + '\n'); process.exit(1); });
+main().catch((err) => {
+  // The check-level diagnostics accumulated before the throw travel with it
+  // (round 40): a run that failed checks and THEN threw lost every named
+  // failure and reported only the stack.
+  if (failures.length) process.stderr.write(`${failures.length} failed before the throw:\n  ${failures.join('\n  ')}\n`);
+  process.stderr.write(String(err && err.stack || err) + '\n');
+  process.exit(1);
+});

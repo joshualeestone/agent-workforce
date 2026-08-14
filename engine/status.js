@@ -1482,6 +1482,16 @@ function readIdentity(sessionName) {
    * `role` field is what a person types into the detail panel, and the board
    * already prefers that separately, one level up.
    */
+  /* ⚠️ Known limit, recorded rather than fixed (round 40): readProfile
+     swallows read errors and answers as if no record exists, so an
+     UNREADABLE profile is indistinguishable from an absent one and the
+     name silently falls back to the instruction file's identity line for
+     as long as the blip lasts. Accepted because the fallback is the
+     agent's own boot name (never an invented one), the record wins again
+     on the next poll, and a per-card hedge sentence for a transient read
+     failure would flap on and off every five seconds. If profiles ever
+     carry state whose stale reading is dangerous rather than cosmetic,
+     readProfile needs a third answer before that lands. */
   const remembered = store.readProfile(sessionName);
   const recorded = remembered && typeof remembered.displayName === 'string'
     ? remembered.displayName.trim() : '';

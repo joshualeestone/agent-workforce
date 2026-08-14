@@ -4316,8 +4316,11 @@ function pjMsg(m, name) {
     // was typed restates it. placed/unconfirmed append the note because
     // there it adds what the verdict alone cannot say. The live line holds
     // the same asymmetry.
+    // Through pjSentence like the unconfirmed arm above (round 40): this
+    // was the one arm gluing a raw clause to its own full stop, so a
+    // because that already ends in punctuation doubled the stop.
     said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
-      + esc(d.because || 'we could not put it into its session') + '.';
+      + esc(pjSentence(d.because || 'we could not put it into its session'));
   }
   return '<div class="pj-msg' + mark + '">'
     + '<span class="pj-msg-text">' + esc(m.text) + '</span>'

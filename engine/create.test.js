@@ -1459,8 +1459,13 @@ test('the launchd job says WHOSE background item it is, so macOS names Kosmos an
   // launchd silently refuses to load, which is an agent that never starts.
   const file = nodePath.join(SANDBOX, 'bundle-id-check.plist');
   fs.writeFileSync(file, plist, 'utf8');
-  const read = require('node:child_process').execFileSync(
-    '/usr/bin/plutil', ['-lint', file], { encoding: 'utf8' },
-  );
-  assert.match(read, /OK/, 'launchd would refuse this plist, so the agent would never start');
+  // Guarded on platform (round 40): plutil is macOS-only, and launchd -- the
+  // consumer this lint stands in for -- exists only there too, so on another
+  // OS the honest outcome is a skip, not an ENOENT masquerading as a failure.
+  if (process.platform === 'darwin') {
+    const read = require('node:child_process').execFileSync(
+      '/usr/bin/plutil', ['-lint', file], { encoding: 'utf8' },
+    );
+    assert.match(read, /OK/, 'launchd would refuse this plist, so the agent would never start');
+  }
 });

@@ -133,7 +133,7 @@ casey's session just now", or the reason it could not, and never that the agent
 read anything. A keystroke reaching a terminal is not evidence that a program
 understood it, so there are three verdicts rather than two — `placed`,
 `could_not` (nothing of yours reached the pane, so sending again is safe), and
-`could not confirm` (it may already be in that agent's composer, so look at its
+`unconfirmed` (it may already be in that agent's composer, so look at its
 screen before sending again). The agent's side of that screen is the live tail
 of its terminal, labelled as the terminal and never parsed into speech.
 

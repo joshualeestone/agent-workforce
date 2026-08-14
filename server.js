@@ -1332,10 +1332,22 @@ const server = http.createServer((req, res) => {
           // and uncapped it became the agent's name on every card.
           const typed = m && m[1].trim().slice(0, 80);
           if (typed && typed !== lineHad) {
-            const had = store.readProfile(name);
-            if (had && typeof had.displayName === 'string' && had.displayName !== typed) {
-              store.writeProfile(name, { displayName: typed });
-            }
+            /* ⚠️ Guarded, because the SAVE ALREADY LANDED (round 40): a
+               throw out of the profile store here fell to the route's
+               .catch, which answered 400 with the raw message -- so a
+               committed instructions save was reported as a failed one,
+               with an errno and an internal temp path printed into the
+               editor's message line. Two rules broken at once (recording
+               failure reported as act failure; errnos on screen). Same
+               posture as create.js's own display-name write: a rename we
+               could not record is a card that keeps its old name, not a
+               failure. */
+            try {
+              const had = store.readProfile(name);
+              if (had && typeof had.displayName === 'string' && had.displayName !== typed) {
+                store.writeProfile(name, { displayName: typed });
+              }
+            } catch { /* the save succeeded; the follow is best-effort */ }
           }
         }
         sendJson(res, 200, wrote);

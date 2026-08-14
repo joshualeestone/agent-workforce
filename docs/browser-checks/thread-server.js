@@ -28,6 +28,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const fs = require('node:fs');
 
 // ⚠️ `AGENT_WORKFORCE_PROJECTS` is in this list because the add screen now
 // MAKES folders: creating a project with no folder puts a real directory under
@@ -38,7 +39,22 @@ for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WOR
   if (!set) {
     throw new Error(`${key} is not set: this would write into the real fleet's files. Refusing.`);
   }
-  const real = path.resolve(set);
+  // realpathSync of the nearest EXISTING ancestor, not path.resolve (round
+  // 40): resolve does not follow symlinks, so /tmp/link -> ~/Kosmos/Projects
+  // passed a guard whose stated job is stopping exactly that. Relative
+  // values are refused outright rather than resolved under whatever cwd the
+  // operator happened to launch from.
+  if (!path.isAbsolute(set)) {
+    throw new Error(`${key} is relative (${set}): pass an absolute sandbox path. Refusing.`);
+  }
+  const realOf = (p) => {
+    let probe = p;
+    for (;;) {
+      try { return fs.realpathSync(probe); }
+      catch { const up = path.dirname(probe); if (up === probe) return probe; probe = up; }
+    }
+  };
+  const real = realOf(set);
   // ⚠️ `~/Kosmos` is in the refusal list by name: it is the real projects
   // root, the very directory the comment above warns about -- and the first
   // version of this guard rejected only ~/Library and ~ itself, so

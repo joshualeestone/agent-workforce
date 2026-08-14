@@ -3713,7 +3713,7 @@ test('the 80-character cap holds on BOTH display-name writers, and no record is 
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text: 'You are **' + long + 'X**, a tester.\n', version: v }),
     });
-    assert.equal(store.readProfile('angel').displayName, ('N'.repeat(200) + 'X').slice(0, 80),
+    assert.equal(store.readProfile('angel').displayName, 'N'.repeat(80),
       'the rename-follow stored an uncapped name');
     // ⚠️ The precondition is behaviour, not decoration: an agent with no
     // displayName on record keeps having none after an identity-line save.

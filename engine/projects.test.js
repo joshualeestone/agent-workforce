@@ -23,9 +23,20 @@ process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 // leave real directories in the operator's home, named after test fixtures. The
 // rule is every root the code writes to, and the code grew one.
 process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
+// ⚠️ Belt-and-braces like chat.test.js and server.projects.test.js (round
+// 40): this suite pulls in engine/chat transitively (projects requires
+// chat), so without this the chat module sits in that process with dry-run
+// unarmed against the host's real tmux. Latent today -- only the pure
+// defaultAgentFor runs -- but this file is the one doing the requiring,
+// and the sandbox has to be in place before the hazard arrives.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 const test = require('node:test');
-const assert = require('node:assert');
+// `strict` (round 40): the loose default let `assert.equal(x, null)` pass
+// on undefined -- the exact class the blocked/exists assertions in this
+// file were individually hardened against in round 37. The file-level
+// default now matches the 13 sibling suites.
+const assert = require('node:assert/strict');
 
 const projects = require('./projects');
 const store = require('./store');

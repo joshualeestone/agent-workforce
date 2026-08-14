@@ -1329,7 +1329,11 @@ test('two writers that both see a stale lock do not both get inside', () => {
   const old = Date.now() - (60 * 1000);
   fs.utimesSync(file + '.lock', new Date(old), new Date(old));
 
-  const writer = path.join(SANDBOX, 'writer.js');   // written by the test above
+  const writer = path.join(SANDBOX, 'writer.js');
+  // Inter-test dependency made loud (round 40): run alone, the child died
+  // with a bare ENOENT instead of naming the missing prerequisite.
+  assert.ok(fs.existsSync(writer),
+    'writer.js is written by the two-real-processes test above; this test cannot run without it');
   const both = ['stale A', 'stale B'].map((text) =>
     new Promise((resolve) => {
       const { execFile } = require('node:child_process');
@@ -1743,7 +1747,17 @@ test('two asides in the SAME millisecond both keep the kind as the last segment'
     .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.damaged'));
 
   const realNow = Date.now;
-  Date.now = () => 1755178800000;
+  /* ⚠️ Frozen WITH A WATCHDOG (round 40). withThreadLock derives both its
+     2s give-up deadline and its stale-lock age from this same clock, so a
+     plain constant made the deadline unexpirable: if a lock directory ever
+     leaked into this path, the suite would HANG here rather than fail.
+     After 10 real seconds the mock hands back the real clock, so the
+     deadline expires and this test fails with a lock error instead of
+     wedging the run. The normal path completes in milliseconds and never
+     sees the switch, so the same-millisecond aside collision this test
+     exists to force is unaffected. */
+  const frozeAt = realNow();
+  Date.now = () => (realNow() - frozeAt > 10000 ? realNow() : 1755178800000);
   try {
     fs.writeFileSync(file, '{ damaged the first time');
     assert.equal(chat.appendMessage('samemillisecond', 'casey', {
