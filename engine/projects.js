@@ -262,6 +262,24 @@ function folderState(folder) {
  * shipped once already, in Remove, and was caught by a blind review rather than
  * by the suite. **Act on the machine name, speak the display name.**
  */
+/**
+ * The role a PERSON set on this agent, if they set one.
+ *
+ * ⚠️ `hasOwnProperty` rather than a plain `profile.role`, and the reason is the
+ * fixture harness in `test-support/fleet.js` — which is right to complain. A
+ * profile is a free-form record: `store.readProfile` answers `{}` for an agent
+ * nobody has edited, so `profile.role` is a read of a key that legitimately may
+ * be absent, and the harness cannot tell that apart from the wrong-shape reads
+ * it exists to catch (it caught six of those on this very feature, where
+ * `describe` read `name`, `state` and `because` off a producer that emits none
+ * of them). Asking whether the key is there says which of the two this is.
+ */
+function profileRole(card) {
+  const profile = card && card.profile;
+  if (!profile || typeof profile !== 'object') return null;
+  return Object.prototype.hasOwnProperty.call(profile, 'role') ? profile.role : null;
+}
+
 function describe(project, roster) {
   const cards = Array.isArray(roster) ? roster : [];
   // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
@@ -315,6 +333,13 @@ function describe(project, roster) {
       // honour it, or the row still says "1 working" about a pane we cannot
       // tie to anybody.
       tied: Boolean(card && card.isNamedOurs),
+      // ⚠️ Carried so the thread can open on the project's MANAGER without a
+      // second read of the board. Gated on `tied` like every other value taken
+      // off a card here: a role read off a pane we cannot tie to this name is
+      // somebody else's role, and it would decide who a person's message is
+      // addressed to. The person-set role wins over the derived one, the same
+      // order the detail panel already uses.
+      role: (card && card.isNamedOurs) ? (profileRole(card) || card.role || null) : null,
       // ⚠️ `unknown` for an untied pane, for the same reason the board refuses
       // to read its model or its transcript: whatever that pane is doing, we
       // have not established it is this agent doing it.

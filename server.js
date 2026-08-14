@@ -7,8 +7,12 @@
  * commitments each agent says it is holding, and the instruction file each
  * agent reads at startup. It also MAKES agents: `POST /api/agents` writes a
  * worker directory, a startup script and a launchd job, and loads that job.
- * It can now stop and remove an agent, and put one back. It cannot yet send
- * input to one.
+ * It can now stop and remove an agent, and put one back. And it TYPES INTO
+ * ONE: `POST /api/project/:id/thread/:agent` places a line of text into that
+ * agent's own tmux session. That is the strongest thing in this file, so read
+ * `engine/chat.js`'s header for what it may and may not claim about it — the
+ * short version is that a keystroke reaching a terminal is never evidence that
+ * an agent read anything.
  *
  * See the ⚠️ block above `start()` for what protects it, and what does not.
  */
@@ -35,6 +39,7 @@ const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
+const chat = require('./engine/chat');
 const os = require('node:os');
 
 /**
@@ -1541,6 +1546,152 @@ const server = http.createServer((req, res) => {
     let project = null;
     try { project = projects.get(id, roster); } catch { project = null; }
     sendJson(res, 200, { project, told: verdict, agentsUnreadable: roster === null });
+    return;
+  }
+
+  /**
+   * --- talking to ONE agent on ONE project ---------------------------------
+   *
+   * ⚠️ THE MEMBERSHIP CHECK IS A ROUTING RULE, NOT A PERMISSION, and the
+   * difference has to be said out loud on this branch. Nothing in this product
+   * confines an agent to a project (`engine/projects.js` says so at length),
+   * and this does not start. What it does is refuse to make THIS route a
+   * general "type into any agent on the machine" endpoint that merely happens
+   * to take a project id: a thread belongs to a project and an agent on it, so
+   * an agent that is not on the project has no thread here to read or write.
+   * The gate that decides whether a keystroke may reach a session at all is
+   * `chat.addressable`, and it is about the PANE, not the project.
+   *
+   * ⚠️ Both halves answer renderable state on every path. A viewport we could
+   * not capture, a history file we could not read, and an agent we cannot tie
+   * to a session are each a sentence rather than a blank screen.
+   */
+  const thread = pathname.match(/^\/api\/project\/([^/]+)\/thread\/([^/]+)$/);
+  if (thread && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(thread[1]);
+    const name = decodeSegment(thread[2]);
+    if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    // ⚠️ ONE roster read for the whole request, like every sibling route here.
+    // Two `tmux list-panes` calls can disagree, and the disagreement is exactly
+    // the sentence this app exists not to say — a viewport captured from one
+    // look reported beside a membership described from another.
+    const roster = safeRoster();
+    let project;
+    try {
+      project = projects.get(id, roster);
+    } catch (err) {
+      sendJson(res, 500, {
+        error: String((err && err.message) || 'we cannot read your projects right now'),
+        projectsUnreadable: true,
+      });
+      return;
+    }
+    if (!project) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    const member = (project.agents || []).find((m) => m.sessionName === name) || null;
+    if (!member) { sendJson(res, 404, { error: 'that agent is not on this project' }); return; }
+
+    /**
+     * ⚠️ THE HISTORY AND THE VIEWPORT FAIL SEPARATELY, because they are
+     * different objects with different owners. The messages are OURS — we wrote
+     * them — and an unreadable record is reported as unreadable rather than as
+     * an empty conversation, the same refusal `/api/projects` makes for the
+     * projects file. The viewport is the AGENT's screen, live-only, and its
+     * failure says so in its own sentence.
+     */
+    let messages = null;
+    let historyBecause = null;
+    try {
+      messages = chat.readThread(id, name).messages;
+    } catch (err) {
+      historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+    }
+    const view = chat.viewport(name, roster);
+    /**
+     * ⚠️ The question region is offered only when the BOARD says this agent is
+     * asking one, so the thread cannot contradict the card that sent the person
+     * here. And when the board says so while the markers are not in the capture
+     * — the pane redraws, and the two reads are milliseconds apart — that is
+     * said plainly rather than rendered as no question at all.
+     */
+    const asking = member.tied && member.state === 'needs_you';
+    const question = asking && view.text ? chat.questionIn(view.text) : null;
+    sendJson(res, 200, {
+      project: { id: project.id, name: project.name },
+      agent: member,
+      agents: project.agents || [],
+      messages,
+      historyBecause,
+      viewport: view,
+      asking,
+      question,
+      questionBecause: (asking && !question)
+        ? 'its card says it is asking something, but we cannot find the question on its screen right now'
+        : null,
+      agentsUnreadable: roster === null,
+    });
+    return;
+  }
+
+  if (thread && req.method === 'POST') {
+    const id = decodeSegment(thread[1]);
+    const name = decodeSegment(thread[2]);
+    if (id === null || name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        // Refused before anything is looked up, so a message we would never
+        // send does not cost a tmux fan-out.
+        const problem = chat.messageProblem(body.text);
+        if (problem) throw new Error(problem);
+
+        const roster = safeRoster();
+        let project;
+        try {
+          project = projects.get(id, roster);
+        } catch (err) {
+          const unreadable = new Error(String((err && err.message) || 'we cannot read your projects right now'));
+          unreadable.status = 500;
+          throw unreadable;
+        }
+        if (!project) {
+          const missing = new Error('there is no project by that name');
+          missing.status = 404;
+          throw missing;
+        }
+        if (!(project.agents || []).some((m) => m.sessionName === name)) {
+          const notOn = new Error('that agent is not on this project');
+          notOn.status = 404;
+          throw notOn;
+        }
+
+        /**
+         * ⚠️ DELIVER FIRST, THEN RECORD THE VERDICT WITH IT — and record even a
+         * failure. "I asked casey this and it did not get there" is a thing the
+         * person needs to be able to see later; a thread that remembers only
+         * the successes quietly rewrites its own history.
+         *
+         * ⚠️ AND THE TWO ANSWERS ARE REPORTED SEPARATELY. A message that WAS
+         * placed and could not be written down must not come back looking like
+         * a message that was not sent, which is what one merged boolean would
+         * have done. Same reason create and delete each carry two try blocks.
+         */
+        const delivery = chat.deliver(name, body.text, roster);
+        const kept = chat.appendMessage(id, name, { text: body.text, at: delivery.at, delivery });
+        sendJson(res, 200, {
+          delivery,
+          recorded: kept.recorded === true,
+          recordedBecause: kept.because || null,
+          messages: kept.messages || null,
+          agentsUnreadable: roster === null,
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),
+        { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
 

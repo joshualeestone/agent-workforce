@@ -1715,6 +1715,13 @@ module.exports = {
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
   setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,
+  // ⚠️ EXPORTED so `engine/chat.js` can show the person the part of the screen
+  // that produced the NEEDS_YOU verdict. It is exported rather than copied for
+  // the reason `countAgents` is: a private second copy is two derivations of
+  // one question, this codebase's worst habit, and the copy would drift the
+  // first time a marker is added here. The card that says "Needs you" and the
+  // thread that shows the question must never be able to disagree.
+  NEEDS_YOU_MARKERS,
 };
 
 if (require.main === module) {
