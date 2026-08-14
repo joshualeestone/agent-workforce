@@ -4485,10 +4485,19 @@ async function loadThread() {
       ? 'This conversation is not here any more. ' + pjSentence((body && body.error) || 'what it belonged to changed')
       : 'We cannot read this conversation right now.'
         + (body && body.error ? ' ' + pjSentence(body.error) : '');
-    if (msg.textContent !== note) msg.textContent = note;
-    // Remembered, so the next successful read clears THIS sentence and not
-    // whatever a send has since written in its place.
-    PJ_THREAD_NOTE = note;
+    /* ⚠️ A standing SEND VERDICT outranks this note (round 29): writing
+       over it broke the pairing the success path depends on -- the next
+       good poll cleared this note to empty, the shown-text match then
+       failed, and PJ_SENT_LINE was dropped with nothing in its place. A
+       could_not that also failed to record ended as a full box over a
+       blank line: the stranded state, rebuilt by a connection blip. The
+       verdict already tells the person more than this note would. */
+    if (!(PJ_SENT_LINE && msg.textContent === PJ_SENT_LINE.shown)) {
+      if (msg.textContent !== note) msg.textContent = note;
+      // Remembered, so the next successful read clears THIS sentence and
+      // not whatever a send has since written in its place.
+      PJ_THREAD_NOTE = note;
+    }
     return;
   }
   /**
@@ -4662,11 +4671,18 @@ async function pjSend() {
     // it re-renders the rows, so the two can never disagree about one send.
     const at = (body.delivery && body.delivery.at) || new Date().toISOString();
     let render = null;
+    /* ⚠️ The clear is GUARDED against what is in the box NOW (round 29):
+       the box stays enabled during a flight that can honestly run many
+       seconds (three 5s tmux timeouts plus the record lock), so someone
+       who pressed Enter and started typing the next message had it
+       silently deleted when the verdict landed -- the never-delete rule
+       this branch holds on disk, broken in the one place the words are
+       only in the DOM. Only the text this send took is cleared. */
     if (state === 'placed') {
-      box.value = '';
+      if (box.value.trim() === text) box.value = '';
       render = (when) => 'Placed into ' + name + '’s session' + when + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
-      if (inThread) box.value = '';
+      if (inThread && box.value.trim() === text) box.value = '';
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
       // "look at its screen" on top of the page's "it is in the conversation
       // above" on top of "it may be sitting in its composer unsent" — a wall
@@ -4802,10 +4818,14 @@ async function pjAnswerFrom(sessionName, displayName) {
   await loadThread();
   if (on.length > 1) {
     // ⚠️ Said, because we chose. Opening one of three projects silently is a
-    // decision the person did not make and cannot see.
-    document.getElementById('pj-thread-msg').textContent =
-      pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
+    // decision the person did not make and cannot see. Registered as the
+    // poll's note (round 29) so it is cleared by the same pairing that
+    // clears every other transient sentence, instead of sitting under
+    // later unrelated activity on an aria-live region forever.
+    const chose = pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
       + on[0].name + '.';
+    document.getElementById('pj-thread-msg').textContent = chose;
+    PJ_THREAD_NOTE = chose;
   }
 }
 

@@ -937,13 +937,17 @@ function isClaudeRunning(command) {
  */
 const SPINNER = /[⠀-⣿]/;
 
-const NEEDS_YOU_MARKERS = [
+// Frozen (round 29): this is exported as the live array the classifier
+// itself reads, so a consumer pushing into it would rewrite the board's
+// definition of needs_you from outside. Freezing makes the one-derivation
+// contract structural instead of conventional.
+const NEEDS_YOU_MARKERS = Object.freeze([
   /Do you want to proceed/i,
   /Would you like to/i,
   /\bAllow\b.*\?/,
   /permission to/i,
   /❯\s*1\.\s*Yes/,
-];
+]);
 
 const RATE_LIMIT_MARKERS = [
   /rate limit/i,

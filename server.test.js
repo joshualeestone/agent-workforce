@@ -2733,8 +2733,8 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // Same widening on the two pins below, for the same measured reason.
     [/const inThread = body\.recorded === true;/,
      'inThread no longer derives from recorded, so an unrecorded unconfirmed send wipes the only copy'],
-    [/if \(inThread\) box\.value = '';/,
-     'the unconfirmed clear no longer checks recorded, so an unrecorded send wipes the only copy'],
+    [/if \(inThread && box\.value\.trim\(\) === text\) box\.value = '';/,
+     'the unconfirmed clear must check recorded AND that the box still holds the sent text (round 29: typing during the flight was deleted by the landing verdict)'],
     // A bare clock time is only true today; a thread keeps a thousand rows.
     [/then\.toDateString\(\) !== now\.toDateString\(\)/,
      'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
