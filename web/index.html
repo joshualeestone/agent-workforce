@@ -4048,8 +4048,11 @@ function paintOneProject() {
   // pressing the button would then rewrite the wrong agent's instruction file.
   // Repainting only on change also stops the native popup being closed
   // mid-choice.
-  if (sel.innerHTML !== html) {
+  // Stored-string compare here too (round 35), same quote round-trip as
+  // the thread picker.
+  if (sel.__lastPicker !== html) {
     const chosen = sel.value;
+    sel.__lastPicker = html;
     sel.innerHTML = html;
     if (chosen && free.some((a) => a.sessionName === chosen)) sel.value = chosen;
   }
@@ -4342,7 +4345,13 @@ function paintThreadPicker(p, who) {
   // picker beside it carries: rebuilding options resets a select to index 0, so
   // somebody who picked an agent and paused for five seconds would be typing to
   // a different one.
-  if (sel.innerHTML !== html) {
+  // Stored-string compare, not innerHTML round-trip (round 35): esc()
+  // writes &quot; where serialization reads back a bare quote, so a name
+  // containing one made this rebuild fire every poll and close an open
+  // dropdown mid-choice -- the setLive fix of round 34, applied to the
+  // element its comment named and which had not been migrated.
+  if (sel.__lastPicker !== html) {
+    sel.__lastPicker = html;
     sel.innerHTML = html;
   }
   if (who && sel.value !== who) sel.value = who;
@@ -4964,8 +4973,16 @@ async function pjAnswerFrom(sessionName, displayName) {
      the no-question arm does not focus a hidden element; the pre is
      already tabindex=0 with role=region and a name, so landing there
      announces whose question it is. */
-  const q = document.getElementById('pj-question');
-  if (q && !q.hidden) document.getElementById('pj-question-text').focus();
+  /* Guarded on the TEXT BOX, not the wrapper (round 35): the
+     asking-but-no-question arm shows the wrapper while hiding the box,
+     and .focus() on a hidden element is a no-op -- the stranded-keyboard
+     state again, one arm over from where round 30 closed it. In that arm
+     the deliberate landing is the message box, same as paintThread's own
+     rescue. */
+  const qt = document.getElementById('pj-question-text');
+  const qw = document.getElementById('pj-question');
+  if (qt && qt.hidden === false && qw && !qw.hidden) qt.focus();
+  else document.getElementById('pj-say').focus();
   if (on.length > 1) {
     // ⚠️ Said, because we chose. Opening one of three projects silently is a
     // decision the person did not make and cannot see. Registered as the
