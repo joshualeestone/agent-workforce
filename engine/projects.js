@@ -40,6 +40,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const store = require('./store');
 const instructions = require('./instructions');
+// ⚠️ ONE rule for who answers, and it lives with the thread rather than being
+// re-derived in the page. `web/index.html` ships as one file with no import
+// mechanism, so a picker that worked out its own default would be a second
+// answer to "who answers on this project" — this codebase's worst habit, and
+// the exact question the screen this replaced said it was waiting on. So the
+// project publishes the answer and the page renders it.
+const chat = require('./chat');
 
 const FILE = 'projects.json';
 
@@ -374,6 +381,9 @@ function describe(project, roster) {
     folder: project.folder,
     folderState: folderState(project.folder),
     agents: members,
+    // Who this project's thread opens on. Published rather than left to the
+    // caller for the reason given above the `chat` require.
+    defaultAgent: chat.defaultAgentFor(members),
     // ⚠️ Deliberately NOT a health summary. It counts what is on screen so the
     // list row can say "1 needs you" the way the page does, and it carries
     // `unseen` beside the counts so a row can never quietly report that

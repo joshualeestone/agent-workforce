@@ -142,3 +142,47 @@ The detail panel calls the instructions a "special purpose" and names no file.
 ⚠️ **Restart the server after editing `web/index.html`.** It caches the page at
 startup, so an in-place edit does not reach the browser. A mutation test that skips
 this reports a false PASS: measured, while checking that the AA guard bites.
+
+## render-thread.js
+
+The project thread: the question, the picker, the viewport, a send that lands
+and a send that does not, in light and dark.
+
+⚠️ **It must be pointed at `thread-server.js`, never at `node server.js`.** This
+screen SENDS. Against a plain server on this machine, pressing Send types into a
+live agent's conversation. `thread-server.js` stubs the pane source and `chat`'s
+tmux runner so a Send reaches a log line and goes no further, and the check
+refuses to run unless it can read that server's own announcement of the stub in
+the log it is handed.
+
+    SB=$(mktemp -d)
+    PORT=4421 AGENT_WORKFORCE_DATA="$SB/data" \
+      AGENT_WORKFORCE_WORKERS="$SB/workers" \
+      AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+      node docs/browser-checks/thread-server.js > /tmp/threadsrv.log &
+
+    NODE_PATH=/path/to/playwright/node_modules \
+      node docs/browser-checks/render-thread.js \
+        http://127.0.0.1:4421 /tmp/threadshots /tmp/threadsrv.log
+
+**What it caught on its first run**, neither of which any text assertion could
+see:
+
+- A delivery that FAILED said "Could not deliver: can't find pane" for a few
+  milliseconds and then went silent, because the refresh after the send cleared
+  the message line — and the five-second poll cleared it again on every tick.
+  The person pressed Send, the message did not arrive, and the screen ended up
+  saying nothing at all: the stranded state this feature exists to remove,
+  rebuilt inside the fix for it.
+- The verdict line under each message measured **3.04:1** in light mode, under
+  this project's 4.5:1 floor, on the one sentence that says whether a message
+  got there.
+
+⚠️ **And its contrast checker had the alpha bug the others still have**, in the
+BACKGROUND rather than the foreground: the sibling checks take the first
+background that is not fully transparent and treat it as opaque, which is fine
+everywhere they look and wrong on this screen, whose terminal boxes sit on
+`--attn-bg` — a 3.5%-black veil. Read as opaque it is near-black, so near-black
+text on it measured 1.00 and the check reported two failures on a page that has
+none. `flatten()` composites the whole stack. A false failure is cheaper than a
+false pass and still costs the next person an hour.

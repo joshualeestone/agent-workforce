@@ -232,6 +232,54 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member .drop { margin-left: auto; background: none; border: 0; cursor: pointer;
   font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
   min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
+/* --- the thread --------------------------------------------------------- */
+#pj-thread-who { font: var(--text-body) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* ⚠️ `overflow-x: auto` and NOT `white-space: pre-wrap`. A Claude permission
+   prompt draws its options in columns, and wrapping them at the panel width
+   turns the thing the person has to read into a jumble. The box scrolls
+   sideways instead, and `tabindex="0"` is what makes a scrollable region
+   reachable from the keyboard (WCAG 2.1 SC 2.1.1 — this project's floor is AA,
+   and a pane somebody cannot scroll is a pane they cannot read). */
+.pj-screen { font: var(--text-caption) var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--label); background: var(--attn-bg);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-control);
+  padding: var(--space-4) var(--space-5); margin-top: var(--space-3);
+  max-height: 320px; overflow: auto; white-space: pre; }
+/* The question is the reason the person came, so it is not the same weight as
+   the ambient screen below it. */
+.pj-question { margin: var(--space-5) 0; padding-left: var(--space-4);
+  border-left: 2px solid var(--warn-ink); }
+.pj-question .pj-screen { max-height: 240px; }
+.pj-viewport { margin-top: var(--space-6); }
+.pj-msgs { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-5) 0; }
+.pj-msg { padding: var(--space-4) var(--space-5); border: 0.5px solid var(--separator);
+  border-radius: var(--radius-control); }
+.pj-msg .pj-msg-text { display: block; font: var(--text-body) var(--font-ui); color: var(--label); }
+/* ⚠️ The verdict is a SENTENCE under every message, never a tick. A tick would
+   be read as "it got there and was understood", and all we know is that tmux
+   took the keystroke. */
+/* ⚠️ `--label-2`, NOT `--label-3`, and it was measured rather than chosen.
+   `--label-3` is `rgba(0,0,0,0.42)`, which at this size is 3.04:1 on the page
+   background — under the 4.5:1 this project's floor requires, in light mode,
+   on the one line that tells somebody whether their message got there. Its
+   sibling `.pj-member small` uses `--label-3` and is a scannable caption; this
+   is a sentence with a verdict in it. */
+.pj-msg .pj-msg-said { display: block; font: var(--text-caption) var(--font-ui);
+  color: var(--label-2); margin-top: 2px; }
+/* A message that did not get there does not draw like one that did. */
+.pj-msg.failed { border-style: dashed; }
+.pj-msg.failed .pj-msg-said { color: var(--label); }
+.pj-say { margin-top: var(--space-5); }
+#pj-say { flex: 1 1 auto; }
+/* The one-click route from a card that says "Needs you". 24px minimum, WCAG 2.2
+   SC 2.5.8, the same floor as the Take-off control. */
+.card-answer { display: inline-block; margin-top: var(--space-3); cursor: pointer;
+  font: var(--text-callout) var(--font-ui); color: var(--label);
+  background: var(--bg); border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-control); min-height: 24px;
+  padding: var(--space-3) var(--space-4); }
 .pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
 .pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
   border-radius: var(--radius-control); }
@@ -1026,13 +1074,51 @@ svg { display: block; }
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
     </div>
 
-    <div class="field">
-      <span class="flabel">Talking to them isn't built yet.</span>
-      <p class="fhint">This is where you'll give them work and read what they say
-         back, the way you would message a person. It needs one thing we haven't
-         settled: when five agents are on a project, who answers. Everything
-         answering at once and nothing answering are the same bug, so the room
-         waits until that has a rule.</p>
+    <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
+         the room was waiting on exactly this question: when five agents are on a
+         project, who answers. The answer is ONE of them, chosen here. Everything
+         answering at once and nothing answering are the same bug. -->
+    <div class="field" id="pj-thread">
+      <span class="flabel" id="pj-thread-label">Talk to one of them</span>
+      <p class="fhint">Every message goes to the one agent you pick. The others
+         are on the project and are not in this conversation.</p>
+      <div class="frow">
+        <select id="pj-thread-who" aria-label="Which agent this message goes to"></select>
+      </div>
+
+      <!-- The question, when the board says this agent is asking one. First,
+           because it is why the person came. -->
+      <div class="pj-question" id="pj-question" hidden>
+        <span class="flabel" id="pj-question-label"></span>
+        <!-- ⚠️ `pre`, and it is not a style choice: this is terminal output, so
+             the columns a Claude prompt draws its options in only line up in a
+             monospaced, whitespace-preserving box. -->
+        <pre class="pj-screen" id="pj-question-text" tabindex="0"></pre>
+      </div>
+
+      <!-- What we have sent, and how each one went. Ours to keep, because we
+           wrote it; the screen below is not. -->
+      <div class="pj-msgs" id="pj-msgs"></div>
+
+      <div class="frow pj-say">
+        <input type="text" id="pj-say" maxlength="2000"
+               placeholder="Type a message" aria-label="A message for this agent">
+        <button class="btn" id="pj-send" type="button">Send</button>
+      </div>
+      <p class="fmsg" id="pj-thread-msg" aria-live="polite"></p>
+
+      <!-- ⚠️ THE AGENT'S SIDE IS A VIEWPORT, NOT A TRANSCRIPT, and the heading
+           says so in words rather than in a tooltip. Nothing here parses the
+           terminal into who-said-what: a parser that guesses wrong puts words in
+           the agent's mouth, and Claude Code redraws, wraps and prints tool
+           output that reads exactly like prose. -->
+      <div class="pj-viewport">
+        <span class="flabel" id="pj-screen-label">Its screen</span>
+        <p class="fhint" id="pj-screen-hint">This is the window it is running in,
+           as it looks right now. It is not a transcript, and it is not what the
+           agent said to you.</p>
+        <pre class="pj-screen" id="pj-screen" tabindex="0"></pre>
+      </div>
     </div>
 
     <div class="field">
@@ -1351,6 +1437,17 @@ function card(a) {
         ? '<div class="note">Nearly full. It will soon forget the earlier part of this conversation, including anything it agreed to do.</div>'
         : '');
 
+  /**
+   * ⚠️ THE ONE CLICK OUT OF THE STRANDED STATE. This card is where the product
+   * failed a first run: it said "Needs you — the pane is showing a question"
+   * and offered nowhere to see the question or answer it. The button is only on
+   * the state that means somebody is waiting, and it says what it will show
+   * rather than what it will do to the agent.
+   */
+  const answer = a.state === 'needs_you'
+    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}">See the question</button>`
+    : '';
+
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
     <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
     <div class="ringwrap">${ring(a)}</div>
@@ -1361,6 +1458,7 @@ function card(a) {
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}
       <div class="why">${esc(a.because)}</div>
+      ${answer}
     </div>
   </div>`;
 }
@@ -1976,6 +2074,11 @@ function setWritesOffered(a, tied) {
 }
 
 document.getElementById('grid').addEventListener('click', (e) => {
+  // ⚠️ FIRST, because it is INSIDE the card. Checked after `.card` it would
+  // never fire at all: the card's own handler matches the same click and opens
+  // the detail panel instead, which is the screen this button exists to skip.
+  const answer = e.target.closest('[data-answer]');
+  if (answer) { pjAnswerFrom(answer.dataset.answer); return; }
   const card = e.target.closest('.card');
   if (card) openDetail(card.dataset.agent);
 });
@@ -3523,6 +3626,28 @@ let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
 let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
 let PJ_ADD_AGENTS = [];     // the agents ticked in the add flow
+/**
+ * The thread's state, declared HERE with the rest of the projects state rather
+ * than beside its own functions four hundred lines down.
+ *
+ * ⚠️ `let` is not hoisted, and `openProject` — which sits above those
+ * functions — assigns `PJ_WHO`. That works only while nothing can call it
+ * during synchronous evaluation of this script. `WATCH` carries the same note
+ * at the top of this file for the same reason: one programmatic click during
+ * load, or making this a module, turns a below-the-use declaration into a
+ * ReferenceError that silently kills the screen.
+ */
+let PJ_WHO = null;          // the agent this project's thread is addressed to
+let PJ_THREAD = null;       // the last thread answer, or null if we have none
+let PJ_SENDING = false;     // a send is in flight; guards double-sends and the poll
+// The last sentence `loadThread` itself wrote into the thread's message line.
+// It clears only that one, so a poll cannot wipe a send's verdict — see the
+// note in `loadThread`.
+let PJ_THREAD_NOTE = null;
+// Ordering guard, the same one `loadProjects` and `pjBrowse` take: the
+// 5-second poll and a click can be in flight together, and a stale answer must
+// not repaint a thread the person has since switched away from.
+let PJ_THREAD_GEN = 0;
 
 function pjView(which) {
   for (const v of ['list', 'one', 'add']) {
@@ -3753,9 +3878,342 @@ function openProject(id) {
   }
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
+  // ⚠️ The thread starts fresh on every project. Carrying the last project's
+  // recipient over would open a conversation addressed to whoever the person
+  // happened to be talking to on a different piece of work, and `pjThreadWho`
+  // would only catch it when that agent is not on this project — so the
+  // dangerous half (it IS on both) would be silent.
+  PJ_WHO = null;
+  PJ_THREAD = null;
+  document.getElementById('pj-thread-msg').textContent = '';
+  document.getElementById('pj-say').value = '';
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
+  loadThread();
+}
+
+/* --- the thread ---------------------------------------------------------- *
+ *
+ * ⚠️ WHAT THIS SCREEN MAY SAY, and it is the whole design. We put text into a
+ * pane and we captured what that pane shows. We did NOT inform a program, and
+ * nothing here may read as though we did: the verdict under a message is
+ * "placed into casey's session", never "casey received it". A keystroke
+ * reaching a terminal is not evidence that anything read it.
+ *
+ * ⚠️ AND THE AGENT'S SIDE IS THE SCREEN, NOT SPEECH. There are no bubbles for
+ * the agent, deliberately. Parsing a TUI into who-said-what guesses, and the
+ * first wrong guess puts words in the agent's mouth under its own name.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Who this project's thread is addressed to.
+ *
+ * ⚠️ The DEFAULT is not worked out here. `/api/projects` carries
+ * `defaultAgent`, decided by `chat.defaultAgentFor` — one rule, server-side,
+ * because a copy in this file would drift from the one the routes use and the
+ * two would disagree about who a message goes to.
+ */
+function pjThreadWho(p) {
+  const on = (p.agents || []).map((a) => a.sessionName);
+  if (PJ_WHO && on.includes(PJ_WHO)) return PJ_WHO;
+  return p.defaultAgent || null;
+}
+
+/** The name to SPEAK for a member. Act on the machine name, speak this one. */
+function pjNameOf(p, sessionName) {
+  const m = (p.agents || []).find((a) => a.sessionName === sessionName);
+  return (m && m.name) || sessionName;
+}
+
+/**
+ * When something happened, said as weakly as we actually know it.
+ *
+ * "Just now" is a claim about a minute, and a wall-clock time is a claim about
+ * a moment; nothing here rounds a five-minute-old send into "just now".
+ */
+function pjWhen(at) {
+  const when = Date.parse(at);
+  if (!Number.isFinite(when)) return '';
+  const secs = Math.round((Date.now() - when) / 1000);
+  if (secs < 0) return 'just now';          // a clock that moved; do not invent a future
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return mins === 1 ? 'a minute ago' : mins + ' minutes ago';
+  try {
+    return 'at ' + new Date(when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function pjMsg(m, name) {
+  const d = (m && m.delivery) || {};
+  const placed = d.state === 'placed';
+  // ⚠️ THE SENTENCE, not a tick. A tick beside a message is read as "it arrived
+  // and was understood", and all we know is that tmux took the keystroke.
+  const said = placed
+    ? 'Placed into ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + '.'
+    : 'Could not deliver: ' + esc(d.because || 'we could not put it into its session') + '.';
+  return '<div class="pj-msg' + (placed ? '' : ' failed') + '">'
+    + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
+    + '<span class="pj-msg-said">' + said + '</span>'
+    + '</div>';
+}
+
+/** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
+function pjSetScreen(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+function paintThreadPicker(p, who) {
+  const sel = document.getElementById('pj-thread-who');
+  const members = p.agents || [];
+  const html = members.length
+    ? members.map((m) => '<option value="' + esc(m.sessionName) + '">' + esc(m.name) + '</option>').join('')
+    : '<option value="">no agents on this project yet</option>';
+  // The person's CHOICE survives a repaint, the same guard the add-an-agent
+  // picker beside it carries: rebuilding options resets a select to index 0, so
+  // somebody who picked an agent and paused for five seconds would be typing to
+  // a different one.
+  if (sel.innerHTML !== html) {
+    sel.innerHTML = html;
+  }
+  if (who && sel.value !== who) sel.value = who;
+  sel.disabled = !members.length;
+  document.getElementById('pj-say').disabled = !members.length;
+  document.getElementById('pj-send').disabled = !members.length || PJ_SENDING;
+}
+
+function paintThread(body) {
+  const p = pjById(PJ_CURRENT);
+  if (!p || !body) return;
+  const name = pjNameOf(p, body.agent && body.agent.sessionName);
+
+  /* The question, when the board says this agent is asking one. */
+  const qWrap = document.getElementById('pj-question');
+  const qText = document.getElementById('pj-question-text');
+  const qLabel = document.getElementById('pj-question-label');
+  if (body.asking && body.question) {
+    qLabel.textContent = name + ' is waiting on an answer. This is the part of its screen that asked:';
+    pjSetScreen(qText, body.question.text);
+    qWrap.hidden = false;
+  } else if (body.asking) {
+    // ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is the
+    // stranded state this whole feature exists to remove, rebuilt one step
+    // further in. The two reads are milliseconds apart and the pane redraws
+    // between them, so this is reachable.
+    qLabel.textContent = name + ' is waiting on an answer, and we cannot find the '
+      + 'question on its screen right now. Its whole screen is below.';
+    pjSetScreen(qText, '');
+    qText.hidden = true;
+    qWrap.hidden = false;
+  } else {
+    qWrap.hidden = true;
+    qText.hidden = false;
+  }
+  if (body.asking && body.question) qText.hidden = false;
+
+  /* What we have sent. */
+  const msgs = document.getElementById('pj-msgs');
+  if (body.messages === null) {
+    // ⚠️ `null` is "we could not read them", which is NOT "you have said
+    // nothing". Painting an empty list here would be the same failure as
+    // rendering "No projects yet" over an unreadable projects file.
+    setLive(msgs, '<div class="err">We cannot read what you have sent this agent. '
+      + 'This is not saying you have sent nothing, it is saying we cannot see it.'
+      + (body.historyBecause ? '<br>' + esc(body.historyBecause) + '.' : '') + '</div>');
+  } else if (!body.messages.length) {
+    setLive(msgs, '<p class="fhint">You have not sent ' + esc(name) + ' anything from here yet.</p>');
+  } else {
+    setLive(msgs, body.messages.map((m) => pjMsg(m, name)).join(''));
+  }
+
+  /* Its screen. */
+  document.getElementById('pj-screen-label').textContent = 'What ' + name + '’s screen shows right now';
+  const screen = document.getElementById('pj-screen');
+  const hint = document.getElementById('pj-screen-hint');
+  if (body.viewport && body.viewport.text !== null && body.viewport.text !== undefined) {
+    pjSetScreen(screen, body.viewport.text);
+    screen.hidden = false;
+    hint.textContent = 'This is the window it is running in, as it looks right now. '
+      + 'It is not a transcript, and it is not what the agent said to you.';
+  } else {
+    screen.hidden = true;
+    // ⚠️ The reason, in place of the screen. An empty box would read as an
+    // agent sitting at a blank terminal, which is a claim about its screen we
+    // did not make.
+    hint.textContent = 'We cannot see its screen right now'
+      + ((body.viewport && body.viewport.because) ? ': ' + body.viewport.because : '') + '.';
+  }
+}
+
+async function loadThread() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const who = pjThreadWho(p);
+  paintThreadPicker(p, who);
+  if (!who) {
+    // Nobody to talk to is a real state, and it is the first one a new project
+    // is in. Say what to do rather than showing an empty conversation.
+    setLive(document.getElementById('pj-msgs'),
+      '<p class="fhint">Put an agent on this project and you can talk to it here.</p>');
+    document.getElementById('pj-question').hidden = true;
+    document.getElementById('pj-screen').hidden = true;
+    document.getElementById('pj-screen-hint').textContent = '';
+    return;
+  }
+  const mine = ++PJ_THREAD_GEN;
+  let body;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
+      + '/thread/' + encodeURIComponent(who));
+    body = await res.json();
+    if (mine !== PJ_THREAD_GEN) return;
+    if (!res.ok) throw new Error(body.error || 'we could not read this conversation right now');
+  } catch (err) {
+    if (mine !== PJ_THREAD_GEN) return;
+    // ⚠️ PJ_THREAD is deliberately NOT cleared, and the painted thread is left
+    // as it was. Blanking it would turn "we could not look" into "there is
+    // nothing here", which is the failure this app is built against. Through
+    // the same change-guard as everything else, because the poll re-enters here
+    // every five seconds and this is an aria-live region.
+    const msg = document.getElementById('pj-thread-msg');
+    const note = 'We cannot read this conversation right now. ' + (err.message || '');
+    if (msg.textContent !== note) msg.textContent = note;
+    // Remembered, so the next successful read clears THIS sentence and not
+    // whatever a send has since written in its place.
+    PJ_THREAD_NOTE = note;
+    return;
+  }
+  PJ_THREAD = body;
+  /**
+   * ⚠️ ONLY THIS FUNCTION'S OWN NOTE IS CLEARED, and finding out why cost a
+   * render check. Clearing the line outright wiped the sentence `pjSend` had
+   * just written — so a delivery that FAILED said "Could not deliver: can't
+   * find pane" for a few milliseconds and then went silent, and the 5-second
+   * poll wiped it again on every tick. The person pressed Send, their message
+   * did not arrive, and the screen ended up saying nothing at all: the stranded
+   * state this whole feature exists to remove, rebuilt inside the fix for it.
+   * Not visible to any assertion that reads source.
+   */
+  const line = document.getElementById('pj-thread-msg');
+  if (PJ_THREAD_NOTE && line.textContent === PJ_THREAD_NOTE) line.textContent = '';
+  PJ_THREAD_NOTE = null;
+  paintThread(body);
+}
+
+document.getElementById('pj-thread-who').addEventListener('change', (e) => {
+  PJ_WHO = e.target.value || null;
+  // Cleared, because it describes the conversation being left rather than the
+  // one being opened.
+  document.getElementById('pj-thread-msg').textContent = '';
+  PJ_THREAD = null;
+  loadThread();
+});
+
+async function pjSend() {
+  // ⚠️ ONE send at a time. Two clicks on a slow tmux would type the same
+  // message into the agent twice, and the second one lands after the agent has
+  // already started on the first.
+  if (PJ_SENDING) return;
+  const p = pjById(PJ_CURRENT);
+  if (!p) {
+    // ⚠️ SAYS SO rather than returning silently, which is what "nothing
+    // happened" looks like from the outside — somebody presses Send, their
+    // words stay in the box, and the screen offers no account of it. Reachable:
+    // the project can be removed in another window between the poll and the
+    // click, and the list this reads is refreshed every five seconds.
+    document.getElementById('pj-thread-msg').textContent =
+      'We cannot see this project any more, so we did not send that. Your message is still here.';
+    return;
+  }
+  const who = pjThreadWho(p);
+  const box = document.getElementById('pj-say');
+  const msg = document.getElementById('pj-thread-msg');
+  const text = box.value.trim();
+  if (!who) { msg.textContent = 'There is no agent on this project to send that to.'; return; }
+  if (!text) { msg.textContent = 'Write something to send.'; return; }
+
+  PJ_SENDING = true;
+  document.getElementById('pj-send').disabled = true;
+  msg.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
+      + '/thread/' + encodeURIComponent(who), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not send that');
+    const name = pjNameOf(p, who);
+    const placed = body.delivery && body.delivery.state === 'placed';
+    if (placed) {
+      // ⚠️ Cleared only on a delivery that happened. Emptying the box after a
+      // failure throws away what the person wrote at the exact moment they most
+      // need it back.
+      box.value = '';
+      msg.textContent = 'Placed into ' + name + '’s session just now.'
+        // ⚠️ RECORDING AND DELIVERING ARE TWO ACTS. A message that went through
+        // and could not be written down must say both, or the thread quietly
+        // loses a message it delivered.
+        + (body.recorded ? '' : ' We could not add it to this conversation'
+          + (body.recordedBecause ? ' (' + body.recordedBecause + ')' : '') + '.');
+    } else {
+      msg.textContent = 'Could not deliver: '
+        + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.';
+    }
+    await loadThread();
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    PJ_SENDING = false;
+    document.getElementById('pj-send').disabled = false;
+  }
+}
+
+document.getElementById('pj-send').addEventListener('click', pjSend);
+document.getElementById('pj-say').addEventListener('keydown', (e) => {
+  // Enter sends, because this is a message box and that is what a message box
+  // does. There is no multi-line message to protect: the engine collapses
+  // whitespace, since a newline reaching the pane submits half a message.
+  if (e.key === 'Enter') { e.preventDefault(); pjSend(); }
+});
+
+/**
+ * From a card that says "Needs you" to the question, in one click.
+ *
+ * ⚠️ THE STRANDED STATE THIS EXISTS TO MAKE IMPOSSIBLE: a card saying an agent
+ * is showing a question, with no way to see or answer it. So every ending here
+ * lands somewhere that says what to do next — including the two that cannot
+ * open a thread at all.
+ */
+async function pjAnswerFrom(sessionName) {
+  await loadProjects();
+  const on = PROJECTS.filter((p) => (p.agents || []).some((m) => m.sessionName === sessionName));
+  showTab('projects');
+  if (!on.length) {
+    PJ_CURRENT = null;
+    pjView('list');
+    // Named, and told what would fix it. "Nothing happened" is what a silent
+    // return looks like from the outside.
+    document.getElementById('pj-list-msg').textContent =
+      sessionName + ' is not on a project yet, so there is no conversation to open here. '
+      + 'Add it to a project and you can answer it.';
+    return;
+  }
+  openProject(on[0].id);
+  if (PJ_CURRENT !== on[0].id) return;   // openProject bailed and said why
+  PJ_WHO = sessionName;
+  await loadThread();
+  if (on.length > 1) {
+    // ⚠️ Said, because we chose. Opening one of three projects silently is a
+    // decision the person did not make and cannot see.
+    document.getElementById('pj-thread-msg').textContent =
+      pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
+      + on[0].name + '.';
+  }
 }
 
 /* --- adding one -------------------------------------------------------- */
@@ -4129,6 +4587,13 @@ setInterval(() => {
   // is how somebody answers a different question than the one they read.
   if (!document.getElementById('pj-one-confirm').hidden) return;
   loadProjects();
+  // ⚠️ The thread rides the SAME cadence, not a second timer. Its two live
+  // values are the agent's screen and whether it is asking something, and both
+  // change on their own — a viewport painted once goes on asserting a screen
+  // that stopped being true, which is the failure this whole app is built
+  // against. Not while a send is in flight: that would repaint the list from
+  // underneath the send's own refresh.
+  if (!document.getElementById('pj-one-view').hidden && !PJ_SENDING) loadThread();
 }, 5000);
 
 /* ==========================================================================

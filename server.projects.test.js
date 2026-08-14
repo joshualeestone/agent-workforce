@@ -592,3 +592,223 @@ test('an agent the person removed does not appear on a project row', async () =>
     board.restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Talking to ONE agent on ONE project
+//
+// ⚠️ EVERY TEST BELOW ARMS THE tmux SEAM EXPLICITLY, and that is not optional
+// here the way it is elsewhere in this file. `AGENT_WORKFORCE_TMUX_BIN` is
+// `/bin/echo` for these tests, and `/bin/echo` EXITS ZERO — so an unarmed send
+// would report `placed` for a keystroke that reached nothing, which is the one
+// verdict this whole feature exists not to invent. The seam is installed per
+// test and torn down in a `finally`, because a leaked runner would let a later
+// test in this process type into whatever tmux is really on the machine.
+// ---------------------------------------------------------------------------
+
+const chat = require('./engine/chat');
+
+/** Arm the chat seam with a scripted tmux, and hand back what was called. */
+function armChat(answers) {
+  const calls = [];
+  chat.setRunner((args) => {
+    calls.push(args);
+    return answers.length ? answers.shift() : { ran: true, status: 0, out: '', err: '' };
+  });
+  chat.setDryRun(false);
+  return calls;
+}
+const said = (out) => ({ ran: true, status: 0, out: out || '', err: '' });
+
+/**
+ * A project with one agent on it, and the seam armed. Always torn down.
+ *
+ * ⚠️ THE THREAD STORE IS CLEARED TOO, and finding out why was worth the
+ * paragraph. `reset()` removes `projects.json` only, and a project id is
+ * derived from its NAME — so every test here rebuilt the SAME id and inherited
+ * the previous test's messages. Three tests read another test's history and two
+ * of them asserted the wrong verdict off it. A fixture that carries state
+ * between tests is measuring a world the next test did not arrange.
+ */
+async function withThread(spec, answers, fn) {
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  const calls = armChat(answers);
+  try {
+    const made = json(await post('/api/projects', {
+      name: 'Thread ' + spec.name, folder: folder('thread-' + spec.name), agents: [spec.name],
+    })).project;
+    return await fn({ board, calls, project: made });
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
+}
+
+test('the thread shows what the agent’s screen shows, labelled as the screen and not as speech', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'working' }), [said('Reading the lease\n· Working\n')],
+    async ({ project, calls }) => {
+      const res = await req(`/api/project/${project.id}/thread/zeta`);
+      assert.equal(res.status, 200);
+      const body = json(res);
+      assert.equal(body.agent.sessionName, 'zeta');
+      assert.equal(body.viewport.text, 'Reading the lease\n· Working');
+      assert.equal(body.viewport.because, null);
+      assert.deepEqual(body.messages, [], 'nothing has been said to it yet');
+      assert.equal(body.asking, false);
+      assert.equal(body.question, null);
+      // The capture is a capture, pinned to the exact pane.
+      assert.equal(calls[0][0], 'capture-pane');
+      assert.ok(calls[0].includes('-J'));
+      assert.ok(calls[0].some((a) => typeof a === 'string' && a.startsWith('=zeta-discord:')));
+    });
+});
+
+test('an agent the board calls "Needs you" hands the thread the question region', async () => {
+  reset();
+  // The stranded state: from the card that says "Needs you", the thread has to
+  // be able to show WHAT it is asking. Same screen, same markers.
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('I want to delete the old build folder.\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n')],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.agent.state, 'needs_you');
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the thread must not be empty under a card that says it is asking');
+      assert.match(body.question.text, /Do you want to proceed\?/);
+      assert.match(body.question.text, /delete the old build folder/);
+      assert.equal(body.questionBecause, null);
+    });
+});
+
+test('a card that says "Needs you" over a screen we cannot read SAYS so, rather than showing nothing', async () => {
+  reset();
+  // The two reads are milliseconds apart and the pane redraws between them. A
+  // silent empty question box under a "Needs you" card is the stranded state
+  // rebuilt one step further in.
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [{ ran: true, status: 1, out: '', err: 'no server running' }],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      assert.match(body.questionBecause, /cannot find the question on its screen/);
+      assert.equal(body.viewport.text, null);
+      assert.match(body.viewport.because, /could not read its window/);
+    });
+});
+
+test('sending places the text into the agent’s own session, and says only that', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said()],
+    async ({ project, calls }) => {
+      const res = await post(`/api/project/${project.id}/thread/zeta`, { text: 'have a look at the lease' });
+      assert.equal(res.status, 200);
+      const body = json(res);
+      assert.equal(body.delivery.state, 'placed');
+      assert.equal(body.recorded, true);
+      // ⚠️ The vocabulary is asserted, because the whole discipline of this
+      // feature is what the answer is allowed to CLAIM. `placed` and
+      // `could_not` are the only two verdicts; anything meaning "received",
+      // "read" or "delivered to the agent" would be a claim about a program's
+      // understanding that a keystroke cannot support.
+      assert.ok(['placed', 'could_not'].includes(body.delivery.state));
+      assert.equal(calls[0][0], 'send-keys');
+      assert.equal(calls[0][calls[0].length - 1], 'have a look at the lease');
+      assert.deepEqual(calls[1].slice(-1), ['Enter']);
+    });
+});
+
+test('what was sent is kept, with the verdict on sending it, and read back on the next look', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'first thing' });
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.messages.length, 1);
+      assert.equal(body.messages[0].text, 'first thing');
+      assert.equal(body.messages[0].delivery.state, 'placed');
+      assert.ok(body.messages[0].at);
+    });
+});
+
+test('a send that could NOT be delivered is recorded too, so the thread does not rewrite its own history', async () => {
+  reset();
+  // A pane we cannot tie to the name: refused before tmux is touched, and the
+  // attempt is still the person's to see later.
+  await withThread(fleet.stranger('zeta', { state: 'working' }), [],
+    async ({ project, calls }) => {
+      const body = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'are you there' }));
+      assert.equal(body.delivery.state, 'could_not');
+      assert.match(body.delivery.because, /cannot tell that it is this agent/);
+      assert.equal(body.recorded, true);
+      assert.equal(calls.length, 0, 'nothing was typed anywhere');
+      const back = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(back.messages[0].delivery.state, 'could_not');
+    });
+});
+
+test('an empty message is refused before anything is looked up', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    const res = await post(`/api/project/${project.id}/thread/zeta`, { text: '   ' });
+    assert.equal(res.status, 400);
+    assert.match(json(res).error, /write something to send/);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('a thread for an agent that is not on the project is a 404, on both verbs', async () => {
+  reset();
+  // ⚠️ A ROUTING RULE, NOT A PERMISSION. Nothing here confines an agent to a
+  // project. What it refuses is turning this route into a general "type into
+  // any agent on this machine" endpoint that merely takes a project id.
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    const got = await req(`/api/project/${project.id}/thread/nobody-here`);
+    assert.equal(got.status, 404);
+    assert.match(json(got).error, /not on this project/);
+    const sent = await post(`/api/project/${project.id}/thread/nobody-here`, { text: 'hello' });
+    assert.equal(sent.status, 404);
+    assert.equal(calls.length, 0, 'a refused route types nothing');
+  });
+});
+
+test('a thread on a project that does not exist is a 404, not a blank screen', async () => {
+  reset();
+  const got = await req('/api/project/no-such-project/thread/zeta');
+  assert.equal(got.status, 404);
+  assert.match(json(got).error, /no project by that name/);
+});
+
+test('sending is a WRITE, so another website cannot fire it', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project, calls }) => {
+    const res = await req(`/api/project/${project.id}/thread/zeta`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
+      body: JSON.stringify({ text: 'do something regrettable' }),
+    });
+    assert.notEqual(res.status, 200);
+    assert.equal(calls.length, 0, 'a cross-site request must not reach an agent’s keyboard');
+  });
+});
+
+test('a conversation we cannot read is reported as unreadable, never as nothing said', async () => {
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'something worth keeping' });
+      // The control: it reads back before the file is damaged.
+      assert.equal(json(await req(`/api/project/${project.id}/thread/zeta`)).messages.length, 1);
+
+      const file = chat.threadFile(project.id, 'zeta');
+      fs.writeFileSync(file, '{ not json');
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.messages, null, 'null is "we could not read them"; [] would be a claim');
+      assert.match(body.historyBecause, /cannot make sense of it/);
+      // And the rest of the screen still renders: the agent's side is a
+      // different object with a different owner, and it failed nothing.
+      assert.equal(body.agent.sessionName, 'zeta');
+    });
+});
