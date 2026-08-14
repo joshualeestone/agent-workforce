@@ -1059,6 +1059,24 @@ test('an unreadable parent leaves the asked-for spelling alone, rather than thro
   }
 });
 
+test('an over-long name on the default path meets the SAME sentence the preview showed', () => {
+  // Round 18: this guard was the one survivor of a 34-mutation battery --
+  // correct and held by nothing. Reachable through the UI despite the
+  // field's maxlength, because pjChoose assigns the name programmatically
+  // from a folder basename. The property: the sentence at the button is
+  // the sentence the preview line has been printing, never cleanName's
+  // different one.
+  reset();
+  const long = 'x'.repeat(121);
+  assert.throws(() => projects.create({ name: long }),
+    /too long to make a folder out of; keep it to 60 characters/,
+    'the default path must speak folderNameProblem’s sentence first');
+  // Control: with a folder GIVEN, cleanName's own cap still speaks, so the
+  // guard above is ordering, not a swallow of the other refusal.
+  assert.throws(() => projects.create({ name: long, folder: folder('longname-target') }),
+    /longer than a project name should be/);
+});
+
 test('the previewed path IS the path the act produces, case correction included', () => {
   // ⚠️ Volume-portable on purpose, the same lesson create.test.js records: on
   // a case-insensitive disk `lease` beside an existing `Lease` ADOPTS that
