@@ -41,7 +41,10 @@ SB="$(mktemp -d)"
 # The board-kill list is a glob, not a hardcoded home/home2/... list: a
 # future pass that adds a seventh sandbox home must not silently leak a
 # board process onto the operator's machine.
-trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then kill "$(cat "$_p")" 2>/dev/null || true; fi; done; chflags -R nouchg "$SB" 2>/dev/null || true; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
+# The kill skips this shell's own pid: the stale-pidfile fixture seeds $$
+# as a live-but-not-a-board pid, and the first version of this trap
+# SIGTERMed the harness itself right after printing the summary.
+trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then _k="$(cat "$_p" 2>/dev/null)"; [ "$_k" = "$$" ] || kill "$_k" 2>/dev/null || true; fi; done; chflags -R nouchg "$SB" 2>/dev/null || true; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
 # A free port, probed rather than assumed: several agents and a real board
@@ -723,12 +726,19 @@ SBH23="$SB/stranger-home"
 SYS28="$SB/sys28"
 mkdir -p "$SBH23" "$SYS28"
 export KOSMOS_HOME="$SB/home27" KOSMOS_BIN_DIR="$SB/bin27"
+# A LIVE pid that is not a board, seeded as home27's pidfile: this drives
+# the ps leg of the BOARD_OURS proof (a recycled pid must not read as
+# ours). Deleting the ps case would flip this run to "Kosmos is running"
+# and open the stub, failing both assertions below.
+mkdir -p "$SB/home27"
+printf '%s' "$$" > "$SB/home27/board.pid"
 OPENED_BEFORE_STRANGER="$(wc -l < "$SB/opened.log" | tr -d ' ')"
 RC=0; cat "$SETUP" | HOME="$SBH23" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS28" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
 chk "occupied-port install exits 0" "[ $RC -eq 0 ]"
 chk "the occupied port is named, not claimed" "grep -q 'could not confirm its own board' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
 chk "no browser was opened onto the stranger's board" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_STRANGER\" ]"
 KOSMOS_HOME="$SB/home26" "$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
+rm -f "$SB/home27/board.pid"
 
 echo "== a link at the SYSTEM path survives uninstall, named =="
 # The round-14 gap: an owned-target LINK at the system entry passed the
@@ -792,7 +802,7 @@ else
   chmod 755 "$SYS_RO5"
 fi
 
-echo "== the operator's real folders were never touched =="
+echo "== the operator's real folders were never touched (top-level entries) =="
 chk "real home Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"
 chk "real /Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint /Applications)\" = \"$REAL_SYS_APPS_BEFORE\" ]"
 

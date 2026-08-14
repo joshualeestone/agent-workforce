@@ -1125,8 +1125,11 @@ PLIST
 
   # ⚠️ IT STARTS THE BOARD IF IT IS NOT RUNNING, rather than only opening a
   # URL, and it does so through `kosmos open`, which is the one place that
-  # knows how to start, health-check and identify the board (a squatter on
-  # the port must not be opened and called Kosmos). If that fails, the icon
+  # knows how to start, health-check and identify the board (a NON-Kosmos
+  # squatter on the port must not be opened and called Kosmos; another
+  # account's Kosmos is indistinguishable to that check, which is why the
+  # fresh-install open in this file demands the pidfile proof instead).
+  # If that fails, the icon
   # says so in a dialog instead of opening a dead page: an icon that opens a
   # browser error is how a person concludes the product broke, and they are
   # not wrong to. osascript ships on every Mac; if even the dialog fails
@@ -1414,7 +1417,7 @@ if [ -f "$KOSMOS_HOME/board.pid" ]; then
       # running_pid uses): a recycled pid behind a stale pidfile would
       # otherwise read as ours, and this flag gates the browser open.
       case "$(/bin/ps -ww -p "$_bpid" -o command= 2>/dev/null)" in
-        *app/server.js*) BOARD_OURS=yes ;;
+        *"$KOSMOS_HOME/app/server.js"*) BOARD_OURS=yes ;;
       esac
       ;;
   esac
@@ -1428,8 +1431,12 @@ else
   printf '\n  Kosmos is installed, but could not confirm its own board is the one answering\n'
   printf '  on port %s (an "already running" line above refers to a board something else\n' "$PORT"
   printf '  started, often another account%ss Kosmos; each account runs its own).\n' "'"
+  printf '  (The Kosmos icon this install created is tied to port %s and will open\n' "$PORT"
+  printf '  whichever Kosmos answers there.)\n'
   printf '  Start yours on a different port, for example:\n'
-  printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$((PORT + 1))" "$BIN_DIR"
+  _alt=$((PORT + 1))
+  [ "$_alt" -le 65535 ] || _alt=$((PORT - 1))
+  printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$_alt" "$BIN_DIR"
   printf '  and it will print your dashboard address.\n\n'
 fi
 printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
