@@ -112,6 +112,18 @@ test('an empty message is refused, and so is one that is only whitespace', () =>
   assert.equal(chat.messageProblem('   \n  '), 'write something to send');
 });
 
+test('a non-string is refused, not coerced into "[object Object]"', () => {
+  // What was CHECKED must be what gets TYPED: String({}) would pass every
+  // later check and type a coerced artifact nobody wrote into a session.
+  assert.equal(chat.messageProblem({}), 'that message is not text');
+  assert.equal(chat.messageProblem(['ship it']), 'that message is not text');
+  assert.equal(chat.messageProblem(42), 'that message is not text');
+  // null/undefined stay on the empty-message path: "write something to send"
+  // is the right sentence for an absent field, and cleanMessage(null) is ''.
+  assert.equal(chat.messageProblem(null), 'write something to send');
+  assert.equal(chat.messageProblem(undefined), 'write something to send');
+});
+
 test('a message longer than the cap is refused rather than truncated', () => {
   assert.match(chat.messageProblem('x'.repeat(chat.MAX_TEXT + 1)), /2000 characters or fewer/);
   assert.equal(chat.messageProblem('x'.repeat(chat.MAX_TEXT)), null);

@@ -3719,6 +3719,11 @@ async function watchForAgent(name, result, attempt) {
 
 let PROJECTS = [];
 let PJ_AGENTS_UNREADABLE = false;
+// ⚠️ Whether the LAST projects read succeeded. PROJECTS is deliberately never
+// emptied on failure (see loadProjects), so the array alone cannot say "we
+// could not look" -- and a caller filtering a stale-or-initial [] would render
+// "there is nothing" for "we could not see". pjAnswerFrom is that caller.
+let PJ_READ_FAILED = false;
 let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
 let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
@@ -3890,8 +3895,10 @@ async function loadProjects() {
     if (!res.ok || body.projectsUnreadable) throw new Error(body.error || 'we cannot read your projects right now');
     PROJECTS = body.projects || [];
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
+    PJ_READ_FAILED = false;
   } catch {
     if (mine !== PJ_GEN) return;
+    PJ_READ_FAILED = true;
     // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
     // add-member and remove-member paths call this from the one-project view,
     // where `#pj-list` is hidden -- so a failed refresh left the member list
@@ -4344,9 +4351,11 @@ async function loadThread() {
     return;
   }
   let body;
+  let gone = false;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
       + '/thread/' + encodeURIComponent(who));
+    gone = res.status === 404;
     body = await res.json();
     if (mine !== PJ_THREAD_GEN) return;
     if (!res.ok) throw new Error(body.error || 'we could not read this conversation right now');
@@ -4359,8 +4368,23 @@ async function loadThread() {
     // kept and the variable is gone.) Through
     // the same change-guard as everything else, because the poll re-enters here
     // every five seconds and this is an aria-live region.
+    //
+    // ⚠️ A 404 IS A FACT, NOT A BLIND SPOT. "That agent is not on this
+    // project" and "there is no project by that name" are things the server
+    // ESTABLISHED, so framing them as "we cannot read" claims a doubt nobody
+    // has -- and it is reachable: removing the agent in another window 404s
+    // the next 5-second poll. The two frames get two sentences, and the
+    // engine's clause goes through pjSentence either way, because a lowercase
+    // clause after a full stop was the exact defect pjSentence was written
+    // for and this catch had reintroduced it.
     const msg = document.getElementById('pj-thread-msg');
-    const note = 'We cannot read this conversation right now. ' + (err.message || '');
+    // Only an ENGINE clause is repeated to the person. A rejected fetch's
+    // err.message is a browser internals string ("Failed to fetch"), which is
+    // the errno rule's territory: not something a person can act on.
+    const note = gone
+      ? 'This conversation is not here any more. ' + pjSentence((body && body.error) || 'what it belonged to changed')
+      : 'We cannot read this conversation right now.'
+        + (body && body.error ? ' ' + pjSentence(body.error) : '');
     if (msg.textContent !== note) msg.textContent = note;
     // Remembered, so the next successful read clears THIS sentence and not
     // whatever a send has since written in its place.
@@ -4431,16 +4455,44 @@ async function pjSend() {
   PJ_SENDING = true;
   document.getElementById('pj-send').disabled = true;
   msg.textContent = 'Sending…';
+  const name = pjNameOf(p, who);
+  let res, body;
   try {
-    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
+    res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
       + '/thread/' + encodeURIComponent(who), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
     });
-    const body = await res.json();
+    body = await res.json();
+  } catch {
+    /**
+     * ⚠️ A REJECTED FETCH IS THE TRANSPORT'S OWN `unconfirmed`, NOT A REFUSAL.
+     * The POST may have been fully processed (typed into the agent's session
+     * AND recorded) before the connection died on the way back -- so a raw
+     * "Failed to fetch" beside a still-full box is an invitation to press Send
+     * again, and the second copy answers a question the first already
+     * answered: the exact duplicate this feature's three delivery states exist
+     * to prevent, rebuilt one layer down. So it reads like the unconfirmed
+     * verdict: no claim it was or was not sent, the box keeps the only copy we
+     * are sure of, and the person is pointed at the screen below before any
+     * re-send. The browser's exception string stays off the screen (errno
+     * rule). No time phrase: we observed no delivery moment to stamp.
+     */
+    msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
+      + 'the connection to Kosmos failed while sending, so it may or may not have arrived. '
+      + 'Its screen is below. Check there before sending it again. '
+      + 'Your message is still in the box below.';
+    PJ_SENDING = false;
+    document.getElementById('pj-send').disabled = false;
+    // The refresh CAN still settle it: if the send landed and was recorded,
+    // the thread above will show it. Own try, so a repaint problem can never
+    // replace the one sentence the person needs.
+    try { await loadThread(); } catch { /* the verdict line stays */ }
+    return;
+  }
+  try {
     if (!res.ok) throw new Error(body.error || 'we could not send that');
-    const name = pjNameOf(p, who);
     const state = (body.delivery && body.delivery.state) || 'could_not';
     const note = (body.delivery && body.delivery.paneNote) ? ' (' + body.delivery.paneNote + ')' : '';
     // ⚠️ RECORDING AND DELIVERING ARE TWO ACTS. A message that went through and
@@ -4523,7 +4575,9 @@ async function pjSend() {
     }
     msg.textContent = render(pjWhenPart(at));
     PJ_SENT_LINE = { at, render, shown: msg.textContent };
-    await loadThread();
+    // Own try: the verdict above is committed, and a repaint problem in the
+    // refresh must not replace it with an exception string.
+    try { await loadThread(); } catch { /* the verdict line stays */ }
   } catch (err) {
     msg.textContent = err.message;
   } finally {
@@ -4560,8 +4614,21 @@ document.getElementById('pj-say').addEventListener('keydown', (e) => {
  */
 async function pjAnswerFrom(sessionName) {
   await loadProjects();
-  const on = PROJECTS.filter((p) => (p.agents || []).some((m) => m.sessionName === sessionName));
   showTab('projects');
+  // ⚠️ "We could not look" is NOT "it is on none". loadProjects leaves
+  // PROJECTS untouched on failure, so filtering it after a failed read would
+  // say "not on a project yet, add it to one" -- a definite instruction built
+  // on a read that did not happen, directly under a list saying we cannot see
+  // the projects at all. The two sentences cannot both be on screen.
+  if (PJ_READ_FAILED) {
+    PJ_CURRENT = null;
+    pjView('list');
+    document.getElementById('pj-list-msg').textContent =
+      'We could not check which projects ' + sessionName + ' is on just now, so we cannot '
+      + 'open its conversation from here. This is not saying it has none.';
+    return;
+  }
+  const on = PROJECTS.filter((p) => (p.agents || []).some((m) => m.sessionName === sessionName));
   if (!on.length) {
     PJ_CURRENT = null;
     pjView('list');
@@ -4880,9 +4947,16 @@ document.getElementById('pj-path-go').addEventListener('click', () => {
   pjChoose(typed);
 });
 
+// A short debounce, because this fires a fetch per keystroke at a synchronous
+// single-threaded server. PJ_WILLBE_GEN already keeps it CORRECT (stale
+// answers are retired); this just makes 30 keystrokes cost one request. The
+// other callers (open, pick, back-out) stay immediate on purpose: each is a
+// single act whose sentence should change with it.
+let PJ_WILLBE_TIMER = null;
 document.getElementById('pj-name').addEventListener('input', (e) => {
   e.target.dataset.auto = '0';
-  pjWillBe();
+  clearTimeout(PJ_WILLBE_TIMER);
+  PJ_WILLBE_TIMER = setTimeout(pjWillBe, 150);
 });
 
 document.getElementById('pj-advanced').addEventListener('click', () => {

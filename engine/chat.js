@@ -270,6 +270,11 @@ function cleanMessage(raw) {
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
 function messageProblem(raw) {
+  // ⚠️ A non-string is refused, not coerced. cleanMessage's String() would
+  // turn {"text": {}} into the literal "[object Object]" and this module's
+  // whole contract is that what was CHECKED is what gets TYPED into a
+  // person's agent -- a coerced artifact was never checked by anyone.
+  if (raw != null && typeof raw !== 'string') return 'that message is not text';
   const text = cleanMessage(raw);
   if (!text) return 'write something to send';
   if (text.length > MAX_TEXT) return `keep it to ${MAX_TEXT} characters or fewer`;
