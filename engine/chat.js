@@ -768,34 +768,38 @@ function refusalReason(got, fallback) {
  * `questionBecause` on the route, which exists for exactly that case.
  */
 function viewport(sessionName, roster) {
-  const at = new Date().toISOString();
+  // No `at` stamp (round 31): it was published on every return and read
+  // by nothing -- the unread-surface rule rounds 19 and 22 applied to the
+  // thread payload's agents copy and readIdentity's source, applied to
+  // the third instance. The capture is made in the same request cycle as
+  // the sentence that describes it, which is what "right now" claims.
   const key = String(sessionName == null ? '' : sessionName);
   if (!Array.isArray(roster)) {
-    return { text: null, at, because: 'we could not check which agents are running, so we cannot show you its screen' };
+    return { text: null, because: 'we could not check which agents are running, so we cannot show you its screen' };
   }
   const card = roster.find((a) => a && a.sessionName === key) || null;
   if (!card) {
-    return { text: null, at, because: 'we cannot see an agent by exactly this name on this computer right now' };
+    return { text: null, because: 'we cannot see an agent by exactly this name on this computer right now' };
   }
   if (card.isNamedOurs !== true) {
-    return { text: null, at, because: 'something is running under this name, but we cannot tell that it is this agent, so we are not showing you its screen' };
+    return { text: null, because: 'something is running under this name, but we cannot tell that it is this agent, so we are not showing you its screen' };
   }
   if (!card.target) {
-    return { text: null, at, because: 'we do not know which pane this agent is in' };
+    return { text: null, because: 'we do not know which pane this agent is in' };
   }
   // One depth for every caller: a `lines` parameter used to ride here with
   // a bound no caller ever exercised (round 16), which was API surface
   // whose safety nothing held.
   const got = tmux(['capture-pane', '-p', '-J', '-t', paneTarget(card), '-S', `-${VIEWPORT_LINES}`]);
   if (!got.ran || got.status !== 0) {
-    return { text: null, at, because: refusalReason(got, 'we could not read its window just now') };
+    return { text: null, because: refusalReason(got, 'we could not read its window just now') };
   }
   // ⚠️ Trailing blank lines are trimmed and NOTHING ELSE IS. tmux pads a
   // capture to the pane height, so an untrimmed viewport is mostly empty space
   // and the newest line sits off the top of a scrolled box. Trimming the ENDS
   // is presentation; touching the middle would be parsing, which this module
   // does not do.
-  return { text: String(got.out || '').replace(/\s+$/, ''), at, because: null };
+  return { text: String(got.out || '').replace(/\s+$/, ''), because: null };
 }
 
 /**

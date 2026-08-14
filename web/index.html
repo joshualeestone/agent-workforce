@@ -4051,13 +4051,21 @@ function openProject(id) {
     pjView('list');
     return;
   }
+  /* ⚠️ "Fresh" is scoped to SWITCHING projects (round 31): re-opening the
+     project already on screen used to run these same clears, so typing a
+     draft, pressing back, and clicking the same project again silently
+     deleted the words -- the never-delete rule, broken by navigation. On
+     a same-project re-open every cleared thing is already correct for
+     this project, so the whole reset is skipped. */
+  const switching = PJ_CURRENT !== id;
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
-  // ⚠️ The thread starts fresh on every project. Carrying the last project's
-  // recipient over would open a conversation addressed to whoever the person
-  // happened to be talking to on a different piece of work, and `pjThreadWho`
-  // would only catch it when that agent is not on this project — so the
-  // dangerous half (it IS on both) would be silent.
+  // ⚠️ The thread starts fresh on every OTHER project. Carrying the last
+  // project's recipient over would open a conversation addressed to
+  // whoever the person happened to be talking to on a different piece of
+  // work, and `pjThreadWho` would only catch it when that agent is not on
+  // this project — so the dangerous half (it IS on both) would be silent.
+  if (switching) {
   PJ_WHO = null;
   PJ_SENT_LINE = null;
   document.getElementById('pj-thread-msg').textContent = '';
@@ -4082,6 +4090,7 @@ function openProject(id) {
   // "What Mara's screen shows right now" from the LAST thread over an
   // empty area -- a heading naming an agent that is not on this project.
   document.getElementById('pj-screen-label').textContent = 'Its screen';
+  }
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
@@ -4112,6 +4121,13 @@ function openProject(id) {
 function pjThreadWho(p) {
   const on = (p.agents || []).map((a) => a.sessionName);
   if (PJ_WHO && on.includes(PJ_WHO)) return PJ_WHO;
+  // ⚠️ A pin whose agent LEFT the project is dropped, not parked (round
+  // 31): parked, it silently re-aimed the picker back to the departed
+  // agent the moment they were re-added -- the recipient changing under
+  // the person mid-sentence, the exact failure pjPinWho exists to
+  // prevent, arriving from the other direction. Dropping it lets the
+  // fallback below be re-pinned as the new deliberate state.
+  if (PJ_WHO && !on.includes(PJ_WHO)) PJ_WHO = null;
   return p.defaultAgent || null;
 }
 
@@ -4334,9 +4350,21 @@ function paintThread(body) {
       + '.'
       + (body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
     pjSetScreen(qText, '');
+    /* ⚠️ Focus is RESCUED before either hide (round 31): round 30 moves
+       focus INTO qText, and hiding a focused element drops focus to
+       <body> with nothing announced -- the stranded-keyboard state,
+       rebuilt by the poll five seconds after the fix for it. The message
+       box is the deliberate landing: always visible, and the natural
+       next action after reading a question is answering it. */
+    if (qText.contains(document.activeElement) || qText === document.activeElement) {
+      document.getElementById('pj-say').focus();
+    }
     qText.hidden = true;
     qWrap.hidden = false;
   } else {
+    if (qWrap.contains(document.activeElement)) {
+      document.getElementById('pj-say').focus();
+    }
     qWrap.hidden = true;
     qText.hidden = false;
   }
@@ -4375,8 +4403,14 @@ function paintThread(body) {
      * Whether a message got there is the per-send verdict's job, and that
      * verdict is already correct on every path. This line stays out of it.
      */
+    // The SESSION name is the unfilable thing, so it is what gets named --
+    // but the display name every other sentence speaks is tied beside it
+    // (round 31), or a "MyBot" that the picker calls something else reads
+    // as a stranger.
     setLive(msgs, '<p class="fhint">Kosmos cannot keep a conversation for an agent named '
       + esc(body.agent && body.agent.sessionName ? body.agent.sessionName : name)
+      + (body.agent && body.agent.sessionName && name && name !== body.agent.sessionName
+        ? ' (the ' + esc(name) + ' in the picker above)' : '')
       + '; nothing sent here is kept.</p>');
   } else if (body.messages === null) {
     // ⚠️ `null` is "we could not read them", which is NOT "you have said
