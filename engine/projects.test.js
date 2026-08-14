@@ -1004,7 +1004,7 @@ test('path-hostile names are REFUSED, not sanitised into a different folder', ()
   // somewhere else entirely. `create.js` refuses agent names on the same
   // principle — a name that quietly becomes a different path is a folder
   // somebody cannot find, or one they did not mean to write in.
-  for (const bad of ['..', '.', '.hidden', '   ', '/', '//', 'x'.repeat(61)]) {
+  for (const bad of ['..', '.', '.hidden', '   ', '/', '//', 'x'.repeat(61), 'bell\u0007name']) {
     assert.ok(projects.folderNameProblem(bad), `expected a refusal for ${JSON.stringify(bad)}`);
     assert.throws(() => projects.folderNameFor(bad), /name/, `expected a throw for ${JSON.stringify(bad)}`);
   }
@@ -1020,6 +1020,18 @@ test('a name that would escape the projects folder cannot, and the proof is the 
     assert.ok(projects.folderNameProblem(bad) || !path.relative(
       projects.projectsRoot(), projects.folderPathFor(bad),
     ).startsWith('..'), `${bad} escaped the projects folder`);
+  }
+  // ⚠️ The resolution arm must actually RUN (round 24): every input above
+  // is refused by folderNameProblem, so the left arm short-circuited and
+  // folderPathFor was never called -- a test named for the resolved path
+  // that only ever exercised the refusal. These names are asserted
+  // unrefused first (the control), then resolved, and the resolution must
+  // stay inside the root.
+  for (const tricky of ['Q3/Q4 planning', 'dots.mid.name', '  padded  ']) {
+    assert.equal(projects.folderNameProblem(tricky), null,
+      `${tricky} must pass the name check so the resolution arm is the one being tested`);
+    assert.ok(!path.relative(projects.projectsRoot(), projects.folderPathFor(tricky)).startsWith('..'),
+      `${tricky} resolved outside the projects folder`);
   }
 });
 
@@ -1118,6 +1130,25 @@ test('the previewed path IS the path the act produces, case correction included'
     'and makeFolder refuses with the same sentence the preview showed');
   assert.equal(fresh.blocked, null, 'a fresh name is not blocked');
   assert.equal(previewed.blocked, null, 'an adoptable folder is not blocked');
+});
+
+test('a folder that cannot be made is refused in our words, with no errno and no machine path', () => {
+  // ⚠️ makeFolder interpolated err.message raw (round 24): an EACCES put
+  // an errno and an absolute /var path on the person's screen, the exact
+  // shape the appendMessage sentence two files over pins absent.
+  reset();
+  fs.chmodSync(projects.projectsRoot(), 0o555);
+  try {
+    assert.throws(() => projects.makeFolder('Walled off'),
+      (err) => {
+        assert.match(err.message, /could not make a folder/);
+        assert.doesNotMatch(err.message, /EACCES|EPERM|ENOENT|\/var\/folders|\/Users\//,
+          `a machine's sentence reached the person: ${err.message}`);
+        return true;
+      });
+  } finally {
+    fs.chmodSync(projects.projectsRoot(), 0o755);
+  }
 });
 
 test('a second project of the same name meets the duplicate refusal, not a silent second folder', () => {

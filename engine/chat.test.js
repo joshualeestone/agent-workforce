@@ -1044,6 +1044,12 @@ test('and the earlier project’s words are KEPT, not deleted, when the new one 
   const aside = fs.readdirSync(path.dirname(file))
     .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.superseded'));
   assert.equal(aside.length, 1, 'the earlier project’s messages were deleted rather than kept');
+  // ⚠️ The stamp sanitiser is pinned here (round 24): projectBornAt is an
+  // ISO string, and unsanitised it puts colons into a filename -- the
+  // exact Finder-renders-colon-as-slash hazard foldSeparators was extended
+  // for one file over. Deleting the replace() was green until this line.
+  assert.doesNotMatch(aside[0], /[:*?"<>|\\]/,
+    `the aside filename carries filesystem-hostile characters: ${aside[0]}`);
   const was = JSON.parse(fs.readFileSync(path.join(path.dirname(file), aside[0]), 'utf8'));
   assert.deepEqual(was.messages.map((m) => m.text), ['said to the FIRST project']);
 });
@@ -1748,5 +1754,80 @@ test('a supersede that cannot move a DAMAGED file says so, rather than blaming a
       `a damaged file was reported as a project-name clash: ${kept.because}`);
   } finally {
     fs.renameSync = realRename;
+  }
+});
+
+/* ── round-24 coverage: branches that mutation-testing found unheld ──────── */
+
+test('a renamed pane column refuses the send with its own sentence, before tmux is asked anything', () => {
+  // ⚠️ This guard fails CLOSED for every send on the machine, which is why
+  // it says so instead of silently asking tmux for an empty format string
+  // that reads as "no Claude running". Deleting the guard was green
+  // (round 24): nothing had ever renamed a column at it.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    chat.resetForTests(); arm([]);
+    // The renamed column must be one the verify format actually uses
+    // ('claim'), not whatever sits at index 0 -- renaming a bystander
+    // column fires nothing, which the first version of this test proved
+    // by passing with 'placed'.
+    const at = status.PANE_COLUMNS.findIndex((c) => c.key === 'claim');
+    assert.ok(at >= 0, 'the claim column must exist for this test to rename it');
+    const real = status.PANE_COLUMNS[at];
+    status.PANE_COLUMNS[at] = { ...real, key: 'renamed_out_from_under_us' };
+    try {
+      const out = chat.deliver('casey', 'hi', board.agents);
+      assert.equal(out.state, chat.DELIVERY.COULD_NOT);
+      assert.match(out.because, /cannot work out how to check its window/);
+    } finally {
+      status.PANE_COLUMNS[at] = real;
+    }
+  });
+});
+
+test('an agent whose pane we do not know is refused on BOTH paths, send and screen, with the same sentence', () => {
+  // Both "do not know which pane" arms were deletable at green (round 24).
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    chat.resetForTests(); arm([]);
+    const blind = board.agents.map((a) => (a.sessionName === 'casey' ? { ...a, target: null } : a));
+    const sent = chat.deliver('casey', 'hi', blind);
+    assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
+    assert.match(sent.because, /do not know which pane/);
+    const seen = chat.viewport('casey', blind);
+    assert.equal(seen.text, null);
+    assert.match(seen.because, /do not know which pane/);
+  });
+});
+
+test('a send that could NOT be delivered still carries what the agent was doing', () => {
+  // All three could_not paneNote fields were nullable at green (round 24),
+  // so a failed send could silently stop saying the one thing that tells
+  // the person whether re-sending will meet the same wall.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    chat.resetForTests(); arm([refused('no such window')]);
+    const out = chat.deliver('casey', 'hi', board.agents);
+    assert.equal(out.state, chat.DELIVERY.COULD_NOT);
+    assert.equal(out.paneNote, 'it was sitting at its prompt');
+  });
+});
+
+test('an unwritable chats directory is a reported keeping-failure, never a throw at a delivered message', () => {
+  // withThreadLock's non-EEXIST arm holds appendMessage's never-throws
+  // contract; replacing it with `throw err` was green (round 24). The
+  // contract exists because a throw here reports a DELIVERED message as a
+  // failed send.
+  // The CHATS directory itself (threadFile's parent -- the store is flat),
+  // not a level above it: the first version chmodded the data root while
+  // chats/ already existed inside it, so every write still succeeded.
+  const root = path.dirname(chat.threadFile('lockdenied', 'casey'));
+  fs.mkdirSync(root, { recursive: true });
+  fs.chmodSync(root, 0o555);
+  try {
+    const kept = chat.appendMessage('lockdenied', 'casey', {
+      text: 'delivered but unkeepable', delivery: { state: chat.DELIVERY.PLACED },
+    });
+    assert.equal(kept.recorded, false, 'an unwritable store is a keeping failure, not a crash');
+    assert.ok(kept.because, 'and it says why');
+  } finally {
+    fs.chmodSync(root, 0o755);
   }
 });

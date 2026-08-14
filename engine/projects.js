@@ -677,7 +677,16 @@ function makeFolder(name) {
     try {
       fs.mkdirSync(dest, { recursive: true });
     } catch (err) {
-      throw new Error(`we could not make a folder for this project (${(err && err.message) || 'we do not know why'})`);
+      // ⚠️ The errno and its absolute path stay OFF the screen (round 24):
+      // this sentence goes to the person verbatim, and the branch's own
+      // rule two files over (appendMessage's sentence, with a test pinning
+      // /EISDIR|\/var\/folders/ absent) is that a raw err.message is a
+      // machine's sentence in a person's mouth. The one useful word is
+      // whether it is a permissions wall, said in ours.
+      const denied = err && (err.code === 'EACCES' || err.code === 'EPERM');
+      throw new Error(denied
+        ? 'we could not make a folder for this project: this Mac would not let us write there'
+        : 'we could not make a folder for this project');
     }
   }
   /**

@@ -41,6 +41,12 @@ process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
+// ⚠️ Belt AND braces, same as chat.test.js (round 24): the echo stub above
+// is justified in-file for create.js and remove.js, so without this line
+// the only thing keeping a test process from typing into live agents was a
+// variable whose stated purpose is a different module. chat.js reads this
+// from its first require.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 // ⚠️ THAT VARIABLE DOES NOT STUB THE STATUS ENGINE, and a comment here used to
 // claim it did. `engine/status.js` calls `sh('tmux', …)` directly and never
@@ -789,6 +795,13 @@ test('sending places the text into the agent’s own session, and says only that
       const res = await post(`/api/project/${project.id}/thread/zeta`, { text: 'have a look at the lease' });
       assert.equal(res.status, 200);
       const body = json(res);
+      // ⚠️ Membership FIRST, then the exact state (round 24): asserted the
+      // other way round, the membership check sat below a line that had
+      // already pinned 'placed', so it could only fail if the line above
+      // already had -- unfalsifiable, inside the docblock diagnosing
+      // exactly that shape.
+      assert.ok(Object.values(chat.DELIVERY).includes(body.delivery.state),
+        `the route answered a verdict the engine does not define: ${body.delivery.state}`);
       assert.equal(body.delivery.state, 'placed');
       assert.equal(body.recorded, true);
       /**
@@ -805,8 +818,6 @@ test('sending places the text into the agent’s own session, and says only that
        * it could not have failed whatever the set said. An unfalsifiable check
        * guarding a stale fact is worse than no check: it reads as coverage.
        */
-      assert.ok(Object.values(chat.DELIVERY).includes(body.delivery.state),
-        `the route answered a verdict the engine does not define: ${body.delivery.state}`);
       const sends = calls.sends();
       assert.equal(sends[0][0], 'send-keys');
       assert.equal(sends[0][sends[0].length - 1], 'have a look at the lease');
@@ -814,6 +825,42 @@ test('sending places the text into the agent’s own session, and says only that
       // And the pane was asked about itself first, read-only, before any keystroke.
       assert.equal(calls[0][0], 'display-message');
     });
+});
+
+test('reusing a project name moves the earlier conversation aside, and the ROUTE says so', async () => {
+  reset();
+  // ⚠️ The engine's supersededBecause was pinned (engine/chat.test.js) and
+  // the route forwarding it was pinned by nothing: nulling the field in
+  // server.js left 718 tests green (round 24) while the page lost the one
+  // sentence accounting for a file renamed on somebody's disk. This drives
+  // the whole story over routes: same name, freed id, second conversation.
+  const spec = fleet.agent('zeta', { state: 'idle' });
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  armChat([said(), said()]);
+  try {
+    const first = json(await post('/api/projects', {
+      name: 'Twice told', folder: folder('twice-told'), agents: ['zeta'] })).project;
+    const one = json(await post(`/api/project/${first.id}/thread/zeta`, { text: 'to the first' }));
+    assert.equal(one.recorded, true);
+    assert.equal(one.supersededBecause, null, 'nothing to move aside on a fresh conversation');
+    await req(`/api/project/${first.id}`, { method: 'DELETE', headers: { origin: base } });
+    armChat([said(), said()]);
+    const second = json(await post('/api/projects', {
+      name: 'Twice told', folder: folder('twice-told'), agents: ['zeta'] })).project;
+    // The control that makes this the supersede case at all: the reused
+    // name takes the freed id, so the second conversation lands on the
+    // first one's file.
+    assert.equal(second.id, first.id, 'the reused name must take the freed id for this test to test anything');
+    const two = json(await post(`/api/project/${second.id}/thread/zeta`, { text: 'to the second' }));
+    assert.equal(two.recorded, true);
+    assert.match(String(two.supersededBecause), /kept aside/,
+      'the route must carry the moved-aside sentence to the page');
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
 });
 
 test('what was sent is kept, with the verdict on sending it, and read back on the next look', async () => {
