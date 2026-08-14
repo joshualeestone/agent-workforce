@@ -294,6 +294,14 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
   padding: var(--space-4) var(--space-5); margin: 0; }
 .pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
+.pj-advanced { margin: var(--space-5) 0; }
+/* A real <button>, styled as a link. ⚠️ NOT an <a> without an href: that is not
+   focusable and not announced as a control, so the whole advanced route would
+   be unreachable from the keyboard — and this is the ONLY way to a project
+   whose work lives somewhere else. 24px minimum, WCAG 2.2 SC 2.5.8. */
+.linkish { background: none; border: 0; cursor: pointer; padding: var(--space-3) 0;
+  min-height: 24px; font: var(--text-callout) var(--font-ui); color: var(--label-2);
+  text-decoration: underline; }
 .pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
@@ -1150,7 +1158,36 @@ svg { display: block; }
     <button class="back" id="pj-add-back" type="button">← All projects</button>
     <h2>Add a project</h2>
 
+    <!-- ⚠️ NAMING IT IS THE WHOLE DEFAULT PATH, and the reason is a permission
+         dialog rather than a preference. Making the folder the FIRST decision
+         sent every new person into the file picker, and the first folder anyone
+         opens there is Desktop or Documents — which is what raises macOS's
+         "Kosmos wants to access files in your Documents folder" prompt, three
+         screens into a product somebody is still deciding whether to trust.
+         So: type a name, and Kosmos makes the folder inside one it owns. -->
     <div class="field">
+      <span class="flabel">What do you call it?</span>
+      <div class="frow">
+        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
+             disappears the moment somebody types. -->
+        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
+               aria-label="What you call this project">
+      </div>
+      <!-- ⚠️ THE PATH IS SHOWN BEFORE ANYTHING IS MADE. The folder name is
+           derived from what is typed (slashes become dashes), and a derivation
+           the person cannot see is a folder they cannot find. `aria-live`
+           because it changes under a field they are still typing in. -->
+      <p class="pj-chosen" id="pj-will-be" aria-live="polite"></p>
+    </div>
+
+    <!-- The advanced route, one link away: for work that already lives
+         somewhere else. Not removed, and not the default. -->
+    <p class="pj-advanced">
+      <button class="linkish" id="pj-advanced" type="button" aria-expanded="false"
+              aria-controls="pj-folder-field">Or use a folder you already have</button>
+    </p>
+
+    <div class="field" id="pj-folder-field" hidden>
       <span class="flabel">Which folder is this project's work in?</span>
       <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
          own files in it</b> — everything it keeps lives somewhere else.</p>
@@ -1189,18 +1226,6 @@ svg { display: block; }
         <button class="btn" id="pj-path-go" type="button">Use that path</button>
       </div>
       <p class="pj-chosen" id="pj-chosen">No folder chosen yet.</p>
-    </div>
-
-    <div class="field">
-      <span class="flabel">What do you call it?</span>
-      <div class="frow">
-        <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
-             disappears the moment somebody types. Its sibling below already had
-             an aria-label, so this was an omission rather than a house
-             pattern. -->
-        <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
-               aria-label="What you call this project">
-      </div>
     </div>
 
     <div class="field">
@@ -4372,9 +4397,65 @@ function openAddProject() {
   name.dataset.auto = '1';
   document.getElementById('pj-add-msg').textContent = '';
   document.getElementById('pj-chosen').textContent = 'No folder chosen yet.';
+  // The advanced route starts closed on every arrival, so a person who opened
+  // it once does not meet the file picker again the next time they add a
+  // project.
+  pjShowFolderPicker(false);
+  pjWillBe();
   paintAddAgents();
   pjView('add');
-  pjBrowse(null);
+  // ⚠️ The folder browser is NOT loaded here any more. Listing a directory is
+  // the cheap half; the expensive half is that this screen's whole point is
+  // that a new person never meets a file picker at all, and loading one behind
+  // a closed panel is loading one. It is fetched when the advanced link is
+  // opened, and not before.
+}
+
+/** Open or close the "use a folder you already have" route. */
+function pjShowFolderPicker(open) {
+  const field = document.getElementById('pj-folder-field');
+  const link = document.getElementById('pj-advanced');
+  field.hidden = !open;
+  link.setAttribute('aria-expanded', String(Boolean(open)));
+  link.textContent = open ? 'Never mind, let Kosmos make the folder' : 'Or use a folder you already have';
+  if (open && !PJ_HERE) pjBrowse(null);
+}
+
+/**
+ * Where this project's folder will be, said before it is made.
+ *
+ * ⚠️ THE PATH COMES FROM THE ENGINE, over a route, rather than being assembled
+ * here. The folder name is DERIVED from what was typed — slashes become dashes
+ * — and two derivations of one question is this codebase's worst habit. If this
+ * file built the string, the sentence on screen and the directory on disk would
+ * disagree the first time the rule changed, and the person would be looking for
+ * a folder that is not there.
+ */
+let PJ_WILLBE_GEN = 0;
+async function pjWillBe() {
+  const line = document.getElementById('pj-will-be');
+  const typed = document.getElementById('pj-name').value;
+  if (!typed.trim()) {
+    line.textContent = 'Kosmos will make a folder for it, inside a folder of its own. '
+      + 'Nothing of yours is touched.';
+    return;
+  }
+  const mine = ++PJ_WILLBE_GEN;
+  try {
+    const res = await fetch('/api/project-folder?name=' + encodeURIComponent(typed));
+    const body = await res.json();
+    if (mine !== PJ_WILLBE_GEN) return;
+    line.textContent = body.problem
+      ? body.problem.charAt(0).toUpperCase() + body.problem.slice(1) + '.'
+      : 'Kosmos will make this at ' + body.path + '.';
+  } catch {
+    if (mine !== PJ_WILLBE_GEN) return;
+    // ⚠️ NOT silence, and not a guessed path. "We could not work out where"
+    // is the honest sentence; printing a path we did not get from the engine
+    // would be this screen asserting something nobody checked.
+    line.textContent = 'We could not work out where this would go just now. '
+      + 'Adding it will still tell you.';
+  }
 }
 
 /* --- wiring ------------------------------------------------------------ */
@@ -4430,12 +4511,28 @@ document.getElementById('pj-path-go').addEventListener('click', () => {
   pjChoose(typed);
 });
 
-document.getElementById('pj-name').addEventListener('input', (e) => { e.target.dataset.auto = '0'; });
+document.getElementById('pj-name').addEventListener('input', (e) => {
+  e.target.dataset.auto = '0';
+  pjWillBe();
+});
+
+document.getElementById('pj-advanced').addEventListener('click', () => {
+  pjShowFolderPicker(document.getElementById('pj-folder-field').hidden);
+});
 
 document.getElementById('pj-create').addEventListener('click', async () => {
   const msg = document.getElementById('pj-add-msg');
   const btn = document.getElementById('pj-create');
-  if (!PJ_PICKED) { msg.textContent = 'Choose the folder this project is in first.'; return; }
+  // ⚠️ The old requirement, kept EXACTLY where it still applies and nowhere
+  // else. Somebody who opened the folder route and browsed without pressing
+  // "Use this folder" would otherwise have a project made at the default path
+  // while a folder browser sat open on screen — a decision they were visibly in
+  // the middle of, taken for them. On the default path there is nothing to
+  // choose, and the line under the name field already says where it will go.
+  if (!PJ_PICKED && !document.getElementById('pj-folder-field').hidden) {
+    msg.textContent = 'Choose the folder this project is in, or close that and Kosmos will make one for you.';
+    return;
+  }
   btn.disabled = true;
   msg.textContent = 'Adding it…';
   try {
@@ -4444,7 +4541,10 @@ document.getElementById('pj-create').addEventListener('click', async () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: document.getElementById('pj-name').value,
-        folder: PJ_PICKED,
+        // ⚠️ Left OUT rather than sent as null on the default path: the engine
+        // branches on the field being absent, and `folder: null` is a caller
+        // saying "this project lives nowhere" rather than "you choose".
+        ...(PJ_PICKED ? { folder: PJ_PICKED } : {}),
         agents: PJ_ADD_AGENTS,
       }),
     });

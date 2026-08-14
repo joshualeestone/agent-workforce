@@ -1356,6 +1356,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * Where a project of this name WOULD go, before anything is made.
+   *
+   * ⚠️ ONE derivation, and this route is why. The add screen has to show the
+   * exact path before it creates anything — a folder name derived from what was
+   * typed, without showing the derivation, is a folder the person cannot find.
+   * The page could compute it, and then the string on screen and the directory
+   * on disk would be two answers to one question, drifting the first time the
+   * rule changes. So the engine answers and the page renders.
+   *
+   * ⚠️ ANSWERS 200 EITHER WAY. A name we cannot make a folder out of is a
+   * renderable state — the sentence goes under the field the person is still
+   * typing in — not an error the screen has to catch.
+   */
+  if (pathname === '/api/project-folder' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let asked = '';
+    try { asked = new URL(req.url, ROUTING_BASE).searchParams.get('name') || ''; } catch { asked = ''; }
+    const problem = projects.folderNameProblem(asked);
+    if (problem) { sendJson(res, 200, { path: null, problem }); return; }
+    // ⚠️ `folderPathFor`, which does NOT create anything. Somebody typing into a
+    // name box must not leave a trail of empty directories behind them; the
+    // folder is made once, by `create`, when they press the button.
+    sendJson(res, 200, { path: projects.folderPathFor(asked), problem: null });
+    return;
+  }
+
   if (pathname === '/api/projects' && req.method === 'POST') {
     readBody(req)
       .then((buf) => {

@@ -34,6 +34,11 @@ process.env.HOME = HOME;
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
+// ⚠️ THE FOURTH ROOT, and it is new on this branch. Creating a project with no
+// folder makes one under `~/Kosmos/Projects` — so without this the suite would
+// leave real directories in the operator's home, named after test fixtures. The
+// rule is every root the code writes to, and the code grew one.
+process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 process.env.AGENT_WORKFORCE_CLAUDE_BIN = '/bin/echo';
 process.env.AGENT_WORKFORCE_TMUX_BIN = '/bin/echo';
 
@@ -811,4 +816,51 @@ test('a conversation we cannot read is reported as unreadable, never as nothing 
       // different object with a different owner, and it failed nothing.
       assert.equal(body.agent.sessionName, 'zeta');
     });
+});
+
+// ---------------------------------------------------------------------------
+// Creating a project without a folder picker
+// ---------------------------------------------------------------------------
+
+test('a project created with no folder gets one made for it, and says where', async () => {
+  reset();
+  const res = await post('/api/projects', { name: 'No picker' });
+  assert.equal(res.status, 200);
+  const made = json(res).project;
+  assert.equal(made.folder, path.join(projects.projectsRoot(), 'No picker'));
+  assert.equal(made.folderState.state, projects.FOLDER.READABLE, 'and it is really there');
+});
+
+test('the route says where a project WOULD go, and makes nothing while it answers', async () => {
+  // ⚠️ ONE derivation. The add screen shows this path before creating, and a
+  // copy of the rule in the page would drift from the directory on disk the
+  // first time the rule changed.
+  const res = await req('/api/project-folder?name=' + encodeURIComponent('Q3/Q4 planning'));
+  assert.equal(res.status, 200);
+  const body = json(res);
+  assert.equal(body.problem, null);
+  assert.equal(body.path, path.join(projects.projectsRoot(), 'Q3-Q4 planning'));
+  assert.ok(!fs.existsSync(body.path), 'asking must not create');
+});
+
+test('a name we cannot make a folder out of comes back as a SENTENCE at 200, not an error', async () => {
+  // It goes under a field somebody is still typing in. A 500 there would make
+  // the screen catch and render an error state over a half-typed name.
+  const res = await req('/api/project-folder?name=' + encodeURIComponent('..'));
+  assert.equal(res.status, 200);
+  assert.equal(json(res).path, null);
+  assert.match(json(res).problem, /already has a meaning/);
+});
+
+test('a path-hostile name is refused by the create route too, with a sentence', async () => {
+  reset();
+  const res = await post('/api/projects', { name: '..' });
+  assert.equal(res.status, 400);
+  assert.match(json(res).error, /already has a meaning/);
+  assert.ok(!/Error:|at Object\./.test(json(res).error), 'our sentence, never a raw throw');
+});
+
+test('the folder route answers as JSON with a query string, like every sibling', async () => {
+  const res = await req('/api/project-folder?name=Lease&t=1');
+  assert.ok(res.type.includes('application/json'), res.type);
 });

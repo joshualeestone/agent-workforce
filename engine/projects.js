@@ -37,6 +37,7 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const store = require('./store');
 const instructions = require('./instructions');
@@ -453,11 +454,129 @@ function cleanName(name) {
   return title;
 }
 
+/* ---------------------------------------------------------------------------
+ * Making the folder ourselves
+ *
+ * ⚠️ WHY THIS EXISTS, and it is a permission dialog rather than a preference.
+ * Naming a project and then being made to point at a folder sent every new
+ * person into the macOS file picker, and the first folder anyone opens there is
+ * Desktop or Documents — which is exactly what raises the system's "Kosmos
+ * wants to access files in your Documents folder" prompt. A person setting up a
+ * product for the first time, three screens in, being asked by the operating
+ * system whether to let it read their documents. Most say no, and the ones who
+ * say yes have been taught that this app wants their files.
+ *
+ * So the DEFAULT asks for a name and makes `~/Kosmos/Projects/<name>` itself.
+ * Nothing outside a folder Kosmos owns, and no picker. Pointing at a folder you
+ * already have is still there, one link away, for the people whose work is
+ * somewhere else — see the note on `create`.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Where Kosmos makes project folders when it makes them itself.
+ *
+ * Overridable so a test can point it somewhere disposable. Without that, the
+ * suite would create real directories in the operator's home — the same rule
+ * every other root in this codebase is held to.
+ */
+function projectsRoot() {
+  return process.env.AGENT_WORKFORCE_PROJECTS
+    || path.join(os.homedir(), 'Kosmos', 'Projects');
+}
+
+/**
+ * The FOLDER name for a project called this, or a refusal.
+ *
+ * ⚠️ REFUSES rather than sanitises, for everything that could point the write
+ * somewhere else. `create.js` refuses agent names on the same principle and for
+ * the same reason: this string becomes a path, and a name that is quietly
+ * changed into a different path is a folder somebody cannot find, or worse, one
+ * they did not mean to write in. `..` is the case that matters and it is
+ * refused outright — stripping it would silently make a DIFFERENT folder.
+ *
+ * ⚠️ SEPARATORS ARE THE ONE EXCEPTION, and they are replaced rather than
+ * refused, because "Q3/Q4 planning" is a name a person really types and
+ * refusing it teaches them the product is fussy about punctuation. The
+ * replacement is not silent: the add screen shows the exact path before
+ * anything is made, so what lands on disk is on screen first.
+ */
+function folderNameProblem(name) {
+  const raw = oneLine(name);
+  if (!raw) return 'give this project a name';
+  // ⚠️ CHECKED BEFORE THE FOLD, NOT AFTER, and the difference is a real hole a
+  // test found. Folding first turns `/` into `-`, which is not empty — so a
+  // project named `/` sailed past the emptiness check and got a folder called
+  // `-`. Harmless as an escape (it stays inside the root) and nonsense as a
+  // folder somebody has to find later. Ask whether there is a NAME in there
+  // before asking what it folds to.
+  if (!raw.split('/').join('').split('\\').join('').trim()) {
+    return 'that name is only slashes, so there is no folder name in it';
+  }
+  const folded = raw.split('/').join('-').split('\\').join('-').trim();
+  if (!folded) return 'that name is only slashes, so there is no folder name in it';
+  // `.` and `..` ARE the current and parent directory; a leading dot is a
+  // hidden folder the person would never see again in Finder.
+  if (folded === '.' || folded === '..') return 'that name means a folder that already has a meaning on this computer';
+  if (folded.startsWith('.')) return 'a name starting with a dot makes a folder your Mac hides, so pick another';
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(folded)) return 'that name has characters we cannot make a folder out of';
+  if (folded.length > 60) return 'that name is too long to make a folder out of; keep it to 60 characters';
+  return null;
+}
+
+function folderNameFor(name) {
+  const problem = folderNameProblem(name);
+  if (problem) throw new Error(problem);
+  return oneLine(name).split('/').join('-').split('\\').join('-').trim();
+}
+
+/** The exact path a project of this name would get, so a screen can show it. */
+function folderPathFor(name) {
+  return path.join(projectsRoot(), folderNameFor(name));
+}
+
+/**
+ * Make it, or adopt it if it is already there.
+ *
+ * ⚠️ AN EXISTING FOLDER IS ADOPTED, NOT REPLACED, and nothing in it is touched.
+ * Same rule as everywhere else here: this product does not delete anybody's
+ * work. A person who made `~/Kosmos/Projects/Henderson lease` themselves gets
+ * the folder they made. A FILE by that name is refused, because there is
+ * nothing sensible to do with it and overwriting it is not on the list.
+ */
+function makeFolder(name) {
+  const dest = folderPathFor(name);
+  let there = null;
+  try { there = fs.statSync(dest); } catch { there = null; }
+  if (there && !there.isDirectory()) {
+    throw new Error('there is already a file with that name where this project’s folder would go');
+  }
+  if (!there) {
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+    } catch (err) {
+      throw new Error(`we could not make a folder for this project (${(err && err.message) || 'we do not know why'})`);
+    }
+  }
+  return dest;
+}
+
+/**
+ * @param {string} [folder] the folder to point at. LEFT OUT on the default
+ *   path, which makes `~/Kosmos/Projects/<name>` instead — see the block above
+ *   `projectsRoot`. Supplying one is the "use a folder you already have" route,
+ *   which is still fully supported and is the only way to reach work that lives
+ *   somewhere else.
+ */
 function create({ name, folder, agents, roster } = {}) {
   const title = cleanName(name);
 
-  const given = String(folder == null ? '' : folder).trim();
-  if (!given) throw new Error('choose the folder this project lives in');
+  const asked = String(folder == null ? '' : folder).trim();
+  // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
+  // project of the same name meets "that folder is already the project X"
+  // rather than a fresh empty directory nobody asked for. `makeFolder` adopts
+  // an existing folder, so the retry is idempotent either way.
+  const given = asked || makeFolder(title);
   if (!path.isAbsolute(given)) throw new Error('that needs to be the full path to a folder');
 
   // ⚠️ Checked at creation AND on every read, and neither one is redundant.
@@ -855,4 +974,5 @@ module.exports = {
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
+  projectsRoot, folderNameProblem, folderNameFor, folderPathFor, makeFolder,
 };

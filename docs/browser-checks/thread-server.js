@@ -28,7 +28,11 @@
 const os = require('node:os');
 const path = require('node:path');
 
-for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WORKFORCE_LAUNCH']) {
+// ⚠️ `AGENT_WORKFORCE_PROJECTS` is in this list because the add screen now
+// MAKES folders: creating a project with no folder puts a real directory under
+// `~/Kosmos/Projects`. A check that leaves fixture directories in the
+// operator's home is not sandboxed, whatever the other three say.
+for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WORKFORCE_LAUNCH', 'AGENT_WORKFORCE_PROJECTS']) {
   const set = process.env[key];
   if (!set) {
     throw new Error(`${key} is not set: this would write into the real fleet's files. Refusing.`);

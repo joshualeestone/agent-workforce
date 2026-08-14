@@ -18,6 +18,11 @@ const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-projects-'));
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
+// ⚠️ THE FOURTH ROOT, and it is new on this branch. Creating a project with no
+// folder makes one under `~/Kosmos/Projects` — so without this the suite would
+// leave real directories in the operator's home, named after test fixtures. The
+// rule is every root the code writes to, and the code grew one.
+process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -945,4 +950,111 @@ test('a session that merely shares a name is not permission to write', () => {
   // The control: the tied card IS permitted, or the gate is just "refuse".
   const tied = projects.syncAgent('borrowed', cards([fleet.agent('borrowed')]));
   assert.equal(tied.state, projects.TOLD.TOLD);
+});
+
+// ---------------------------------------------------------------------------
+// Making the folder ourselves
+//
+// ⚠️ THE POINT OF THIS BLOCK, in one sentence: naming a project must not send
+// somebody into the macOS file picker, because the first folder anyone opens
+// there is Desktop or Documents and that is what raises the system's "Kosmos
+// wants to access files in your Documents folder" prompt.
+// ---------------------------------------------------------------------------
+
+test('a project with no folder gets one made for it, inside a folder Kosmos owns', () => {
+  reset();
+  const made = projects.create({ name: 'Henderson lease' });
+  assert.equal(made.folder, path.join(projects.projectsRoot(), 'Henderson lease'));
+  assert.ok(fs.statSync(made.folder).isDirectory(), 'and it is really there');
+  // The whole reason this exists: nothing was chosen, so nothing was opened.
+  assert.equal(projects.folderState(made.folder).state, projects.FOLDER.READABLE);
+});
+
+test('the parent folders are made too, so a first-ever project does not need one to exist', () => {
+  reset();
+  const root = projects.projectsRoot();
+  fs.rmSync(root, { recursive: true, force: true });
+  assert.ok(!fs.existsSync(root), 'the control: nothing is there before');
+  const made = projects.create({ name: 'First one' });
+  assert.ok(fs.statSync(made.folder).isDirectory());
+});
+
+test('a folder that is already there is ADOPTED, and nothing in it is touched', () => {
+  reset();
+  const dest = path.join(projects.projectsRoot(), 'Already here');
+  fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(path.join(dest, 'their-notes.md'), 'the person’s own work');
+  const made = projects.create({ name: 'Already here' });
+  assert.equal(made.folder, dest);
+  assert.equal(fs.readFileSync(path.join(dest, 'their-notes.md'), 'utf8'), 'the person’s own work',
+    'this product does not delete anybody’s work, on this path either');
+});
+
+test('a FILE where the folder would go is refused rather than overwritten', () => {
+  reset();
+  fs.mkdirSync(projects.projectsRoot(), { recursive: true });
+  const clash = path.join(projects.projectsRoot(), 'A file');
+  fs.writeFileSync(clash, 'not a folder');
+  assert.throws(() => projects.create({ name: 'A file' }), /already a file with that name/);
+  assert.equal(fs.readFileSync(clash, 'utf8'), 'not a folder', 'and it is still theirs');
+});
+
+test('path-hostile names are REFUSED, not sanitised into a different folder', () => {
+  // ⚠️ `..` is the one that matters: stripped, it would silently make a folder
+  // somewhere else entirely. `create.js` refuses agent names on the same
+  // principle — a name that quietly becomes a different path is a folder
+  // somebody cannot find, or one they did not mean to write in.
+  for (const bad of ['..', '.', '.hidden', '   ', '/', '//', 'x'.repeat(61)]) {
+    assert.ok(projects.folderNameProblem(bad), `expected a refusal for ${JSON.stringify(bad)}`);
+    assert.throws(() => projects.folderNameFor(bad), /name/, `expected a throw for ${JSON.stringify(bad)}`);
+  }
+  // The control: an ordinary name is not refused, so the rule is not simply
+  // refusing everything.
+  assert.equal(projects.folderNameProblem('Henderson lease'), null);
+});
+
+test('a name that would escape the projects folder cannot, and the proof is the resolved path', () => {
+  // Asserted on where it RESOLVES rather than on the spelling, which is the
+  // only check a symlink or a clever separator cannot walk past.
+  for (const bad of ['../../etc', '..', '../elsewhere']) {
+    assert.ok(projects.folderNameProblem(bad) || !path.relative(
+      projects.projectsRoot(), projects.folderPathFor(bad),
+    ).startsWith('..'), `${bad} escaped the projects folder`);
+  }
+});
+
+test('a separator becomes a dash rather than a refusal, because people really type "Q3/Q4"', () => {
+  assert.equal(projects.folderNameFor('Q3/Q4 planning'), 'Q3-Q4 planning');
+  assert.equal(projects.folderNameFor('a\\b'), 'a-b');
+  // ⚠️ AND THE DERIVATION STAYS INSIDE THE ROOT. A replacement that produced a
+  // separator by another route would be worse than the refusal it replaced.
+  const made = path.join(projects.projectsRoot(), projects.folderNameFor('Q3/Q4 planning'));
+  assert.equal(path.dirname(made), projects.projectsRoot());
+});
+
+test('the name the person typed is kept, even when the folder name had to differ', () => {
+  reset();
+  const made = projects.create({ name: 'Q3/Q4 planning' });
+  assert.equal(made.name, 'Q3/Q4 planning', 'what they called it is what it is called');
+  assert.equal(path.basename(made.folder), 'Q3-Q4 planning', 'and the folder is the derived one');
+});
+
+test('folderPathFor makes NOTHING, so typing into a name box leaves no trail of empty folders', () => {
+  const p = projects.folderPathFor('Never created');
+  assert.ok(!fs.existsSync(p), 'asking where it would go must not put it there');
+});
+
+test('a second project of the same name meets the duplicate refusal, not a silent second folder', () => {
+  reset();
+  projects.create({ name: 'Twice' });
+  assert.throws(() => projects.create({ name: 'Twice' }), /already the project/);
+});
+
+test('pointing at a folder you already have still works, and is untouched by any of this', () => {
+  reset();
+  const dir = folder('somewhere-else');
+  const made = projects.create({ name: 'Existing work', folder: dir });
+  assert.equal(made.folder, dir);
+  assert.ok(!fs.existsSync(path.join(projects.projectsRoot(), 'Existing work')),
+    'and no folder was made for it under the Kosmos root');
 });
