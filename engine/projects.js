@@ -577,7 +577,13 @@ function projectsRoot() {
  * validator failed nothing, because the producer had its own copy).
  */
 function foldSeparators(raw) {
-  return raw.split('/').join('-').split('\\').join('-').trim();
+  // ⚠️ `:` folds with the slashes (round 21, measured on this machine):
+  // macOS stores a colon in the POSIX name but Finder RENDERS it as `/`, so
+  // `Q3:Q4 planning` previews here as one name and appears in Finder as
+  // `Q3/Q4 planning` -- and the path shown is meant to be the path they
+  // find. The reverse mapping is the same legacy HFS rule that makes `/`
+  // unusable, so all three fold to the same `-`.
+  return raw.split('/').join('-').split('\\').join('-').split(':').join('-').trim();
 }
 
 function folderNameProblem(name) {
@@ -589,11 +595,11 @@ function folderNameProblem(name) {
   // `-`. Harmless as an escape (it stays inside the root) and nonsense as a
   // folder somebody has to find later. Ask whether there is a NAME in there
   // before asking what it folds to.
-  if (!raw.split('/').join('').split('\\').join('').trim()) {
-    return 'that name is only slashes, so there is no folder name in it';
+  if (!raw.split('/').join('').split('\\').join('').split(':').join('').trim()) {
+    return 'that name is only slashes or colons, so there is no folder name in it';
   }
   const folded = foldSeparators(raw);
-  if (!folded) return 'that name is only slashes, so there is no folder name in it';
+  if (!folded) return 'that name is only slashes or colons, so there is no folder name in it';
   // `.` and `..` ARE the current and parent directory; a leading dot is a
   // hidden folder the person would never see again in Finder.
   if (folded === '.' || folded === '..') return 'that name means a folder that already has a meaning on this computer';

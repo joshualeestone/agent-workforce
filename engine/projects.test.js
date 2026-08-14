@@ -1026,6 +1026,12 @@ test('a name that would escape the projects folder cannot, and the proof is the 
 test('a separator becomes a dash rather than a refusal, because people really type "Q3/Q4"', () => {
   assert.equal(projects.folderNameFor('Q3/Q4 planning'), 'Q3-Q4 planning');
   assert.equal(projects.folderNameFor('a\\b'), 'a-b');
+  // ⚠️ `:` is a separator on a Mac even though POSIX takes it (round 21,
+  // measured with NSFileManager displayNameAtPath): stored as `Q3:Q4`,
+  // Finder shows `Q3/Q4` -- the path on screen would not be the name they
+  // find. Same fold, same reason.
+  assert.equal(projects.folderNameFor('Q3:Q4 planning'), 'Q3-Q4 planning');
+  assert.ok(projects.folderNameProblem(':::'), 'a name that is only colons has no folder name in it');
   // ⚠️ AND THE DERIVATION STAYS INSIDE THE ROOT. A replacement that produced a
   // separator by another route would be worse than the refusal it replaced.
   const made = path.join(projects.projectsRoot(), projects.folderNameFor('Q3/Q4 planning'));

@@ -424,6 +424,23 @@ async function main() {
     const box = await page.locator('#pj-say').inputValue();
     check(box === '', 'a delivered message is cleared from the box');
 
+    // ⚠️ The sideways-scroll assertion in section 3 ran on a page with NO
+    // message rows, so it could not fail on a row defect: it was aimed at an
+    // input that answers a different question (round 21, which measured a
+    // 300-character token stretching the page 1262px past it, all greens).
+    // This is the message-row half of the same property the deliberate wide
+    // terminal line in the fixture holds for the screen boxes: a send whose
+    // text is one long unbroken token -- a URL, the exact thing people type
+    // to agents -- must wrap inside its row rather than drag the page.
+    const LONG_TOKEN = 'https://example.com/' + 'a'.repeat(300) + '/report.md';
+    await page.fill('#pj-say', LONG_TOKEN);
+    await page.click('#pj-send');
+    await page.waitForFunction(() => document.querySelectorAll('.pj-msg').length > 1, null, { timeout: 10000 });
+    const rowOverflow = await page.evaluate(() =>
+      document.body.scrollWidth - document.body.clientWidth);
+    check(rowOverflow <= 0,
+      `a message that is one long unbroken token wraps in its row instead of stretching the page (overflow ${rowOverflow}px)`);
+
     /* ── 5. a delivery that fails keeps the person's words ──────────────── */
     // ⚠️ A REAL REFUSAL, THROUGH THE WHOLE STACK. `nils`'s pane answers the way
     // tmux answers for a session that has gone since the roster was read, so

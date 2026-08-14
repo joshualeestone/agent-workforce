@@ -24,6 +24,12 @@ const path = require('node:path');
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-chat-test-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
+// This file requires ./projects, whose default folder path writes real
+// directories under ~/Kosmos/Projects. Nothing here reaches that today
+// (only the pure describe() is called), but the first projects.create()
+// added to this suite would build folders in the operator's home -- so the
+// root is sandboxed like its siblings, before the require (round 21).
+process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 // ⚠️ DRY RUN FROM THE FIRST REQUIRE, before any beforeEach exists. Between
 // the require below and the first hook the module used to sit armed
 // (DRY_RUN false, runner null) against the real machine's tmux -- latent

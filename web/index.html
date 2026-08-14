@@ -263,7 +263,14 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-msgs { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-5) 0; }
 .pj-msg { padding: var(--space-4) var(--space-5); border: 0.5px solid var(--separator);
   border-radius: var(--radius-control); }
-.pj-msg .pj-msg-text { display: block; font: var(--text-body) var(--font-ui); color: var(--label); }
+/* ⚠️ `overflow-wrap: anywhere` on BOTH message spans (round 21, measured): a
+   single unbroken token -- a URL, an absolute path, a git SHA, exactly what
+   people type to agents -- stretched the whole page 1262px sideways at 1280,
+   dragging the header and tabs with it. Same declaration as `.task`; the
+   `because` line can carry a pane target or a path out of stderr, so it
+   needs it too. */
+.pj-msg .pj-msg-text { display: block; font: var(--text-body) var(--font-ui); color: var(--label);
+  overflow-wrap: anywhere; }
 /* ⚠️ The verdict is a SENTENCE under every message, never a tick. A tick would
    be read as "it got there and was understood", and all we know is that tmux
    took the keystroke. */
@@ -274,7 +281,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    sibling `.pj-member small` uses `--label-3` and is a scannable caption; this
    is a sentence with a verdict in it. */
 .pj-msg .pj-msg-said { display: block; font: var(--text-caption) var(--font-ui);
-  color: var(--label-2); margin-top: 2px; }
+  color: var(--label-2); margin-top: 2px; overflow-wrap: anywhere; }
 /* A message that did not get there does not draw like one that did. */
 .pj-msg.failed { border-style: dashed; }
 .pj-msg.failed .pj-msg-said { color: var(--label); }
@@ -3902,10 +3909,15 @@ let PJ_GEN = 0;
 
 async function loadProjects() {
   const mine = ++PJ_GEN;
+  // Returns whether THIS call's read is the one that landed (true on either
+  // outcome, success or recorded failure; false when a newer call retired
+  // it). Callers that branch on PJ_READ_FAILED right after awaiting need to
+  // know the flag is their read's, not a predecessor's -- see pjAnswerFrom
+  // (round 21).
   try {
     const res = await fetch('/api/projects');
     const body = await res.json();
-    if (mine !== PJ_GEN) return;
+    if (mine !== PJ_GEN) return false;
     // ⚠️ Checked BEFORE anything is assigned. The first version of this fix
     // assigned PROJECTS and then threw, so the comment claiming "PROJECTS is
     // not clobbered on failure" described a guard that was not there -- a
@@ -3919,7 +3931,7 @@ async function loadProjects() {
     PJ_AGENTS_UNREADABLE = body.agentsUnreadable === true;
     PJ_READ_FAILED = false;
   } catch {
-    if (mine !== PJ_GEN) return;
+    if (mine !== PJ_GEN) return false;
     PJ_READ_FAILED = true;
     // ⚠️ Reported where the person is LOOKING, not only into the list. Both the
     // add-member and remove-member paths call this from the one-project view,
@@ -3943,10 +3955,11 @@ async function loadProjects() {
     // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
     // open project as "there is no project by that name" on a transient
     // network failure -- turning "we could not look" into "it is gone".
-    return;
+    return true;
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  return true;
 }
 
 function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
@@ -4541,7 +4554,12 @@ async function pjSend() {
       + 'Its screen is below. Check there before sending it again. '
       + 'Your message is still in the box below.';
     PJ_SENDING = false;
-    document.getElementById('pj-send').disabled = false;
+    // Mirroring the picker, exactly as the finally below does (round 21): an
+    // unconditional re-enable armed the button over an empty picker whenever
+    // the loadThread underneath took its no-project early exit and repainted
+    // nothing.
+    document.getElementById('pj-send').disabled =
+      document.getElementById('pj-thread-who').disabled;
     // The refresh CAN still settle it: if the send landed and was recorded,
     // the thread above will show it. Own try, so a repaint problem can never
     // replace the one sentence the person needs.
@@ -4684,7 +4702,13 @@ async function pjAnswerFrom(sessionName, displayName) {
   // capitalised-names change made everywhere else. The card carries both;
   // falling back to the machine name only when no display name arrived.
   const spoken = displayName || sessionName;
-  await loadProjects();
+  // If our read was retired by a newer caller (the 5-second poll can start
+  // between the await and the branch below), ask once more so the
+  // PJ_READ_FAILED we branch on belongs to a read at least as fresh as this
+  // click. If the retry retires too, the flag and PROJECTS are still a
+  // consistent pair from the last completed read -- the sentence picked
+  // matches the list shown, it is just a moment older (round 21).
+  if (!(await loadProjects())) await loadProjects();
   showTab('projects');
   // ⚠️ "We could not look" is NOT "it is on none". loadProjects leaves
   // PROJECTS untouched on failure, so filtering it after a failed read would
