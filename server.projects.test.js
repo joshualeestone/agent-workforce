@@ -455,7 +455,12 @@ test('a corrupt store does not kill the board, on any projects route', async () 
     ];
     for (const [p, opts] of routes) {
       const res = await req(p, opts);
-      assert.ok(res.status >= 400, `${p} answered ${res.status}`);
+      // Exactly 500 (round 37): server.js argues at length that a store WE
+      // cannot read must not answer 400, because 400 puts "we will not
+      // overwrite your projects file" in front of somebody as if it were a
+      // complaint about what they had typed. `>= 400` could not hold that
+      // line -- inverting the status pick left it green.
+      assert.equal(res.status, 500, `${p} answered ${res.status}, and an unreadable store is OUR fault, not the request's`);
       assert.ok(res.type.includes('application/json'), `${p} must still answer as JSON`);
       assert.ok(!/"projects":\s*\[\]/.test(res.body), `${p} must not report an empty list for a store it cannot read`);
     }
@@ -1002,8 +1007,15 @@ test('the route says where a project WOULD go, and makes nothing while it answer
   assert.equal(res.status, 200);
   const body = json(res);
   assert.equal(body.problem, null);
-  assert.equal(body.path, path.join(projects.projectsRoot(), 'Q3-Q4 planning'));
-  assert.ok(!fs.existsSync(body.path), 'asking must not create');
+  // "Asking must not create" is asserted BEFORE the act-agreement check
+  // below, because that check performs the act. The order is the test.
+  assert.ok(body.path && !fs.existsSync(body.path), 'asking must not create');
+  // Agreement with the act, not a restated spelling (round 37, same shape as
+  // the case-correction test below): `path.join(root, 'Q3-Q4 planning')`
+  // re-derived the `/ -> -` fold in the test, so the pair could drift from
+  // the directory the button actually makes and both would stay green.
+  assert.equal(body.path, projects.makeFolder('Q3/Q4 planning'),
+    'the route previewed one path and the act produced another');
 });
 
 test('a name we cannot make a folder out of comes back as a SENTENCE at 200, not an error', async () => {
@@ -1138,6 +1150,39 @@ test('the folder-preview ROUTE answers the case-corrected path, not the raw deri
     'the route previewed one path and the act produced another');
   const fresh = json(await req('/api/project-folder?name=Entirely%20new%20here'));
   assert.equal(fresh.exists, false, 'control: a fresh name previews as make');
+});
+
+test('the folder-preview ROUTE carries the blocked arm, not just the engine', async () => {
+  // ⚠️ Same round-13 shape as the test above: the engine's third arm is
+  // covered (engine/projects.test.js), but `blocked: preview.blocked || null`
+  // in the route was held by nothing -- hardcoding `blocked: null` there left
+  // the whole suite green while the add screen went back to promising
+  // "Kosmos will make this at X" over a path makeFolder refuses (round 37).
+  reset();
+  fs.writeFileSync(path.join(projects.projectsRoot(), 'Occupied'), 'a file, not a folder');
+  const body = json(await req('/api/project-folder?name=Occupied'));
+  assert.equal(typeof body.blocked, 'string',
+    'a FILE at the path must reach the page as the engine\'s own refusal sentence');
+  assert.ok(body.blocked.length > 0, 'the refusal is a sentence, not an empty flag');
+  // The control, so this cannot pass by the route answering blocked for
+  // everything: a makeable name previews with the arm empty.
+  const clear = json(await req('/api/project-folder?name=Makeable%20here'));
+  assert.equal(clear.blocked, null, 'control: a makeable path previews unblocked');
+});
+
+test('an undecodable segment on the THREAD verbs is refused, both verbs', async () => {
+  // The plain project route's %ZZ test does not cover these: each verb calls
+  // decodeSegment on its own two segments and answers its own 400 (round 37).
+  const got = await req('/api/project/%ZZ/thread/zeta');
+  assert.equal(got.status, 400);
+  assert.ok(got.type.includes('application/json'));
+  const posted = await req('/api/project/abc/thread/%ZZ', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ text: 'hello' }),
+  });
+  assert.equal(posted.status, 400);
+  assert.ok(posted.type.includes('application/json'));
 });
 
 test('the POST route really stamps projectBornAt, read off the file it wrote', async () => {

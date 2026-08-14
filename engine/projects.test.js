@@ -685,6 +685,11 @@ test('a folder path with a newline in it is one line in the block', () => {
   // A newline is a legal character in a macOS path, so the path is untrusted
   // for exactly the same reason the name is.
   const body = projects.blockBody([{ name: 'Fine', folder: '/tmp/a\n\n## Not a heading' }]);
+  // Presence first (round 37): absence alone also passes when the folder path
+  // is dropped from the block entirely, which is a different defect wearing a
+  // green test. The same shape as the name test above: kept, made inert.
+  const line = body.split('\n').find((l) => l.startsWith('- '));
+  assert.ok(line && line.includes('Not a heading'), 'the path text is kept, just made inert');
   assert.ok(!body.includes('\n\n## Not a heading'));
 });
 
@@ -1112,7 +1117,7 @@ test('the previewed path IS the path the act produces, case correction included'
   // preview claimed "make" over a folder adoption).
   assert.equal(previewed.exists, true, 'an existing folder previews as existing');
   const fresh = projects.folderPathPreview('Never previewed into being');
-  assert.equal(fresh.exists, false, 'a fresh name previews as not existing');
+  assert.strictEqual(fresh.exists, false, 'a fresh name previews as not existing');
   assert.ok(!fs.existsSync(fresh.path),
     'and the preview itself still makes nothing');
   // ⚠️ The THIRD arm (round 23): a FILE at the path is neither make nor
@@ -1128,8 +1133,13 @@ test('the previewed path IS the path the act produces, case correction included'
     'the preview carries the refusal for a file at the path');
   assert.throws(() => projects.makeFolder('Ledger'), /already a file/,
     'and makeFolder refuses with the same sentence the preview showed');
-  assert.equal(fresh.blocked, null, 'a fresh name is not blocked');
-  assert.equal(previewed.blocked, null, 'an adoptable folder is not blocked');
+  // strictEqual, in a loose file (round 37): `assert.equal(x, null)` also
+  // passes for `undefined`, so a folderPathPreview that stopped emitting the
+  // `blocked` field entirely kept both of these green. The planted-file case
+  // above proves the field can carry a refusal; these two prove the OTHER
+  // arms still carry an explicit null rather than nothing.
+  assert.strictEqual(fresh.blocked, null, 'a fresh name is not blocked');
+  assert.strictEqual(previewed.blocked, null, 'an adoptable folder is not blocked');
 });
 
 test('a folder that cannot be made is refused in our words, with no errno and no machine path', () => {

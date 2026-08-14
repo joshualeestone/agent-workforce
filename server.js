@@ -1286,6 +1286,26 @@ const server = http.createServer((req, res) => {
         // `version` is the sha256 the editor was last shown. Passing it through lets
         // the engine refuse a save that would overwrite an edit made since,
         // rather than silently picking the version in the textarea.
+        /* ⚠️ The rename-follow keys on the LINE CHANGING, not on the line
+           disagreeing with the record (round 37). "Parses to a name that
+           differs from the record" is also true when the person renamed
+           through the PROFILE route and then saved an unrelated paragraph
+           edit: the untouched identity line still reads the old name, and
+           following it silently reverted the profile rename. So the
+           pre-save file's identity line is read first, and the record
+           follows only a save in which that line itself moved -- the one
+           observable act that distinguishes "they edited the name" from
+           "they edited something else". Read-before-write is not atomic
+           with the write, but the same person racing their own two saves
+           lands on whichever save carried the line change, which is the
+           behaviour either order promises. */
+        const lineHad = (() => {
+          try {
+            const was = instructions.read(name, sessionOf(name));
+            const m = was.exists && String(was.text).slice(0, 4000).match(/You are \*\*([^*]+)\*\*/);
+            return m ? m[1].trim().slice(0, 80) : null;
+          } catch { return null; }
+        })();
         const wrote = instructions.write(name, patch.text, patch.version, sessionOf(name));
         /* ⚠️ A DELIBERATE rename through the identity line updates the
            RECORD (round 33): the record wins over the file so an
@@ -1305,7 +1325,7 @@ const server = http.createServer((req, res) => {
           // identity line can carry ~3,900 characters into the capture,
           // and uncapped it became the agent's name on every card.
           const typed = m && m[1].trim().slice(0, 80);
-          if (typed) {
+          if (typed && typed !== lineHad) {
             const had = store.readProfile(name);
             if (had && typeof had.displayName === 'string' && had.displayName !== typed) {
               store.writeProfile(name, { displayName: typed });

@@ -172,7 +172,19 @@ test('the display name and the machine name differ ONLY in case, which is what m
       if (create.nameProblem(candidate) !== null) continue;
       accepted += 1;
       const shown = create.cleanName(candidate);
-      assert.equal(shown.toLowerCase(), create.slugFor(candidate),
+      /* ⚠️ Pinned to the CANDIDATE, not to each other (round 37). The old
+         assertion here was `shown.toLowerCase() === slugFor(candidate)`,
+         and since `slugFor` is defined as `cleanName(x).toLowerCase()` that
+         reduces to an identity no implementation of `cleanName` can fail --
+         the load-bearing property was held by nothing. The raw candidate is
+         the independent reference: the display name must be the typed name
+         (trimmed, nothing stripped), and the machine name must be exactly
+         that lower-cased. A `cleanName` that started STRIPPING (the safeKey
+         hole: `My.Bot` silently becoming the agent `mybot`) now fails both
+         lines instead of passing both. */
+      assert.equal(shown, candidate.trim(),
+        `'${candidate}' is shown as something other than what was typed`);
+      assert.equal(create.slugFor(candidate), candidate.trim().toLowerCase(),
         `'${candidate}' is shown as something that is not just the machine name in another case`);
       assert.match(shown, /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
         `'${candidate}' would put something other than a name into the file an agent boots from`);

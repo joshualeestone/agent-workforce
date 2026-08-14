@@ -79,6 +79,20 @@ process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
 // LaunchAgents`, and it would then start an agent on their next login. The
 // sandbox has to be in place before the hazard arrives, not after.
 process.env.AGENT_WORKFORCE_LAUNCH = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-launch-'));
+// ⚠️ AND THE PROJECTS ROOT (round 37), for the same reason as LAUNCH above:
+// this server now requires `engine/projects`, whose root defaults to
+// `~/Kosmos/Projects` and whose create path calls `makeFolder` -- a real
+// mkdir under the operator's home. No test in this file drives a
+// `/api/project*` or `/api/folders` route today, which is exactly the state
+// LAUNCH was in when its warning was written: the sandbox has to be in place
+// before the hazard arrives, not after. `server.projects.test.js` and the
+// thread fixture both already do this.
+process.env.AGENT_WORKFORCE_PROJECTS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-projects-'));
+// HOME too: `/api/folders` browses from the home directory when asked for
+// its default start, so an unsandboxed HOME would list the operator's real
+// home into a test. Directories only, nothing written -- but a listing is
+// still a read of somebody's disk that no test here means to make.
+process.env.HOME = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-home-'));
 // And the two programs an agent is made of, so a route test does not depend on
 // whether the machine running the suite happens to have Claude installed where
 // this one does.
@@ -2739,8 +2753,16 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // nulled it, and this exact sequence deleted typed words).
     [/PJ_DRAFTS\[PJ_CURRENT\] = v;/,
      'the input-handler park is gone, so a navigation order can delete typed words again'],
-    [/if \(inThread && box\.value\.trim\(\) === text\) \{ box\.value = ''; delete PJ_DRAFTS\[PJ_CURRENT\]; \}/,
-     'the unconfirmed clear must check recorded AND the sent text AND clear the parked draft (rounds 29/34: a programmatic clear fires no input event, so the map kept the sent text)'],
+    // Round 37 moved the clear into `clearSent`, keyed on the TAKEOFF
+    // project: the box only when the flight has not moved and still shows
+    // the sent text, the parked draft under sentProject only when it still
+    // holds exactly that text.
+    [/if \(inThread\) clearSent\(\);/,
+     'the unconfirmed clear must still be gated on recorded (rounds 29/34/37)'],
+    [/if \(!flightMoved\(\) && box\.value\.trim\(\) === text\) box\.value = '';/,
+     'the box clear lost its sent-text or flight guard, so a verdict can delete words this send never took (rounds 29/37)'],
+    [/if \(\(PJ_DRAFTS\[sentProject\] \|\| ''\)\.trim\(\) === text\) delete PJ_DRAFTS\[sentProject\];/,
+     'the parked-draft clear must key on the TAKEOFF project and the exact sent text (rounds 34/37: a programmatic clear fires no input event, so the map kept the sent text)'],
     // A bare clock time is only true today; a thread keeps a thousand rows.
     [/then\.toDateString\(\) !== now\.toDateString\(\)/,
      'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
@@ -3585,6 +3607,100 @@ test('renaming through the identity line updates the record; mangling it cannot 
     assert.equal(mangled.status, 200);
     assert.equal(store.readProfile('angel').displayName, 'Seraphina',
       'an unparseable line must not un-name the agent');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('an unrelated instructions save does not revert a profile-route rename', async () => {
+  // ⚠️ Round 37: the rename-follow used to key on "the line PARSES to a name
+  // that differs from the record", which is also true when the person renamed
+  // through the PROFILE route and then saved a paragraph edit -- the untouched
+  // identity line still reads the old name, and following it silently undid
+  // the rename. The follow now keys on the LINE ITSELF changing.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // The file says Seraphina; the person then renames to Sera via the
+    // profile route.
+    const v0 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\nParagraph.\n', version: v0 }),
+    });
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Sera' }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Sera', 'control: the profile rename landed');
+    // An edit that leaves the identity line ALONE must leave the name alone.
+    const v1 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    const unrelated = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\nA DIFFERENT paragraph.\n', version: v1 }),
+    });
+    assert.equal(unrelated.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Sera',
+      'a paragraph edit reverted a rename made through the profile route');
+    // The control that keeps the follow alive: editing the LINE still renames.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Serafina**, a tester.\nA DIFFERENT paragraph.\n', version: v2 }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'Serafina',
+      'control: a deliberate line edit must still reach the record');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
+
+test('the 80-character cap holds on BOTH display-name writers, and no record is conjured', async () => {
+  // ⚠️ Round 37: the cap at each writer records a measured defect (an
+  // identity line can carry ~3,900 characters into the capture) and neither
+  // site was held by a test -- removing either `.slice(0, 80)` was green.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  const long = 'N'.repeat(200);
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' })
+    + '\n' + fleet.line({ session: 'newbie-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    // Writer 1: the profile route.
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: long }),
+    });
+    assert.equal(store.readProfile('angel').displayName, 'N'.repeat(80),
+      'the profile route stored an uncapped name');
+    // Writer 2: the rename-follow on the instructions route.
+    const v = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **' + long + 'X**, a tester.\n', version: v }),
+    });
+    assert.equal(store.readProfile('angel').displayName, ('N'.repeat(200) + 'X').slice(0, 80),
+      'the rename-follow stored an uncapped name');
+    // ⚠️ The precondition is behaviour, not decoration: an agent with no
+    // displayName on record keeps having none after an identity-line save.
+    // The record-wins rule exists for agents Kosmos CREATED; for the
+    // pre-existing fleet the file line IS the name, and a follow that
+    // conjured a record would freeze every legacy agent's name at whatever
+    // the line said the day someone saved an edit.
+    fs.mkdirSync(nodePath.join(WORKERS, 'newbie'), { recursive: true });
+    const nv = JSON.parse((await req('/api/agent/newbie/instructions')).body).version;
+    const put = await req('/api/agent/newbie/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Newbie**, a tester.\n', version: nv }),
+    });
+    assert.equal(put.status, 200);
+    const rec = store.readProfile('newbie');
+    assert.ok(!rec || typeof rec.displayName === 'undefined',
+      'an identity-line save conjured a display-name record for a legacy agent');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);

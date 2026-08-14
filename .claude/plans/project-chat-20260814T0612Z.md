@@ -10,7 +10,10 @@ there and picked up here), `engine/projects.js`'s honest-claims table, and Josh'
 
 ⚠️ **Written at the END of the build, not the start, and dated honestly.** This
 branch was worked overnight from a briefed spec rather than from a plan file, and
-seven challenge-loop rounds shaped it. Writing it as though it preceded the code
+challenge-loop rounds shaped it — seven when this document was first written,
+dozens by the time the loop closed (the numbered iteration commits in `git log`
+are the count that cannot go stale, and round 37 caught this sentence
+undercounting by a factor of five). Writing it as though it preceded the code
 would be the one thing this codebase most consistently refuses — a document
 claiming a process that did not happen. What follows is the design **as built**,
 with the reasoning that survived review, so the gate and the next reader get the

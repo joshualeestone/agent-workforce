@@ -229,7 +229,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
-.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+   reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
+   floor this project holds as a hard rule. "It is only a scannable caption"
+   was the recorded defence, and the floor does not have a caption exemption. */
+.pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
 .pj-member.unseen { border-style: dashed; }
 /* ⚠️ 24px minimum, because this is the only destructive control on the row and
@@ -277,9 +281,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* ⚠️ `--label-2`, NOT `--label-3`, and it was measured rather than chosen.
    `--label-3` is `rgba(0,0,0,0.42)`, which at this size is 3.04:1 on the page
    background — under the 4.5:1 this project's floor requires, in light mode,
-   on the one line that tells somebody whether their message got there. Its
-   sibling `.pj-member small` uses `--label-3` and is a scannable caption; this
-   is a sentence with a verdict in it. */
+   on the one line that tells somebody whether their message got there. (Round
+   37 brought `.pj-member small` up to the same token: the caption-vs-verdict
+   distinction this comment used to draw does not exempt anything from AA.) */
 .pj-msg .pj-msg-said { display: block; font: var(--text-caption) var(--font-ui);
   color: var(--label-2); margin-top: 2px; overflow-wrap: anywhere; }
 /* A message that did not get there does not draw like one that did. */
@@ -3836,6 +3840,15 @@ let PJ_SENT_LINE = null;
 // 5-second poll and a click can be in flight together, and a stale answer must
 // not repaint a thread the person has since switched away from.
 let PJ_THREAD_GEN = 0;
+/* Navigation generation, bumped by every openProject (round 37). PJ_THREAD_GEN
+   cannot serve pjSend as a staleness key because the 5-second poll bumps it,
+   which would retire every verdict whose flight outlasted one tick. This one
+   moves only when the person moves. A send captures it (with the project id)
+   at takeoff; a verdict may paint only if neither moved, because a flight can
+   honestly run ~15s (three 5s tmux timeouts plus the record lock) and Back is
+   deliberately not disabled during it -- so "Placed into Mara's session" was
+   landing on a DIFFERENT project's thread and aging there. */
+let PJ_NAV_GEN = 0;
 
 function pjView(which) {
   for (const v of ['list', 'one', 'add']) {
@@ -4089,6 +4102,11 @@ function openProject(id) {
      survives Back because nothing but this function writes it. */
   const switching = PJ_LAST_OPENED !== id;
   PJ_LAST_OPENED = id;
+  // Every arrival is a move, including re-opening the same project: a verdict
+  // from a send that took off before this navigation belongs to a thread view
+  // the switching-clear machinery above has since reset, so it may not paint
+  // (round 37 -- see PJ_NAV_GEN).
+  PJ_NAV_GEN += 1;
   /* ⚠️ A draft survives NAVIGATION, per project (rounds 33-34): the words
      are parked into PJ_DRAFTS as they are TYPED (the input handler on the
      box), not at switch time -- the round-33 switch-time park read
@@ -4711,6 +4729,22 @@ async function pjSend() {
   if (!text) { msg.textContent = 'Write something to send.'; pjAnnounce(msg.textContent); return; }
 
   PJ_SENDING = true;
+  /* ⚠️ THE FLIGHT REMEMBERS WHERE IT TOOK OFF (round 37). Back is not
+     disabled during a send, and a flight can honestly run ~15s -- so its
+     verdict was landing on whatever thread is open when it returns: press
+     Send on project A, press Back, open project B, and B's thread said
+     "Placed into Mara's session" about a send B never made, and the poll
+     kept aging it there. This is the cross-project misattribution class the
+     switching-clear in openProject closes on the painted path, reached
+     through time instead of through a stale response. A verdict may paint
+     only if the person has not moved: same project AND no navigation since
+     takeoff (PJ_NAV_GEN catches leave-and-return to the same project, whose
+     thread view the switching-clear has since reset). The words are never
+     lost either way -- recorded sends are in the thread, unplaced words
+     stay parked in PJ_DRAFTS under the project they belong to. */
+  const sentProject = PJ_CURRENT;
+  const sentNav = PJ_NAV_GEN;
+  const flightMoved = () => PJ_CURRENT !== sentProject || PJ_NAV_GEN !== sentNav;
   // Whether Send itself was focused, so the finally can put focus back:
   // disabling the focused element drops focus to <body>, and a keyboard
   // user lost their tab position for the whole flight (round 36).
@@ -4757,13 +4791,19 @@ async function pjSend() {
     // "lost contact", not "the connection failed" (round 30): this branch
     // is also reached when the connection succeeded and the BODY did not
     // parse, so the old sentence named a cause it had not observed.
-    msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
-      + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
-      + (document.getElementById('pj-screen').hidden
-        ? 'Before sending it again, check whether it already arrived. '
-        : 'Its screen is below. Check there before sending it again. ')
-      + 'Your message is still in the box below.';
-    pjAnnounce(msg.textContent);
+    // Gated on the flight not having moved (round 37): this sentence names
+    // the takeoff project's agent and promises "still in the box below",
+    // and both are about a thread the person may have left. The words stay
+    // parked in PJ_DRAFTS under the project they belong to either way.
+    if (!flightMoved()) {
+      msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
+        + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
+        + (document.getElementById('pj-screen').hidden
+          ? 'Before sending it again, check whether it already arrived. '
+          : 'Its screen is below. Check there before sending it again. ')
+        + 'Your message is still in the box below.';
+      pjAnnounce(msg.textContent);
+    }
     PJ_SENDING = false;
     // Mirroring the picker, exactly as the finally below does (round 21): an
     // unconditional re-enable armed the button over an empty picker whenever
@@ -4773,8 +4813,10 @@ async function pjSend() {
       document.getElementById('pj-thread-who').disabled;
     // The refresh CAN still settle it: if the send landed and was recorded,
     // the thread above will show it. Own try, so a repaint problem can never
-    // replace the one sentence the person needs.
-    try { await loadThread(); } catch { /* the verdict line stays */ }
+    // replace the one sentence the person needs. Skipped when the flight
+    // moved: the open thread is a different project's, and its own poll
+    // owns its refresh.
+    if (!flightMoved()) { try { await loadThread(); } catch { /* the verdict line stays */ } }
     return;
   }
   try {
@@ -4832,11 +4874,23 @@ async function pjSend() {
        silently deleted when the verdict landed -- the never-delete rule
        this branch holds on disk, broken in the one place the words are
        only in the DOM. Only the text this send took is cleared. */
+    /* ⚠️ The clear acts on the TAKEOFF project's copies, not the open box
+       (round 37): with the flight moved, the box holds a DIFFERENT
+       project's draft, and clearing it -- or deleting PJ_DRAFTS under
+       PJ_CURRENT -- destroys words this send never touched. When the send
+       was placed (or unconfirmed-but-recorded), the parked draft under
+       sentProject is retired IF it still holds exactly the text this send
+       took, so returning to that project does not re-offer words the agent
+       already has. Anything the person typed on top survives. */
+    const clearSent = () => {
+      if (!flightMoved() && box.value.trim() === text) box.value = '';
+      if ((PJ_DRAFTS[sentProject] || '').trim() === text) delete PJ_DRAFTS[sentProject];
+    };
     if (state === 'placed') {
-      if (box.value.trim() === text) { box.value = ''; delete PJ_DRAFTS[PJ_CURRENT]; }
+      clearSent();
       render = (when) => 'Placed into ' + name + '’s session' + when + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
-      if (inThread && box.value.trim() === text) { box.value = ''; delete PJ_DRAFTS[PJ_CURRENT]; }
+      if (inThread) clearSent();
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
       // "look at its screen" on top of the page's "it is in the conversation
       // above" on top of "it may be sitting in its composer unsent" — a wall
@@ -4872,27 +4926,39 @@ async function pjSend() {
       render = () => 'Could not deliver: '
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;
     }
-    msg.textContent = render(pjWhenPart(at));
-    pjAnnounce(msg.textContent);
-    PJ_SENT_LINE = { at, render, shown: msg.textContent };
-    // Own try: the verdict above is committed, and a repaint problem in the
-    // refresh must not replace it with an exception string.
-    try { await loadThread(); } catch { /* the verdict line stays */ }
+    // The paint itself is the gated act (round 37): everything above only
+    // computed strings and retired the takeoff project's spent draft. With
+    // the flight moved, this verdict describes a thread that is not on
+    // screen, so it paints nowhere -- the recorded row IS the account of
+    // what happened, visible when that project is next opened.
+    if (!flightMoved()) {
+      msg.textContent = render(pjWhenPart(at));
+      pjAnnounce(msg.textContent);
+      PJ_SENT_LINE = { at, render, shown: msg.textContent };
+      // Own try: the verdict above is committed, and a repaint problem in the
+      // refresh must not replace it with an exception string.
+      try { await loadThread(); } catch { /* the verdict line stays */ }
+    }
   } catch (err) {
     // Through pjSentence, like loadThread's sibling catch: a 400 carries an
     // engine clause ("that message has characters we will not type…"), and
     // rendering it lowercase and unterminated is the clause-after-full-stop
     // defect pjSentence was written for.
-    msg.textContent = pjSentence(err.message) || 'We could not send that.';
-    pjAnnounce(msg.textContent);
-    /* ⚠️ The picker is REPAINTED here too (round 28): this path never ran
-       loadThread, so the send-time disable was still on the picker, the
-       finally mirrored it onto Send, and both controls sat dead until the
-       next poll -- a sentence telling the person to fix their text above a
-       button they could not press for five seconds. Same own-try shape as
-       the success path: the sentence above is committed and outlives any
-       repaint problem. */
-    try { await loadThread(); } catch { /* the sentence stays */ }
+    // Same round-37 gate as the success path: this sentence explains a
+    // refusal of a send made from the takeoff project, and it may not land
+    // on whatever thread is open now.
+    if (!flightMoved()) {
+      msg.textContent = pjSentence(err.message) || 'We could not send that.';
+      pjAnnounce(msg.textContent);
+      /* ⚠️ The picker is REPAINTED here too (round 28): this path never ran
+         loadThread, so the send-time disable was still on the picker, the
+         finally mirrored it onto Send, and both controls sat dead until the
+         next poll -- a sentence telling the person to fix their text above a
+         button they could not press for five seconds. Same own-try shape as
+         the success path: the sentence above is committed and outlives any
+         repaint problem. */
+      try { await loadThread(); } catch { /* the sentence stays */ }
+    }
   } finally {
     PJ_SENDING = false;
     // The PICKER owns the button's no-recipient state: the refresh inside
@@ -4904,8 +4970,11 @@ async function pjSend() {
       document.getElementById('pj-thread-who').disabled;
     // The focus rescue, fourth of its kind in this file (round 36): back
     // onto the button when it is pressable again, onto the box when the
-    // repaint left it disabled (empty picker).
-    if (sendHadFocus) {
+    // repaint left it disabled (empty picker). Skipped when the flight
+    // moved (round 37) -- yanking focus into the thread controls of a
+    // project the person deliberately left, or onto the list view, is the
+    // opposite of a rescue.
+    if (sendHadFocus && !flightMoved()) {
       const btn = document.getElementById('pj-send');
       if (!btn.disabled) btn.focus();
       else document.getElementById('pj-say').focus();

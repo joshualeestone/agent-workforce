@@ -39,7 +39,11 @@ process.env.AGENT_WORKFORCE_PROJECTS = path.join(SANDBOX, 'kosmos-projects');
 process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 const test = require('node:test');
-const assert = require('node:assert');
+// `strict`, like 13 of this repo's 16 test files (round 37): loose
+// `assert.equal(x, null)` passes when the field is undefined, i.e. when the
+// producer stops emitting it at all -- the exact class the blocked/exists
+// assertions in the projects suite were hardened against.
+const assert = require('node:assert/strict');
 
 const chat = require('./chat');
 const status = require('./status');
@@ -310,7 +314,18 @@ test('leaving dry-run with no runner installed is refused outright, and dropping
     // teardowns leaves a suite able to send.
     arm([ok(), ok()]);
     chat.setRunner(null);
-    assert.equal(chat.deliver('casey', 'hello', board.agents).state, chat.DELIVERY.COULD_NOT);
+    /* ⚠️ The FLAG is asserted, then the refusal's own sentence (round 37).
+       COULD_NOT alone could not fail from the hazard this test names: with
+       the re-arm gone, deliver falls through to the real execFileSync, the
+       probe of a pane that does not exist on the host answers non-zero, and
+       the verdict is still COULD_NOT -- green in exactly the state where
+       the suite can type into live agents. DRY_RUN is exported as a getter
+       for precisely this assertion, and the /without permission/ clause is
+       the dry-run refusal's wording, which no real tmux failure produces. */
+    assert.equal(chat.DRY_RUN, true, 'dropping the runner must re-arm dry-run');
+    const rearmed = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(rearmed.state, chat.DELIVERY.COULD_NOT);
+    assert.match(rearmed.because, /without permission to touch/);
   });
 });
 
