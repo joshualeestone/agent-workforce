@@ -1785,10 +1785,21 @@ const server = http.createServer((req, res) => {
         ? 'we could not read its screen just now to show the question'
         : 'we cannot find the question on its screen right now')
       : null;
+    /* ⚠️ The poll gets a BOUNDED tail (round 36): at the engine's own
+       ceilings a full thread is a ~2MB parse-and-stringify every five
+       seconds on a synchronous server that can already block on tmux in
+       the same request path. The last 200 ride; `olderCount` says how
+       many the file still keeps, so the page can state the truth instead
+       of implying the visible list is everything. */
+    const TAIL = 200;
+    const olderCount = Array.isArray(messages) && messages.length > TAIL
+      ? messages.length - TAIL : 0;
+    if (olderCount) messages = messages.slice(-TAIL);
     sendJson(res, 200, {
       project: { id: project.id, name: project.name },
       agent: member,
       messages,
+      olderCount,
       historyBecause,
       // See the block above: withheld is not unreadable, and the page says a
       // different sentence for each.

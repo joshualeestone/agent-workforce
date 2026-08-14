@@ -1211,3 +1211,24 @@ test('an agent whose name cannot be FILED under is told the truth, not the two f
       });
   }
 });
+
+test('the thread GET returns a bounded tail with the older count stated, never the whole 1000', async () => {
+  // ⚠️ Round 36: the poll fetched the entire array every five seconds; at
+  // the engine's own ceilings that is ~2MB of parse-and-stringify per tick
+  // on a synchronous server. The tail is 200 and `olderCount` carries the
+  // truth the page states.
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [], async ({ project }) => {
+    const chat = require('./engine/chat');
+    for (let i = 0; i < 205; i += 1) {
+      chat.appendMessage(project.id, 'zeta', {
+        text: 'row ' + i, delivery: { state: chat.DELIVERY.PLACED },
+      }, project.createdAt);
+    }
+    const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+    assert.equal(body.messages.length, 200, 'the tail must be bounded');
+    assert.equal(body.olderCount, 5, 'and the count of unshown rows stated');
+    assert.equal(body.messages[0].text, 'row 5', 'the tail is the NEWEST 200');
+    assert.equal(body.messages[199].text, 'row 204');
+  });
+});

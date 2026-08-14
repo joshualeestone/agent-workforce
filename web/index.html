@@ -3793,6 +3793,9 @@ let PJ_READ_FAILED = false;
 // that clear the box programmatically (a send that took the text) also
 // clear the entry, because a programmatic clear fires no input event.
 const PJ_DRAFTS = {};
+// The last project opened, for openProject's same-project skip; survives
+// the Back button on purpose (round 36).
+let PJ_LAST_OPENED = null;
 let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
 let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
@@ -4078,7 +4081,14 @@ function openProject(id) {
      deleted the words -- the never-delete rule, broken by navigation. On
      a same-project re-open every cleared thing is already correct for
      this project, so the whole reset is skipped. */
-  const switching = PJ_CURRENT !== id;
+  /* Keyed on the last project OPENED, not on PJ_CURRENT (round 36): the
+     Back button nulls PJ_CURRENT, so a PJ_CURRENT-keyed `switching` was
+     always true on the only user-facing route back to the list -- the
+     round-31 same-project skip never fired from the UI, and a picked
+     recipient reverted to the default across Back-then-reopen. PJ_LAST
+     survives Back because nothing but this function writes it. */
+  const switching = PJ_LAST_OPENED !== id;
+  PJ_LAST_OPENED = id;
   /* ⚠️ A draft survives NAVIGATION, per project (rounds 33-34): the words
      are parked into PJ_DRAFTS as they are TYPED (the input handler on the
      box), not at switch time -- the round-33 switch-time park read
@@ -4314,9 +4324,14 @@ function pjSentence(because) {
  * minute boundary. Writers of new sentences call this beside their write;
  * the aging repaint deliberately does not.
  */
+let PJ_SAY_TIMER = null;
 function pjAnnounce(text) {
   const say = document.getElementById('pj-thread-say');
   if (!say) return;
+  // A pending re-announce is cancelled first (round 36): without this,
+  // two announces inside the 80ms window let the OLDER sentence land
+  // last, and the spoken announcement contradicted the visible line.
+  if (PJ_SAY_TIMER) { clearTimeout(PJ_SAY_TIMER); PJ_SAY_TIMER = null; }
   // The SAME sentence twice still announces (round 33): pressing Send
   // twice and meeting the same refusal spoke nothing the second time,
   // which is "nothing happened" -- the reading this screen works hardest
@@ -4324,7 +4339,7 @@ function pjAnnounce(text) {
   // blanked and re-set a beat later.
   if (say.textContent === text) {
     say.textContent = '';
-    setTimeout(() => { say.textContent = text; }, 80);
+    PJ_SAY_TIMER = setTimeout(() => { PJ_SAY_TIMER = null; say.textContent = text; }, 80);
   } else {
     say.textContent = text;
   }
@@ -4492,7 +4507,11 @@ function paintThread(body) {
   } else if (!body.messages.length) {
     setLive(msgs, '<p class="fhint">You have not sent ' + esc(name) + ' anything from here yet.</p>');
   } else {
-    setLive(msgs, body.messages.map((m) => pjMsg(m, name)).join(''));
+    // The tail is BOUNDED by the route (round 36), and the page says so
+    // rather than implying the visible list is the whole record.
+    setLive(msgs, (body.olderCount
+      ? '<p class="fhint">The first ' + body.olderCount + ' messages of this conversation are kept on this computer and not shown here.</p>'
+      : '') + body.messages.map((m) => pjMsg(m, name)).join(''));
   }
 
   /* Its screen. ⚠️ The HEADING follows the read (round 30, measured): set
@@ -4692,6 +4711,10 @@ async function pjSend() {
   if (!text) { msg.textContent = 'Write something to send.'; pjAnnounce(msg.textContent); return; }
 
   PJ_SENDING = true;
+  // Whether Send itself was focused, so the finally can put focus back:
+  // disabling the focused element drops focus to <body>, and a keyboard
+  // user lost their tab position for the whole flight (round 36).
+  const sendHadFocus = document.activeElement === document.getElementById('pj-send');
   document.getElementById('pj-send').disabled = true;
   // The PICKER holds still during a send too (round 27): changing the
   // recipient mid-flight cleared the sent-line and then the landing
@@ -4879,6 +4902,14 @@ async function pjSend() {
     // the picker reproduces paintThreadPicker's own rule.
     document.getElementById('pj-send').disabled =
       document.getElementById('pj-thread-who').disabled;
+    // The focus rescue, fourth of its kind in this file (round 36): back
+    // onto the button when it is pressable again, onto the box when the
+    // repaint left it disabled (empty picker).
+    if (sendHadFocus) {
+      const btn = document.getElementById('pj-send');
+      if (!btn.disabled) btn.focus();
+      else document.getElementById('pj-say').focus();
+    }
   }
 }
 
