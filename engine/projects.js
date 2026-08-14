@@ -570,6 +570,16 @@ function projectsRoot() {
  * replacement is not silent: the add screen shows the exact path before
  * anything is made, so what lands on disk is on screen first.
  */
+/**
+ * The one fold. Validation and production both call THIS, because deriving
+ * the separator fold twice was the two-derivations habit this file keeps
+ * warning about, one function apart (round 16: removing the fold from the
+ * validator failed nothing, because the producer had its own copy).
+ */
+function foldSeparators(raw) {
+  return raw.split('/').join('-').split('\\').join('-').trim();
+}
+
 function folderNameProblem(name) {
   const raw = oneLine(name);
   if (!raw) return 'give this project a name';
@@ -582,7 +592,7 @@ function folderNameProblem(name) {
   if (!raw.split('/').join('').split('\\').join('').trim()) {
     return 'that name is only slashes, so there is no folder name in it';
   }
-  const folded = raw.split('/').join('-').split('\\').join('-').trim();
+  const folded = foldSeparators(raw);
   if (!folded) return 'that name is only slashes, so there is no folder name in it';
   // `.` and `..` ARE the current and parent directory; a leading dot is a
   // hidden folder the person would never see again in Finder.
@@ -597,7 +607,7 @@ function folderNameProblem(name) {
 function folderNameFor(name) {
   const problem = folderNameProblem(name);
   if (problem) throw new Error(problem);
-  return oneLine(name).split('/').join('-').split('\\').join('-').trim();
+  return foldSeparators(oneLine(name));
 }
 
 /** The exact path a project of this name would get, so a screen can show it. */
@@ -695,9 +705,18 @@ function trueChildName(parent, name) {
  *   somewhere else.
  */
 function create({ name, folder, agents, roster } = {}) {
-  const title = cleanName(name);
-
   const asked = String(folder == null ? '' : folder).trim();
+  // ⚠️ On the default path the FOLDER-NAME refusal comes first, because it
+  // is the sentence the person has been reading: the preview line under the
+  // name box speaks folderNameProblem's words, and a name over both caps
+  // used to meet cleanName's DIFFERENT sentence at the button after the
+  // preview had said the 60-character one all along (round 16). One name,
+  // one sentence, whichever screen it appears on.
+  if (!asked) {
+    const problem = folderNameProblem(name);
+    if (problem) throw new Error(problem);
+  }
+  const title = cleanName(name);
   // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
   // project of the same name meets "that folder is already the project X"
   // rather than a fresh empty directory nobody asked for. `makeFolder` adopts

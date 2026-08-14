@@ -2715,14 +2715,24 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // projects read renders a definite "not on a project yet, add it to one".
     [/if \(PJ_READ_FAILED\)/,
      'pjAnswerFrom filters a list that a failed read never refreshed, and states the result as fact'],
+    [/PJ_READ_FAILED = true;/,
+     'the failed-read flag is never raised, so the honest branch above is dead code'],
     // The unconfirmed-and-unrecorded case: the box is the ONLY copy of the
     // person's words, and clearing it loses them under a sentence promising
     // they were kept.
+    // ⚠️ The pin holds the FACT'S SOURCE, not just the guard line: round 16
+    // set `inThread = true` one line above the guard and the old pin
+    // (/if \(inThread\) box\.value/) matched on while the defect returned.
+    // Same widening on the two pins below, for the same measured reason.
+    [/const inThread = body\.recorded === true;/,
+     'inThread no longer derives from recorded, so an unrecorded unconfirmed send wipes the only copy'],
     [/if \(inThread\) box\.value = '';/,
      'the unconfirmed clear no longer checks recorded, so an unrecorded send wipes the only copy'],
     // A bare clock time is only true today; a thread keeps a thousand rows.
     [/then\.toDateString\(\) !== now\.toDateString\(\)/,
      'pjWhen dropped the calendar-day qualifier, so a three-day-old row reads as this afternoon'],
+    [/return 'at ' \+ time \+ ' on '/,
+     'the calendar-day branch no longer returns a dated form, so its condition decides nothing'],
   ];
 
   /**

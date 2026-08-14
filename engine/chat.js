@@ -543,21 +543,25 @@ function verifyAtSend(card) {
  */
 function waitingNote(state, outcome) {
   const unsure = outcome === DELIVERY.UNCONFIRMED;
+  // The engine's own constants, not literals: a state renamed in status.js
+  // must move these cases with it rather than leaving a switch that
+  // silently stops matching (the same rule server.js records for its
+  // STATE import).
   switch (state) {
-    case 'working':
+    case status.STATE.WORKING:
       return unsure
         ? 'it was mid-task'
         : 'it was mid-task, so this sits in its composer until it finishes';
-    case 'needs_you':
+    case status.STATE.NEEDS_YOU:
       // Deliberately weaker than "this answered its question". We observed a
       // question on its screen; what its interface did with the keystroke is
       // not something we watched.
       return 'it was waiting on an answer when this was sent';
-    case 'rate_limited':
+    case status.STATE.RATE_LIMITED:
       return unsure
         ? 'it was paused on a usage limit'
         : 'it was paused on a usage limit, so it may not act on this until that clears';
-    case 'idle':
+    case status.STATE.IDLE:
       return 'it was sitting at its prompt';
     default:
       return 'we could not tell what it was doing when this was sent';
@@ -747,7 +751,7 @@ function refusalReason(got, fallback) {
  * whether a question is on screen — see the note above `questionIn`, and
  * `questionBecause` on the route, which exists for exactly that case.
  */
-function viewport(sessionName, roster, lines) {
+function viewport(sessionName, roster) {
   const at = new Date().toISOString();
   const key = String(sessionName == null ? '' : sessionName);
   if (!Array.isArray(roster)) {
@@ -763,8 +767,10 @@ function viewport(sessionName, roster, lines) {
   if (!card.target) {
     return { text: null, at, because: 'we do not know which pane this agent is in' };
   }
-  const want = Number.isInteger(lines) && lines > 0 && lines <= 400 ? lines : VIEWPORT_LINES;
-  const got = tmux(['capture-pane', '-p', '-J', '-t', paneTarget(card), '-S', `-${want}`]);
+  // One depth for every caller: a `lines` parameter used to ride here with
+  // a bound no caller ever exercised (round 16), which was API surface
+  // whose safety nothing held.
+  const got = tmux(['capture-pane', '-p', '-J', '-t', paneTarget(card), '-S', `-${VIEWPORT_LINES}`]);
   if (!got.ran || got.status !== 0) {
     return { text: null, at, because: refusalReason(got, 'we could not read its window just now') };
   }

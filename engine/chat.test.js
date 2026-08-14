@@ -825,6 +825,30 @@ test('a slow tmux and a missing tmux are told apart from what execFileSync REALL
  * hundreds of milliseconds old. Both things it checked can stop being true in
  * that window, and a person scrolling their own terminal is enough to do it.
  */
+test('deliver REFUSES a bad message itself, before any tmux call, whoever the caller is', () => {
+  // Round 16: nulling deliver's own messageProblem gate left the suite
+  // green -- the empty-message refusal was only ever asserted against the
+  // ROUTE's separate pre-check, and deliver is exported, so a future second
+  // caller would not inherit it. This gate is the last thing between an
+  // empty or control-character message and send-keys '' plus a separate
+  // Enter: a bare submit into a live composer, taking the highlighted
+  // default on the exact permission prompt this feature exists for.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    // Presence control first: a valid message on this same fixture DOES send.
+    let tmux = arm([ok(), ok()]);
+    assert.equal(chat.deliver('casey', 'hello', board.agents).state, chat.DELIVERY.PLACED);
+    assert.ok(tmux.sends().length > 0, 'control: the fixture can deliver at all');
+    for (const bad of ['', '   \n  ', 'cancel \u001b[A this', 'x'.repeat(chat.MAX_TEXT + 1)]) {
+      chat.resetForTests();
+      tmux = arm([ok(), ok()]);
+      const verdict = chat.deliver('casey', bad, board.agents);
+      assert.equal(verdict.state, chat.DELIVERY.COULD_NOT, JSON.stringify(bad.slice(0, 20)));
+      assert.ok(verdict.because, 'and it says why');
+      assert.equal(tmux.sends().length, 0, 'nothing may reach the pane for ' + JSON.stringify(bad.slice(0, 20)));
+    }
+  });
+});
+
 test('the pane is asked again immediately before typing, and the probe is read-only', () => {
   withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
     const tmux = arm([ok(), ok()]);
