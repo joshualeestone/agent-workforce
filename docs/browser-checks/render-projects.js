@@ -382,6 +382,9 @@ async function main() {
   //     is back to the default story.
   {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    // ctx.close lives in a finally (round 27): an assertion throw anywhere
+    // in this block used to leak the context, unlike the sibling blocks.
+    try {
     const page = await ctx.newPage();
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.click('#pj-new');
@@ -444,7 +447,9 @@ async function main() {
     } finally {
       await api('/api/project/' + encodeURIComponent(made.id), { method: 'DELETE' });
     }
-    await ctx.close();
+    } finally {
+      await ctx.close();
+    }
   }
 
   // 6a. The removal question. ⚠️ A confirmation is exactly the control that can

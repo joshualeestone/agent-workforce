@@ -3592,8 +3592,12 @@ document.getElementById('create-go').addEventListener('click', async () => {
   // is no bundle under our id and macOS names the executable instead.
   // This screen has not observed which of those worlds it is in, so the
   // sentence claims only what the creation itself did.
+  // "may", not "will" (round 27): macOS posts that notice the FIRST time
+  // an item appears under our identifier -- create.js records this at the
+  // plist -- so for the second and later agents the screen was predicting
+  // a notice that may not arrive. The Login Items half is true either way.
   document.getElementById('made-bg').innerHTML =
-    '<b>macOS will mention a new background item.</b> That is your agent '
+    '<b>macOS may mention a new background item.</b> That is your agent '
     + 'staying alive between logins (named Kosmos when the app is installed, '
     + 'or after the program that runs it on a from-source setup). It appears '
     + 'under Login Items in System Settings, and turning it off there stops '
@@ -4553,6 +4557,13 @@ async function pjSend() {
 
   PJ_SENDING = true;
   document.getElementById('pj-send').disabled = true;
+  // The PICKER holds still during a send too (round 27): changing the
+  // recipient mid-flight cleared the sent-line and then the landing
+  // verdict named the previous agent under a picker showing a different
+  // one -- two true things on screen disagreeing. paintThreadPicker
+  // recomputes this from the member list on the next paint, so the
+  // disable lasts exactly as long as the flight.
+  document.getElementById('pj-thread-who').disabled = true;
   msg.textContent = 'Sending…';
   const name = pjNameOf(p, who);
   let res, body;

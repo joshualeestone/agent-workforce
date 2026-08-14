@@ -191,7 +191,11 @@ function tmux(args) {
       spawnFailed: true, // nothing was executed, so nothing was typed
       status: null,
       out: '',
-      err: 'this copy of Kosmos is running without permission to type into agents',
+      // Neutral wording on purpose (round 27): viewport() funnels this
+      // through refusalReason too, and "without permission to TYPE" as the
+      // explanation of a failed READ was a wrong sentence. Fixture-facing
+      // only, but fixtures are where sentences get read most carefully.
+      err: 'this copy of Kosmos is running without permission to touch agents',
     };
   }
   try {
@@ -927,6 +931,18 @@ function readThread(projectId, agent, bornAt) {
     throw damaged;
   }
   if (!parsed || !Array.isArray(parsed.messages)) {
+    const damaged = new Error('this conversation is there but we cannot make sense of it');
+    damaged.code = 'UNPARSEABLE';
+    throw damaged;
+  }
+  // ⚠️ PER-ELEMENT shape too (round 27): `messages: [null]` passed every
+  // gate here and threw a TypeError in the page's renderer -- outside its
+  // try, unawaited, so the thread area stayed blank forever with the poll
+  // re-throwing every five seconds. The stranded-with-no-sentence state is
+  // the one this file's whole damage taxonomy exists to remove, and every
+  // OTHER damage mode was already first-class. UNPARSEABLE routes it into
+  // the existing set-aside-and-start-again repair, so the file is kept.
+  if (parsed.messages.some((m) => !m || typeof m !== 'object' || typeof m.text !== 'string')) {
     const damaged = new Error('this conversation is there but we cannot make sense of it');
     damaged.code = 'UNPARSEABLE';
     throw damaged;

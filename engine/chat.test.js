@@ -298,7 +298,7 @@ test('dry run NEVER reports a delivery it did not perform', () => {
     chat.resetForTests();
     const verdict = chat.deliver('casey', 'hello', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
-    assert.match(verdict.because, /without permission to type/);
+    assert.match(verdict.because, /without permission to touch/);
   });
 });
 
@@ -465,6 +465,21 @@ test('an unreadable thread file is an ERROR, never an empty conversation', () =>
   // not read as "you have said nothing to this agent".
   fs.writeFileSync(file, JSON.stringify({ agent: 'casey' }));
   assert.throws(() => chat.readThread('damaged', 'casey'), (err) => err.code === 'UNPARSEABLE');
+  // ⚠️ And per ELEMENT (round 27): `messages: [null]` passed every gate
+  // and threw a TypeError in the page's renderer, outside its try,
+  // unawaited -- a blank thread area with the poll re-throwing forever,
+  // the exact stranded state this taxonomy exists to remove. A control
+  // pins the boundary: an entry with a string text and junk extras must
+  // still read (extras are not the page's problem).
+  const born = new Date().toISOString();
+  for (const badRow of [null, 'a string', 7, { delivery: {} }, { text: 42 }]) {
+    fs.writeFileSync(file, JSON.stringify({ project: 'damaged', agent: 'casey', projectBornAt: born, messages: [badRow] }));
+    assert.throws(() => chat.readThread('damaged', 'casey', born), (err) => err.code === 'UNPARSEABLE',
+      `a ${JSON.stringify(badRow)} element must be damage, not a render crash`);
+  }
+  fs.writeFileSync(file, JSON.stringify({ project: 'damaged', agent: 'casey', projectBornAt: born, messages: [{ text: 'fine', junk: true }] }));
+  assert.equal(chat.readThread('damaged', 'casey', born).messages[0].text, 'fine',
+    'the control: a well-shaped entry with extras still reads');
 });
 
 test('a thread filed under a different agent is refused rather than rendered as this one’s', () => {
