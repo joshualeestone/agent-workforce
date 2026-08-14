@@ -1423,9 +1423,13 @@ if [ -f "$KOSMOS_HOME/board.pid" ]; then
   case "$_bpid" in
     ''|*[!0-9]*) ;;
     *)
-      # The pid must BE the board (the same ps predicate install/kosmos's
-      # running_pid uses): a recycled pid behind a stale pidfile would
-      # otherwise read as ours, and this flag gates the browser open.
+      # The pid must BE the board, matched on THIS install's full server
+      # path -- deliberately STRICTER than install/kosmos's running_pid,
+      # which matches any *app/server.js*: a recycled pid, or another
+      # install's live server behind a stale pidfile, must not read as
+      # ours, because this flag gates the browser open. The harness pins
+      # the anchoring with another install's live server pid; do not
+      # "align" the two patterns.
       case "$(/bin/ps -ww -p "$_bpid" -o command= 2>/dev/null)" in
         *"$KOSMOS_HOME/app/server.js"*) BOARD_OURS=yes ;;
       esac
@@ -1495,7 +1499,8 @@ if [ "$BOARD_OURS" = "yes" ] && [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_N
   printf '  Opening your dashboard in the browser...\n\n'
   # </dev/null: the spawned process must not inherit the curl|sh pipe --
   # the same class as cmd_start's measured never-returning install.
-  "$OPEN_CMD" "http://127.0.0.1:$PORT" </dev/null >/dev/null 2>&1 || true
+  "$OPEN_CMD" "http://127.0.0.1:$PORT" </dev/null >/dev/null 2>&1 \
+    || printf '  note: your browser could not be opened; the address above is your dashboard.\n\n' 
 fi
 }
 

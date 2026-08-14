@@ -564,6 +564,27 @@ chk "the link's target survives untouched" "[ -f \"$REALB/Kosmos.app/Contents/Ma
 chk "the resolvable-link install diverted home" "[ -x \"$SBH21/Applications/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 KOSMOS_HOME="$SB/home23" "$SB/bin23/kosmos" stop > /dev/null 2>&1 || true
 
+echo "== every inner level of the ownership predicate rejects a link =="
+# The root-link guard is driven elsewhere; these pin the three INNER
+# guards (Contents, MacOS, launcher leaf), each of which could be
+# deleted from bundle_is_ours while the suite stayed green. Fixture: an
+# otherwise-ours bundle with one level replaced by a link whose target
+# would pass the content grep; the uninstall must refuse and name it.
+for _lvl in contents macos leaf; do
+  LNK_SYS="$SB/sys-inner-$_lvl"
+  LNK_TGT="$SB/tgt-inner-$_lvl"
+  seed_kosmos_bundle "$LNK_TGT" "$SB/home-inner"
+  mkdir -p "$LNK_SYS/Kosmos.app"
+  case "$_lvl" in
+    contents) ln -s "$LNK_TGT/Kosmos.app/Contents" "$LNK_SYS/Kosmos.app/Contents" ;;
+    macos) mkdir -p "$LNK_SYS/Kosmos.app/Contents"; ln -s "$LNK_TGT/Kosmos.app/Contents/MacOS" "$LNK_SYS/Kosmos.app/Contents/MacOS" ;;
+    leaf) mkdir -p "$LNK_SYS/Kosmos.app/Contents/MacOS"; ln -s "$LNK_TGT/Kosmos.app/Contents/MacOS/Kosmos" "$LNK_SYS/Kosmos.app/Contents/MacOS/Kosmos" ;;
+  esac
+  RC=0; HOME="$SB/inner-home-$_lvl" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$LNK_SYS" KOSMOS_HOME="$SB/home-inner" KOSMOS_BIN_DIR="$SB/bin-inner" sh -s -- --uninstall < "$SETUP" > "$SB/inner-$_lvl.log" 2>&1 || RC=$?
+  chk "inner-$_lvl link uninstall exits 0" "[ $RC -eq 0 ]"
+  chk "inner-$_lvl link bundle survives, named" "[ -e \"$LNK_SYS/Kosmos.app\" ] && grep -q 'could not be proven to belong to this install' \"$SB/inner-$_lvl.log\""
+done
+
 echo "== a link entry is decided by its target, and each skip sentence is its own =="
 # The unknown-skip leg: a dangling home Applications symlink plus a foreign
 # system bundle. The install must refuse to guess, write no icon, and say
