@@ -1058,3 +1058,96 @@ test('pointing at a folder you already have still works, and is untouched by any
   assert.ok(!fs.existsSync(path.join(projects.projectsRoot(), 'Existing work')),
     'and no folder was made for it under the Kosmos root');
 });
+
+test('"Lease" and "lease" are ONE project on a case-insensitive volume, not two over one folder', () => {
+  /**
+   * ⚠️ REPRODUCED BEFORE IT WAS FIXED, and the failure was data corruption
+   * rather than cosmetics: `fs.realpathSync` does not canonicalise case, so the
+   * duplicate guard compared `…/Lease` against `…/lease`, found no match, and
+   * made a SECOND project over the SAME directory. Both projects' members were
+   * then told the same folder under two names, and the add screen printed a
+   * spelling Finder will never show.
+   *
+   * ⚠️ ASSERTED THROUGH THE DIRECTORY LISTING, the same instrument
+   * `create.test.js` uses for the identical volume lesson: `existsSync` cannot
+   * tell these apart here, so a check built on it would measure the filesystem
+   * rather than the code.
+   */
+  reset();
+  const first = projects.create({ name: 'Lease' });
+  const listing = fs.readdirSync(projects.projectsRoot()).filter((e) => e.toLowerCase() === 'lease');
+  assert.deepEqual(listing, ['Lease'], 'the control: exactly one folder, spelled the way it was typed');
+
+  // The other spelling. On this volume it is the same directory.
+  assert.throws(() => projects.create({ name: 'lease' }), /already the project/,
+    'the second spelling made a second project over the same folder');
+
+  assert.equal(projects.readAll().length, 1, 'two rows exist for one directory');
+  assert.deepEqual(
+    fs.readdirSync(projects.projectsRoot()).filter((e) => e.toLowerCase() === 'lease'),
+    ['Lease'],
+    'a second folder was created beside the first',
+  );
+  // And the stored path is the spelling that is really on disk, so what the
+  // screen shows is what Finder shows.
+  assert.equal(path.basename(first.folder), 'Lease');
+});
+
+test('an adopted folder is stored under the spelling the filesystem uses, not the one we derived', () => {
+  reset();
+  fs.mkdirSync(path.join(projects.projectsRoot(), 'Henderson Lease'), { recursive: true });
+  const made = projects.create({ name: 'henderson lease' });
+  assert.equal(path.basename(made.folder), 'Henderson Lease',
+    'the project points at a spelling that does not exist on disk');
+  assert.equal(made.name, 'henderson lease', 'and what the person called it is untouched');
+});
+
+test('the same folder reached by two spellings of a MIDDLE segment is still one project', () => {
+  // The advanced "use a folder you already have" route takes a typed path, so
+  // the case difference can be anywhere in it — not only in the project name.
+  reset();
+  const parent = path.join(WORK, 'Mixed-Case-Parent');
+  fs.mkdirSync(path.join(parent, 'work'), { recursive: true });
+  projects.create({ name: 'One', folder: path.join(parent, 'work') });
+  assert.throws(
+    () => projects.create({ name: 'Two', folder: path.join(WORK, 'mixed-case-parent', 'work') }),
+    /already the project/,
+    'two projects were made over one directory reached by two spellings',
+  );
+});
+
+test('a long-but-ordinary project name yields an id a thread can actually be filed under', () => {
+  /**
+   * ⚠️ THE DEFECT THIS PINS: `cleanName` allows 120 characters, `safeKey` keeps
+   * every one of them, and `engine/chat.js` will not file a thread under an id
+   * longer than its cap. So a project like this DELIVERED messages and recorded
+   * none — with the sentence "that is not a project we can read", about a
+   * project the same screen had just created and listed. Three caps that had
+   * never been introduced to each other.
+   */
+  reset();
+  const chat = require('./chat');
+  const long = 'Henderson lease renegotiation and schedule of dilapidations for the north building 2026';
+  assert.ok(long.length > 64 && long.length <= 120, 'the fixture has to be a name cleanName accepts');
+  // ⚠️ VIA THE ADVANCED ROUTE, which is the path that reaches this. Naming a
+  // project caps the derived FOLDER name at 60, so the long name is only
+  // storable when the person supplies a folder they already have — and that
+  // route never consults folderNameProblem, which is exactly why the caps could
+  // disagree without anybody noticing.
+  const made = projects.create({ name: long, folder: folder('long-name') });
+  assert.equal(made.name, long, 'what they called it is untouched');
+  // The id is what the thread is filed under, and the thread module must take it.
+  assert.doesNotThrow(() => chat.threadFile(made.id, 'casey'),
+    'a project this app just made cannot keep a conversation');
+  assert.ok(made.id.length <= 64);
+});
+
+test('two long names sharing their first 64 characters stay two projects', () => {
+  // Bounding the id must not make one project silently replace another.
+  reset();
+  const stem = 'Henderson lease renegotiation and schedule of dilapidations for the ';
+  const a = projects.create({ name: stem + 'north building', folder: folder('long-a') });
+  const b = projects.create({ name: stem + 'south building', folder: folder('long-b') });
+  assert.notEqual(a.id, b.id);
+  assert.equal(projects.readAll().length, 2);
+});

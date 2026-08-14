@@ -31,6 +31,13 @@
  * directory, so without it the script walks docs/browser-checks/node_modules
  * and exits MODULE_NOT_FOUND.
  *
+ * ⚠️ THE OUTPUT FILENAMES MATCH THE ONES COMMITTED UNDER docs/screenshots/, on
+ * purpose. They did not, and a screenshot in the repo is evidence only if the
+ * next person can regenerate the same picture — copying `thread-4-failed.png`
+ * onto `thread-3-could-not-deliver.png` by hand is a step nobody will
+ * reproduce, and a mismatched pair is how a stale image outlives the screen it
+ * claims to show.
+ *
  * ⚠️ HEADED by default. Headless renders through SwiftShader rather than the
  * real compositor, so a paint or geometry result from it is weaker evidence.
  * `HEADED=0` for a machine with no console session.
@@ -131,8 +138,29 @@ function assertFixtureServer() {
       + 'and against a real server that types into a live agent');
   }
   const text = fs.readFileSync(LOG, 'utf8');
-  if (!/thread-server: fixture fleet/.test(text)) {
+  /**
+   * ⚠️ THE LOG HAS TO BE THIS SERVER'S LOG, and the first version of this guard
+   * never checked that it was. It read any file containing the fixture's
+   * announcement and then drove `BASE` — so a stale log from an earlier run,
+   * beside a plain `node server.js` on the port actually being driven, passed
+   * the refusal and pressed Send against the real machine. A guard that reads
+   * one thing and vouches for another is not a guard; it is a sentence.
+   *
+   * The fixture prints the port it bound, so the two are tied by comparing it
+   * to the port being driven.
+   */
+  const announced = text.match(/thread-server: fixture fleet on (\d+)/);
+  if (!announced) {
     throw new Error(`${LOG} is not a thread-server log, so nothing proves this server's send seam is stubbed. Refusing.`);
+  }
+  let drivingPort;
+  try { drivingPort = new URL(BASE).port; } catch { drivingPort = null; }
+  if (!drivingPort || drivingPort !== announced[1]) {
+    throw new Error(
+      `${LOG} is the log of a fixture server on port ${announced[1]}, but this check is driving `
+      + `${BASE}. Nothing proves the server being driven has its send seam stubbed, and a send `
+      + 'against a real one types into a live agent. Refusing.',
+    );
   }
 }
 
@@ -193,7 +221,7 @@ async function main() {
     /* ── 1. the one click out of the stranded state ─────────────────────── */
     await page.goto(BASE, { waitUntil: 'networkidle' });
     await page.waitForSelector('.card', { timeout: 10000 });
-    await page.screenshot({ path: path.join(OUT, 'thread-0-board.png'), fullPage: true });
+    await page.screenshot({ path: path.join(OUT, 'thread-0-needs-you-card.png'), fullPage: true });
 
     const answerBtn = page.locator('.card[data-agent="mara"] .card-answer');
     check(await answerBtn.count() === 1, 'the "Needs you" card carries exactly one way into the question');
@@ -252,7 +280,7 @@ async function main() {
     await page.fill('#pj-say', '1');
     await page.click('#pj-send');
     await page.waitForFunction(() => document.querySelectorAll('.pj-msg').length > 0, null, { timeout: 10000 });
-    await page.screenshot({ path: path.join(OUT, 'thread-2-sent.png'), fullPage: true });
+    await page.screenshot({ path: path.join(OUT, 'thread-2-sent-placed.png'), fullPage: true });
 
     const keys = sentKeys().slice(before);
     check(keys.length === 2, `a send is two tmux calls, the text then Enter (saw ${keys.length})`);
@@ -295,7 +323,7 @@ async function main() {
     await page.click('#pj-send');
     await page.waitForFunction(() => /Could not deliver/i.test(
       document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 10000 });
-    await page.screenshot({ path: path.join(OUT, 'thread-4-failed.png'), fullPage: true });
+    await page.screenshot({ path: path.join(OUT, 'thread-3-could-not-deliver.png'), fullPage: true });
 
     const failedSaid = await page.locator('#pj-thread-msg').textContent();
     check(/can't find pane/.test(failedSaid), `the refusal carries what tmux said: "${failedSaid}"`);
@@ -332,7 +360,7 @@ async function main() {
     await page.click('#pj-send');
     await page.waitForFunction(() => /Could not confirm/i.test(
       document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 10000 });
-    await page.screenshot({ path: path.join(OUT, 'thread-5-unconfirmed.png'), fullPage: true });
+    await page.screenshot({ path: path.join(OUT, 'thread-4-could-not-confirm.png'), fullPage: true });
 
     const unsure = await page.locator('#pj-thread-msg').textContent();
     check(!/could not deliver/i.test(unsure),
@@ -388,7 +416,7 @@ async function main() {
       await page.waitForSelector('#pj-screen', { timeout: 10000 });
       await page.waitForFunction(() => (document.getElementById('pj-screen').textContent || '').length > 0,
         null, { timeout: 10000 });
-      await page.screenshot({ path: path.join(OUT, `thread-3-${scheme}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(OUT, `thread-5-${scheme}.png`), fullPage: true });
 
       /**
        * ⚠️ THE CONTROL, AND IT IS LOAD-BEARING. The only assertion below is

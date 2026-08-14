@@ -109,6 +109,36 @@ status.setPaneCapture((target) => (target in SCREENS ? SCREENS[target] : null));
  * pane — the one thing a screenshot cannot show.
  */
 chat.setRunner((args) => {
+  /**
+   * ⚠️ THE JUST-BEFORE-SENDING PROBE, answered from the SAME fleet spec the
+   * board is built from.
+   *
+   * `deliver` asks the pane about itself immediately before typing, because the
+   * roster it was authorised against is already hundreds of milliseconds old
+   * (see `verifyAtSend`). A fixture that does not answer that question returns
+   * an empty string, which reads as "no Claude running" and refuses every send
+   * — which is exactly what happened the first time this check ran after the
+   * probe landed: the unconfirmed step waited ten seconds for a sentence that
+   * was never coming.
+   *
+   * Answered from `SPECS` rather than hard-coded, so the probe and the board
+   * cannot describe different fleets.
+   */
+  if (args[0] === 'display-message') {
+    const target = String(args[3] || '').replace(/^=/, '');
+    const spec = SPECS.find((s) => `${s.session}:${s.pane}` === target);
+    if (!spec) {
+      return { ran: true, spawnFailed: false, status: 1, out: '', err: `can't find pane: ${target}` };
+    }
+    // The field ORDER is the engine's own VERIFY_FORMAT: command, claim, inMode.
+    return {
+      ran: true,
+      spawnFailed: false,
+      status: 0,
+      out: `${spec.command}\t${spec.claim || ''}\t${spec.inMode || '0'}\n`,
+      err: '',
+    };
+  }
   if (args[0] === 'capture-pane') {
     const target = String(args[args.length - 3] || '').replace(/^=/, '');
     const screen = SCREENS[target];

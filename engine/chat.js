@@ -351,6 +351,99 @@ function paneTarget(card) {
 /* ── the send ────────────────────────────────────────────────────────────── */
 
 /**
+ * The three fields that can go stale between authorising a send and making it,
+ * asked for by NAME from the engine's own column list.
+ *
+ * ⚠️ Built from `status.PANE_COLUMNS` rather than hand-typed, for the reason
+ * `test-support/fleet` builds pane lines the same way: a format string typed
+ * out here is a second place that has to be right about what tmux calls these
+ * things, and it would go on looking right while asking for the wrong field.
+ *
+ * ⚠️ `claim` sits in the MIDDLE on purpose. It is empty for every session that
+ * does not carry one, and a trailing empty field is indistinguishable from a
+ * field that was not emitted at all once the answer is split. `inMode` is
+ * always `0` or `1`, so putting it last keeps the shape readable.
+ */
+const VERIFY_KEYS = ['command', 'claim', 'inMode'];
+const VERIFY_FORMAT = VERIFY_KEYS
+  .map((key) => (status.PANE_COLUMNS.find((c) => c.key === key) || {}).fmt)
+  .join('\t');
+
+/**
+ * Is this pane STILL one we may type into, right now?
+ *
+ * Never throws. Answers `{ok}` or `{ok: false, because}`, and every refusal
+ * here happens before a single keystroke — so the caller's verdict is
+ * `could_not`, which is the one that tells the person re-sending is safe.
+ */
+function verifyAtSend(card) {
+  if (VERIFY_KEYS.some((key) => !status.PANE_COLUMNS.some((c) => c.key === key))) {
+    // A column was renamed in the engine and this would silently ask tmux for
+    // an empty string, which reads as "no Claude running" and refuses every
+    // send on the machine. Better to say so than to fail closed in silence.
+    return { ok: false, because: 'we cannot work out how to check its window before typing, so we did not type anything' };
+  }
+  const got = tmux(['display-message', '-p', '-t', paneTarget(card), VERIFY_FORMAT]);
+  if (!got.ran || got.status !== 0) {
+    return {
+      ok: false,
+      because: refusalReason(got, 'we could not check its window just before sending, so we did not type anything'),
+    };
+  }
+  const parts = String(got.out || '').replace(/\n+$/, '').split('\t');
+  if (parts.length < VERIFY_KEYS.length) {
+    return { ok: false, because: 'its window answered something we could not read, so we did not type anything' };
+  }
+  const fresh = {};
+  VERIFY_KEYS.forEach((key, i) => { fresh[key] = parts[i]; });
+  /**
+   * ⚠️ The IDENTITY fields come from the card and the LIVE fields from tmux,
+   * and that split is deliberate. A session's name cannot change under us
+   * without the exact-pinned target failing outright, so re-reading it would
+   * add nothing; what changes in the window that matters is what is RUNNING in
+   * the pane and whether it is scrolled back.
+   */
+  const pane = {
+    name: card.sessionName,
+    session: card.session,
+    claim: fresh.claim,
+    command: fresh.command,
+    inMode: fresh.inMode,
+  };
+  /**
+   * ⚠️ OWNERSHIP IS ASSERTED SEPARATELY, and a test caught me leaving it out.
+   *
+   * `isAgentPane` is NOT an ownership check: its fleet arm accepts any pane
+   * with a live Claude in it, whatever the session is called, because a
+   * legitimately non-Discord agent has to be manageable. So a probe answering
+   * with somebody ELSE's claim still passed it — while the `claim` field this
+   * function goes to the trouble of fetching went unread, which is its own
+   * smell.
+   *
+   * `addressable` gates the send on `isNamedOurs` up front; this is that same
+   * gate re-asked against the live values, so the window closes on all three
+   * facts rather than two. It is the lesson `status.js` states about itself:
+   * publishing a flag and leaving another branch to honour it is not enough.
+   */
+  if (!status.isNamedOurs(pane)) {
+    return {
+      ok: false,
+      because: 'we could not still tie its window to this agent when we went to type, so we did not type anything',
+    };
+  }
+  if (status.isAgentPane(pane)) return { ok: true };
+  // Told apart, because they are different things to be told: one is somebody
+  // scrolling, the other is an agent that has stopped since we looked.
+  return {
+    ok: false,
+    because: status.isAgentSession(pane)
+      ? 'its window was scrolled back by the time we went to type, so we did not type anything'
+      : 'it stopped being an agent’s window between us checking and us typing, so we did not type anything — '
+        + 'anything we sent would have been run as a command instead of read',
+  };
+}
+
+/**
  * What the agent was doing when we typed into it.
  *
  * ⚠️ THIS EXISTS BECAUSE THE NO-QUEUE DESIGN IS HONEST ABOUT THE SEND AND
@@ -414,6 +507,39 @@ function deliver(sessionName, raw, roster) {
   // we were typing.
   const paneState = allowed.card.state || null;
   const paneNote = waitingNote(paneState);
+
+  /**
+   * ⚠️ THE PANE IS ASKED AGAIN, HERE, IMMEDIATELY BEFORE THE KEYSTROKE.
+   *
+   * `addressable` above checked a roster SNAPSHOT, and that snapshot is already
+   * hundreds of milliseconds old by the time we get here: it was taken at the
+   * top of the request, and a `snapshot()` fans out one `capture-pane` per agent
+   * on the machine before the route even reaches this function. Everything it
+   * authorised can stop being true inside that window, and the two ways it can
+   * are the two worst outcomes this module has:
+   *
+   *   - Claude EXITS. The pane falls back to a shell, and the person's message
+   *     is then a COMMAND, executed. "have a look at the lease" is harmless;
+   *     the message somebody sends about deleting an old build is not.
+   *   - The person scrolls the pane into copy-mode. The keystrokes go to
+   *     copy-mode bindings, tmux answers success, and we report `placed` for a
+   *     message that reached nothing.
+   *
+   * A check whose window a real user action can walk through is not a check, so
+   * this closes it to one tmux round-trip. It is not zero — nothing outside the
+   * pane can make it zero — but it is the difference between a gate that can be
+   * beaten by scrolling and one that cannot realistically be.
+   *
+   * ⚠️ AND THE VERDICT IS THE ENGINE'S OWN. The fresh values are put back into a
+   * pane shaped the way `status` builds them and handed to `isAgentPane`, so
+   * this cannot drift from the rule that authorised the send in the first place.
+   * A second copy of "is this pane typeable" is exactly the two-derivations
+   * habit this codebase keeps paying for.
+   */
+  const still = verifyAtSend(allowed.card);
+  if (!still.ok) {
+    return { state: DELIVERY.COULD_NOT, because: still.because, at, paneState, paneNote };
+  }
 
   // ⚠️ TWO CALLS, in this order, never one. `-l` types characters literally, so
   // folding Enter into the same call would type the five letters E-n-t-e-r.
@@ -486,6 +612,17 @@ function deliver(sessionName, raw, roster) {
  */
 function refusalReason(got, fallback) {
   if (!got || !got.ran) {
+    /**
+     * ⚠️ TOLD APART, because they send a person to different places. tmux
+     * NEVER STARTED (it is not installed, not executable, not on PATH) is a
+     * machine to fix; tmux started and did not answer in time is a machine
+     * under load, where the same action a moment later usually works. One
+     * sentence for both told the second person to go looking for a missing
+     * program they have.
+     */
+    if (got && got.spawnFailed === false) {
+      return 'its window did not answer in time';
+    }
     return (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach tmux on this computer';
   }
   const said = String((got && got.err) || '').trim().split('\n')[0];
@@ -542,8 +679,17 @@ function viewport(sessionName, roster, lines) {
  * ⚠️ ONE derivation, shared. The markers come from `engine/status.js`, which is
  * where the NEEDS_YOU verdict is made — a private copy here would be a second
  * answer to one question, this codebase's worst habit, and it would drift the
- * first time a marker is added there. So this function cannot disagree with the
- * card that sent the person here.
+ * first time a marker is added there. So this function SHARES the markers with
+ * the card that sent the person here.
+ *
+ * ⚠️ That is not the same as the two agreeing, and an earlier version of this
+ * paragraph claimed it was. They read the pane at different moments: the card
+ * comes from the roster snapshot at the top of the request and this runs on a
+ * capture taken after it, so a pane that redraws in between can be classified
+ * needs_you and yield no region here. That gap is real and reachable, which is
+ * exactly why the route carries `questionBecause` — a sentence for the case
+ * where the two reads disagree, instead of a silence that would render as no
+ * question at all under a card saying there is one.
  *
  * ⚠️ AND IT IS STILL NOT A PARSER. It returns a SLICE of the same pane text,
  * from a few lines above the matching line to the end. It does not extract "the
@@ -577,7 +723,21 @@ function questionIn(text) {
  * rather than stripping it — a stripped id silently becomes a DIFFERENT
  * thread's file, which is worse than an error.
  */
-const PROJECT_ID = /^[a-z0-9_-]{1,80}$/;
+/**
+ * ⚠️ THE LENGTH IS DELIBERATELY GENEROUS, and the reason is a defect rather
+ * than a preference. `projects.idFor` now bounds new ids at 64, but this ran at
+ * 80 while `cleanName` allowed a 120-character NAME — so a project created
+ * before that bound, with a long-but-ordinary name, DELIVERED messages and
+ * recorded none of them, under the sentence "that is not a project we can
+ * read" about a project the same screen had just listed.
+ *
+ * The job of this pattern is the CHARSET — refusing `..`, a separator, anything
+ * that could point the write at another thread's file. The length is a
+ * sanity bound, not the guard, so it sits well above every id the producer can
+ * now make and above the historical ones too. Tightening it would re-open a
+ * silent no-record for records that already exist on somebody's disk.
+ */
+const PROJECT_ID = /^[a-z0-9_-]{1,128}$/;
 
 /**
  * ⚠️ The agent name must ALREADY be its own key. `store.safeKey` strips, so
@@ -610,7 +770,11 @@ function badRequest(message) {
  * read. Nothing here may tell somebody they have said nothing when we simply
  * could not look.
  */
-function readThread(projectId, agent) {
+/**
+ * @param {string} [bornAt] the project's own `createdAt`. When given, and when
+ *   the stored record carries one too, a MISMATCH is refused — see below.
+ */
+function readThread(projectId, agent, bornAt) {
   const file = threadFile(projectId, agent);
   let raw;
   try {
@@ -645,7 +809,41 @@ function readThread(projectId, agent) {
     wrong.code = 'UNREADABLE';
     throw wrong;
   }
-  return { project: String(projectId), agent: String(agent), messages: parsed.messages };
+  /**
+   * ⚠️ THE SAME NAME IS NOT THE SAME PROJECT, and without this the messages
+   * come back attached to work they were never about.
+   *
+   * A project id is derived from its NAME, and removing a project frees the id.
+   * So: make "Henderson lease", say six things to Mara about the lease, remove
+   * the project, make a new "Henderson lease" months later for a different
+   * building — and the thread opens holding the old conversation, under the new
+   * project's heading, as though it had been said about this work. Nothing on
+   * screen would suggest otherwise.
+   *
+   * The project's own `createdAt` distinguishes them, and a mismatch is refused
+   * exactly like the agent mismatch above. NOTHING IS DELETED: the record stays
+   * on disk, and the sentence says the messages exist and belong to a project
+   * that had this name before. `appendMessage` is what moves the old file aside
+   * so the new project can keep its own conversation — a refusal alone would
+   * leave the new thread permanently unable to record anything, which would be a
+   * worse bug than the one being fixed.
+   *
+   * ⚠️ ONLY when BOTH stamps are present. A record written before this existed
+   * carries none, and inventing a mismatch for it would refuse a conversation
+   * that is very probably this project's own.
+   */
+  if (bornAt && parsed.projectBornAt && parsed.projectBornAt !== String(bornAt)) {
+    const other = new Error('these messages were sent to an earlier project that had this name, '
+      + 'so we are not showing them here. They are still on this computer.');
+    other.code = 'OTHER_PROJECT';
+    throw other;
+  }
+  return {
+    project: String(projectId),
+    agent: String(agent),
+    messages: parsed.messages,
+    projectBornAt: parsed.projectBornAt || null,
+  };
 }
 
 /**
@@ -662,12 +860,35 @@ function readThread(projectId, agent) {
  * recording separately. A message that went through and could not be written
  * down must not come back looking like a message that was not sent.
  */
-function appendMessage(projectId, agent, entry) {
+function appendMessage(projectId, agent, entry, bornAt) {
   let existing;
+  let supersededBecause = null;
   try {
-    existing = readThread(projectId, agent);
+    existing = readThread(projectId, agent, bornAt);
   } catch (err) {
-    return { recorded: false, because: String((err && err.message) || 'we could not read this conversation to add to it') };
+    if (err && err.code === 'OTHER_PROJECT') {
+      /**
+       * ⚠️ MOVED ASIDE, NEVER DELETED, and never appended to either.
+       *
+       * The file under this key belongs to an earlier project that had this
+       * name (see `readThread`). Appending would mix two projects' conversations
+       * into one record; refusing forever would leave this project unable to
+       * keep a single message, which is a worse bug than the one being fixed.
+       * So the old record is RENAMED out of the way — every word of it still on
+       * disk — and this project starts its own.
+       *
+       * A failure to move it is not a failure to send: we say we could not
+       * record, and the old file stays exactly as it was.
+       */
+      const moved = supersede(projectId, agent);
+      if (!moved.ok) {
+        return { recorded: false, because: moved.because };
+      }
+      existing = { messages: [] };
+      supersededBecause = 'an earlier project had this name; its messages have been kept aside.';
+    } else {
+      return { recorded: false, because: String((err && err.message) || 'we could not read this conversation to add to it') };
+    }
   }
   if (existing.messages.length >= MAX_MESSAGES) {
     // See MAX_MESSAGES: refusing keeps every word the person wrote. Rotating
@@ -681,6 +902,10 @@ function appendMessage(projectId, agent, entry) {
   const record = {
     project: String(projectId),
     agent: String(agent),
+    // Stamped so a LATER project that reuses this name cannot inherit these
+    // messages. Carried forward when the record already had one, so an existing
+    // conversation is not re-stamped by a read that happened to know the date.
+    projectBornAt: existing.projectBornAt || (bornAt ? String(bornAt) : null),
     messages: [...existing.messages, {
       at: (entry && entry.at) || new Date().toISOString(),
       text: cleanMessage(entry && entry.text),
@@ -713,7 +938,41 @@ function appendMessage(projectId, agent, entry) {
   } catch (err) {
     return { recorded: false, because: String((err && err.message) || 'we could not write this conversation down') };
   }
-  return { recorded: true, because: null, messages: record.messages };
+  return { recorded: true, because: null, messages: record.messages, supersededBecause };
+}
+
+/**
+ * Move an earlier project's thread out of the way, keeping every word of it.
+ *
+ * ⚠️ A RENAME, and the destination name never collides: it carries the stamp of
+ * the project the messages belonged to, plus the pid, so two windows doing this
+ * at once cannot rename over each other. If the destination somehow exists, we
+ * refuse rather than overwrite — this whole function exists so that nothing of
+ * the person's is lost, and clobbering the file we are rescuing would be the
+ * one way to fail at that.
+ */
+function supersede(projectId, agent) {
+  let file;
+  try { file = threadFile(projectId, agent); }
+  catch (err) { return { ok: false, because: String((err && err.message) || 'we could not find that conversation') }; }
+  let stamp = 'earlier';
+  try {
+    const was = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (was && was.projectBornAt) stamp = String(was.projectBornAt).replace(/[^0-9A-Za-z-]/g, '');
+  } catch { /* the name is a label, not a lookup key */ }
+  const aside = `${file}.${stamp}.${process.pid}.superseded`;
+  if (fs.existsSync(aside)) {
+    return { ok: false, because: 'we could not move an earlier project’s messages aside, so we did not add to them' };
+  }
+  try {
+    fs.renameSync(file, aside);
+    return { ok: true, aside };
+  } catch (err) {
+    return {
+      ok: false,
+      because: `we could not move an earlier project’s messages aside (${(err && err.message) || 'we do not know why'}), so we did not add to them`,
+    };
+  }
 }
 
 /* ── who answers ─────────────────────────────────────────────────────────── */
@@ -755,8 +1014,8 @@ function looksLikeManager(role) {
 module.exports = {
   DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget,
-  deliver, viewport, questionIn, waitingNote, spawnFailure,
-  threadFile, readThread, appendMessage,
+  deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend, VERIFY_FORMAT,
+  threadFile, readThread, appendMessage, supersede,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,
 };

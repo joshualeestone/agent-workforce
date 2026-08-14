@@ -4008,6 +4008,21 @@ function pjNameOf(p, sessionName) {
  * "Just now" is a claim about a minute, and a wall-clock time is a claim about
  * a moment; nothing here rounds a five-minute-old send into "just now".
  */
+/**
+ * `pjWhen` with a leading space, or nothing at all.
+ *
+ * ⚠️ `pjWhen` legitimately answers an EMPTY STRING — an unparseable or missing
+ * timestamp is a thing we cannot say, and inventing "just now" for it would be
+ * this screen asserting a moment nobody recorded. But the callers interpolate
+ * it mid-sentence, so an empty answer left "…into Casey’s session  (it was
+ * mid-task)" with a doubled space, or "…session ." with a dangling one. The
+ * space belongs to the value, not to the sentence.
+ */
+function pjWhenPart(at) {
+  const said = pjWhen(at);
+  return said ? ' ' + said : '';
+}
+
 function pjWhen(at) {
   const when = Date.parse(at);
   if (!Number.isFinite(when)) return '';
@@ -4046,12 +4061,12 @@ function pjMsg(m, name) {
   let mark;
   if (d.state === 'placed') {
     mark = '';
-    said = 'Placed into ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + note + '.';
+    said = 'Placed into ' + esc(name) + '’s session' + esc(pjWhenPart(m.at)) + note + '.';
   } else if (d.state === 'unconfirmed') {
     mark = ' unsure';
     // A row is history, so it states what happened and stops. The instruction
     // about what to do lives in the live message line, once.
-    said = 'Could not confirm this reached ' + esc(name) + '’s session ' + esc(pjWhen(m.at)) + note + '. '
+    said = 'Could not confirm this reached ' + esc(name) + '’s session' + esc(pjWhenPart(m.at)) + note + '. '
       + esc(pjSentence(d.because || 'we typed it and could not tell whether it arrived'));
   } else {
     mark = ' failed';
@@ -4320,7 +4335,17 @@ document.getElementById('pj-say').addEventListener('keydown', (e) => {
   // Enter sends, because this is a message box and that is what a message box
   // does. There is no multi-line message to protect: the engine collapses
   // whitespace, since a newline reaching the pane submits half a message.
-  if (e.key === 'Enter') { e.preventDefault(); pjSend(); }
+  //
+  // ⚠️ EXCEPT WHILE AN INPUT METHOD IS COMPOSING. Typing Japanese, Chinese or
+  // Korean, the Enter that CONFIRMS the candidate reaches this handler as an
+  // ordinary Enter — so the first word somebody types would be sent to their
+  // agent half-composed, every time, and the rest of the sentence with it. The
+  // two checks are one rule with two spellings: `isComposing` is the standard
+  // one, and keyCode 229 is what older WebKit reports for the same keystroke.
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  pjSend();
 });
 
 /**

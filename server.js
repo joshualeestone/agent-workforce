@@ -21,7 +21,10 @@ const http = require('node:http');
 const { pipeline } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
-const { snapshot, paneRoster, countAgents } = require('./engine/status');
+// `STATE` travels with them: the thread route compares a member's state, and a
+// literal there is a comparison that silently stops matching the day the engine
+// renames one.
+const { snapshot, paneRoster, countAgents, STATE } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -1627,7 +1630,10 @@ const server = http.createServer((req, res) => {
     let messages = null;
     let historyBecause = null;
     try {
-      messages = chat.readThread(id, name).messages;
+      // ⚠️ The project's own birth date goes in, so a thread written for an
+      // EARLIER project that had this name is refused rather than shown under
+      // this one. Ids are derived from names and a removal frees the id.
+      messages = chat.readThread(id, name, project.createdAt).messages;
     } catch (err) {
       historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
     }
@@ -1639,7 +1645,9 @@ const server = http.createServer((req, res) => {
      * — the pane redraws, and the two reads are milliseconds apart — that is
      * said plainly rather than rendered as no question at all.
      */
-    const asking = member.tied && member.state === 'needs_you';
+    // The engine's own constant, not a literal: a state renamed there must move
+    // this with it rather than leaving a comparison that silently never matches.
+    const asking = member.tied && member.state === STATE.NEEDS_YOU;
     const question = asking && view.text ? chat.questionIn(view.text) : null;
     sendJson(res, 200, {
       project: { id: project.id, name: project.name },
@@ -1714,11 +1722,14 @@ const server = http.createServer((req, res) => {
          * the re-send that duplicates it. See `DELIVERY` in engine/chat.js.
          */
         const delivery = chat.deliver(name, body.text, roster);
-        const kept = chat.appendMessage(id, name, { text: body.text, at: delivery.at, delivery });
+        const kept = chat.appendMessage(id, name, { text: body.text, at: delivery.at, delivery }, project.createdAt);
         sendJson(res, 200, {
           delivery,
           recorded: kept.recorded === true,
           recordedBecause: kept.because || null,
+          // Said out loud when an earlier project of this name had a
+          // conversation: it was kept, and it is not this project's.
+          supersededBecause: kept.supersededBecause || null,
           messages: kept.messages || null,
           agentsUnreadable: roster === null,
         });

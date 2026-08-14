@@ -26,9 +26,11 @@ headed) that means no icon is written at all, and the transcript says so. A fres
 confirms its own board is running ends by opening the dashboard in the
 browser (updates stay quiet; `KOSMOS_NO_OPEN=1` suppresses it).
 `kosmos start|stop|restart|status|open|version` manages it after that.
-`sh -s -- --uninstall` reverses everything except the agents' own folders
-and the AgentWorkforce store (profiles, avatars, commitments): user work
-and records about it stay; the app and its plumbing go.
+`sh -s -- --uninstall` reverses everything except the agents' own folders,
+the AgentWorkforce store (profiles, avatars, commitments, and the messages
+you have sent agents from a project) and `~/Kosmos/Projects` (the folders
+Kosmos makes when you name a project rather than pointing at one): user
+work and records about it stay; the app and its plumbing go.
 Apple silicon, macOS 13.5+ (gated in a sentence, and the builders refuse
 to pack a release artifact above that floor).
 
@@ -123,7 +125,17 @@ flow sends is pinned to the exact session name. The reservation also means the f
 treats any session with that exact name as its own: a `tmux new -s
 kosmos-connect` you opened by hand will be closed when a connect starts.
 
-It cannot message an agent yet.
+It **can** message an agent, from a project. Opening a project gives you one
+conversation with one agent on it — chosen by a picker that starts on the
+project's manager — and sending types the line into that agent's own tmux
+session. What the screen says about it is deliberately narrow: "placed into
+casey's session just now", or the reason it could not, and never that the agent
+read anything. A keystroke reaching a terminal is not evidence that a program
+understood it, so there are three verdicts rather than two — `placed`,
+`could_not` (nothing of yours reached the pane, so sending again is safe), and
+`could not confirm` (it may already be in that agent's composer, so look at its
+screen before sending again). The agent's side of that screen is the live tail
+of its terminal, labelled as the terminal and never parsed into speech.
 
 ⚠️ **If you need to remove one by hand** — because it was made before this
 existed, or because a removal reported that it could not finish — a created
@@ -190,9 +202,16 @@ and says so. Name them instead of editing the code:
 
 ## Projects
 
-A project is **a folder you already have**, plus the agents you have put on it.
-Nothing this app generates is ever written into that folder; everything it keeps
-lives in its own store, so a project can be a repo somebody already has.
+A project is **a folder**, plus the agents you have put on it. Name it and
+Kosmos makes `~/Kosmos/Projects/<name>` itself — that is the default, and it
+exists so that adding your first project does not send you into the macOS file
+picker, where the first folder anyone opens raises the system's "Kosmos wants to
+access files in your Documents folder" prompt. **Pointing at a folder you
+already have** is one link away on the same screen, and is still the way to
+reach work that lives somewhere else, including a repo you already have.
+
+Nothing this app generates is ever written into a project folder; everything it
+keeps lives in its own store.
 
 Two caveats belong here rather than in a comment, because both are things a
 person could otherwise believe and have no way to check.

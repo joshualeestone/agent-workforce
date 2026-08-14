@@ -47,14 +47,37 @@ function withFleet(specs, fn) {
   }
 }
 
-/** Records every tmux call and answers however the test says. */
-function fakeTmux(answers) {
+/**
+ * A healthy answer to the just-before-sending probe: a Claude version string,
+ * no claim (the fixture's sessions carry the `-discord` suffix instead), not in
+ * copy-mode. The field ORDER is the engine's own `VERIFY_FORMAT`.
+ */
+function okProbe() {
+  return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+}
+
+/**
+ * Records every tmux call and answers however the test says.
+ *
+ * ⚠️ THE PROBE IS ANSWERED SEPARATELY FROM THE SCRIPT, and by default it is
+ * answered as healthy. `deliver` asks the pane again immediately before typing
+ * (see `verifyAtSend`), so without this every test that scripts two answers
+ * would have its first one eaten by the probe and would be measuring a refusal
+ * rather than the send it was written for. Tests that care about the probe pass
+ * `{probe: …}` and say so.
+ */
+function fakeTmux(answers, opts) {
   const calls = [];
+  const probe = opts && Object.prototype.hasOwnProperty.call(opts, 'probe') ? opts.probe : okProbe();
   const fn = (args) => {
     calls.push(args);
-    return answers.length ? answers.shift() : { ran: true, status: 0, out: '', err: '' };
+    if (args[0] === 'display-message') return probe;
+    return answers.length ? answers.shift() : { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
   };
   fn.calls = calls;
+  // The sends only, so a test asserting "nothing was typed" is not confused by
+  // the read-only probe that precedes them.
+  fn.sends = () => calls.filter((args) => args[0] === 'send-keys');
   return fn;
 }
 
@@ -66,8 +89,8 @@ function timedOut() { return { ran: false, spawnFailed: false, status: null, out
 function neverRan() { return { ran: false, spawnFailed: true, status: null, out: '', err: 'ENOENT' }; }
 
 /** Arm the seam with a scripted tmux, the only way this suite may "send". */
-function arm(answers) {
-  const tmux = fakeTmux(answers);
+function arm(answers, opts) {
+  const tmux = fakeTmux(answers, opts);
   chat.setRunner(tmux);
   chat.setDryRun(false);
   return tmux;
@@ -113,7 +136,7 @@ test('a roster we could not read is NOT permission: nothing is typed anywhere', 
   const verdict = chat.deliver('casey', 'hello', null);
   assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
   assert.match(verdict.because, /could not check which agents are running/);
-  assert.equal(tmux.calls.length, 0, 'nothing may be typed on the strength of a look that failed');
+  assert.equal(tmux.sends().length, 0, 'nothing may be typed on the strength of a look that failed');
 });
 
 test('a session that is not marked ours is refused: a stranger’s `tmux new -s casey` is not this agent', () => {
@@ -122,7 +145,7 @@ test('a session that is not marked ours is refused: a stranger’s `tmux new -s 
     const verdict = chat.deliver('casey', 'hello', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
     assert.match(verdict.because, /cannot tell that it is this agent/);
-    assert.equal(tmux.calls.length, 0);
+    assert.equal(tmux.sends().length, 0);
   });
 });
 
@@ -136,7 +159,7 @@ test('the name must match EXACTLY: a spelling that merely sanitises to a live ag
     const verdict = chat.deliver('Ca.sey', 'hello', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
     assert.match(verdict.because, /cannot see an agent by exactly this name/);
-    assert.equal(tmux.calls.length, 0);
+    assert.equal(tmux.sends().length, 0);
   });
 });
 
@@ -146,7 +169,7 @@ test('a pane with no Claude in it is refused, because text sent to a shell is RU
     const verdict = chat.deliver('casey', 'rm the old build', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
     assert.match(verdict.because, /run as a command instead of read/);
-    assert.equal(tmux.calls.length, 0);
+    assert.equal(tmux.sends().length, 0);
   });
 });
 
@@ -159,7 +182,7 @@ test('a pane scrolled back in copy-mode is refused, and says which of the two it
     const verdict = chat.deliver('casey', 'hello', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
     assert.match(verdict.because, /scrolled back/);
-    assert.equal(tmux.calls.length, 0);
+    assert.equal(tmux.sends().length, 0);
   });
 });
 
@@ -172,8 +195,11 @@ test('a good send is two calls in order: the literal text, then Enter, both pinn
     assert.equal(verdict.state, chat.DELIVERY.PLACED);
     assert.equal(verdict.because, null);
     const target = '=' + board.card('casey').target;
-    assert.deepEqual(tmux.calls[0], ['send-keys', '-t', target, '-l', '--', 'have a look at the lease']);
-    assert.deepEqual(tmux.calls[1], ['send-keys', '-t', target, 'Enter']);
+    const sends = tmux.sends();
+    assert.deepEqual(sends[0], ['send-keys', '-t', target, '-l', '--', 'have a look at the lease']);
+    assert.deepEqual(sends[1], ['send-keys', '-t', target, 'Enter']);
+    // And the pane was asked about itself FIRST, read-only, before any keystroke.
+    assert.equal(tmux.calls[0][0], 'display-message');
   });
 });
 
@@ -194,7 +220,7 @@ test('the text is delivered CLEANED, so what was checked is what is typed', () =
   withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
     const tmux = arm([ok(), ok()]);
     chat.deliver('casey', '  two\nlines  ', board.agents);
-    assert.equal(tmux.calls[0][5], 'two lines');
+    assert.equal(tmux.sends()[0][5], 'two lines');
   });
 });
 
@@ -205,8 +231,8 @@ test('`--` ends option parsing, so a message starting with a dash is typed rathe
     const tmux = arm([ok(), ok()]);
     const verdict = chat.deliver('casey', '-n is what broke it', board.agents);
     assert.equal(verdict.state, chat.DELIVERY.PLACED);
-    assert.equal(tmux.calls[0][4], '--');
-    assert.equal(tmux.calls[0][5], '-n is what broke it');
+    assert.equal(tmux.sends()[0][4], '--');
+    assert.equal(tmux.sends()[0][5], '-n is what broke it');
   });
 });
 
@@ -217,7 +243,7 @@ test('tmux refusing the text is a could_not that carries what tmux said', () => 
     assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
     assert.match(verdict.because, /could not type it into its window/);
     assert.match(verdict.because, /can't find pane/);
-    assert.equal(tmux.calls.length, 1, 'Enter is not pressed after the text failed to land');
+    assert.equal(tmux.sends().length, 1, 'Enter is not pressed after the text failed to land');
   });
 });
 
@@ -291,7 +317,7 @@ test('an untied pane’s screen is not shown under this agent’s name', () => {
     const view = chat.viewport('casey', board.agents);
     assert.equal(view.text, null);
     assert.match(view.because, /cannot tell that it is this agent/);
-    assert.equal(tmux.calls.length, 0, 'we do not even capture a pane we cannot tie to the name');
+    assert.equal(tmux.sends().length, 0, 'we do not even capture a pane we cannot tie to the name');
   });
 });
 
@@ -364,7 +390,7 @@ test('an absent thread is an empty conversation; there is nothing to report abou
 });
 
 test('a path-hostile project id is REFUSED, not sanitised into a different thread’s file', () => {
-  for (const bad of ['../../etc', 'a/b', 'Lease', 'has space', '', 'x'.repeat(81), '.']) {
+  for (const bad of ['../../etc', 'a/b', 'Lease', 'has space', '', 'x'.repeat(129), '.']) {
     assert.throws(() => chat.threadFile(bad, 'casey'), /not a project we can read/,
       `expected refusal for ${JSON.stringify(bad)}`);
   }
@@ -506,7 +532,7 @@ test('a stranger holding a manager’s name does not inherit the manager’s rol
     assert.equal(membersOf(board, ['mara']).find((m) => m.sessionName === 'mara').role, null);
     const tmux = arm([]);
     assert.equal(chat.deliver('mara', 'hello', board.agents).state, chat.DELIVERY.COULD_NOT);
-    assert.equal(tmux.calls.length, 0);
+    assert.equal(tmux.sends().length, 0);
   });
 });
 
@@ -582,7 +608,7 @@ test('every refusal BEFORE the first keystroke is could_not, because re-sending 
       chat.resetForTests();
       const tmux = arm([]);
       assert.equal(send().state, chat.DELIVERY.COULD_NOT, what);
-      assert.equal(tmux.calls.length, 0, `${what}: something was typed on a path that refuses`);
+      assert.equal(tmux.sends().length, 0, `${what}: something was typed on a path that refuses`);
     }
   });
 });
@@ -735,4 +761,204 @@ test('a slow tmux and a missing tmux are told apart from what execFileSync REALL
   assert.ok(slow, 'the control: a command that outlives its timeout has to throw');
   assert.equal(chat.spawnFailure(slow), false,
     'a tmux that was merely slow is being reported as one that never ran');
+});
+
+/* ── the window between authorising a send and making it ─────────────────── */
+
+/**
+ * ⚠️ WHAT THESE ARE ABOUT. `addressable` reads a roster SNAPSHOT taken at the
+ * top of the request, and `snapshot()` fans out one capture-pane per agent on
+ * the machine before this function is reached — so the authorisation is already
+ * hundreds of milliseconds old. Both things it checked can stop being true in
+ * that window, and a person scrolling their own terminal is enough to do it.
+ */
+test('the pane is asked again immediately before typing, and the probe is read-only', () => {
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    const tmux = arm([ok(), ok()]);
+    assert.equal(chat.deliver('casey', 'hello', board.agents).state, chat.DELIVERY.PLACED);
+    const first = tmux.calls[0];
+    assert.equal(first[0], 'display-message');
+    assert.equal(first[1], '-p');
+    assert.equal(first[3], '=' + board.card('casey').target, 'the probe is pinned to the same exact pane');
+    // ⚠️ Built from the engine's own column list, so a renamed column moves this
+    // rather than leaving it asking tmux for a field that no longer exists.
+    assert.equal(first[4], chat.VERIFY_FORMAT);
+    assert.match(chat.VERIFY_FORMAT, /pane_current_command/);
+    assert.match(chat.VERIFY_FORMAT, /pane_in_mode/);
+    assert.match(chat.VERIFY_FORMAT, /kosmos_agent/);
+  });
+});
+
+test('Claude exiting in the window is caught, so the message is never RUN as a shell command', () => {
+  /**
+   * ⚠️ THE WORST OUTCOME THIS FEATURE HAS. The roster said "agent"; by the time
+   * we type, the pane is a shell — and a shell EXECUTES what it is sent. The
+   * message somebody writes about deleting an old build is a sentence in a
+   * composer and a command in a shell.
+   */
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    const tmux = arm([ok(), ok()], {
+      probe: { ran: true, spawnFailed: false, status: 0, out: '-zsh\t\t0\n', err: '' },
+    });
+    const verdict = chat.deliver('casey', 'rm the old build', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.COULD_NOT, 'a refusal here must read as safe to re-send');
+    assert.match(verdict.because, /run as a command instead of read/);
+    assert.equal(tmux.sends().length, 0, 'the message was typed into a shell');
+  });
+});
+
+test('the person scrolling their own terminal in the window is caught, and told apart from the above', () => {
+  // Copy-mode is the quiet one: tmux answers success and the keystrokes go to
+  // copy-mode bindings, so without this the screen would report `placed` for a
+  // message that reached nothing.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    const tmux = arm([ok(), ok()], {
+      probe: { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t1\n', err: '' },
+    });
+    const verdict = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
+    assert.match(verdict.because, /scrolled back/);
+    assert.ok(!/run as a command/.test(verdict.because), 'the two causes are collapsed into one sentence');
+    assert.equal(tmux.sends().length, 0);
+  });
+});
+
+test('a session that stops being ours in the window is caught by the claim, not just by the name', () => {
+  // ⚠️ A CLAIM NAMING SOMEBODY ELSE is somebody else's claim. This fleet's
+  // sessions are tied by the `-discord` suffix, so to exercise the claim arm the
+  // fixture uses a session tied by claim alone — and the probe answers with a
+  // claim for a different agent, which is what a stranger's session looks like.
+  withFleet([fleet.agent('casey', { state: 'idle', ours: 'claim' })], (board) => {
+    // The control: with its own claim back, the same fleet sends fine.
+    const good = arm([ok(), ok()], {
+      probe: { ran: true, spawnFailed: false, status: 0, out: '2.1.212\tcasey\t0\n', err: '' },
+    });
+    assert.equal(chat.deliver('casey', 'hello', board.agents).state, chat.DELIVERY.PLACED);
+    assert.equal(good.sends().length, 2);
+
+    chat.resetForTests();
+    const tmux = arm([ok(), ok()], {
+      probe: { ran: true, spawnFailed: false, status: 0, out: '2.1.212\tsomebody-else\t0\n', err: '' },
+    });
+    const verdict = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.COULD_NOT);
+    assert.match(verdict.because, /could not still tie its window to this agent/);
+    assert.equal(tmux.sends().length, 0);
+  });
+});
+
+test('a probe we could not run refuses the send rather than waving it through', () => {
+  // Fails CLOSED, and it can afford to: nothing has been typed, so `could_not`
+  // is both true and the verdict that tells the person to send again.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    for (const answer of [refused('no server running'), timedOut(), neverRan(),
+      { ran: true, spawnFailed: false, status: 0, out: 'nonsense\n', err: '' }]) {
+      chat.resetForTests();
+      const tmux = arm([ok(), ok()], { probe: answer });
+      const verdict = chat.deliver('casey', 'hello', board.agents);
+      assert.equal(verdict.state, chat.DELIVERY.COULD_NOT, JSON.stringify(answer));
+      assert.equal(tmux.sends().length, 0, 'a send went out over a check that did not answer');
+    }
+  });
+});
+
+test('the re-check uses the ENGINE’s rule, so it cannot drift from the one that authorised the send', () => {
+  // A second copy of "is this pane typeable" is exactly the two-derivations
+  // habit this codebase keeps paying for. `verifyAtSend` hands its fresh fields
+  // to `status.isAgentPane`, and this pins that they agree about the same pane.
+  withFleet([fleet.agent('casey', { state: 'idle' })], (board) => {
+    const card = board.card('casey');
+    arm([], { probe: { ran: true, spawnFailed: false, status: 0, out: '-zsh\t\t0\n', err: '' } });
+    assert.equal(chat.verifyAtSend(card).ok, false);
+    chat.resetForTests();
+    arm([], { probe: okProbe() });
+    assert.equal(chat.verifyAtSend(card).ok, true);
+    // And the engine agrees about the same two panes, read directly.
+    assert.equal(status.isAgentPane({ name: 'casey', session: 'casey-discord', claim: '', command: '-zsh', inMode: '0' }), false);
+    assert.equal(status.isAgentPane({ name: 'casey', session: 'casey-discord', claim: '', command: '2.1.212', inMode: '0' }), true);
+  });
+});
+
+/* ── the same name is not the same project ───────────────────────────────── */
+
+test('a NEW project that reuses a removed one’s name does not inherit its conversation', () => {
+  /**
+   * ⚠️ THE DEFECT: a project id is derived from its NAME, and removing a
+   * project frees the id. Make "Henderson lease", say six things to Mara about
+   * the lease, remove it, and make a new "Henderson lease" months later for a
+   * different building — and the thread opened holding the old conversation,
+   * under the new project's heading, as though it had been said about this
+   * work. Nothing on screen would have suggested otherwise.
+   */
+  const born = '2026-01-01T00:00:00.000Z';
+  chat.appendMessage('lease-reused', 'casey', {
+    text: 'the north building lease',
+    delivery: { state: chat.DELIVERY.PLACED },
+  }, born);
+  // The control: the SAME project reads its own messages back.
+  assert.equal(chat.readThread('lease-reused', 'casey', born).messages.length, 1);
+
+  // A different project that happens to have taken the same name.
+  const reborn = '2026-08-01T00:00:00.000Z';
+  assert.throws(() => chat.readThread('lease-reused', 'casey', reborn),
+    (err) => err.code === 'OTHER_PROJECT');
+});
+
+test('and the earlier project’s words are KEPT, not deleted, when the new one starts writing', () => {
+  const born = '2026-01-01T00:00:00.000Z';
+  const reborn = '2026-08-01T00:00:00.000Z';
+  chat.appendMessage('lease-kept', 'casey', {
+    text: 'said to the FIRST project',
+    delivery: { state: chat.DELIVERY.PLACED },
+  }, born);
+  const file = chat.threadFile('lease-kept', 'casey');
+
+  const kept = chat.appendMessage('lease-kept', 'casey', {
+    text: 'said to the SECOND project',
+    delivery: { state: chat.DELIVERY.PLACED },
+  }, reborn);
+  assert.equal(kept.recorded, true, 'a refusal alone would leave the new project unable to keep anything');
+  assert.match(kept.supersededBecause, /kept aside/);
+
+  // The new project's thread holds only its own message.
+  const now = chat.readThread('lease-kept', 'casey', reborn);
+  assert.deepEqual(now.messages.map((m) => m.text), ['said to the SECOND project']);
+
+  // ⚠️ AND NOTHING WAS DELETED. The earlier record is still on disk, beside the
+  // new one, with every word in it.
+  const aside = fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.superseded'));
+  assert.equal(aside.length, 1, 'the earlier project’s messages were deleted rather than kept');
+  const was = JSON.parse(fs.readFileSync(path.join(path.dirname(file), aside[0]), 'utf8'));
+  assert.deepEqual(was.messages.map((m) => m.text), ['said to the FIRST project']);
+});
+
+test('a record written before any of this existed is NOT refused, because we cannot tell', () => {
+  // Every thread on disk today has no stamp. Inventing a mismatch for one would
+  // refuse a conversation that is very probably this project's own.
+  const file = chat.threadFile('legacy-thread', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    project: 'legacy-thread', agent: 'casey',
+    messages: [{ at: new Date().toISOString(), text: 'from before', delivery: { state: 'placed' } }],
+  }));
+  const got = chat.readThread('legacy-thread', 'casey', '2026-08-01T00:00:00.000Z');
+  assert.equal(got.messages.length, 1);
+  assert.equal(got.projectBornAt, null);
+});
+
+test('an existing conversation is not re-stamped by a read that happened to know the date', () => {
+  // Carrying the stored stamp forward keeps the record's own history true;
+  // overwriting it would quietly re-attach it to whatever asked last.
+  const file = chat.threadFile('stamp-keep', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    project: 'stamp-keep', agent: 'casey', projectBornAt: '2026-01-01T00:00:00.000Z',
+    messages: [],
+  }));
+  chat.appendMessage('stamp-keep', 'casey', {
+    text: 'another', delivery: { state: chat.DELIVERY.PLACED },
+  }, '2026-01-01T00:00:00.000Z');
+  const back = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(back.projectBornAt, '2026-01-01T00:00:00.000Z');
 });

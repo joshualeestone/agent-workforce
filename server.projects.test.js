@@ -612,17 +612,33 @@ test('an agent the person removed does not appear on a project row', async () =>
 
 const chat = require('./engine/chat');
 
-/** Arm the chat seam with a scripted tmux, and hand back what was called. */
-function armChat(answers) {
+/**
+ * Arm the chat seam with a scripted tmux, and hand back what was called.
+ *
+ * ⚠️ THE JUST-BEFORE-SENDING PROBE IS ANSWERED SEPARATELY, and healthy by
+ * default. `deliver` asks the pane about itself immediately before typing (see
+ * `verifyAtSend` in engine/chat.js), so without this the first scripted answer
+ * would be eaten by a read-only check and every send test would be measuring a
+ * refusal instead of the send it was written for. Tests that care about the
+ * probe pass one.
+ */
+function armChat(answers, probe) {
   const calls = [];
+  const answerProbe = probe === undefined
+    ? { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' }
+    : probe;
   chat.setRunner((args) => {
     calls.push(args);
-    return answers.length ? answers.shift() : { ran: true, status: 0, out: '', err: '' };
+    if (args[0] === 'display-message') return answerProbe;
+    return answers.length ? answers.shift() : { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
   });
   chat.setDryRun(false);
+  // The sends only, so an assertion about what was typed is not confused by the
+  // read-only probe in front of it.
+  calls.sends = () => calls.filter((args) => args[0] === 'send-keys');
   return calls;
 }
-const said = (out) => ({ ran: true, status: 0, out: out || '', err: '' });
+const said = (out) => ({ ran: true, spawnFailed: false, status: 0, out: out || '', err: '' });
 
 /**
  * A project with one agent on it, and the seam armed. Always torn down.
@@ -719,9 +735,12 @@ test('sending places the text into the agent’s own session, and says only that
       // "read" or "delivered to the agent" would be a claim about a program's
       // understanding that a keystroke cannot support.
       assert.ok(['placed', 'could_not'].includes(body.delivery.state));
-      assert.equal(calls[0][0], 'send-keys');
-      assert.equal(calls[0][calls[0].length - 1], 'have a look at the lease');
-      assert.deepEqual(calls[1].slice(-1), ['Enter']);
+      const sends = calls.sends();
+      assert.equal(sends[0][0], 'send-keys');
+      assert.equal(sends[0][sends[0].length - 1], 'have a look at the lease');
+      assert.deepEqual(sends[1].slice(-1), ['Enter']);
+      // And the pane was asked about itself first, read-only, before any keystroke.
+      assert.equal(calls[0][0], 'display-message');
     });
 });
 
@@ -748,7 +767,7 @@ test('a send that could NOT be delivered is recorded too, so the thread does not
       assert.equal(body.delivery.state, 'could_not');
       assert.match(body.delivery.because, /cannot tell that it is this agent/);
       assert.equal(body.recorded, true);
-      assert.equal(calls.length, 0, 'nothing was typed anywhere');
+      assert.equal(calls.sends().length, 0, 'nothing was typed anywhere');
       const back = json(await req(`/api/project/${project.id}/thread/zeta`));
       assert.equal(back.messages[0].delivery.state, 'could_not');
     });
@@ -760,7 +779,7 @@ test('an empty message is refused before anything is looked up', async () => {
     const res = await post(`/api/project/${project.id}/thread/zeta`, { text: '   ' });
     assert.equal(res.status, 400);
     assert.match(json(res).error, /write something to send/);
-    assert.equal(calls.length, 0);
+    assert.equal(calls.sends().length, 0);
   });
 });
 
@@ -775,7 +794,7 @@ test('a thread for an agent that is not on the project is a 404, on both verbs',
     assert.match(json(got).error, /not on this project/);
     const sent = await post(`/api/project/${project.id}/thread/nobody-here`, { text: 'hello' });
     assert.equal(sent.status, 404);
-    assert.equal(calls.length, 0, 'a refused route types nothing');
+    assert.equal(calls.sends().length, 0, 'a refused route types nothing');
   });
 });
 
@@ -795,7 +814,7 @@ test('sending is a WRITE, so another website cannot fire it', async () => {
       body: JSON.stringify({ text: 'do something regrettable' }),
     });
     assert.notEqual(res.status, 200);
-    assert.equal(calls.length, 0, 'a cross-site request must not reach an agent’s keyboard');
+    assert.equal(calls.sends().length, 0, 'a cross-site request must not reach an agent’s keyboard');
   });
 });
 

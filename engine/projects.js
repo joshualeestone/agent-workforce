@@ -164,10 +164,29 @@ function writeAll(list) {
  * same way get distinguished by a counter rather than one silently replacing
  * the other — "Q3" and "q3." must not be the same project.
  */
+/**
+ * ⚠️ BOUNDED, because an id is a KEY IN A FILENAME further downstream and the
+ * caps did not line up.
+ *
+ * `cleanName` allows a 120-character project name, `safeKey` keeps every ASCII
+ * alphanumeric in it, and `engine/chat.js` will only file a thread under an id
+ * of 80 characters or fewer. So a project with a long-but-perfectly-ordinary
+ * name DELIVERED messages and never RECORDED one, and the sentence it showed
+ * for that was "that is not a project we can read" — about a project it had
+ * just created, listed, and typed into. Three caps, no relationship between
+ * them, and the only symptom was a conversation that silently kept nothing.
+ *
+ * 64 is comfortably under the thread key's limit and long enough that no
+ * readable name reaches it. The counter still disambiguates, so two long names
+ * that share their first 64 characters become `<base>` and `<base>-2` rather
+ * than one project silently replacing the other.
+ */
+const MAX_ID = 64;
+
 function idFor(name, taken) {
   let base;
   try {
-    base = store.safeKey(name);
+    base = store.safeKey(name).slice(0, MAX_ID);
   } catch {
     // ⚠️ NOT an error. `safeKey` keeps `[a-z0-9_-]` only, so it yields nothing
     // for a name written in Cyrillic, Japanese, or anything else without ASCII
@@ -210,12 +229,50 @@ function idFor(name, taken) {
  * decision about what a project IS, not a passing correction. The sentence was
  * the defect.
  */
+/**
+ * The resolved path, canonicalised the way the FILESYSTEM spells it.
+ *
+ * ⚠️ `realpathSync.native`, NOT `realpathSync`, AND THIS IS A DATA-CORRUPTION
+ * FIX RATHER THAN A TIDY-UP. Measured on this machine, 2026-08-13, in a temp
+ * directory containing one real folder named `Lease`:
+ *
+ *     fs.realpathSync('…/lease')         → '…/lease'   (case preserved as asked)
+ *     fs.realpathSync.native('…/lease')  → '…/Lease'   (canonicalised)
+ *     statSync of both                    → the same inode
+ *
+ * Node's JS implementation resolves symlinks and does not canonicalise case;
+ * the native one goes through the OS `realpath(3)`, which does. On macOS's
+ * default case-INSENSITIVE volume that difference was making `Lease` and
+ * `lease` two projects over ONE directory: the duplicate check compares `real`,
+ * the two spellings never matched, and the person ended up with two rows whose
+ * agents both write into the same folder — and an add screen naming a spelling
+ * Finder will never show them.
+ *
+ * ⚠️ AND IT IS EXACT ON BOTH KINDS OF VOLUME, which is why this beats
+ * case-folding on `process.platform === 'darwin'`. On a case-SENSITIVE volume
+ * `Lease` and `lease` are genuinely two directories, and the native call
+ * answers each as itself — so they stay two projects, correctly. Case-folding
+ * would have refused the second one, a false refusal invented by a rule that
+ * guessed at the volume instead of asking it.
+ *
+ * (The case-sensitive half is reasoned from what `realpath(3)` returns, not
+ * measured: this machine has no case-sensitive volume to test on. Said plainly
+ * rather than left to read as though both halves were run.)
+ *
+ * Falls back to the JS implementation if the native one is unavailable, so a
+ * platform without it degrades to today's behaviour rather than throwing.
+ */
+function resolveReal(given) {
+  if (typeof fs.realpathSync.native === 'function') return fs.realpathSync.native(given);
+  return fs.realpathSync(given);
+}
+
 function folderState(folder) {
   const given = String(folder || '');
   if (!given) return { state: FOLDER.MISSING, because: 'no folder was recorded for this project', real: null };
   let real = given;
   try {
-    real = fs.realpathSync(given);
+    real = resolveReal(given);
   } catch (err) {
     if (err && err.code === 'ENOENT') {
       return { state: FOLDER.MISSING, because: 'this folder is not there any more, or it was moved', real: null };
@@ -558,7 +615,47 @@ function makeFolder(name) {
       throw new Error(`we could not make a folder for this project (${(err && err.message) || 'we do not know why'})`);
     }
   }
-  return dest;
+  /**
+   * ⚠️ THE SPELLING THE FILESYSTEM USES — FOR THE ONE SEGMENT WE DERIVED, and
+   * not a single character more.
+   *
+   * On macOS's case-insensitive volume, a project called `lease` next to an
+   * existing folder called `Lease` ADOPTS that folder — `statSync` finds it,
+   * because they are the same directory — and returning `dest` would store
+   * `…/lease`, naming a folder Finder will never show them.
+   *
+   * ⚠️ AND IT IS DELIBERATELY NOT `resolveReal(dest)`, which was the first
+   * version of this line and was wrong in a way the tests caught immediately:
+   * a full resolve also follows SYMLINKS, so on this machine it rewrote
+   * `/var/folders/…` to `/private/var/folders/…`. `folderState`'s own docstring
+   * settles that question — showing the stored path is defensible because it is
+   * the path the person picked, and swapping to the resolved one "is a product
+   * decision about what a project IS, not a passing correction". Fixing a case
+   * bug is not licence to make that decision quietly.
+   *
+   * So: the parent is left exactly as it was (it comes from the person's home
+   * directory, which they recognise), and only the last segment — the part
+   * derived from their typed name — is corrected against the parent's own
+   * listing. That is the same instrument `create.test.js` uses for the identical
+   * volume lesson, and it is exact on both kinds of volume: on a case-sensitive
+   * one, `Lease` and `lease` are two entries and each matches itself.
+   */
+  return path.join(path.dirname(dest), trueChildName(path.dirname(dest), path.basename(dest)));
+}
+
+/**
+ * How this directory really spells a child of this name.
+ *
+ * Answers the asked-for name unchanged when the listing cannot be read, or when
+ * it does not hold exactly one case-insensitive match — an ambiguous answer is
+ * not one to act on, and inventing a spelling is worse than keeping theirs.
+ */
+function trueChildName(parent, name) {
+  let entries;
+  try { entries = fs.readdirSync(parent); } catch { return name; }
+  const wanted = name.toLowerCase();
+  const matches = entries.filter((entry) => entry.toLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] : name;
 }
 
 /**

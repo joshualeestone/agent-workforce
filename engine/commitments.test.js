@@ -727,11 +727,34 @@ test('traversal is refused by the code that actually reads and writes, not just 
     assert.ok(!JSON.stringify(got).includes('SECRET FROM OUTSIDE'),
       'traversal returned content from outside the store');
 
-    // And the write path must not land outside DIR either.
+    /**
+     * And the write path must not land outside DIR either.
+     *
+     * ⚠️ THIS ARM WAS DEAD, and it read as coverage. It swallowed every error
+     * and then asserted that a directory had not changed — which is exactly
+     * what a `report()` that refused on its first line produces, and equally
+     * what one that never ran would produce. Absence proved by absence.
+     *
+     * Driven properly now: the refusal is asserted POSITIVELY, and a control
+     * below proves `report()` writes at all when it is given a name it accepts.
+     * Without that control, "nothing landed outside the store" is a sentence a
+     * completely broken `report()` would also earn.
+     */
     const before = fs.readdirSync(outsideDir).sort();
-    try { c.report(escape, [{ what: 'should not land here', id: 'gen18', createdAt: new Date().toISOString(), source: 'agent' }]); } catch { /* refused is fine */ }
+    const entry = { what: 'should not land here', id: 'gen18', createdAt: new Date().toISOString(), source: 'agent' };
+    assert.throws(() => c.report(escape, [entry]), /name/i,
+      'the traversal name was accepted by the write path');
     assert.deepEqual(fs.readdirSync(outsideDir).sort(), before,
       'a write escaped the store directory');
+
+    // THE CONTROL. A name that is its own key really does get written, inside
+    // the store — so the refusal above is this guard doing its job rather than
+    // `report()` being unable to write anything at all.
+    c.report('traversalcontrol', [{ ...entry, what: 'this one belongs here' }]);
+    assert.ok(fs.existsSync(path.join(c.DIR, 'traversalcontrol.json')),
+      'the control did not write, so the assertions above prove nothing');
+    assert.deepEqual(fs.readdirSync(outsideDir).sort(), before,
+      'the control itself escaped the store directory');
   } finally {
     fs.rmSync(outsideDir, { recursive: true, force: true });
   }
