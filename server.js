@@ -1150,6 +1150,18 @@ const server = http.createServer((req, res) => {
         // Only fields we know. An unrecognised key is dropped rather than
         // stored, so the profile cannot become a junk drawer.
         if (typeof patch.role === 'string') clean.role = patch.role.slice(0, 80);
+        // ⚠️ displayName is writable HERE because the record now WINS over
+        // the instruction file (round 32): creation writes it, readIdentity
+        // prefers it, and with no route accepting it a Kosmos-created agent
+        // had a permanently unchangeable name -- editing the file's
+        // identity line, which used to rename the board, silently did
+        // nothing with no sentence saying why. One-line trim: an
+        // empty-after-trim name is dropped rather than stored, so a person
+        // cannot blank an agent into anonymity by accident; the file line
+        // remains the fallback for agents with no record.
+        if (typeof patch.displayName === 'string' && patch.displayName.trim()) {
+          clean.displayName = patch.displayName.trim().slice(0, 80);
+        }
         sendJson(res, 200, store.writeProfile(name, clean));
       })
       .catch((err) => sendJson(res, 400, { error: String(err.message) }));

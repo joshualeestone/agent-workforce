@@ -4066,30 +4066,30 @@ function openProject(id) {
   // work, and `pjThreadWho` would only catch it when that agent is not on
   // this project — so the dangerous half (it IS on both) would be silent.
   if (switching) {
-  PJ_WHO = null;
-  PJ_SENT_LINE = null;
-  document.getElementById('pj-thread-msg').textContent = '';
-  document.getElementById('pj-say').value = '';
-  /**
-   * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
-   * synchronously below, but the thread body waits a full route round trip
-   * (which fans out to tmux) -- so without this, the NEW project's name sat
-   * over the PREVIOUS project's conversation, screen capture and question
-   * for the whole fetch: cross-project misattribution, the thing
-   * projectBornAt closes on the stored path, reappearing on the painted
-   * one. PJ_THREAD_GEN retires late RESPONSES; it cannot clear a stale
-   * PAINT. The interim is the honest not-looked-yet state, not a blank
-   * terminal (see the screen-hint rule at paintThread).
-   */
-  setLive(document.getElementById('pj-msgs'), '');
-  document.getElementById('pj-question').hidden = true;
-  document.getElementById('pj-screen').hidden = true;
-  document.getElementById('pj-screen-hint').textContent = '';
-  // The heading too (round 22): it is written in exactly one place
-  // (paintThread), so without this reset a project with no agents kept
-  // "What Mara's screen shows right now" from the LAST thread over an
-  // empty area -- a heading naming an agent that is not on this project.
-  document.getElementById('pj-screen-label').textContent = 'Its screen';
+    PJ_WHO = null;
+    PJ_SENT_LINE = null;
+    document.getElementById('pj-thread-msg').textContent = '';
+    document.getElementById('pj-say').value = '';
+    /**
+     * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
+     * synchronously below, but the thread body waits a full route round trip
+     * (which fans out to tmux) -- so without this, the NEW project's name sat
+     * over the PREVIOUS project's conversation, screen capture and question
+     * for the whole fetch: cross-project misattribution, the thing
+     * projectBornAt closes on the stored path, reappearing on the painted
+     * one. PJ_THREAD_GEN retires late RESPONSES; it cannot clear a stale
+     * PAINT. The interim is the honest not-looked-yet state, not a blank
+     * terminal (see the screen-hint rule at paintThread).
+     */
+    setLive(document.getElementById('pj-msgs'), '');
+    document.getElementById('pj-question').hidden = true;
+    document.getElementById('pj-screen').hidden = true;
+    document.getElementById('pj-screen-hint').textContent = '';
+    // The heading too (round 22): it is written in exactly one place
+    // (paintThread), so without this reset a project with no agents kept
+    // "What Mara's screen shows right now" from the LAST thread over an
+    // empty area -- a heading naming an agent that is not on this project.
+    document.getElementById('pj-screen-label').textContent = 'Its screen';
   }
   pjCloseConfirm();
   paintOneProject();
@@ -4623,6 +4623,22 @@ async function pjSend() {
   const msg = document.getElementById('pj-thread-msg');
   const text = box.value.trim();
   if (!who) { msg.textContent = 'There is no agent on this project to send that to.'; pjAnnounce(msg.textContent); return; }
+  /* ⚠️ The send goes to the agent the PICKER NAMES, or not at all (round
+     32): the resolved recipient and the visible picker can disagree for
+     up to a poll tick -- loadProjects replaces PROJECTS while the picker
+     still shows an agent just removed, so pjThreadWho falls back to the
+     default and the message would be typed into a DIFFERENT live agent's
+     session than the name on screen. "Typing to Mara, delivered to Nils",
+     the exact failure the pin exists to prevent, reached from the data
+     side. On mismatch: repaint, refuse, keep the words. */
+  const shown = document.getElementById('pj-thread-who').value;
+  if (shown && shown !== who) {
+    paintThreadPicker(p, who);
+    msg.textContent = 'Who this goes to just changed, so we did not send it. '
+      + 'Check the name above and press Send again. Your message is still in the box.';
+    pjAnnounce(msg.textContent);
+    return;
+  }
   if (!text) { msg.textContent = 'Write something to send.'; pjAnnounce(msg.textContent); return; }
 
   PJ_SENDING = true;
@@ -4881,6 +4897,14 @@ async function pjAnswerFrom(sessionName, displayName) {
   }
   openProject(on[0].id);
   if (PJ_CURRENT !== on[0].id) return;   // openProject bailed and said why
+  // ⚠️ Same two lines the picker's change handler runs, for the same
+  // reason (round 32): the standing verdict describes the conversation
+  // being LEFT, and without this the single-project case kept re-rendering
+  // "Placed into Casey's session" under a picker now showing Mara (the
+  // multi-project arm below happened to overwrite it, so the common case
+  // was the uncovered one).
+  PJ_SENT_LINE = null;
+  document.getElementById('pj-thread-msg').textContent = '';
   PJ_WHO = sessionName;
   await loadThread();
   /* ⚠️ Focus MOVES to the question (round 30, measured): the card that

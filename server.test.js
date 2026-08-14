@@ -3517,3 +3517,33 @@ test('the completion route is a write, so another website cannot fire it', async
   assert.equal(cross.status, 403, 'a cross-site POST was accepted');
   assert.match(cross.type, /application\/json/);
 });
+
+test('the display name is writable through the profile route, and a blank cannot erase it', async () => {
+  // ⚠️ Round 32: the record WINS over the instruction file, creation was
+  // the only writer, and the PUT whitelisted role only -- so a
+  // Kosmos-created agent had a permanently unchangeable name, and the old
+  // rename path (editing the identity line) silently stopped working.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const put = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '  Seraph  ' }),
+    });
+    assert.equal(put.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraph', 'trimmed and stored');
+    // A blank is dropped rather than stored: a person cannot un-name an
+    // agent by accident, and the record keeps the last real name.
+    const blank = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '   ' }),
+    });
+    assert.equal(blank.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraph', 'a blank overwrote the name');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});
