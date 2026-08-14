@@ -1011,6 +1011,13 @@ const LOCK_WAIT_MS = 2000;
  *
  * `Atomics.wait` on a private buffer blocks this thread for the timeout with no
  * process, no file descriptor and nothing to throw.
+ *
+ * ⚠️ AND IT BLOCKS THE WHOLE SERVER, which is single-threaded: while one
+ * request waits out lock contention (up to LOCK_WAIT_MS, 2s), every other
+ * request on the machine stalls behind it. Bounded and rare (the lock is
+ * per-thread-file and held for one read-modify-write), and far better than
+ * the 15-second unbounded spin it replaced -- but a wait here is everybody
+ * waiting, which is the cost to weigh before raising LOCK_WAIT_MS.
  */
 const PARK = new Int32Array(new SharedArrayBuffer(4));
 function pauseMs(ms) {

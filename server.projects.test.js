@@ -1006,6 +1006,28 @@ test('a project reusing an earlier name says its OWN conversation is empty, not 
     });
 });
 
+test('the POST route really stamps projectBornAt, read off the file it wrote', async () => {
+  /**
+   * ⚠️ THE WIRING, not the guard. The engine's reuse guard is well covered,
+   * but every test of it re-stamped the file BY HAND, overwriting whatever
+   * the route had written -- so dropping `project.createdAt` from the route's
+   * appendMessage call left the whole suite green (measured, round 12) while
+   * every new thread was born with projectBornAt null, which makes the
+   * mismatch check inert for all of them: a recreated project of the same
+   * name would inherit the earlier project's conversation, the exact defect
+   * the guard exists for. This reads the file the route ACTUALLY wrote.
+   */
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      await post(`/api/project/${project.id}/thread/zeta`, { text: 'stamp me' });
+      const was = JSON.parse(fs.readFileSync(chat.threadFile(project.id, 'zeta'), 'utf8'));
+      assert.ok(project.createdAt, 'control: the project carries a createdAt to stamp');
+      assert.equal(was.projectBornAt, project.createdAt,
+        'the route must stamp the thread with the project’s own birth time');
+    });
+});
+
 test('an agent whose name cannot be FILED under is told the truth, not the two false sentences', async () => {
   /**
    * ⚠️ THE CASE THAT SLIPPED PAST EVERY EARLIER ROUND. `chat.threadFile`

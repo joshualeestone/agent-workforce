@@ -1509,12 +1509,20 @@ function card(a) {
    * the state that means somebody is waiting, and it says what it will show
    * rather than what it will do to the agent.
    */
-  const answer = a.state === 'needs_you'
+  // ⚠️ GATED ON THE TIE, not only the state. The board does not gate a card's
+  // STATE on isNamedOurs, so a borrowed-name pane (a stranger's `tmux new -s
+  // casey` with a Claude in it) can read needs_you here -- and the thread this
+  // button opens WILL refuse it (describe forces an untied member to
+  // `unknown`, so the route's question sentence never fires). A button
+  // promising a question the next screen silently cannot show is the exact
+  // stranded state this button was built to remove, borrowed-name flavour.
+  // A new sibling does not inherit the guard; it has to be given it.
+  const answer = a.state === 'needs_you' && a.isNamedOurs
     // ⚠️ NAMED, like the pencil button two lines up. On a board of thirteen
     // agents a screen-reader user hears "See the question" thirteen times with
     // nothing saying whose; the visible label stays short and the accessible
     // name carries the agent.
-    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}" aria-label="See ${esc(a.name)}’s question">See the question</button>`
+    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}" data-answer-name="${esc(a.name)}" aria-label="See ${esc(a.name)}’s question">See the question</button>`
     : '';
 
   return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
@@ -2147,7 +2155,7 @@ document.getElementById('grid').addEventListener('click', (e) => {
   // never fire at all: the card's own handler matches the same click and opens
   // the detail panel instead, which is the screen this button exists to skip.
   const answer = e.target.closest('[data-answer]');
-  if (answer) { pjAnswerFrom(answer.dataset.answer); return; }
+  if (answer) { pjAnswerFrom(answer.dataset.answer, answer.dataset.answerName); return; }
   const card = e.target.closest('.card');
   if (card) openDetail(card.dataset.agent);
 });
@@ -4096,7 +4104,19 @@ function pjWhen(at) {
   const mins = Math.round(secs / 60);
   if (mins < 60) return mins === 1 ? 'a minute ago' : mins + ' minutes ago';
   try {
-    return 'at ' + new Date(when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const then = new Date(when);
+    const time = then.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    // ⚠️ A bare clock time is only TRUE today. A thread keeps up to a
+    // thousand messages, so "at 3:42 PM" on a three-day-old row reads as
+    // this afternoon -- a false time claim, the exact class rule 5 exists
+    // for. Compared by calendar day, not by 24 hours, because "yesterday at
+    // 11 PM" is not today at any hour.
+    const now = new Date();
+    if (then.toDateString() !== now.toDateString()) {
+      return 'at ' + time + ' on '
+        + then.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    return 'at ' + time;
   } catch {
     return '';
   }
@@ -4579,7 +4599,11 @@ async function pjSend() {
     // refresh must not replace it with an exception string.
     try { await loadThread(); } catch { /* the verdict line stays */ }
   } catch (err) {
-    msg.textContent = err.message;
+    // Through pjSentence, like loadThread's sibling catch: a 400 carries an
+    // engine clause ("that message has characters we will not type…"), and
+    // rendering it lowercase and unterminated is the clause-after-full-stop
+    // defect pjSentence was written for.
+    msg.textContent = pjSentence(err.message) || 'We could not send that.';
   } finally {
     PJ_SENDING = false;
     document.getElementById('pj-send').disabled = false;
@@ -4612,7 +4636,11 @@ document.getElementById('pj-say').addEventListener('keydown', (e) => {
  * lands somewhere that says what to do next — including the two that cannot
  * open a thread at all.
  */
-async function pjAnswerFrom(sessionName) {
+async function pjAnswerFrom(sessionName, displayName) {
+  // Act on the machine name, SPEAK the display name -- the same split the
+  // capitalised-names change made everywhere else. The card carries both;
+  // falling back to the machine name only when no display name arrived.
+  const spoken = displayName || sessionName;
   await loadProjects();
   showTab('projects');
   // ⚠️ "We could not look" is NOT "it is on none". loadProjects leaves
@@ -4624,7 +4652,7 @@ async function pjAnswerFrom(sessionName) {
     PJ_CURRENT = null;
     pjView('list');
     document.getElementById('pj-list-msg').textContent =
-      'We could not check which projects ' + sessionName + ' is on just now, so we cannot '
+      'We could not check which projects ' + spoken + ' is on just now, so we cannot '
       + 'open its conversation from here. This is not saying it has none.';
     return;
   }
@@ -4635,7 +4663,7 @@ async function pjAnswerFrom(sessionName) {
     // Named, and told what would fix it. "Nothing happened" is what a silent
     // return looks like from the outside.
     document.getElementById('pj-list-msg').textContent =
-      sessionName + ' is not on a project yet, so there is no conversation to open here. '
+      spoken + ' is not on a project yet, so there is no conversation to open here. '
       + 'Add it to a project and you can answer it.';
     return;
   }

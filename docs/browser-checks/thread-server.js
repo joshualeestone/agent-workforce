@@ -147,8 +147,17 @@ chat.setRunner((args) => {
    * Answered from `SPECS` rather than hard-coded, so the probe and the board
    * cannot describe different fleets.
    */
+  // ⚠️ The target is read from the `-t` FLAG, not a fixed position. The
+  // send-keys arm already matches by substring for the same reason: a change
+  // to the engine's argv shape would make a positional read answer about the
+  // wrong pane, or emit a spurious "can't find pane" that reads as a product
+  // defect in every check downstream.
+  const targetOf = (argv) => {
+    const i = argv.indexOf('-t');
+    return i >= 0 ? String(argv[i + 1] || '').replace(/^=/, '') : '';
+  };
   if (args[0] === 'display-message') {
-    const target = String(args[3] || '').replace(/^=/, '');
+    const target = targetOf(args);
     const spec = SPECS.find((s) => `${s.session}:${s.pane}` === target);
     if (!spec) {
       return { ran: true, spawnFailed: false, status: 1, out: '', err: `can't find pane: ${target}` };
@@ -163,7 +172,7 @@ chat.setRunner((args) => {
     };
   }
   if (args[0] === 'capture-pane') {
-    const target = String(args[args.length - 3] || '').replace(/^=/, '');
+    const target = targetOf(args);
     const screen = SCREENS[target];
     return screen === undefined
       ? { ran: true, spawnFailed: false, status: 1, out: '', err: `can't find pane: ${target}` }
