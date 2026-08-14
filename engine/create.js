@@ -162,10 +162,34 @@ function cleanName(raw) {
   return String(raw == null ? '' : raw).trim();
 }
 
+/**
+ * The name the MACHINERY uses: the tmux session, the launchd label, the folder,
+ * every key in the store.
+ *
+ * ⚠️ TWO NAMES, ONE OF THEM LOWER CASE, and the split is the whole change here.
+ * This used to refuse a capital outright — "use lower case, so the name is the
+ * same everywhere it appears" — which is a true sentence about the machinery
+ * and the wrong thing to say to somebody naming a colleague. They type `Casey`
+ * and were told their own name for it was invalid.
+ *
+ * So the capital survives as the DISPLAY name and everything the operating
+ * system touches uses this. Nothing on disk changes shape: the session is still
+ * `casey`, the label is still `com.kosmos.agent.casey`, and every existing agent
+ * keeps every path it has.
+ *
+ * ⚠️ `toLowerCase` and NOTHING ELSE. It is not `safeKey`, deliberately.
+ * `safeKey` STRIPS, so `Ca.sey` would become `casey` — a different agent's name,
+ * arrived at silently, which is the exact hole this repo has closed three times
+ * on other routes. Lowercasing changes case and nothing else, and `nameProblem`
+ * then refuses anything the result is not made of.
+ */
+function slugFor(raw) {
+  return cleanName(raw).toLowerCase();
+}
+
 function nameProblem(raw) {
-  const name = cleanName(raw);
+  const name = slugFor(raw);
   if (!name) return 'give the agent a name';
-  if (name.toLowerCase() !== name) return 'use lower case, so the name is the same everywhere it appears';
   // ⚠️ Length gets its OWN sentence. `NAME_RE` enforces 2 to 32 characters, and
   // a person who typed `a` was told to use letters, numbers, hyphens and
   // underscores -- a rule they had not broken, with no way to work out what was
@@ -323,6 +347,37 @@ function xml(value) {
     .split('>').join('&gt;');
 }
 
+/**
+ * ⚠️ WHOSE BACKGROUND ITEM THIS IS — the `AssociatedBundleIdentifiers` key
+ * below, explained here rather than in the plist because that string is a
+ * template literal and a backtick inside it ends the string. (Measured: the
+ * first version of this note went in as an XML comment and the module stopped
+ * parsing.)
+ *
+ * macOS lists every launchd job in System Settings → General → Login Items, and
+ * posts a notification the first time one appears. With nothing to attribute
+ * the job to it names the executable — so the person is told `bash` was added
+ * as a background item, and later that `bash` is running in the background on
+ * their Mac. A security notice about an unidentified shell, minutes after they
+ * installed something. The honest reading of that is alarming, and the thing it
+ * describes is their own agent staying alive between logins.
+ *
+ * The key points the notice at the app that owns the job, so it says Kosmos.
+ * The identifier is the one the installer registers the bundle under
+ * (`install/setup.sh`), written here as a literal because this module has no
+ * read of the installed bundle and inventing one would be a second definition
+ * of it. A test asserts the two files still agree.
+ *
+ * ⚠️ EXISTING AGENTS KEEP THEIR PLISTS. Nothing on this branch rewrites a job
+ * already on disk; the key arrives when an agent is next created or
+ * reinstalled. An operator with a running fleet will keep seeing `bash` for
+ * those, deliberately — rewriting live launchd jobs to improve a label is not a
+ * trade this product makes.
+ *
+ * ⚠️ AND IT DOES NOT STOP THE NOTICE. It attributes it. The creation screen says
+ * the notice is coming, in as many words, rather than letting somebody meet it
+ * unexplained and switch their own agent off.
+ */
 function plistFor(name, claudeBin, tmuxBin) {
   const label = serviceLabel(name);
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -347,6 +402,9 @@ function plistFor(name, claudeBin, tmuxBin) {
     <key>PATH</key><string>${xml(`${path.dirname(claudeBin)}:${path.dirname(tmuxBin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`)}</string>
     <key>LANG</key><string>en_US.UTF-8</string>
   </dict>
+  <!-- Whose background item this is. See the note above plistFor. -->
+  <key>AssociatedBundleIdentifiers</key>
+  <array><string>com.chaoskosmos.kosmos</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
@@ -414,12 +472,26 @@ function binPaths(opts) {
  * operator has to be able to see which half.
  */
 function createAgent(opts) {
-  const name = cleanName(opts && opts.name);
+  /**
+   * ⚠️ TWO NAMES FROM HERE DOWN, and which one goes where is the whole of 6b.
+   *
+   *   `name`  — the slug. Everything the machine touches: the folder, the tmux
+   *             session, the launchd label, every key in the store.
+   *   `shown` — what the person typed, capitals and all. The instruction file
+   *             (which is what the board reads a display name back out of), the
+   *             stored profile, and every sentence this function returns.
+   *
+   * The rule is the one `engine/projects.js` states for members and this repo
+   * has already shipped a defect against: **act on the machine name, speak the
+   * display name.**
+   */
+  const shown = cleanName(opts && opts.name);
+  const name = slugFor(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
   const { claudeBin, tmuxBin } = binPaths(opts);
 
   const steps = [];
-  const problem = nameProblem(name);
+  const problem = nameProblem(shown);
   if (problem) return { outcome: OUTCOME.REFUSED, because: problem, steps };
 
   const role = roles.byKey(roleKey);
@@ -451,7 +523,7 @@ function createAgent(opts) {
   if (removedList.isRemoved(name)) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `${name} is on your removed list. Put that one back from "Show removed agents" at the bottom of the Agents tab, or pick a different name.`,
+      because: `${shown} is on your removed list. Put that one back from "Show removed agents" at the bottom of the Agents tab, or pick a different name.`,
       steps,
     };
   }
@@ -476,21 +548,21 @@ function createAgent(opts) {
   if (hasFolder && hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already an agent called ${name}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
+      because: `there is already an agent called ${shown}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
       steps,
     };
   }
   if (hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${shown} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
       steps,
     };
   }
   if (hasFolder) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already a folder for an agent called ${name}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
+      because: `there is already a folder for an agent called ${shown}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
       steps,
     };
   }
@@ -580,7 +652,7 @@ function createAgent(opts) {
     const also = running === name ? '' : ` (this computer is running ${running}, which the board files under the same name)`;
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is already running on this computer${also}`,
+      because: `something called ${shown} is already running on this computer${also}`,
       steps,
     };
   }
@@ -690,8 +762,32 @@ function createAgent(opts) {
 
   const wroteInstructions = step('wrote its instructions', () => {
     if (DRY_RUN) return true;
-    fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, name), 'utf8');
+    fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, shown), 'utf8');
   });
+
+  /**
+   * The display name, written where the board reads it.
+   *
+   * ⚠️ NOT A STEP, and deliberately not gating anything. An agent whose profile
+   * could not be written is a working agent shown under its slug — a cosmetic
+   * loss — and failing the creation over it would destroy the agent to protect
+   * its capital letter. The screen's step list is for things that decide whether
+   * the person HAS an agent.
+   *
+   * ⚠️ AND IT IS THE SECOND RECORD OF THIS NAME, which needs saying because two
+   * derivations of one fact is this codebase's worst habit. The instruction file
+   * written above already says `You are **Casey**`, and `readIdentity` parses it
+   * — that is how every pre-existing agent on this machine gets its display
+   * name, and it keeps working untouched. This record is what survives the
+   * person EDITING that file: the instruction file belongs to them and they may
+   * rewrite its first line, and a name that vanishes when somebody edits their
+   * own instructions is not a name. `readIdentity` prefers this and falls back
+   * to the file, so the two cannot contradict each other — one wins, stated.
+   */
+  if (!DRY_RUN && shown) {
+    try { store.writeProfile(name, { displayName: shown }); }
+    catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
+  }
 
   // ⚠️ Executable, and that is not a detail. launchd runs it through
   // `/bin/bash` either way, but this file is the one an operator debugging a
@@ -808,12 +904,23 @@ function createAgent(opts) {
   // than asserted here. "We started it" is a claim about us.
   return {
     outcome: OUTCOME.CREATED,
-    because: `${name} is set up and starting`,
+    because: `${shown} is set up and starting`,
     steps,
     firstAction: role.firstAction,
     // Where it actually is, so no screen has to rebuild this path and be wrong
     // about it on a machine with the roots pointed elsewhere.
     folder: workerDir(name),
+    /**
+     * ⚠️ BOTH NAMES, PUBLISHED, and this is not decoration. The creation screen
+     * then WATCHES the board for the agent it just made, by `sessionName` — and
+     * the board files it under the slug. A screen watching for what the person
+     * typed would look for `Casey`, never find it, and tell somebody their
+     * successful creation could not be seen coming up. Same rule as everywhere
+     * else here: act on the machine name, speak the display name, and never
+     * make a caller derive either one for itself.
+     */
+    name,
+    shownAs: shown,
   };
 }
 
@@ -823,6 +930,7 @@ module.exports = {
   unusablePath,
   nameProblem,
   cleanName,
+  slugFor,
   plistFor,
   supervisorPath,
   supervisorSource,

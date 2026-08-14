@@ -45,6 +45,7 @@ for (const key of ['AGENT_WORKFORCE_DATA', 'AGENT_WORKFORCE_WORKERS', 'AGENT_WOR
 
 const status = require('../../engine/status');
 const chat = require('../../engine/chat');
+const create = require('../../engine/create');
 const fleet = require('../../test-support/fleet');
 
 /**
@@ -133,6 +134,35 @@ chat.setRunner((args) => {
   return { ran: true, status: 0, out: '', err: '' };
 });
 chat.setDryRun(false);
+
+/**
+ * The CREATION seam, armed the other way round.
+ *
+ * ⚠️ `create` is left in DRY-RUN with a recorder installed, which is the one
+ * combination where it writes nothing and runs nothing while still answering
+ * the way it really answers. That is what makes the last screen of the create
+ * flow — the step list, the display name, the background-item notice — safe to
+ * look at on a machine with a live fleet on it. Without this, opening that
+ * screen in a browser check would put a real folder, a real launchd job and a
+ * real tmux session on somebody's Mac.
+ */
+create.setRunner((file, args) => {
+  process.stdout.write('CREATE-RAN ' + JSON.stringify([file, args]) + '\n');
+  return { ok: true, stdout: '' };
+});
+/**
+ * ⚠️ SET EXPLICITLY, AND THEN ASSERTED — and the assertion caught the first
+ * version of these four lines. `setRunner` re-arms dry-run only when it is
+ * handed NULL; installing a runner leaves the flag exactly as it was, which on
+ * a fresh process is FALSE. So this file, whose entire purpose is that nothing
+ * reaches the machine, was one line away from making a real folder, a real
+ * launchd job and a real tmux session the first time anybody opened the create
+ * screen against it. The check is cheap and the failure is not.
+ */
+create.setDryRun(true);
+if (create.DRY_RUN !== true) {
+  throw new Error('create is not in dry-run: this fixture would make real agents. Refusing.');
+}
 
 const { start } = require('../../server');
 require('../../engine/firstrun').complete();

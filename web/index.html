@@ -1008,12 +1008,18 @@ svg { display: block; }
            here is a second definition of the same fact, and the two would
            disagree eventually. So this is copy, and the refusal a person sees
            is the server's own sentence. -->
-      <div class="fhint">Lower case letters, numbers, hyphens and underscores.
-        It becomes the name of its folder, so it is the one thing that is
-        awkward to change later.</div>
+      <!-- ⚠️ THE CAPITAL IS FINE NOW, and this copy had to change with the
+           rule. It used to read "Lower case letters …", which was true of the
+           machinery and was the sentence a person met when they typed their
+           agent's name the way they would write a colleague's. Capitals are
+           kept for what you see; the machine quietly uses the lower-case form
+           for its folder and its window. -->
+      <div class="fhint">Letters, numbers, hyphens and underscores. Capitals are
+        fine — you will see it written the way you type it, and the folder it
+        gets on this computer uses the lower-case form.</div>
       <div class="frow">
         <input type="text" id="create-name" autocomplete="off" spellcheck="false"
-               placeholder="casey">
+               placeholder="Casey">
         <button class="btn" id="create-go" type="button">Create it</button>
       </div>
       <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
@@ -1034,6 +1040,15 @@ svg { display: block; }
     <div class="ticks" id="made-ticks"></div>
     <p class="vh" id="made-say" role="status" aria-live="polite"></p>
     <div class="stale-note" id="made-warn" hidden></div>
+    <!-- ⚠️ SAID BEFORE macOS SAYS IT. The agent is kept alive by a launchd job,
+         so the operating system posts its own "background item added" notice
+         and lists it under Login Items. Meeting that unexplained, minutes after
+         installing something, reads as a security warning about software you
+         did not know was running — and a person who then turns it off has
+         switched their own agent off without knowing that is what they did.
+         Shown only on a creation that actually happened; see `made-bg` in the
+         script. -->
+    <div class="stale-note" id="made-bg" hidden></div>
     <div class="first-action" id="made-first" hidden></div>
     <div class="frow" style="margin-top: var(--space-7);">
       <button class="btn" id="made-done" type="button" hidden>See it on the board</button>
@@ -3458,6 +3473,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
   document.getElementById('made-head').textContent = 'Making ' + name;
   document.getElementById('made-first').hidden = true;
   document.getElementById('made-warn').hidden = true;
+  document.getElementById('made-bg').hidden = true;
   document.getElementById('made-done').hidden = true;
   document.getElementById('made-retry').hidden = true;
   paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' });
@@ -3500,7 +3516,29 @@ document.getElementById('create-go').addEventListener('click', async () => {
     return;
   }
 
-  await watchForAgent(name, result, attempt);
+  /**
+   * ⚠️ SHOWN ON A CREATION THAT HAPPENED, AND ONLY THEN. A `partial` rolls
+   * everything back — no job, nothing to appear in Login Items — so warning
+   * about a background item there would describe something that does not exist,
+   * on the screen whose stated rule is that every line is reported or watched.
+   * That is why this sits below the partial branch rather than beside the
+   * heading.
+   */
+  document.getElementById('made-bg').innerHTML =
+    '<b>macOS will mention Kosmos running in the background.</b> That is your agent '
+    + 'staying alive between logins, and it will appear under Login Items in System '
+    + 'Settings. Turning it off there stops the agent from starting.';
+  document.getElementById('made-bg').hidden = false;
+
+  /**
+   * ⚠️ WATCHED BY THE MACHINE NAME, SPOKEN BY THE TYPED ONE. The board files an
+   * agent under its slug, so somebody who typed `Casey` would have this poll for
+   * a `Casey` that will never appear and then be told their agent could not be
+   * seen coming up — a successful creation reported as a failure, on the last
+   * screen of the flow. `result.name` is the engine's own answer for which name
+   * that is; falling back to what was typed keeps an older server working.
+   */
+  await watchForAgent(result.name || name, result, attempt);
 });
 
 /**
@@ -3552,6 +3590,11 @@ function boardCanSeeIt(a) {
  * NOT treated as failure here; the structural facts are.
  */
 async function watchForAgent(name, result, attempt) {
+  // ⚠️ MATCH ON `name` (the board's key), SPEAK `shown`. They differ the moment
+  // somebody types a capital, and using one for both would either look for a
+  // `Casey` the board will never list or head the screen with `casey` after the
+  // person carefully typed their agent's name.
+  const shown = result.shownAs || name;
   // The token from before the request, so one creation is one attempt from the
   // click to the last poll.
   const mine = attempt;
@@ -3570,7 +3613,7 @@ async function watchForAgent(name, result, attempt) {
     const found = agents.find((a) => a.sessionName === name);
     if (boardCanSeeIt(found)) {
       paintMade(result.steps, { state: 'done', text: 'The board can see it running' });
-      document.getElementById('made-head').textContent = name + ' is running';
+      document.getElementById('made-head').textContent = shown + ' is running';
       if (result.firstAction) {
         const box = document.getElementById('made-first');
         box.innerHTML = '<b>Something to give it first</b><q>' + esc(result.firstAction) + '</q>';
@@ -3587,7 +3630,7 @@ async function watchForAgent(name, result, attempt) {
   // nothing about why — we do not know why, and the plausible guess is the
   // thing this codebase is written against.
   paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' });
-  document.getElementById('made-head').textContent = name + ' has not come up';
+  document.getElementById('made-head').textContent = shown + ' has not come up';
   const warn = document.getElementById('made-warn');
   /**
    * ⚠️ DO NOT OVERWRITE A PARTIAL'S REASON WITH THIS ONE.

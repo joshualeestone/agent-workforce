@@ -1449,6 +1449,27 @@ function readIdentity(sessionName) {
   const override = IDENTITY_OVERRIDES[sessionName];
   if (override) return { ...override, derived: true, source: 'override' };
 
+  /**
+   * ⚠️ THE RECORD BEFORE THE FILE, and the order is the point.
+   *
+   * An agent created as `Casey` runs as `casey` everywhere the machine looks —
+   * session, launchd label, folder — and is called Casey everywhere a person
+   * looks. `create` writes the display name here as well as into the first line
+   * of the instruction file, and this prefers the record because the file
+   * belongs to the PERSON: they can rewrite that line, and a display name that
+   * vanishes when somebody edits their own instructions is not a name.
+   *
+   * ⚠️ It cannot make an agent anonymous. A profile with no `displayName` — every
+   * agent that existed before this was written — falls straight through to the
+   * file exactly as before, which is how `claudebot` still reads `Splinter`.
+   * `role` deliberately still comes from the file below: the profile's own
+   * `role` field is what a person types into the detail panel, and the board
+   * already prefers that separately, one level up.
+   */
+  const remembered = store.readProfile(sessionName);
+  const recorded = remembered && typeof remembered.displayName === 'string'
+    ? remembered.displayName.trim() : '';
+
   const file = path.join(WORKERS_DIR, sessionName, 'CLAUDE.md');
 
   // ⚠️ Through the SHARED reader, not a local `readFileSync`.
@@ -1467,13 +1488,26 @@ function readIdentity(sessionName) {
   // `instructions.js` already requires this one, so anything shared has to live
   // underneath or the require becomes a cycle.
   const got = readWorkerFile(file, WORKERS_DIR);
-  if (!got.ok) return { displayName: sessionName, role: null, derived: false };
+  // ⚠️ `derived: true` when we have a recorded name even though the file is
+  // unreadable, because `derived` answers "did we find a real name for this
+  // one, or is this the machine name?" — and a recorded name IS a real name.
+  // Answering false would put the card's "machine name" flag on an agent whose
+  // name the person themselves typed.
+  if (!got.ok) {
+    return recorded
+      ? { displayName: recorded, role: null, derived: true, source: 'profile' }
+      : { displayName: sessionName, role: null, derived: false };
+  }
   const text = got.buf.toString('utf8').slice(0, 4000);
 
   const m = text.match(/You are \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?\s*,?\s*([^.\n]*)/);
-  if (!m) return { displayName: sessionName, role: null, derived: false };
+  if (!m) {
+    return recorded
+      ? { displayName: recorded, role: null, derived: true, source: 'profile' }
+      : { displayName: sessionName, role: null, derived: false };
+  }
 
-  const displayName = m[1].trim();
+  const displayName = recorded || m[1].trim();
   let role = (m[3] || '')
     .replace(/\*\*/g, '')          // instruction files are markdown; strip emphasis
     .replace(/^(the|a|an)\s+/i, '')
