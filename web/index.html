@@ -4246,10 +4246,16 @@ function paintThread(body) {
      * drift the first time either is edited. The fallback covers an older
      * server that does not send the field.
      */
+    // ⚠️ "Its whole screen is below" ONLY when a screen will actually be
+    // below: with the capture failed, the screen block twenty lines down
+    // hides itself and says we could not read the window -- and this line
+    // was still pointing at it. The same viewport test that block uses
+    // decides the pointer here, so the two sentences cannot disagree.
     qLabel.textContent = name + ' is waiting on an answer, and '
       + (body.questionBecause
         || 'we cannot find the question on its screen right now')
-      + '. Its whole screen is below.';
+      + '.'
+      + (body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
     pjSetScreen(qText, '');
     qText.hidden = true;
     qWrap.hidden = false;
@@ -4257,6 +4263,8 @@ function paintThread(body) {
     qWrap.hidden = true;
     qText.hidden = false;
   }
+  // The un-hide for the question branch above (its qText.hidden = true is
+  // the no-question arm); kept out here so one line closes all three arms.
   if (body.asking && body.question) qText.hidden = false;
 
   /* What we have sent. */

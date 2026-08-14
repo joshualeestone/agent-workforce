@@ -1044,6 +1044,21 @@ test('folderPathFor makes NOTHING, so typing into a name box leaves no trail of 
   assert.ok(!fs.existsSync(p), 'asking where it would go must not put it there');
 });
 
+test('an unreadable parent leaves the asked-for spelling alone, rather than throwing', () => {
+  // trueChildName's readdir-failure arm: mutation-verified uncovered in
+  // round 14. An unreadable projects root must degrade to the name as
+  // asked, not crash the preview.
+  reset();
+  fs.mkdirSync(projects.projectsRoot(), { recursive: true });
+  fs.chmodSync(projects.projectsRoot(), 0o000);
+  try {
+    const p = projects.folderPathPreview('lease');
+    assert.ok(p.endsWith('/lease'), 'the spelling stays as asked when the listing cannot be read');
+  } finally {
+    fs.chmodSync(projects.projectsRoot(), 0o755);
+  }
+});
+
 test('the previewed path IS the path the act produces, case correction included', () => {
   // ⚠️ Volume-portable on purpose, the same lesson create.test.js records: on
   // a case-insensitive disk `lease` beside an existing `Lease` ADOPTS that

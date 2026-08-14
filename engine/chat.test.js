@@ -24,6 +24,13 @@ const path = require('node:path');
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-chat-test-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
+// ⚠️ DRY RUN FROM THE FIRST REQUIRE, before any beforeEach exists. Between
+// the require below and the first hook the module used to sit armed
+// (DRY_RUN false, runner null) against the real machine's tmux -- latent
+// rather than live, but the header's "no ordering of teardowns leaves a
+// suite able to send" rested entirely on beforeEach. The spawned writer.js
+// children inherit this env and boot the same way.
+process.env.AGENT_WORKFORCE_DRY_RUN = '1';
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -832,6 +839,15 @@ test('the pane is asked again immediately before typing, and the probe is read-o
     assert.match(chat.VERIFY_FORMAT, /pane_current_command/);
     assert.match(chat.VERIFY_FORMAT, /pane_in_mode/);
     assert.match(chat.VERIFY_FORMAT, /kosmos_agent/);
+    // ⚠️ THE SEPARATOR, as a literal. The equality above compares the argv
+    // against the module's own constant, so it passes whatever the constant
+    // contains -- round 14 changed the join to spaces and the suite stayed
+    // green while every real probe on the machine would have come back as
+    // one field and refused every send. TAB is what okProbe()'s fixture
+    // answers with, so the two are pinned to each other here.
+    assert.equal((chat.VERIFY_FORMAT.match(/\t/g) || []).length, 2,
+      'the probe format must be tab-separated, one tab between each of the three fields');
+    assert.ok(!/ /.test(chat.VERIFY_FORMAT), 'no space separator can sneak in beside the tabs');
   });
 });
 
@@ -901,13 +917,27 @@ test('a probe we could not run refuses the send rather than waving it through', 
       { ran: true, spawnFailed: false, status: 0, out: 'nonsense\n', err: '' },
       // ⚠️ TOO MANY fields, not just too few: an extra one shifts every value
       // by a column, so a claim would be read as a command.
-      { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\textra\n', err: '' }]) {
+      { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\textra\n', err: '' },
+      // ⚠️ And TOO FEW as its own probe, refused by THIS guard with THIS
+      // sentence. The 1-field 'nonsense' probe above is refused downstream by
+      // isAgentPane, so relaxing the exact-length check to too-many-only
+      // stayed green (round 14) while a short answer earned "its window was
+      // scrolled back" -- a claim about a scroll state nothing observed. The
+      // sentence is asserted below, not just the refusal.
+      { ran: true, spawnFailed: false, status: 0, out: '2.1.212\tcasey\n', err: '' }]) {
       chat.resetForTests();
       const tmux = arm([ok(), ok()], { probe: answer });
       const verdict = chat.deliver('casey', 'hello', board.agents);
       assert.equal(verdict.state, chat.DELIVERY.COULD_NOT, JSON.stringify(answer));
       assert.equal(tmux.sends().length, 0, 'a send went out over a check that did not answer');
     }
+    // The too-few sentence, pinned: it must be the shape refusal, never a
+    // borrowed claim about scroll state (see the loop comment above).
+    chat.resetForTests();
+    arm([ok(), ok()], { probe: { ran: true, spawnFailed: false, status: 0, out: '2.1.212\tcasey\n', err: '' } });
+    const short = chat.deliver('casey', 'hello', board.agents);
+    assert.match(short.because, /shape we do not recognise/,
+      'a short probe answer must be refused as a shape, not explained as a scroll state');
   });
 });
 
@@ -1473,6 +1503,9 @@ test('an unconfirmed send does not also assert WHERE the message is sitting', ()
      * one is hedged, and hedged is the whole difference.
      */
     assert.equal(verdict.paneNote, 'it was mid-task');
+    // A REGRESSION GUARD, deliberately redundant with the equality above:
+    // it re-fires with its own sentence if the note ever grows the retired
+    // "composer" wording back, whatever else the note becomes.
     assert.ok(!/composer/.test(verdict.paneNote),
       'the note still says where the message ended up');
     assert.match(verdict.because, /may be sitting in its composer unsent/,
@@ -1533,6 +1566,52 @@ test('a file we cannot READ right now is not treated as a file that is DAMAGED',
   assert.equal(after.recorded, true);
   assert.deepEqual(chat.readThread('unreadablenow', 'casey').messages.map((m) => m.text),
     ['one', 'two', 'three', 'after it cleared'], 'the history did not survive the transient failure');
+});
+
+test('the RECORD is the cleaned text, so the thread shows what was typed, not what was posted', () => {
+  // Round 14: replacing cleanMessage with raw String() in appendLocked left
+  // the suite green. The module's contract is that what was CHECKED is what
+  // gets TYPED -- and the record has to carry the same text, or the thread
+  // on screen shows something different from what reached the agent.
+  const got = chat.appendMessage('cleanrecord', 'casey', {
+    text: '  spaced\n\nand   broken  ', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(got.recorded, true);
+  const back = chat.readThread('cleanrecord', 'casey').messages[0].text;
+  assert.equal(back, chat.cleanMessage('  spaced\n\nand   broken  '),
+    'the recorded text must be the cleaned form the send path checked');
+  assert.ok(!/\n|  /.test(back), 'control: cleaning really changed this input');
+});
+
+test('appendMessage NEVER throws, even when the entry itself throws mid-write', () => {
+  // The never-throws contract is the whole reason the try/catch around
+  // withThreadLock exists: a throw escaping to the route's 400 handler
+  // reports a DELIVERED message as a failed send. Round 14 removed the
+  // wrapper and the suite stayed green, because nothing ever made the locked
+  // section throw. A poisoned entry does, deterministically.
+  const poisoned = {
+    get text() { throw new Error('boom from inside the lock'); },
+    delivery: { state: chat.DELIVERY.PLACED },
+  };
+  let got;
+  assert.doesNotThrow(() => { got = chat.appendMessage('poisoned', 'casey', poisoned); });
+  assert.equal(got.recorded, false, 'a failed write is reported, never raised');
+  assert.ok(got.because, 'and it says so in a sentence');
+});
+
+test('a project id up to 128 characters records, because ids that long are already on disks', () => {
+  // Round 14: tightening PROJECT_ID to {1,64} left the suite green, while
+  // the plan records the raised bound as one of the two halves of the
+  // silent-no-record fix (projects.js MAX_ID is the other). Pinned at the
+  // boundary, with the control just past it.
+  const long = 'p'.repeat(128);
+  assert.equal(chat.appendMessage(long, 'casey', {
+    text: 'long id', delivery: { state: chat.DELIVERY.PLACED },
+  }).recorded, true, 'a 128-char id must file');
+  const over = chat.appendMessage('p'.repeat(129), 'casey', {
+    text: 'too long', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(over.recorded, false, 'control: the bound itself still exists');
 });
 
 test('a SECOND damaged file in one process is set aside too, not refused forever', () => {

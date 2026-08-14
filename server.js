@@ -1698,8 +1698,28 @@ const server = http.createServer((req, res) => {
      */
     // The engine's own constant, not a literal: a state renamed there must move
     // this with it rather than leaving a comparison that silently never matches.
+    // ⚠️ The `member.tied &&` conjunct is defence-in-depth the same way the
+    // page's button gate is: today's pipeline forces an untied member's
+    // state to `unknown` upstream, so no fixture can drive tied=false
+    // together with NEEDS_YOU and no test can hold this conjunct (round 14
+    // measured its removal green). It stays for the day the upstream gating
+    // changes; there is no route-level pin for it, on purpose recorded here.
     const asking = member.tied && member.state === STATE.NEEDS_YOU;
     const question = asking && view.text ? chat.questionIn(view.text) : null;
+    /**
+     * ⚠️ TWO DIFFERENT FACTS, TWO SENTENCES. "We read its screen and the
+     * question is not in the capture" and "we could not read its screen at
+     * all" were one string here, so a failed capture rendered as a claim
+     * about what IS on a screen nobody read -- with the page then adding
+     * "its whole screen is below" over a screen it was hiding. The exact
+     * collapse this branch fixed three times elsewhere, on the one screen
+     * the feature exists for.
+     */
+    const questionBecause = (asking && !question)
+      ? (view.text == null
+        ? 'its card says it is asking something, and we could not read its screen just now to show the question'
+        : 'its card says it is asking something, but we cannot find the question on its screen right now')
+      : null;
     sendJson(res, 200, {
       project: { id: project.id, name: project.name },
       agent: member,
@@ -1714,9 +1734,7 @@ const server = http.createServer((req, res) => {
       viewport: view,
       asking,
       question,
-      questionBecause: (asking && !question)
-        ? 'its card says it is asking something, but we cannot find the question on its screen right now'
-        : null,
+      questionBecause,
       agentsUnreadable: roster === null,
     });
     return;

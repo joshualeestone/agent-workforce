@@ -1420,13 +1420,22 @@ test('the launchd job says WHOSE background item it is, so macOS names Kosmos an
    */
   const plist = create.plistFor('fixture-agent', '/bin/echo', '/bin/echo');
   assert.match(plist, /<key>AssociatedBundleIdentifiers<\/key>/);
-  assert.match(plist, /<array><string>com\.chaoskosmos\.kosmos<\/string><\/array>/);
   // ⚠️ The identifier is the one the INSTALLER registers the bundle under. A
   // plist pointing at an identifier no bundle claims attributes the job to
   // nothing, which is the state this key exists to leave.
+  // ⚠️ EXTRACTED FROM BOTH SIDES AND COMPARED, never a literal held in this
+  // test: the first version asserted a hardcoded string against each file
+  // separately, which passed when the installer's real CFBundleIdentifier
+  // changed (a stale mention elsewhere in the file satisfied includes()) and
+  // FAILED when both sides were renamed consistently -- silent on the
+  // disagreement it exists to catch, red on a correct change (round 14).
+  const inPlist = (plist.match(/<key>AssociatedBundleIdentifiers<\/key>\s*<array><string>([^<]+)<\/string>/) || [])[1];
+  assert.ok(inPlist, 'control: the plist really carries an identifier to compare');
   const setup = fs.readFileSync(nodePath.join(__dirname, '..', 'install', 'setup.sh'), 'utf8');
-  assert.ok(setup.includes('com.chaoskosmos.kosmos'),
-    'the plist names a bundle identifier the installer does not use');
+  const inSetup = (setup.match(/<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/) || [])[1];
+  assert.ok(inSetup, 'control: the installer really registers a CFBundleIdentifier to compare');
+  assert.equal(inPlist, inSetup,
+    'the plist attributes the job to an identifier the installer does not register');
   // And the job still parses as a plist: an array in the wrong place is a file
   // launchd silently refuses to load, which is an agent that never starts.
   const file = nodePath.join(SANDBOX, 'bundle-id-check.plist');

@@ -429,12 +429,23 @@ test('a corrupt store does not kill the board, on any projects route', async () 
   // The app that watches the fleet dying on a plain read is worse than every
   // state the guards around it protect.
   await withCorruptStore(async () => {
+    // ⚠️ The THREAD routes are in this list. Its first version enumerated
+    // five routes under a name promising "any projects route", and the two
+    // thread routes plus the folder preview were not among them -- round 14
+    // replaced the thread GET's unreadable-500 with a 200 carrying an empty
+    // conversation and the suite stayed green. An enumerating test's name is
+    // a promise about the enumeration.
     const routes = [
       ['/api/projects', undefined],
       ['/api/project/anything', undefined],
       ['/api/project/anything/agent/mara', { method: 'POST', headers: { origin: base } }],
       ['/api/project/anything/agent/mara', { method: 'DELETE', headers: { origin: base } }],
       ['/api/project/anything', { method: 'DELETE', headers: { origin: base } }],
+      ['/api/project/anything/thread/mara', undefined],
+      ['/api/project/anything/thread/mara', {
+        method: 'POST', headers: { origin: base, 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'hello' }),
+      }],
     ];
     for (const [p, opts] of routes) {
       const res = await req(p, opts);
@@ -714,9 +725,60 @@ test('a card that says "Needs you" over a screen we cannot read SAYS so, rather 
       const body = json(await req(`/api/project/${project.id}/thread/zeta`));
       assert.equal(body.asking, true);
       assert.equal(body.question, null);
-      assert.match(body.questionBecause, /cannot find the question on its screen/);
+      // ⚠️ The COULD-NOT-READ sentence, not the not-in-the-capture one. One
+      // string used to serve both facts, so a failed capture rendered as a
+      // claim about what IS on a screen nobody read (round 14). The two
+      // sentences are asserted apart here and in the test below.
+      assert.match(body.questionBecause, /could not read its screen just now/);
+      assert.doesNotMatch(body.questionBecause, /cannot find the question on its screen/);
       assert.equal(body.viewport.text, null);
       assert.match(body.viewport.because, /could not read its window/);
+    });
+});
+
+test('a "Needs you" card over a READABLE screen missing the markers says that, not could-not-read', async () => {
+  reset();
+  // The other half of the split: the capture SUCCEEDED and the question
+  // markers are not in it (the pane redrew between the two reads).
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('an ordinary screen with no prompt on it')],
+    async ({ project }) => {
+      const body = json(await req(`/api/project/${project.id}/thread/zeta`));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      assert.match(body.questionBecause, /cannot find the question on its screen/);
+      assert.doesNotMatch(body.questionBecause, /could not read its screen/);
+      assert.ok(body.viewport.text != null, 'control: the screen really was read');
+    });
+});
+
+test('a POST to a project that is not there is the 404 sentence, not a raw throw', async () => {
+  reset();
+  // Round 14: deleting this guard left the suite green -- the GET sibling was
+  // covered "on both verbs" in name only. Without it the caller gets a 400
+  // carrying a raw TypeError string.
+  const res = await post('/api/project/never-existed/thread/zeta', { text: 'hello' });
+  assert.equal(res.status, 404);
+  assert.match(json(res).error, /no project by that name/);
+  assert.ok(!/TypeError|undefined/.test(json(res).error), 'our sentence, never a raw throw');
+});
+
+test('a blind roster reaches BOTH thread routes as agentsUnreadable, never as an empty fleet', async () => {
+  reset();
+  // Round 14: hardcoding agentsUnreadable:false on both thread routes left
+  // the suite green -- fleet.blind() was only ever pointed at /api/projects.
+  let blind = null;
+  await withThread(fleet.agent('zeta', { state: 'idle' }), [said(), said(), said('screen')],
+    async ({ project }) => {
+      try {
+        blind = fleet.blind();
+        const got = json(await req(`/api/project/${project.id}/thread/zeta`));
+        assert.equal(got.agentsUnreadable, true, 'the GET must say the look failed');
+        const sent = json(await post(`/api/project/${project.id}/thread/zeta`, { text: 'while blind' }));
+        assert.equal(sent.agentsUnreadable, true, 'the POST must say the look failed');
+      } finally {
+        if (blind) blind.restore();
+      }
     });
 });
 
@@ -859,6 +921,13 @@ test('a conversation we cannot read is reported as unreadable, never as nothing 
       const body = json(await req(`/api/project/${project.id}/thread/zeta`));
       assert.equal(body.messages, null, 'null is "we could not read them"; [] would be a claim');
       assert.match(body.historyBecause, /cannot make sense of it/);
+      // ⚠️ The OTHER TWO channels are asserted off, here and in each
+      // sibling: the three history sentences were built to be mutually
+      // exclusive, and nothing held that -- round 14 set all three true in
+      // one arm and the suite stayed green, which is the all-three-sentences
+      // -on-one-screen collapse this branch was built around.
+      assert.equal(body.historyOther, false);
+      assert.equal(body.historyUnfilable, false);
       // And the rest of the screen still renders: the agent's side is a
       // different object with a different owner, and it failed nothing.
       assert.equal(body.agent.sessionName, 'zeta');
@@ -1003,6 +1072,7 @@ test('a project reusing an earlier name says its OWN conversation is empty, not 
         'this project has genuinely sent nothing, and an empty list is the true answer');
       assert.equal(body.historyBecause, null,
         'a state we read and withheld must not be reported as one we could not read');
+      assert.equal(body.historyUnfilable, false, 'the channels stay mutually exclusive');
     });
 });
 
@@ -1070,6 +1140,8 @@ test('an agent whose name cannot be FILED under is told the truth, not the two f
         assert.equal(body.historyUnfilable, true, `${name}: the unfilable state has no channel of its own`);
         assert.deepEqual(body.messages, [], `${name}: an empty list is the honest shape when no file exists`);
         assert.equal(body.historyOther, false, `${name}: this is not an earlier project's conversation`);
+        // historyBecause is non-null here BY DESIGN (the unfilable sentence
+        // rides that channel); exclusivity for this arm is the Other flag.
         assert.match(body.historyBecause, /agent name we can keep a thread under/);
         // ⚠️ AND IT PROMISES NOTHING ABOUT DELIVERY. This state fires on the
         // SHAPE OF THE NAME and knows nothing about whether the agent is
