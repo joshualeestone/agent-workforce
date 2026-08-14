@@ -233,7 +233,11 @@ chat.setRunner((args) => {
      * A fixture with only success and only failure would photograph two thirds
      * of this feature.
      */
-    if (String(args[2] || '').includes('casey') && args[args.length - 1] === 'Enter') {
+    // Discriminated by SHAPE, not position (round 28): the Enter call has
+    // no -l flag, while the literal-text call does -- so a message whose
+    // text is exactly "Enter" no longer matches this arm on the text send
+    // and photographs a could_not where the fixture means an unconfirmed.
+    if (String(args[2] || '').includes('casey') && !args.includes('-l') && args[args.length - 1] === 'Enter') {
       return { ran: true, spawnFailed: false, status: 1, out: '', err: 'no current session' };
     }
     return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };

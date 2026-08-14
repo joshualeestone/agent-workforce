@@ -435,7 +435,15 @@ const VERIFY_FORMAT = VERIFY_KEYS
  * `could_not`, which is the one that tells the person re-sending is safe.
  */
 function verifyAtSend(card) {
-  if (VERIFY_KEYS.some((key) => !status.PANE_COLUMNS.some((c) => c.key === key))) {
+  if (VERIFY_KEYS.some((key) => {
+    const col = status.PANE_COLUMNS.find((c) => c.key === key);
+    // The fmt too, not only the key (round 28): a column that kept its key
+    // and lost its fmt puts the literal string "undefined" into the format,
+    // survives the arity check, and refuses every send on the machine with
+    // a sentence about the pane changing -- the same silent machine-wide
+    // refusal this guard exists to prevent, one field over.
+    return !col || typeof col.fmt !== 'string' || !col.fmt;
+  })) {
     // A column was renamed in the engine and this would silently ask tmux for
     // an empty string, which reads as "no Claude running" and refuses every
     // send on the machine. Better to say so than to fail closed in silence.

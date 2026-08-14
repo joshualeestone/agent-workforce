@@ -1157,7 +1157,7 @@ svg { display: block; }
 
       <div class="frow pj-say">
         <input type="text" id="pj-say" maxlength="2000"
-               placeholder="Type a message" aria-label="A message for this agent">
+               placeholder="Type a message" aria-label="Type a message for this agent">
         <button class="btn" id="pj-send" type="button">Send</button>
       </div>
       <p class="fmsg" id="pj-thread-msg" aria-live="polite"></p>
@@ -4713,6 +4713,14 @@ async function pjSend() {
     // rendering it lowercase and unterminated is the clause-after-full-stop
     // defect pjSentence was written for.
     msg.textContent = pjSentence(err.message) || 'We could not send that.';
+    /* ⚠️ The picker is REPAINTED here too (round 28): this path never ran
+       loadThread, so the send-time disable was still on the picker, the
+       finally mirrored it onto Send, and both controls sat dead until the
+       next poll -- a sentence telling the person to fix their text above a
+       button they could not press for five seconds. Same own-try shape as
+       the success path: the sentence above is committed and outlives any
+       repaint problem. */
+    try { await loadThread(); } catch { /* the sentence stays */ }
   } finally {
     PJ_SENDING = false;
     // The PICKER owns the button's no-recipient state: the refresh inside

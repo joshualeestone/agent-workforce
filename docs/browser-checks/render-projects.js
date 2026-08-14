@@ -385,68 +385,68 @@ async function main() {
     // ctx.close lives in a finally (round 27): an assertion throw anywhere
     // in this block used to leak the context, unlike the sibling blocks.
     try {
-    const page = await ctx.newPage();
-    await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
-    await page.click('#pj-new');
-    await page.waitForTimeout(400);
-    await page.click('#pj-advanced');
-    await page.waitForTimeout(500);
-    await page.click('button[data-into$="kosmos-demo"]');
-    await page.waitForTimeout(300);
-    await page.click('#pj-use');
-    await page.waitForTimeout(200);
-    const picked = await page.evaluate(() => ({
-      chosen: document.getElementById('pj-chosen').textContent,
-      willBe: document.getElementById('pj-will-be').textContent.trim(),
-    }));
-    if (!picked.chosen.includes('kosmos-demo')) {
-      throw new Error('pressing "Use this folder" did not put the folder in the chosen line: ' + picked.chosen);
-    }
-    if (picked.willBe) {
-      throw new Error('with a folder picked, the default-path line still speaks -- two sentences about '
-        + 'where the project will be, one of them wrong: ' + JSON.stringify(picked));
-    }
-    // CONTROL for the back-out check: the pick was really in force just now,
-    // so the clearing asserted below is a change this click caused, not a
-    // state the screen was already in.
-    await page.click('#pj-advanced');
-    await page.waitForTimeout(200);
-    const after = await page.evaluate(() => ({
-      chosen: document.getElementById('pj-chosen').textContent,
-      willBe: document.getElementById('pj-will-be').textContent.trim(),
-    }));
-    if (after.chosen.includes('kosmos-demo') || !after.willBe) {
-      throw new Error('closing the advanced route did not forget the pick on screen: ' + JSON.stringify(after));
-    }
-    // ⚠️ PROBE, DON'T INFER, before the one create in this file that uses
-    // the DEFAULT path (round 23): unlike thread-server.js, this check
-    // drives whatever server it is pointed at, and against one started
-    // without AGENT_WORKFORCE_PROJECTS this click would build a real
-    // directory under ~/Kosmos/Projects that the DELETE below never
-    // removes (remove rewrites the record and deliberately never touches
-    // folders). The route answers with the exact path the server would
-    // use, so the refusal is keyed on reality, not on the header comment.
-    const os = require('node:os');
-    const probe = await api('/api/project-folder?name=' + encodeURIComponent('Backout check'));
-    if (String(probe.path || '').startsWith(os.homedir() + '/Kosmos')) {
-      throw new Error('refusing the default-path create: the server would build '
-        + probe.path + ' inside the operator\'s real home. Start the server with '
-        + 'AGENT_WORKFORCE_PROJECTS pointed at a scratch dir.');
-    }
-    await page.fill('#pj-name', 'Backout check');
-    await page.click('#pj-create');
-    await page.waitForTimeout(800);
-    const { projects } = await api('/api/projects');
-    const made = projects.find((p) => p.name === 'Backout check');
-    if (!made) throw new Error('the back-out project was not created at all');
-    try {
-      if (String(made.folder || '').includes('kosmos-demo')) {
-        throw new Error('backing out of the folder route did NOT back out: the project was created at '
-          + made.folder + ' while the screen promised the default path.');
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.click('#pj-new');
+      await page.waitForTimeout(400);
+      await page.click('#pj-advanced');
+      await page.waitForTimeout(500);
+      await page.click('button[data-into$="kosmos-demo"]');
+      await page.waitForTimeout(300);
+      await page.click('#pj-use');
+      await page.waitForTimeout(200);
+      const picked = await page.evaluate(() => ({
+        chosen: document.getElementById('pj-chosen').textContent,
+        willBe: document.getElementById('pj-will-be').textContent.trim(),
+      }));
+      if (!picked.chosen.includes('kosmos-demo')) {
+        throw new Error('pressing "Use this folder" did not put the folder in the chosen line: ' + picked.chosen);
       }
-    } finally {
-      await api('/api/project/' + encodeURIComponent(made.id), { method: 'DELETE' });
-    }
+      if (picked.willBe) {
+        throw new Error('with a folder picked, the default-path line still speaks -- two sentences about '
+          + 'where the project will be, one of them wrong: ' + JSON.stringify(picked));
+      }
+      // CONTROL for the back-out check: the pick was really in force just now,
+      // so the clearing asserted below is a change this click caused, not a
+      // state the screen was already in.
+      await page.click('#pj-advanced');
+      await page.waitForTimeout(200);
+      const after = await page.evaluate(() => ({
+        chosen: document.getElementById('pj-chosen').textContent,
+        willBe: document.getElementById('pj-will-be').textContent.trim(),
+      }));
+      if (after.chosen.includes('kosmos-demo') || !after.willBe) {
+        throw new Error('closing the advanced route did not forget the pick on screen: ' + JSON.stringify(after));
+      }
+      // ⚠️ PROBE, DON'T INFER, before the one create in this file that uses
+      // the DEFAULT path (round 23): unlike thread-server.js, this check
+      // drives whatever server it is pointed at, and against one started
+      // without AGENT_WORKFORCE_PROJECTS this click would build a real
+      // directory under ~/Kosmos/Projects that the DELETE below never
+      // removes (remove rewrites the record and deliberately never touches
+      // folders). The route answers with the exact path the server would
+      // use, so the refusal is keyed on reality, not on the header comment.
+      const os = require('node:os');
+      const probe = await api('/api/project-folder?name=' + encodeURIComponent('Backout check'));
+      if (String(probe.path || '').startsWith(os.homedir() + '/Kosmos')) {
+        throw new Error('refusing the default-path create: the server would build '
+          + probe.path + ' inside the operator\'s real home. Start the server with '
+          + 'AGENT_WORKFORCE_PROJECTS pointed at a scratch dir.');
+      }
+      await page.fill('#pj-name', 'Backout check');
+      await page.click('#pj-create');
+      await page.waitForTimeout(800);
+      const { projects } = await api('/api/projects');
+      const made = projects.find((p) => p.name === 'Backout check');
+      if (!made) throw new Error('the back-out project was not created at all');
+      try {
+        if (String(made.folder || '').includes('kosmos-demo')) {
+          throw new Error('backing out of the folder route did NOT back out: the project was created at '
+            + made.folder + ' while the screen promised the default path.');
+        }
+      } finally {
+        await api('/api/project/' + encodeURIComponent(made.id), { method: 'DELETE' });
+      }
     } finally {
       await ctx.close();
     }
