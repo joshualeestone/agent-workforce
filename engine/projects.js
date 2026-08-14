@@ -730,7 +730,11 @@ function create({ name, folder, agents, roster } = {}) {
   // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
   // project of the same name meets "that folder is already the project X"
   // rather than a fresh empty directory nobody asked for. `makeFolder` adopts
-  // an existing folder, so the retry is idempotent either way.
+  // an existing folder, so the retry is idempotent either way. The cost of
+  // this ordering is accepted, not overlooked: if readAll/writeAll throws
+  // after the mkdir, an empty folder is left with no project pointing at it.
+  // That folder is exactly what the person's retry will adopt, so it is a
+  // parked spot, not a leak.
   const given = asked || makeFolder(title);
   if (!path.isAbsolute(given)) throw new Error('that needs to be the full path to a folder');
 

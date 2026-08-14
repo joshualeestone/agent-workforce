@@ -721,7 +721,11 @@ function refusalReason(got, fallback) {
         ? `${fallback} (its window did not answer in time)`
         : 'its window did not answer in time';
     }
-    return (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach tmux on this computer';
+    // ⚠️ Same weight-bearing rule as the timeout arm above (round 20): the
+    // caller's fallback clause is what tells the reader nothing was typed,
+    // so the spawn-failed sentence keeps it too instead of replacing it.
+    const why = (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach tmux on this computer';
+    return fallback ? `${fallback} (${why})` : why;
   }
   const said = String((got && got.err) || '').trim().split('\n')[0];
   return said ? `${fallback} (${said})` : fallback;

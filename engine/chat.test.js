@@ -703,7 +703,13 @@ test('a timeout is not a spawn failure, and only one of them may say nothing was
     chat.resetForTests(); arm([timedOut()]);
     assert.equal(chat.deliver('casey', 'hi', board.agents).state, chat.DELIVERY.UNCONFIRMED);
     chat.resetForTests(); arm([neverRan()]);
-    assert.equal(chat.deliver('casey', 'hi', board.agents).state, chat.DELIVERY.COULD_NOT);
+    const failed = chat.deliver('casey', 'hi', board.agents);
+    assert.equal(failed.state, chat.DELIVERY.COULD_NOT);
+    // ⚠️ The spawn-fail sentence keeps the caller's clause (round 20): the
+    // clause is what says nothing was typed, and the raw error alone
+    // ("ENOENT") sent the reader hunting with no verdict attached.
+    assert.ok(failed.because.includes('we could not'), failed.because);
+    assert.ok(failed.because.includes('ENOENT'), failed.because);
   });
 });
 
