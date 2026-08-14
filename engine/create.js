@@ -908,7 +908,12 @@ function createAgent(opts) {
   // than asserted here. "We started it" is a claim about us.
   // The display-name record, written only now that nothing can roll back
   // (see the naming docblock above for why this record exists at all).
-  if (!DRY_RUN && shown) {
+  // ⚠️ And only when the shown name DIFFERS from the slug (round 33): for
+  // an all-lowercase creation the record added nothing readIdentity's
+  // file fallback would not answer identically, while costing the
+  // record-wins hazards for every agent instead of only the capitalised
+  // ones the record exists for.
+  if (!DRY_RUN && shown && shown !== name) {
     try { store.writeProfile(name, { displayName: shown }); }
     catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
   }

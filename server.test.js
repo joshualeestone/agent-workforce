@@ -3547,3 +3547,40 @@ test('the display name is writable through the profile route, and a blank cannot
     status.setPaneCapture(null);
   }
 });
+
+test('renaming through the identity line updates the record; mangling it cannot un-name', async () => {
+  // ⚠️ Round 33: the record wins over the file, so the in-product edit of
+  // `You are **X**` -- the one rename path a person had -- was a silent
+  // no-op that still said "Saved." A PARSEABLE new name is a deliberate
+  // act and the record follows it; an unparseable line updates nothing,
+  // which is the accident the record exists to survive.
+  const status = require('./engine/status');
+  const store = require('./engine/store');
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'working' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    store.writeProfile('angel', { displayName: 'Angel' });
+    const cur = await req('/api/agent/angel/instructions');
+    const version = JSON.parse(cur.body).version;
+    const renamed = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'You are **Seraphina**, a tester.\n', version }),
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraphina',
+      'a deliberate rename through the identity line did not reach the record');
+    // The accident control: a save whose line no longer parses leaves the
+    // name alone rather than blanking it.
+    const v2 = JSON.parse((await req('/api/agent/angel/instructions')).body).version;
+    const mangled = await req('/api/agent/angel/instructions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'no identity line at all\n', version: v2 }),
+    });
+    assert.equal(mangled.status, 200);
+    assert.equal(store.readProfile('angel').displayName, 'Seraphina',
+      'an unparseable line must not un-name the agent');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+  }
+});

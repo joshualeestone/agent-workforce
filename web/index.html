@@ -243,7 +243,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 #pj-thread-who { font: var(--text-body) var(--font-ui); color: var(--label);
   background: var(--bg); border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
-/* ⚠️ `overflow-x: auto` and NOT `white-space: pre-wrap`. A Claude permission
+/* ⚠️ `overflow: auto` and NOT `white-space: pre-wrap`. A Claude permission
    prompt draws its options in columns, and wrapping them at the panel width
    turns the thing the person has to read into a jumble. The box scrolls
    sideways instead, and `tabindex="0"` is what makes a scrollable region
@@ -3775,6 +3775,9 @@ let PJ_AGENTS_UNREADABLE = false;
 // could not look" -- and a caller filtering a stale-or-initial [] would render
 // "there is nothing" for "we could not see". pjAnswerFrom is that caller.
 let PJ_READ_FAILED = false;
+// Unsent words, parked per project across navigation (round 33). Only the
+// DOM box and this map ever hold a draft; nothing is written to disk.
+const PJ_DRAFTS = {};
 let PJ_CURRENT = null;      // the project id being looked at, or null
 let PJ_PICKED = null;       // the folder CHOSEN in the add flow, deliberately
 let PJ_HERE = null;        // the folder being LOOKED AT, which is not the same
@@ -4058,6 +4061,18 @@ function openProject(id) {
      a same-project re-open every cleared thing is already correct for
      this project, so the whole reset is skipped. */
   const switching = PJ_CURRENT !== id;
+  /* ⚠️ A draft survives NAVIGATION, per project (round 33): the switching
+     branch below used to clear the box outright, so Back then a different
+     project threw typed words away with the same silence the same-project
+     case had -- the same act. The words are parked under the project they
+     were typed for and restored when it is opened again; carrying them to
+     a different recipient (the hazard the clear was for) never happens
+     because each project only ever sees its own draft. */
+  if (switching && PJ_CURRENT) {
+    const parked = document.getElementById('pj-say').value;
+    if (parked.trim()) PJ_DRAFTS[PJ_CURRENT] = parked;
+    else delete PJ_DRAFTS[PJ_CURRENT];
+  }
   PJ_CURRENT = id;
   document.getElementById('pj-one-msg').textContent = '';
   // ⚠️ The thread starts fresh on every OTHER project. Carrying the last
@@ -4069,7 +4084,7 @@ function openProject(id) {
     PJ_WHO = null;
     PJ_SENT_LINE = null;
     document.getElementById('pj-thread-msg').textContent = '';
-    document.getElementById('pj-say').value = '';
+    document.getElementById('pj-say').value = PJ_DRAFTS[id] || '';
     /**
      * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
      * synchronously below, but the thread body waits a full route round trip
@@ -4286,7 +4301,18 @@ function pjSentence(because) {
  */
 function pjAnnounce(text) {
   const say = document.getElementById('pj-thread-say');
-  if (say && say.textContent !== text) say.textContent = text;
+  if (!say) return;
+  // The SAME sentence twice still announces (round 33): pressing Send
+  // twice and meeting the same refusal spoke nothing the second time,
+  // which is "nothing happened" -- the reading this screen works hardest
+  // to prevent. A live region only fires on change, so the repeat is
+  // blanked and re-set a beat later.
+  if (say.textContent === text) {
+    say.textContent = '';
+    setTimeout(() => { say.textContent = text; }, 80);
+  } else {
+    say.textContent = text;
+  }
 }
 
 /** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
@@ -5449,6 +5475,13 @@ document.getElementById('pj-one-remove-go').addEventListener('click', async () =
 // on the add flow being closed so a refresh cannot repaint the folder browser
 // out from under somebody mid-choice.
 setInterval(() => {
+  /* ⚠️ A hidden TAB polls nothing (round 33): with a project open this
+     tick makes three snapshot fan-outs on a single-threaded server whose
+     tmux calls block, so a wedged pane stalls every request on the
+     machine three times per tick -- for a page nobody is looking at. The
+     first visible tick repaints everything, so nothing is stale when
+     they return. */
+  if (document.hidden) return;
   const panel = document.getElementById('panel-projects');
   if (!panel || panel.hidden) return;
   if (!document.getElementById('pj-add-view').hidden) return;

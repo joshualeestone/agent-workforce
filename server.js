@@ -1286,7 +1286,27 @@ const server = http.createServer((req, res) => {
         // `version` is the sha256 the editor was last shown. Passing it through lets
         // the engine refuse a save that would overwrite an edit made since,
         // rather than silently picking the version in the textarea.
-        sendJson(res, 200, instructions.write(name, patch.text, patch.version, sessionOf(name)));
+        const wrote = instructions.write(name, patch.text, patch.version, sessionOf(name));
+        /* ⚠️ A DELIBERATE rename through the identity line updates the
+           RECORD (round 33): the record wins over the file so an
+           accidental mangle cannot un-name an agent, but that made the
+           in-product edit of `You are **X**` -- the only rename path a
+           person had -- a silent no-op that still reported "Saved." The
+           split that honours both: a saved line that PARSES to a
+           different name is a deliberate act and the record follows it;
+           a line that no longer parses updates nothing, so the name
+           survives exactly the accident the record exists for. */
+        if (wrote && wrote.ok !== false) {
+          const m = String(patch.text).slice(0, 4000).match(/You are \*\*([^*]+)\*\*/);
+          const typed = m && m[1].trim();
+          if (typed) {
+            const had = store.readProfile(name);
+            if (had && typeof had.displayName === 'string' && had.displayName !== typed) {
+              store.writeProfile(name, { displayName: typed });
+            }
+          }
+        }
+        sendJson(res, 200, wrote);
       })
       // The message reaches the person verbatim, so it says what to do rather
       // than naming an exception.
