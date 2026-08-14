@@ -490,7 +490,7 @@ function verifyAtSend(card) {
     ok: false,
     because: status.isAgentSession(pane)
       ? 'its window was scrolled back by the time we went to type, so we did not type anything'
-      : 'it stopped being an agent’s window between us checking and us typing, so we did not type anything — '
+      : 'it stopped being an agent’s window between us checking and us typing, so we did not type anything: '
         + 'anything we sent would have been run as a command instead of read',
   };
 }
@@ -1316,9 +1316,14 @@ function supersede(projectId, agent, kind) {
    * was always described as — a cannot-happen guard — instead of the
    * second-time-through path.
    */
-  const base = `${file}.${stamp}.${process.pid}.${Date.now()}.${kind || 'superseded'}`;
-  let aside = base;
-  for (let n = 2; fs.existsSync(aside) && n <= 50; n += 1) aside = `${base}.${n}`;
+  // ⚠️ The counter sits BEFORE the kind. Appending it after
+  // (`...damaged.2`) breaks the property the first warning above promises:
+  // the kind stops being the last segment, so a person (or a suffix match)
+  // reading the directory can no longer tell what the second aside was.
+  const stem = `${file}.${stamp}.${process.pid}.${Date.now()}`;
+  const suffix = kind || 'superseded';
+  let aside = `${stem}.${suffix}`;
+  for (let n = 2; fs.existsSync(aside) && n <= 50; n += 1) aside = `${stem}.${n}.${suffix}`;
   if (fs.existsSync(aside)) {
     // Fifty asides for one project+agent, in one process, inside one
     // millisecond. Refusing beats overwriting the file we are rescuing.

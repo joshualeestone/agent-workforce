@@ -152,9 +152,13 @@ promises nothing about delivery — that is the per-send verdict's job.
   `.pj-member small` (pre-existing, likely fails AA in light mode). Both flagged from
   round 2, both design-pass work.
 - **`supersede`'s `existsSync` arm** is untested. The aside is
-  `<file>.<stamp>.<pid>.<ms>.<kind>`, with `.2`, `.3` … appended while anything is in
-  the way, up to fifty — so reaching that arm needs fifty asides for one project+agent,
-  in one process, inside one millisecond. Kept because overwriting the file it is
+  `<file>.<stamp>.<pid>.<ms>.<kind>`, with the collision counter inserted BEFORE the
+  kind (`<file>.<stamp>.<pid>.<ms>.<n>.<kind>`) while anything is in the way, up to
+  fifty — so reaching that arm needs fifty asides for one project+agent, in one
+  process, inside one millisecond. (Round 9: the counter originally appended AFTER
+  the kind, so a same-millisecond second aside ended `.damaged.2` and stopped being
+  recognisable by its suffix — the intermittent 1-in-8 test failure was exactly the
+  kind-last property breaking.) Kept because overwriting the file it is
   rescuing is the one way that function could fail at its whole job.
 
   ⚠️ **This paragraph was false when first written**, and the falsehood cost a blocker:

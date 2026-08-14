@@ -32,6 +32,7 @@ PORT=4399 \
   AGENT_WORKFORCE_DATA="$SB/data" \
   AGENT_WORKFORCE_WORKERS="$SB/workers" \
   AGENT_WORKFORCE_LAUNCH="$SB/launch" \
+  AGENT_WORKFORCE_PROJECTS="$SB/projects" \
   node server.js &
 
 # 2. playwright, installed OUTSIDE this repo
@@ -47,10 +48,12 @@ NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/click-first-run.js 
   "$SB/data/AgentWorkforce/first-run.json"
 ```
 
-⚠️ **Sandbox the roots.** `click-first-run.js` drives the real completion flag
-through the real route. Run unsandboxed and it writes to
+⚠️ **Sandbox the roots — all FOUR of them.** `click-first-run.js` drives the
+real completion flag through the real route. Run unsandboxed and it writes to
 `~/Library/Application Support/AgentWorkforce/`, which is the flag the live
-board reads.
+board reads. And `AGENT_WORKFORCE_PROJECTS` is a root the server WRITES to
+(adding a project on the default path makes its folder there): leave it unset
+and a test click creates directories in the operator's real ~/Kosmos/Projects.
 
 ⚠️ **Headed by default.** Set `HEADED=0` for a machine with no console session.
 Headless renders through SwiftShader rather than the real compositor, so a

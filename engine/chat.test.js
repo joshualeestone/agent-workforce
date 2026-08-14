@@ -1470,6 +1470,41 @@ test('a SECOND damaged file in one process is set aside too, not refused forever
     ['after the second damage']);
 });
 
+test('two asides in the SAME millisecond both keep the kind as the last segment', () => {
+  /**
+   * ⚠️ The test above only meets this case when its two damages land inside one
+   * millisecond, which real runs did about one time in eight — an intermittent
+   * red is how the defect was found. Pinning Date.now makes the collision
+   * happen every run: with the counter appended AFTER the kind the second
+   * aside was named `….damaged.2`, the kind stopped being readable off the end
+   * of the name, and the suffix filter above counted one aside instead of two.
+   */
+  const file = chat.threadFile('samemillisecond', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const asides = () => fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.damaged'));
+
+  const realNow = Date.now;
+  Date.now = () => 1755178800000;
+  try {
+    fs.writeFileSync(file, '{ damaged the first time');
+    assert.equal(chat.appendMessage('samemillisecond', 'casey', {
+      text: 'one', delivery: { state: chat.DELIVERY.PLACED },
+    }).recorded, true, 'the control: the first damage is handled');
+    fs.writeFileSync(file, '{ damaged the second time');
+    assert.equal(chat.appendMessage('samemillisecond', 'casey', {
+      text: 'two', delivery: { state: chat.DELIVERY.PLACED },
+    }).recorded, true, 'the same-millisecond second damage was refused');
+  } finally {
+    Date.now = realNow;
+  }
+
+  const kept = asides();
+  assert.equal(kept.length, 2, `expected two same-millisecond asides ending in .damaged, saw ${JSON.stringify(kept)}`);
+  assert.ok(kept.some((f) => /\.2\.damaged$/.test(f)),
+    `the collided aside must carry its counter BEFORE the kind, saw ${JSON.stringify(kept)}`);
+});
+
 test('a supersede that cannot move a DAMAGED file says so, rather than blaming a project name', () => {
   // Both failure returns used to say "an earlier project's messages" whatever
   // they had been asked to move — sending somebody to look for a project they
