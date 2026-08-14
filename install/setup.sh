@@ -1219,11 +1219,12 @@ LAUNCH
   chmod +x "$target/MacOS/Kosmos" || return 1
 
   # The icon is optional so the installer never fails for the want of
-  # artwork; it ships inside the bundle at app/assets/ when it exists. Until
-  # the artwork lands the app shows the generic icon -- tracked on the
-  # launch list, since the icon rationale above is only satisfied by a real
-  # one. (CFBundleIconFile pointing at a file that is absent is harmless:
-  # macOS falls back to the generic icon either way.)
+  # artwork; it ships inside the bundle at app/assets/ (the gold-K
+  # Kosmos.icns landed 2026-08-13, macOS-shaped). (CFBundleIconFile
+  # pointing at a file that is absent is harmless: macOS falls back to
+  # the generic icon either way. A Dock that already pins Kosmos may
+  # keep its cached tile until the Dock restarts; that is the Dock's
+  # cache, not a bad icns.)
   [ -f "$KOSMOS_HOME/app/assets/Kosmos.icns" ] && cp "$KOSMOS_HOME/app/assets/Kosmos.icns" "$target/Resources/Kosmos.icns"
   return 0
 }
