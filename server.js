@@ -1645,6 +1645,26 @@ const server = http.createServer((req, res) => {
      * kept aside.
      */
     let historyOther = false;
+    /**
+     * ⚠️ A THIRD CHANNEL, because a name we CANNOT FILE UNDER is a third fact.
+     *
+     * `chat.threadFile` refuses an agent whose session name is not already its
+     * own store key — a capital or a dot, which is exactly what the pre-existing
+     * `-discord` agents adoption produces and exactly what Josh asked for when
+     * he asked for capitalised names. The refusal is right (relaxing it would
+     * reintroduce the `MyBot`/`mybot` collision this branch already killed), but
+     * routing it into `historyBecause` produced, again, the two false sentences
+     * `historyOther` exists to have removed: "We cannot read what you have sent
+     * this agent" (there is no file to read) and "this is not saying you have
+     * sent nothing" (nothing is kept, here or anywhere).
+     *
+     * So it gets its own channel and its own vocabulary. Sending still WORKS —
+     * `deliver` places the words in the agent's session — and the send-time line
+     * already says the message was not added to the conversation. What this
+     * flags is the standing fact behind that: for this agent, nothing is kept,
+     * and nothing will be.
+     */
+    let historyUnfilable = false;
     try {
       // ⚠️ The project's own birth date goes in, so a thread written for an
       // EARLIER project that had this name is refused rather than shown under
@@ -1656,6 +1676,12 @@ const server = http.createServer((req, res) => {
         // Empty is the TRUE answer for this project: it is a new project and
         // nothing has been sent to this agent from it.
         messages = [];
+      } else if (err && err.code === 'BAD_THREAD') {
+        historyUnfilable = true;
+        // There is no file and there never will be one, so an empty list is
+        // the honest shape — the sentence beside it carries the standing fact.
+        messages = [];
+        historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
       } else {
         historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
       }
@@ -1681,6 +1707,8 @@ const server = http.createServer((req, res) => {
       // See the block above: withheld is not unreadable, and the page says a
       // different sentence for each.
       historyOther,
+      // The third channel: this agent's name cannot be filed under at all.
+      historyUnfilable,
       viewport: view,
       asking,
       question,

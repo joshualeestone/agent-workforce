@@ -1005,3 +1005,44 @@ test('a project reusing an earlier name says its OWN conversation is empty, not 
         'a state we read and withheld must not be reported as one we could not read');
     });
 });
+
+test('an agent whose name cannot be FILED under is told the truth, not the two false sentences', async () => {
+  /**
+   * ⚠️ THE CASE THAT SLIPPED PAST EVERY EARLIER ROUND. `chat.threadFile`
+   * refuses an agent whose session name is not already its own store key — a
+   * capital or a dot — which is exactly what adopting the pre-existing
+   * `-discord` fleet produces, and exactly the capitalised names Josh asked to
+   * be able to use. The refusal is RIGHT: relaxing it would fold `MyBot` and
+   * `mybot` onto one file, which is the case-collision blocker this branch
+   * already killed.
+   *
+   * What was wrong was the reporting. The refusal went down the same channel as
+   * a corrupt file, so the screen said "We cannot read what you have sent this
+   * agent" (there is no file to read, and never will be) and "this is not
+   * saying you have sent nothing" (nothing is kept for this agent anywhere).
+   * Both false, in opposite directions, on the one screen this branch built to
+   * stop exactly that.
+   *
+   * ⚠️ The "corrupt file" test does NOT cover this, which is how it slipped:
+   * that one plants a damaged file under a filable name.
+   */
+  for (const name of ['MyBot', 'my.bot']) {
+    reset();
+    await withThread(fleet.agent(name, { state: 'idle' }), [said(), said(), said('screen')],
+      async ({ project }) => {
+        const body = json(await req(`/api/project/${project.id}/thread/${encodeURIComponent(name)}`));
+        assert.equal(body.historyUnfilable, true, `${name}: the unfilable state has no channel of its own`);
+        assert.deepEqual(body.messages, [], `${name}: an empty list is the honest shape when no file exists`);
+        assert.equal(body.historyOther, false, `${name}: this is not an earlier project's conversation`);
+        assert.match(body.historyBecause, /agent name we can keep a thread under/);
+
+        // ⚠️ AND SENDING STILL WORKS. The words reach the agent's session; only
+        // the keeping does not, and the send-time answer says both.
+        const sent = json(await post(`/api/project/${project.id}/thread/${encodeURIComponent(name)}`,
+          { text: 'this reaches you but is not kept' }));
+        assert.equal(sent.delivery.state, 'placed', `${name}: delivery must not be collateral damage`);
+        assert.equal(sent.recorded, false, `${name}: nothing can be recorded under this name`);
+        assert.match(sent.recordedBecause, /agent name we can keep a thread under/);
+      });
+  }
+});

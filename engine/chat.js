@@ -516,17 +516,32 @@ function verifyAtSend(card) {
  * ⚠️ `unknown` GETS A SENTENCE TOO. It is the state that must never read as
  * fine, and silence here would render identically to an idle agent.
  */
-function waitingNote(state) {
+/**
+ * @param {string} [outcome] the delivery state this note will be shown beside.
+ *   ⚠️ `unconfirmed` DROPS THE SETTLED-FACT CLAUSE. "It was mid-task, so this
+ *   sits in its composer until it finishes" is a statement about where the
+ *   message IS — and the one verdict that cannot make that statement is the one
+ *   that exists precisely because we do not know whether it arrived. The two
+ *   were being printed side by side: "we cannot tell you whether it arrived"
+ *   and "this sits in its composer", in one sentence. What the agent was DOING
+ *   is still true and still useful, so that half stays.
+ */
+function waitingNote(state, outcome) {
+  const unsure = outcome === DELIVERY.UNCONFIRMED;
   switch (state) {
     case 'working':
-      return 'it was mid-task, so this sits in its composer until it finishes';
+      return unsure
+        ? 'it was mid-task'
+        : 'it was mid-task, so this sits in its composer until it finishes';
     case 'needs_you':
       // Deliberately weaker than "this answered its question". We observed a
       // question on its screen; what its interface did with the keystroke is
       // not something we watched.
       return 'it was waiting on an answer when this was sent';
     case 'rate_limited':
-      return 'it was paused on a usage limit, so it may not act on this until that clears';
+      return unsure
+        ? 'it was paused on a usage limit'
+        : 'it was paused on a usage limit, so it may not act on this until that clears';
     case 'idle':
       return 'it was sitting at its prompt';
     default:
@@ -558,7 +573,10 @@ function deliver(sessionName, raw, roster) {
   // note describes the pane we typed into rather than whatever it became while
   // we were typing.
   const paneState = allowed.card.state || null;
-  const paneNote = waitingNote(paneState);
+  // ⚠️ The note depends on the VERDICT as well as the state (see waitingNote),
+  // and the verdict is not known until the sends have answered — so it is built
+  // at each return rather than once up front.
+  const noteFor = (outcome) => waitingNote(paneState, outcome);
 
   /**
    * ⚠️ THE PANE IS ASKED AGAIN, HERE, IMMEDIATELY BEFORE THE KEYSTROKE.
@@ -590,7 +608,7 @@ function deliver(sessionName, raw, roster) {
    */
   const still = verifyAtSend(allowed.card);
   if (!still.ok) {
-    return { state: DELIVERY.COULD_NOT, because: still.because, at, paneState, paneNote };
+    return { state: DELIVERY.COULD_NOT, because: still.because, at, paneState, paneNote: noteFor(DELIVERY.COULD_NOT) };
   }
 
   // ⚠️ TWO CALLS, in this order, never one. `-l` types characters literally, so
@@ -604,7 +622,7 @@ function deliver(sessionName, raw, roster) {
     return {
       state: DELIVERY.COULD_NOT,
       because: refusalReason(typed, 'we could not type it into its window'),
-      at, paneState, paneNote,
+      at, paneState, paneNote: noteFor(DELIVERY.COULD_NOT),
     };
   }
   if (!typed.ran && typed.spawnFailed) {
@@ -612,7 +630,7 @@ function deliver(sessionName, raw, roster) {
     return {
       state: DELIVERY.COULD_NOT,
       because: refusalReason(typed, 'we could not reach tmux to type it'),
-      at, paneState, paneNote,
+      at, paneState, paneNote: noteFor(DELIVERY.COULD_NOT),
     };
   }
   if (!typed.ran) {
@@ -629,7 +647,7 @@ function deliver(sessionName, raw, roster) {
       // produced a three-clause wall on screen, each clause telling the person
       // to look somewhere different.
       because: 'we typed it in and its window did not answer us in time, so we cannot tell whether it arrived',
-      at, paneState, paneNote,
+      at, paneState, paneNote: noteFor(DELIVERY.UNCONFIRMED),
     };
   }
   const entered = tmux(['send-keys', '-t', target, 'Enter']);
@@ -652,10 +670,10 @@ function deliver(sessionName, raw, roster) {
     return {
       state: DELIVERY.UNCONFIRMED,
       because: refusalReason(entered, 'it went into its window and we could not press Enter, so it may be sitting in its composer unsent'),
-      at, paneState, paneNote,
+      at, paneState, paneNote: noteFor(DELIVERY.UNCONFIRMED),
     };
   }
-  return { state: DELIVERY.PLACED, because: null, at, paneState, paneNote };
+  return { state: DELIVERY.PLACED, because: null, at, paneState, paneNote: noteFor(DELIVERY.PLACED) };
 }
 
 /**
@@ -1132,12 +1150,33 @@ function appendLocked(projectId, agent, entry, bornAt) {
        * A failure to move it is not a failure to send: we say we could not
        * record, and the old file stays exactly as it was.
        */
-      const moved = supersede(projectId, agent);
+      const moved = supersede(projectId, agent, 'superseded');
       if (!moved.ok) {
         return { recorded: false, because: moved.because };
       }
       existing = { messages: [] };
       supersededBecause = 'an earlier project had this name; its messages have been kept aside.';
+    } else if (err && err.code === 'UNREADABLE') {
+      /**
+       * ⚠️ A DAMAGED FILE LOCKED RECORDING OUT FOREVER, and the argument
+       * against that is already written three paragraphs up: refusing forever
+       * is a worse bug than the one being fixed. A thread file that will not
+       * parse is not a thread we can add to — and it is also not a reason for
+       * this conversation to stop being kept for the rest of time. Every send
+       * after the damage was delivered and silently unrecorded.
+       *
+       * Same treatment, different suffix: the damaged file is RENAMED aside
+       * (nothing deleted, in case a person or a tool can still salvage it) and
+       * this conversation starts again. The suffix differs from the
+       * `projectBornAt` one on purpose, so the two kinds of aside can never be
+       * mistaken for each other on disk or collide.
+       */
+      const moved = supersede(projectId, agent, 'damaged');
+      if (!moved.ok) {
+        return { recorded: false, because: moved.because };
+      }
+      existing = { messages: [] };
+      supersededBecause = 'an earlier damaged file was set aside, and this conversation started again.';
     } else {
       return { recorded: false, because: String((err && err.message) || 'we could not read this conversation to add to it') };
     }
@@ -1222,7 +1261,7 @@ function appendLocked(projectId, agent, entry, bornAt) {
  * the person's is lost, and clobbering the file we are rescuing would be the
  * one way to fail at that.
  */
-function supersede(projectId, agent) {
+function supersede(projectId, agent, kind) {
   let file;
   try { file = threadFile(projectId, agent); }
   catch (err) { return { ok: false, because: String((err && err.message) || 'we could not find that conversation') }; }
@@ -1231,7 +1270,10 @@ function supersede(projectId, agent) {
     const was = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (was && was.projectBornAt) stamp = String(was.projectBornAt).replace(/[^0-9A-Za-z-]/g, '');
   } catch { /* the name is a label, not a lookup key */ }
-  const aside = `${file}.${stamp}.${process.pid}.superseded`;
+  // ⚠️ The KIND is in the name: a file set aside because a previous project
+  // had this name is a different thing from one set aside because it was
+  // damaged, and a person looking at the directory should be able to tell.
+  const aside = `${file}.${stamp}.${process.pid}.${kind || 'superseded'}`;
   if (fs.existsSync(aside)) {
     return { ok: false, because: 'we could not move an earlier project’s messages aside, so we did not add to them' };
   }

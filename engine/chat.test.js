@@ -1264,3 +1264,91 @@ test('the ordinary case still releases its own lock, or the next write would blo
   chat.withThreadLock(file, () => 'done');
   assert.ok(!fs.existsSync(file + '.lock'), 'the lock was left behind after an ordinary release');
 });
+
+test('a DAMAGED thread file does not lock recording out forever', () => {
+  /**
+   * ⚠️ THE SAME ARGUMENT `supersede` ALREADY MAKES, applied to the case it did
+   * not cover: refusing forever is a worse bug than the one being fixed. A
+   * thread file that will not parse is not a thread we can add to — and it is
+   * also not a reason for this conversation to stop being kept for the rest of
+   * time. Every send after the damage was delivered and silently unrecorded.
+   */
+  const file = chat.threadFile('damagedlockout', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '{ this will not parse');
+
+  const kept = chat.appendMessage('damagedlockout', 'casey', {
+    text: 'after the damage', delivery: { state: chat.DELIVERY.PLACED },
+  });
+  assert.equal(kept.recorded, true, 'a damaged file locked this conversation out for good');
+  assert.match(kept.supersededBecause, /damaged file was set aside/);
+  assert.deepEqual(chat.readThread('damagedlockout', 'casey').messages.map((m) => m.text),
+    ['after the damage']);
+
+  // ⚠️ NOTHING DELETED, and the aside says WHY it was set aside — a distinct
+  // suffix from the projectBornAt one, so the two kinds cannot be confused on
+  // disk or collide.
+  const aside = fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.damaged'));
+  assert.equal(aside.length, 1, 'the damaged file was deleted rather than kept');
+  assert.equal(fs.readFileSync(path.join(path.dirname(file), aside[0]), 'utf8'), '{ this will not parse');
+});
+
+test('a supersede that cannot RENAME reports it, and records nothing', () => {
+  /**
+   * ⚠️ THE FAILURE ARM OF THE ASIDE, driven rather than reasoned about. If the
+   * earlier conversation cannot be moved out of the way, appending would mix
+   * two projects' words into one record — so nothing is recorded, and the
+   * person is told which of the two things failed.
+   *
+   * ⚠️ The `existsSync` arm above it is deliberately left untested: the aside
+   * name carries the pid and a millisecond stamp, so producing a genuine
+   * collision would mean racing this process against itself. It is a guard
+   * against a state this code cannot reach, kept because overwriting the file
+   * it is rescuing is the one way this function could fail at its whole job.
+   */
+  const born = '2026-01-01T00:00:00.000Z';
+  const reborn = '2026-08-01T00:00:00.000Z';
+  chat.appendMessage('renamefail', 'casey', {
+    text: 'the earlier project’s words', delivery: { state: chat.DELIVERY.PLACED },
+  }, born);
+
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (String(to).endsWith('.superseded')) throw new Error('EPERM: operation not permitted');
+    return realRename(from, to);
+  };
+  try {
+    const kept = chat.appendMessage('renamefail', 'casey', {
+      text: 'the new project’s words', delivery: { state: chat.DELIVERY.PLACED },
+    }, reborn);
+    assert.equal(kept.recorded, false);
+    assert.match(kept.because, /could not move an earlier project’s messages aside/);
+    assert.ok(!/EPERM|renameSync/.test(kept.because), `an errno reached the person: ${kept.because}`);
+  } finally {
+    fs.renameSync = realRename;
+  }
+  // And the earlier conversation is untouched, exactly as it was.
+  assert.deepEqual(chat.readThread('renamefail', 'casey', born).messages.map((m) => m.text),
+    ['the earlier project’s words']);
+});
+
+test('an unconfirmed send does not also assert WHERE the message is sitting', () => {
+  // ⚠️ "It was mid-task, so this sits in its composer until it finishes" is a
+  // statement about where the message IS — and the one verdict that cannot make
+  // it is the one that exists because we do not know whether it arrived. The
+  // two were printed side by side in a single sentence.
+  assert.match(chat.waitingNote('working', chat.DELIVERY.PLACED), /sits in its composer/);
+  assert.equal(chat.waitingNote('working', chat.DELIVERY.UNCONFIRMED), 'it was mid-task');
+  assert.match(chat.waitingNote('rate_limited', chat.DELIVERY.PLACED), /may not act on this/);
+  assert.equal(chat.waitingNote('rate_limited', chat.DELIVERY.UNCONFIRMED), 'it was paused on a usage limit');
+  // What it was DOING is still true and still useful, so that half stays.
+  withFleet([fleet.agent('casey', { state: 'working' })], (board) => {
+    arm([ok(), refused('no current session')]);
+    const verdict = chat.deliver('casey', 'hello', board.agents);
+    assert.equal(verdict.state, chat.DELIVERY.UNCONFIRMED);
+    assert.equal(verdict.paneNote, 'it was mid-task');
+    assert.ok(!/sits in its composer/.test(verdict.paneNote + ' ' + verdict.because),
+      'the unconfirmed verdict still says where the message is sitting');
+  });
+});

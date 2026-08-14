@@ -1193,6 +1193,13 @@ svg { display: block; }
       <div class="frow">
         <!-- ⚠️ A placeholder is a value EXAMPLE, not a field name, and it
              disappears the moment somebody types. -->
+        <!-- ⚠️ 120 MATCHES cleanName, not the 60-character cap on a DERIVED
+             folder name, and the difference is deliberate. The 60 applies only
+             when Kosmos makes the folder; the advanced route accepts a name up
+             to 120 against a folder you already have. Capping the field at 60
+             would refuse a legitimate name on that path, and the live line
+             below is the real gate either way -- it shows the exact path, or
+             the refusal, before anything is made. -->
         <input type="text" id="pj-name" maxlength="120" placeholder="Henderson lease"
                aria-label="What you call this project">
       </div>
@@ -4200,7 +4207,23 @@ function paintThread(body) {
 
   /* What we have sent. */
   const msgs = document.getElementById('pj-msgs');
-  if (body.messages === null) {
+  if (body.historyUnfilable) {
+    /**
+     * ⚠️ A NAME WE CANNOT FILE UNDER IS A THIRD STATE, and reported through
+     * either of the others it produced sentences that are false in BOTH
+     * directions: "We cannot read what you have sent this agent" (there is no
+     * file to read, and never will be) and "this is not saying you have sent
+     * nothing" (nothing is kept for this agent, here or anywhere).
+     *
+     * It is reachable for exactly the agents Josh asked to be able to name the
+     * way he writes them — a capital or a dot puts a session name outside the
+     * key we can file under. Sending WORKS; only the keeping does not, and the
+     * difference is the whole sentence.
+     */
+    setLive(msgs, '<p class="fhint">Kosmos cannot keep a conversation for an agent named '
+      + esc(body.agent && body.agent.sessionName ? body.agent.sessionName : name)
+      + '. Messages you send are delivered to its session, and are not kept here.</p>');
+  } else if (body.messages === null) {
     // ⚠️ `null` is "we could not read them", which is NOT "you have said
     // nothing". Painting an empty list here would be the same failure as
     // rendering "No projects yet" over an unreadable projects file.
@@ -4258,6 +4281,15 @@ function paintThread(body) {
 async function loadThread() {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
+  /**
+   * ⚠️ THE GENERATION IS TAKEN FIRST, BEFORE ANY EARLY RETURN. It used to be
+   * taken after the no-recipient branch below — so taking the last agent off a
+   * project, while a fetch for that agent was still in flight, let the stale
+   * answer land and repaint a departed agent's thread over "Put an agent on
+   * this project". Bumping here invalidates every read already in the air,
+   * which is the whole job of the counter.
+   */
+  const mine = ++PJ_THREAD_GEN;
   // Pinned the first time one resolves, so a poll cannot re-aim the picker
   // while somebody is typing. See pjPinWho.
   const who = pjPinWho(pjThreadWho(p));
@@ -4272,7 +4304,6 @@ async function loadThread() {
     document.getElementById('pj-screen-hint').textContent = '';
     return;
   }
-  const mine = ++PJ_THREAD_GEN;
   let body;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT)
@@ -4955,12 +4986,30 @@ setInterval(() => {
   // is how somebody answers a different question than the one they read.
   if (!document.getElementById('pj-one-confirm').hidden) return;
   loadProjects();
-  // ⚠️ The thread rides the SAME cadence, not a second timer. Its two live
-  // values are the agent's screen and whether it is asking something, and both
-  // change on their own — a viewport painted once goes on asserting a screen
-  // that stopped being true, which is the failure this whole app is built
-  // against. Not while a send is in flight: that would repaint the list from
-  // underneath the send's own refresh.
+  /**
+   * ⚠️ The thread rides the SAME cadence, not a second timer. Its two live
+   * values are the agent's screen and whether it is asking something, and both
+   * change on their own — a viewport painted once goes on asserting a screen
+   * that stopped being true, which is the failure this whole app is built
+   * against. Not while a send is in flight: that would repaint the list from
+   * underneath the send's own refresh.
+   *
+   * ⚠️ KNOWN COST, DEFERRED DELIBERATELY: with a project open this tick makes
+   * THREE `snapshot()` fan-outs — `/api/status` for the board, `/api/projects`
+   * for the row, and `/api/project/:id/thread/:agent` for this — and each one
+   * is a `list-panes` plus a `capture-pane` per agent on the machine. On a
+   * thirteen-agent fleet that is ~39 captures every five seconds to paint one
+   * conversation.
+   *
+   * Left as it is tonight because the shape of the fix is a real design
+   * decision rather than a tidy-up: coalescing them means one roster read
+   * shared ACROSS requests, and a roster shared across requests is a roster
+   * that can be stale for one of them — which is the "two derivations of one
+   * question" hazard pointed the other way, and the reason each route reads
+   * its own today. It is self-healing (nothing accumulates) and cheap on the
+   * small fleets this ships for. Follow-up work, named here so it is a
+   * decision rather than an oversight.
+   */
   if (!document.getElementById('pj-one-view').hidden && !PJ_SENDING) loadThread();
 }, 5000);
 
