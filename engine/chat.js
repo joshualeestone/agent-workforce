@@ -1048,10 +1048,35 @@ function withThreadLock(file, fn) {
       pauseMs(20);
     }
   }
+  /**
+   * ⚠️ WE RELEASE OUR OWN LOCK, NEVER WHOEVER'S IS THERE NOW.
+   *
+   * The `finally` removed the lock PATH unconditionally, which is right until
+   * one critical section outlives `LOCK_STALE_MS`. Then: this holder is still
+   * working, a second writer measures the lock as stale and steals it, and
+   * this holder's `finally` deletes the SUCCESSOR's brand-new lock — putting
+   * two writers inside at once by way of the cleanup. Unlikely (the section is
+   * two file operations) and cheap to close, which is the whole argument for
+   * closing it rather than reasoning about how unlikely it is.
+   *
+   * A token written into the lock is what makes ownership checkable. Losing the
+   * marker (an unwritable dir) is not a reason to fail the write — it only
+   * means we cannot prove the lock is ours, so we do not remove it and let the
+   * staleness rule collect it.
+   */
+  const token = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  let marked = false;
+  try { fs.writeFileSync(path.join(lock, 'owner'), token); marked = true; } catch { marked = false; }
   try {
     return { ok: true, value: fn() };
   } finally {
-    try { fs.rmSync(lock, { recursive: true, force: true }); } catch { /* already gone */ }
+    let ours = marked;
+    if (marked) {
+      try { ours = fs.readFileSync(path.join(lock, 'owner'), 'utf8') === token; } catch { ours = false; }
+    }
+    if (ours) {
+      try { fs.rmSync(lock, { recursive: true, force: true }); } catch { /* already gone */ }
+    }
   }
 }
 
@@ -1162,8 +1187,27 @@ function appendLocked(projectId, agent, entry, bornAt) {
     const tmp = `${file}.${process.pid}.new`;
     fs.writeFileSync(tmp, JSON.stringify(record, null, 2));
     fs.renameSync(tmp, file);
-  } catch (err) {
-    return { recorded: false, because: String((err && err.message) || 'we could not write this conversation down') };
+  } catch {
+    /**
+     * ⚠️ OUR SENTENCE, NOT THE ERRNO. Forwarding `err.message` put
+     * "EISDIR: illegal operation on a directory, open '/var/folders/rn/…/
+     * lease.casey.json.4821.new'" on screen — an error code and an internal
+     * temp path, to somebody who wanted to message their agent. `folderState`
+     * has answered these in plain language since the day it shipped; this is
+     * the same rule for the same reason. The detail is dropped rather than
+     * appended: there is nothing in it a person can act on.
+     *
+     * ⚠️ AND THE ASIDE IS REPORTED EVEN THOUGH THE WRITE FAILED. `supersede`
+     * may already have RENAMED an earlier project's conversation out of the
+     * way — a change to somebody's disk — and only the success return carried
+     * word of it, so that move could happen with no sentence anywhere. It
+     * travels on both returns now.
+     */
+    return {
+      recorded: false,
+      because: 'we could not write this conversation down on this computer',
+      supersededBecause,
+    };
   }
   return { recorded: true, because: null, messages: record.messages, supersededBecause };
 }
@@ -1194,10 +1238,12 @@ function supersede(projectId, agent) {
   try {
     fs.renameSync(file, aside);
     return { ok: true, aside };
-  } catch (err) {
+  } catch {
+    // Plain language, same rule as the write failure above: an errno and an
+    // internal path are not things a person can act on.
     return {
       ok: false,
-      because: `we could not move an earlier project’s messages aside (${(err && err.message) || 'we do not know why'}), so we did not add to them`,
+      because: 'we could not move an earlier project’s messages aside, so we did not add to them',
     };
   }
 }
@@ -1242,7 +1288,7 @@ module.exports = {
   DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget, wireText,
   deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend, VERIFY_FORMAT,
-  threadFile, readThread, appendMessage, supersede,
+  threadFile, readThread, appendMessage, supersede, withThreadLock,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,
 };

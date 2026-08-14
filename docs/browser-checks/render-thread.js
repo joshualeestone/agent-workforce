@@ -472,6 +472,25 @@ async function main() {
     check(await page.locator('#pj-say').inputValue() === '',
       'the box is cleared, so re-sending text that may already be in the composer takes a retype');
 
+    /* ── 5b2. the verdict line ages with the rows ───────────────────────── */
+    /**
+     * ⚠️ IT SAID "just now" FOREVER while the row above it moved on to "2
+     * minutes ago" — two claims about one send, on one screen, disagreeing, and
+     * the frozen one was the sentence the person had just read. Driven by
+     * back-dating the stamp the page holds and letting the real poll re-render.
+     */
+    const aged = await page.evaluate(async () => {
+      const line = document.getElementById('pj-thread-msg');
+      const before = line.textContent;
+      // Ten minutes ago, which pjWhen renders as a wall-clock time.
+      PJ_SENT_LINE.at = new Date(Date.now() - 600000).toISOString();
+      await loadThread();
+      return { before, after: line.textContent };
+    });
+    check(/just now/.test(aged.before), 'the control: the line said "just now" when it was sent');
+    check(!/just now/.test(aged.after),
+      `the verdict line ages rather than saying "just now" forever: "${aged.after.slice(0, 90)}"`);
+
     /* ── 5c. the recipient cannot change under the person ───────────────── */
     /**
      * ⚠️ THE FLIP THIS PREVENTS, and the mechanism is ordinary rather than

@@ -3723,6 +3723,21 @@ let PJ_SENDING = false;     // a send is in flight; guards double-sends and the 
 // It clears only that one, so a poll cannot wipe a send's verdict — see the
 // note in `loadThread`.
 let PJ_THREAD_NOTE = null;
+/**
+ * The last send's verdict line, kept so it can AGE.
+ *
+ * ⚠️ IT SAID "just now" FOREVER. The sentence was written once, at the moment
+ * of sending, with the phrase baked in — while the message row a few pixels
+ * above it re-rendered on every poll and moved on to "2 minutes ago". Two
+ * claims about one send, on one screen, disagreeing; and the one that never
+ * moved was the one the person had just read.
+ *
+ * `{ at, render }` is what makes it re-renderable: `render` takes the aged
+ * phrase and rebuilds the same sentence, so the poll can restate it exactly as
+ * the rows are restated. `shown` is the text we last wrote, so a re-render only
+ * ever replaces OUR sentence and never something a later error put there.
+ */
+let PJ_SENT_LINE = null;
 // Ordering guard, the same one `loadProjects` and `pjBrowse` take: the
 // 5-second poll and a click can be in flight together, and a stale answer must
 // not repaint a thread the person has since switched away from.
@@ -3963,6 +3978,7 @@ function openProject(id) {
   // would only catch it when that agent is not on this project — so the
   // dangerous half (it IS on both) would be silent.
   PJ_WHO = null;
+  PJ_SENT_LINE = null;
   document.getElementById('pj-thread-msg').textContent = '';
   document.getElementById('pj-say').value = '';
   pjCloseConfirm();
@@ -4294,14 +4310,28 @@ async function loadThread() {
   const line = document.getElementById('pj-thread-msg');
   if (PJ_THREAD_NOTE && line.textContent === PJ_THREAD_NOTE) line.textContent = '';
   PJ_THREAD_NOTE = null;
+  /**
+   * ⚠️ THE LAST SEND'S VERDICT AGES WITH THE ROWS. Only OUR sentence is
+   * replaced — matched against what we last wrote — so a poll can never
+   * overwrite an error somebody else put on this line, and a verdict the person
+   * has navigated away from is dropped rather than resurrected.
+   */
+  if (PJ_SENT_LINE && line.textContent === PJ_SENT_LINE.shown) {
+    const aged = PJ_SENT_LINE.render(pjWhenPart(PJ_SENT_LINE.at));
+    if (aged !== PJ_SENT_LINE.shown) { line.textContent = aged; PJ_SENT_LINE.shown = aged; }
+  } else if (PJ_SENT_LINE && line.textContent !== PJ_SENT_LINE.shown) {
+    PJ_SENT_LINE = null;
+  }
   paintThread(body);
 }
 
 document.getElementById('pj-thread-who').addEventListener('change', (e) => {
   PJ_WHO = e.target.value || null;
   // Cleared, because it describes the conversation being left rather than the
-  // one being opened.
+  // one being opened — the stamp with it, or the poll would restate a verdict
+  // about a different agent's send.
   document.getElementById('pj-thread-msg').textContent = '';
+  PJ_SENT_LINE = null;
   loadThread();
 });
 
@@ -4382,9 +4412,14 @@ async function pjSend() {
      *                  keeps it — and the sentence stops making the promise.
      */
     const inThread = body.recorded === true;
+    // ⚠️ Each verdict is a FUNCTION of how long ago it was, not a string with
+    // the phrase baked in — see PJ_SENT_LINE. The poll re-renders it exactly as
+    // it re-renders the rows, so the two can never disagree about one send.
+    const at = (body.delivery && body.delivery.at) || new Date().toISOString();
+    let render = null;
     if (state === 'placed') {
       box.value = '';
-      msg.textContent = 'Placed into ' + name + '’s session just now' + note + '.' + moved + kept;
+      render = (when) => 'Placed into ' + name + '’s session' + when + note + '.' + moved + kept;
     } else if (state === 'unconfirmed') {
       if (inThread) box.value = '';
       // ⚠️ ONE instruction, not three. The first version stacked the engine's
@@ -4392,15 +4427,26 @@ async function pjSend() {
       // above" on top of "it may be sitting in its composer unsent" — a wall
       // that sent the person to three different places. The engine states the
       // fact; this line says the one thing to do about it.
-      msg.textContent = 'Could not confirm this reached ' + name + '’s session' + note + '. '
+      render = (when) => 'Could not confirm this reached ' + name + '’s session' + when + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
         + ' Its screen is below — check there before sending it again.'
         + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')
         + moved + kept;
     } else {
-      msg.textContent = 'Could not deliver: '
+      /**
+       * ⚠️ NO TIME PHRASE ON THIS ONE, deliberately. "Could not deliver just
+       * now: …" reads as "not at this moment", which is a different and wrong
+       * claim — it suggests trying again in a second might work. And this
+       * verdict needs no stamp to stay true: nothing was typed, the person's
+       * text is still in the box in front of them, and the row below carries
+       * the time. The defect being fixed here is a FALSE time claim, not the
+       * absence of one.
+       */
+      render = () => 'Could not deliver: '
         + ((body.delivery && body.delivery.because) || 'we could not put it into its session') + '.' + moved + kept;
     }
+    msg.textContent = render(pjWhenPart(at));
+    PJ_SENT_LINE = { at, render, shown: msg.textContent };
     await loadThread();
   } catch (err) {
     msg.textContent = err.message;

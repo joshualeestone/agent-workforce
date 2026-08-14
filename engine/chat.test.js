@@ -1184,3 +1184,83 @@ test('two writers that both see a stale lock do not both get inside', () => {
     assert.ok(said.includes('stale A') && said.includes('stale B'));
   });
 });
+
+test('an earlier project’s messages being moved aside is reported EVEN when the write then fails', () => {
+  /**
+   * ⚠️ A RENAME ON SOMEBODY'S DISK WITH NO SENTENCE ANYWHERE. `supersede` moves
+   * an earlier project's conversation out of the way BEFORE the new record is
+   * written — so a write that then fails left the move done and unreported,
+   * because only the success return carried word of it. The person is told the
+   * message was not recorded and never told their older conversation moved.
+   *
+   * Forced through the real path: a DIRECTORY planted at the per-pid temp name
+   * makes `writeFileSync` fail after the rename has already happened.
+   */
+  const born = '2026-01-01T00:00:00.000Z';
+  const reborn = '2026-08-01T00:00:00.000Z';
+  chat.appendMessage('asidefail', 'casey', {
+    text: 'said to the FIRST project', delivery: { state: chat.DELIVERY.PLACED },
+  }, born);
+
+  const file = chat.threadFile('asidefail', 'casey');
+  const blocker = `${file}.${process.pid}.new`;
+  fs.mkdirSync(blocker, { recursive: true });
+  try {
+    const kept = chat.appendMessage('asidefail', 'casey', {
+      text: 'said to the SECOND project', delivery: { state: chat.DELIVERY.PLACED },
+    }, reborn);
+    assert.equal(kept.recorded, false, 'the control: the write really did fail');
+    assert.match(kept.supersededBecause, /kept aside/,
+      'an earlier conversation was moved and nothing said so');
+    // ⚠️ And the sentence is ours, not an errno. "EISDIR: illegal operation on
+    // a directory, open '/var/folders/…new'" is not a thing a person can act on.
+    assert.match(kept.because, /could not write this conversation down/);
+    assert.ok(!/EISDIR|\/var\/folders|\.new/.test(kept.because),
+      `an error code and an internal path reached the person: ${kept.because}`);
+  } finally {
+    fs.rmSync(blocker, { recursive: true, force: true });
+  }
+  // And nothing of the person's was lost: the earlier conversation is beside it.
+  const aside = fs.readdirSync(path.dirname(file))
+    .filter((f) => f.startsWith(path.basename(file)) && f.endsWith('.superseded'));
+  assert.equal(aside.length, 1);
+});
+
+test('a holder whose lock was stolen does not delete the successor’s lock on the way out', () => {
+  /**
+   * ⚠️ THE CLEANUP PUTTING TWO WRITERS INSIDE. If one critical section ever
+   * outlives the stale bound, a second writer steals the lock — and the first
+   * one's `finally` then removes the SUCCESSOR's brand-new lock, which is the
+   * interleave the lock exists to prevent, arriving through the release path.
+   *
+   * Simulated exactly: the lock is stolen (renamed away and replaced) from
+   * INSIDE the critical section, so the original holder's `finally` runs
+   * against a lock that is no longer its own.
+   */
+  const file = chat.threadFile('stolenrelease', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const lock = file + '.lock';
+
+  chat.withThreadLock(file, () => {
+    // A successor steals it: the stale path renames the old one away and makes
+    // its own. The marker inside is the successor's, not ours.
+    fs.renameSync(lock, lock + '.taken');
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, 'owner'), 'the-successor');
+  });
+
+  assert.ok(fs.existsSync(lock), 'the original holder deleted the successor’s lock on its way out');
+  assert.equal(fs.readFileSync(path.join(lock, 'owner'), 'utf8'), 'the-successor',
+    'the successor’s lock was replaced rather than left alone');
+  fs.rmSync(lock, { recursive: true, force: true });
+  fs.rmSync(lock + '.taken', { recursive: true, force: true });
+});
+
+test('the ordinary case still releases its own lock, or the next write would block', () => {
+  // The control for the test above: without this, "we did not delete it" would
+  // also be satisfied by a release that never deletes anything.
+  const file = chat.threadFile('normalrelease', 'casey');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  chat.withThreadLock(file, () => 'done');
+  assert.ok(!fs.existsSync(file + '.lock'), 'the lock was left behind after an ordinary release');
+});
