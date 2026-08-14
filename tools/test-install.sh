@@ -138,7 +138,8 @@ chk "the launcher bakes this install's port" "grep -q \"KOSMOS_PORT:-$PORT\" \"$
 # stayed green. A copy with a wrong baked uid must refuse (exit 1) and
 # invoke nothing. osascript is swapped for /usr/bin/true in the copy so
 # the alert never reaches the operator's screen on a GUI dev machine.
-sed -e 's|!= "[0-9][0-9]*"|!= "99999"|' -e 's|/usr/bin/osascript|/usr/bin/true|' \
+WRONG_UID=$(( $(id -u) + 1 ))
+sed -e "s|!= \"[0-9][0-9]*\"|!= \"$WRONG_UID\"|" -e 's|/usr/bin/osascript|/usr/bin/true|' \
   "$SB/apps/Kosmos.app/Contents/MacOS/Kosmos" > "$SB/other-account-launcher"
 chmod +x "$SB/other-account-launcher"
 LNS_BEFORE="$(wc -l < "$SB/launcher.log" | tr -d ' ')"
@@ -361,7 +362,7 @@ export KOSMOS_HOME="$SB/home9" KOSMOS_BIN_DIR="$SB/bin9"
 RC=0; cat "$SETUP" | HOME="$SBH7" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYSALIAS2" sh > "$SB/alias-foreign.log" 2>&1 || RC=$?
 chk "foreign-aliased install exits 0" "[ $RC -eq 0 ]"
 chk "the stranger's app is byte-identical" "grep -q 'stranger' \"$SYSALIAS2/Kosmos.app/Contents/MacOS/Kosmos\""
-chk "no icon was written anywhere" "[ \"\$(ls -A \"$SYSALIAS2\" | grep -cv '^Kosmos.app\$')\" = \"0\" ]"
+chk "nothing new appeared beside the stranger's app" "[ \"\$(ls -A \"$SYSALIAS2\" | grep -cv '^Kosmos.app\$')\" = \"0\" ]"
 chk "the skip speaks its own sentence" "grep -q 'is the same folder, so no icon was created' \"$SB/alias-foreign.log\""
 KOSMOS_HOME="$SB/home9" "$SB/bin9/kosmos" stop > /dev/null 2>&1 || true
 
@@ -735,10 +736,22 @@ printf '%s' "$$" > "$SB/home27/board.pid"
 OPENED_BEFORE_STRANGER="$(wc -l < "$SB/opened.log" | tr -d ' ')"
 RC=0; cat "$SETUP" | HOME="$SBH23" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS28" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
 chk "occupied-port install exits 0" "[ $RC -eq 0 ]"
-chk "the occupied port is named, not claimed" "grep -q 'could not confirm its own board' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
+chk "the occupied port is named, not claimed" "grep -q 'could not confirm a board of its own' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
 chk "no browser was opened onto the stranger's board" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_STRANGER\" ]"
-KOSMOS_HOME="$SB/home26" "$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
 rm -f "$SB/home27/board.pid"
+# The ANCHOR of the ps predicate, pinned: another install's LIVE server
+# pid in this home's pidfile must still read as not-ours (the unanchored
+# *app/server.js* pattern would accept it, print "Kosmos is running",
+# and open the stub).
+export KOSMOS_HOME="$SB/home31" KOSMOS_BIN_DIR="$SB/bin31"
+mkdir -p "$SB/home31"
+cp "$SB/home26/board.pid" "$SB/home31/board.pid"
+OPENED_BEFORE_ANCHOR="$(wc -l < "$SB/opened.log" | tr -d ' ')"
+RC=0; cat "$SETUP" | HOME="$SB/anchor-home" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SB/sys31" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/anchor.log" 2>&1 || RC=$?
+chk "anchored install exits 0" "[ $RC -eq 0 ]"
+chk "another install's live server does not read as ours" "grep -q 'could not confirm' \"$SB/anchor.log\""
+chk "no open on another install's server" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_ANCHOR\" ]"
+KOSMOS_HOME="$SB/home26" "$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
 
 echo "== a link at the SYSTEM path survives uninstall, named =="
 # The round-14 gap: an owned-target LINK at the system entry passed the
@@ -801,6 +814,13 @@ else
   KOSMOS_HOME="$SB/home21" "$SB/bin21/kosmos" stop > /dev/null 2>&1 || true
   chmod 755 "$SYS_RO5"
 fi
+
+echo "== no sandbox path entered LaunchServices =="
+# The lsregister sandbox gate had only a comment behind it; this converts
+# it into a fact. (The dump is a few seconds; it is the one machine-global
+# database a sandboxed run used to pollute.)
+chk "no sandbox path registered with LaunchServices" "! /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump 2>/dev/null | grep -qF \"$SB\""
+chk "sysnever still untouched at the end" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 
 echo "== the operator's real folders were never touched (top-level entries) =="
 chk "real home Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"

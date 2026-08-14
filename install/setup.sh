@@ -69,6 +69,12 @@ esac
 set -euo pipefail
 
 KOSMOS_HOME="${KOSMOS_HOME:-$HOME/.local/share/kosmos}"
+# Slash-normalized, because install/kosmos self-derives ITS home from its
+# own location and the two strings must compare equal: a trailing slash
+# on $HOME (measured) made every ownership and board proof in this file
+# use //-flavored paths the launcher never bakes.
+KOSMOS_HOME="$(printf '%s' "$KOSMOS_HOME" | /usr/bin/tr -s '/')"
+KOSMOS_HOME="${KOSMOS_HOME%/}"
 # ⚠️ SHELL-SIGNIFICANT CHARACTERS IN KOSMOS_HOME ARE REFUSED OUTRIGHT.
 # Two separate mechanisms make them catastrophic rather than awkward. A
 # NEWLINE: the ownership checks below prove a bundle is ours with
@@ -1196,6 +1202,10 @@ elif ! mkdir -p "$APP_DIR" 2>/dev/null; then
   # or file-shadowed Applications folder must not abort a run that can
   # still deliver a working Kosmos. The give-up sentence below covers it.
   :
+# (Under the verbatim KOSMOS_APP_DIR override this gate is skipped by
+# design; a foreign occupant there still cannot be destroyed, because
+# make_app re-verifies ownership contemporaneously and fails into the
+# generic give-up sentence instead of the specific left-alone one.)
 elif [ -z "${KOSMOS_APP_DIR:-}" ] && [ "$APP_DIR" != "$SYS_APP_DIR" ] \
      && { [ -e "$APP_DIR/Kosmos.app" ] || [ -L "$APP_DIR/Kosmos.app" ]; } \
      && ! bundle_is_ours "$APP_DIR/Kosmos.app"; then
@@ -1428,11 +1438,13 @@ if [ "$BOARD_OURS" = "yes" ]; then
   printf '  Open it and it will walk you through connecting your AI account.\n'
   printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 else
-  printf '\n  Kosmos is installed, but could not confirm its own board is the one answering\n'
-  printf '  on port %s (an "already running" line above refers to a board something else\n' "$PORT"
-  printf '  started, often another account%ss Kosmos; each account runs its own).\n' "'"
-  printf '  (The Kosmos icon this install created is tied to port %s and will open\n' "$PORT"
-  printf '  whichever Kosmos answers there.)\n'
+  printf '\n  Kosmos is installed, but could not confirm a board of its own is running on\n'
+  printf '  port %s. Something else may already be using that port (often another\n' "$PORT"
+  printf '  account%ss Kosmos; each account runs its own).\n' "'"
+  if [ "$APP_MADE" = "yes" ]; then
+    printf '  (The Kosmos icon this install created is tied to port %s and will open\n' "$PORT"
+    printf '  whichever Kosmos answers there.)\n'
+  fi
   printf '  Start yours on a different port, for example:\n'
   _alt=$((PORT + 1))
   [ "$_alt" -le 65535 ] || _alt=$((PORT - 1))
@@ -1477,6 +1489,10 @@ OPEN_CMD="${KOSMOS_OPEN_CMD:-/usr/bin/open}"
 if [ "$BOARD_OURS" = "yes" ] && [ "$FRESH_INSTALL" = "yes" ] && [ -z "${KOSMOS_NO_OPEN:-}" ] && [ -z "${KOSMOS_APP_DIR:-}" ] \
    && { [ -z "${KOSMOS_SYS_APP_DIR:-}" ] || [ -n "${KOSMOS_OPEN_CMD:-}" ]; } \
    && command -v "$OPEN_CMD" >/dev/null 2>&1; then
+  # Named before it happens, per the header's every-step rule: a browser
+  # window appearing unannounced reads as "something went wrong", and on
+  # a cold browser start the prompt returns seconds before the window.
+  printf '  Opening your dashboard in the browser...\n\n'
   # </dev/null: the spawned process must not inherit the curl|sh pipe --
   # the same class as cmd_start's measured never-returning install.
   "$OPEN_CMD" "http://127.0.0.1:$PORT" </dev/null >/dev/null 2>&1 || true
