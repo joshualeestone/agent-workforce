@@ -3582,10 +3582,18 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * That is why this sits below the partial branch rather than beside the
    * heading.
    */
+  // ⚠️ "a new background item", NOT "Kosmos" (round 23): macOS names the
+  // notice from the registered bundle, which install/setup.sh sets up --
+  // on a from-source `node server.js` run (a documented way to run) there
+  // is no bundle under our id and macOS names the executable instead.
+  // This screen has not observed which of those worlds it is in, so the
+  // sentence claims only what the creation itself did.
   document.getElementById('made-bg').innerHTML =
-    '<b>macOS will mention Kosmos running in the background.</b> That is your agent '
-    + 'staying alive between logins, and it will appear under Login Items in System '
-    + 'Settings. Turning it off there stops the agent from starting.';
+    '<b>macOS will mention a new background item.</b> That is your agent '
+    + 'staying alive between logins (named Kosmos when the app is installed, '
+    + 'or after the program that runs it on a from-source setup). It appears '
+    + 'under Login Items in System Settings, and turning it off there stops '
+    + 'the agent from starting.';
   document.getElementById('made-bg').hidden = false;
 
   /**
@@ -5010,9 +5018,15 @@ async function pjWillBe() {
     // folder sentence ends in punctuation).
     line.textContent = body.problem
       ? pjSentence(body.problem)
-      : (body.exists
-        ? 'Kosmos will use the folder already at ' + body.path + ', and put nothing of its own in it.'
-        : 'Kosmos will make this at ' + body.path + '.');
+      // The third arm before the other two (round 23): a FILE already at
+      // the path means neither make nor adopt -- the engine will refuse --
+      // and the preview says so now rather than promising a make the
+      // button cannot deliver.
+      : (body.blocked
+        ? pjSentence(body.blocked) + ' Pick another name.'
+        : (body.exists
+          ? 'Kosmos will use the folder already at ' + body.path + ', and put nothing of its own in it.'
+          : 'Kosmos will make this at ' + body.path + '.'));
   } catch {
     if (mine !== PJ_WILLBE_GEN) return;
     // ⚠️ NOT silence, and not a guessed path. "We could not work out where"

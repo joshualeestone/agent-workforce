@@ -642,9 +642,19 @@ function folderPathPreview(name) {
   // and pressing Add adopted the folder and its contents. Same statSync
   // shape makeFolder itself uses; a stat we cannot take reads as
   // not-existing, which errs toward the weaker claim.
-  let exists = false;
-  try { exists = fs.statSync(corrected).isDirectory(); } catch { exists = false; }
-  return { path: corrected, exists };
+  // ⚠️ THREE arms, because makeFolder has three (round 23): a FILE at the
+  // derived path is neither make nor adopt -- makeFolder will refuse it --
+  // and folding it into exists:false had the preview promising "will make
+  // this at X" about an act the engine had already decided not to perform.
+  // `blocked` carries makeFolder's own refusal sentence so the preview and
+  // the button speak identically.
+  let there = null;
+  try { there = fs.statSync(corrected); } catch { there = null; }
+  const exists = !!(there && there.isDirectory());
+  const blocked = (there && !there.isDirectory())
+    ? 'there is already a file with that name where this project’s folder would go'
+    : null;
+  return { path: corrected, exists, blocked };
 }
 
 /**

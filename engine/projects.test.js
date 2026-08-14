@@ -1103,6 +1103,21 @@ test('the previewed path IS the path the act produces, case correction included'
   assert.equal(fresh.exists, false, 'a fresh name previews as not existing');
   assert.ok(!fs.existsSync(fresh.path),
     'and the preview itself still makes nothing');
+  // ⚠️ The THIRD arm (round 23): a FILE at the path is neither make nor
+  // adopt -- makeFolder will refuse it -- and folding it into exists:false
+  // had the preview promising "will make" about an act already refused.
+  // The preview's sentence must be makeFolder's own, so the two cannot
+  // drift apart, and the throw is asserted alongside so the pair is
+  // proven against the same filesystem state.
+  fs.writeFileSync(path.join(projects.projectsRoot(), 'Ledger'), 'a file');
+  const blockedPreview = projects.folderPathPreview('Ledger');
+  assert.equal(blockedPreview.exists, false, 'a file does not preview as an adoptable folder');
+  assert.ok(blockedPreview.blocked && /already a file/.test(blockedPreview.blocked),
+    'the preview carries the refusal for a file at the path');
+  assert.throws(() => projects.makeFolder('Ledger'), /already a file/,
+    'and makeFolder refuses with the same sentence the preview showed');
+  assert.equal(fresh.blocked, null, 'a fresh name is not blocked');
+  assert.equal(previewed.blocked, null, 'an adoptable folder is not blocked');
 });
 
 test('a second project of the same name meets the duplicate refusal, not a silent second folder', () => {

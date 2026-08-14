@@ -415,6 +415,21 @@ async function main() {
     if (after.chosen.includes('kosmos-demo') || !after.willBe) {
       throw new Error('closing the advanced route did not forget the pick on screen: ' + JSON.stringify(after));
     }
+    // ⚠️ PROBE, DON'T INFER, before the one create in this file that uses
+    // the DEFAULT path (round 23): unlike thread-server.js, this check
+    // drives whatever server it is pointed at, and against one started
+    // without AGENT_WORKFORCE_PROJECTS this click would build a real
+    // directory under ~/Kosmos/Projects that the DELETE below never
+    // removes (remove rewrites the record and deliberately never touches
+    // folders). The route answers with the exact path the server would
+    // use, so the refusal is keyed on reality, not on the header comment.
+    const os = require('node:os');
+    const probe = await api('/api/project-folder?name=' + encodeURIComponent('Backout check'));
+    if (String(probe.path || '').startsWith(os.homedir() + '/Kosmos')) {
+      throw new Error('refusing the default-path create: the server would build '
+        + probe.path + ' inside the operator\'s real home. Start the server with '
+        + 'AGENT_WORKFORCE_PROJECTS pointed at a scratch dir.');
+    }
     await page.fill('#pj-name', 'Backout check');
     await page.click('#pj-create');
     await page.waitForTimeout(800);

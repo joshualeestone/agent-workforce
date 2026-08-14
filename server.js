@@ -1386,7 +1386,10 @@ const server = http.createServer((req, res) => {
     const preview = projects.folderPathPreview(asked);
     // `exists` rides along so the page can say ADOPT instead of MAKE for a
     // folder that is already there -- two different acts, one sentence each.
-    sendJson(res, 200, { path: preview.path, exists: preview.exists, problem: null });
+    // `blocked` is the third arm (a FILE at the path): the preview speaks
+    // makeFolder's refusal before the button is pressed, instead of
+    // promising a make the engine will refuse (round 23).
+    sendJson(res, 200, { path: preview.path, exists: preview.exists, blocked: preview.blocked || null, problem: null });
     return;
   }
 

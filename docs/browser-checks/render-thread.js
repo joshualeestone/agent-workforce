@@ -805,9 +805,14 @@ async function main() {
      * page at all, so renaming an element would have left it reporting itself
      * reachable forever.
      */
+    // `hidden` is asserted, not merely captured (round 23): tabIndex reads
+    // 0 on a hidden element, so without this half the check would report
+    // pj-screen reachable on a page whose screen block is hidden behind
+    // "we cannot see its screen right now" -- measured, carried, dropped,
+    // the exact shape the overflow check above calls out.
     for (const f of focusable) {
-      check(f.there === true && f.tabIndex >= 0,
-        `${f.id} is reachable from the keyboard (tabIndex ${f.tabIndex})`);
+      check(f.there === true && f.tabIndex >= 0 && f.hidden === false,
+        `${f.id} is reachable from the keyboard (tabIndex ${f.tabIndex}, ${f.hidden ? 'HIDDEN' : 'visible'})`);
     }
   } finally {
     await browser.close();
