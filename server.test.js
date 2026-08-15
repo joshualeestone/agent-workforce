@@ -3134,6 +3134,19 @@ test('the machine route always answers, with renderable checks and never an erro
     'the /api/machine response must carry the appLocation field beside the rows');
 });
 
+test('leaving step 5 really retires its pane (the bumps exist in production code)', () => {
+  // The leave scenarios move the counter through t5.leave(), so they pin
+  // the GUARD; these pins hold the TRIGGERS -- round 7 deleted both
+  // production bumps and the suite stayed green, which silently restores
+  // the round-6 state (a guard no production path ever moves).
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /if \(step !== FR_STEP_RETURN\) FR_RETURN_GEN \+= 1;/,
+    'frGo no longer bumps the return generation on leaving');
+  const closeFn = raw.slice(raw.indexOf('function frClose'), raw.indexOf('function frClose') + 400);
+  assert.match(closeFn, /FR_RETURN_GEN \+= 1;/,
+    'frClose no longer bumps the return generation on the way out');
+});
+
 test('the step-5 live region is static markup with its announcement attributes', () => {
   // The unit harness's DOM stub auto-creates any id, so without this pin
   // the region (and both its ARIA attributes) could be deleted from the

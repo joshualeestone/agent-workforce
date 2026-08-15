@@ -207,3 +207,19 @@ pre-write removed from the leave scenario; appFixture's comment names
 root as the blind-fixture failure cause; the folderless closing line
 stops saying Kosmos three times ("they will be here when you open Kosmos
 again").
+
+## Review round 7 (2026-08-14, ~11:45 PM)
+
+No blockers. Warnings closed: the leave TRIGGERS are pinned in committed
+source (round 7 deleted both production bumps and the suite stayed green
+-- the guard was held, the thing making it reachable was not; two source
+pins now red on either bump's removal); the render-first-run header
+states the current rule (every shot-bearing payload pinned AND
+engine-generated with a control -- the old header's own rule, followed,
+would have undone the fix); the last two live-dependent shots
+(firstrun-3-claude-connected, firstrun-4-adopt) are pinned with the
+shared adopt fixture and re-shot. Nits: the generation bump reads the
+CLAMPED step and names FR_STEP_RETURN (a bare 5 and the raw argument
+could drift from the paint branch); the drag helper's parameter no
+longer shadows the row variable. The two-product-names card remains the
+terminology sweep's item, recorded.
