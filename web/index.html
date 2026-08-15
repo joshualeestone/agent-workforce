@@ -697,7 +697,13 @@ svg { display: block; }
           max-width: 40rem; width: 100%; overflow: hidden; margin: auto; }
 .fr-bar { padding: var(--space-5) var(--space-7);
           border-bottom: 0.5px solid var(--separator);
-          font: var(--text-callout) var(--font-ui); color: var(--label-3); }
+          /* --label-2, measured (orientation branch): --label-3 at this 12px
+             size reads 3.04:1 light / 3.76:1 dark, under the 4.5:1 AA floor,
+             on every one of the wizard's shots -- the same twice-fixed class
+             as the projects screen's hints. Pre-existing on main (its own
+             harness reports it, 32 problems); fixed where the branch was
+             already standing. */
+          font: var(--text-callout) var(--font-ui); color: var(--label-2); }
 .fr-body { padding: var(--space-8) var(--space-7); }
 .fr-body h2 { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
               margin: 0 0 var(--space-5); }
@@ -735,7 +741,11 @@ svg { display: block; }
 .fr-check.unknown { border-style: dashed; border-width: 1px; background: var(--attn-bg);
                     padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
-           line-height: 1.35; color: var(--label-3); }
+           /* --label-2 for the same AA reason as .fr-bar above: the ok tick
+              and the unknown ? measured 3.0-4.0:1 at 15px. The glyph has a
+              visually-hidden spoken word beside it, but a visible glyph a
+              sighted-low-vision reader cannot see fails the same floor. */
+           line-height: 1.35; color: var(--label-2); }
 .fr-check.attention .fr-mark { color: var(--warn-ink); }
 .fr-ctitle { font: 600 var(--text-body) var(--font-ui); color: var(--label);
              margin-bottom: var(--space-2); }
@@ -1068,6 +1078,17 @@ svg { display: block; }
            them, and there is no progress bar here because there is no work. -->
       <div class="fr-pane" id="fr-pane-4" hidden>
         <div id="fr-fleet"></div>
+      </div>
+
+      <!-- 5. Getting back. ⚠️ The one thing the install said only into
+           Terminal scrollback, now said where the person actually is. The
+           check row LOOKS (the app-location check in /api/machine) rather
+           than remembering where the installer meant to put the icon: the
+           icon legitimately lands in /Applications, ~/Applications, or
+           nowhere, and a screen claiming a location nobody checked is the
+           defect this codebase is built against. -->
+      <div class="fr-pane" id="fr-pane-5" hidden>
+        <div id="fr-return" role="status" aria-live="polite"></div>
       </div>
 
       <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
@@ -6222,7 +6243,9 @@ setInterval(() => {
        thirteen running agents looks broken.
    ========================================================================== */
 
-const FR_STEPS = 4;
+// 5 since the orientation step landed (PIN-2026-08-14-1913CDT: "five setup
+// steps -- welcome, model, this computer, your agents, getting back").
+const FR_STEPS = 5;
 let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
@@ -6307,8 +6330,11 @@ function frGo(step) {
     // when somebody wanders to another step). If it is, this repaints the
     // live flow over the static verdict once the answer arrives.
     frConnResume();
-  } else {
+  } else if (step === 4) {
     frPaintFleet();
+  } else {
+    document.getElementById('fr-title').textContent = 'Getting back to Kosmos';
+    frPaintReturn();
   }
 
   /**
@@ -7095,8 +7121,7 @@ function frPaintFleet() {
       + '</ul>'
       + '<p>You can give any of them a picture, say what they are for, and change what they '
          + 'work on, or make a new one.</p>';
-    frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) },
-      { label: 'Make another agent', go: () => frFinish(openCreate) });
+    frActions({ label: 'Continue', go: () => frGo(5) });
     return;
   }
 
@@ -7155,8 +7180,7 @@ function frPaintFleet() {
             + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
             + 'that is sorted.</div>'
           : '');
-    frActions({ label: 'Make my first agent', go: () => frFinish(openCreate) },
-      { label: 'Just show me around', go: () => frFinish(() => showTab('agents')) });
+    frActions({ label: 'Continue', go: () => frGo(5) });
     return;
   }
 
@@ -7173,8 +7197,77 @@ function frPaintFleet() {
     + 'reason to stop. It just means we are not going to guess which of these you want.</p>'
     + '<p>Have a look at the board: if your agents are on it, everything is fine and this was '
     + 'one bad reading. If it is empty, make one.</p>';
-  frActions({ label: 'Show me the board', go: () => frFinish(() => showTab('agents')) },
-    { label: 'Make an agent', go: () => frFinish(openCreate) });
+  frActions({ label: 'Continue', go: () => frGo(5) });
+}
+
+/**
+ * The fork, moved whole from step 4 to step 5's actions (orientation spec:
+ * "its primary button carries the existing step-4 action, so the step costs
+ * no extra click"). Same three paths, same labels, same destinations --
+ * one function so the pairs cannot drift from the path logic that used to
+ * sit beside them in frPaintFleet.
+ */
+function frForkActions() {
+  const path = (FR && FR.path) || 'unknown';
+  if (path === 'adopt') {
+    frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) },
+      { label: 'Make another agent', go: () => frFinish(openCreate) });
+  } else if (path === 'create') {
+    frActions({ label: 'Make my first agent', go: () => frFinish(openCreate) },
+      { label: 'Just show me around', go: () => frFinish(() => showTab('agents')) });
+  } else {
+    frActions({ label: 'Show me the board', go: () => frFinish(() => showTab('agents')) },
+      { label: 'Make an agent', go: () => frFinish(openCreate) });
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Step 5 -- getting back
+   -------------------------------------------------------------------------- */
+
+/**
+ * ⚠️ IT LOOKS AGAIN, on entry, rather than reusing step 2's snapshot: a
+ * person can sit in this wizard for minutes, and the one question this step
+ * answers ("where is the icon RIGHT NOW") deserves an answer at least as
+ * fresh as the step. A failed fetch renders the could-not-look copy, which
+ * is the honest state, never an empty row.
+ *
+ * ⚠️ The Dock instruction is DRAG, and must never be "simplified" to
+ * right-click, Keep in Dock. That advice would not work: Kosmos.app's
+ * executable is a script that opens the browser and exits 0, and with
+ * LSUIElement false the tile flashes into the Dock and is gone before
+ * anyone can right-click it. "Keep in Dock" is unreachable, not merely
+ * unreliable (orientation spec, two installer lines cited; independently
+ * confirmed by Splinter 2026-08-14).
+ */
+async function frPaintReturn() {
+  const box = document.getElementById('fr-return');
+  const intro = '<p>Kosmos runs on this Mac and opens in your browser. You come back to it '
+    + 'the same way you open anything else on here.</p>';
+  const dock = '<p><b>Keep it one click away.</b> Drag Kosmos out of that folder and onto '
+    + 'the Dock, the strip of icons along the edge of your screen. It stays there until '
+    + 'you take it off.</p>'
+    + '<p>Closing this tab does not stop your agents. They keep working, and clicking the '
+    + 'icon brings this screen back.</p>';
+  const unknownRow = frCheckRow({
+    state: 'unknown',
+    title: 'We could not check where the Kosmos icon is',
+    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
+      + 'right of your screen, and it will find it.',
+  });
+  // Painted BEFORE the fetch, so the step is never a blank pane during the
+  // round trip; the row upgrades in place when the look completes.
+  box.innerHTML = intro + unknownRow + dock;
+  frForkActions();
+  try {
+    const res = await fetch('/api/machine');
+    const body = await res.json();
+    if (!res.ok) throw new Error('machine check failed');
+    const found = (body.checks || []).find((c) => c && c.key === 'app-location');
+    if (found) box.innerHTML = intro + frCheckRow(found) + dock;
+  } catch {
+    /* the pre-painted could-not-look row IS the honest answer */
+  }
 }
 
 /* --------------------------------------------------------------------------

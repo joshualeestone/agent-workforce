@@ -23,6 +23,8 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const create = require('./create');
 
@@ -498,6 +500,75 @@ function restartCheck(runner) {
 /**
  * @returns {{checks: Array, attention: number, unknown: number}}
  */
+/**
+ * Where the Kosmos icon actually IS, looked up rather than remembered.
+ *
+ * ⚠️ WHY THIS EXISTS (orientation spec, 2026-08-14): the installer's APP_DIR
+ * is a shell variable that was never persisted, so the app had no idea where
+ * its own icon landed -- and the icon legitimately lands in three places:
+ * /Applications (the account could write there), ~/Applications (fallback,
+ * measured on the first real clean-machine run when the tester concluded the
+ * install "did not put it in my applications"), or nowhere. A screen saying
+ * "it is in your Applications folder" without looking would be a state
+ * nobody checked rendered as fact.
+ *
+ * ⚠️ EXISTENCE, not provenance, deliberately: this check says "we found a
+ * Kosmos here" when a Kosmos.app directory is present, and does not try to
+ * prove the bundle is this install's the way install/kosmos's bundle_is_ours
+ * does. The spec weighed this: an honest "we found one" beats a provenance
+ * proof that lands a healthy machine in unknown.
+ *
+ * Four answers, per the spec's table, in this module's check shape:
+ * found in /Applications (ok), found in ~/Applications (ok, its own title,
+ * because the path differs and the installer already words it this way),
+ * found in neither (attention -- with the sentence that absence-of-finding
+ * is not absence: "That is not the same as it not being there"), and could
+ * not look (unknown -- "Nothing is wrong").
+ *
+ * `opts.appDirs` overrides the two real folders so tests never depend on
+ * this machine's actual /Applications -- the same injection shape as
+ * opts.runner and opts.pmset.
+ */
+function appLocationCheck(opts) {
+  const dirs = (opts && Array.isArray(opts.appDirs) && opts.appDirs.length === 2)
+    ? opts.appDirs
+    : ['/Applications', path.join(os.homedir(), 'Applications')];
+  const TITLES = [
+    'Kosmos is in your Applications folder',
+    'Kosmos is in the Applications folder inside your home folder',
+  ];
+  const OPEN_FROM_THERE = 'Open it from there whenever you want it. Clicking it starts '
+    + 'Kosmos if it is not already running.';
+  for (let i = 0; i < dirs.length; i++) {
+    try {
+      const st = fs.statSync(path.join(dirs[i], 'Kosmos.app'));
+      // A FILE named Kosmos.app is not the app; keep looking rather than
+      // pointing somebody at a thing that will not open.
+      if (st.isDirectory()) {
+        return { key: 'app-location', state: STATE.OK, title: TITLES[i], detail: OPEN_FROM_THERE };
+      }
+    } catch (err) {
+      if (err && err.code === 'ENOENT') continue;
+      // Anything but a clean "not there" means we could not complete the
+      // look, and "could not look" must never render as "it is not there".
+      return {
+        key: 'app-location',
+        state: STATE.UNKNOWN,
+        title: 'We could not check where the Kosmos icon is',
+        detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
+          + 'top right of your screen, and it will find it.',
+      };
+    }
+  }
+  return {
+    key: 'app-location',
+    state: STATE.ATTENTION,
+    title: 'We could not find the Kosmos icon',
+    detail: 'That is not the same as it not being there. Type Kosmos into Spotlight, the '
+      + 'magnifying glass at the top right of your screen, and it will find it.',
+  };
+}
+
 function check(opts) {
   const runner = (opts && opts.runner) || run;
 
@@ -507,6 +578,7 @@ function check(opts) {
 
   const checks = [
     installedCheck(opts),
+    appLocationCheck(opts),
     pm.ok ? sleepCheck(pm.stdout) : {
       key: 'sleep',
       state: STATE.UNKNOWN,
@@ -527,4 +599,4 @@ function check(opts) {
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, restartCheck, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, restartCheck, STATE };

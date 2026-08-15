@@ -3461,15 +3461,26 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     assert.ok(!/undefined|NaN|null/.test(title + body),
       `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
     assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
-    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+    // The fork moved to step 5 (orientation spec): step 4's way onward is
+    // now a single Continue on EVERY path, including the broken-payload
+    // one -- a person must never be stranded, and must also never meet the
+    // fork here where the orientation has not been shown yet.
+    assert.ok(got.actions && /continue/i.test(got.actions.primary || ''),
       `payload ${JSON.stringify(FR)} left the person short of a way onward`);
   }
 
-  // Both ways out are always offered, whichever path it picked.
-  for (const path of ['adopt', 'create', 'unknown']) {
-    const got = firstRunHarness('frPaintFleet', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
-    assert.ok(got.actions.primary && got.actions.alt,
-      `the ${path} path offers only one door`);
+  // Both ways out are still offered on every path -- at step 5, where the
+  // fork lives now. frForkActions is the single holder of the pairs.
+  for (const [path, primary, alt] of [
+    ['adopt', /take me to my agents/i, /make another agent/i],
+    ['create', /make my first agent/i, /show me around/i],
+    ['unknown', /show me the board/i, /make an agent/i],
+  ]) {
+    const got = firstRunHarness('frForkActions', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
+    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+      `the ${path} path offers only one door at the fork`);
+    assert.match(got.actions.primary, primary, `the ${path} fork primary drifted`);
+    assert.match(got.actions.alt, alt, `the ${path} fork alt drifted`);
   }
 });
 

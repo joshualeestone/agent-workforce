@@ -43,12 +43,75 @@ const LAPTOP_PMSET = [
   'AC Power:', ' lidwake              1', ' sleep                0', ' disksleep            10', '',
 ].join('\n');
 
+/* App-location fixtures for step 5 and the machine payloads, each GENERATED
+   by the real engine against a scratch pair of folders rather than
+   hand-written, so the wording on the shots cannot drift from the engine's
+   (the same anti-drift property the MIXED fixture has, one step removed).
+   The dirs are built once and removed at exit. */
+const APPFIX = (() => {
+  const os = require('node:os');
+  const withApp = fs.mkdtempSync(path.join(os.tmpdir(), 'frshot-app-'));
+  fs.mkdirSync(path.join(withApp, 'Kosmos.app'));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'frshot-empty-'));
+  const sealed = fs.mkdtempSync(path.join(os.tmpdir(), 'frshot-sealed-'));
+  fs.chmodSync(sealed, 0o000);
+  process.on('exit', () => {
+    try { fs.chmodSync(sealed, 0o755); } catch { /* gone */ }
+    for (const d of [withApp, empty, sealed]) {
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ }
+    }
+  });
+  return {
+    sys: [withApp, empty],
+    home: [empty, withApp],
+    none: [empty, empty],
+    blind: [path.join(sealed, 'Applications'), empty],
+  };
+})();
+
+const CLEAR_INPUTS = {
+  pmset: ['AC Power:', ' lidwake              1', ' sleep                0', ' disksleep            10', ''].join('\n'),
+  claudeBin: '/bin/sh',
+  tmuxBin: '/bin/sh',
+  runner: () => ({ ok: true, stdout: 'com.kosmos.agent.x' }),
+};
+
+/* The clear payload is engine-generated too (it was captured against the
+   LIVE route until app-location joined the checks: a dev machine without
+   Kosmos.app can never read all-clear again, while every real post-install
+   machine can -- the premise moved from "this machine" to "an installed
+   machine", so the fixture follows the premise). Its control still holds
+   the shot to its name. */
+const MACHINE_CLEAR = (() => {
+  const got = machineEngine.check({ ...CLEAR_INPUTS, appDirs: APPFIX.sys });
+  if (got.attention !== 0 || got.unknown !== 0) {
+    throw new Error(`the clear fixture is not clear (attention=${got.attention}, unknown=${got.unknown})`);
+  }
+  return got;
+})();
+
+const appFixture = (dirs, wantState, label) => {
+  const got = machineEngine.check({ ...CLEAR_INPUTS, appDirs: dirs });
+  const row = got.checks.find((c) => c.key === 'app-location');
+  if (!row || row.state !== wantState) {
+    throw new Error(`the ${label} app fixture reads ${row && row.state}, wanted ${wantState}`);
+  }
+  return got;
+};
+const MACHINE_APP_SYS = appFixture(APPFIX.sys, 'ok', 'system');
+const MACHINE_APP_HOME = appFixture(APPFIX.home, 'ok', 'home');
+const MACHINE_APP_NONE = appFixture(APPFIX.none, 'attention', 'missing');
+const MACHINE_APP_BLIND = appFixture(APPFIX.blind, 'unknown', 'blind');
+
 const MACHINE_MIXED = (() => {
   const got = machineEngine.check({
     pmset: LAPTOP_PMSET,
     claudeBin: '/bin/sh',
     tmuxBin: '/bin/sh',
     runner: (cmd) => (cmd === '/bin/launchctl' ? { ok: false, because: 'no' } : { ok: true, stdout: '' }),
+    // Pinned to the with-app pair so the mixed fixture stays exactly one
+    // attention and one unknown now that app-location is a fourth row.
+    appDirs: APPFIX.sys,
   });
   // The control: this fixture is only worth screenshotting if it really does
   // carry one of each, which is the whole point of the shot.
@@ -66,7 +129,7 @@ const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, fleetNames: [
 
 const SHOTS = [
   { name: 'firstrun-1-welcome', step: 1 },
-  { name: 'firstrun-2-checks-clear', step: 2 },   // live route: this machine is all-clear
+  { name: 'firstrun-2-checks-clear', step: 2, machine: MACHINE_CLEAR },
   { name: 'firstrun-2-checks-attention', step: 2, machine: MACHINE_MIXED },
   { name: 'firstrun-3-claude-connected', step: 3 },
   { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
@@ -74,6 +137,10 @@ const SHOTS = [
   { name: 'firstrun-4-adopt', step: 4 },
   { name: 'firstrun-4-create', step: 4, first: FLEET_CREATE },
   { name: 'firstrun-4-cannot-see', step: 4, first: FLEET_BLIND },
+  { name: 'firstrun-5-return-system', step: 5, machine: MACHINE_APP_SYS },
+  { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME },
+  { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE },
+  { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND },
 ];
 
 /**
@@ -251,6 +318,24 @@ async function look(page, name) {
         if (!rows.length || rows.some((c) => !/\bok\b/.test(c))) {
           problems.push(`firstrun-2-checks-clear [${scheme}]: this machine is NOT all-clear `
             + `(${rows.join(' | ') || 'no rows'}), so the shot under that name would be a lie`);
+        }
+      }
+
+      /* Each step-5 shot asserts the row it claims to depict, read from the
+         fixture the engine generated -- and the drag-not-Keep-in-Dock guard
+         is asserted on every one of the four, because the Dock paragraph is
+         static copy and any state could regress it. */
+      if (shot.name.startsWith('firstrun-5-return')) {
+        const want = shot.machine.checks.find((c) => c.key === 'app-location');
+        const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
+        if (!text.includes(want.title)) {
+          problems.push(`${shot.name} [${scheme}]: the row does not carry the fixture's title ("${want.title}")`);
+        }
+        if (!/Drag Kosmos out of that folder/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the Dock instruction is not the drag`);
+        }
+        if (/Keep in Dock/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the unreachable Keep in Dock advice appeared`);
         }
       }
       const seen = await look(page, shot.name);

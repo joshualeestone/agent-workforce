@@ -39,13 +39,26 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Checking your computer', 'step 2');
     await page.waitForSelector('.fr-check', { timeout: 5000 });
-    ok((await page.locator('#fr-checks .fr-check').count()) === 3, 'three checks painted from the live route');
+    ok((await page.locator('#fr-checks .fr-check').count()) === 4, 'four checks painted from the live route (app-location joined)');
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Claude', 'step 3');
     ok(await page.locator('#fr-sub .fr-ctitle').textContent().then((t) => /connected/.test(t)),
       'the real subscription answer arrived: ' + await page.locator('#fr-sub .fr-ctitle').textContent());
     await page.click('#fr-next');
     ok(/already have/.test(await page.locator('#fr-title').textContent()), 'step 4, the adopt path');
+    await page.click('#fr-next');
+    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'step 5, getting back');
+    // The check row is painted from the live /api/machine look; against this
+    // real machine any of the four states is legitimate -- what must be true
+    // is that A row rendered and the Dock sentence is the drag instruction,
+    // never "Keep in Dock" (the orientation spec's load-bearing guard: the
+    // Dock tile exits before anyone can right-click it).
+    await page.waitForSelector('#fr-return .fr-check', { timeout: 5000 });
+    const returnText = await page.locator('#fr-return').textContent();
+    ok(/Drag Kosmos out of that folder/.test(returnText), 'the Dock instruction is drag');
+    ok(!/Keep in Dock/.test(returnText), 'and never the unreachable Keep in Dock');
+    ok(/Closing this tab does not stop your agents/.test(returnText),
+      'the narrow true promise about closing the tab');
 
     console.log('   ...and out the front door');
     await page.click('#fr-next');
@@ -110,6 +123,12 @@ async function fresh(browser, opts = {}) {
     });
     await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
     ok(/first agent/.test(await page.locator('#fr-title').textContent()), 'on the create path');
+    // The fork moved to step 5: step 4's Continue leads to the orientation,
+    // whose primary carries "Make my first agent" on this path.
+    await page.click('#fr-next');
+    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'orientation before the fork');
+    ok(/Make my first agent/.test(await page.locator('#fr-next').textContent()),
+      'the create-path fork rode along to step 5');
     await page.click('#fr-next');
     await page.waitForTimeout(800);
     ok(await page.isHidden('#firstrun'), 'the overlay got out of the way');
@@ -180,10 +199,10 @@ async function fresh(browser, opts = {}) {
     // dialog: frGo(3.7) matched no pane, so it hid all four and painted step 4
     // into one it had just hidden.
     const panes = await page.evaluate(() =>
-      [1, 2, 3, 4].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
+      [1, 2, 3, 4, 5].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
     ok(panes.length === 1, `fr-step=${bad} shows exactly one pane (showed ${panes.length})`);
     const crumb = await page.locator('#fr-step').textContent();
-    ok(/^Step [1-4] of 4$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
+    ok(/^Step [1-5] of 5$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
     ok((await page.locator('#fr-title').textContent()).trim().length > 0, `fr-step=${bad} has a heading`);
     await ctx.close();
   }
@@ -205,6 +224,7 @@ async function fresh(browser, opts = {}) {
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
     await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
+    await page.click('#fr-next');                 // step 4 -> 5 (the fork moved)
     await page.click('#fr-next');                 // starts "Make my first agent"
     await page.waitForTimeout(150);
     await page.keyboard.press('Escape');          // ...and Escape mid-flight
@@ -304,7 +324,7 @@ async function fresh(browser, opts = {}) {
     ok(seen.has('fr-skip'), 'Shift+Tab reaches the way out');
 
     // Every step, because the button set changes between them.
-    for (const step of [2, 3, 4]) {
+    for (const step of [2, 3, 4, 5]) {
       await page.goto(`${BASE}/?first-run=1&fr-step=${step}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
       // Same reason as above: a reload restores inert, which would make the rest
