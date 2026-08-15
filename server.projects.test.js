@@ -646,6 +646,30 @@ test('a save that would move nothing is refused, not answered "saved"', async ()
   assert.equal(list[0].archived, false);
 });
 
+test('an archive-only PUT leaves member instruction files untouched', async () => {
+  reset();
+  // The comment beside the re-tell gate claims it; this holds it.
+  const board = fleet.install([fleet.agent('archtell', { state: 'working' })]);
+  try {
+    const wdir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'archtell');
+    fs.mkdirSync(wdir, { recursive: true });
+    const file = path.join(wdir, 'CLAUDE.md');
+    fs.writeFileSync(file, '# archtell\n');
+    const made = json(await post('/api/projects', { name: 'Quiet archive', folder: folder('quiet-archive'), agents: ['archtell'] })).project;
+    const afterCreate = fs.readFileSync(file, 'utf8');
+    assert.match(afterCreate, /Quiet archive/, 'the premise: creation reached the boot file');
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ archived: true }),
+    });
+    assert.equal(res.status, 200, res.body);
+    assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
+      'archiving rewrote a boot file about a project whose name did not move');
+  } finally {
+    board.restore();
+  }
+});
+
 test('a mixed body with one bad field applies NOTHING, not the good half', async () => {
   reset();
   const made = json(await post('/api/projects', { name: 'Whole', folder: folder('whole-mixed') })).project;

@@ -181,9 +181,12 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    must clear the sticky bar, or "focused but hidden under the bar" replaces
    the focus-dropped-to-body failure this file already guards. In PX like
    the spacing tokens the bar is built from (a rem value diverges as the
-   root font moves while the bar does not): measured 120px at default
-   metrics, padded to 132. */
+   root font moves while the bar does not). Measured per width, not once:
+   120px at 1440 through 440, then the header WRAPS -- 138px at 420, 154px
+   at 400 -- so one value padded from one width put focus 22px under the
+   bar at 400. */
 html { scroll-padding-top: 132px; }
+@media (max-width: 440px) { html { scroll-padding-top: 170px; } }
 .apphead { position: sticky; top: 0; z-index: 20; background: var(--bg-sunken);
            margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-6);
            padding: var(--space-8) var(--space-8) 0;
@@ -4270,8 +4273,15 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
       // person is told which half failed, and the button comes back so the
       // disclosure is not left holding a dead control over a stale count.
       btn.disabled = false;
+      // ⚠️ Describes the MOMENT and points at nothing: the first wording
+      // said "the note above says so", and five seconds later the poll
+      // succeeded, repainted the healthy list, and left this sentence
+      // pointing at a note that no longer existed (the round-1 shape,
+      // reintroduced by the round-2 fix). A sentence about what happened
+      // stays true after recovery; a sentence about the current screen
+      // does not.
       document.getElementById('pj-list-msg').textContent =
-        'The restore saved. We could not re-read your projects to show it; the note above says so.';
+        'The restore saved, but we could not re-read your projects just then.';
       return;
     }
     // ⚠️ The keyboard is NOT dropped to <body> when the section it was in

@@ -1576,24 +1576,13 @@ const server = http.createServer((req, res) => {
         const fields = {};
         if (body.name !== undefined) fields.name = body.name;
         if (body.description !== undefined) fields.description = body.description;
-        /* ⚠️ archived rides beside the edit, not inside it: it is its own
-           engine write (setArchived), validated FIRST so a bad value fails
-           before anything moves. Anything but a boolean is refused rather
-           than coerced -- `!!` would have turned {"archived": "false"}
-           into an archive, the exact opposite of what the caller wrote.
-           An archive-only body skips the edit entirely (so it cannot be
-           refused for carrying no editable field); a body carrying nothing
-           we recognise still takes the edit path and its loud refusal. The
-           one-write rule bends only when a caller carries BOTH kinds of
-           field in one PUT, which no shipped screen does: settings sends
-           name/description, the archive control sends archived alone. */
-        if (body.archived !== undefined && typeof body.archived !== 'boolean') {
-          throw new Error('archived must be true or false');
-        }
-        if (Object.keys(fields).length || body.archived === undefined) {
-          projects.edit(id, fields);
-        }
-        if (body.archived !== undefined) projects.setArchived(id, body.archived);
+        /* archived is a carried field like the others: the engine's edit
+           validates every carried field before its ONE write (a non-boolean
+           archived is refused there, because `!!` would turn
+           {"archived": "false"} into an archive), so a mixed body either
+           applies whole or not at all. */
+        if (body.archived !== undefined) fields.archived = body.archived;
+        projects.edit(id, fields);
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
         // project that no longer goes by that. Archiving does NOT re-tell: the

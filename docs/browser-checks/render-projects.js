@@ -980,13 +980,51 @@ async function main() {
       if (!/saved/.test(failedRead.archMsg) || !/could not re-read/.test(failedRead.archMsg)) {
         throw new Error('the failed-re-read note does not name both halves (write landed, read did not): ' + JSON.stringify(failedRead));
       }
-      // The write DID land (the PUT went through before the stub), so a
-      // clean reload shows it active again -- which is also the cleanup.
+      // The write DID land: the stub's glob (**/api/projects) matches only
+      // the LIST endpoint, so the PUT to /api/project/<id> passes through
+      // it untouched. A clean reload shows it active again -- which is
+      // also the cleanup.
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const cleanedUp = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
       if (!cleanedUp) throw new Error('the restore whose re-read failed did not actually land');
-      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, and the archived detail with a failed re-read)');
+      // 8i. The DISCLOSURE restore arm under the same failed re-read: its
+      // note must describe the MOMENT and point at nothing, because five
+      // seconds after the failure the poll succeeds, repaints the healthy
+      // list, and a note referencing "the note above" points at a sentence
+      // that no longer exists (review round 4, measured).
+      await api('/api/project/' + encodeURIComponent('quarterclose'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+      await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'stubbed' } }));
+      await page.click('#pj-arch-list [data-restore]');
+      await page.waitForTimeout(600);
+      const discFailed = await page.evaluate(() => ({
+        note: document.getElementById('pj-list-msg').textContent,
+        btnEnabled: (() => { const b = document.querySelector('#pj-arch-list [data-restore]'); return b ? !b.disabled : null; })(),
+      }));
+      await page.unroute('**/api/projects');
+      if (!/restore saved, but we could not re-read/.test(discFailed.note)) {
+        throw new Error('the disclosure arm did not say which half failed: ' + JSON.stringify(discFailed));
+      }
+      if (/above|below/.test(discFailed.note)) {
+        throw new Error('the note points at another element, which the next successful poll will erase: ' + JSON.stringify(discFailed));
+      }
+      if (discFailed.btnEnabled === false) {
+        throw new Error('the disclosure Restore stayed disabled after a failed re-read');
+      }
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const discCleaned = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!discCleaned) throw new Error('the disclosure restore whose re-read failed did not actually land');
+      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, and BOTH restore arms under a failed re-read)');
     } finally {
       await ctx.close();
     }

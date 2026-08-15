@@ -202,6 +202,39 @@ test('re-archiving a record with a stray distrusted date stamps NOW, not the str
     'the distrusted stray date was published as the archive date');
 });
 
+test('a mangled archivedAt VALUE never becomes a confident date', () => {
+  reset();
+  const p = projects.create({ name: 'Epoch trap', folder: folder('epoch-trap') });
+  const all = projects.readAll();
+  // archived true with a numeric date: new Date(12345) is a valid 1970
+  // instant, so without the value heal the disclosure read "Archived
+  // 1/1/1970" off a field nobody recorded.
+  Object.assign(all.find((x) => x.id === p.id), { archived: true, archivedAt: 12345 });
+  projects.writeAll(all);
+  assert.equal(projects.get(p.id, []).archivedAt, null, 'a numeric stray published as a date');
+  const all2 = projects.readAll();
+  Object.assign(all2.find((x) => x.id === p.id), { archived: true, archivedAt: 'not a date' });
+  projects.writeAll(all2);
+  assert.equal(projects.get(p.id, []).archivedAt, null, 'an unparseable stray published as a date');
+  // And the WRITE side: re-archiving over the numeric stray stamps now.
+  const on = projects.setArchived(p.id, true);
+  assert.equal(typeof on.archivedAt, 'string');
+  assert.ok(!Number.isNaN(new Date(on.archivedAt).getTime()));
+});
+
+test('edit applies both carried fields in one write, and a refused field refuses the whole save', () => {
+  reset();
+  const p = projects.create({ name: 'Atomic shell', folder: folder('atomic-shell') });
+  const both = projects.edit(p.id, { name: 'Atomic II', archived: true });
+  assert.equal(both.name, 'Atomic II');
+  assert.equal(both.archived, true);
+  assert.throws(() => projects.edit(p.id, { name: 'Atomic III', archived: 'yes' }), /true or false/);
+  const after = projects.get(p.id, []);
+  assert.equal(after.name, 'Atomic II', 'the valid half of a refused save must not land');
+  assert.equal(after.archived, true);
+  assert.throws(() => projects.edit(p.id, {}), /nothing here we can change/);
+});
+
 test('every hand-mangled archived shape heals on read, in the safe direction', () => {
   reset();
   const p = projects.create({ name: 'Mangled', folder: folder('mangled') });
