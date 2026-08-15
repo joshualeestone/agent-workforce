@@ -309,10 +309,55 @@ async function main() {
   for (const d of ['henderson-lease', 'quarter-close', 'reed-handover']) {
     fs.mkdirSync(path.join(demo, d), { recursive: true });
   }
-  await post('/api/projects', { name: 'Henderson lease', folder: path.join(demo, 'henderson-lease'), agents });
+  await post('/api/projects', { name: 'Henderson lease', folder: path.join(demo, 'henderson-lease'), agents,
+    description: 'Review the renewal terms and prepare the counter.' });
   await post('/api/projects', { name: 'Quarter close', folder: path.join(demo, 'quarter-close'), agents: ['claudebot'] });
   await post('/api/projects', { name: 'Reed handover', folder: path.join(demo, 'reed-handover') });
   await shot('2-list');
+
+  /* The description, on the RENDERED page in both places it lives, with the
+     absence arm as its own assertion (project-description branch): a
+     described project shows the sentence on its row and under its detail
+     title; an undescribed one renders NO description element at all --
+     an empty grey line under every undescribed project is the exact
+     empty-state failure the hidden-toggle exists to prevent. Same
+     own-context-in-a-finally shape as the add-flow block below. */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const seen = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Henderson lease'));
+        const bare = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Reed handover'));
+        return {
+          onRow: row ? ((row.querySelector('.pj-desc') || {}).textContent || null) : null,
+          bareHasDesc: bare ? Boolean(bare.querySelector('.pj-desc')) : null,
+        };
+      });
+      if (seen.onRow !== 'Review the renewal terms and prepare the counter.') {
+        throw new Error('the described row does not carry its sentence: ' + JSON.stringify(seen.onRow));
+      }
+      if (seen.bareHasDesc !== false) {
+        throw new Error('an undescribed project rendered a description element (empty grey line): ' + JSON.stringify(seen.bareHasDesc));
+      }
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(300);
+      const detail = await page.evaluate(() => {
+        const el = document.getElementById('pj-one-desc');
+        return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
+      });
+      if (detail.text !== 'Review the renewal terms and prepare the counter.' || detail.hidden !== false) {
+        throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
+      }
+      console.log('✔ 2b-description (row, absence arm, and detail)');
+    } finally {
+      await ctx.close();
+    }
+  }
 
   // 3. One project — where the told-verdicts are visible.
   await shot('3-one', async (page) => {

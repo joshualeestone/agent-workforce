@@ -704,6 +704,39 @@ test('a folder path with a newline in it is one line in the block', () => {
   assert.ok(!body.includes('\n\n## Not a heading'));
 });
 
+test('a description is stored trimmed, one-line, capped, and optional', () => {
+  reset();
+  const made = projects.create({ name: 'Described', folder: folder('described'),
+    description: '  Build the campaign calendar,\ndraft content.  ' });
+  // Newlines fold exactly as the name's do: this renders on a card and in a
+  // heading, and the engine is where the folding lives (one derivation).
+  assert.equal(made.description, 'Build the campaign calendar, draft content.');
+  const plain = projects.create({ name: 'Undescribed', folder: folder('undescribed') });
+  assert.strictEqual(plain.description, '', 'absent must store as the explicit empty string');
+  const long = projects.create({ name: 'Longform', folder: folder('longform'),
+    description: 'x'.repeat(500) });
+  assert.equal(long.description.length, 200, 'the one-line cap holds at create');
+});
+
+test('setDescription updates, clears on explicit empty, and heals legacy records', () => {
+  reset();
+  const made = projects.create({ name: 'Mutable', folder: folder('mutable'), description: 'first words' });
+  assert.equal(projects.setDescription(made.id, '  second words  ').description, 'second words');
+  // ⚠️ Explicit empty CLEARS -- a description is optional by design and the
+  // settings screen offers clearing; this is deliberately unlike the profile
+  // displayName's blank-drop, whose field is an identity that must survive
+  // accidents.
+  assert.strictEqual(projects.setDescription(made.id, '').description, '');
+  // A record written before the field existed simply gains it.
+  const storeFile = path.join(store.ROOT, projects.FILE);
+  const all = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+  delete all.find((p) => p.id === made.id).description;
+  fs.writeFileSync(storeFile, JSON.stringify(all));
+  assert.equal(projects.setDescription(made.id, 'added later').description, 'added later');
+  assert.equal(projects.setDescription(made.id, 'x'.repeat(500)).description.length, 200,
+    'the cap holds on update too');
+});
+
 test('renaming is judged by the same rule as naming', () => {
   reset();
   const p = projects.create({ name: 'Fine', folder: folder('rename-rules') });

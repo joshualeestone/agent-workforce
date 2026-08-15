@@ -408,6 +408,39 @@ test('renaming a project keeps its id, and reaches its members', async () => {
   assert.equal(json(res).project.id, made.id, 'the id is what membership points at');
 });
 
+test('the description travels the routes: created, carried, updated alone, cleared', async () => {
+  reset();
+  const made = json(await post('/api/projects', {
+    name: 'Q4 Marketing Plan', folder: folder('q4'),
+    description: '  Build the campaign calendar and track deadlines.  ',
+  })).project;
+  assert.equal(made.description, 'Build the campaign calendar and track deadlines.');
+  // GET carries it (the card and the detail read this list).
+  const listed = json(await req('/api/projects')).projects.find((p) => p.id === made.id);
+  assert.equal(listed.description, 'Build the campaign calendar and track deadlines.');
+  // Description-only PUT: the name must not move, and the request must not
+  // need to carry one (the old route ran rename unconditionally).
+  const put1 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'Second wording.' }),
+  });
+  assert.equal(put1.status, 200, put1.body);
+  assert.equal(json(put1).project.description, 'Second wording.');
+  assert.equal(json(put1).project.name, 'Q4 Marketing Plan', 'a description-only save must not touch the name');
+  // Name-only PUT preserves the description it never mentioned.
+  const put2 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Q4 Plan' }),
+  });
+  assert.equal(json(put2).project.description, 'Second wording.', 'a rename must not blank the description');
+  // Explicit empty clears -- deliberate, per the engine's own rule.
+  const put3 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: '' }),
+  });
+  assert.strictEqual(json(put3).project.description, '');
+});
+
 test('a name that cannot be decoded is refused rather than guessed at', async () => {
   const res = await req('/api/project/%ZZ');
   assert.equal(res.status, 400);

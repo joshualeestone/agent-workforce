@@ -524,6 +524,21 @@ function cleanName(name) {
   return title;
 }
 
+/**
+ * A project's one-line description: what this work IS, in the person's words.
+ *
+ * ⚠️ OPTIONAL, and empty is a real value. Unlike the name (a project must be
+ * addressable) a description can legitimately be blank, and clearing one is a
+ * deliberate act the settings screen offers -- so '' is stored, never refused
+ * and never quietly kept. `oneLine` folds newlines like the name's does: this
+ * renders on a card and in a heading, and a stray newline would break both.
+ * Capped at 200 characters: the design renders one line under the title, and
+ * Josh's own twelve fixture descriptions top out under half that.
+ */
+function cleanDescription(text) {
+  return oneLine(text == null ? '' : text).slice(0, 200);
+}
+
 /* ---------------------------------------------------------------------------
  * Making the folder ourselves
  *
@@ -739,7 +754,7 @@ function trueChildName(parent, name) {
  *   which is still fully supported and is the only way to reach work that lives
  *   somewhere else.
  */
-function create({ name, folder, agents, roster } = {}) {
+function create({ name, folder, agents, roster, description } = {}) {
   const asked = String(folder == null ? '' : folder).trim();
   // ⚠️ On the default path the FOLDER-NAME refusal comes first, because it
   // is the sentence the person has been reading: the preview line under the
@@ -784,6 +799,7 @@ function create({ name, folder, agents, roster } = {}) {
   const project = {
     id: idFor(title, new Set(all.map((p) => p.id))),
     name: title,
+    description: cleanDescription(description),
     folder: given,
     agents: members,
     everSeen: Object.fromEntries(members.map((a) => [
@@ -814,6 +830,12 @@ function rename(id, name) {
   // membership and any open URL point at, and renaming is a display change
   // rather than a new project.
   return mutate(id, (p) => ({ ...p, name: title }));
+}
+
+function setDescription(id, text) {
+  // Records written before this field existed simply gain it here; readers
+  // treat a missing description as ''.
+  return mutate(id, (p) => ({ ...p, description: cleanDescription(text) }));
 }
 
 function addAgent(id, sessionName, roster) {
@@ -1156,7 +1178,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, rename, setDescription, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,
