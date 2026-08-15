@@ -640,7 +640,8 @@ async function main() {
         return 'rgb(255, 255, 255)';
       };
       const out = [];
-      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc']) {
+      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc',
+                         '#pj-list-view .viewtoggle .vt', '#pj-list-view .viewtoggle .vt.on']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);

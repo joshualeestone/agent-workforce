@@ -646,6 +646,22 @@ test('a save that would move nothing is refused, not answered "saved"', async ()
   assert.equal(list[0].archived, false);
 });
 
+test('a mixed body with one bad field applies NOTHING, not the good half', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Whole', folder: folder('whole-mixed') })).project;
+  // The name is valid, archived is refused: the rename must not have landed
+  // when the route answers failure -- a 400 about a save that half applied
+  // tells the caller a lie in the other direction.
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Renamed anyway', archived: 'yes' }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.name, 'Whole', 'the valid half of a refused save must not land');
+  assert.equal(after.archived, false);
+});
+
 test('archived refuses anything but a boolean, because "false" the string is not false', async () => {
   reset();
   const made = json(await post('/api/projects', { name: 'Strict', folder: folder('strict-put') })).project;

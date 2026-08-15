@@ -177,6 +177,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    edge to edge.
    The bar paints on the page's own ground -- a transparent sticky bar would
    show the content sliding through it. */
+/* Anything scrolled to programmatically (focus rescues, scrollIntoView)
+   must clear the sticky bar, or "focused but hidden under the bar" replaces
+   the focus-dropped-to-body failure this file already guards. 7rem covers
+   the header plus tabs at default metrics with margin. */
+html { scroll-padding-top: 7rem; }
 .apphead { position: sticky; top: 0; z-index: 20; background: var(--bg-sunken);
            margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-6);
            padding: var(--space-8) var(--space-8) 0;
@@ -206,6 +211,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .pj-list.asgrid { display: grid; flex-direction: unset;
                   grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
 .pj-list.asgrid .pj-row { height: 100%; }
+/* The empty state and the read-failure card span the grid: the failure
+   message is the one that matters and it must not squeeze into one cell. */
+.pj-list.asgrid .pj-empty, .pj-list.asgrid .err { grid-column: 1 / -1; }
 .tabs { max-width: 1320px; margin: 0 auto var(--space-6); display: flex; gap: var(--space-2); }
 .tab { font: var(--text-body) var(--font-ui); color: var(--label-2); background: none;
        border: 0.5px solid transparent; border-radius: var(--radius-control);
@@ -1166,10 +1174,10 @@ svg { display: block; }
       <h2>My Projects</h2>
       <div class="pj-headright">
         <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
-          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Grid view">
+          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Show projects as a grid">
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
           </button>
-          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="List view">
+          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="Show projects as a list">
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
           </button>
         </div>
@@ -1295,8 +1303,8 @@ svg { display: block; }
          pinned yet -- this placement is provisional and flagged for the
          designer. The hint sentence is the pack's own. -->
     <div class="field">
-      <span class="flabel">Archive this project</span>
-      <p class="fhint">Archiving takes a project off this list. Nothing in the
+      <span class="flabel" id="pj-one-archive-label">Archive this project</span>
+      <p class="fhint" id="pj-one-archive-hint">Archiving takes a project off this list. Nothing in the
          folder changes and the agents that were on it stay as they are.</p>
       <button class="btn" id="pj-one-archive" type="button">Archive it</button>
       <p class="fmsg" id="pj-one-archive-msg" aria-live="polite"></p>
@@ -1466,10 +1474,10 @@ svg { display: block; }
 <div class="build" id="build"></div>
 <div class="boardbar" id="boardbar" hidden>
   <div class="viewtoggle" role="group" aria-label="How to show agents" data-scope="agents">
-    <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show agents as a grid" title="Grid view">
+    <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show agents as a grid" title="Show agents as a grid">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
     </button>
-    <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show agents as a list" title="List view">
+    <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show agents as a list" title="Show agents as a list">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
     </button>
   </div>
@@ -4241,8 +4249,23 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || 'we could not restore it');
+    // ⚠️ loadProjects alone, like every sibling handler: it paints on
+    // success and paints the honest error card on failure. The extra
+    // paintProjects() this handler used to carry OVERWROTE that card with
+    // the pre-restore list rebuilt from stale PROJECTS -- and because the
+    // stale archived rows were byte-identical, setIfChanged skipped the
+    // rewrite and the just-restored row stayed behind its disabled button:
+    // the round-1 one-way door returning through the error path.
     await loadProjects();
-    paintProjects();
+    if (PJ_READ_FAILED) {
+      // The write LANDED (the PUT answered 200); the re-read did not. The
+      // person is told which half failed, and the button comes back so the
+      // disclosure is not left holding a dead control over a stale count.
+      btn.disabled = false;
+      document.getElementById('pj-list-msg').textContent =
+        'The restore saved. We could not re-read your projects to show it; the note above says so.';
+      return;
+    }
     // ⚠️ The keyboard is NOT dropped to <body> when the section it was in
     // disappears (restoring the last row hides the whole wrap). The restored
     // project's own row is where the person's attention went; the heading is
@@ -4310,6 +4333,11 @@ async function loadProjects() {
     setIfChanged(document.getElementById('pj-list'),
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
       + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    // The archived disclosure goes with the list: its count and Restore
+    // buttons derive from a read that did not happen, and "Show archived
+    // projects (3)" is a confident sentence one element below the one saying
+    // we could not look. The next successful read repaints it.
+    document.getElementById('pj-arch-wrap').hidden = true;
     const one = document.getElementById('pj-one-msg');
     const add = document.getElementById('pj-add-msg');
     if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
@@ -4334,6 +4362,25 @@ function paintOneProject() {
   desc.textContent = p.description || '';
   desc.hidden = !p.description;
   document.getElementById('pj-one-folder').textContent = p.folder;
+  // ⚠️ The detail STATES the archived fact and flips the control. Without
+  // this, an archived project's page was indistinguishable from an active
+  // one, still offering "Archive it" -- a 200 no-op answered with "It is in
+  // the archived list below" for a change that did not occur. (Reachable:
+  // pjAnswerFrom opens an agent's only project even when archived.)
+  const archLabel = document.getElementById('pj-one-archive-label');
+  const archHint = document.getElementById('pj-one-archive-hint');
+  const archBtn = document.getElementById('pj-one-archive');
+  if (p.archived) {
+    archLabel.textContent = 'This project is archived';
+    archHint.textContent = 'It is off the projects list. Nothing in the folder changed, '
+      + 'and the agents that were on it stayed as they are.';
+    archBtn.textContent = 'Restore it';
+  } else {
+    archLabel.textContent = 'Archive this project';
+    archHint.textContent = 'Archiving takes a project off this list. Nothing in the '
+      + 'folder changes and the agents that were on it stay as they are.';
+    archBtn.textContent = 'Archive it';
+  }
   const folder = pjFolderLine(p);
   const state = document.getElementById('pj-one-folder-state');
   state.textContent = folder.bad ? folder.text : '';
@@ -5978,14 +6025,25 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
   if (!p) return;
   const msg = document.getElementById('pj-one-archive-msg');
   msg.textContent = '';
+  // The button acts on the CURRENT state: on an archived project it is the
+  // Restore control, and re-archiving something already archived (a no-op
+  // answered as a change) cannot happen from here any more.
+  const want = !p.archived;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(p.id), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archived: true }),
+      body: JSON.stringify({ archived: want }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || 'we could not archive it');
+    if (!res.ok) throw new Error(body.error || (want ? 'we could not archive it' : 'we could not restore it'));
+    if (!want) {
+      // Restored from the detail: stay here; the repaint flips the control
+      // back and the row rejoins the list behind us.
+      await loadProjects();
+      msg.textContent = 'Restored.';
+      return;
+    }
     PJ_CURRENT = null;
     await loadProjects();
     pjView('list');
