@@ -720,7 +720,7 @@ svg { display: block; }
 .fr-body p:last-child { margin-bottom: 0; }
 .fr-body p b { color: var(--label); }
 
-/* The progress segments. `aria-hidden`, because the "Step 2 of 4" line above
+/* The progress segments. `aria-hidden`, because the "Step 2 of 5" line above
    says the same thing in words — two announcements of one fact is noise. */
 .fr-segs { display: flex; gap: var(--space-3); margin-bottom: var(--space-7); }
 .fr-seg { height: 4px; flex: 1; border-radius: 2px; background: var(--separator); }
@@ -1049,7 +1049,7 @@ svg { display: block; }
            be answered. Nothing else about you is sent anywhere, and there is no
            account here to send it to.</p>
         <p class="fr-next">Next: a quick look at this computer, then Claude,
-           then your agents.</p>
+           then your agents, then how you get back to Kosmos later.</p>
       </div>
 
       <!-- 2. The machine checks. Painted from /api/machine. -->
@@ -7215,7 +7215,15 @@ function frPaintFleet() {
  */
 function frForkActions() {
   const path = (FR && FR.path) || 'unknown';
-  if (path === 'adopt') {
+  // ⚠️ The SAME guard frPaintFleet keys the adopt screen on, or the pairs
+  // drift from the path logic (they did, in the move to step 5): a payload
+  // naming "adopt" without a countable fleet had step 4 honestly refuse to
+  // guess and step 5's button then read "Take me to my agents" -- the fleet
+  // we could not count asserted as a fleet that exists, one screen after
+  // the app declined to claim it. An uncountable adopt falls through to the
+  // neutral pair, which promises only the board.
+  const count = FR && FR.fleetCount;
+  if (path === 'adopt' && Number.isInteger(count) && count > 0) {
     frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) },
       { label: 'Make another agent', go: () => frFinish(openCreate) });
   } else if (path === 'create') {
@@ -7262,8 +7270,9 @@ async function frPaintReturn() {
       : 'When you have the Kosmos icon in front of you, drag it onto the Dock, the strip '
         + 'of icons along the edge of your screen. It stays there until you take it off.')
     + '</p>'
-    + '<p>Closing this tab does not stop your agents. They keep working, and clicking the '
-    + 'icon brings this screen back.</p>';
+    + '<p>Closing this tab does not stop your agents. They keep working, and '
+    + (found ? 'clicking the icon brings' : 'opening Kosmos again brings')
+    + ' this screen back.</p>';
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
   // what is true at that moment. The old pre-paint said "could not check", a
   // completed failed look that had not happened yet, and it was byte-identical
@@ -7279,8 +7288,10 @@ async function frPaintReturn() {
   frForkActions();
   try {
     const res = await fetch('/api/machine', { cache: 'no-store' });
-    const body = await res.json();
+    // ok checked BEFORE parsing: a non-JSON error body used to throw out of
+    // json() first, leaving the status check a dead line.
     if (!res.ok) throw new Error('machine check failed');
+    const body = await res.json();
     // Its OWN field, deliberately not one of `checks` -- see engine/machine.js:
     // folded into the rows, step 2 counted it and step 4 captioned it as a
     // reason an agent may not run, which it is not.

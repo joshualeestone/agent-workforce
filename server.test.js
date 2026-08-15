@@ -3126,6 +3126,12 @@ test('the machine route always answers, with renderable checks and never an erro
   }
   assert.equal(typeof got.attention, 'number');
   assert.equal(typeof got.unknown, 'number');
+  // The wire pin for step 5: engine tests exercise check() directly and the
+  // render harness stubs this route, so without this line a route that
+  // dropped the field would render an honest-looking "we could not check"
+  // forever and no test anywhere would notice.
+  assert.equal(got.appLocation && got.appLocation.key, 'app-location',
+    'the /api/machine response must carry the appLocation field beside the rows');
 });
 
 test('a check row carries its state in a WORD, not only in a glyph and a colour', () => {
@@ -3499,6 +3505,26 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
       `the ${path} path offers only one door at the fork`);
     assert.match(got.actions.primary, primary, `the ${path} fork primary drifted`);
     assert.match(got.actions.alt, alt, `the ${path} fork alt drifted`);
+  }
+
+  // ⚠️ The fork guards its payload with the SAME predicate as the fleet
+  // screen, or the pairs drift from the path logic (they did, in the move to
+  // step 5): an adopt payload whose fleet could not be counted had step 4
+  // honestly refuse to guess while step 5's button read "Take me to my
+  // agents" -- the fleet we could not count asserted as one that exists.
+  // Every uncountable-adopt shape lands on the neutral pair, which promises
+  // only the board.
+  for (const FR of [
+    { path: 'adopt' },
+    { path: 'adopt', fleetCount: 'lots', fleetNames: [] },
+    { path: 'adopt', fleetCount: 0, fleetNames: [] },
+    { path: 'adopt', fleetCount: null, fleetNames: [] },
+  ]) {
+    const got = firstRunHarness('frForkActions', { FR });
+    assert.match(got.actions.primary, /show me the board/i,
+      `payload ${JSON.stringify(FR)} claimed a fleet nobody counted: ${JSON.stringify(got.actions)}`);
+    assert.match(got.actions.alt, /make an agent/i,
+      `payload ${JSON.stringify(FR)} lost the neutral second door`);
   }
 });
 

@@ -60,6 +60,7 @@ async function fresh(browser, opts = {}) {
     const returnText = await page.locator('#fr-return').textContent();
     ok(/drag it onto the Dock|Drag Kosmos out of that folder/.test(returnText), 'the Dock instruction is a drag (the wording tracks whether a folder was found on THIS machine)');
     ok(!/Checking where the Kosmos icon is/.test(returnText), 'the live answer replaced the checking placeholder');
+    ok(!/right now/.test(returnText), 'and it is the route\'s answer, not the could-not-ask fallback -- this walk is the one place the LIVE route is proven');
     ok(!/Keep in Dock/.test(returnText), 'and never the unreachable Keep in Dock');
     ok(/Closing this tab does not stop your agents/.test(returnText),
       'the narrow true promise about closing the tab');

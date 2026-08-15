@@ -327,6 +327,10 @@ async function look(page, name) {
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
       if (shot.name.startsWith('firstrun-5-return')) {
+        // Wait for the ANSWER, not a fixed delay: the pane paints instantly
+        // with the checking placeholder, and a slow run would report the
+        // placeholder as a rendering problem rather than a wait.
+        await page.waitForSelector('#fr-return-row .fr-check:not(.checking)', { timeout: 5000 });
         const want = shot.machine.appLocation;
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         if (!text.includes(want.title)) {

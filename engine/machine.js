@@ -498,9 +498,6 @@ function restartCheck(runner) {
    =========================================================================== */
 
 /**
- * @returns {{checks: Array, attention: number, unknown: number}}
- */
-/**
  * Where the Kosmos icon actually IS, looked up rather than remembered.
  *
  * ⚠️ WHY THIS EXISTS (orientation spec, 2026-08-14): the installer's APP_DIR
@@ -528,6 +525,12 @@ function restartCheck(runner) {
  * `opts.appDirs` overrides the two real folders so tests never depend on
  * this machine's actual /Applications -- the same injection shape as
  * opts.runner and opts.pmset.
+ *
+ * Known limit, not an oversight: the installer accepts KOSMOS_SYS_APP_DIR
+ * and KOSMOS_APP_DIR overrides, and those shell variables are never
+ * persisted -- so a machine installed to a custom folder reads attention
+ * here. The copy stays honest about exactly that ("That is not the same as
+ * it not being there").
  */
 function appLocationCheck(opts) {
   // ⚠️ A malformed override THROWS rather than silently probing the real
@@ -561,7 +564,10 @@ function appLocationCheck(opts) {
       // A FILE named Kosmos.app is not the app; keep looking rather than
       // pointing somebody at a thing that will not open.
       if (st.isDirectory()) {
-        return { key: 'app-location', state: STATE.OK, title: TITLES[i] || TITLES[1], detail: OPEN_FROM_THERE };
+        // Index 0 and 1 are the two real folders; an injected extra gets a
+        // title that does not name a folder it was not found in.
+        const title = i < TITLES.length ? TITLES[i] : 'We found the Kosmos icon on this Mac';
+        return { key: 'app-location', state: STATE.OK, title, detail: OPEN_FROM_THERE };
       }
     } catch (err) {
       if (err && err.code === 'ENOENT') continue;
@@ -590,6 +596,10 @@ function appLocationCheck(opts) {
   };
 }
 
+/**
+ * @returns {{checks: Array, attention: number, unknown: number,
+ *            appLocation: {key: string, state: string, title: string, detail: string}}}
+ */
 function check(opts) {
   const runner = (opts && opts.runner) || run;
 

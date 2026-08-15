@@ -86,3 +86,22 @@ async supported); the live region moved off the pane wrapper onto the row;
 the shape test that read the real machine is sandboxed; step 4 asserts
 Continue is the ONLY button on every path; stale four-step comments and
 the Step 1 of 4 crumb corrected.
+
+## Review round 2 (2026-08-14 evening)
+
+One blocker: the fork moved to step 5 but its adopt GUARD did not -- an
+adopt payload whose fleet could not be counted had step 4 honestly refuse
+to guess while step 5's button read "Take me to my agents". frForkActions
+now keys adopt on the same predicate as frPaintFleet (integer count > 0)
+and every uncountable-adopt shape lands on the neutral pair; the fork test
+drives four such shapes. Also: /api/machine's appLocation is pinned on the
+WIRE (route test), and the route's degraded catch-path payload now carries
+an unknown appLocation row so the broken-runner shape matches the healthy
+one; the click walk asserts the live answer is not the could-not-ask
+fallback; the render harness waits for the answer instead of a fixed
+delay; step 1's preview sentence counts five; the closing sentence no
+longer says "clicking the icon" over a row that found no icon; res.ok is
+checked before json(); check()'s JSDoc moved back onto check() and gained
+the appLocation field; an injected third directory no longer wears the
+home-folder title; the installer-override limit is documented at the
+function; README's shot count corrected.
