@@ -6083,14 +6083,26 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
     PJ_CURRENT = null;
     if (!(await loadProjects())) await loadProjects();
     pjView('list');
+    // The keyboard lands where the project went (the disclosure), or the
+    // heading -- the same rescue the disclosure Restore already has; this
+    // arm was the branch's one new control still dropping to body.
+    if (document.activeElement === document.body) {
+      const wrap = document.getElementById('pj-arch-wrap');
+      if (!wrap.hidden) document.getElementById('pj-arch-toggle').focus();
+      else document.querySelector('h1').focus();
+    }
     // ⚠️ The note claims only what was READ. The PUT's 200 makes "archived"
     // a fact; "it is in the archived list below" is a claim about a list
     // that a failed reload renders as "we cannot read your projects" -- and
     // the two sentences sat in adjacent elements contradicting each other
     // (measured by review round 1 with the read stubbed to 500).
-    document.getElementById('pj-list-msg').textContent = PJ_READ_FAILED
-      ? 'Archived ' + p.name + '.'
-      : 'Archived ' + p.name + '. It is in the archived list below, and Restore brings it back.';
+    // ⚠️ A MOMENT sentence on BOTH branches (round 6: the conditional's
+    // healthy arm said "in the archived list below", and a LATER failed
+    // poll hid the disclosure while the sentence stayed -- the round-1
+    // two-adjacent-elements contradiction reached through the poll).
+    // "Restore brings it back" claims the feature, not the screen.
+    document.getElementById('pj-list-msg').textContent =
+      'Archived ' + p.name + '. Restore brings it back whenever you want it.';
   } catch (err) {
     msg.textContent = String((err && err.message) || (want ? 'we could not archive it' : 'we could not restore it'));
   } finally {

@@ -892,6 +892,11 @@ async function main() {
       }
       if (!archivedNow.listHidden) throw new Error('the archived list opened itself');
       if (!/Archived Quarter close/.test(archivedNow.note)) throw new Error('nothing told the person what just happened: "' + archivedNow.note + '"');
+      // The note may not reference the screen (round 6: "in the archived
+      // list below" outlived a LATER failed poll that hid the disclosure).
+      if (/above|below|this page|archived list/.test(archivedNow.note)) {
+        throw new Error('the archive note references the screen, which any later poll can repaint: "' + archivedNow.note + '"');
+      }
       await page.click('#pj-arch-toggle');
       await page.waitForTimeout(200);
       const open = await page.evaluate(() => {
@@ -998,8 +1003,8 @@ async function main() {
       if (recovered.btn !== 'Archive it') {
         throw new Error('the recovering poll did not repaint the control from the truth: ' + JSON.stringify(recovered));
       }
-      if (/this page|archived/.test(recovered.note) && !/just then/.test(recovered.note)) {
-        throw new Error('the note aged into a lie beside the recovered screen: ' + JSON.stringify(recovered));
+      if (/this page|above|below|archived list/.test(recovered.note)) {
+        throw new Error('the note references the screen, which recovery has repainted: ' + JSON.stringify(recovered));
       }
       if (/We cannot read your projects right now/.test(recovered.oneMsg)) {
         throw new Error('the failure sentence in #pj-one-msg outlived the successful read');
@@ -1043,6 +1048,20 @@ async function main() {
       }
       if (discFailed.btnEnabled === false) {
         throw new Error('the disclosure Restore stayed disabled after a failed re-read');
+      }
+      // The recovery is DRIVEN here too (round 6: 8h proved its arm across
+      // the recovering poll and 8i jumped straight to a goto that wiped
+      // the note): force a successful read and the moment sentence must
+      // still be true beside the repainted list.
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      const discRecovered = await page.evaluate(() => ({
+        note: document.getElementById('pj-list-msg').textContent,
+        rowBack: !!document.querySelector('#pj-list [data-project="quarterclose"]'),
+      }));
+      if (!discRecovered.rowBack) throw new Error('the recovering poll did not repaint the restored row');
+      if (/above|below|this page|archived list/.test(discRecovered.note)) {
+        throw new Error('the disclosure note references the screen after recovery: ' + JSON.stringify(discRecovered));
       }
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
