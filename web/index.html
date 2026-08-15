@@ -7275,10 +7275,12 @@ function frForkActions() {
  * unreliable (orientation spec, two installer lines cited; independently
  * confirmed by Splinter 2026-08-14).
  */
-/* Entry generation: a newer entry to step 5 owns the pane, so a stale
-   fetch resolving late cannot repaint over it (the exact self-contradiction
-   the drag(found) split exists to prevent: an ok dock from fetch B with a
-   could-not-ask row from fetch A). */
+/* Entry generation: the pane belongs to its newest entry. Because the look
+   is SHARED while in flight, two live entries always paint the same answer
+   -- the guard's one reachable job is the answer that lands after the
+   person has LEFT the step, so a late resolution must not repaint a pane
+   the person is no longer on. Tested by bumping the generation between
+   entry and resolve; deleting these guards reds that scenario. */
 let FR_RETURN_GEN = 0;
 /* The machine look is SHARED while in flight: the route shells out twice
    with 5s timeouts on the server's event loop (its own header says it was
@@ -7303,9 +7305,13 @@ async function frPaintReturn() {
       : 'When you have the Kosmos icon in front of you, drag it onto the Dock, the strip '
         + 'of icons along the edge of your screen. It stays there until you take it off.')
     + '</p>'
+    // "...brings KOSMOS back", not "this screen": completing the wizard
+    // sets the seen flag, so this screen deliberately never returns, and
+    // the one sentence on the page that was checkably untrue said it did.
+    // Spec deviation recorded for the designer as an amendment of record.
     + '<p>Closing this tab does not stop your agents. They keep working, and '
     + (found ? 'clicking the icon brings' : 'opening Kosmos again brings')
-    + ' this screen back.</p>';
+    + ' Kosmos back.</p>';
   const introEl = document.getElementById('fr-return-intro');
   const rowEl = document.getElementById('fr-return-row');
   const dockEl = document.getElementById('fr-return-dock');
@@ -7332,7 +7338,11 @@ async function frPaintReturn() {
     // folded into the rows, step 2 counted it and step 4 captioned it as a
     // reason an agent may not run, which it is not.
     const found = body.appLocation;
-    if (!found || !found.state) throw new Error('no app-location answer');
+    // ⚠️ Having something to SAY is part of the shape: {state:'ok'} with no
+    // title rendered a confident tick over a blank box, above a dock
+    // pointing at a folder the screen never named. Every sibling screen
+    // guards its payload for content; this one now does too.
+    if (!found || !found.state || !found.title || !found.detail) throw new Error('no app-location answer');
     rowEl.innerHTML = frCheckRow(found);
     dockEl.innerHTML = drag(found.state === 'ok');
   } catch {

@@ -688,6 +688,17 @@ test('the app-location check looks in both folders and answers all four states',
     }
   }
 
+  // The injected-extra branch (a third directory) renders copy that names
+  // no folder in title OR detail -- reachable only from tests, which is
+  // exactly why a test has to be the thing that renders it.
+  fs.mkdirSync(path.join(home, 'Kosmos.app'), { recursive: true });
+  const extra = machine.appLocationCheck({ appDirs: [sys, sys, home] });
+  assert.equal(extra.state, machine.STATE.OK);
+  assert.match(extra.title, /found the Kosmos icon on this Mac/);
+  assert.ok(!/folder/.test(extra.title), 'the extra-dir title must name no folder');
+  assert.match(extra.detail, /from where you found it/);
+  fs.rmSync(path.join(home, 'Kosmos.app'), { recursive: true, force: true });
+
   // A malformed override THROWS rather than silently probing the real machine.
   assert.throws(() => machine.appLocationCheck({ appDirs: [] }), /non-empty array/);
   assert.throws(() => machine.appLocationCheck({ appDirs: sys }), /non-empty array/);

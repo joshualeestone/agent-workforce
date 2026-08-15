@@ -3134,6 +3134,16 @@ test('the machine route always answers, with renderable checks and never an erro
     'the /api/machine response must carry the appLocation field beside the rows');
 });
 
+test('the step-5 live region is static markup with its announcement attributes', () => {
+  // The unit harness's DOM stub auto-creates any id, so without this pin
+  // the region (and both its ARIA attributes) could be deleted from the
+  // page while every step-5 test stayed green -- and the announcement,
+  // the whole reason the region was restructured, would silently stop.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /<div id="fr-return-row" role="status" aria-live="polite"><\/div>/,
+    'the step-5 live region must exist in the STATIC markup, before anything fills it');
+});
+
 test('the degraded machine answer publishes the ENGINE\u2019S could-not-look row', () => {
   // The catch path cannot be forced over HTTP on a healthy machine, so two
   // pins hold it: the shared row renders through the row grammar (shape),
@@ -3605,6 +3615,20 @@ test('step 5 paints a look in progress, then the engine answer, and could-not-as
   await shapeless.done;
   assert.match(shapeless.els['fr-return-row'].innerHTML, /right now/);
 
+  // An answer with nothing to SAY is not an answer: {state:'ok'} with no
+  // title rendered a confident tick over a blank box, above a dock pointing
+  // at a folder the screen never named.
+  const blank = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: PRELUDE_VARS + `
+      const fetch = async () => ({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok' } }) });
+    `,
+  });
+  await blank.done;
+  assert.match(blank.els['fr-return-row'].innerHTML, /right now/,
+    'a contentless ok payload rendered as a confident blank tick');
+  assert.ok(!/out of that folder/.test(blank.els['fr-return-dock'].innerHTML),
+    'the dock pointed at a folder no row named');
+
   // A wire row claiming the LOCAL state renders as unknown, never as a
   // permanent look-in-progress.
   for (const sneaky of [
@@ -3646,7 +3670,7 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
     let FR_MACHINE_LOOK = null;
     let __calls = 0; let __resolve = null;
     const fetch = () => { __calls += 1; return new Promise((res) => { __resolve = res; }); };
-    globalThis.__t5 = { els: __els, calls: () => __calls, resolve: (v) => __resolve(v) };
+    globalThis.__t5 = { els: __els, calls: () => __calls, resolve: (v) => __resolve(v), leave: () => { FR_RETURN_GEN += 1; } };
   `;
   const fn = pageFunction('frPaintReturn', prelude);
   const t5 = globalThis.__t5;
@@ -3662,14 +3686,13 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
   assert.match(t5.els['fr-return-row'].innerHTML, /Kosmos is in your Applications folder/);
   assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos out of that folder/);
 
-  // Second scenario, the one that self-contradicts without the token: the
-  // shared look FAILS after a newer entry painted an OK answer. The stale
-  // failure continuation must not overwrite the newer state... which needs
-  // two distinct looks, so the first must have cleared. Entry 3 (fresh look)
-  // resolves ok; entry 4 starts a new look which we REJECT after 3 painted:
-  // gen guards mean 3's paint stands only until 4's catch -- 4 is newest, so
-  // ITS could-not-ask wins, and the dock moves with it (never an ok drag
-  // over a right-now row).
+  // Second scenario: entries 3 and 4 SHARE one look (asserted by call
+  // count), the shared look fails, and both continuations paint the same
+  // could-not-ask -- what this proves is the failure path repaints the dock
+  // alongside the row, and that a settled look really cleared for a fresh
+  // entry. (It deliberately does NOT prove the generation guard: shared
+  // looks mean live entries always paint identical content. The guard's
+  // one reachable job is tested in the LEAVE scenario below.)
   const e3 = fn();
   assert.equal(t5.calls(), 2, 'the settled look was not cleared for the next entry');
   const e4 = fn();
@@ -3677,9 +3700,25 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
   t5.resolve({ ok: false });
   await e3; await e4;
   assert.match(t5.els['fr-return-row'].innerHTML, /right now/,
-    'the newest entry\u2019s could-not-ask should stand');
+    'the failure path did not paint could-not-ask');
   assert.ok(!/out of that folder/.test(t5.els['fr-return-dock'].innerHTML),
     'a folder-pointing dock outlived the row that named no folder');
+
+  // ⚠️ THE GUARD'S ONE REACHABLE JOB, and the only scenario that reds when
+  // the `gen !== FR_RETURN_GEN` lines are deleted (round 5 proved the two
+  // above pass without them): the person LEAVES step 5 while the look is in
+  // flight, and the late answer must not repaint a pane they are no longer
+  // on. Leaving is simulated the way it manifests -- the generation moving
+  // past this entry's.
+  t5.els['fr-return-row'].innerHTML = 'the pane the person is looking at now';
+  const e5 = fn();
+  assert.equal(t5.calls(), 3);
+  const before = t5.els['fr-return-row'].innerHTML; // the fresh placeholder
+  t5.leave();
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  await e5;
+  assert.equal(t5.els['fr-return-row'].innerHTML, before,
+    'a look resolving after the person left the step repainted the pane');
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {

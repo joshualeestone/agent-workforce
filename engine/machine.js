@@ -498,6 +498,21 @@ function restartCheck(runner) {
    =========================================================================== */
 
 /**
+ * The could-not-look answer, defined ONCE. The /api/machine route's degraded
+ * catch path publishes this same row, and a second hand-copied literal there
+ * went stale the moment this wording moved.
+ */
+function appLocationUnknown() {
+  return {
+    key: 'app-location',
+    state: STATE.UNKNOWN,
+    title: 'We could not check where the Kosmos icon is',
+    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
+      + 'top right of your screen, and it will find it.',
+  };
+}
+
+/**
  * Where the Kosmos icon actually IS, looked up rather than remembered.
  *
  * ⚠️ WHY THIS EXISTS (orientation spec, 2026-08-14): the installer's APP_DIR
@@ -532,21 +547,6 @@ function restartCheck(runner) {
  * here. The copy stays honest about exactly that ("That is not the same as
  * it not being there").
  */
-/**
- * The could-not-look answer, defined ONCE. The /api/machine route's degraded
- * catch path publishes this same row, and a second hand-copied literal there
- * went stale the moment this wording moved.
- */
-function appLocationUnknown() {
-  return {
-    key: 'app-location',
-    state: STATE.UNKNOWN,
-    title: 'We could not check where the Kosmos icon is',
-    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
-      + 'top right of your screen, and it will find it.',
-  };
-}
-
 function appLocationCheck(opts) {
   // ⚠️ A malformed override THROWS rather than silently probing the real
   // machine. The fallback used to require length exactly 2, so a test passing
