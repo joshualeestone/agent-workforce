@@ -190,6 +190,29 @@ test('archiving touches nothing else: record, folder, and members stay as they a
   assert.ok(fs.existsSync(path.join(dir, 'work.txt')));
 });
 
+test('every hand-mangled archived shape heals on read, in the safe direction', () => {
+  reset();
+  const p = projects.create({ name: 'Mangled', folder: folder('mangled') });
+  const mangle = (fields) => {
+    const all = projects.readAll();
+    const row = all.find((x) => x.id === p.id);
+    delete row.archived; delete row.archivedAt;
+    Object.assign(row, fields);
+    projects.writeAll(all);
+    return projects.get(p.id, []);
+  };
+  // Truthy non-booleans never read as archived: a record only counts as
+  // archived when it says exactly true.
+  assert.equal(mangle({ archived: 'yes' }).archived, false);
+  assert.equal(mangle({ archived: 1 }).archived, false);
+  // A stray date beside archived:false is not repeated as if it meant
+  // something -- "archived at" about a project that is not archived is a
+  // sentence about a thing that is not true.
+  const stray = mangle({ archived: false, archivedAt: '2026-01-01T00:00:00.000Z' });
+  assert.equal(stray.archived, false);
+  assert.equal(stray.archivedAt, null);
+});
+
 test('a record written before archiving existed reads as not archived, not as undefined', () => {
   reset();
   const p = projects.create({ name: 'Old world', folder: folder('legacy') });

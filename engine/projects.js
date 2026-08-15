@@ -459,7 +459,10 @@ function describe(project, roster) {
     // the field existed must read as "not archived", never as undefined
     // leaking into a template. Same heal path the rest of the payload uses.
     archived: project.archived === true,
-    archivedAt: project.archivedAt || null,
+    // Gated on the healed flag, not the raw field: a hand-edited record
+    // carrying a date beside archived:false must not publish an "archived
+    // at" for a project that is not archived.
+    archivedAt: project.archived === true ? (project.archivedAt || null) : null,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.

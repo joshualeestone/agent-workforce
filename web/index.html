@@ -172,8 +172,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
         color: var(--label-2); font-size: 12px; line-height: 1;
         display: flex; align-items: center; justify-content: center; }
 .edit:hover { background: var(--attn-bg); color: var(--label); border-color: var(--border-strong); }
-/* ⚠️ The negative margins MIRROR the body padding (var(--space-8) sides, so
-   the bar reaches the page edges and content scrolls under it edge to edge.
+/* ⚠️ The negative margins MIRROR the body padding (var(--space-8) on the
+   sides), so the bar reaches the page edges and content scrolls under it
+   edge to edge.
    The bar paints on the page's own ground -- a transparent sticky bar would
    show the content sliding through it. */
 .apphead { position: sticky; top: 0; z-index: 20; background: var(--bg-sunken);
@@ -387,6 +388,8 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
   padding: 2px var(--space-3); }
+.pj-tag-arch { font: var(--text-caption) var(--font-ui); color: var(--label-2);
+  text-transform: uppercase; letter-spacing: 0.05em; }
 /* ⚠️ Dashed and full-width, matching `.pj-member.unseen`. `--label` rather than
    `--label-2` because this one is a sentence to read, not a chip to scan, and it
    has to clear AA on both themes.
@@ -1163,10 +1166,10 @@ svg { display: block; }
       <h2>My Projects</h2>
       <div class="pj-headright">
         <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
-          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Grid view" title="Grid view">
+          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Grid view">
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
           </button>
-          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="List view" title="List view">
+          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="List view">
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
           </button>
         </div>
@@ -1463,10 +1466,10 @@ svg { display: block; }
 <div class="build" id="build"></div>
 <div class="boardbar" id="boardbar" hidden>
   <div class="viewtoggle" role="group" aria-label="How to show agents" data-scope="agents">
-    <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Grid view" title="Grid view">
+    <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show agents as a grid" title="Grid view">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
     </button>
-    <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="List view" title="List view">
+    <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show agents as a list" title="List view">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
     </button>
   </div>
@@ -2313,7 +2316,12 @@ async function paintAgentProjects(sessionName) {
   const okLabel = document.getElementById('d-projects-label');
   if (okLabel) okLabel.textContent = 'Projects it is on';
   document.getElementById('d-projects').innerHTML =
-    mine.map((p) => '<span class="pj-tag">' + esc(p.name) + '</span>').join('');
+    // Archived travels with the name here: archiving keeps the membership
+    // (the engine's own rule), so the tag stays -- but a project that left
+    // the projects list must not read as active on this card. A new sibling
+    // does not inherit the split paintProjects makes; it is given the fact.
+    mine.map((p) => '<span class="pj-tag">' + esc(p.name)
+      + (p.archived ? ' <span class="pj-tag-arch">archived</span>' : '') + '</span>').join('');
   field.hidden = false;
 }
 
@@ -4195,6 +4203,16 @@ function paintArchived(archived) {
     // no longer exists.
     PJ_ARCH_OPEN = false;
     listEl.hidden = true;
+    // ⚠️ CLEARED through setIfChanged, not merely hidden -- the trap
+    // paintRemoved documents at length: hiding leaves the stale DOM AND the
+    // stale __lastLive cache, so re-archiving the same project the same day
+    // regenerates a byte-identical rows string, setIfChanged skips the
+    // rewrite, and the disclosure reopens showing the old row with its
+    // still-disabled Restore. Measured by review round 1: the archive was a
+    // one-way door until reload. The label clears with it, so text and
+    // aria-expanded never disagree while the button rests.
+    setIfChanged(listEl, '');
+    toggle.textContent = '';
     toggle.setAttribute('aria-expanded', 'false');
     return;
   }
@@ -4213,9 +4231,10 @@ document.getElementById('pj-arch-toggle').addEventListener('click', () => {
 document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-restore]');
   if (!btn) return;
+  const id = btn.dataset.restore;
   btn.disabled = true;
   try {
-    const res = await fetch('/api/project/' + encodeURIComponent(btn.dataset.restore), {
+    const res = await fetch('/api/project/' + encodeURIComponent(id), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ archived: false }),
@@ -4224,11 +4243,23 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
     if (!res.ok) throw new Error(body.error || 'we could not restore it');
     await loadProjects();
     paintProjects();
+    // ⚠️ The keyboard is NOT dropped to <body> when the section it was in
+    // disappears (restoring the last row hides the whole wrap). The restored
+    // project's own row is where the person's attention went; the heading is
+    // the fallback the removal path already uses.
+    if (document.activeElement === document.body) {
+      const back = document.querySelector('#pj-list [data-project="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+      if (back) back.focus();
+      else document.querySelector('h1').focus();
+    }
   } catch (err) {
-    // Reported on the list, where the person is looking; the button comes
-    // back so the restore stays tryable.
-    document.getElementById('pj-list-msg').textContent = String((err && err.message) || 'we could not restore it');
+    // ⚠️ ON THE BUTTON, not only in a message that can sit a full screen
+    // above it (measured: 411px off-viewport with eleven projects). A
+    // restore that failed and a restore that worked must not look the same,
+    // which is the removal path's own stated rule.
+    btn.textContent = 'Restore failed. Try again';
     btn.disabled = false;
+    document.getElementById('pj-list-msg').textContent = String((err && err.message) || 'we could not restore it');
   }
 });
 
@@ -5958,8 +5989,14 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
     PJ_CURRENT = null;
     await loadProjects();
     pjView('list');
-    document.getElementById('pj-list-msg').textContent =
-      'Archived ' + p.name + '. It is in the archived list below, and Restore brings it back.';
+    // ⚠️ The note claims only what was READ. The PUT's 200 makes "archived"
+    // a fact; "it is in the archived list below" is a claim about a list
+    // that a failed reload renders as "we cannot read your projects" -- and
+    // the two sentences sat in adjacent elements contradicting each other
+    // (measured by review round 1 with the read stubbed to 500).
+    document.getElementById('pj-list-msg').textContent = PJ_READ_FAILED
+      ? 'Archived ' + p.name + '.'
+      : 'Archived ' + p.name + '. It is in the archived list below, and Restore brings it back.';
   } catch (err) {
     msg.textContent = String((err && err.message) || 'we could not archive it');
   }

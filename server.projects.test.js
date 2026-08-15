@@ -621,6 +621,31 @@ test('a rename-only PUT does not touch archived', async () => {
   assert.equal(json(res).project.archived, true, 'an absent field means leave it alone, never clear it');
 });
 
+test('a save that would move nothing is refused, not answered "saved"', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Immovable', folder: folder('immovable') })).project;
+  // {} and a capitalised typo both carry no field we recognise -- 200 for
+  // either is a save the person believes happened. On main the same {} was
+  // already refused (rename ran unconditionally); conditional fields must
+  // not turn that refusal into a silent success.
+  for (const body of [{}, { Archived: true }]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 400, `body ${JSON.stringify(body)} should be refused: ${res.body}`);
+  }
+  // A carried name of the wrong type is refused loudly, not skipped.
+  const bad = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 42 }),
+  });
+  assert.equal(bad.status, 400, bad.body);
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].name, 'Immovable', 'a refused write changes nothing');
+  assert.equal(list[0].archived, false);
+});
+
 test('archived refuses anything but a boolean, because "false" the string is not false', async () => {
   reset();
   const made = json(await post('/api/projects', { name: 'Strict', folder: folder('strict-put') })).project;
