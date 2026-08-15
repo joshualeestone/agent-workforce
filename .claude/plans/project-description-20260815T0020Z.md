@@ -15,7 +15,7 @@ break is a card's text).
   when absent), and `setDescription(id, text)` where explicit empty
   CLEARS, deliberately unlike the profile displayName's blank-drop: a
   description is optional by design and the settings screen offers
-  clearing. Legacy records without the field gain it on first write and
+  clearing. Legacy records read as '' everywhere via describe; a setDescription write adds the field (a name-only edit leaves the record keyless, which describe covers) and
   read as '' everywhere.
 - `server.js`: POST /api/projects passes it through; PUT /api/project/:id
   now moves each field only when the request carries it (the route used
@@ -129,3 +129,25 @@ both routes; the cap comment says 200 code points with the human
 approximation named; fixture names are distinct; the mangled comment
 wrap fixed. Known and accepted: rename(id, undefined) now answers
 "nothing here we can change" (no non-test caller).
+
+## Review round 5 (2026-08-14, ~11:15 PM)
+
+No blockers. Four warnings, all closed:
+- The 5ms clock breath moved to where it protects the assertion that
+  catches a deleted gate (before the description-only PUT; the two stamps
+  ran 1ms apart under load).
+- Over-length descriptions are REFUSED with a sentence, like the name at
+  120: silent truncation answered success while cutting the person's
+  words. Counted in code points (200 emoji legal, 201 refused); engine,
+  route, and the legacy cap tests all follow.
+- null means absence for a description, as it already did for name and
+  folder in create (it was the one field where null meant malformed);
+  clears on edit, empty on create, tested at both layers.
+- The detail's description renders in full ink over the grey path (the
+  two were byte-identical typography reading as one metadata block; the
+  pin asks for a title-plus-statement pair). The row/detail size equality
+  check still holds; ink change only.
+Nits: the plan's legacy-write claim scoped to what the code does.
+Recorded coverage gap, accepted: a change moving row and detail sizes
+together stays green (the equality is the check; the callout intent is
+prose).

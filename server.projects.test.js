@@ -466,6 +466,11 @@ test('a rename re-tells members and a description-only save leaves their files a
   const stampOf = () => projects.readAll().find((x) => x.id === made.id).told.telltest.at;
   const stampAfterCreate = stampOf();
   assert.ok(stampAfterCreate, 'the premise: creation stamped the told verdict');
+  // The breath goes HERE, before the description-only PUT: the equality
+  // below is the assertion that catches a deleted gate, and it needs the
+  // clock's millisecond granularity cleared far more than the notEqual
+  // does (round 5: the two stamps ran 1ms apart under load).
+  await new Promise((r) => setTimeout(r, 5));
 
   const descOnly = await req(`/api/project/${made.id}`, {
     method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
@@ -533,7 +538,7 @@ test('one rule for what a description IS, on both routes: words or refused', asy
   const posted = await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: { not: 'words' } });
   assert.equal(posted.status, 400, posted.body);
   const made = json(await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: 'real words' })).project;
-  for (const bad of [{ not: 'words' }, ['a', 'b'], 7, true, null]) {
+  for (const bad of [{ not: 'words' }, ['a', 'b'], 7, true]) {
     const res = await req(`/api/project/${made.id}`, {
       method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
       body: JSON.stringify({ description: bad }),
@@ -542,6 +547,20 @@ test('one rule for what a description IS, on both routes: words or refused', asy
   }
   const after = json(await req('/api/projects')).projects[0];
   assert.equal(after.description, 'real words', 'a refused write changes nothing');
+  // Over-length is refused at the route with the sentence, not cut.
+  const long = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'x'.repeat(201) }),
+  });
+  assert.equal(long.status, 400, long.body);
+  assert.match(json(long).error, /longer than 200/);
+  // And null clears, as absence: the one field where null meant malformed.
+  const nulled = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: null }),
+  });
+  assert.equal(nulled.status, 200, nulled.body);
+  assert.strictEqual(json(nulled).project.description, '');
 });
 
 test('a failed half of a two-field save applies NOTHING, not the readable half', async () => {

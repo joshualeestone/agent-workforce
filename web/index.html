@@ -216,7 +216,12 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 span.pj-desc, p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
   color: var(--label-2); }
 span.pj-desc { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-p.pj-desc { margin-top: 2px; margin-bottom: 2px; }
+p.pj-desc { margin-top: 2px; margin-bottom: 2px;
+  /* The person's sentence in full ink; the machine path below it stays
+     --label-2 -- the two rendered byte-identical and read as one grey
+     metadata block instead of the title-plus-statement pair the pin asks
+     for (round 5, confirmed on the rendered page). */
+  color: var(--label); }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
    together into one unreadable string -- which every one of the 408 text tests

@@ -551,21 +551,24 @@ function cleanDescription(text) {
   // here turned {description: {}} into "[object Object]" on one route while
   // the other route silently dropped it -- one field, two rules, the exact
   // "two derivations of one question" cleanName's own comment warns against.
-  if (text === undefined || text === '') return '';
-  // (A whitespace-only description folds to '' through oneLine below and
-  // clears the field too -- the same deliberate act as the explicit empty.)
-  // null included: the blessed clear is the explicit empty string, and a
-  // second clear spelling is a second rule waiting to disagree with it.
+  // null means absence, exactly as it does for name and folder in create:
+  // round 2 refused it as "a second clear spelling", which made description
+  // the ONE field where null meant malformed while its neighbours read it
+  // as not-provided. (A whitespace-only description folds to '' through
+  // oneLine below and clears the field too -- the same deliberate act as
+  // the explicit empty.)
+  if (text === undefined || text === null || text === '') return '';
   if (typeof text !== 'string') throw new Error('a description has to be words');
-  // Cut at 200 code POINTS (the "200 characters" the plan speaks of is the
-  // human approximation; an all-emoji description stores up to 400 UTF-16
-  // units): a code-unit cap landing inside an astral character left a lone
-  // surrogate rendering as a replacement glyph, and one landing on a space
-  // left the space. Trim after the cut for the same reason. (Scoped
-  // honestly: a multi-code-point grapheme -- a ZWJ family, a flag -- can
-  // still lose its tail members at the cap; what cannot happen any more is
-  // an invalid half-character.)
-  return Array.from(oneLine(text)).slice(0, 200).join('').trim();
+  const flat = oneLine(text).trim();
+  // REFUSED over the cap, like cleanName at 120: a silent truncation
+  // answered success while cutting the person's words with nothing saying
+  // so -- two answers to over-length on two adjacent fields of one form.
+  // Counted in code points (the "200 characters" people count is the
+  // approximation; an all-emoji description is up to 400 UTF-16 units).
+  if (Array.from(flat).length > 200) {
+    throw new Error('that description is longer than 200 characters');
+  }
+  return flat;
 }
 
 /* ---------------------------------------------------------------------------

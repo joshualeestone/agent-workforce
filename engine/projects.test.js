@@ -747,18 +747,27 @@ test('a refused description does not leave an orphan folder behind', () => {
   assert.equal(control, before + 1, 'the control create did not reach makeFolder, so the test above measured nothing');
 });
 
-test('the description cap cuts characters, not code units, and never leaves a trailing space', () => {
+test('an over-length description is REFUSED with a sentence, like the name, never silently cut', () => {
   reset();
-  // An emoji astride position 200: a code-unit slice leaves a lone surrogate
-  // that renders as a replacement glyph.
-  const emojiAt199 = 'x'.repeat(199) + '\u{1F600}' + 'tail';
-  const made = projects.create({ name: 'Astral', folder: folder('astral'), description: emojiAt199 });
+  // Counted in code points: 200 emoji are 400 UTF-16 units and legal.
+  const twoHundredEmoji = '\u{1F600}'.repeat(200);
+  const made = projects.create({ name: 'Emoji cap', folder: folder('emoji-cap'), description: twoHundredEmoji });
   assert.equal(Array.from(made.description).length, 200);
-  assert.equal(Array.from(made.description)[199], '\u{1F600}', 'the emoji survives whole or not at all');
-  // A cap landing on a space must not store the space.
-  const spaceAt200 = 'y'.repeat(199) + ' word';
-  const spaced = projects.create({ name: 'Spaced', folder: folder('spaced'), description: spaceAt200 });
-  assert.equal(spaced.description, 'y'.repeat(199), 'the cut is trimmed');
+  // One over is refused -- a silent truncation answered success while
+  // cutting the person's words with nothing saying so.
+  assert.throws(() => projects.create({ name: 'Over', folder: folder('over-cap'), description: 'x'.repeat(201) }),
+    /longer than 200/);
+  assert.throws(() => projects.edit(made.id, { description: '\u{1F600}'.repeat(201) }), /longer than 200/);
+  assert.equal(Array.from(projects.get(made.id, []).description).length, 200, 'a refused write changes nothing');
+});
+
+test('null means absence for a description, as it does for name and folder', () => {
+  reset();
+  const made = projects.create({ name: 'Nullable', folder: folder('nullable'), description: null });
+  assert.strictEqual(made.description, '', 'null on create is not-provided, not malformed');
+  projects.setDescription(made.id, 'words');
+  assert.strictEqual(projects.edit(made.id, { description: null }).description, '',
+    'null on edit clears, the same deliberate act as the explicit empty');
 });
 
 test('a legacy record READS as the empty description everywhere, API included', () => {
@@ -797,9 +806,9 @@ test('a description is stored trimmed, one-line, capped, and optional', () => {
   assert.equal(made.description, 'Build the campaign calendar, draft content.');
   const plain = projects.create({ name: 'Undescribed', folder: folder('undescribed') });
   assert.strictEqual(plain.description, '', 'absent must store as the explicit empty string');
-  const long = projects.create({ name: 'Longform', folder: folder('longform'),
-    description: 'x'.repeat(500) });
-  assert.equal(long.description.length, 200, 'the one-line cap holds at create');
+  assert.throws(() => projects.create({ name: 'Longform', folder: folder('longform'),
+    description: 'x'.repeat(500) }), /longer than 200/,
+  'over-length is refused with the sentence, never silently cut');
 });
 
 test('setDescription updates, clears on explicit empty, and heals legacy records', () => {
@@ -817,8 +826,8 @@ test('setDescription updates, clears on explicit empty, and heals legacy records
   delete all.find((p) => p.id === made.id).description;
   fs.writeFileSync(storeFile, JSON.stringify(all));
   assert.equal(projects.setDescription(made.id, 'added later').description, 'added later');
-  assert.equal(projects.setDescription(made.id, 'x'.repeat(500)).description.length, 200,
-    'the cap holds on update too');
+  assert.throws(() => projects.setDescription(made.id, 'x'.repeat(500)), /longer than 200/,
+    'the refusal holds on update too');
 });
 
 test('renaming is judged by the same rule as naming', () => {
