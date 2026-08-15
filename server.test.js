@@ -3134,6 +3134,20 @@ test('the machine route always answers, with renderable checks and never an erro
     'the /api/machine response must carry the appLocation field beside the rows');
 });
 
+test('the degraded machine answer publishes the ENGINE\u2019S could-not-look row', () => {
+  // The catch path cannot be forced over HTTP on a healthy machine, so two
+  // pins hold it: the shared row renders through the row grammar (shape),
+  // and the route SOURCE references the engine's function rather than a
+  // hand-copied literal (reference).
+  const row = require('./engine/machine').appLocationUnknown();
+  assert.equal(row.key, 'app-location');
+  assert.equal(row.state, 'unknown');
+  assert.ok(row.title && row.detail, 'a row with nothing to say renders as an empty box');
+  const src = fs.readFileSync(nodePath.join(__dirname, 'server.js'), 'utf8');
+  assert.match(src, /appLocation: machine\.appLocationUnknown\(\)/,
+    'the degraded catch hand-writes its appLocation again (a copied literal goes stale the moment the wording moves)');
+});
+
 test('a check row carries its state in a WORD, not only in a glyph and a colour', () => {
   /**
    * ⚠️ Three findings, and two of the three glyphs are punctuation. `!` and `?`
@@ -3227,8 +3241,8 @@ test('first run fails CLOSED: an unreadable answer shows no onboarding at all', 
 
 test('the first-run buttons are ASSIGNED, not accumulated', () => {
   /**
-   * ⚠️ Continue means four different things across four steps, and on step 4 it
-   * means one of three. `addEventListener` on a button whose meaning changes
+   * ⚠️ Continue means a different thing on each of the five steps, and the
+   * one-of-three fork lives on step 5 now. `addEventListener` on a button whose meaning changes
    * leaves every previous meaning still bound, so Back-then-Continue fires two
    * of them — measured as "advanced two steps at once" the first time it was
    * clicked through.
@@ -3593,14 +3607,79 @@ test('step 5 paints a look in progress, then the engine answer, and could-not-as
 
   // A wire row claiming the LOCAL state renders as unknown, never as a
   // permanent look-in-progress.
-  const wireChecking = firstRunHarness('frPaintReturn', { FR: {} }, {
-    prelude: PRELUDE_VARS + `
-      const fetch = async () => ({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'checking', title: 'sneaky', detail: 'x' } }) });
-    `,
-  });
-  await wireChecking.done;
-  assert.match(wireChecking.els['fr-return-row'].innerHTML, /fr-check unknown/,
-    'a wire state of "checking" must fall back to unknown');
+  for (const sneaky of [
+    { key: 'app-location', state: 'checking', title: 'sneaky', detail: 'x' },
+    // The row claiming local-ness ITSELF: trust is the caller's argument,
+    // never a field the wire can set.
+    { key: 'app-location', state: 'checking', local: true, title: 'sneakier', detail: 'x' },
+  ]) {
+    const wireChecking = firstRunHarness('frPaintReturn', { FR: {} }, {
+      prelude: PRELUDE_VARS + `
+        const fetch = async () => ({ ok: true, json: async () => ({ appLocation: ${JSON.stringify(sneaky)} }) });
+      `,
+    });
+    await wireChecking.done;
+    assert.match(wireChecking.els['fr-return-row'].innerHTML, /fr-check unknown/,
+      `a wire state of "checking" (${JSON.stringify(sneaky)}) must fall back to unknown`);
+  }
+});
+
+test('step 5: entries share one in-flight look, and a stale look cannot repaint a newer entry', async () => {
+  // One module state, two overlapping entries, a fetch we resolve by hand.
+  const realEsc = pageFunction('esc');
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
+    const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  const realRow = pageFunction('frCheckRow', 'const esc = ' + realEsc.toString() + ';\n' + tables);
+  const prelude = `
+    const esc = ${realEsc.toString()};
+    ${tables}
+    const frCheckRow = ${realRow.toString()};
+    const __els = {};
+    const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '' }) };
+    function frForkActions() {}
+    let FR_RETURN_GEN = 0;
+    let FR_MACHINE_LOOK = null;
+    let __calls = 0; let __resolve = null;
+    const fetch = () => { __calls += 1; return new Promise((res) => { __resolve = res; }); };
+    globalThis.__t5 = { els: __els, calls: () => __calls, resolve: (v) => __resolve(v) };
+  `;
+  const fn = pageFunction('frPaintReturn', prelude);
+  const t5 = globalThis.__t5;
+  const e1 = fn();
+  const e2 = fn();
+  assert.equal(t5.calls(), 1,
+    'the second entry re-fired the route instead of joining the in-flight look');
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  await e1; await e2;
+  // The NEWEST entry's paint is what stands; the stale continuation returned
+  // without touching the pane (both write the same answer here, so the
+  // observable pin is: the answer landed exactly, and the dock matches it).
+  assert.match(t5.els['fr-return-row'].innerHTML, /Kosmos is in your Applications folder/);
+  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos out of that folder/);
+
+  // Second scenario, the one that self-contradicts without the token: the
+  // shared look FAILS after a newer entry painted an OK answer. The stale
+  // failure continuation must not overwrite the newer state... which needs
+  // two distinct looks, so the first must have cleared. Entry 3 (fresh look)
+  // resolves ok; entry 4 starts a new look which we REJECT after 3 painted:
+  // gen guards mean 3's paint stands only until 4's catch -- 4 is newest, so
+  // ITS could-not-ask wins, and the dock moves with it (never an ok drag
+  // over a right-now row).
+  const e3 = fn();
+  assert.equal(t5.calls(), 2, 'the settled look was not cleared for the next entry');
+  const e4 = fn();
+  assert.equal(t5.calls(), 2, 'entry 4 should join entry 3\u2019s in-flight look');
+  t5.resolve({ ok: false });
+  await e3; await e4;
+  assert.match(t5.els['fr-return-row'].innerHTML, /right now/,
+    'the newest entry\u2019s could-not-ask should stand');
+  assert.ok(!/out of that folder/.test(t5.els['fr-return-dock'].innerHTML),
+    'a folder-pointing dock outlived the row that named no folder');
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {

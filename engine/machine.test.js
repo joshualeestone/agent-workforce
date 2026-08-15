@@ -691,6 +691,9 @@ test('the app-location check looks in both folders and answers all four states',
   // A malformed override THROWS rather than silently probing the real machine.
   assert.throws(() => machine.appLocationCheck({ appDirs: [] }), /non-empty array/);
   assert.throws(() => machine.appLocationCheck({ appDirs: sys }), /non-empty array/);
+  // A non-string ELEMENT is the half that matters: path.join would TypeError
+  // inside the look and fabricate a could-not-look no test would question.
+  assert.throws(() => machine.appLocationCheck({ appDirs: [123] }), /non-empty array/);
 
   fs.rmSync(sb, { recursive: true, force: true });
 });

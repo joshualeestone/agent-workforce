@@ -135,3 +135,27 @@ could-not-look); 'checking' is a LOCAL row state the wire cannot claim (a
 payload saying "checking" falls back to unknown, tested); the
 injected-extra title's detail no longer points at "there"; step-4's
 closing-tab flat claim on the create path is flagged to the designer.
+
+## Review round 4 (2026-08-14, ~10:30 PM)
+
+No blockers. Four warnings, all closed with checks that can fail:
+- Local-ness is the CALLER's argument on frCheckRow, never a field on the
+  row: a wire payload carrying {local:true, state:"checking"} rendered a
+  permanent look-in-progress before; now both sneaky shapes are tested to
+  fall back to unknown.
+- The degraded catch path is pinned two ways: the shared engine row is
+  asserted renderable, and the route SOURCE is pinned to reference
+  machine.appLocationUnknown() (a copied literal reds).
+- The entry token and the shared look have a test that exercises them:
+  two overlapping entries join ONE fetch (call count pinned), the settled
+  look clears for the next entry, and a failing look after a newer entry
+  paints could-not-ask with the dock moving alongside.
+- The checking state is rendered, measured, and photographed: a new
+  firstrun-5-return-checking shot stalls the machine route (goto waits on
+  load, not networkidle, since the stalled request IS the state) and
+  asserts the placeholder class and the absence of completed-look wording.
+Nits: appDirs refuses a non-string element (tested); the live-region
+comment claims only what the code delivers; the five-step comment in the
+button test corrected. The closing-tab sentence's literal falseness about
+this screen (the wizard does not come back) and the two product names
+remain designer/terminology items, recorded.

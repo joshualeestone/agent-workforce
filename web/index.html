@@ -1092,11 +1092,12 @@ svg { display: block; }
            nowhere, and a screen claiming a location nobody checked is the
            defect this codebase is built against. -->
       <div class="fr-pane" id="fr-pane-5" hidden>
-        <!-- ⚠️ The live region EXISTS BEFORE anything fills it, like step 2's
-             #fr-checks: a region inserted and populated in one innerHTML write
-             is the documented way to get no announcement at all. frPaintReturn
-             writes only the three containers' contents and never recreates
-             the region -- which also survives re-entering the step. -->
+        <!-- ⚠️ The live region is STATIC MARKUP the painter never recreates,
+             like step 2's #fr-checks: a region inserted and populated in one
+             innerHTML write is the documented way to get no announcement.
+             The write that matters (the engine answer arriving) lands in a
+             region that long predates it; the initial placeholder joins the
+             tree with the pane, the same shape as step 2's "Looking...". -->
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
@@ -6378,14 +6379,19 @@ const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?' };
 const FR_SAY_LOCAL = { checking: 'checking' };
 const FR_GLYPH_LOCAL = { checking: '&#8230;' };
 
-function frCheckRow(c) {
+function frCheckRow(c, opts) {
   // ⚠️ `hasOwnProperty`, not a truthiness test on the lookup: `c.state ===
   // 'toString'` hits Object.prototype and interpolates a whole function body
   // into the class attribute and the screen-reader text. Not reachable from the
   // engine today, but the test beside this asserts an unrecognised state falls
   // back safely, and a truthiness test is exactly how it would not.
-  const say = c && c.local ? { ...FR_SAY, ...FR_SAY_LOCAL } : FR_SAY;
-  const glyph = c && c.local ? { ...FR_GLYPH, ...FR_GLYPH_LOCAL } : FR_GLYPH;
+  // ⚠️ Local-ness is the CALLER's second argument, never a field on the row:
+  // both live call sites pass wire objects straight through, so a payload
+  // carrying {local: true, state: "checking"} would have rendered a
+  // permanent look-in-progress if the row itself were trusted to say so.
+  const allowLocal = Boolean(opts && opts.allowLocal);
+  const say = allowLocal ? { ...FR_SAY, ...FR_SAY_LOCAL } : FR_SAY;
+  const glyph = allowLocal ? { ...FR_GLYPH, ...FR_GLYPH_LOCAL } : FR_GLYPH;
   const state = Object.prototype.hasOwnProperty.call(say, c.state) ? c.state : 'unknown';
   return '<div class="fr-check ' + state + '">'
     // ⚠️ The glyph is decorative and the WORD beside it is not. Both states
@@ -7306,7 +7312,7 @@ async function frPaintReturn() {
   introEl.innerHTML = intro;
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
   // what is true at that moment, and a LOCAL state the wire cannot claim.
-  rowEl.innerHTML = frCheckRow({ local: true, state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' });
+  rowEl.innerHTML = frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' }, { allowLocal: true });
   dockEl.innerHTML = drag(false);
   frForkActions();
   try {

@@ -143,6 +143,11 @@ const SHOTS = [
   { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME },
   { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE },
   { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND },
+  // The look STILL IN PROGRESS: the only genuinely new visual state on this
+  // branch, otherwise never rendered by any harness (both walks wait past
+  // it). machine: 'hang' stalls the route so the placeholder is what is
+  // measured and photographed.
+  { name: 'firstrun-5-return-checking', step: 5, machine: 'hang' },
 ];
 
 /**
@@ -299,13 +304,19 @@ async function look(page, name) {
       const page = await ctx.newPage();
       page.on('pageerror', (e) => problems.push(`${shot.name} [${scheme}] JS ERROR: ${e.message}`));
       page.on('console', (m) => { if (m.type() === 'error') problems.push(`${shot.name} [${scheme}] console: ${m.text()}`); });
-      if (shot.machine) {
+      if (shot.machine === 'hang') {
+        // Never answered: the checking placeholder is the state under test.
+        await page.route('**/api/machine', () => {});
+      } else if (shot.machine) {
         await page.route('**/api/machine', (r) => r.fulfill({ json: shot.machine }));
       }
       if (shot.first) {
         await page.route('**/api/first-run', (r) => r.fulfill({ json: shot.first }));
       }
-      await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`, { waitUntil: 'networkidle' });
+      // The hanging-route shot can never reach networkidle -- the stalled
+      // machine request IS the state under test.
+      await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`,
+        { waitUntil: shot.machine === 'hang' ? 'load' : 'networkidle' });
       await page.waitForTimeout(700);
       /**
        * ⚠️ THE CLEAR SHOT ASSERTS ITS OWN PREMISE. Its payload is engine-
@@ -326,10 +337,23 @@ async function look(page, name) {
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
-      if (shot.name.startsWith('firstrun-5-return')) {
+      if (shot.name === 'firstrun-5-return-checking') {
+        const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
+        const cls = await page.evaluate(() => {
+          const el = document.querySelector('#fr-return-row .fr-check');
+          return el ? el.className : null;
+        });
+        if (!/Checking where the Kosmos icon is/.test(text) || cls !== 'fr-check checking') {
+          problems.push(`${shot.name} [${scheme}]: the checking placeholder is not what rendered (${cls})`);
+        }
+        if (/right now/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
+        }
+      } else if (shot.name.startsWith('firstrun-5-return')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
-        // placeholder as a rendering problem rather than a wait.
+        // placeholder as a rendering problem rather than a wait. (The
+        // checking shot takes the branch above and never waits.)
         await page.waitForSelector('#fr-return-row .fr-check:not(.checking)', { timeout: 5000 });
         const want = shot.machine.appLocation;
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
