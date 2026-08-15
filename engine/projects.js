@@ -522,9 +522,10 @@ function projectsFor(sessionName, roster) {
  * derivations of one question always drift; this is the one.
  */
 function cleanName(name) {
-  // Words or refused, the same rule as cleanDescription: oneLine String()s,
-  // so {name: {}} stored "[object Object]" -- and the name is what syncAgent
-  // writes into every member's managed instruction block.
+  // Words or refused, like cleanDescription (one asymmetry, deliberate:
+  // null keeps the older "give this project a name" -- absence, not wrong
+  // type): oneLine String()s, so {name: {}} stored "[object Object]" -- and
+  // the name is what syncAgent writes into every member's boot block.
   if (name !== undefined && name !== null && typeof name !== 'string') {
     throw new Error('a name has to be words');
   }

@@ -712,6 +712,20 @@ test('a folder path with a newline in it is one line in the block', () => {
   assert.ok(!body.includes('\n\n## Not a heading'));
 });
 
+test('a name has to be words, on every writer', () => {
+  reset();
+  // The guard protects the one field syncAgent writes into every member's
+  // boot file; "[object Object]" was a legal name before it.
+  for (const bad of [{ a: 1 }, 42, ['x'], true]) {
+    assert.throws(() => projects.create({ name: bad, folder: folder('badname-' + typeof bad) }), /words/);
+  }
+  const made = projects.create({ name: 'Wordy', folder: folder('wordy') });
+  assert.throws(() => projects.edit(made.id, { name: 42 }), /words/);
+  assert.equal(projects.get(made.id, []).name, 'Wordy', 'a refused write changes nothing');
+  // null keeps its own older sentence: absence-of-a-name, not wrong-typed.
+  assert.throws(() => projects.create({ name: null, folder: folder('nullname') }), /give this project a name/);
+});
+
 test('a refused description does not leave an orphan folder behind', () => {
   reset();
   // The type refusal fires BEFORE makeFolder: refused-for-a-bad-body is not
@@ -725,6 +739,12 @@ test('a refused description does not leave an orphan folder behind', () => {
     try { return fs.readdirSync(projects.projectsRoot()).length; } catch { return 0; }
   })();
   assert.equal(after, before, 'the refused create made a folder no record points at');
+  // ⚠️ The control: the same shape WITHOUT the bad description does make a
+  // folder, so the equality above measured a refusal, not a name that never
+  // reached makeFolder for some other reason.
+  projects.create({ name: 'Orphan probe' });
+  const control = fs.readdirSync(projects.projectsRoot()).length;
+  assert.equal(control, before + 1, 'the control create did not reach makeFolder, so the test above measured nothing');
 });
 
 test('the description cap cuts characters, not code units, and never leaves a trailing space', () => {

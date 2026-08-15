@@ -443,6 +443,41 @@ test('the description travels the routes: created, carried, updated alone, clear
   assert.strictEqual(json(put3).project.description, '');
 });
 
+test('a rename re-tells members and a description-only save leaves their files alone', async () => {
+  reset();
+  // ⚠️ Both directions of the re-tell gate, neither previously held: delete
+  // the gate and the second assertion reds; invert it and the third does.
+  const board = fleet.install([fleet.agent('telltest', { state: 'working' })]);
+  try {
+  const wdir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'telltest');
+  fs.mkdirSync(wdir, { recursive: true });
+  const file = path.join(wdir, 'CLAUDE.md');
+  fs.writeFileSync(file, '# telltest\n');
+  const made = json(await post('/api/projects', { name: 'Before name', folder: folder('retell'), agents: ['telltest'] })).project;
+  const afterCreate = fs.readFileSync(file, 'utf8');
+  assert.match(afterCreate, /Before name/, 'the premise: creation reached the member boot file');
+
+  const descOnly = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'display-side words' }),
+  });
+  assert.equal(descOnly.status, 200, descOnly.body);
+  assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
+    'a description-only save rewrote a boot file the block does not mention');
+
+  const renamed = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'After name' }),
+  });
+  assert.equal(renamed.status, 200, renamed.body);
+  const afterRename = fs.readFileSync(file, 'utf8');
+  assert.match(afterRename, /After name/, 'the rename never reached the member');
+  assert.ok(!/Before name/.test(afterRename), 'the boot file still names a project that no longer goes by that');
+  } finally {
+    board.restore();
+  }
+});
+
 test('a save that would move nothing is refused, not answered "saved"', async () => {
   reset();
   const made = json(await post('/api/projects', { name: 'Immovable', folder: folder('immovable'), description: 'stays' })).project;

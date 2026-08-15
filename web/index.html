@@ -206,8 +206,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* The description line, card and detail alike. `--label-2`, not `--label-3`:
    this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
    floor on this screen already at caption size (rounds 20 and 37 of the chat
-   branch; the callout size here is asserted by the harness sweep, not
-   inherited from those rounds). One line in the ROW: `oneLine` folds
+   branch). The harness asserts row and detail render the SAME size, which
+   is the check that catches the cascade regression this rule once had. One line in the ROW: `oneLine` folds
    newlines at the engine, and ellipsis keeps a 200-char description from
    wrapping the row. Both selectors carry the element for specificity --
    bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),

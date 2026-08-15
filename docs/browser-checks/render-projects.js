@@ -365,6 +365,17 @@ async function main() {
       if (detail.text !== 'Review the <b>renewal terms</b> & prepare the counter.' || detail.hidden !== false) {
         throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
       }
+      // The row and the detail render the SAME token size: this is the check
+      // that reds the round-1 cascade regression (bare .pj-desc losing font
+      // to .panel p, the detail silently at body size under a comment
+      // claiming callout).
+      const sizes = await page.evaluate(() => ({
+        row: getComputedStyle(document.querySelector('#pj-list .pj-desc')).fontSize,
+        detail: getComputedStyle(document.getElementById('pj-one-desc')).fontSize,
+      }));
+      if (sizes.row !== sizes.detail) {
+        throw new Error('the description renders at two sizes (the cascade regression): ' + JSON.stringify(sizes));
+      }
       // The DETAIL's absence arm, exercised, not inferred from the row's: an
       // undescribed project's detail must hide the element (hidden === true),
       // which is the arm the markup comment says the toggle exists for.
@@ -374,10 +385,23 @@ async function main() {
       await page.waitForTimeout(300);
       const bareDetail = await page.evaluate(() => {
         const el = document.getElementById('pj-one-desc');
-        return { hidden: el ? el.hidden : null, text: el ? el.textContent : null };
+        if (!el) return { present: false };
+        const r = el.getBoundingClientRect();
+        return {
+          present: true,
+          hidden: el.hidden,
+          display: getComputedStyle(el).display,
+          w: r.width, h: r.height,
+          text: el.textContent,
+        };
       });
-      if (bareDetail.hidden !== true) {
-        throw new Error('an undescribed project’s detail did not hide the description element: ' + JSON.stringify(bareDetail));
+      // ⚠️ RENDERED absence, not the attribute: `p.pj-desc { display: block }`
+      // is exactly the author rule that beats the UA [hidden], and only the
+      // global [hidden]{display:none !important} keeps the empty grey line
+      // off this screen. The attribute check passed either way; this one
+      // reds if that global rule ever weakens.
+      if (bareDetail.present && (bareDetail.hidden !== true || bareDetail.display !== 'none' || bareDetail.w > 0 || bareDetail.h > 0)) {
+        throw new Error('an undescribed project\u2019s detail description is ON SCREEN (attribute vs rendering): ' + JSON.stringify(bareDetail));
       }
       // A description AT THE CAP stays one line on the row: nowrap+ellipsis
       // is a claim about rendering, and no fixture carried a long sentence.

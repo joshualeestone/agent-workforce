@@ -91,3 +91,22 @@ not graphemes); whitespace-only-clears is stated where the rule lives; the
 escaping proof is now RENDERED, not only source-pinned -- the fixture
 description carries live markup and the harness asserts it appears as
 verbatim text with no element born from it, in row and detail both.
+
+## Review round 3 (2026-08-14, ~10 PM)
+
+No blockers. Both warnings closed with tests that can fail:
+- The cleanName guard now has coverage on every writer (object, number,
+  array, boolean refused at create and edit; a refused write changes
+  nothing; null keeps its older absence sentence, and the comment claims
+  only that).
+- The re-tell gate is held in BOTH directions against a real board
+  fixture: a rename rewrites the member's boot file to the new name, and
+  a description-only save leaves the file byte-identical.
+Nits: the orphan-folder test gained its positive control (the same shape
+without the bad field does reach makeFolder); the detail's absence arm
+asserts RENDERED absence (display, rect) rather than the attribute the
+author-rule trap can beat; the harness asserts row and detail render the
+same token size (the check that reds the cascade regression, and the CSS
+comment now claims exactly that); setDescription noted as the deferred
+settings-screen write path; the detail's description-vs-path visual
+differentiation deferred to the design pass.
