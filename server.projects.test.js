@@ -457,11 +457,23 @@ test('a rename re-tells members and a description-only save leaves their files a
   const afterCreate = fs.readFileSync(file, 'utf8');
   assert.match(afterCreate, /Before name/, 'the premise: creation reached the member boot file');
 
+  // ⚠️ The gate is held by the TOLD STAMP, not by byte-comparing the file:
+  // blockBody carries only name and folder, so a re-tell fired on a
+  // description-only save splices back identical text and the byte
+  // comparison measures idempotence, never the gate (round 4 deleted the
+  // gate outright and the file comparison stayed green). syncAgent stamps
+  // told[key].at on EVERY call, so the stamp moves iff the re-tell fired.
+  const stampOf = () => projects.readAll().find((x) => x.id === made.id).told.telltest.at;
+  const stampAfterCreate = stampOf();
+  assert.ok(stampAfterCreate, 'the premise: creation stamped the told verdict');
+
   const descOnly = await req(`/api/project/${made.id}`, {
     method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
     body: JSON.stringify({ description: 'display-side words' }),
   });
   assert.equal(descOnly.status, 200, descOnly.body);
+  assert.equal(stampOf(), stampAfterCreate,
+    'a description-only save re-told the member (the stamp moved)');
   assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
     'a description-only save rewrote a boot file the block does not mention');
 
@@ -470,6 +482,8 @@ test('a rename re-tells members and a description-only save leaves their files a
     body: JSON.stringify({ name: 'After name' }),
   });
   assert.equal(renamed.status, 200, renamed.body);
+  assert.notEqual(stampOf(), stampAfterCreate,
+    'the rename did not re-tell the member (the stamp never moved)');
   const afterRename = fs.readFileSync(file, 'utf8');
   assert.match(afterRename, /After name/, 'the rename never reached the member');
   assert.ok(!/Before name/.test(afterRename), 'the boot file still names a project that no longer goes by that');
