@@ -3704,21 +3704,34 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
   assert.ok(!/out of that folder/.test(t5.els['fr-return-dock'].innerHTML),
     'a folder-pointing dock outlived the row that named no folder');
 
-  // ⚠️ THE GUARD'S ONE REACHABLE JOB, and the only scenario that reds when
-  // the `gen !== FR_RETURN_GEN` lines are deleted (round 5 proved the two
-  // above pass without them): the person LEAVES step 5 while the look is in
-  // flight, and the late answer must not repaint a pane they are no longer
-  // on. Leaving is simulated the way it manifests -- the generation moving
-  // past this entry's.
-  t5.els['fr-return-row'].innerHTML = 'the pane the person is looking at now';
+  // ⚠️ THE GUARD'S JOB, and the scenarios that red when the guard lines are
+  // deleted (round 5 proved the shared-look scenarios above pass without
+  // them): the person LEAVES step 5 while the look is in flight, and the
+  // late settlement must not repaint the pane. In production the bump IS
+  // performed by frGo(step !== 5) and frClose (round 6 made the premise
+  // real); here t5.leave() performs the same mutation those perform.
+  // Success copy of the guard:
   const e5 = fn();
   assert.equal(t5.calls(), 3);
-  const before = t5.els['fr-return-row'].innerHTML; // the fresh placeholder
+  const before = t5.els['fr-return-row'].innerHTML; // this entry's placeholder
   t5.leave();
   t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
   await e5;
   assert.equal(t5.els['fr-return-row'].innerHTML, before,
     'a look resolving after the person left the step repainted the pane');
+  // Failure copy of the guard (the catch's own gen check, which the
+  // shared-look failure scenario cannot exercise):
+  const e6 = fn();
+  assert.equal(t5.calls(), 4);
+  const before6 = t5.els['fr-return-row'].innerHTML;
+  const dock6 = t5.els['fr-return-dock'].innerHTML;
+  t5.leave();
+  t5.resolve({ ok: false });
+  await e6;
+  assert.equal(t5.els['fr-return-row'].innerHTML, before6,
+    'a look FAILING after the person left the step repainted the pane');
+  assert.equal(t5.els['fr-return-dock'].innerHTML, dock6,
+    'the stale failure rewrote the dock of a pane the person left');
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {

@@ -6299,6 +6299,12 @@ function frActions(primary, alt) {
 }
 
 function frGo(step) {
+  // ⚠️ Leaving step 5 retires its pane: the machine look is async, and an
+  // answer landing after the person moved on must not repaint a pane they
+  // are no longer on. This bump is what makes the generation guard's
+  // premise REAL -- without it the guard had no production trigger and its
+  // test simulated a transition the app never performed (review round 6).
+  if (step !== 5) FR_RETURN_GEN += 1;
   /**
    * ⚠️ CLAMPED TO A WHOLE STEP THAT EXISTS, because `?fr-step=` is a deep link
    * and deep links arrive with whatever is typed into them. `frGo(3.7)` hid
@@ -6479,7 +6485,7 @@ async function frPaintMachine() {
     return;
   }
   FR_MACHINE = got;
-  box.innerHTML = checks.map(frCheckRow).join('')
+  box.innerHTML = checks.map((c) => frCheckRow(c)).join('')
     // ⚠️ Says what to do about it, and says it is not a wall. §125: guide, do
     // not error — first run never blocks on anything it finds here.
     + (checks.some((c) => c.state !== 'ok')
@@ -7275,12 +7281,13 @@ function frForkActions() {
  * unreliable (orientation spec, two installer lines cited; independently
  * confirmed by Splinter 2026-08-14).
  */
-/* Entry generation: the pane belongs to its newest entry. Because the look
-   is SHARED while in flight, two live entries always paint the same answer
-   -- the guard's one reachable job is the answer that lands after the
-   person has LEFT the step, so a late resolution must not repaint a pane
-   the person is no longer on. Tested by bumping the generation between
-   entry and resolve; deleting these guards reds that scenario. */
+/* Entry generation: the pane belongs to its newest entry, and LEAVING the
+   step (frGo to any other step, frClose) retires it. Because the look is
+   SHARED while in flight, two live entries always paint the same answer --
+   the guard's job is the answer or failure that lands after the person has
+   moved on, which must not repaint a pane they are no longer on. Both the
+   success and the failure copies of the guard are tested by leave-then-
+   settle scenarios that red on deletion. */
 let FR_RETURN_GEN = 0;
 /* The machine look is SHARED while in flight: the route shells out twice
    with 5s timeouts on the server's event loop (its own header says it was
@@ -7309,9 +7316,11 @@ async function frPaintReturn() {
     // sets the seen flag, so this screen deliberately never returns, and
     // the one sentence on the page that was checkably untrue said it did.
     // Spec deviation recorded for the designer as an amendment of record.
-    + '<p>Closing this tab does not stop your agents. They keep working, and '
-    + (found ? 'clicking the icon brings' : 'opening Kosmos again brings')
-    + ' Kosmos back.</p>';
+    + '<p>Closing this tab does not stop your agents. '
+    + (found
+      ? 'They keep working, and clicking the icon brings Kosmos back.'
+      : 'They keep working, and they will be here when you open Kosmos again.')
+    + '</p>';
   const introEl = document.getElementById('fr-return-intro');
   const rowEl = document.getElementById('fr-return-row');
   const dockEl = document.getElementById('fr-return-dock');
@@ -7381,6 +7390,8 @@ function frOpen() {
 }
 
 function frClose() {
+  // Same retirement on the way out (Skip, Escape, the fork buttons).
+  FR_RETURN_GEN += 1;
   document.getElementById('firstrun').hidden = true;
   document.querySelectorAll('body > *:not(#firstrun)').forEach((el) => { el.inert = false; });
   if (FR_RETURN && FR_RETURN.focus) FR_RETURN.focus();

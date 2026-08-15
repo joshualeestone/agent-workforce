@@ -91,6 +91,9 @@ const MACHINE_CLEAR = (() => {
 })();
 
 const appFixture = (dirs, wantState, label) => {
+  // (Root note: mode-000 does not seal for root, so the blind fixture reads
+  // attention instead of unknown under sudo -- the throw below is loud but
+  // the cause is the runner's uid, not the engine.)
   const got = machineEngine.check({ ...CLEAR_INPUTS, appDirs: dirs });
   // Its own field now, never one of `checks`: folded into the rows, step 2
   // counted it and step 4 captioned it as a reason an agent may not run.
@@ -124,6 +127,11 @@ const MACHINE_MIXED = (() => {
 })();
 
 const FLEET_REAL = null; // let the real server answer
+// The step-5 shots PIN their fork: without this the action bar came from
+// the live /api/first-run, so a create-path machine would commit different
+// buttons under the same four filenames (the same drift the clear shot was
+// moved off the live route for). Adopt, matching the committed pictures.
+const FLEET_STEP5 = { done: false, fleetKnown: true, fleetCount: 14, fleetNames: ['Splinter', 'Angel'], path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
@@ -139,15 +147,15 @@ const SHOTS = [
   { name: 'firstrun-4-adopt', step: 4 },
   { name: 'firstrun-4-create', step: 4, first: FLEET_CREATE },
   { name: 'firstrun-4-cannot-see', step: 4, first: FLEET_BLIND },
-  { name: 'firstrun-5-return-system', step: 5, machine: MACHINE_APP_SYS },
-  { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME },
-  { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE },
-  { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND },
+  { name: 'firstrun-5-return-system', step: 5, machine: MACHINE_APP_SYS, first: FLEET_STEP5 },
+  { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME, first: FLEET_STEP5 },
+  { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE, first: FLEET_STEP5 },
+  { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND, first: FLEET_STEP5 },
   // The look STILL IN PROGRESS: the only genuinely new visual state on this
   // branch, otherwise never rendered by any harness (both walks wait past
   // it). machine: 'hang' stalls the route so the placeholder is what is
   // measured and photographed.
-  { name: 'firstrun-5-return-checking', step: 5, machine: 'hang' },
+  { name: 'firstrun-5-return-checking', step: 5, machine: 'hang', first: FLEET_STEP5 },
 ];
 
 /**
@@ -337,6 +345,14 @@ async function look(page, name) {
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
+      if (shot.name.startsWith('firstrun-5-return')) {
+        // The pinned fork really painted: the primary carries the adopt
+        // path's label on every step-5 shot.
+        const forkLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
+        if (!/take me to my agents/i.test(forkLabel)) {
+          problems.push(`${shot.name} [${scheme}]: the fork is not the pinned adopt pair ("${forkLabel}")`);
+        }
+      }
       if (shot.name === 'firstrun-5-return-checking') {
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         const cls = await page.evaluate(() => {

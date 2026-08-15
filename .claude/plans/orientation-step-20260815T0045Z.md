@@ -185,3 +185,25 @@ assertion failure (tmp-only leak). Process note, recorded because it bit
 again: the round-4 mutant restore via git checkout ate the uncommitted
 round-5 web fixes (commit-before-perturb, relearned); re-applied and
 verified before this commit.
+
+## Review round 6 (2026-08-14, ~11 PM)
+
+One blocker, the round-5 blocker one level up: the generation guard had
+no production trigger (only frPaintReturn itself ever moved the counter,
+so "the person left the step" was a transition the app never performed
+and the leave test simulated a mutation nothing performs). Leaving is
+real now: frGo bumps the generation on any non-5 step and frClose bumps
+on the way out, so a look settling after departure retires against a
+counter production actually moved. Both guard copies are covered: the
+leave-then-resolve scenario reds when the success copy is deleted, and a
+new leave-then-fail scenario reds when the catch copy is (the shared-look
+scenarios cannot reach either, which round 5's record now says plainly).
+Warnings: step 2's checks.map no longer feeds the array index into the
+trust parameter (wrapped; local-ness stays deliberate); the five step-5
+shots pin their first-run payload and assert the pinned adopt fork label
+per shot (the fork half of the card came from the live route and would
+have flipped per machine under the same filenames). Nits: the pointless
+pre-write removed from the leave scenario; appFixture's comment names
+root as the blind-fixture failure cause; the folderless closing line
+stops saying Kosmos three times ("they will be here when you open Kosmos
+again").
