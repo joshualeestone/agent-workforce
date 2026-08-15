@@ -159,3 +159,29 @@ comment claims only what the code delivers; the five-step comment in the
 button test corrected. The closing-tab sentence's literal falseness about
 this screen (the wizard does not come back) and the two product names
 remain designer/terminology items, recorded.
+
+## Review round 5 (2026-08-14, ~10:40 PM)
+
+One blocker, in the round-4 test itself: the overlapping-entries test
+could not fail on the token half of its name (shared looks mean live
+entries always paint identical content; the reviewer deleted both
+generation guards and the test stayed green). The guard's ONE reachable
+job is now the tested scenario: the person leaves step 5 while the look
+is in flight, and the late answer must not repaint the pane (bumping the
+generation between entry and resolve; verified by planting the deletion
+mutant, which reds this scenario by name). The misleading comment and the
+abandoned-design narration both rewritten to claim what runs. Warnings:
+an answer with nothing to SAY is not an answer ({state:'ok'} with no
+title rendered a confident blank tick over a folder-pointing dock; the
+guard requires title and detail, tested); the static live region is
+pinned in the committed markup (the DOM stub auto-creates ids, so the
+region could have been deleted while every test stayed green); the
+closing sentence now says "brings Kosmos back" (the wizard deliberately
+never returns, and this was the one checkably untrue sentence on the
+page; spec deviation recorded for the designer); README says fourteen.
+Also: the misplaced JSDoc moved onto appLocationCheck; the extra-dir
+branch is rendered by a test. Deferred: unconditional mkdtemp cleanup on
+assertion failure (tmp-only leak). Process note, recorded because it bit
+again: the round-4 mutant restore via git checkout ate the uncommitted
+round-5 web fixes (commit-before-perturb, relearned); re-applied and
+verified before this commit.
