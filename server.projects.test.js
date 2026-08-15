@@ -477,6 +477,10 @@ test('a rename re-tells members and a description-only save leaves their files a
   assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
     'a description-only save rewrote a boot file the block does not mention');
 
+  // The stamp has millisecond resolution; two writes inside one ms read
+  // equal and flake the inequality below. A 5ms breath is not a sleep-based
+  // assertion, it is the clock's own granularity.
+  await new Promise((r) => setTimeout(r, 5));
   const renamed = await req(`/api/project/${made.id}`, {
     method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
     body: JSON.stringify({ name: 'After name' }),
@@ -507,6 +511,19 @@ test('a save that would move nothing is refused, not answered "saved"', async ()
   const list = json(await req('/api/projects')).projects;
   assert.equal(list[0].description, 'stays');
   assert.equal(list[0].name, 'Immovable');
+});
+
+test('a name has to be words at the ROUTE boundary too, on both routes', async () => {
+  reset();
+  const posted = await post('/api/projects', { name: { a: 1 }, folder: folder('typed-name') });
+  assert.equal(posted.status, 400, posted.body);
+  const made = json(await post('/api/projects', { name: 'Typed name', folder: folder('typed-name') })).project;
+  const put = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: ['x'] }),
+  });
+  assert.equal(put.status, 400, put.body);
+  assert.equal(json(await req('/api/projects')).projects[0].name, 'Typed name');
 });
 
 test('one rule for what a description IS, on both routes: words or refused', async () => {

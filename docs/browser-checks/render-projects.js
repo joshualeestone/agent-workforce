@@ -302,7 +302,7 @@ async function main() {
   // keep a `~/kosmos-demo` would have lost it. The check and the delete have to
   // agree about who owns the folder.
   if (fs.existsSync(demo)) {
-    throw new Error(`${demo} already exists; this check creates and deletes that folder, so it will not touch yours. Move it aside and re-run.`);
+    throw new Error(`${demo} already exists -- usually the leftover of a KILLED harness run (the finally only runs when main() settles). If its contents are just the fixture dirs (henderson-lease, quarter-close, reed-handover), move it aside (mv ${demo} ${demo}.stale) and re-run; if not, it is yours and this check will not touch it.`);
   }
   // ⚠️ ONLY A TREE THIS RUN CREATED IS EVER DELETED. The cleanup used to be an
   // unconditional `finally`, and `.finally` runs after `.catch` -- so the run
@@ -400,7 +400,10 @@ async function main() {
       // global [hidden]{display:none !important} keeps the empty grey line
       // off this screen. The attribute check passed either way; this one
       // reds if that global rule ever weakens.
-      if (bareDetail.present && (bareDetail.hidden !== true || bareDetail.display !== 'none' || bareDetail.w > 0 || bareDetail.h > 0)) {
+      if (!bareDetail.present) {
+        throw new Error('#pj-one-desc vanished from the markup entirely');
+      }
+      if (bareDetail.hidden !== true || bareDetail.display !== 'none' || bareDetail.w > 0 || bareDetail.h > 0) {
         throw new Error('an undescribed project\u2019s detail description is ON SCREEN (attribute vs rendering): ' + JSON.stringify(bareDetail));
       }
       // A description AT THE CAP stays one line on the row: nowrap+ellipsis

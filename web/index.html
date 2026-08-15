@@ -207,9 +207,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
    floor on this screen already at caption size (rounds 20 and 37 of the chat
    branch). The harness asserts row and detail render the SAME size, which
-   is the check that catches the cascade regression this rule once had. One line in the ROW: `oneLine` folds
-   newlines at the engine, and ellipsis keeps a 200-char description from
-   wrapping the row. Both selectors carry the element for specificity --
+   is the check that catches the cascade regression this rule once had.
+   One line in the ROW: `oneLine` folds newlines at the engine, and the
+   ellipsis keeps a 200-char description from wrapping the row. Both selectors carry the element for specificity --
    bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),
    so the detail paragraph silently rendered at body size under a comment
    claiming callout. */

@@ -716,9 +716,9 @@ test('a name has to be words, on every writer', () => {
   reset();
   // The guard protects the one field syncAgent writes into every member's
   // boot file; "[object Object]" was a legal name before it.
-  for (const bad of [{ a: 1 }, 42, ['x'], true]) {
-    assert.throws(() => projects.create({ name: bad, folder: folder('badname-' + typeof bad) }), /words/);
-  }
+  [{ a: 1 }, 42, ['x'], true].forEach((bad, i) => {
+    assert.throws(() => projects.create({ name: bad, folder: folder('badname-' + i) }), /words/);
+  });
   const made = projects.create({ name: 'Wordy', folder: folder('wordy') });
   assert.throws(() => projects.edit(made.id, { name: 42 }), /words/);
   assert.equal(projects.get(made.id, []).name, 'Wordy', 'a refused write changes nothing');

@@ -557,12 +557,14 @@ function cleanDescription(text) {
   // null included: the blessed clear is the explicit empty string, and a
   // second clear spelling is a second rule waiting to disagree with it.
   if (typeof text !== 'string') throw new Error('a description has to be words');
-  // Cut by code POINTS, not code units: a cap landing inside an astral
-  // character left a lone surrogate rendering as a replacement glyph, and
-  // one landing on a space left the space. Trim after the cut for the same
-  // reason. (Scoped honestly: a multi-code-point grapheme -- a ZWJ family,
-  // a flag -- can still lose its tail members at the cap; what cannot
-  // happen any more is an invalid half-character.)
+  // Cut at 200 code POINTS (the "200 characters" the plan speaks of is the
+  // human approximation; an all-emoji description stores up to 400 UTF-16
+  // units): a code-unit cap landing inside an astral character left a lone
+  // surrogate rendering as a replacement glyph, and one landing on a space
+  // left the space. Trim after the cut for the same reason. (Scoped
+  // honestly: a multi-code-point grapheme -- a ZWJ family, a flag -- can
+  // still lose its tail members at the cap; what cannot happen any more is
+  // an invalid half-character.)
   return Array.from(oneLine(text)).slice(0, 200).join('').trim();
 }
 
