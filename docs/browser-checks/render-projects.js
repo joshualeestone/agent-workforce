@@ -914,7 +914,33 @@ async function main() {
       }));
       if (!restored.back) throw new Error('Restore did not return the project to the list');
       if (!restored.wrapHidden) throw new Error('an empty archived section stayed on screen after the restore');
-      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore)');
+      // 8g. Archive the SAME project again the same day: the regenerated rows
+      // string is byte-identical, so a disclosure that only hid (without
+      // clearing the setIfChanged cache) reopens on the stale DOM with its
+      // still-disabled Restore -- a one-way door until reload (review round
+      // 1, measured). The button must come back enabled.
+      const all2 = await api('/api/projects');
+      const q2 = (all2.projects || []).find((pr) => pr.name === 'Quarter close');
+      await api('/api/project/' + encodeURIComponent(q2.id), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.waitForTimeout(600);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+      const again = await page.evaluate(() => {
+        const b = document.querySelector('#pj-arch-list [data-restore]');
+        return { present: !!b, disabled: b ? b.disabled : null, text: b ? b.textContent : null };
+      });
+      if (!again.present) throw new Error('re-archiving did not put the row back in the disclosure');
+      if (again.disabled) throw new Error('the re-archived row reopened with a DISABLED Restore (the stale setIfChanged cache): ' + JSON.stringify(again));
+      await page.click('#pj-arch-list [data-restore]');
+      await page.waitForTimeout(400);
+      const finalBack = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!finalBack) throw new Error('the second restore did not return the project');
+      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, and the same-day re-archive)');
     } finally {
       await ctx.close();
     }
