@@ -522,6 +522,12 @@ function projectsFor(sessionName, roster) {
  * derivations of one question always drift; this is the one.
  */
 function cleanName(name) {
+  // Words or refused, the same rule as cleanDescription: oneLine String()s,
+  // so {name: {}} stored "[object Object]" -- and the name is what syncAgent
+  // writes into every member's managed instruction block.
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw new Error('a name has to be words');
+  }
   const title = oneLine(name);
   if (!title) throw new Error('give this project a name');
   if (title.length > 120) throw new Error('that name is longer than a project name should be');
@@ -545,12 +551,17 @@ function cleanDescription(text) {
   // the other route silently dropped it -- one field, two rules, the exact
   // "two derivations of one question" cleanName's own comment warns against.
   if (text === undefined || text === '') return '';
+  // (A whitespace-only description folds to '' through oneLine below and
+  // clears the field too -- the same deliberate act as the explicit empty.)
   // null included: the blessed clear is the explicit empty string, and a
   // second clear spelling is a second rule waiting to disagree with it.
   if (typeof text !== 'string') throw new Error('a description has to be words');
-  // Cut by CHARACTERS, not code units: a cap landing inside an emoji left a
-  // lone surrogate rendering as a replacement glyph, and one landing on a
-  // space left the space. Trim after the cut for the same reason.
+  // Cut by code POINTS, not code units: a cap landing inside an astral
+  // character left a lone surrogate rendering as a replacement glyph, and
+  // one landing on a space left the space. Trim after the cut for the same
+  // reason. (Scoped honestly: a multi-code-point grapheme -- a ZWJ family,
+  // a flag -- can still lose its tail members at the cap; what cannot
+  // happen any more is an invalid half-character.)
   return Array.from(oneLine(text)).slice(0, 200).join('').trim();
 }
 
@@ -782,6 +793,12 @@ function create({ name, folder, agents, roster, description } = {}) {
     if (problem) throw new Error(problem);
   }
   const title = cleanName(name);
+  // ⚠️ BEFORE makeFolder, with every other refusal. This was the one
+  // validation firing after the mkdir, so a type-refused description left
+  // an empty folder no record pointed at -- and unlike the accepted
+  // I/O-failure case below, nothing adopts it: a caller refused for a bad
+  // body does not retry with the same bad body.
+  const desc = cleanDescription(description);
   // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
   // project of the same name meets "that folder is already the project X"
   // rather than a fresh empty directory nobody asked for. `makeFolder` adopts
@@ -814,7 +831,7 @@ function create({ name, folder, agents, roster, description } = {}) {
   const project = {
     id: idFor(title, new Set(all.map((p) => p.id))),
     name: title,
-    description: cleanDescription(description),
+    description: desc,
     folder: given,
     agents: members,
     everSeen: Object.fromEntries(members.map((a) => [

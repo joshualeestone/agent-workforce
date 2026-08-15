@@ -483,6 +483,14 @@ test('the block names each project and its folder', () => {
   const body = projects.blockBody([{ name: 'Henderson lease', folder: '/Users/josh/work/henderson' }]);
   assert.match(body, /Henderson lease/);
   assert.match(body, /\/Users\/josh\/work\/henderson/);
+  // ⚠️ The NEGATIVE half is what the PUT route's re-tell gate leans on: a
+  // description-only save does not re-tell members BECAUSE the block carries
+  // no description. Without this assertion that gate is guarded by a comment;
+  // if the description ever joins the block, this line goes red and the gate
+  // has to be revisited in the same change.
+  const described = projects.blockBody([{ name: 'Henderson lease', folder: '/Users/josh/work/henderson', description: 'the person\u2019s own words' }]);
+  assert.ok(!/own words/.test(described),
+    'the managed block must not carry the description: it is display-side text, and the re-tell gate depends on this');
 });
 
 test('the block for an agent on nothing says so rather than being empty', () => {
@@ -702,6 +710,21 @@ test('a folder path with a newline in it is one line in the block', () => {
   const line = body.split('\n').find((l) => l.startsWith('- '));
   assert.ok(line && line.includes('Not a heading'), 'the path text is kept, just made inert');
   assert.ok(!body.includes('\n\n## Not a heading'));
+});
+
+test('a refused description does not leave an orphan folder behind', () => {
+  reset();
+  // The type refusal fires BEFORE makeFolder: refused-for-a-bad-body is not
+  // the accepted parked-spot case (an I/O failure the retry adopts), because
+  // a caller refused for a bad body does not retry with the same bad body.
+  const before = (() => {
+    try { return fs.readdirSync(projects.projectsRoot()).length; } catch { return 0; }
+  })();
+  assert.throws(() => projects.create({ name: 'Orphan probe', description: 42 }), /words/);
+  const after = (() => {
+    try { return fs.readdirSync(projects.projectsRoot()).length; } catch { return 0; }
+  })();
+  assert.equal(after, before, 'the refused create made a folder no record points at');
 });
 
 test('the description cap cuts characters, not code units, and never leaves a trailing space', () => {

@@ -74,6 +74,9 @@ const SANDBOX = process.argv[4] || process.env.AGENT_WORKFORCE_SANDBOX || null;
 const HEADED = process.env.HEADED !== '0';
 // Set only once we have created the fixture tree ourselves; the cleanup keys on it.
 let OURS = null;
+// The launched browser, held at module level so the tail finally can close
+// it after ANY failure inside main().
+let BROWSER = null;
 
 async function api(p, options) {
   const res = await fetch(BASE + p, options);
@@ -209,6 +212,7 @@ async function main() {
   await assertSandboxed();
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: !HEADED });
+  BROWSER = browser;
   const shots = [];
   let overflows = 0;
 
@@ -310,7 +314,7 @@ async function main() {
     fs.mkdirSync(path.join(demo, d), { recursive: true });
   }
   await post('/api/projects', { name: 'Henderson lease', folder: path.join(demo, 'henderson-lease'), agents,
-    description: 'Review the renewal terms and prepare the counter.' });
+    description: 'Review the <b>renewal terms</b> & prepare the counter.' });
   await post('/api/projects', { name: 'Quarter close', folder: path.join(demo, 'quarter-close'), agents: ['claudebot'] });
   await post('/api/projects', { name: 'Reed handover', folder: path.join(demo, 'reed-handover') });
   await shot('2-list');
@@ -335,11 +339,19 @@ async function main() {
           .find((r) => r.textContent.includes('Reed handover'));
         return {
           onRow: row ? ((row.querySelector('.pj-desc') || {}).textContent || null) : null,
+          rowHasBold: row ? Boolean(row.querySelector('.pj-desc b')) : null,
           bareHasDesc: bare ? Boolean(bare.querySelector('.pj-desc')) : null,
         };
       });
-      if (seen.onRow !== 'Review the renewal terms and prepare the counter.') {
-        throw new Error('the described row does not carry its sentence: ' + JSON.stringify(seen.onRow));
+      // ⚠️ RENDERED escaping, not only the source-regex pin: the fixture's
+      // description carries live markup, and the row must show it as TEXT,
+      // verbatim, with no element born from it. A text assertion alone
+      // cannot see the difference between escaped and parsed.
+      if (seen.onRow !== 'Review the <b>renewal terms</b> & prepare the counter.') {
+        throw new Error('the described row does not carry its sentence verbatim (markup should render as text): ' + JSON.stringify(seen.onRow));
+      }
+      if (seen.rowHasBold !== false) {
+        throw new Error('the description markup PARSED on the row: injection, not text');
       }
       if (seen.bareHasDesc !== false) {
         throw new Error('an undescribed project rendered a description element (empty grey line): ' + JSON.stringify(seen.bareHasDesc));
@@ -350,7 +362,7 @@ async function main() {
         const el = document.getElementById('pj-one-desc');
         return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
       });
-      if (detail.text !== 'Review the renewal terms and prepare the counter.' || detail.hidden !== false) {
+      if (detail.text !== 'Review the <b>renewal terms</b> & prepare the counter.' || detail.hidden !== false) {
         throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
       }
       // The DETAIL's absence arm, exercised, not inferred from the row's: an
@@ -746,7 +758,16 @@ async function main() {
 // obligation for the bigger tree.
 main()
   .catch((err) => { console.error(err); process.exitCode = 1; })
-  .finally(() => {
-    if (!OURS) return; // never ours, never deleted
-    try { fs.rmSync(OURS, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+  .finally(async () => {
+    if (OURS) {
+      try { fs.rmSync(OURS, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+    }
+    // ⚠️ The browser dies HERE, not only on the happy path: every throw
+    // inside main() used to leave Chromium attached and node resident
+    // forever -- an unattended loop reads a hang as "still running", never
+    // as red (one such run sat for 2 days 23 hours on this machine,
+    // measured by the round-2 reviewer).
+    if (BROWSER) {
+      try { await BROWSER.close(); } catch { /* already down */ }
+    }
   });

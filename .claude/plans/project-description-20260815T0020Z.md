@@ -68,3 +68,26 @@ Seven warnings, all fixed:
 - The cap cuts characters (an emoji survives whole or not at all) and trims
   the cut; describe() normalizes description to '' for legacy records so
   the API reads as '' everywhere, not only the two web renderers.
+
+## Review round 2 (2026-08-14 late evening)
+
+No blockers. Four warnings, all fixed:
+- The description validation was the one refusal firing AFTER makeFolder,
+  so a type-refused create left an orphan folder no record pointed at
+  (the parked-spot rationale covers I/O failures the retry adopts, not
+  refusals nobody retries). Hoisted above the mkdir; a regression test
+  counts the projects root before and after a refused create.
+- cleanName now carries the same words-or-refused rule as
+  cleanDescription ({name:{}} stored "[object Object]", and the name is
+  what syncAgent writes into every member's boot file). The server
+  comment's claimed symmetry is real now instead of documented-only.
+- The re-tell gate is self-guarding: blockBody's test asserts the block
+  does NOT carry the description, so if it ever joins the block, the
+  description-only-saves-do-not-re-tell gate goes red in the same change.
+- The harness closes its browser in the tail finally, so a throw reds
+  instead of hanging (a prior run sat 2 days 23 hours as "still running").
+Nits: the emoji-cap comment is scoped to what was measured (code points,
+not graphemes); whitespace-only-clears is stated where the rule lives; the
+escaping proof is now RENDERED, not only source-pinned -- the fixture
+description carries live markup and the harness asserts it appears as
+verbatim text with no element born from it, in row and detail both.
