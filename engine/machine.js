@@ -530,35 +530,56 @@ function restartCheck(runner) {
  * opts.runner and opts.pmset.
  */
 function appLocationCheck(opts) {
-  const dirs = (opts && Array.isArray(opts.appDirs) && opts.appDirs.length === 2)
-    ? opts.appDirs
-    : ['/Applications', path.join(os.homedir(), 'Applications')];
+  // ⚠️ A malformed override THROWS rather than silently probing the real
+  // machine. The fallback used to require length exactly 2, so a test passing
+  // one or three directories by mistake read the operator's real
+  // /Applications under a green run -- the exact leak the override exists to
+  // prevent.
+  let dirs;
+  if (opts && opts.appDirs !== undefined) {
+    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0) {
+      throw new Error('appDirs override must be a non-empty array of directories');
+    }
+    dirs = opts.appDirs;
+  } else {
+    dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
+  }
   const TITLES = [
     'Kosmos is in your Applications folder',
     'Kosmos is in the Applications folder inside your home folder',
   ];
   const OPEN_FROM_THERE = 'Open it from there whenever you want it. Clicking it starts '
     + 'Kosmos if it is not already running.';
+  // ⚠️ An unreadable FIRST folder no longer ends the look. A machine whose
+  // /Applications errors EACCES but whose home Applications holds the app was
+  // told "we could not check" when a definite yes was one iteration away --
+  // could-not-look is the honest LAST answer, never the eager one.
+  let errored = false;
   for (let i = 0; i < dirs.length; i++) {
     try {
       const st = fs.statSync(path.join(dirs[i], 'Kosmos.app'));
       // A FILE named Kosmos.app is not the app; keep looking rather than
       // pointing somebody at a thing that will not open.
       if (st.isDirectory()) {
-        return { key: 'app-location', state: STATE.OK, title: TITLES[i], detail: OPEN_FROM_THERE };
+        return { key: 'app-location', state: STATE.OK, title: TITLES[i] || TITLES[1], detail: OPEN_FROM_THERE };
       }
     } catch (err) {
       if (err && err.code === 'ENOENT') continue;
-      // Anything but a clean "not there" means we could not complete the
-      // look, and "could not look" must never render as "it is not there".
-      return {
-        key: 'app-location',
-        state: STATE.UNKNOWN,
-        title: 'We could not check where the Kosmos icon is',
-        detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
-          + 'top right of your screen, and it will find it.',
-      };
+      // Anything but a clean "not there" means we could not complete this
+      // look -- remember it and keep going, because a find anywhere is still
+      // a find.
+      errored = true;
     }
+  }
+  if (errored) {
+    // "Could not look" must never render as "it is not there".
+    return {
+      key: 'app-location',
+      state: STATE.UNKNOWN,
+      title: 'We could not check where the Kosmos icon is',
+      detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
+        + 'top right of your screen, and it will find it.',
+    };
   }
   return {
     key: 'app-location',
@@ -578,7 +599,6 @@ function check(opts) {
 
   const checks = [
     installedCheck(opts),
-    appLocationCheck(opts),
     pm.ok ? sleepCheck(pm.stdout) : {
       key: 'sleep',
       state: STATE.UNKNOWN,
@@ -596,6 +616,14 @@ function check(opts) {
     // could not read is a sentence that is false about half of what it counts.
     attention: checks.filter((c) => c.state === STATE.ATTENTION).length,
     unknown: checks.filter((c) => c.state === STATE.UNKNOWN).length,
+    // ⚠️ Its OWN field, deliberately not one of `checks`. Where the app sits
+    // has no bearing on whether an agent runs, so folding it into the rows
+    // step 2 counts and step 4 filters made the wizard state a false cause:
+    // "We could not find the Kosmos icon. An agent made now may not run until
+    // that is sorted" -- on exactly the fresh-install path this check exists
+    // for. Step 5 (getting back to Kosmos) is its one consumer. Separating it
+    // at the SOURCE means no screen has to remember to exclude it.
+    appLocation: appLocationCheck(opts),
   };
 }
 

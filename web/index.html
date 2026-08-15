@@ -740,6 +740,10 @@ svg { display: block; }
                       padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-check.unknown { border-style: dashed; border-width: 1px; background: var(--attn-bg);
                     padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
+/* A look still in progress: quiet, and visually distinct from "could not
+   check" so the placeholder can never pass for a completed failed look. */
+.fr-check.checking { border: 1px dashed var(--separator);
+                     padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
            /* --label-2 for the same AA reason as .fr-bar above: the ok tick
               and the unknown ? measured 3.0-4.0:1 at 15px. The glyph has a
@@ -1008,7 +1012,7 @@ svg { display: block; }
   <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
     <div class="fr-bar">Agent Workforce &mdash; Setup</div>
     <div class="fr-body">
-      <p class="crumb" id="fr-step">Step 1 of 4</p>
+      <p class="crumb" id="fr-step">Step 1 of 5</p>
       <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
       <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED without joining the tab
            order. Without it `.focus()` here is a silent no-op and the step
@@ -1088,12 +1092,14 @@ svg { display: block; }
            nowhere, and a screen claiming a location nobody checked is the
            defect this codebase is built against. -->
       <div class="fr-pane" id="fr-pane-5" hidden>
-        <div id="fr-return" role="status" aria-live="polite"></div>
+        <!-- The live region is the ROW inside, painted by frPaintReturn; on this
+             wrapper it re-announced the whole pane on every upgrade. -->
+        <div id="fr-return"></div>
       </div>
 
       <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
            only message on this screen that can be raised from ANY step — Skip
-           is on all four — so putting it inside step 4's pane, which is where
+           is on all five — so putting it inside step 4's pane, which is where
            it started, meant a person who skipped from the welcome screen was
            told nothing at all: the sentence was written into a hidden div.
            `alert`, because it is the one thing here somebody must not walk away
@@ -6356,8 +6362,8 @@ function frGo(step) {
    -------------------------------------------------------------------------- */
 
 /** The word, for anybody who cannot see the glyph or its colour. */
-const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could not check' };
-const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?' };
+const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could not check', checking: 'checking' };
+const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?', checking: '&#8230;' };
 
 function frCheckRow(c) {
   // ⚠️ `hasOwnProperty`, not a truthiness test on the lookup: `c.state ===
@@ -7244,29 +7250,54 @@ async function frPaintReturn() {
   const box = document.getElementById('fr-return');
   const intro = '<p>Kosmos runs on this Mac and opens in your browser. You come back to it '
     + 'the same way you open anything else on here.</p>';
-  const dock = '<p><b>Keep it one click away.</b> Drag Kosmos out of that folder and onto '
-    + 'the Dock, the strip of icons along the edge of your screen. It stays there until '
-    + 'you take it off.</p>'
+  // ⚠️ The spec's drag sentence says "out of that folder", which is only true
+  // once a folder was FOUND. The missing and could-not-check states name no
+  // folder, so they get a Spotlight-anchored variant -- an instruction
+  // pointing at a thing the row just said we do not have is the screen
+  // contradicting itself.
+  const drag = (found) => '<p><b>Keep it one click away.</b> '
+    + (found
+      ? 'Drag Kosmos out of that folder and onto the Dock, the strip of icons along the '
+        + 'edge of your screen. It stays there until you take it off.'
+      : 'When you have the Kosmos icon in front of you, drag it onto the Dock, the strip '
+        + 'of icons along the edge of your screen. It stays there until you take it off.')
+    + '</p>'
     + '<p>Closing this tab does not stop your agents. They keep working, and clicking the '
     + 'icon brings this screen back.</p>';
-  const unknownRow = frCheckRow({
-    state: 'unknown',
-    title: 'We could not check where the Kosmos icon is',
-    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
-      + 'right of your screen, and it will find it.',
-  });
-  // Painted BEFORE the fetch, so the step is never a blank pane during the
-  // round trip; the row upgrades in place when the look completes.
-  box.innerHTML = intro + unknownRow + dock;
+  // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
+  // what is true at that moment. The old pre-paint said "could not check", a
+  // completed failed look that had not happened yet, and it was byte-identical
+  // to the engine's real unknown row, so neither a picture nor an assertion
+  // could tell the fetched answer from the placeholder.
+  // ⚠️ role="status" lives on the ROW ALONE. On the wrapper, every upgrade
+  // re-announced the intro and both Dock paragraphs to a screen reader.
+  box.innerHTML = intro
+    + '<div id="fr-return-row" role="status" aria-live="polite">'
+    + frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' })
+    + '</div>'
+    + '<div id="fr-return-dock">' + drag(false) + '</div>';
   frForkActions();
   try {
-    const res = await fetch('/api/machine');
+    const res = await fetch('/api/machine', { cache: 'no-store' });
     const body = await res.json();
     if (!res.ok) throw new Error('machine check failed');
-    const found = (body.checks || []).find((c) => c && c.key === 'app-location');
-    if (found) box.innerHTML = intro + frCheckRow(found) + dock;
+    // Its OWN field, deliberately not one of `checks` -- see engine/machine.js:
+    // folded into the rows, step 2 counted it and step 4 captioned it as a
+    // reason an agent may not run, which it is not.
+    const found = body.appLocation;
+    if (!found || !found.state) throw new Error('no app-location answer');
+    document.getElementById('fr-return-row').innerHTML = frCheckRow(found);
+    document.getElementById('fr-return-dock').innerHTML = drag(found.state === 'ok');
   } catch {
-    /* the pre-painted could-not-look row IS the honest answer */
+    // We could not ASK -- a different fact from the engine's own could-not-
+    // check, and worded differently on purpose: the harness tells the fetched
+    // answer, the placeholder, and this fallback apart by their words.
+    document.getElementById('fr-return-row').innerHTML = frCheckRow({
+      state: 'unknown',
+      title: 'We could not check where the Kosmos icon is right now',
+      detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
+        + 'right of your screen, and it will find it.',
+    });
   }
 }
 

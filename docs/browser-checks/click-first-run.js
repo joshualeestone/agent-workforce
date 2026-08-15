@@ -39,7 +39,7 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Checking your computer', 'step 2');
     await page.waitForSelector('.fr-check', { timeout: 5000 });
-    ok((await page.locator('#fr-checks .fr-check').count()) === 4, 'four checks painted from the live route (app-location joined)');
+    ok((await page.locator('#fr-checks .fr-check').count()) === 3, 'three checks painted from the live route (app-location rides beside the rows, not among them)');
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Claude', 'step 3');
     ok(await page.locator('#fr-sub .fr-ctitle').textContent().then((t) => /connected/.test(t)),
@@ -53,9 +53,13 @@ async function fresh(browser, opts = {}) {
     // is that A row rendered and the Dock sentence is the drag instruction,
     // never "Keep in Dock" (the orientation spec's load-bearing guard: the
     // Dock tile exits before anyone can right-click it).
-    await page.waitForSelector('#fr-return .fr-check', { timeout: 5000 });
+    // Wait for the ANSWER, not the pane: the pane paints instantly with the
+    // "checking" placeholder, so waiting on any .fr-check reads the pre-paint
+    // in a race with the fetch.
+    await page.waitForSelector('#fr-return-row .fr-check:not(.checking)', { timeout: 5000 });
     const returnText = await page.locator('#fr-return').textContent();
-    ok(/Drag Kosmos out of that folder/.test(returnText), 'the Dock instruction is drag');
+    ok(/drag it onto the Dock|Drag Kosmos out of that folder/.test(returnText), 'the Dock instruction is a drag (the wording tracks whether a folder was found on THIS machine)');
+    ok(!/Checking where the Kosmos icon is/.test(returnText), 'the live answer replaced the checking placeholder');
     ok(!/Keep in Dock/.test(returnText), 'and never the unreachable Keep in Dock');
     ok(/Closing this tab does not stop your agents/.test(returnText),
       'the narrow true promise about closing the tab');

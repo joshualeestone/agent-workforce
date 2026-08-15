@@ -451,7 +451,7 @@ test('the restart check asks launchctl about THIS login session', () => {
    The whole screen
 --------------------------------------------------------------------------- */
 
-test('four checks come back, and the two kinds of not-ok are counted apart', () => {
+test('three checks come back, and the two kinds of not-ok are counted apart', () => {
   // app-location gets DETERMINISTIC dirs: without appDirs this test would
   // read this machine's real /Applications and pass or fail by whether the
   // machine running the suite happens to have Kosmos installed.
@@ -468,10 +468,14 @@ test('four checks come back, and the two kinds of not-ok are counted apart', () 
     appDirs: [sb, sb],
   });
   fs.rmSync(sb, { recursive: true, force: true });
-  assert.equal(got.checks.length, 4);
-  assert.deepEqual(got.checks.map((c) => c.key), ['installed', 'app-location', 'sleep', 'restart']);
+  assert.equal(got.checks.length, 3);
+  assert.deepEqual(got.checks.map((c) => c.key), ['installed', 'sleep', 'restart']);
   assert.equal(got.attention, 1);
   assert.equal(got.unknown, 0);
+  // Beside the rows, never among them: where the app sits has no bearing on
+  // whether an agent runs, so it must not join what step 2 counts and step 4
+  // captions as "an agent made now may not run until that is sorted".
+  assert.equal(got.appLocation.state, machine.STATE.OK);
 
   /**
    * ⚠️ NOT ADDED TOGETHER. "Two things need your attention" over one real
@@ -480,17 +484,22 @@ test('four checks come back, and the two kinds of not-ok are counted apart', () 
    * person go looking for a problem that does not exist.
    */
   const sb2 = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-check2-'));
-  fs.mkdirSync(nodePath.join(sb2, 'Kosmos.app'));
   const mixed = machine.check({
     pmset: 'nonsense',
     claudeBin: '/nope/claude',
     tmuxBin: REAL_BIN,
     runner: okRunner,
+    // Deliberately EMPTY, so the app-location answer is attention -- and the
+    // counts below prove that attention is not added to the rows'. Folding it
+    // in is exactly how the wizard came to state a false cause on the
+    // fresh-install path.
     appDirs: [sb2, sb2],
   });
   fs.rmSync(sb2, { recursive: true, force: true });
   assert.equal(mixed.attention, 1);
   assert.equal(mixed.unknown, 1);
+  assert.equal(mixed.appLocation.state, machine.STATE.ATTENTION,
+    'the premise of the count assertion above: app-location IS attention here, and still not counted');
 });
 
 test('every check reports one of exactly three states, and always says something', () => {
@@ -509,7 +518,10 @@ test('every check reports one of exactly three states, and always says something
   ];
   require('node:fs').rmSync(empty, { recursive: true, force: true });
   for (const got of runs) {
-    for (const c of got.checks) {
+    // The shape rule covers appLocation too: it renders through the same row
+    // grammar on step 5, so a state the screen has no branch for is the same
+    // nothing-at-all there as in the rows.
+    for (const c of [...got.checks, got.appLocation]) {
       assert.ok(['ok', 'attention', 'unknown'].includes(c.state), `bad state: ${c.state}`);
       assert.ok(c.title && c.title.length > 0, `${c.key} has no title`);
       assert.ok(c.detail && c.detail.length > 0, `${c.key} has no detail`);
@@ -645,20 +657,55 @@ test('the app-location check looks in both folders and answers all four states',
   assert.equal(past.state, machine.STATE.OK, 'a file wearing the name must not stop the look');
   assert.match(past.title, /inside your home folder/);
 
-  // Could not look: unknown, and the copy insists nothing is wrong. An
-  // unreadable folder (not ENOENT) is the reachable real case.
+  // An unreadable FIRST folder does not end the look: the app sitting in the
+  // second one is still a definite yes. (This is the recovered half of the
+  // could-not-look rule; the eager-unknown version told this machine "we
+  // could not check" with the answer one iteration away.)
+  // ⚠️ Skipped as root, stated loudly: root stats through mode 000, so the
+  // sealed folder stops sealing and both this case and the blind one below
+  // would assert against a premise that does not hold.
   const sealed = path.join(sb, 'sealed');
-  fs.mkdirSync(sealed, { mode: 0o000 });
-  const blind = machine.appLocationCheck({ appDirs: [path.join(sealed, 'Applications'), home] });
-  fs.chmodSync(sealed, 0o755);
-  assert.equal(blind.state, machine.STATE.UNKNOWN);
-  assert.match(blind.detail, /Nothing is wrong/);
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    console.log('  (running as root: sealed-folder cases skipped, mode 000 does not seal for root)');
+  } else {
+    try {
+      fs.mkdirSync(sealed, { mode: 0o000 });
+      const recovered = machine.appLocationCheck({ appDirs: [path.join(sealed, 'Applications'), home] });
+      assert.equal(recovered.state, machine.STATE.OK,
+        'an unreadable first folder must not eat a find in the second');
+
+      // Could not look ANYWHERE it mattered: unknown, and the copy insists
+      // nothing is wrong. Home is emptied first -- with the app still there,
+      // this case would be the recovered one above.
+      fs.rmdirSync(path.join(home, 'Kosmos.app'));
+      const blind = machine.appLocationCheck({ appDirs: [path.join(sealed, 'Applications'), home] });
+      assert.equal(blind.state, machine.STATE.UNKNOWN);
+      assert.match(blind.detail, /Nothing is wrong/);
+    } finally {
+      // In a finally: an assertion throw between mkdir and here used to leave
+      // an unreadable folder in tmp that rmSync could not remove.
+      try { fs.chmodSync(sealed, 0o755); } catch { /* never made */ }
+    }
+  }
+
+  // A malformed override THROWS rather than silently probing the real machine.
+  assert.throws(() => machine.appLocationCheck({ appDirs: [] }), /non-empty array/);
+  assert.throws(() => machine.appLocationCheck({ appDirs: sys }), /non-empty array/);
 
   fs.rmSync(sb, { recursive: true, force: true });
 });
 
-test('the app-location check joins the machine report', () => {
-  const got = machine.check({ pmset: 'sleep 0', claudeBin: REAL_BIN, tmuxBin: REAL_BIN });
-  assert.ok(got.checks.some((c) => c.key === 'app-location'),
-    'the /api/machine payload must carry the app-location row for first-run step 5');
+test('the app-location answer rides BESIDE the machine report, never among its rows', () => {
+  const os = require('node:os');
+  const nodePath = require('node:path');
+  const fs = require('node:fs');
+  // Deterministic dirs and a stubbed runner: this test used to read the real
+  // /Applications and shell out to the real launchctl under a green run.
+  const empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-join-'));
+  const got = machine.check({ pmset: 'sleep 0', claudeBin: REAL_BIN, tmuxBin: REAL_BIN, runner: okRunner, appDirs: [empty, empty] });
+  fs.rmSync(empty, { recursive: true, force: true });
+  assert.equal(got.appLocation.key, 'app-location',
+    'the /api/machine payload must carry the app-location answer for first-run step 5');
+  assert.ok(!got.checks.some((c) => c.key === 'app-location'),
+    'in the rows, step 2 counts it and step 4 captions it as a reason an agent may not run');
 });

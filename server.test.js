@@ -1832,8 +1832,11 @@ test('the roles route carries the copy the creation actually uses', async () => 
 function pageFunction(name, prelude = '') {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const start = script.indexOf('function ' + name);
+  let start = script.indexOf('function ' + name);
   assert.ok(start > -1, name + ' vanished from the page');
+  // An `async function` must keep its keyword: sliced off, the body's awaits
+  // are a SyntaxError inside new Function and the extraction dies confusingly.
+  if (script.slice(start - 6, start) === 'async ') start -= 6;
   let depth = 0; let end = -1;
   for (let k = script.indexOf('{', start); k < script.length; k += 1) {
     if (script[k] === '{') depth += 1;
@@ -3350,7 +3353,7 @@ test('the "we could not remember that" message lives outside the step panes', ()
 --------------------------------------------------------------------------- */
 
 /** A fake DOM just big enough for the two painters. */
-function firstRunHarness(name, state) {
+function firstRunHarness(name, state, opts = {}) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
@@ -3380,10 +3383,15 @@ function firstRunHarness(name, state) {
     function showTab() {}
     globalThis.__els = __els;
     globalThis.__actions = () => __actions;
+    ${opts.prelude || ''}
   `;
   const fn = pageFunction(name, prelude);
-  fn();
-  return { els: globalThis.__els, actions: globalThis.__actions() };
+  // An async painter returns a promise; `done` lets the caller await the
+  // post-fetch writes while still reading the pre-paint synchronously (the
+  // element stubs are live references, so reads after `await done` see the
+  // upgraded content).
+  const out = fn();
+  return { els: globalThis.__els, actions: globalThis.__actions(), done: Promise.resolve(out) };
 }
 
 test('an unrecognised subscription answer never renders as "you have none"', () => {
@@ -3431,6 +3439,12 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     FR: { path: 'create', fleetCount: 0, fleetNames: [] },
   });
   assert.match(create.els['fr-title'].textContent, /first agent/i);
+  // The healthy paths carry a single Continue too, not only the broken ones
+  // asserted below: the fork lives on step 5 now on every path.
+  assert.ok(/continue/i.test(adopt.actions.primary || '') && !adopt.actions.alt,
+    `adopt at step 4 should offer Continue alone: ${JSON.stringify(adopt.actions)}`);
+  assert.ok(/continue/i.test(create.actions.primary || '') && !create.actions.alt,
+    `create at step 4 should offer Continue alone: ${JSON.stringify(create.actions)}`);
 
   /**
    * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
@@ -3467,6 +3481,10 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     // fork here where the orientation has not been shown yet.
     assert.ok(got.actions && /continue/i.test(got.actions.primary || ''),
       `payload ${JSON.stringify(FR)} left the person short of a way onward`);
+    // And ONLY Continue: a second button reappearing here is the fork
+    // creeping back to the step it was deliberately moved off.
+    assert.ok(!got.actions.alt,
+      `payload ${JSON.stringify(FR)} grew a second button at step 4: ${JSON.stringify(got.actions)}`);
   }
 
   // Both ways out are still offered on every path -- at step 5, where the
@@ -3482,6 +3500,64 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     assert.match(got.actions.primary, primary, `the ${path} fork primary drifted`);
     assert.match(got.actions.alt, alt, `the ${path} fork alt drifted`);
   }
+});
+
+test('step 5 paints a look in progress, then the engine answer, and could-not-ask on failure', async () => {
+  // The Dock instruction must never point at "that folder" when no folder was
+  // found: the found state gets the spec's drag sentence, the other two get
+  // the Spotlight-anchored variant.
+  const cases = [
+    [{ key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it from there.' },
+      /Drag Kosmos out of that folder/],
+    [{ key: 'app-location', state: 'attention', title: 'We could not find the Kosmos icon', detail: 'Not the same as it not being there.' },
+      /When you have the Kosmos icon in front of you/],
+    [{ key: 'app-location', state: 'unknown', title: 'We could not check where the Kosmos icon is', detail: 'Nothing is wrong.' },
+      /When you have the Kosmos icon in front of you/],
+  ];
+  for (const [row, dockRe] of cases) {
+    const h = firstRunHarness('frPaintReturn', { FR: {} }, {
+      prelude: `
+        function frForkActions() {}
+        const fetch = async () => ({ ok: true, json: async () => ({ appLocation: ${JSON.stringify(row)} }) });
+      `,
+    });
+    // The pre-paint is a look IN PROGRESS -- not the completed "could not
+    // check" it used to claim before any look had happened, and not
+    // byte-identical to the engine's real unknown row.
+    assert.match(h.els['fr-return'].innerHTML, /fr-check checking/);
+    assert.match(h.els['fr-return'].innerHTML, /Checking where the Kosmos icon is/);
+    await h.done;
+    assert.match(h.els['fr-return-row'].innerHTML, new RegExp(row.title));
+    assert.match(h.els['fr-return-row'].innerHTML, new RegExp('fr-check ' + row.state));
+    assert.match(h.els['fr-return-dock'].innerHTML, dockRe);
+    // The engine answer replaced the placeholder; three distinguishable
+    // wordings is the whole point of the checking state.
+    assert.ok(!/Checking where the Kosmos icon is/.test(h.els['fr-return-row'].innerHTML),
+      'the placeholder survived the fetch');
+  }
+
+  // Could not ASK: its own wording ("right now"), distinct from the engine's
+  // own could-not-check row, so a picture can tell the two apart.
+  const broken = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: `
+      function frForkActions() {}
+      const fetch = async () => { throw new Error('down'); };
+    `,
+  });
+  await broken.done;
+  assert.match(broken.els['fr-return-row'].innerHTML, /could not check where the Kosmos icon is right now/);
+  assert.match(broken.els['fr-return-row'].innerHTML, /fr-check unknown/);
+
+  // A payload WITHOUT the appLocation field (an old server, a shape drift)
+  // lands on could-not-ask too, never on the placeholder forever.
+  const shapeless = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: `
+      function frForkActions() {}
+      const fetch = async () => ({ ok: true, json: async () => ({ checks: [] }) });
+    `,
+  });
+  await shapeless.done;
+  assert.match(shapeless.els['fr-return-row'].innerHTML, /right now/);
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {

@@ -76,12 +76,12 @@ const CLEAR_INPUTS = {
   runner: () => ({ ok: true, stdout: 'com.kosmos.agent.x' }),
 };
 
-/* The clear payload is engine-generated too (it was captured against the
-   LIVE route until app-location joined the checks: a dev machine without
-   Kosmos.app can never read all-clear again, while every real post-install
-   machine can -- the premise moved from "this machine" to "an installed
-   machine", so the fixture follows the premise). Its control still holds
-   the shot to its name. */
+/* The clear payload is engine-generated. (History: it was captured against
+   the live route until app-location briefly joined the rows and made dev
+   machines unable to read clear; app-location now rides BESIDE the rows and
+   never joins the counts, but the fixture stays engine-generated -- a
+   deterministic payload plus the on-screen control below is strictly
+   stronger than trusting whatever machine runs the harness.) */
 const MACHINE_CLEAR = (() => {
   const got = machineEngine.check({ ...CLEAR_INPUTS, appDirs: APPFIX.sys });
   if (got.attention !== 0 || got.unknown !== 0) {
@@ -92,7 +92,9 @@ const MACHINE_CLEAR = (() => {
 
 const appFixture = (dirs, wantState, label) => {
   const got = machineEngine.check({ ...CLEAR_INPUTS, appDirs: dirs });
-  const row = got.checks.find((c) => c.key === 'app-location');
+  // Its own field now, never one of `checks`: folded into the rows, step 2
+  // counted it and step 4 captioned it as a reason an agent may not run.
+  const row = got.appLocation;
   if (!row || row.state !== wantState) {
     throw new Error(`the ${label} app fixture reads ${row && row.state}, wanted ${wantState}`);
   }
@@ -109,8 +111,8 @@ const MACHINE_MIXED = (() => {
     claudeBin: '/bin/sh',
     tmuxBin: '/bin/sh',
     runner: (cmd) => (cmd === '/bin/launchctl' ? { ok: false, because: 'no' } : { ok: true, stdout: '' }),
-    // Pinned to the with-app pair so the mixed fixture stays exactly one
-    // attention and one unknown now that app-location is a fourth row.
+    // Pinned so the appLocation field (now beside the rows, not among
+    // them) stays deterministic; the counts below never included it.
     appDirs: APPFIX.sys,
   });
   // The control: this fixture is only worth screenshotting if it really does
@@ -306,11 +308,10 @@ async function look(page, name) {
       await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(700);
       /**
-       * ⚠️ THE CLEAR SHOT ASSERTS ITS OWN PREMISE. It is captured against the
-       * LIVE route so it cannot drift from the engine's wording -- which also
-       * means a machine that develops a finding would quietly produce a
-       * screenshot committed under the name "clear". `MACHINE_MIXED` has such a
-       * control; this had none.
+       * ⚠️ THE CLEAR SHOT ASSERTS ITS OWN PREMISE. Its payload is engine-
+       * generated now (no longer the live route), so the control's job moved:
+       * it holds the SCREEN to the fixture's name, catching a paint that
+       * renders a clear payload as anything but green rows.
        */
       if (shot.name === 'firstrun-2-checks-clear') {
         const rows = await page.evaluate(() =>
@@ -326,13 +327,36 @@ async function look(page, name) {
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
       if (shot.name.startsWith('firstrun-5-return')) {
-        const want = shot.machine.checks.find((c) => c.key === 'app-location');
+        const want = shot.machine.appLocation;
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         if (!text.includes(want.title)) {
           problems.push(`${shot.name} [${scheme}]: the row does not carry the fixture's title ("${want.title}")`);
         }
-        if (!/Drag Kosmos out of that folder/.test(text)) {
-          problems.push(`${shot.name} [${scheme}]: the Dock instruction is not the drag`);
+        // The fetched answer really landed: the pre-paint says "Checking" and
+        // the could-not-ask fallback says "right now", and neither may
+        // survive into a shot named for an engine state. (The old pre-paint
+        // was byte-identical to the engine's unknown row, so the unsure shot
+        // could not fail -- a picture of the placeholder passed as a picture
+        // of the answer.)
+        if (/Checking where the Kosmos icon is/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the checking placeholder is still on screen`);
+        }
+        if (/right now/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the could-not-ask fallback painted over the fixture's answer`);
+        }
+        // The Dock instruction tracks the state: only a FOUND app may say
+        // "that folder"; the other states get the Spotlight-anchored drag.
+        if (want.state === 'ok') {
+          if (!/Drag Kosmos out of that folder/.test(text)) {
+            problems.push(`${shot.name} [${scheme}]: the Dock instruction is not the drag`);
+          }
+        } else {
+          if (/out of that folder/.test(text)) {
+            problems.push(`${shot.name} [${scheme}]: the Dock copy points at "that folder" over a row that named none`);
+          }
+          if (!/drag it onto the Dock/.test(text)) {
+            problems.push(`${shot.name} [${scheme}]: the folderless Dock instruction is missing the drag`);
+          }
         }
         if (/Keep in Dock/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the unreachable Keep in Dock advice appeared`);
