@@ -808,6 +808,21 @@ async function main() {
       }));
       if (!agLay.aslist || agLay.pressed !== 'true') throw new Error('the agents list toggle did not change the board: ' + JSON.stringify(agLay));
       if (agLay.pjTouched) throw new Error('the agents toggle drove the PROJECTS list -- the scopes are not independent');
+      // The AGENTS toggle's contrast, measured here where it is on screen
+      // (the sweep runs on the projects tab, where this one is hidden).
+      const agContrast = await page.evaluate(() => {
+        const parse = (c) => { const m = String(c).match(/[\d.]+/g).map(Number); return { r: m[0], g: m[1], b: m[2], a: m.length > 3 ? m[3] : 1 }; };
+        const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const over = (f, b) => ({ r: f.r * f.a + b.r * (1 - f.a), g: f.g * f.a + b.g * (1 - f.a), b: f.b * f.a + b.b * (1 - f.a) });
+        const bgOf = (el) => { let n = el; while (n) { const c = getComputedStyle(n).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)') return c; n = n.parentElement; } return 'rgb(255, 255, 255)'; };
+        const ratio = (el) => { const fg = parse(getComputedStyle(el).color); const bg = parse(bgOf(el)); const l1 = lum(over(fg, bg)); const l2 = lum(bg); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+        const rest = document.querySelector('.boardbar .vt:not(.on)');
+        const on = document.querySelector('.boardbar .vt.on');
+        return { rest: rest ? ratio(rest) : null, on: on ? ratio(on) : null };
+      });
+      if (agContrast.rest === null || agContrast.on === null || agContrast.rest < 3 || agContrast.on < 3) {
+        throw new Error('the agents toggle is unmeasured or under the 3:1 icon floor: ' + JSON.stringify(agContrast));
+      }
 
       // 8d. The projects toggle, and the choice surviving a reload.
       await page.click('.tab[data-tab="projects"]');
@@ -886,6 +901,8 @@ async function main() {
         note: document.getElementById('pj-list-msg').textContent,
       }));
       if (!archivedNow.onList) throw new Error('archiving did not return to the list');
+      const focusAfterArchive = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterArchive) throw new Error('archiving from the detail dropped keyboard focus to body');
       if (!archivedNow.rowGone) throw new Error('the archived project is still in the active list');
       if (!archivedNow.wrapShown || archivedNow.toggleText !== 'Show archived projects (1)') {
         throw new Error('the disclosure does not carry the row-derived count: ' + JSON.stringify(archivedNow));
@@ -920,6 +937,11 @@ async function main() {
       }));
       if (!restored.back) throw new Error('Restore did not return the project to the list');
       if (!restored.wrapHidden) throw new Error('an empty archived section stayed on screen after the restore');
+      // The keyboard survived the section disappearing (round 7: the only
+      // focus assertion in step 8 was the picker reveal, so the rescues
+      // were undriven and a missing one was invisible to a green run).
+      const focusAfterRestore = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterRestore) throw new Error('the disclosure restore dropped keyboard focus to body');
       // 8g. Archive the SAME project again the same day: the regenerated rows
       // string is byte-identical, so a disclosure that only hid (without
       // clearing the setIfChanged cache) reopens on the stale DOM with its
@@ -1003,6 +1025,8 @@ async function main() {
       if (recovered.btn !== 'Archive it') {
         throw new Error('the recovering poll did not repaint the control from the truth: ' + JSON.stringify(recovered));
       }
+      const focusAfterDetailRestore = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterDetailRestore) throw new Error('the detail restore dropped keyboard focus to body');
       if (/this page|above|below|archived list/.test(recovered.note)) {
         throw new Error('the note references the screen, which recovery has repainted: ' + JSON.stringify(recovered));
       }
@@ -1037,7 +1061,9 @@ async function main() {
       await page.waitForTimeout(600);
       const discFailed = await page.evaluate(() => ({
         note: document.getElementById('pj-list-msg').textContent,
-        btnEnabled: (() => { const b = document.querySelector('#pj-arch-list [data-restore]'); return b ? !b.disabled : null; })(),
+        wrapHidden: document.getElementById('pj-arch-wrap').hidden,
+        focusOnBody: document.activeElement === document.body,
+        focusTag: document.activeElement.tagName,
       }));
       await page.unroute('**/api/projects');
       if (!/restore saved, but we could not re-read/.test(discFailed.note)) {
@@ -1046,8 +1072,15 @@ async function main() {
       if (/above|below/.test(discFailed.note)) {
         throw new Error('the note points at another element, which the next successful poll will erase: ' + JSON.stringify(discFailed));
       }
-      if (discFailed.btnEnabled === false) {
-        throw new Error('the disclosure Restore stayed disabled after a failed re-read');
+      // The list error path withdraws the disclosure WITH the list (round
+      // 7: asserting an enabled button inside a hidden wrap measured a
+      // property the person cannot reach), so the honest assertions are:
+      // the section is off screen, and the keyboard did not die with it.
+      if (!discFailed.wrapHidden) {
+        throw new Error('the disclosure stayed on screen beside a list saying we could not read: ' + JSON.stringify(discFailed));
+      }
+      if (discFailed.focusOnBody) {
+        throw new Error('the keyboard died with the withdrawn section: ' + JSON.stringify(discFailed));
       }
       // The recovery is DRIVEN here too (round 6: 8h proved its arm across
       // the recovering poll and 8i jumped straight to a goto that wiped

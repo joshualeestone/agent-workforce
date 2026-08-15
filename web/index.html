@@ -4154,7 +4154,7 @@ function paintProjects() {
     // archived, and saying "none yet" beside a disclosure holding three of
     // them would be the screen contradicting itself.
     setIfChanged(list, '<div class="pj-empty">'
-      + '<p><b>Nothing here right now.</b><br>Everything you have is archived, below.</p>'
+      + '<p><b>Nothing here right now.</b><br>Everything you have is archived.</p>'
       + '</div>');
     return;
   }
@@ -4272,7 +4272,13 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
       // The write LANDED (the PUT answered 200); the re-read did not. The
       // person is told which half failed, and the button comes back so the
       // disclosure is not left holding a dead control over a stale count.
+      // ⚠️ The list error path has just hidden the whole disclosure, so
+      // re-enabling the button described a control nobody could see (round
+      // 7 measured it: btnOnScreen false, focus on body). The section is
+      // withdrawn with the list; the note is what survives, and the
+      // keyboard lands on the heading instead of dying with the section.
       btn.disabled = false;
+      if (document.activeElement === document.body) document.querySelector('h1').focus();
       // ⚠️ Describes the MOMENT and points at nothing: the first wording
       // said "the note above says so", and five seconds later the poll
       // succeeded, repainted the healthy list, and left this sentence
@@ -4301,6 +4307,10 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
     btn.textContent = 'Restore failed. Try again';
     btn.disabled = false;
     document.getElementById('pj-list-msg').textContent = String((err && err.message) || 'we could not restore it');
+    // Disabling on entry blurred the button; on a failed PUT it is still on
+    // screen (nothing repainted), so the keyboard returns to the control
+    // that now says what happened.
+    if (document.activeElement === document.body) btn.focus();
   }
 });
 
@@ -6078,6 +6088,12 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
       msg.textContent = PJ_READ_FAILED
         ? 'The restore saved, but we could not re-read your projects just then.'
         : 'Restored.';
+      // ⚠️ The rescue THIS arm was missing while its own comment claimed the
+      // opposite (round 7): disabling the button blurred it, and this early
+      // return skipped the sibling's rescue below. The same control is the
+      // natural landing -- it has flipped to "Archive it" under the person.
+      archBtn.disabled = false;
+      if (document.activeElement === document.body) archBtn.focus();
       return;
     }
     PJ_CURRENT = null;
@@ -6096,13 +6112,15 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
     // that a failed reload renders as "we cannot read your projects" -- and
     // the two sentences sat in adjacent elements contradicting each other
     // (measured by review round 1 with the read stubbed to 500).
-    // ⚠️ A MOMENT sentence on BOTH branches (round 6: the conditional's
-    // healthy arm said "in the archived list below", and a LATER failed
-    // poll hid the disclosure while the sentence stayed -- the round-1
-    // two-adjacent-elements contradiction reached through the poll).
-    // "Restore brings it back" claims the feature, not the screen.
-    document.getElementById('pj-list-msg').textContent =
-      'Archived ' + p.name + '. Restore brings it back whenever you want it.';
+    // ⚠️ MOMENT sentences on both branches (round 6: the healthy arm said
+    // "in the archived list below" and a LATER failed poll hid the
+    // disclosure while the sentence stayed). "Restore brings it back"
+    // claims the feature, not the screen -- and the failed-re-read branch
+    // names its moment like both restore arms do (round 7: three arms,
+    // one standard).
+    document.getElementById('pj-list-msg').textContent = PJ_READ_FAILED
+      ? 'Archived ' + p.name + ', but we could not re-read your projects just then.'
+      : 'Archived ' + p.name + '. Restore brings it back whenever you want it.';
   } catch (err) {
     msg.textContent = String((err && err.message) || (want ? 'we could not archive it' : 'we could not restore it'));
   } finally {
