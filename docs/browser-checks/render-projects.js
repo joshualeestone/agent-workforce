@@ -994,6 +994,21 @@ async function main() {
       if (archDetail.label !== 'This project is archived' || archDetail.btn !== 'Restore it') {
         throw new Error('the archived detail does not state its own fact: ' + JSON.stringify(archDetail));
       }
+      // The failed-PUT direction first (round 8: both failure arms dropped
+      // the keyboard and left the control unmarked while the success arms
+      // had been fixed one by one).
+      await page.route('**/api/project/*', (r) => r.fulfill({ status: 500, json: { error: 'stubbed put' } }));
+      await page.click('#pj-one-archive');
+      await page.waitForTimeout(400);
+      const failedPut = await page.evaluate(() => ({
+        msg: document.getElementById('pj-one-archive-msg').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+        focusOnBody: document.activeElement === document.body,
+      }));
+      await page.unroute('**/api/project/*');
+      if (!failedPut.msg) throw new Error('a failed PUT said nothing');
+      if (!/failed/i.test(failedPut.btn)) throw new Error('a failed PUT left the control unmarked: ' + JSON.stringify(failedPut));
+      if (failedPut.focusOnBody) throw new Error('a failed PUT dropped the keyboard to body');
       await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'stubbed' } }));
       await page.click('#pj-one-archive');
       await page.waitForTimeout(500);

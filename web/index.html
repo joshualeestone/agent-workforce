@@ -4249,6 +4249,10 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-restore]');
   if (!btn) return;
   const id = btn.dataset.restore;
+  // ⚠️ The previous attempt's failure sentence retires when a new attempt
+  // starts (round 8: a retry that WORKED sat under "we could not restore
+  // it" forever -- the detail sibling has cleared at entry all along).
+  document.getElementById('pj-list-msg').textContent = '';
   btn.disabled = true;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(id), {
@@ -6061,9 +6065,12 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
   if (!p) return;
   const msg = document.getElementById('pj-one-archive-msg');
   msg.textContent = '';
-  // The button acts on the CURRENT state: on an archived project it is the
-  // Restore control, and re-archiving something already archived (a no-op
-  // answered as a change) cannot happen from here any more.
+  // The button acts on the CURRENT state as last successfully read: on an
+  // archived project it is the Restore control. (After a restore whose
+  // re-read FAILED, the stale record still reads archived and a second
+  // click re-sends {archived:false} -- an idempotent no-op the next good
+  // read answers honestly; the moment-note has already said the first
+  // save landed.)
   const want = !p.archived;
   const archBtn = document.getElementById('pj-one-archive');
   archBtn.disabled = true;
@@ -6123,10 +6130,19 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
       : 'Archived ' + p.name + '. Restore brings it back whenever you want it.';
   } catch (err) {
     msg.textContent = String((err && err.message) || (want ? 'we could not archive it' : 'we could not restore it'));
+    // ⚠️ ON THE CONTROL too, the disclosure arm's own rule: a failed act
+    // and an untouched button must not look the same. (The 5s poll may
+    // repaint this label from state truth; the message above persists,
+    // which is the removal path's accepted shape.)
+    archBtn.textContent = want ? 'Archive failed. Try again' : 'Restore failed. Try again';
   } finally {
     // Held while the PUT flies, like the disclosure sibling: two fast
     // clicks fired two PUTs (idempotent today only by the carry-forward).
     archBtn.disabled = false;
+    // Disabling blurred the control; on every exit the keyboard returns
+    // to it rather than dying on body (round 8: both failure directions
+    // dropped it while the success arms had been fixed one by one).
+    if (document.activeElement === document.body) archBtn.focus();
   }
 });
 
