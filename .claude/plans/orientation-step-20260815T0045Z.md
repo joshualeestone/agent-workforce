@@ -105,3 +105,33 @@ checked before json(); check()'s JSDoc moved back onto check() and gained
 the appLocation field; an injected third directory no longer wears the
 home-folder title; the installer-override limit is documented at the
 function; README's shot count corrected.
+
+## Review round 3 (2026-08-14 late evening)
+
+No blockers. Six warnings, five fixed, one deferred with its reason:
+- The step-5 live region now EXISTS in the static markup before anything
+  fills it (a region inserted and populated in one write is the documented
+  way to get no announcement); frPaintReturn writes only the three
+  containers' contents and never recreates the region, which also survives
+  re-entry.
+- frPaintReturn carries an entry generation: a stale fetch resolving after
+  a newer entry cannot repaint over it, and the could-not-ask catch moves
+  the DOCK with the row (an ok drag instruction can no longer outlive the
+  answer that named the folder). The unit test pins the dock on the
+  failure path.
+- The /api/machine look is shared while in flight (the route costs two
+  subprocesses; Back/Continue re-fired it per click). The promise resolves
+  to the parsed body so every awaiter can read it.
+- The route's degraded catch publishes machine.appLocationUnknown(), the
+  engine's own row, instead of a hand-copied literal that drifts.
+- The vacuous placeholder assertion is real now: the placeholder is
+  written into the row stub itself, so the same assertion that could not
+  fail before now proves the upgrade landed.
+- DEFERRED: two product names on one card ("Agent Workforce" chrome over
+  "Getting back to Kosmos" copy). The rename is the terminology sheet's
+  own sweep, queued as its own branch; sequencing recorded as a decision.
+Also: appDirs elements must be strings (a number answered a fabricated
+could-not-look); 'checking' is a LOCAL row state the wire cannot claim (a
+payload saying "checking" falls back to unknown, tested); the
+injected-extra title's detail no longer points at "there"; step-4's
+closing-tab flat claim on the create path is flagged to the designer.

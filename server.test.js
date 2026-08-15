@@ -3149,7 +3149,7 @@ test('a check row carries its state in a WORD, not only in a glyph and a colour'
   // after the page's own set drifted away from it.
   const raw0 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script0 = raw0.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
     const m = script0.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
     assert.ok(m, n + ' vanished from the page');
     return m[0];
@@ -3362,7 +3362,7 @@ test('the "we could not remember that" message lives outside the step panes', ()
 function firstRunHarness(name, state, opts = {}) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
     const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
     assert.ok(m, n + ' vanished from the page');
     return m[0];
@@ -3540,50 +3540,67 @@ test('step 5 paints a look in progress, then the engine answer, and could-not-as
     [{ key: 'app-location', state: 'unknown', title: 'We could not check where the Kosmos icon is', detail: 'Nothing is wrong.' },
       /When you have the Kosmos icon in front of you/],
   ];
+  const PRELUDE_VARS = `
+    function frForkActions() {}
+    let FR_RETURN_GEN = 0;
+    let FR_MACHINE_LOOK = null;
+  `;
   for (const [row, dockRe] of cases) {
     const h = firstRunHarness('frPaintReturn', { FR: {} }, {
-      prelude: `
-        function frForkActions() {}
+      prelude: PRELUDE_VARS + `
         const fetch = async () => ({ ok: true, json: async () => ({ appLocation: ${JSON.stringify(row)} }) });
       `,
     });
     // The pre-paint is a look IN PROGRESS -- not the completed "could not
     // check" it used to claim before any look had happened, and not
-    // byte-identical to the engine's real unknown row.
-    assert.match(h.els['fr-return'].innerHTML, /fr-check checking/);
-    assert.match(h.els['fr-return'].innerHTML, /Checking where the Kosmos icon is/);
+    // byte-identical to the engine's real unknown row. Asserted on the ROW
+    // itself: the region is static markup now and the placeholder is written
+    // straight into it, so this stub really is overwritten by the upgrade
+    // (the old wrapper-level assertion could not fail).
+    assert.match(h.els['fr-return-row'].innerHTML, /fr-check checking/);
+    assert.match(h.els['fr-return-row'].innerHTML, /Checking where the Kosmos icon is/);
     await h.done;
     assert.match(h.els['fr-return-row'].innerHTML, new RegExp(row.title));
     assert.match(h.els['fr-return-row'].innerHTML, new RegExp('fr-check ' + row.state));
     assert.match(h.els['fr-return-dock'].innerHTML, dockRe);
-    // The engine answer replaced the placeholder; three distinguishable
-    // wordings is the whole point of the checking state.
     assert.ok(!/Checking where the Kosmos icon is/.test(h.els['fr-return-row'].innerHTML),
       'the placeholder survived the fetch');
   }
 
   // Could not ASK: its own wording ("right now"), distinct from the engine's
-  // own could-not-check row, so a picture can tell the two apart.
+  // own could-not-check row -- and the DOCK moves with the row, so a
+  // folder-pointing instruction cannot outlive the answer that named it.
   const broken = firstRunHarness('frPaintReturn', { FR: {} }, {
-    prelude: `
-      function frForkActions() {}
+    prelude: PRELUDE_VARS + `
       const fetch = async () => { throw new Error('down'); };
     `,
   });
   await broken.done;
   assert.match(broken.els['fr-return-row'].innerHTML, /could not check where the Kosmos icon is right now/);
   assert.match(broken.els['fr-return-row'].innerHTML, /fr-check unknown/);
+  assert.ok(!/out of that folder/.test(broken.els['fr-return-dock'].innerHTML),
+    'the failure path left a folder-pointing dock over a row that named none');
 
   // A payload WITHOUT the appLocation field (an old server, a shape drift)
   // lands on could-not-ask too, never on the placeholder forever.
   const shapeless = firstRunHarness('frPaintReturn', { FR: {} }, {
-    prelude: `
-      function frForkActions() {}
+    prelude: PRELUDE_VARS + `
       const fetch = async () => ({ ok: true, json: async () => ({ checks: [] }) });
     `,
   });
   await shapeless.done;
   assert.match(shapeless.els['fr-return-row'].innerHTML, /right now/);
+
+  // A wire row claiming the LOCAL state renders as unknown, never as a
+  // permanent look-in-progress.
+  const wireChecking = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: PRELUDE_VARS + `
+      const fetch = async () => ({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'checking', title: 'sneaky', detail: 'x' } }) });
+    `,
+  });
+  await wireChecking.done;
+  assert.match(wireChecking.els['fr-return-row'].innerHTML, /fr-check unknown/,
+    'a wire state of "checking" must fall back to unknown');
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {

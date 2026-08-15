@@ -1010,13 +1010,9 @@ const server = http.createServer((req, res) => {
         unknown: 1,
         // The degraded answer keeps the healthy answer's shape: step 5 reads
         // this field, and the honest state when the check-runner itself broke
-        // is could-not-look here too.
-        appLocation: {
-          key: 'app-location', state: 'unknown',
-          title: 'We could not check where the Kosmos icon is',
-          detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
-            + 'top right of your screen, and it will find it.',
-        },
+        // is could-not-look here too -- the ENGINE'S OWN row, not a copied
+        // literal that goes stale the moment the wording moves.
+        appLocation: machine.appLocationUnknown(),
       });
       return;
     }

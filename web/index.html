@@ -1092,9 +1092,16 @@ svg { display: block; }
            nowhere, and a screen claiming a location nobody checked is the
            defect this codebase is built against. -->
       <div class="fr-pane" id="fr-pane-5" hidden>
-        <!-- The live region is the ROW inside, painted by frPaintReturn; on this
-             wrapper it re-announced the whole pane on every upgrade. -->
-        <div id="fr-return"></div>
+        <!-- ⚠️ The live region EXISTS BEFORE anything fills it, like step 2's
+             #fr-checks: a region inserted and populated in one innerHTML write
+             is the documented way to get no announcement at all. frPaintReturn
+             writes only the three containers' contents and never recreates
+             the region -- which also survives re-entering the step. -->
+        <div id="fr-return">
+          <div id="fr-return-intro"></div>
+          <div id="fr-return-row" role="status" aria-live="polite"></div>
+          <div id="fr-return-dock"></div>
+        </div>
       </div>
 
       <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
@@ -6362,8 +6369,14 @@ function frGo(step) {
    -------------------------------------------------------------------------- */
 
 /** The word, for anybody who cannot see the glyph or its colour. */
-const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could not check', checking: 'checking' };
-const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?', checking: '&#8230;' };
+const FR_SAY = { ok: 'ready', attention: 'needs your attention', unknown: 'could not check' };
+const FR_GLYPH = { ok: '&#10003;', attention: '!', unknown: '?' };
+/* ⚠️ LOCAL states, honoured only when the caller marks the row local: a
+   payload row arriving over the wire with state "checking" must fall back
+   to unknown like any unrecognised state, or a malformed answer renders as
+   a permanent look-in-progress. */
+const FR_SAY_LOCAL = { checking: 'checking' };
+const FR_GLYPH_LOCAL = { checking: '&#8230;' };
 
 function frCheckRow(c) {
   // ⚠️ `hasOwnProperty`, not a truthiness test on the lookup: `c.state ===
@@ -6371,14 +6384,16 @@ function frCheckRow(c) {
   // into the class attribute and the screen-reader text. Not reachable from the
   // engine today, but the test beside this asserts an unrecognised state falls
   // back safely, and a truthiness test is exactly how it would not.
-  const state = Object.prototype.hasOwnProperty.call(FR_SAY, c.state) ? c.state : 'unknown';
+  const say = c && c.local ? { ...FR_SAY, ...FR_SAY_LOCAL } : FR_SAY;
+  const glyph = c && c.local ? { ...FR_GLYPH, ...FR_GLYPH_LOCAL } : FR_GLYPH;
+  const state = Object.prototype.hasOwnProperty.call(say, c.state) ? c.state : 'unknown';
   return '<div class="fr-check ' + state + '">'
     // ⚠️ The glyph is decorative and the WORD beside it is not. Both states
     // render as one character in a box, and on the machine-check screen two of
     // the three characters are punctuation — so without this a screen reader
     // hears three findings and cannot tell which one is the problem.
-    + '<div class="fr-mark"><span aria-hidden="true">' + FR_GLYPH[state] + '</span>'
-    + '<span class="vh">' + FR_SAY[state] + ': </span></div>'
+    + '<div class="fr-mark"><span aria-hidden="true">' + glyph[state] + '</span>'
+    + '<span class="vh">' + say[state] + ': </span></div>'
     + '<div><div class="fr-ctitle">' + esc(c.title) + '</div>'
     + '<div class="fr-cdetail">' + esc(c.detail) + '</div></div></div>';
 }
@@ -7243,7 +7258,7 @@ function frForkActions() {
  * ⚠️ IT LOOKS AGAIN, on entry, rather than reusing step 2's snapshot: a
  * person can sit in this wizard for minutes, and the one question this step
  * answers ("where is the icon RIGHT NOW") deserves an answer at least as
- * fresh as the step. A failed fetch renders the could-not-look copy, which
+ * fresh as the step. A failed look renders the could-not-ask copy, which
  * is the honest state, never an empty row.
  *
  * ⚠️ The Dock instruction is DRAG, and must never be "simplified" to
@@ -7254,8 +7269,20 @@ function frForkActions() {
  * unreliable (orientation spec, two installer lines cited; independently
  * confirmed by Splinter 2026-08-14).
  */
+/* Entry generation: a newer entry to step 5 owns the pane, so a stale
+   fetch resolving late cannot repaint over it (the exact self-contradiction
+   the drag(found) split exists to prevent: an ok dock from fetch B with a
+   could-not-ask row from fetch A). */
+let FR_RETURN_GEN = 0;
+/* The machine look is SHARED while in flight: the route shells out twice
+   with 5s timeouts on the server's event loop (its own header says it was
+   split out of /api/first-run for exactly that cost), and Back/Continue
+   between steps 4 and 5 used to re-fire it as fast as a person could
+   click. The promise resolves to the PARSED body so every awaiter can read
+   it (a Response body can be consumed once). */
+let FR_MACHINE_LOOK = null;
 async function frPaintReturn() {
-  const box = document.getElementById('fr-return');
+  const gen = ++FR_RETURN_GEN;
   const intro = '<p>Kosmos runs on this Mac and opens in your browser. You come back to it '
     + 'the same way you open anything else on here.</p>';
   // ⚠️ The spec's drag sentence says "out of that folder", which is only true
@@ -7273,42 +7300,49 @@ async function frPaintReturn() {
     + '<p>Closing this tab does not stop your agents. They keep working, and '
     + (found ? 'clicking the icon brings' : 'opening Kosmos again brings')
     + ' this screen back.</p>';
+  const introEl = document.getElementById('fr-return-intro');
+  const rowEl = document.getElementById('fr-return-row');
+  const dockEl = document.getElementById('fr-return-dock');
+  introEl.innerHTML = intro;
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
-  // what is true at that moment. The old pre-paint said "could not check", a
-  // completed failed look that had not happened yet, and it was byte-identical
-  // to the engine's real unknown row, so neither a picture nor an assertion
-  // could tell the fetched answer from the placeholder.
-  // ⚠️ role="status" lives on the ROW ALONE. On the wrapper, every upgrade
-  // re-announced the intro and both Dock paragraphs to a screen reader.
-  box.innerHTML = intro
-    + '<div id="fr-return-row" role="status" aria-live="polite">'
-    + frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' })
-    + '</div>'
-    + '<div id="fr-return-dock">' + drag(false) + '</div>';
+  // what is true at that moment, and a LOCAL state the wire cannot claim.
+  rowEl.innerHTML = frCheckRow({ local: true, state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' });
+  dockEl.innerHTML = drag(false);
   frForkActions();
   try {
-    const res = await fetch('/api/machine', { cache: 'no-store' });
-    // ok checked BEFORE parsing: a non-JSON error body used to throw out of
-    // json() first, leaving the status check a dead line.
-    if (!res.ok) throw new Error('machine check failed');
-    const body = await res.json();
+    if (!FR_MACHINE_LOOK) {
+      FR_MACHINE_LOOK = fetch('/api/machine', { cache: 'no-store' })
+        .then((res) => {
+          // ok checked BEFORE parsing: a non-JSON error body used to throw
+          // out of json() first, leaving the status check a dead line.
+          if (!res.ok) throw new Error('machine check failed');
+          return res.json();
+        })
+        .finally(() => { FR_MACHINE_LOOK = null; });
+    }
+    const body = await FR_MACHINE_LOOK;
+    if (gen !== FR_RETURN_GEN) return;
     // Its OWN field, deliberately not one of `checks` -- see engine/machine.js:
     // folded into the rows, step 2 counted it and step 4 captioned it as a
     // reason an agent may not run, which it is not.
     const found = body.appLocation;
     if (!found || !found.state) throw new Error('no app-location answer');
-    document.getElementById('fr-return-row').innerHTML = frCheckRow(found);
-    document.getElementById('fr-return-dock').innerHTML = drag(found.state === 'ok');
+    rowEl.innerHTML = frCheckRow(found);
+    dockEl.innerHTML = drag(found.state === 'ok');
   } catch {
+    if (gen !== FR_RETURN_GEN) return;
     // We could not ASK -- a different fact from the engine's own could-not-
     // check, and worded differently on purpose: the harness tells the fetched
-    // answer, the placeholder, and this fallback apart by their words.
-    document.getElementById('fr-return-row').innerHTML = frCheckRow({
+    // answer, the placeholder, and this fallback apart by their words. The
+    // DOCK moves with the row: a folder-pointing instruction must never
+    // outlive the answer that named the folder.
+    rowEl.innerHTML = frCheckRow({
       state: 'unknown',
       title: 'We could not check where the Kosmos icon is right now',
       detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
         + 'right of your screen, and it will find it.',
     });
+    dockEl.innerHTML = drag(false);
   }
 }
 

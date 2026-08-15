@@ -532,6 +532,21 @@ function restartCheck(runner) {
  * here. The copy stays honest about exactly that ("That is not the same as
  * it not being there").
  */
+/**
+ * The could-not-look answer, defined ONCE. The /api/machine route's degraded
+ * catch path publishes this same row, and a second hand-copied literal there
+ * went stale the moment this wording moved.
+ */
+function appLocationUnknown() {
+  return {
+    key: 'app-location',
+    state: STATE.UNKNOWN,
+    title: 'We could not check where the Kosmos icon is',
+    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
+      + 'top right of your screen, and it will find it.',
+  };
+}
+
 function appLocationCheck(opts) {
   // ⚠️ A malformed override THROWS rather than silently probing the real
   // machine. The fallback used to require length exactly 2, so a test passing
@@ -540,8 +555,12 @@ function appLocationCheck(opts) {
   // prevent.
   let dirs;
   if (opts && opts.appDirs !== undefined) {
-    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0) {
-      throw new Error('appDirs override must be a non-empty array of directories');
+    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0
+        || !opts.appDirs.every((d) => typeof d === 'string' && d.length > 0)) {
+      // Non-string elements included: path.join would TypeError inside the
+      // look's try, read as errored, and answer a fabricated could-not-look
+      // -- the one state this guard exists to keep honest.
+      throw new Error('appDirs override must be a non-empty array of directory paths');
     }
     dirs = opts.appDirs;
   } else {
@@ -565,9 +584,13 @@ function appLocationCheck(opts) {
       // pointing somebody at a thing that will not open.
       if (st.isDirectory()) {
         // Index 0 and 1 are the two real folders; an injected extra gets a
-        // title that does not name a folder it was not found in.
-        const title = i < TITLES.length ? TITLES[i] : 'We found the Kosmos icon on this Mac';
-        return { key: 'app-location', state: STATE.OK, title, detail: OPEN_FROM_THERE };
+        // title AND detail that name no folder ("from there" would point at
+        // a place the title deliberately declines to name).
+        const named = i < TITLES.length;
+        const title = named ? TITLES[i] : 'We found the Kosmos icon on this Mac';
+        const detail = named ? OPEN_FROM_THERE
+          : 'Open it from where you found it. Clicking it starts Kosmos if it is not already running.';
+        return { key: 'app-location', state: STATE.OK, title, detail };
       }
     } catch (err) {
       if (err && err.code === 'ENOENT') continue;
@@ -579,13 +602,7 @@ function appLocationCheck(opts) {
   }
   if (errored) {
     // "Could not look" must never render as "it is not there".
-    return {
-      key: 'app-location',
-      state: STATE.UNKNOWN,
-      title: 'We could not check where the Kosmos icon is',
-      detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
-        + 'top right of your screen, and it will find it.',
-    };
+    return appLocationUnknown();
   }
   return {
     key: 'app-location',
@@ -637,4 +654,4 @@ function check(opts) {
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, restartCheck, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, STATE };
