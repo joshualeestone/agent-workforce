@@ -153,6 +153,135 @@ test('renaming changes the name and NOT the id, because the id is what membershi
   assert.equal(after.name, 'New');
 });
 
+// ---------------------------------------------------------------------------
+// Archiving: a display state, never a removal
+// ---------------------------------------------------------------------------
+
+test('archiving sets the flag and the date; restoring clears BOTH', () => {
+  reset();
+  const p = projects.create({ name: 'Season', folder: folder('season') });
+
+  const on = projects.setArchived(p.id, true);
+  assert.equal(on.archived, true);
+  assert.ok(on.archivedAt, 'the date the person will read in the disclosure row');
+
+  const off = projects.setArchived(p.id, false);
+  assert.equal(off.archived, false);
+  // A stale "archived at" beside a project that is not archived would be a
+  // sentence about a thing that is no longer true.
+  assert.equal(off.archivedAt, null);
+});
+
+test('archiving touches nothing else: record, folder, and members stay as they are', () => {
+  reset();
+  agent('mara', 'hello');
+  const dir = folder('untouched');
+  fs.writeFileSync(path.join(dir, 'work.txt'), 'real work');
+  const p = projects.create({ name: 'Hold', folder: dir });
+  // No roster on purpose: membership is what archiving must not touch, and
+  // whether the agent was visible at add time is another test's question.
+  projects.addAgent(p.id, 'mara');
+
+  projects.setArchived(p.id, true);
+
+  const row = projects.readAll().find((x) => x.id === p.id);
+  assert.ok(row, 'archived is a state, not a removal');
+  assert.deepEqual(row.agents, ['mara']);
+  assert.ok(fs.existsSync(path.join(dir, 'work.txt')));
+});
+
+test('re-archiving a record with a stray distrusted date stamps NOW, not the stray', () => {
+  reset();
+  const p = projects.create({ name: 'Stray date', folder: folder('stray-date') });
+  const all = projects.readAll();
+  Object.assign(all.find((x) => x.id === p.id), { archived: false, archivedAt: '2019-03-04T00:00:00.000Z' });
+  projects.writeAll(all);
+  // The read side heals this to null; the write side must not republish it.
+  const on = projects.setArchived(p.id, true);
+  assert.ok(!String(on.archivedAt).startsWith('2019'),
+    'the distrusted stray date was published as the archive date');
+});
+
+test('a mangled archivedAt VALUE never becomes a confident date', () => {
+  reset();
+  const p = projects.create({ name: 'Epoch trap', folder: folder('epoch-trap') });
+  const all = projects.readAll();
+  // archived true with a numeric date: new Date(12345) is a valid 1970
+  // instant, so without the value heal the disclosure read "Archived
+  // 1/1/1970" off a field nobody recorded.
+  Object.assign(all.find((x) => x.id === p.id), { archived: true, archivedAt: 12345 });
+  projects.writeAll(all);
+  assert.equal(projects.get(p.id, []).archivedAt, null, 'a numeric stray published as a date');
+  const all2 = projects.readAll();
+  Object.assign(all2.find((x) => x.id === p.id), { archived: true, archivedAt: 'not a date' });
+  projects.writeAll(all2);
+  assert.equal(projects.get(p.id, []).archivedAt, null, 'an unparseable stray published as a date');
+  // And the WRITE side: re-archiving over the numeric stray stamps now.
+  const on = projects.setArchived(p.id, true);
+  assert.equal(typeof on.archivedAt, 'string');
+  assert.ok(!Number.isNaN(new Date(on.archivedAt).getTime()));
+});
+
+test('edit applies both carried fields in one write, and a refused field refuses the whole save', () => {
+  reset();
+  const p = projects.create({ name: 'Atomic shell', folder: folder('atomic-shell') });
+  const both = projects.edit(p.id, { name: 'Atomic II', archived: true });
+  assert.equal(both.name, 'Atomic II');
+  assert.equal(both.archived, true);
+  assert.throws(() => projects.edit(p.id, { name: 'Atomic III', archived: 'yes' }), /true or false/);
+  const after = projects.get(p.id, []);
+  assert.equal(after.name, 'Atomic II', 'the valid half of a refused save must not land');
+  assert.equal(after.archived, true);
+  assert.throws(() => projects.edit(p.id, {}), /nothing here we can change/);
+});
+
+test('every hand-mangled archived shape heals on read, in the safe direction', () => {
+  reset();
+  const p = projects.create({ name: 'Mangled', folder: folder('mangled') });
+  const mangle = (fields) => {
+    const all = projects.readAll();
+    const row = all.find((x) => x.id === p.id);
+    delete row.archived; delete row.archivedAt;
+    Object.assign(row, fields);
+    projects.writeAll(all);
+    return projects.get(p.id, []);
+  };
+  // Truthy non-booleans never read as archived: a record only counts as
+  // archived when it says exactly true.
+  assert.equal(mangle({ archived: 'yes' }).archived, false);
+  assert.equal(mangle({ archived: 1 }).archived, false);
+  // A stray date beside archived:false is not repeated as if it meant
+  // something -- "archived at" about a project that is not archived is a
+  // sentence about a thing that is not true.
+  const stray = mangle({ archived: false, archivedAt: '2026-01-01T00:00:00.000Z' });
+  assert.equal(stray.archived, false);
+  assert.equal(stray.archivedAt, null);
+});
+
+test('a record written before archiving existed reads as not archived, not as undefined', () => {
+  reset();
+  const p = projects.create({ name: 'Old world', folder: folder('legacy') });
+  // Surgery on the store file: strip the fields the way every pre-archiving
+  // record genuinely lacks them.
+  const all = projects.readAll();
+  delete all[0].archived;
+  delete all[0].archivedAt;
+  projects.writeAll(all);
+
+  const seen = projects.get(p.id, []);
+  assert.equal(seen.archived, false);
+  assert.equal(seen.archivedAt, null);
+});
+
+test('anything but a boolean is refused, because "false" the string is not false', () => {
+  reset();
+  const p = projects.create({ name: 'Strict', folder: folder('strict') });
+  assert.throws(() => projects.setArchived(p.id, 'false'), /true or false/);
+  assert.throws(() => projects.setArchived(p.id, 1), /true or false/);
+  const row = projects.get(p.id, []);
+  assert.equal(row.archived, false, 'a refused write changes nothing');
+});
+
 test('removing a project removes our record and NOT the folder', () => {
   reset();
   const dir = folder('keepme');

@@ -640,7 +640,8 @@ async function main() {
         return 'rgb(255, 255, 255)';
       };
       const out = [];
-      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc']) {
+      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc',
+                         '#pj-list-view .viewtoggle .vt', '#pj-list-view .viewtoggle .vt.on']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
@@ -760,6 +761,405 @@ async function main() {
     await ctx.close();
   }
   console.log(contrastFails ? `✖ ${contrastFails} contrast failures` : '✔ 7-contrast (WCAG AA, light and dark)');
+
+  // 8. The app shell: sticky bar, the K mark, the member wording, the two
+  //    scoped view toggles, and the archived disclosure. Behaviour in one
+  //    context; the states worth evidence get their own shots below.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 520 } });
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+
+      // 8a. The bar stays while the page goes. Asserted as the SYMPTOM (after
+      // scrolling, the tabs still sit at the top of the screen), not as a
+      // computed-style reading of `position: sticky`.
+      const stick = await page.evaluate(() => {
+        window.scrollTo(0, 400);
+        const bar = document.querySelector('.apphead');
+        const r = bar.getBoundingClientRect();
+        return { scrolled: window.scrollY, top: r.top, visible: r.height > 0 };
+      });
+      if (stick.scrolled < 100) throw new Error('the page did not scroll, so stickiness was never exercised (scrollY ' + stick.scrolled + ')');
+      if (!stick.visible || stick.top < -1 || stick.top > 1) {
+        throw new Error('after scrolling ' + stick.scrolled + 'px the bar is not at the top of the screen (top ' + stick.top + ') -- the nav is not sticking');
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+
+      // 8b. The K mark goes to the Agents board through the real tab control.
+      await page.click('#klink');
+      await page.waitForTimeout(200);
+      const landed = await page.evaluate(() => ({
+        selected: document.querySelector('.tab[data-tab="agents"]').getAttribute('aria-selected'),
+        gridShown: !document.getElementById('grid').hidden,
+        barShown: !document.getElementById('boardbar').hidden,
+      }));
+      if (landed.selected !== 'true' || !landed.gridShown) {
+        throw new Error('clicking the K mark did not land on the Agents board: ' + JSON.stringify(landed));
+      }
+      if (!landed.barShown) throw new Error('the agents view toggle is not shown with the board it operates on');
+
+      // 8c. The agents toggle drives the agents board -- and ONLY it.
+      await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
+      const agLay = await page.evaluate(() => ({
+        aslist: document.getElementById('grid').classList.contains('aslist'),
+        pressed: document.querySelector('.viewtoggle[data-scope="agents"] [data-layout="list"]').getAttribute('aria-pressed'),
+        pjTouched: document.getElementById('pj-list').classList.contains('asgrid'),
+      }));
+      if (!agLay.aslist || agLay.pressed !== 'true') throw new Error('the agents list toggle did not change the board: ' + JSON.stringify(agLay));
+      if (agLay.pjTouched) throw new Error('the agents toggle drove the PROJECTS list -- the scopes are not independent');
+      // The AGENTS toggle's contrast, measured here where it is on screen
+      // (the sweep runs on the projects tab, where this one is hidden).
+      const agContrast = await page.evaluate(() => {
+        const parse = (c) => { const m = String(c).match(/[\d.]+/g).map(Number); return { r: m[0], g: m[1], b: m[2], a: m.length > 3 ? m[3] : 1 }; };
+        const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const over = (f, b) => ({ r: f.r * f.a + b.r * (1 - f.a), g: f.g * f.a + b.g * (1 - f.a), b: f.b * f.a + b.b * (1 - f.a) });
+        const bgOf = (el) => { let n = el; while (n) { const c = getComputedStyle(n).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)') return c; n = n.parentElement; } return 'rgb(255, 255, 255)'; };
+        const ratio = (el) => { const fg = parse(getComputedStyle(el).color); const bg = parse(bgOf(el)); const l1 = lum(over(fg, bg)); const l2 = lum(bg); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+        const rest = document.querySelector('.boardbar .vt:not(.on)');
+        const on = document.querySelector('.boardbar .vt.on');
+        return { rest: rest ? ratio(rest) : null, on: on ? ratio(on) : null };
+      });
+      if (agContrast.rest === null || agContrast.on === null || agContrast.rest < 3 || agContrast.on < 3) {
+        throw new Error('the agents toggle is unmeasured or under the 3:1 icon floor: ' + JSON.stringify(agContrast));
+      }
+
+      // 8d. The projects toggle, and the choice surviving a reload.
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(300);
+      await page.click('.viewtoggle[data-scope="projects"] [data-layout="grid"]');
+      const pjLay = await page.evaluate(() => document.getElementById('pj-list').classList.contains('asgrid'));
+      if (!pjLay) throw new Error('the projects grid toggle did not change the list');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
+      const kept = await page.evaluate(() => ({
+        pj: document.getElementById('pj-list').classList.contains('asgrid'),
+        ag: document.getElementById('grid').classList.contains('aslist'),
+        pressed: document.querySelector('.viewtoggle[data-scope="projects"] [data-layout="grid"]').getAttribute('aria-pressed'),
+      }));
+      if (!kept.pj || !kept.ag || kept.pressed !== 'true') {
+        throw new Error('the layout choice did not survive a reload: ' + JSON.stringify(kept));
+      }
+      // Back to the defaults so the shots below show the shipped resting state.
+      await page.click('.viewtoggle[data-scope="projects"] [data-layout="list"]');
+      await page.evaluate(() => {
+        document.querySelector('.tab[data-tab="agents"]').click();
+      });
+      await page.waitForTimeout(200);
+      await page.click('.viewtoggle[data-scope="agents"] [data-layout="grid"]');
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(300);
+
+      // 8e. The member wording and the resting picker. The heading is the
+      // pinned words; the choosing row hides behind "+ Add Member" and the
+      // reveal puts the keyboard on the choice.
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(300);
+      const members = await page.evaluate(() => ({
+        heading: (document.querySelector('#pj-one-view .flabel') || {}).textContent,
+        btnShown: !document.getElementById('pj-add-member').hidden,
+        rowHidden: document.getElementById('pj-one-add-row').hidden,
+      }));
+      if (members.heading !== 'Project members') throw new Error('the members heading reads "' + members.heading + '", not the pinned words');
+      if (!members.btnShown || !members.rowHidden) throw new Error('the picker is not resting behind + Add Member: ' + JSON.stringify(members));
+      await page.click('#pj-add-member');
+      const revealed = await page.evaluate(() => ({
+        rowHidden: document.getElementById('pj-one-add-row').hidden,
+        btnShown: !document.getElementById('pj-add-member').hidden,
+        focusOnSelect: document.activeElement === document.getElementById('pj-one-add'),
+      }));
+      if (revealed.rowHidden || revealed.btnShown || !revealed.focusOnSelect) {
+        throw new Error('+ Add Member did not reveal the picker with focus on the choice: ' + JSON.stringify(revealed));
+      }
+      // Leaving and coming back rests it again -- an open picker must not leak
+      // between projects.
+      await page.click('#pj-back');
+      await page.waitForTimeout(200);
+      await page.click('[data-project="quarterclose"]');
+      await page.waitForTimeout(300);
+      const rested = await page.evaluate(() => ({
+        btnShown: !document.getElementById('pj-add-member').hidden,
+        rowHidden: document.getElementById('pj-one-add-row').hidden,
+      }));
+      if (!rested.btnShown || !rested.rowHidden) throw new Error('the picker leaked open into the next project: ' + JSON.stringify(rested));
+
+      // 8f. Archiving, from the resting truth outward: no disclosure at all
+      // while nothing is archived; archive one from its detail; the count is
+      // the rows; Restore brings it back.
+      const before = await page.evaluate(() => ({
+        wrapHidden: document.getElementById('pj-arch-wrap').hidden,
+      }));
+      if (!before.wrapHidden) throw new Error('the archived disclosure is on screen with nothing archived');
+      await page.click('#pj-one-archive');
+      await page.waitForTimeout(400);
+      const archivedNow = await page.evaluate(() => ({
+        onList: !document.getElementById('pj-list-view').hidden,
+        rowGone: !document.querySelector('#pj-list [data-project="quarterclose"]'),
+        wrapShown: !document.getElementById('pj-arch-wrap').hidden,
+        toggleText: document.getElementById('pj-arch-toggle').textContent,
+        listHidden: document.getElementById('pj-arch-list').hidden,
+        note: document.getElementById('pj-list-msg').textContent,
+      }));
+      if (!archivedNow.onList) throw new Error('archiving did not return to the list');
+      const focusAfterArchive = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterArchive) throw new Error('archiving from the detail dropped keyboard focus to body');
+      if (!archivedNow.rowGone) throw new Error('the archived project is still in the active list');
+      if (!archivedNow.wrapShown || archivedNow.toggleText !== 'Show archived projects (1)') {
+        throw new Error('the disclosure does not carry the row-derived count: ' + JSON.stringify(archivedNow));
+      }
+      if (!archivedNow.listHidden) throw new Error('the archived list opened itself');
+      if (!/Archived Quarter close/.test(archivedNow.note)) throw new Error('nothing told the person what just happened: "' + archivedNow.note + '"');
+      // The note may not reference the screen (round 6: "in the archived
+      // list below" outlived a LATER failed poll that hid the disclosure).
+      if (/above|below|this page|archived list/.test(archivedNow.note)) {
+        throw new Error('the archive note references the screen, which any later poll can repaint: "' + archivedNow.note + '"');
+      }
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+      const open = await page.evaluate(() => {
+        const row = document.querySelector('#pj-arch-list .removed-row');
+        return {
+          listHidden: document.getElementById('pj-arch-list').hidden,
+          expanded: document.getElementById('pj-arch-toggle').getAttribute('aria-expanded'),
+          who: row ? row.querySelector('.who').textContent : null,
+          hasRestore: !!(row && row.querySelector('[data-restore]')),
+          when: row ? row.querySelector('.when').textContent : null,
+        };
+      });
+      if (open.listHidden || open.expanded !== 'true') throw new Error('the disclosure did not open: ' + JSON.stringify(open));
+      if (open.who !== 'Quarter close' || !open.hasRestore) throw new Error('the archived row is not the project with its Restore: ' + JSON.stringify(open));
+      if (!/^Archived/.test(open.when || '')) throw new Error('the row does not say when it was archived: "' + open.when + '"');
+      await page.click('#pj-arch-list [data-restore]');
+      await page.waitForTimeout(400);
+      const restored = await page.evaluate(() => ({
+        back: !!document.querySelector('#pj-list [data-project="quarterclose"]'),
+        wrapHidden: document.getElementById('pj-arch-wrap').hidden,
+      }));
+      if (!restored.back) throw new Error('Restore did not return the project to the list');
+      if (!restored.wrapHidden) throw new Error('an empty archived section stayed on screen after the restore');
+      // The keyboard survived the section disappearing (round 7: the only
+      // focus assertion in step 8 was the picker reveal, so the rescues
+      // were undriven and a missing one was invisible to a green run).
+      const focusAfterRestore = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterRestore) throw new Error('the disclosure restore dropped keyboard focus to body');
+      // 8g. Archive the SAME project again the same day: the regenerated rows
+      // string is byte-identical, so a disclosure that only hid (without
+      // clearing the setIfChanged cache) reopens on the stale DOM with its
+      // still-disabled Restore -- a one-way door until reload (review round
+      // 1, measured). The button must come back enabled.
+      const all2 = await api('/api/projects');
+      const q2 = (all2.projects || []).find((pr) => pr.name === 'Quarter close');
+      await api('/api/project/' + encodeURIComponent(q2.id), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.waitForTimeout(600);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+      const again = await page.evaluate(() => {
+        const b = document.querySelector('#pj-arch-list [data-restore]');
+        return { present: !!b, disabled: b ? b.disabled : null, text: b ? b.textContent : null };
+      });
+      if (!again.present) throw new Error('re-archiving did not put the row back in the disclosure');
+      if (again.disabled) throw new Error('the re-archived row reopened with a DISABLED Restore (the stale setIfChanged cache): ' + JSON.stringify(again));
+      await page.click('#pj-arch-list [data-restore]');
+      await page.waitForTimeout(400);
+      const finalBack = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!finalBack) throw new Error('the second restore did not return the project');
+      // 8h. The ARCHIVED project's detail (reachable via pjAnswerFrom in the
+      // product): the screen states the fact and flips the control -- and on
+      // a restore whose RE-READ fails, every element tells the same story:
+      // the write landed, the read did not, and "Restored." appears nowhere.
+      // The two prior review rounds both found their blocker in a path this
+      // harness did not visit; this is that path.
+      await api('/api/project/' + encodeURIComponent('quarterclose'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.waitForTimeout(200);
+      // The page's copy of PROJECTS predates the API archive; the product's
+      // own poll would catch up in 5s, but the harness reloads deliberately
+      // so the detail is painted from the archived record.
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      await page.evaluate(() => { openProject('quarterclose'); });
+      await page.waitForTimeout(300);
+      const archDetail = await page.evaluate(() => ({
+        label: document.getElementById('pj-one-archive-label').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+      }));
+      if (archDetail.label !== 'This project is archived' || archDetail.btn !== 'Restore it') {
+        throw new Error('the archived detail does not state its own fact: ' + JSON.stringify(archDetail));
+      }
+      // The failed-PUT direction first (round 8: both failure arms dropped
+      // the keyboard and left the control unmarked while the success arms
+      // had been fixed one by one).
+      await page.route('**/api/project/*', (r) => r.fulfill({ status: 500, json: { error: 'stubbed put' } }));
+      await page.click('#pj-one-archive');
+      await page.waitForTimeout(400);
+      const failedPut = await page.evaluate(() => ({
+        msg: document.getElementById('pj-one-archive-msg').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+        focusOnBody: document.activeElement === document.body,
+      }));
+      await page.unroute('**/api/project/*');
+      if (!failedPut.msg) throw new Error('a failed PUT said nothing');
+      if (!/failed/i.test(failedPut.btn)) throw new Error('a failed PUT left the control unmarked: ' + JSON.stringify(failedPut));
+      if (failedPut.focusOnBody) throw new Error('a failed PUT dropped the keyboard to body');
+      await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'stubbed' } }));
+      await page.click('#pj-one-archive');
+      await page.waitForTimeout(500);
+      const failedRead = await page.evaluate(() => ({
+        archMsg: document.getElementById('pj-one-archive-msg').textContent,
+      }));
+      if (/^Restored\.$/.test(failedRead.archMsg.trim())) {
+        throw new Error('a restore with a failed re-read still claimed "Restored." beside a page that says archived');
+      }
+      if (!/saved/.test(failedRead.archMsg) || !/could not re-read/.test(failedRead.archMsg)) {
+        throw new Error('the failed-re-read note does not name both halves (write landed, read did not): ' + JSON.stringify(failedRead));
+      }
+      // ⚠️ The note may not describe the SCREEN (review round 5): "this page
+      // may still show it archived" became false when the next poll
+      // repainted the control around it. Held to the disclosure's standard,
+      // and then the recovery is DRIVEN: unroute, force a read, and the
+      // sentence must still be true beside the repainted control.
+      if (/this page|above|below/.test(failedRead.archMsg)) {
+        throw new Error('the detail note references the current screen, which the next poll repaints: ' + JSON.stringify(failedRead));
+      }
+      await page.unroute('**/api/projects');
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      const recovered = await page.evaluate(() => ({
+        note: document.getElementById('pj-one-archive-msg').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+        oneMsg: document.getElementById('pj-one-msg').textContent,
+      }));
+      if (recovered.btn !== 'Archive it') {
+        throw new Error('the recovering poll did not repaint the control from the truth: ' + JSON.stringify(recovered));
+      }
+      const focusAfterDetailRestore = await page.evaluate(() => document.activeElement === document.body);
+      if (focusAfterDetailRestore) throw new Error('the detail restore dropped keyboard focus to body');
+      if (/this page|above|below|archived list/.test(recovered.note)) {
+        throw new Error('the note references the screen, which recovery has repainted: ' + JSON.stringify(recovered));
+      }
+      if (/We cannot read your projects right now/.test(recovered.oneMsg)) {
+        throw new Error('the failure sentence in #pj-one-msg outlived the successful read');
+      }
+      // The write DID land: the stub's glob (**/api/projects) matches only
+      // the LIST endpoint, so the PUT to /api/project/<id> passes through
+      // it untouched. A clean reload shows it active again -- which is
+      // also the cleanup.
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const cleanedUp = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!cleanedUp) throw new Error('the restore whose re-read failed did not actually land');
+      // 8i. The DISCLOSURE restore arm under the same failed re-read: its
+      // note must describe the MOMENT and point at nothing, because five
+      // seconds after the failure the poll succeeds, repaints the healthy
+      // list, and a note referencing "the note above" points at a sentence
+      // that no longer exists (review round 4, measured).
+      await api('/api/project/' + encodeURIComponent('quarterclose'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+      await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'stubbed' } }));
+      await page.click('#pj-arch-list [data-restore]');
+      await page.waitForTimeout(600);
+      const discFailed = await page.evaluate(() => ({
+        note: document.getElementById('pj-list-msg').textContent,
+        wrapHidden: document.getElementById('pj-arch-wrap').hidden,
+        focusOnBody: document.activeElement === document.body,
+        focusTag: document.activeElement.tagName,
+      }));
+      await page.unroute('**/api/projects');
+      if (!/restore saved, but we could not re-read/.test(discFailed.note)) {
+        throw new Error('the disclosure arm did not say which half failed: ' + JSON.stringify(discFailed));
+      }
+      if (/above|below/.test(discFailed.note)) {
+        throw new Error('the note points at another element, which the next successful poll will erase: ' + JSON.stringify(discFailed));
+      }
+      // The list error path withdraws the disclosure WITH the list (round
+      // 7: asserting an enabled button inside a hidden wrap measured a
+      // property the person cannot reach), so the honest assertions are:
+      // the section is off screen, and the keyboard did not die with it.
+      if (!discFailed.wrapHidden) {
+        throw new Error('the disclosure stayed on screen beside a list saying we could not read: ' + JSON.stringify(discFailed));
+      }
+      if (discFailed.focusOnBody) {
+        throw new Error('the keyboard died with the withdrawn section: ' + JSON.stringify(discFailed));
+      }
+      // The recovery is DRIVEN here too (round 6: 8h proved its arm across
+      // the recovering poll and 8i jumped straight to a goto that wiped
+      // the note): force a successful read and the moment sentence must
+      // still be true beside the repainted list.
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      const discRecovered = await page.evaluate(() => ({
+        note: document.getElementById('pj-list-msg').textContent,
+        rowBack: !!document.querySelector('#pj-list [data-project="quarterclose"]'),
+      }));
+      if (!discRecovered.rowBack) throw new Error('the recovering poll did not repaint the restored row');
+      if (/above|below|this page|archived list/.test(discRecovered.note)) {
+        throw new Error('the disclosure note references the screen after recovery: ' + JSON.stringify(discRecovered));
+      }
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const discCleaned = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!discCleaned) throw new Error('the disclosure restore whose re-read failed did not actually land');
+      // 8j. The scroll pad clears the bar at the widths where the header
+      // WRAPS (review rounds 4-5: one value measured at one width put focus
+      // 22px under the bar at 400). Measured, not trusted from the comment.
+      for (const w of [1280, 420, 400]) {
+        await page.setViewportSize({ width: w, height: 700 });
+        await page.waitForTimeout(250);
+        const pad = await page.evaluate(() => ({
+          bar: Math.round(document.querySelector('.apphead').getBoundingClientRect().height),
+          pad: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0,
+        }));
+        if (pad.pad < pad.bar) {
+          throw new Error(`at ${w}px wide the scroll pad (${pad.pad}) is under the bar (${pad.bar}): focus scrolls beneath it`);
+        }
+      }
+      await page.setViewportSize({ width: 1280, height: 520 });
+      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, BOTH restore arms under a failed re-read, and the pad clears the bar at wrapped widths)');
+    } finally {
+      await ctx.close();
+    }
+  }
+
+  // 9. Evidence shots for the two new resting states.
+  {
+    const all = await api('/api/projects');
+    const q = (all.projects || []).find((p) => p.name === 'Quarter close');
+    if (!q) throw new Error('the shot fixture is gone: Quarter close is not in the list');
+    await api('/api/project/' + encodeURIComponent(q.id), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ archived: true }),
+    });
+    await shot('8-archived', async (page) => {
+      await page.click('#pj-arch-toggle');
+      await page.waitForTimeout(200);
+    });
+    await api('/api/project/' + encodeURIComponent(q.id), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ archived: false }),
+    });
+    await shot('9-grid-view', async (page) => {
+      await page.click('.viewtoggle[data-scope="projects"] [data-layout="grid"]');
+      await page.waitForTimeout(200);
+    });
+  }
 
   // ⚠️ The fixture folders live in the REAL home, because the folder browser is
   // rooted there and a fixture in /tmp could not be reached by the thing under

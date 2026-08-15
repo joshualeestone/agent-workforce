@@ -579,6 +579,126 @@ test('a failed half of a two-field save applies NOTHING, not the readable half',
   assert.equal(after.description, 'original');
 });
 
+test('an archive-only PUT archives without renaming, and restore brings it back', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Season', folder: folder('archiving') })).project;
+
+  const on = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: true }),
+  });
+  assert.equal(on.status, 200, on.body);
+  assert.equal(json(on).project.archived, true);
+  assert.ok(json(on).project.archivedAt);
+  assert.equal(json(on).project.name, 'Season', 'a PUT with no name does not touch the name');
+
+  const off = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: false }),
+  });
+  assert.equal(off.status, 200, off.body);
+  assert.equal(json(off).project.archived, false);
+  assert.equal(json(off).project.archivedAt, null);
+});
+
+test('a rename-only PUT does not touch archived', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Kept', folder: folder('kept-archived') })).project;
+  await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: true }),
+  });
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Kept still' }),
+  });
+  assert.equal(res.status, 200, res.body);
+  assert.equal(json(res).project.name, 'Kept still');
+  assert.equal(json(res).project.archived, true, 'an absent field means leave it alone, never clear it');
+});
+
+test('a save that would move nothing is refused, not answered "saved"', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Immovable', folder: folder('immovable') })).project;
+  // {} and a capitalised typo both carry no field we recognise -- 200 for
+  // either is a save the person believes happened. On main the same {} was
+  // already refused (rename ran unconditionally); conditional fields must
+  // not turn that refusal into a silent success.
+  for (const body of [{}, { Archived: true }]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 400, `body ${JSON.stringify(body)} should be refused: ${res.body}`);
+  }
+  // A carried name of the wrong type is refused loudly, not skipped.
+  const bad = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 42 }),
+  });
+  assert.equal(bad.status, 400, bad.body);
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].name, 'Immovable', 'a refused write changes nothing');
+  assert.equal(list[0].archived, false);
+});
+
+test('an archive-only PUT leaves member instruction files untouched', async () => {
+  reset();
+  // The comment beside the re-tell gate claims it; this holds it.
+  const board = fleet.install([fleet.agent('archtell', { state: 'working' })]);
+  try {
+    const wdir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'archtell');
+    fs.mkdirSync(wdir, { recursive: true });
+    const file = path.join(wdir, 'CLAUDE.md');
+    fs.writeFileSync(file, '# archtell\n');
+    const made = json(await post('/api/projects', { name: 'Quiet archive', folder: folder('quiet-archive'), agents: ['archtell'] })).project;
+    const afterCreate = fs.readFileSync(file, 'utf8');
+    assert.match(afterCreate, /Quiet archive/, 'the premise: creation reached the boot file');
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ archived: true }),
+    });
+    assert.equal(res.status, 200, res.body);
+    assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
+      'archiving rewrote a boot file about a project whose name did not move');
+  } finally {
+    board.restore();
+  }
+});
+
+test('a mixed body with one bad field applies NOTHING, not the good half', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Whole', folder: folder('whole-mixed') })).project;
+  // The name is valid, archived is refused: the rename must not have landed
+  // when the route answers failure -- a 400 about a save that half applied
+  // tells the caller a lie in the other direction.
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Renamed anyway', archived: 'yes' }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.name, 'Whole', 'the valid half of a refused save must not land');
+  assert.equal(after.archived, false);
+});
+
+test('archived refuses anything but a boolean, because "false" the string is not false', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Strict', folder: folder('strict-put') })).project;
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: 'false' }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].archived, false, 'a refused write changes nothing');
+});
+
 test('a name that cannot be decoded is refused rather than guessed at', async () => {
   const res = await req('/api/project/%ZZ');
   assert.equal(res.status, 400);

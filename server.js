@@ -1576,10 +1576,18 @@ const server = http.createServer((req, res) => {
         const fields = {};
         if (body.name !== undefined) fields.name = body.name;
         if (body.description !== undefined) fields.description = body.description;
+        /* archived is a carried field like the others: the engine's edit
+           validates every carried field before its ONE write (a non-boolean
+           archived is refused there, because `!!` would turn
+           {"archived": "false"} into an archive), so a mixed body either
+           applies whole or not at all. */
+        if (body.archived !== undefined) fields.archived = body.archived;
         projects.edit(id, fields);
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
-        // project that no longer goes by that.
+        // project that no longer goes by that. Archiving does NOT re-tell: the
+        // name did not change, and the engine's own rule is that archiving
+        // changes nothing about the members.
         // ⚠️ Re-read rather than reusing the row from the existence check: a
         // record removed in between made this `.agents` of `undefined`, and the
         // raw TypeError went out as the person's error message.
@@ -1588,9 +1596,9 @@ const server = http.createServer((req, res) => {
         // Same reason as create and delete: the rename HAPPENED. A failure
         // re-telling the members is a different fact from a failed rename.
         // (Only when the name moved: the managed block carries the name and
-        // the folder, and neither the description nor anything else this
-        // route can change, so a description-only save has nothing to
-        // re-tell.)
+        // the folder, and neither the description, the archived flag, nor
+        // anything else this route can change, so a name-less save has
+        // nothing to re-tell.)
         try {
           if (body.name !== undefined) {
             for (const a of (reRead ? reRead.agents : [])) projects.syncAgent(a, roster);

@@ -172,6 +172,57 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
         color: var(--label-2); font-size: 12px; line-height: 1;
         display: flex; align-items: center; justify-content: center; }
 .edit:hover { background: var(--attn-bg); color: var(--label); border-color: var(--border-strong); }
+/* ⚠️ The negative margins MIRROR the body padding (var(--space-8) on the
+   sides), so the bar reaches the page edges and content scrolls under it
+   edge to edge.
+   The bar paints on the page's own ground -- a transparent sticky bar would
+   show the content sliding through it. */
+/* Anything scrolled to programmatically (focus rescues, scrollIntoView)
+   must clear the sticky bar, or "focused but hidden under the bar" replaces
+   the focus-dropped-to-body failure this file already guards. In PX like
+   the spacing tokens the bar is built from (a rem value diverges as the
+   root font moves while the bar does not). Measured per width, not once:
+   120px at 1440 through 440, then the header WRAPS -- 138px at 420, 154px
+   at 400 -- so one value padded from one width put focus 22px under the
+   bar at 400. */
+html { scroll-padding-top: 132px; }
+@media (max-width: 440px) { html { scroll-padding-top: 170px; } }
+.apphead { position: sticky; top: 0; z-index: 20; background: var(--bg-sunken);
+           margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-6);
+           padding: var(--space-8) var(--space-8) 0;
+           border-bottom: 0.5px solid var(--separator); }
+.apphead .tabs { margin-bottom: 0; padding-bottom: var(--space-4); }
+.headleft { display: flex; align-items: center; gap: var(--space-5); }
+.klink { border: 0; background: none; padding: 0; cursor: pointer; display: block; line-height: 0; }
+.klink img { width: 34px; height: 34px; display: block; }
+.klink:focus-visible { outline: 2px solid var(--label); outline-offset: 4px; border-radius: 8px; }
+/* ---- grid / list toggle. One component, each instance NAMES its scope with
+   data-scope (the control says what it operates on rather than assuming there
+   is only one of it). `.vt` colour is --label-2, the measured AA pair. */
+.viewtoggle { display: inline-flex; border: 0.5px solid var(--separator);
+              border-radius: var(--radius-control); overflow: hidden; background: var(--bg-elevated); }
+.vt { border: 0; background: none; cursor: pointer; padding: 0; width: 38px; height: 30px;
+      display: grid; place-items: center; color: var(--label-2); }
+.vt svg { display: block; }
+.vt + .vt { border-left: 0.5px solid var(--separator); }
+.vt:hover { color: var(--label); }
+.vt.on { background: var(--label); color: var(--bg-elevated); }
+.vt:focus-visible { outline: 2px solid var(--label); outline-offset: -2px; }
+/* On the selected button the fill IS var(--label), so the same ring was
+   invisible on exactly the control the first Tab can land on (measured
+   1.35:1 light / 1.15:1 dark). The ring inverts with the fill. */
+.vt.on:focus-visible { outline-color: var(--bg-elevated); }
+.boardbar { max-width: 1320px; margin: 0 auto var(--space-4); display: flex; justify-content: flex-end; }
+/* List mode for the agents board: same cards, one readable column. A second
+   renderer would be a second source of truth for what a card says. */
+.grid.aslist { grid-template-columns: minmax(0, 900px); }
+/* Grid mode for the projects list: the same rows laid as cards. */
+.pj-list.asgrid { display: grid;
+                  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
+.pj-list.asgrid .pj-row { height: 100%; }
+/* The empty state and the read-failure card span the grid: the failure
+   message is the one that matters and it must not squeeze into one cell. */
+.pj-list.asgrid .pj-empty, .pj-list.asgrid .err { grid-column: 1 / -1; }
 .tabs { max-width: 1320px; margin: 0 auto var(--space-6); display: flex; gap: var(--space-2); }
 .tab { font: var(--text-body) var(--font-ui); color: var(--label-2); background: none;
        border: 0.5px solid transparent; border-radius: var(--radius-control);
@@ -189,8 +240,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* --- projects ---------------------------------------------------------- */
 .panel-wide { max-width: 860px; }
 .pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
+.pj-headright { display: flex; align-items: center; gap: var(--space-4); }
 .pj-lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin: var(--space-4) 0 var(--space-6); }
 .pj-list { display: flex; flex-direction: column; gap: var(--space-4); }
+.pj-arch-wrap { margin-top: var(--space-6); }
 /* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
    failure. A <button> does NOT inherit the page's colour -- it uses the UA's
    `buttontext`, which is near-black. In light mode that happened to look
@@ -352,6 +405,8 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
   padding: 2px var(--space-3); }
+.pj-tag-arch { font: var(--text-caption) var(--font-ui); color: var(--label-2);
+  text-transform: uppercase; letter-spacing: 0.05em; }
 /* ⚠️ Dashed and full-width, matching `.pj-member.unseen`. `--label` rather than
    `--label-2` because this one is a sentence to read, not a chip to scan, and it
    has to clear AA on both themes.
@@ -760,12 +815,24 @@ svg { display: block; }
 </style>
 </head>
 <body>
+<!-- ⚠️ THE STICKY UNIT IS THE WHOLE BAR, header and tabs together, pulled to
+     the page edges with negative margins that mirror the body padding exactly
+     (the design pack's own warning: the pull-out must track the stage padding,
+     so if body padding ever gains a breakpoint this needs one too). -->
+<div class="apphead">
 <header>
-  <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED programmatically without joining
-       the tab order. Without it `h1.focus()` is a silent no-op, and the fallback
-       that sends the keyboard here after a removal would do nothing at all --
-       an accessibility fix that only appears to work is worse than none. -->
-  <h1 tabindex="-1">Agent Workforce</h1>
+  <!-- ⚠️ A LOGO IN THE TOP LEFT IS A HOME AFFORDANCE whether or not anyone
+       designed it as one. People click it, so it goes somewhere: the Agents
+       tab, by clicking the real tab control rather than calling showTab --
+       aria-selected and the rest of the tab bookkeeping stay in one place. -->
+  <div class="headleft">
+    <button class="klink" id="klink" type="button" aria-label="Go to your agents"><img id="klink-img" alt="" width="34" height="34" src="data:image/png;base64,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"></button>
+    <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED programmatically without joining
+         the tab order. Without it `h1.focus()` is a silent no-op, and the fallback
+         that sends the keyboard here after a removal would do nothing at all --
+         an accessibility fix that only appears to work is worse than none. -->
+    <h1 tabindex="-1">Agent Workforce</h1>
+  </div>
   <div class="headright">
     <button class="btn" id="new-agent" type="button">New agent</button>
     <div class="checked" id="checked"></div>
@@ -777,6 +844,7 @@ svg { display: block; }
   <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
+</div>
 <section class="detail" id="panel-detail" hidden>
   <button class="back" id="detail-back">&#8592; All agents</button>
   <div class="detail-head">
@@ -1113,12 +1181,32 @@ svg { display: block; }
   <div id="pj-list-view">
     <div class="pj-head">
       <h2>My Projects</h2>
-      <button class="btn" id="pj-new" type="button">Add a project</button>
+      <div class="pj-headright">
+        <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
+          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Show projects as a grid">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
+          </button>
+          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="Show projects as a list">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
+          </button>
+        </div>
+        <button class="btn" id="pj-new" type="button">Add a project</button>
+      </div>
     </div>
     <p class="pj-lede">A project is a folder you already have on this computer,
        and the agents you have put on it.</p>
     <p class="fmsg" id="pj-list-msg" aria-live="polite"></p>
     <div id="pj-list" class="pj-list"></div>
+    <!-- ⚠️ Absent entirely when nothing is archived (hidden on the WRAP, same
+         lesson as the removed-agents section: an empty "Show archived
+         projects (0)" teaches the person to ignore this corner). The count in
+         the button is derived from the rows the list actually renders, never
+         typed beside them. -->
+    <div class="pj-arch-wrap" id="pj-arch-wrap" hidden>
+      <button class="linkish" id="pj-arch-toggle" type="button"
+              aria-expanded="false" aria-controls="pj-arch-list"></button>
+      <div class="removed-list" id="pj-arch-list" hidden></div>
+    </div>
   </div>
 
   <!-- One project. -->
@@ -1136,13 +1224,17 @@ svg { display: block; }
     <p class="pj-folder-state" id="pj-one-folder-state"></p>
 
     <div class="field">
-      <span class="flabel">Agents on this project</span>
+      <span class="flabel">Project members</span>
       <p class="fhint">Putting an agent here tells it where this project's folder
          is. It does not stop it reaching anything else, and it is not a
          permission.</p>
       <div id="pj-one-agents" class="pj-members"></div>
-      <div class="frow" style="margin-top: var(--space-5)">
-        <select id="pj-one-add" aria-label="An agent to put on this project"></select>
+      <!-- ⚠️ The picker hides behind the button, not the other way round: the
+           resting state of the box is the members, and "+ Add Member" (the
+           pinned words) is the one control that opens the choosing row. -->
+      <button class="btn" id="pj-add-member" type="button" style="margin-top: var(--space-5)"><span aria-hidden="true">+</span> Add Member</button>
+      <div class="frow" id="pj-one-add-row" hidden style="margin-top: var(--space-5)">
+        <select id="pj-one-add" aria-label="An agent to add to this project"></select>
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
@@ -1214,6 +1306,17 @@ svg { display: block; }
         <pre class="pj-screen" id="pj-screen" tabindex="0" hidden
              role="region" aria-labelledby="pj-screen-label"></pre>
       </div>
+    </div>
+
+    <!-- ⚠️ The pack routes archiving through Project settings, which is not
+         pinned yet -- this placement is provisional and flagged for the
+         designer. The hint sentence is the pack's own. -->
+    <div class="field">
+      <span class="flabel" id="pj-one-archive-label">Archive this project</span>
+      <p class="fhint" id="pj-one-archive-hint">Archiving takes a project off this list. Nothing in the
+         folder changes and the agents that were on it stay as they are.</p>
+      <button class="btn" id="pj-one-archive" type="button">Archive it</button>
+      <p class="fmsg" id="pj-one-archive-msg" aria-live="polite"></p>
     </div>
 
     <div class="field">
@@ -1378,6 +1481,16 @@ svg { display: block; }
 <div class="conn" id="conn" role="status" aria-live="polite" hidden></div>
 <div class="summary" id="summary">Loading…</div>
 <div class="build" id="build"></div>
+<div class="boardbar" id="boardbar" hidden>
+  <div class="viewtoggle" role="group" aria-label="How to show agents" data-scope="agents">
+    <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show agents as a grid" title="Show agents as a grid">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
+    </button>
+    <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show agents as a list" title="Show agents as a list">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
+    </button>
+  </div>
+</div>
 <div class="grid" id="grid"></div>
 
 <!-- ⚠️ REMOVED AGENTS ARE NOT LOST, and this is where that becomes true for the
@@ -1962,6 +2075,10 @@ function showTab(tab) {
   document.getElementById('grid').hidden = !agents;
   document.getElementById('summary').hidden = !agents;
   document.getElementById('build').hidden = !agents;
+  // The view toggle is board chrome: it shows and hides with the board it
+  // operates on, or it would sit under Settings offering to rearrange a grid
+  // that is not on screen.
+  document.getElementById('boardbar').hidden = !agents;
   // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
   // shows at all depends on there being something in it, which `paintRemoved`
   // decides. Unhiding it on every tab switch put an empty box on screen.
@@ -2001,6 +2118,61 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   // creation in flight.
   if (btn) { WATCH += 1; showTab(btn.dataset.tab); }
 });
+
+// The K mark goes to the Agents board by clicking the REAL tab control, so
+// aria-selected, WATCH, and everything else a tab change means stay in the
+// one place that owns them. A logo in the top left is a home affordance
+// whether or not anyone designed it as one.
+document.getElementById('klink').addEventListener('click', () => {
+  const t = document.querySelector('#tabs [data-tab="agents"]');
+  if (t) t.click();
+});
+
+// ---------------------------------------------------------------------------
+// Grid / list toggles. One handler, and the control NAMES what it operates on
+// with data-scope -- the design pack's own lesson: the first version queried
+// one list by hand, so a second toggle would have driven the wrong screen.
+// The choice is a display preference; it stays in this browser (localStorage),
+// so the welcome promise about nothing leaving the machine is untouched.
+// ---------------------------------------------------------------------------
+const LAYOUTS = {
+  agents:   { el: 'grid',    cls: 'aslist', flip: 'list', fallback: 'grid' },
+  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'list' },
+};
+
+function layoutApply(scope, want) {
+  const lay = LAYOUTS[scope];
+  if (!lay) return;
+  document.getElementById(lay.el).classList.toggle(lay.cls, want === lay.flip);
+  const box = document.querySelector('.viewtoggle[data-scope="' + scope + '"]');
+  if (!box) return;
+  for (const b of box.querySelectorAll('[data-layout]')) {
+    const on = b.dataset.layout === want;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+}
+
+for (const box of document.querySelectorAll('.viewtoggle')) {
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-layout]');
+    if (!btn) return;
+    const scope = box.dataset.scope;
+    layoutApply(scope, btn.dataset.layout);
+    // Storage can be refused (private windows, storage pressure); the toggle
+    // still works for this page either way.
+    try { localStorage.setItem('kosmos.layout.' + scope, btn.dataset.layout); } catch { /* display preference only */ }
+  });
+}
+
+// Re-apply the saved choice on boot. An unreadable store, or a value that is
+// not one of ours, falls back to the default layout rather than guessing.
+for (const scope of Object.keys(LAYOUTS)) {
+  let saved = null;
+  try { saved = localStorage.getItem('kosmos.layout.' + scope); } catch { saved = null; }
+  if (saved !== 'grid' && saved !== 'list') saved = LAYOUTS[scope].fallback;
+  layoutApply(scope, saved);
+}
 
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
@@ -2161,7 +2333,12 @@ async function paintAgentProjects(sessionName) {
   const okLabel = document.getElementById('d-projects-label');
   if (okLabel) okLabel.textContent = 'Projects it is on';
   document.getElementById('d-projects').innerHTML =
-    mine.map((p) => '<span class="pj-tag">' + esc(p.name) + '</span>').join('');
+    // Archived travels with the name here: archiving keeps the membership
+    // (the engine's own rule), so the tag stays -- but a project that left
+    // the projects list must not read as active on this card. A new sibling
+    // does not inherit the split paintProjects makes; it is given the fact.
+    mine.map((p) => '<span class="pj-tag">' + esc(p.name)
+      + (p.archived ? ' <span class="pj-tag-arch">archived</span>' : '') + '</span>').join('');
   field.hidden = false;
 }
 
@@ -3879,6 +4056,15 @@ function pjView(which) {
   for (const v of ['list', 'one', 'add']) {
     document.getElementById('pj-' + v + '-view').hidden = (v !== which);
   }
+  // Arriving at a project resets the member picker to its resting state (the
+  // "+ Add Member" button), so an open picker does not leak from the last
+  // project into this one. Navigation-only: repaints while the view is open
+  // never pass through here, so a picker in use stays open.
+  if (which === 'one') {
+    document.getElementById('pj-add-member').hidden = false;
+    document.getElementById('pj-one-add-row').hidden = true;
+    document.getElementById('pj-one-archive-msg').textContent = '';
+  }
 }
 
 /**
@@ -3949,6 +4135,12 @@ const setIfChanged = setLive;
 
 function paintProjects() {
   const list = document.getElementById('pj-list');
+  // Archived rows leave this list and live in the disclosure below it. The
+  // split happens here, once, so the count the disclosure shows is derived
+  // from the same rows it renders and can never disagree with them.
+  const active = PROJECTS.filter((p) => !p.archived);
+  const archived = PROJECTS.filter((p) => p.archived);
+  paintArchived(archived);
   if (!PROJECTS.length) {
     setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
@@ -3957,7 +4149,16 @@ function paintProjects() {
       + '</div>');
     return;
   }
-  setIfChanged(list, PROJECTS.map((p) => {
+  if (!active.length) {
+    // ⚠️ NOT the "No projects yet" card: there are projects, they are all
+    // archived, and saying "none yet" beside a disclosure holding three of
+    // them would be the screen contradicting itself.
+    setIfChanged(list, '<div class="pj-empty">'
+      + '<p><b>Nothing here right now.</b><br>Everything you have is archived.</p>'
+      + '</div>');
+    return;
+  }
+  setIfChanged(list, active.map((p) => {
     const s = p.summary || {};
     const folder = pjFolderLine(p);
     // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
@@ -3985,6 +4186,137 @@ function paintProjects() {
       + '</button>';
   }).join(''));
 }
+
+// ---------------------------------------------------------------------------
+// Archived projects. Follows the removed-agents section it sits opposite:
+// hidden on the WRAP when empty, the count in the button derived from the
+// rows the list actually renders.
+// ---------------------------------------------------------------------------
+let PJ_ARCH_OPEN = false;
+
+function pjArchWhen(p) {
+  // A record archived before the date was kept (or by hand) still reads as
+  // archived -- it just does not claim a date nobody recorded.
+  if (!p || !p.archivedAt) return 'Archived';
+  const d = new Date(p.archivedAt);
+  if (isNaN(d.getTime())) return 'Archived';
+  return 'Archived ' + d.toLocaleDateString();
+}
+
+function paintArchived(archived) {
+  const wrap = document.getElementById('pj-arch-wrap');
+  const toggle = document.getElementById('pj-arch-toggle');
+  const listEl = document.getElementById('pj-arch-list');
+  const rows = (archived || []).map((p) =>
+    '<div class="removed-row">'
+    + '<span class="who">' + esc(p.name) + '</span>'
+    + '<span class="when">' + esc(pjArchWhen(p)) + '</span>'
+    + '<button class="btn" type="button" data-restore="' + esc(p.id) + '">Restore</button>'
+    + '</div>');
+  wrap.hidden = rows.length === 0;
+  if (!rows.length) {
+    // Closed as well as hidden, so the next archived project opens a fresh
+    // collapsed section rather than inheriting an open one from a list that
+    // no longer exists.
+    PJ_ARCH_OPEN = false;
+    listEl.hidden = true;
+    // ⚠️ CLEARED through setIfChanged, not merely hidden -- the trap
+    // paintRemoved documents at length: hiding leaves the stale DOM AND the
+    // stale __lastLive cache, so re-archiving the same project the same day
+    // regenerates a byte-identical rows string, setIfChanged skips the
+    // rewrite, and the disclosure reopens showing the old row with its
+    // still-disabled Restore. Measured by review round 1: the archive was a
+    // one-way door until reload. The label clears with it, so text and
+    // aria-expanded never disagree while the button rests.
+    setIfChanged(listEl, '');
+    toggle.textContent = '';
+    toggle.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const label = (PJ_ARCH_OPEN ? 'Hide' : 'Show') + ' archived projects (' + rows.length + ')';
+  if (toggle.textContent !== label) toggle.textContent = label;
+  setIfChanged(listEl, rows.join(''));
+  listEl.hidden = !PJ_ARCH_OPEN;
+  toggle.setAttribute('aria-expanded', String(PJ_ARCH_OPEN));
+}
+
+document.getElementById('pj-arch-toggle').addEventListener('click', () => {
+  PJ_ARCH_OPEN = !PJ_ARCH_OPEN;
+  paintArchived(PROJECTS.filter((p) => p.archived));
+});
+
+document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-restore]');
+  if (!btn) return;
+  const id = btn.dataset.restore;
+  // ⚠️ The previous attempt's failure sentence retires when a new attempt
+  // starts (round 8: a retry that WORKED sat under "we could not restore
+  // it" forever -- the detail sibling has cleared at entry all along).
+  document.getElementById('pj-list-msg').textContent = '';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: false }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || 'we could not restore it');
+    // ⚠️ loadProjects alone, like every sibling handler: it paints on
+    // success and paints the honest error card on failure. The extra
+    // paintProjects() this handler used to carry OVERWROTE that card with
+    // the pre-restore list rebuilt from stale PROJECTS -- and because the
+    // stale archived rows were byte-identical, setIfChanged skipped the
+    // rewrite and the just-restored row stayed behind its disabled button:
+    // the round-1 one-way door returning through the error path. Retried
+    // once if a newer read retired ours (round-21 shape), so the branch
+    // below describes OUR read, not a predecessor's.
+    if (!(await loadProjects())) await loadProjects();
+    if (PJ_READ_FAILED) {
+      // The write LANDED (the PUT answered 200); the re-read did not. The
+      // person is told which half failed, and the button comes back so the
+      // disclosure is not left holding a dead control over a stale count.
+      // ⚠️ The list error path has just hidden the whole disclosure, so
+      // re-enabling the button described a control nobody could see (round
+      // 7 measured it: btnOnScreen false, focus on body). The section is
+      // withdrawn with the list; the note is what survives, and the
+      // keyboard lands on the heading instead of dying with the section.
+      btn.disabled = false;
+      if (document.activeElement === document.body) document.querySelector('h1').focus();
+      // ⚠️ Describes the MOMENT and points at nothing: the first wording
+      // said "the note above says so", and five seconds later the poll
+      // succeeded, repainted the healthy list, and left this sentence
+      // pointing at a note that no longer existed (the round-1 shape,
+      // reintroduced by the round-2 fix). A sentence about what happened
+      // stays true after recovery; a sentence about the current screen
+      // does not.
+      document.getElementById('pj-list-msg').textContent =
+        'The restore saved, but we could not re-read your projects just then.';
+      return;
+    }
+    // ⚠️ The keyboard is NOT dropped to <body> when the section it was in
+    // disappears (restoring the last row hides the whole wrap). The restored
+    // project's own row is where the person's attention went; the heading is
+    // the fallback the removal path already uses.
+    if (document.activeElement === document.body) {
+      const back = document.querySelector('#pj-list [data-project="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+      if (back) back.focus();
+      else document.querySelector('h1').focus();
+    }
+  } catch (err) {
+    // ⚠️ ON THE BUTTON, not only in a message that can sit a full screen
+    // above it (measured: 411px off-viewport with eleven projects). A
+    // restore that failed and a restore that worked must not look the same,
+    // which is the removal path's own stated rule.
+    btn.textContent = 'Restore failed. Try again';
+    btn.disabled = false;
+    document.getElementById('pj-list-msg').textContent = String((err && err.message) || 'we could not restore it');
+    // Disabling on entry blurred the button; on a failed PUT it is still on
+    // screen (nothing repainted), so the keyboard returns to the control
+    // that now says what happened.
+    if (document.activeElement === document.body) btn.focus();
+  }
+});
 
 // ⚠️ A generation counter, because the 5-second poll and the click handlers'
 // own `await loadProjects()` can be in flight together and can land out of
@@ -4033,6 +4365,11 @@ async function loadProjects() {
     setIfChanged(document.getElementById('pj-list'),
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
       + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    // The archived disclosure goes with the list: its count and Restore
+    // buttons derive from a read that did not happen, and "Show archived
+    // projects (3)" is a confident sentence one element below the one saying
+    // we could not look. The next successful read repaints it.
+    document.getElementById('pj-arch-wrap').hidden = true;
     const one = document.getElementById('pj-one-msg');
     const add = document.getElementById('pj-add-msg');
     if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
@@ -4044,6 +4381,14 @@ async function loadProjects() {
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  // ⚠️ A successful read retires the error sentences ITS OWN failure path
+  // wrote (and only that sentence, matched exactly): the failed-restore
+  // flow left "We cannot read your projects right now..." in #pj-one-msg
+  // beside a page the next poll had already repainted healthy.
+  const oneMsg = document.getElementById('pj-one-msg');
+  if (oneMsg && oneMsg.textContent.startsWith('We cannot read your projects right now')) {
+    oneMsg.textContent = '';
+  }
   return true;
 }
 
@@ -4057,6 +4402,25 @@ function paintOneProject() {
   desc.textContent = p.description || '';
   desc.hidden = !p.description;
   document.getElementById('pj-one-folder').textContent = p.folder;
+  // ⚠️ The detail STATES the archived fact and flips the control. Without
+  // this, an archived project's page was indistinguishable from an active
+  // one, still offering "Archive it" -- a 200 no-op answered with "It is in
+  // the archived list below" for a change that did not occur. (Reachable:
+  // pjAnswerFrom opens an agent's only project even when archived.)
+  const archLabel = document.getElementById('pj-one-archive-label');
+  const archHint = document.getElementById('pj-one-archive-hint');
+  const archBtn = document.getElementById('pj-one-archive');
+  if (p.archived) {
+    archLabel.textContent = 'This project is archived';
+    archHint.textContent = 'It is off the projects list. Nothing in the folder changed, '
+      + 'and the agents that were on it stayed as they are.';
+    archBtn.textContent = 'Restore it';
+  } else {
+    archLabel.textContent = 'Archive this project';
+    archHint.textContent = 'Archiving takes a project off this list. Nothing in the '
+      + 'folder changes and the agents that were on it stay as they are.';
+    archBtn.textContent = 'Archive it';
+  }
   const folder = pjFolderLine(p);
   const state = document.getElementById('pj-one-folder-state');
   state.textContent = folder.bad ? folder.text : '';
@@ -5690,6 +6054,105 @@ document.getElementById('pj-one-remove-go').addEventListener('click', async () =
   } catch (err) {
     msg.textContent = err.message;
   }
+});
+
+// Archiving from the detail view. No confirmation on purpose: unlike removal
+// (which drops the membership list and cannot be undone by re-adding the
+// folder), archiving keeps everything and Restore is one click away in the
+// disclosure this returns you to.
+document.getElementById('pj-one-archive').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const msg = document.getElementById('pj-one-archive-msg');
+  msg.textContent = '';
+  // The button acts on the CURRENT state as last successfully read: on an
+  // archived project it is the Restore control. (After a restore whose
+  // re-read FAILED, the stale record still reads archived and a second
+  // click re-sends {archived:false} -- an idempotent no-op the next good
+  // read answers honestly; the moment-note has already said the first
+  // save landed.)
+  const want = !p.archived;
+  const archBtn = document.getElementById('pj-one-archive');
+  archBtn.disabled = true;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: want }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || (want ? 'we could not archive it' : 'we could not restore it'));
+    if (!want) {
+      // Restored from the detail: stay here; the repaint flips the control
+      // back and the row rejoins the list behind us. Retried once if a
+      // newer read retired ours (the round-21 shape), then the note claims
+      // only what was read: "Restored." beside a page still saying archived
+      // was four elements telling three stories.
+      if (!(await loadProjects())) await loadProjects();
+      // ⚠️ A MOMENT sentence, symmetric with the disclosure arm: "this page
+      // may still show it archived" became false five seconds later when
+      // the poll repainted the control to "Archive it" around it.
+      msg.textContent = PJ_READ_FAILED
+        ? 'The restore saved, but we could not re-read your projects just then.'
+        : 'Restored.';
+      // ⚠️ The rescue THIS arm was missing while its own comment claimed the
+      // opposite (round 7): disabling the button blurred it, and this early
+      // return skipped the sibling's rescue below. The same control is the
+      // natural landing -- it has flipped to "Archive it" under the person.
+      archBtn.disabled = false;
+      if (document.activeElement === document.body) archBtn.focus();
+      return;
+    }
+    PJ_CURRENT = null;
+    if (!(await loadProjects())) await loadProjects();
+    pjView('list');
+    // The keyboard lands where the project went (the disclosure), or the
+    // heading -- the same rescue the disclosure Restore already has; this
+    // arm was the branch's one new control still dropping to body.
+    if (document.activeElement === document.body) {
+      const wrap = document.getElementById('pj-arch-wrap');
+      if (!wrap.hidden) document.getElementById('pj-arch-toggle').focus();
+      else document.querySelector('h1').focus();
+    }
+    // ⚠️ The note claims only what was READ. The PUT's 200 makes "archived"
+    // a fact; "it is in the archived list below" is a claim about a list
+    // that a failed reload renders as "we cannot read your projects" -- and
+    // the two sentences sat in adjacent elements contradicting each other
+    // (measured by review round 1 with the read stubbed to 500).
+    // ⚠️ MOMENT sentences on both branches (round 6: the healthy arm said
+    // "in the archived list below" and a LATER failed poll hid the
+    // disclosure while the sentence stayed). "Restore brings it back"
+    // claims the feature, not the screen -- and the failed-re-read branch
+    // names its moment like both restore arms do (round 7: three arms,
+    // one standard).
+    document.getElementById('pj-list-msg').textContent = PJ_READ_FAILED
+      ? 'Archived ' + p.name + ', but we could not re-read your projects just then.'
+      : 'Archived ' + p.name + '. Restore brings it back whenever you want it.';
+  } catch (err) {
+    msg.textContent = String((err && err.message) || (want ? 'we could not archive it' : 'we could not restore it'));
+    // ⚠️ ON THE CONTROL too, the disclosure arm's own rule: a failed act
+    // and an untouched button must not look the same. (The 5s poll may
+    // repaint this label from state truth; the message above persists,
+    // which is the removal path's accepted shape.)
+    archBtn.textContent = want ? 'Archive failed. Try again' : 'Restore failed. Try again';
+  } finally {
+    // Held while the PUT flies, like the disclosure sibling: two fast
+    // clicks fired two PUTs (idempotent today only by the carry-forward).
+    archBtn.disabled = false;
+    // Disabling blurred the control; on every exit the keyboard returns
+    // to it rather than dying on body (round 8: both failure directions
+    // dropped it while the success arms had been fixed one by one).
+    if (document.activeElement === document.body) archBtn.focus();
+  }
+});
+
+// The member picker rests behind the pinned "+ Add Member" words. Revealing
+// focuses the select so the keyboard lands on the choice, not on nothing.
+document.getElementById('pj-add-member').addEventListener('click', () => {
+  document.getElementById('pj-add-member').hidden = true;
+  const row = document.getElementById('pj-one-add-row');
+  row.hidden = false;
+  document.getElementById('pj-one-add').focus();
 });
 
 // ⚠️ Kept up to date while it is open, not painted once on arrival. A project's

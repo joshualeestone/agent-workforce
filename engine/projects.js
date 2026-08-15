@@ -455,6 +455,15 @@ function describe(project, roster) {
     // has no field at all, and "read as ''" has to hold for API readers too,
     // not only the two web renderers with their own || '' fallbacks.
     description: project.description || '',
+    // Same normalization argument for archiving: a project written before
+    // the field existed must read as "not archived", never as undefined
+    // leaking into a template. Same heal path the rest of the payload uses.
+    archived: project.archived === true,
+    // Gated on the healed flag AND the value: a hand-edited record carrying
+    // a date beside archived:false must not publish an "archived at", and a
+    // non-string or unparseable value beside archived:true must not become
+    // "Archived 1/1/1970" through new Date().
+    archivedAt: project.archived === true ? cleanArchivedAt(project.archivedAt) : null,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.
@@ -870,24 +879,42 @@ function mutate(id, fn) {
 }
 
 /**
- * Every writable display field, applied in ONE mutate.
+ * Every writable field, applied in ONE mutate.
  *
- * ⚠️ One write on purpose. The PUT route used to run rename and
- * setDescription as two independent read-modify-writes -- so a failure in
- * the second answered the caller "your save failed" about a rename that had
- * already persisted. Validation happens for every carried field BEFORE any
- * write, so a request either applies whole or not at all.
+ * ⚠️ One write on purpose. The PUT route used to run rename, setDescription
+ * and setArchived as independent read-modify-writes -- so a failure in a
+ * later one answered the caller "your save failed" about a change that had
+ * already persisted. Validation happens for EVERY carried field BEFORE any
+ * write (cleanName and cleanDescription throw; archived refuses anything
+ * but a boolean, because `!!` would turn {"archived": "false"} into an
+ * archive, the opposite of what the caller wrote), so a request either
+ * applies whole or not at all.
  */
 function edit(id, fields = {}) {
   const want = {};
   if (fields.name !== undefined) want.name = cleanName(fields.name);
   if (fields.description !== undefined) want.description = cleanDescription(fields.description);
-  if (!Object.keys(want).length) {
+  if (fields.archived !== undefined && typeof fields.archived !== 'boolean') {
+    throw new Error('archived must be true or false');
+  }
+  if (!Object.keys(want).length && fields.archived === undefined) {
     // A save that would move nothing is refused, not answered "saved": a
     // typo'd key reporting success is a save the person believes happened.
     throw new Error('nothing here we can change');
   }
-  return mutate(id, (p) => ({ ...p, ...want }));
+  return mutate(id, (p) => {
+    const next = { ...p, ...want };
+    if (fields.archived !== undefined) {
+      next.archived = fields.archived;
+      // Archiving an already-archived project keeps its original date;
+      // restoring clears it rather than leaving a stale "archived at"
+      // beside a project that is not archived.
+      next.archivedAt = fields.archived
+        ? ((p.archived === true && cleanArchivedAt(p.archivedAt)) || new Date().toISOString())
+        : null;
+    }
+    return next;
+  });
 }
 
 function rename(id, name) {
@@ -901,6 +928,42 @@ function setDescription(id, text) {
   // Records written before this field existed simply gain it here; readers
   // treat a missing description as ''.
   return edit(id, { description: text });
+}
+
+/**
+ * Archive or restore a project.
+ *
+ * ⚠️ A display state, not a removal. The record stays in the store, the folder
+ * is untouched, and the agents that were on it stay as they are -- so nothing
+ * here re-tells the members: their instructions still describe a project that
+ * still exists under the same name. Restoring clears the timestamp rather than
+ * leaving a stale "archived at" beside a project that is not archived, which
+ * would be a sentence about a thing that is no longer true.
+ */
+/**
+ * An archive date is published only when it is a parseable STRING: the heal
+ * for the flag taught the read side to distrust strays, and 12345 beside
+ * archived:true rendered "Archived 1/1/1970" -- a confident date from a
+ * distrusted field, one field over from the heal.
+ */
+function cleanArchivedAt(value) {
+  if (typeof value !== 'string') return null;
+  return Number.isNaN(new Date(value).getTime()) ? null : value;
+}
+
+/**
+ * Archive or restore a project.
+ *
+ * ⚠️ A display state, not a removal. The record stays in the store, the folder
+ * is untouched, and the agents that were on it stay as they are -- so nothing
+ * here re-tells the members: their instructions still describe a project that
+ * still exists under the same name. Restoring clears the timestamp rather than
+ * leaving a stale "archived at" beside a project that is not archived, which
+ * would be a sentence about a thing that is no longer true.
+ */
+function setArchived(id, want) {
+  // One rule: this is edit with one field carried.
+  return edit(id, { archived: want });
 }
 
 function addAgent(id, sessionName, roster) {
@@ -1243,7 +1306,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, edit, rename, setDescription, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,
