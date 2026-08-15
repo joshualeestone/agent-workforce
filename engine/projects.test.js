@@ -153,6 +153,67 @@ test('renaming changes the name and NOT the id, because the id is what membershi
   assert.equal(after.name, 'New');
 });
 
+// ---------------------------------------------------------------------------
+// Archiving: a display state, never a removal
+// ---------------------------------------------------------------------------
+
+test('archiving sets the flag and the date; restoring clears BOTH', () => {
+  reset();
+  const p = projects.create({ name: 'Season', folder: folder('season') });
+
+  const on = projects.setArchived(p.id, true);
+  assert.equal(on.archived, true);
+  assert.ok(on.archivedAt, 'the date the person will read in the disclosure row');
+
+  const off = projects.setArchived(p.id, false);
+  assert.equal(off.archived, false);
+  // A stale "archived at" beside a project that is not archived would be a
+  // sentence about a thing that is no longer true.
+  assert.equal(off.archivedAt, null);
+});
+
+test('archiving touches nothing else: record, folder, and members stay as they are', () => {
+  reset();
+  agent('mara', 'hello');
+  const dir = folder('untouched');
+  fs.writeFileSync(path.join(dir, 'work.txt'), 'real work');
+  const p = projects.create({ name: 'Hold', folder: dir });
+  // No roster on purpose: membership is what archiving must not touch, and
+  // whether the agent was visible at add time is another test's question.
+  projects.addAgent(p.id, 'mara');
+
+  projects.setArchived(p.id, true);
+
+  const row = projects.readAll().find((x) => x.id === p.id);
+  assert.ok(row, 'archived is a state, not a removal');
+  assert.deepEqual(row.agents, ['mara']);
+  assert.ok(fs.existsSync(path.join(dir, 'work.txt')));
+});
+
+test('a record written before archiving existed reads as not archived, not as undefined', () => {
+  reset();
+  const p = projects.create({ name: 'Old world', folder: folder('legacy') });
+  // Surgery on the store file: strip the fields the way every pre-archiving
+  // record genuinely lacks them.
+  const all = projects.readAll();
+  delete all[0].archived;
+  delete all[0].archivedAt;
+  projects.writeAll(all);
+
+  const seen = projects.get(p.id, []);
+  assert.equal(seen.archived, false);
+  assert.equal(seen.archivedAt, null);
+});
+
+test('anything but a boolean is refused, because "false" the string is not false', () => {
+  reset();
+  const p = projects.create({ name: 'Strict', folder: folder('strict') });
+  assert.throws(() => projects.setArchived(p.id, 'false'), /true or false/);
+  assert.throws(() => projects.setArchived(p.id, 1), /true or false/);
+  const row = projects.get(p.id, []);
+  assert.equal(row.archived, false, 'a refused write changes nothing');
+});
+
 test('removing a project removes our record and NOT the folder', () => {
   reset();
   const dir = folder('keepme');

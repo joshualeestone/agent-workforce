@@ -455,6 +455,11 @@ function describe(project, roster) {
     // has no field at all, and "read as ''" has to hold for API readers too,
     // not only the two web renderers with their own || '' fallbacks.
     description: project.description || '',
+    // Same normalization argument for archiving: a project written before
+    // the field existed must read as "not archived", never as undefined
+    // leaking into a template. Same heal path the rest of the payload uses.
+    archived: project.archived === true,
+    archivedAt: project.archivedAt || null,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.
@@ -903,6 +908,28 @@ function setDescription(id, text) {
   return edit(id, { description: text });
 }
 
+/**
+ * Archive or restore a project.
+ *
+ * ⚠️ A display state, not a removal. The record stays in the store, the folder
+ * is untouched, and the agents that were on it stay as they are -- so nothing
+ * here re-tells the members: their instructions still describe a project that
+ * still exists under the same name. Restoring clears the timestamp rather than
+ * leaving a stale "archived at" beside a project that is not archived, which
+ * would be a sentence about a thing that is no longer true.
+ */
+function setArchived(id, want) {
+  // Anything but a boolean is refused rather than coerced: a truthy string
+  // "false" silently restoring (or archiving) is the caller's opposite.
+  if (typeof want !== 'boolean') throw new Error('archived must be true or false');
+  const on = want;
+  return mutate(id, (p) => ({
+    ...p,
+    archived: on,
+    archivedAt: on ? (p.archivedAt || new Date().toISOString()) : null,
+  }));
+}
+
 function addAgent(id, sessionName, roster) {
   const key = String(sessionName || '').trim();
   if (!key) throw new Error('choose an agent');
@@ -1243,7 +1270,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, edit, rename, setDescription, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,

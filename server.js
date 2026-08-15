@@ -1576,10 +1576,29 @@ const server = http.createServer((req, res) => {
         const fields = {};
         if (body.name !== undefined) fields.name = body.name;
         if (body.description !== undefined) fields.description = body.description;
-        projects.edit(id, fields);
+        /* ⚠️ archived rides beside the edit, not inside it: it is its own
+           engine write (setArchived), validated FIRST so a bad value fails
+           before anything moves. Anything but a boolean is refused rather
+           than coerced -- `!!` would have turned {"archived": "false"}
+           into an archive, the exact opposite of what the caller wrote.
+           An archive-only body skips the edit entirely (so it cannot be
+           refused for carrying no editable field); a body carrying nothing
+           we recognise still takes the edit path and its loud refusal. The
+           one-write rule bends only when a caller carries BOTH kinds of
+           field in one PUT, which no shipped screen does: settings sends
+           name/description, the archive control sends archived alone. */
+        if (body.archived !== undefined && typeof body.archived !== 'boolean') {
+          throw new Error('archived must be true or false');
+        }
+        if (Object.keys(fields).length || body.archived === undefined) {
+          projects.edit(id, fields);
+        }
+        if (body.archived !== undefined) projects.setArchived(id, body.archived);
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
-        // project that no longer goes by that.
+        // project that no longer goes by that. Archiving does NOT re-tell: the
+        // name did not change, and the engine's own rule is that archiving
+        // changes nothing about the members.
         // ⚠️ Re-read rather than reusing the row from the existence check: a
         // record removed in between made this `.agents` of `undefined`, and the
         // raw TypeError went out as the person's error message.
@@ -1588,9 +1607,9 @@ const server = http.createServer((req, res) => {
         // Same reason as create and delete: the rename HAPPENED. A failure
         // re-telling the members is a different fact from a failed rename.
         // (Only when the name moved: the managed block carries the name and
-        // the folder, and neither the description nor anything else this
-        // route can change, so a description-only save has nothing to
-        // re-tell.)
+        // the folder, and neither the description, the archived flag, nor
+        // anything else this route can change, so a name-less save has
+        // nothing to re-tell.)
         try {
           if (body.name !== undefined) {
             for (const a of (reRead ? reRead.agents : [])) projects.syncAgent(a, roster);

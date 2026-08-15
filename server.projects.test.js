@@ -579,6 +579,61 @@ test('a failed half of a two-field save applies NOTHING, not the readable half',
   assert.equal(after.description, 'original');
 });
 
+test('an archive-only PUT archives without renaming, and restore brings it back', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Season', folder: folder('archiving') })).project;
+
+  const on = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: true }),
+  });
+  assert.equal(on.status, 200, on.body);
+  assert.equal(json(on).project.archived, true);
+  assert.ok(json(on).project.archivedAt);
+  assert.equal(json(on).project.name, 'Season', 'a PUT with no name does not touch the name');
+
+  const off = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: false }),
+  });
+  assert.equal(off.status, 200, off.body);
+  assert.equal(json(off).project.archived, false);
+  assert.equal(json(off).project.archivedAt, null);
+});
+
+test('a rename-only PUT does not touch archived', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Kept', folder: folder('kept-archived') })).project;
+  await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: true }),
+  });
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Kept still' }),
+  });
+  assert.equal(res.status, 200, res.body);
+  assert.equal(json(res).project.name, 'Kept still');
+  assert.equal(json(res).project.archived, true, 'an absent field means leave it alone, never clear it');
+});
+
+test('archived refuses anything but a boolean, because "false" the string is not false', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Strict', folder: folder('strict-put') })).project;
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ archived: 'false' }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].archived, false, 'a refused write changes nothing');
+});
+
 test('a name that cannot be decoded is refused rather than guessed at', async () => {
   const res = await req('/api/project/%ZZ');
   assert.equal(res.status, 400);
