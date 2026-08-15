@@ -1560,18 +1560,23 @@ const server = http.createServer((req, res) => {
           missing.status = 404;
           throw missing;
         }
-        /* ⚠️ Each field moves only when the request CARRIES it. This route
-           used to be rename-only and called rename unconditionally; with
-           `description` joining it, a description-only save must not run
-           the name through cleanName (which throws on absence), and a
-           rename must not blank a description it never mentioned. An
-           EXPLICIT empty description clears the field -- deliberately
-           unlike the profile displayName's blank-drop, because a
-           description is optional by design and the settings screen
-           offers clearing; the never-delete rule protects a person's
-           words in composition, not a field they chose to empty. */
-        if (typeof body.name === 'string') projects.rename(id, body.name);
-        if (typeof body.description === 'string') projects.setDescription(id, body.description);
+        /* ⚠️ Each field moves only when the request CARRIES it, and every
+           carried field is applied in ONE engine write. Two separate
+           mutations here meant a failure in the second answered "your save
+           failed" about a rename that had already persisted. An EXPLICIT
+           empty description clears the field -- deliberately unlike the
+           profile displayName's blank-drop, because a description is
+           optional by design and the settings screen offers clearing; the
+           never-delete rule protects a person's words in composition, not a
+           field they chose to empty. A carried field of the WRONG TYPE is
+           refused loudly by the engine (cleanName throws on nothing,
+           cleanDescription on non-words), and a body carrying NO field we
+           recognise is refused too -- {"descrption": "..."} answering
+           "saved" is a save the person believes happened. */
+        const fields = {};
+        if (body.name !== undefined) fields.name = body.name;
+        if (body.description !== undefined) fields.description = body.description;
+        projects.edit(id, fields);
         // The block names the project, so a rename has to reach the agents that
         // were told the old name -- otherwise their instructions describe a
         // project that no longer goes by that.
@@ -1582,10 +1587,12 @@ const server = http.createServer((req, res) => {
         const roster = safeRoster();
         // Same reason as create and delete: the rename HAPPENED. A failure
         // re-telling the members is a different fact from a failed rename.
-        // (Only when the name moved: the managed block carries the NAME, so a
-        // description-only save has nothing to re-tell.)
+        // (Only when the name moved: the managed block carries the name and
+        // the folder, and neither the description nor anything else this
+        // route can change, so a description-only save has nothing to
+        // re-tell.)
         try {
-          if (typeof body.name === 'string') {
+          if (body.name !== undefined) {
             for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
           }
         } catch { /* reported by the row's own told verdict on the next read */ }

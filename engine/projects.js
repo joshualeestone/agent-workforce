@@ -451,6 +451,10 @@ function describe(project, roster) {
     ...project,
     folder: project.folder,
     folderState: folderState(project.folder),
+    // Normalized here rather than trusted from the record: a legacy project
+    // has no field at all, and "read as ''" has to hold for API readers too,
+    // not only the two web renderers with their own || '' fallbacks.
+    description: project.description || '',
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.
@@ -536,7 +540,18 @@ function cleanName(name) {
  * Josh's own twelve fixture descriptions top out under half that.
  */
 function cleanDescription(text) {
-  return oneLine(text == null ? '' : text).slice(0, 200);
+  // Absent is a legitimate blank; anything present has to BE words. String()
+  // here turned {description: {}} into "[object Object]" on one route while
+  // the other route silently dropped it -- one field, two rules, the exact
+  // "two derivations of one question" cleanName's own comment warns against.
+  if (text === undefined || text === '') return '';
+  // null included: the blessed clear is the explicit empty string, and a
+  // second clear spelling is a second rule waiting to disagree with it.
+  if (typeof text !== 'string') throw new Error('a description has to be words');
+  // Cut by CHARACTERS, not code units: a cap landing inside an emoji left a
+  // lone surrogate rendering as a replacement glyph, and one landing on a
+  // space left the space. Trim after the cut for the same reason.
+  return Array.from(oneLine(text)).slice(0, 200).join('').trim();
 }
 
 /* ---------------------------------------------------------------------------
@@ -824,18 +839,38 @@ function mutate(id, fn) {
   return next;
 }
 
+/**
+ * Every writable display field, applied in ONE mutate.
+ *
+ * ⚠️ One write on purpose. The PUT route used to run rename and
+ * setDescription as two independent read-modify-writes -- so a failure in
+ * the second answered the caller "your save failed" about a rename that had
+ * already persisted. Validation happens for every carried field BEFORE any
+ * write, so a request either applies whole or not at all.
+ */
+function edit(id, fields = {}) {
+  const want = {};
+  if (fields.name !== undefined) want.name = cleanName(fields.name);
+  if (fields.description !== undefined) want.description = cleanDescription(fields.description);
+  if (!Object.keys(want).length) {
+    // A save that would move nothing is refused, not answered "saved": a
+    // typo'd key reporting success is a save the person believes happened.
+    throw new Error('nothing here we can change');
+  }
+  return mutate(id, (p) => ({ ...p, ...want }));
+}
+
 function rename(id, name) {
-  const title = cleanName(name);
   // ⚠️ The id does NOT change with the name. It is what the agents' recorded
   // membership and any open URL point at, and renaming is a display change
   // rather than a new project.
-  return mutate(id, (p) => ({ ...p, name: title }));
+  return edit(id, { name });
 }
 
 function setDescription(id, text) {
   // Records written before this field existed simply gain it here; readers
   // treat a missing description as ''.
-  return mutate(id, (p) => ({ ...p, description: cleanDescription(text) }));
+  return edit(id, { description: text });
 }
 
 function addAgent(id, sessionName, roster) {
@@ -1178,7 +1213,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, rename, setDescription, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,

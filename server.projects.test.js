@@ -432,13 +432,66 @@ test('the description travels the routes: created, carried, updated alone, clear
     method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
     body: JSON.stringify({ name: 'Q4 Plan' }),
   });
+  assert.equal(put2.status, 200, put2.body);
   assert.equal(json(put2).project.description, 'Second wording.', 'a rename must not blank the description');
   // Explicit empty clears -- deliberate, per the engine's own rule.
   const put3 = await req(`/api/project/${made.id}`, {
     method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
     body: JSON.stringify({ description: '' }),
   });
+  assert.equal(put3.status, 200, put3.body);
   assert.strictEqual(json(put3).project.description, '');
+});
+
+test('a save that would move nothing is refused, not answered "saved"', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Immovable', folder: folder('immovable'), description: 'stays' })).project;
+  // {} and a typo'd key both carry no field we recognise -- reporting 200
+  // for either is a save the person believes happened.
+  for (const body of [{}, { descrption: 'typo' }]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 400, `body ${JSON.stringify(body)} should be refused: ${res.body}`);
+  }
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].description, 'stays');
+  assert.equal(list[0].name, 'Immovable');
+});
+
+test('one rule for what a description IS, on both routes: words or refused', async () => {
+  reset();
+  // POST: String() used to store "[object Object]" while PUT silently
+  // dropped the same value -- one field, two rules, split across routes.
+  const posted = await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: { not: 'words' } });
+  assert.equal(posted.status, 400, posted.body);
+  const made = json(await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: 'real words' })).project;
+  for (const bad of [{ not: 'words' }, ['a', 'b'], 7, true, null]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ description: bad }),
+    });
+    assert.equal(res.status, 400, `description ${JSON.stringify(bad)} should be refused: ${res.body}`);
+  }
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.description, 'real words', 'a refused write changes nothing');
+});
+
+test('a failed half of a two-field save applies NOTHING, not the readable half', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Whole', folder: folder('whole-put'), description: 'original' })).project;
+  // The name is valid, the description is refused: the rename must not have
+  // happened when the route answers failure -- a 400 about a save that half
+  // landed tells the caller a lie in the other direction.
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Renamed anyway', description: 42 }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.name, 'Whole', 'the valid half of a refused save must not land');
+  assert.equal(after.description, 'original');
 });
 
 test('a name that cannot be decoded is refused rather than guessed at', async () => {

@@ -704,6 +704,47 @@ test('a folder path with a newline in it is one line in the block', () => {
   assert.ok(!body.includes('\n\n## Not a heading'));
 });
 
+test('the description cap cuts characters, not code units, and never leaves a trailing space', () => {
+  reset();
+  // An emoji astride position 200: a code-unit slice leaves a lone surrogate
+  // that renders as a replacement glyph.
+  const emojiAt199 = 'x'.repeat(199) + '\u{1F600}' + 'tail';
+  const made = projects.create({ name: 'Astral', folder: folder('astral'), description: emojiAt199 });
+  assert.equal(Array.from(made.description).length, 200);
+  assert.equal(Array.from(made.description)[199], '\u{1F600}', 'the emoji survives whole or not at all');
+  // A cap landing on a space must not store the space.
+  const spaceAt200 = 'y'.repeat(199) + ' word';
+  const spaced = projects.create({ name: 'Spaced', folder: folder('spaced'), description: spaceAt200 });
+  assert.equal(spaced.description, 'y'.repeat(199), 'the cut is trimmed');
+});
+
+test('a legacy record READS as the empty description everywhere, API included', () => {
+  reset();
+  const made = projects.create({ name: 'Legacy read', folder: folder('legacy-read') });
+  const all = projects.readAll();
+  delete all.find((p) => p.id === made.id).description;
+  projects.writeAll(all);
+  // describe() is what every route returns: the field must be present and
+  // '', not omitted for API readers to trip over as undefined.
+  const seen = projects.get(made.id, []);
+  assert.strictEqual(seen.description, '');
+});
+
+test('edit applies every carried field in one write, and a refused field refuses the whole save', () => {
+  reset();
+  const made = projects.create({ name: 'Atomic', folder: folder('atomic'), description: 'original' });
+  const both = projects.edit(made.id, { name: 'Atomic II', description: 'new words' });
+  assert.equal(both.name, 'Atomic II');
+  assert.equal(both.description, 'new words');
+  // A valid name beside a refused description applies NOTHING.
+  assert.throws(() => projects.edit(made.id, { name: 'Atomic III', description: 42 }), /words/);
+  const after = projects.get(made.id, []);
+  assert.equal(after.name, 'Atomic II', 'the valid half of a refused save must not land');
+  assert.equal(after.description, 'new words');
+  // No recognised field at all is refused, not answered with the row.
+  assert.throws(() => projects.edit(made.id, {}), /nothing here we can change/);
+});
+
 test('a description is stored trimmed, one-line, capped, and optional', () => {
   reset();
   const made = projects.create({ name: 'Described', folder: folder('described'),

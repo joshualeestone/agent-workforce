@@ -2769,6 +2769,8 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // invisible to node tests (project-description branch).
     [/p\.description \? '<span class="pj-desc">' \+ esc\(p\.description\)/,
      'the card row lost its escaped description arm'],
+    [/desc\.textContent = p\.description \|\| '';/,
+     'the detail description must be written through textContent -- innerHTML here is the injection the card arm escapes against, and no node test can see the swap'],
     [/desc\.hidden = !p\.description;/,
      'the detail description lost its hidden-when-absent toggle (an empty grey line under every undescribed project)'],
     // The pick toggle must keep setLive's memory in step with its in-place

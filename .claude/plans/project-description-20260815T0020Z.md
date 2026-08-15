@@ -39,5 +39,32 @@ until settings lands.
 
 ## Verification
 
-node --test (736), render-projects.js and render-thread.js against the
-sandboxed fixture, then the challenge loop below.
+node --test (742 after round 1), render-projects.js and render-thread.js
+against the sandboxed fixture, then the challenge loop (rounds recorded
+below).
+
+## Review round 1 (2026-08-14 evening)
+
+Seven warnings, all fixed:
+- The PUT applied rename and setDescription as two independent writes, so a
+  failure in the second reported failure for a rename that had persisted.
+  Engine gains `edit(id, fields)`: every carried field validated BEFORE one
+  mutate, so a save applies whole or not at all (tested engine and route).
+- A PUT carrying no recognised field answered 200; now refused ("nothing
+  here we can change"), because a typo'd key reporting saved is a save the
+  person believes happened.
+- One rule for what a description IS on both routes: strings only
+  (cleanDescription throws on non-strings; POST's String() coercion that
+  stored "[object Object]" is gone; null is refused too, since the blessed
+  clear is the explicit empty string).
+- The harness now drives the DETAIL's absence arm (undescribed project,
+  hidden === true), measures both description tokens in the contrast sweep,
+  and renders a description at the 200-char cap asserting one-line
+  truncation on the row.
+- The textContent render of the detail is pinned in server.test.js beside
+  the row's esc() pin, so an innerHTML swap goes red.
+- `.pj-desc` lost font/line-height to `.panel p` on specificity; both
+  selectors now carry the element and the comment tells the truth.
+- The cap cuts characters (an emoji survives whole or not at all) and trims
+  the cut; describe() normalizes description to '' for legacy records so
+  the API reads as '' everywhere, not only the two web renderers.

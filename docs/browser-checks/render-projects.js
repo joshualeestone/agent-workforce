@@ -353,7 +353,52 @@ async function main() {
       if (detail.text !== 'Review the renewal terms and prepare the counter.' || detail.hidden !== false) {
         throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
       }
-      console.log('✔ 2b-description (row, absence arm, and detail)');
+      // The DETAIL's absence arm, exercised, not inferred from the row's: an
+      // undescribed project's detail must hide the element (hidden === true),
+      // which is the arm the markup comment says the toggle exists for.
+      await page.click('#pj-back');
+      await page.waitForTimeout(200);
+      await page.click('[data-project="reedhandover"]');
+      await page.waitForTimeout(300);
+      const bareDetail = await page.evaluate(() => {
+        const el = document.getElementById('pj-one-desc');
+        return { hidden: el ? el.hidden : null, text: el ? el.textContent : null };
+      });
+      if (bareDetail.hidden !== true) {
+        throw new Error('an undescribed project’s detail did not hide the description element: ' + JSON.stringify(bareDetail));
+      }
+      // A description AT THE CAP stays one line on the row: nowrap+ellipsis
+      // is a claim about rendering, and no fixture carried a long sentence.
+      const cap = 'C'.repeat(200);
+      await api('/api/project/' + encodeURIComponent('reedhandover'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: cap }),
+      });
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const longRow = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Reed handover'));
+        const el = row && row.querySelector('.pj-desc');
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return {
+          lines: Math.round(el.getBoundingClientRect().height / parseFloat(cs.lineHeight)),
+          truncated: el.scrollWidth > el.clientWidth,
+          whiteSpace: cs.whiteSpace,
+        };
+      });
+      if (!longRow) throw new Error('the 200-char description never rendered on its row');
+      if (longRow.lines !== 1 || longRow.whiteSpace !== 'nowrap' || !longRow.truncated) {
+        throw new Error('a description at the cap did not truncate to one row line: ' + JSON.stringify(longRow));
+      }
+      await api('/api/project/' + encodeURIComponent('reedhandover'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: '' }),
+      });
+      console.log('✔ 2b-description (row, both absence arms, detail, and the one-line cap)');
     } finally {
       await ctx.close();
     }
@@ -556,7 +601,7 @@ async function main() {
         return 'rgb(255, 255, 255)';
       };
       const out = [];
-      for (const sel of ['#panel-projects .pj-warn']) {
+      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
@@ -648,7 +693,8 @@ async function main() {
       // view of a HEALTHY project, so it cannot carry either.
       for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
-        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel']) {
+        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel',
+        '#pj-one-view #pj-one-desc']) {
         const el = document.querySelector(sel);
         // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
         // went unmeasured under a printed pass.
