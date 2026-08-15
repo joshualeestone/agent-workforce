@@ -151,3 +151,20 @@ Nits: the plan's legacy-write claim scoped to what the code does.
 Recorded coverage gap, accepted: a change moving row and detail sizes
 together stays green (the equality is the check; the callout intent is
 prose).
+
+## Review round 6 (2026-08-14, ~11:45 PM) -- CONVERGED at the cap
+
+No blockers. Both warnings are recorded decisions rather than defects:
+no person-facing writer exists yet (the settings screen is the plan's
+own deferred write path; the field is read-only until then, said here
+so the PR reader knows it); and the name/description counting split
+(120 UTF-16 units vs 200 code points) is deliberate -- the name's cap
+must agree with its input's maxlength, the description has no input
+yet, and the future input must not use a raw maxlength=200 (recorded at
+the rule). Nits applied: the redundant trim dropped, the row/detail
+color comment scoped, the post-edit re-read variable renamed. Considered
+and declined: refusing unknown keys alongside recognized ones (brittle
+across the in-flight sibling branch that adds `archived`; the
+no-recognized-field refusal covers the total-typo case). Cap 6 reached
+with rounds 4-6 blocker-free; evidence shots committed to
+docs/screenshots/projects-description-*.

@@ -559,12 +559,19 @@ function cleanDescription(text) {
   // the explicit empty.)
   if (text === undefined || text === null || text === '') return '';
   if (typeof text !== 'string') throw new Error('a description has to be words');
-  const flat = oneLine(text).trim();
+  const flat = oneLine(text); // oneLine already trims
   // REFUSED over the cap, like cleanName at 120: a silent truncation
   // answered success while cutting the person's words with nothing saying
   // so -- two answers to over-length on two adjacent fields of one form.
   // Counted in code points (the "200 characters" people count is the
   // approximation; an all-emoji description is up to 400 UTF-16 units).
+  // ⚠️ Counted in code POINTS, and deliberately NOT the name's rule: the
+  // name caps at 120 UTF-16 units because its input carries maxlength=120,
+  // which counts units, and the cap must agree with the box a person types
+  // into. The description has no input yet -- and when the settings screen
+  // adds one, it must NOT use a raw maxlength=200 (that would cut a pasted
+  // 200-emoji description at 100 while this rule accepts it). The split is
+  // a recorded decision, not drift.
   if (Array.from(flat).length > 200) {
     throw new Error('that description is longer than 200 characters');
   }

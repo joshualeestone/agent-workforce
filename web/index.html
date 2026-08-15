@@ -203,7 +203,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
   padding: var(--space-5); }
 .pj-row:hover { background: var(--attn-bg); }
 .pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
-/* The description line, card and detail alike. `--label-2`, not `--label-3`:
+/* The description line, card and detail alike. On the ROW `--label-2`, not
+   `--label-3` (the detail's p.pj-desc overrides to full --label below):
    this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
    floor on this screen already at caption size (rounds 20 and 37 of the chat
    branch). The harness asserts row and detail render the SAME size, which

@@ -1583,7 +1583,7 @@ const server = http.createServer((req, res) => {
         // ⚠️ Re-read rather than reusing the row from the existence check: a
         // record removed in between made this `.agents` of `undefined`, and the
         // raw TypeError went out as the person's error message.
-        const renamed = projects.readAll().find((p) => p.id === id);
+        const reRead = projects.readAll().find((p) => p.id === id);
         const roster = safeRoster();
         // Same reason as create and delete: the rename HAPPENED. A failure
         // re-telling the members is a different fact from a failed rename.
@@ -1593,7 +1593,7 @@ const server = http.createServer((req, res) => {
         // re-tell.)
         try {
           if (body.name !== undefined) {
-            for (const a of (renamed ? renamed.agents : [])) projects.syncAgent(a, roster);
+            for (const a of (reRead ? reRead.agents : [])) projects.syncAgent(a, roster);
           }
         } catch { /* reported by the row's own told verdict on the next read */ }
         let project = null;
