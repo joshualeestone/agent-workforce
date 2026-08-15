@@ -110,3 +110,22 @@ same token size (the check that reds the cascade regression, and the CSS
 comment now claims exactly that); setDescription noted as the deferred
 settings-screen write path; the detail's description-vs-path visual
 differentiation deferred to the design pass.
+
+## Review round 4 (2026-08-14, ~10:50 PM)
+
+One blocker, in the round-3 test itself: the re-tell byte comparison
+measured idempotence, never the gate (blockBody splices back identical
+text, so a re-tell on a description-only save changes nothing the file
+can show; the reviewer deleted the gate and the test stayed green). The
+gate is now held by the TOLD STAMP, which syncAgent moves on every call:
+unchanged after a description-only save, moved after a rename. Verified
+by planting the gate-deletion mutant, which reds this test by name; a
+5ms breath covers the stamp's millisecond granularity. Also: the stale
+~/kosmos-demo left by a killed harness run (which blocked every
+subsequent run at the reuse guard) is cleared, and the guard's message
+now names the cause and the fix; the detail absence arm fails loudly if
+the element vanishes; route-level non-string NAME refusals are tested on
+both routes; the cap comment says 200 code points with the human
+approximation named; fixture names are distinct; the mangled comment
+wrap fixed. Known and accepted: rename(id, undefined) now answers
+"nothing here we can change" (no non-test caller).
