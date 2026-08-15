@@ -951,6 +951,16 @@ function cleanArchivedAt(value) {
   return Number.isNaN(new Date(value).getTime()) ? null : value;
 }
 
+/**
+ * Archive or restore a project.
+ *
+ * ⚠️ A display state, not a removal. The record stays in the store, the folder
+ * is untouched, and the agents that were on it stay as they are -- so nothing
+ * here re-tells the members: their instructions still describe a project that
+ * still exists under the same name. Restoring clears the timestamp rather than
+ * leaving a stale "archived at" beside a project that is not archived, which
+ * would be a sentence about a thing that is no longer true.
+ */
 function setArchived(id, want) {
   // One rule: this is edit with one field carried.
   return edit(id, { archived: want });

@@ -217,7 +217,7 @@ html { scroll-padding-top: 132px; }
    renderer would be a second source of truth for what a card says. */
 .grid.aslist { grid-template-columns: minmax(0, 900px); }
 /* Grid mode for the projects list: the same rows laid as cards. */
-.pj-list.asgrid { display: grid; flex-direction: unset;
+.pj-list.asgrid { display: grid;
                   grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
 .pj-list.asgrid .pj-row { height: 100%; }
 /* The empty state and the read-failure card span the grid: the failure
@@ -4367,6 +4367,14 @@ async function loadProjects() {
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  // ⚠️ A successful read retires the error sentences ITS OWN failure path
+  // wrote (and only that sentence, matched exactly): the failed-restore
+  // flow left "We cannot read your projects right now..." in #pj-one-msg
+  // beside a page the next poll had already repainted healthy.
+  const oneMsg = document.getElementById('pj-one-msg');
+  if (oneMsg && oneMsg.textContent.startsWith('We cannot read your projects right now')) {
+    oneMsg.textContent = '';
+  }
   return true;
 }
 
@@ -6047,6 +6055,8 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
   // Restore control, and re-archiving something already archived (a no-op
   // answered as a change) cannot happen from here any more.
   const want = !p.archived;
+  const archBtn = document.getElementById('pj-one-archive');
+  archBtn.disabled = true;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(p.id), {
       method: 'PUT',
@@ -6062,8 +6072,11 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
       // only what was read: "Restored." beside a page still saying archived
       // was four elements telling three stories.
       if (!(await loadProjects())) await loadProjects();
+      // ⚠️ A MOMENT sentence, symmetric with the disclosure arm: "this page
+      // may still show it archived" became false five seconds later when
+      // the poll repainted the control to "Archive it" around it.
       msg.textContent = PJ_READ_FAILED
-        ? 'The restore saved. We could not re-read your projects, so this page may still show it archived.'
+        ? 'The restore saved, but we could not re-read your projects just then.'
         : 'Restored.';
       return;
     }
@@ -6079,7 +6092,11 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
       ? 'Archived ' + p.name + '.'
       : 'Archived ' + p.name + '. It is in the archived list below, and Restore brings it back.';
   } catch (err) {
-    msg.textContent = String((err && err.message) || 'we could not archive it');
+    msg.textContent = String((err && err.message) || (want ? 'we could not archive it' : 'we could not restore it'));
+  } finally {
+    // Held while the PUT flies, like the disclosure sibling: two fast
+    // clicks fired two PUTs (idempotent today only by the carry-forward).
+    archBtn.disabled = false;
   }
 });
 

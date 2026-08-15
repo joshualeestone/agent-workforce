@@ -973,12 +973,36 @@ async function main() {
       const failedRead = await page.evaluate(() => ({
         archMsg: document.getElementById('pj-one-archive-msg').textContent,
       }));
-      await page.unroute('**/api/projects');
       if (/^Restored\.$/.test(failedRead.archMsg.trim())) {
         throw new Error('a restore with a failed re-read still claimed "Restored." beside a page that says archived');
       }
       if (!/saved/.test(failedRead.archMsg) || !/could not re-read/.test(failedRead.archMsg)) {
         throw new Error('the failed-re-read note does not name both halves (write landed, read did not): ' + JSON.stringify(failedRead));
+      }
+      // ⚠️ The note may not describe the SCREEN (review round 5): "this page
+      // may still show it archived" became false when the next poll
+      // repainted the control around it. Held to the disclosure's standard,
+      // and then the recovery is DRIVEN: unroute, force a read, and the
+      // sentence must still be true beside the repainted control.
+      if (/this page|above|below/.test(failedRead.archMsg)) {
+        throw new Error('the detail note references the current screen, which the next poll repaints: ' + JSON.stringify(failedRead));
+      }
+      await page.unroute('**/api/projects');
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      const recovered = await page.evaluate(() => ({
+        note: document.getElementById('pj-one-archive-msg').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+        oneMsg: document.getElementById('pj-one-msg').textContent,
+      }));
+      if (recovered.btn !== 'Archive it') {
+        throw new Error('the recovering poll did not repaint the control from the truth: ' + JSON.stringify(recovered));
+      }
+      if (/this page|archived/.test(recovered.note) && !/just then/.test(recovered.note)) {
+        throw new Error('the note aged into a lie beside the recovered screen: ' + JSON.stringify(recovered));
+      }
+      if (/We cannot read your projects right now/.test(recovered.oneMsg)) {
+        throw new Error('the failure sentence in #pj-one-msg outlived the successful read');
       }
       // The write DID land: the stub's glob (**/api/projects) matches only
       // the LIST endpoint, so the PUT to /api/project/<id> passes through
@@ -1024,7 +1048,22 @@ async function main() {
       await page.waitForTimeout(400);
       const discCleaned = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
       if (!discCleaned) throw new Error('the disclosure restore whose re-read failed did not actually land');
-      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, and BOTH restore arms under a failed re-read)');
+      // 8j. The scroll pad clears the bar at the widths where the header
+      // WRAPS (review rounds 4-5: one value measured at one width put focus
+      // 22px under the bar at 400). Measured, not trusted from the comment.
+      for (const w of [1280, 420, 400]) {
+        await page.setViewportSize({ width: w, height: 700 });
+        await page.waitForTimeout(250);
+        const pad = await page.evaluate(() => ({
+          bar: Math.round(document.querySelector('.apphead').getBoundingClientRect().height),
+          pad: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0,
+        }));
+        if (pad.pad < pad.bar) {
+          throw new Error(`at ${w}px wide the scroll pad (${pad.pad}) is under the bar (${pad.bar}): focus scrolls beneath it`);
+        }
+      }
+      await page.setViewportSize({ width: 1280, height: 520 });
+      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, BOTH restore arms under a failed re-read, and the pad clears the bar at wrapped widths)');
     } finally {
       await ctx.close();
     }
