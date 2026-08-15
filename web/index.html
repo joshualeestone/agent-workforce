@@ -203,6 +203,26 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
   padding: var(--space-5); }
 .pj-row:hover { background: var(--attn-bg); }
 .pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
+/* The description line, card and detail alike. On the ROW `--label-2`, not
+   `--label-3` (the detail's p.pj-desc overrides to full --label below):
+   this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
+   floor on this screen already at caption size (rounds 20 and 37 of the chat
+   branch). The harness asserts row and detail render the SAME size, which
+   is the check that catches the cascade regression this rule once had.
+   One line in the ROW: `oneLine` folds newlines at the engine, and the
+   ellipsis keeps a 200-char description from wrapping the row. Both selectors carry the element for specificity --
+   bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),
+   so the detail paragraph silently rendered at body size under a comment
+   claiming callout. */
+span.pj-desc, p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
+  color: var(--label-2); }
+span.pj-desc { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+p.pj-desc { margin-top: 2px; margin-bottom: 2px;
+  /* The person's sentence in full ink; the machine path below it stays
+     --label-2 -- the two rendered byte-identical and read as one grey
+     metadata block instead of the title-plus-statement pair the pin asks
+     for (round 5, confirmed on the rendered page). */
+  color: var(--label); }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
    together into one unreadable string -- which every one of the 408 text tests
@@ -1107,6 +1127,11 @@ svg { display: block; }
     <div class="pj-head">
       <h2 id="pj-one-name"></h2>
     </div>
+    <!-- What this project IS, in the person's own words, directly under the
+         title per the design (PIN-2026-08-14-1913CDT): the pair is one
+         statement. Hidden entirely when there is none: an empty grey line
+         under every undescribed project would read as something missing. -->
+    <p class="pj-desc" id="pj-one-desc" hidden></p>
     <p class="pj-folder" id="pj-one-folder"></p>
     <p class="pj-folder-state" id="pj-one-folder-state"></p>
 
@@ -3950,6 +3975,10 @@ function paintProjects() {
     }
     return '<button class="pj-row" type="button" data-project="' + esc(p.id) + '">'
       + '<b>' + esc(p.name) + '</b>'
+      // The description is what makes a list of twelve projects readable
+      // (Josh's fixtures made the case); absent, the line is absent, per
+      // the same no-empty-grey-line rule as the detail.
+      + (p.description ? '<span class="pj-desc">' + esc(p.description) + '</span>' : '')
       + '<span class="pj-path">' + esc(p.folder) + '</span>'
       + '<span class="pj-who">' + who + '</span>'
       + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
@@ -4024,6 +4053,9 @@ function paintOneProject() {
   const p = pjById(PJ_CURRENT);
   if (!p) { pjView('list'); PJ_CURRENT = null; return; }
   document.getElementById('pj-one-name').textContent = p.name;
+  const desc = document.getElementById('pj-one-desc');
+  desc.textContent = p.description || '';
+  desc.hidden = !p.description;
   document.getElementById('pj-one-folder').textContent = p.folder;
   const folder = pjFolderLine(p);
   const state = document.getElementById('pj-one-folder-state');

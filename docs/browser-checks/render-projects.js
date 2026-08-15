@@ -74,6 +74,9 @@ const SANDBOX = process.argv[4] || process.env.AGENT_WORKFORCE_SANDBOX || null;
 const HEADED = process.env.HEADED !== '0';
 // Set only once we have created the fixture tree ourselves; the cleanup keys on it.
 let OURS = null;
+// The launched browser, held at module level so the tail finally can close
+// it after ANY failure inside main().
+let BROWSER = null;
 
 async function api(p, options) {
   const res = await fetch(BASE + p, options);
@@ -209,6 +212,7 @@ async function main() {
   await assertSandboxed();
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: !HEADED });
+  BROWSER = browser;
   const shots = [];
   let overflows = 0;
 
@@ -298,7 +302,7 @@ async function main() {
   // keep a `~/kosmos-demo` would have lost it. The check and the delete have to
   // agree about who owns the folder.
   if (fs.existsSync(demo)) {
-    throw new Error(`${demo} already exists; this check creates and deletes that folder, so it will not touch yours. Move it aside and re-run.`);
+    throw new Error(`${demo} already exists -- usually the leftover of a KILLED harness run (the finally only runs when main() settles). If its contents are just the fixture dirs (henderson-lease, quarter-close, reed-handover), move it aside (mv ${demo} ${demo}.stale) and re-run; if not, it is yours and this check will not touch it.`);
   }
   // ⚠️ ONLY A TREE THIS RUN CREATED IS EVER DELETED. The cleanup used to be an
   // unconditional `finally`, and `.finally` runs after `.catch` -- so the run
@@ -309,10 +313,135 @@ async function main() {
   for (const d of ['henderson-lease', 'quarter-close', 'reed-handover']) {
     fs.mkdirSync(path.join(demo, d), { recursive: true });
   }
-  await post('/api/projects', { name: 'Henderson lease', folder: path.join(demo, 'henderson-lease'), agents });
+  await post('/api/projects', { name: 'Henderson lease', folder: path.join(demo, 'henderson-lease'), agents,
+    description: 'Review the <b>renewal terms</b> & prepare the counter.' });
   await post('/api/projects', { name: 'Quarter close', folder: path.join(demo, 'quarter-close'), agents: ['claudebot'] });
   await post('/api/projects', { name: 'Reed handover', folder: path.join(demo, 'reed-handover') });
   await shot('2-list');
+
+  /* The description, on the RENDERED page in both places it lives, with the
+     absence arm as its own assertion (project-description branch): a
+     described project shows the sentence on its row and under its detail
+     title; an undescribed one renders NO description element at all --
+     an empty grey line under every undescribed project is the exact
+     empty-state failure the hidden-toggle exists to prevent. Same
+     own-context-in-a-finally shape as the add-flow block below. */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const seen = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Henderson lease'));
+        const bare = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Reed handover'));
+        return {
+          onRow: row ? ((row.querySelector('.pj-desc') || {}).textContent || null) : null,
+          rowHasBold: row ? Boolean(row.querySelector('.pj-desc b')) : null,
+          bareHasDesc: bare ? Boolean(bare.querySelector('.pj-desc')) : null,
+        };
+      });
+      // ⚠️ RENDERED escaping, not only the source-regex pin: the fixture's
+      // description carries live markup, and the row must show it as TEXT,
+      // verbatim, with no element born from it. A text assertion alone
+      // cannot see the difference between escaped and parsed.
+      if (seen.onRow !== 'Review the <b>renewal terms</b> & prepare the counter.') {
+        throw new Error('the described row does not carry its sentence verbatim (markup should render as text): ' + JSON.stringify(seen.onRow));
+      }
+      if (seen.rowHasBold !== false) {
+        throw new Error('the description markup PARSED on the row: injection, not text');
+      }
+      if (seen.bareHasDesc !== false) {
+        throw new Error('an undescribed project rendered a description element (empty grey line): ' + JSON.stringify(seen.bareHasDesc));
+      }
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(300);
+      const detail = await page.evaluate(() => {
+        const el = document.getElementById('pj-one-desc');
+        return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
+      });
+      if (detail.text !== 'Review the <b>renewal terms</b> & prepare the counter.' || detail.hidden !== false) {
+        throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
+      }
+      // The row and the detail render the SAME token size: this is the check
+      // that reds the round-1 cascade regression (bare .pj-desc losing font
+      // to .panel p, the detail silently at body size under a comment
+      // claiming callout).
+      const sizes = await page.evaluate(() => ({
+        row: getComputedStyle(document.querySelector('#pj-list .pj-desc')).fontSize,
+        detail: getComputedStyle(document.getElementById('pj-one-desc')).fontSize,
+      }));
+      if (sizes.row !== sizes.detail) {
+        throw new Error('the description renders at two sizes (the cascade regression): ' + JSON.stringify(sizes));
+      }
+      // The DETAIL's absence arm, exercised, not inferred from the row's: an
+      // undescribed project's detail must hide the element (hidden === true),
+      // which is the arm the markup comment says the toggle exists for.
+      await page.click('#pj-back');
+      await page.waitForTimeout(200);
+      await page.click('[data-project="reedhandover"]');
+      await page.waitForTimeout(300);
+      const bareDetail = await page.evaluate(() => {
+        const el = document.getElementById('pj-one-desc');
+        if (!el) return { present: false };
+        const r = el.getBoundingClientRect();
+        return {
+          present: true,
+          hidden: el.hidden,
+          display: getComputedStyle(el).display,
+          w: r.width, h: r.height,
+          text: el.textContent,
+        };
+      });
+      // ⚠️ RENDERED absence, not the attribute: `p.pj-desc { display: block }`
+      // is exactly the author rule that beats the UA [hidden], and only the
+      // global [hidden]{display:none !important} keeps the empty grey line
+      // off this screen. The attribute check passed either way; this one
+      // reds if that global rule ever weakens.
+      if (!bareDetail.present) {
+        throw new Error('#pj-one-desc vanished from the markup entirely');
+      }
+      if (bareDetail.hidden !== true || bareDetail.display !== 'none' || bareDetail.w > 0 || bareDetail.h > 0) {
+        throw new Error('an undescribed project\u2019s detail description is ON SCREEN (attribute vs rendering): ' + JSON.stringify(bareDetail));
+      }
+      // A description AT THE CAP stays one line on the row: nowrap+ellipsis
+      // is a claim about rendering, and no fixture carried a long sentence.
+      const cap = 'C'.repeat(200);
+      await api('/api/project/' + encodeURIComponent('reedhandover'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: cap }),
+      });
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const longRow = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.pj-row')]
+          .find((r) => r.textContent.includes('Reed handover'));
+        const el = row && row.querySelector('.pj-desc');
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return {
+          lines: Math.round(el.getBoundingClientRect().height / parseFloat(cs.lineHeight)),
+          truncated: el.scrollWidth > el.clientWidth,
+          whiteSpace: cs.whiteSpace,
+        };
+      });
+      if (!longRow) throw new Error('the 200-char description never rendered on its row');
+      if (longRow.lines !== 1 || longRow.whiteSpace !== 'nowrap' || !longRow.truncated) {
+        throw new Error('a description at the cap did not truncate to one row line: ' + JSON.stringify(longRow));
+      }
+      await api('/api/project/' + encodeURIComponent('reedhandover'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: '' }),
+      });
+      console.log('✔ 2b-description (row, both absence arms, detail, and the one-line cap)');
+    } finally {
+      await ctx.close();
+    }
+  }
 
   // 3. One project — where the told-verdicts are visible.
   await shot('3-one', async (page) => {
@@ -511,7 +640,7 @@ async function main() {
         return 'rgb(255, 255, 255)';
       };
       const out = [];
-      for (const sel of ['#panel-projects .pj-warn']) {
+      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
@@ -603,7 +732,8 @@ async function main() {
       // view of a HEALTHY project, so it cannot carry either.
       for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
-        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel']) {
+        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel',
+        '#pj-one-view #pj-one-desc']) {
         const el = document.querySelector(sel);
         // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
         // went unmeasured under a printed pass.
@@ -655,7 +785,16 @@ async function main() {
 // obligation for the bigger tree.
 main()
   .catch((err) => { console.error(err); process.exitCode = 1; })
-  .finally(() => {
-    if (!OURS) return; // never ours, never deleted
-    try { fs.rmSync(OURS, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+  .finally(async () => {
+    if (OURS) {
+      try { fs.rmSync(OURS, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+    }
+    // ⚠️ The browser dies HERE, not only on the happy path: every throw
+    // inside main() used to leave Chromium attached and node resident
+    // forever -- an unattended loop reads a hang as "still running", never
+    // as red (one such run sat for 2 days 23 hours on this machine,
+    // measured by the round-2 reviewer).
+    if (BROWSER) {
+      try { await BROWSER.close(); } catch { /* already down */ }
+    }
   });

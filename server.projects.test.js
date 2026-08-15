@@ -408,6 +408,177 @@ test('renaming a project keeps its id, and reaches its members', async () => {
   assert.equal(json(res).project.id, made.id, 'the id is what membership points at');
 });
 
+test('the description travels the routes: created, carried, updated alone, cleared', async () => {
+  reset();
+  const made = json(await post('/api/projects', {
+    name: 'Q4 Marketing Plan', folder: folder('q4'),
+    description: '  Build the campaign calendar and track deadlines.  ',
+  })).project;
+  assert.equal(made.description, 'Build the campaign calendar and track deadlines.');
+  // GET carries it (the card and the detail read this list).
+  const listed = json(await req('/api/projects')).projects.find((p) => p.id === made.id);
+  assert.equal(listed.description, 'Build the campaign calendar and track deadlines.');
+  // Description-only PUT: the name must not move, and the request must not
+  // need to carry one (the old route ran rename unconditionally).
+  const put1 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'Second wording.' }),
+  });
+  assert.equal(put1.status, 200, put1.body);
+  assert.equal(json(put1).project.description, 'Second wording.');
+  assert.equal(json(put1).project.name, 'Q4 Marketing Plan', 'a description-only save must not touch the name');
+  // Name-only PUT preserves the description it never mentioned.
+  const put2 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Q4 Plan' }),
+  });
+  assert.equal(put2.status, 200, put2.body);
+  assert.equal(json(put2).project.description, 'Second wording.', 'a rename must not blank the description');
+  // Explicit empty clears -- deliberate, per the engine's own rule.
+  const put3 = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: '' }),
+  });
+  assert.equal(put3.status, 200, put3.body);
+  assert.strictEqual(json(put3).project.description, '');
+});
+
+test('a rename re-tells members and a description-only save leaves their files alone', async () => {
+  reset();
+  // ⚠️ Both directions of the re-tell gate, neither previously held: delete
+  // the gate and the second assertion reds; invert it and the third does.
+  const board = fleet.install([fleet.agent('telltest', { state: 'working' })]);
+  try {
+  const wdir = path.join(process.env.AGENT_WORKFORCE_WORKERS, 'telltest');
+  fs.mkdirSync(wdir, { recursive: true });
+  const file = path.join(wdir, 'CLAUDE.md');
+  fs.writeFileSync(file, '# telltest\n');
+  const made = json(await post('/api/projects', { name: 'Before name', folder: folder('retell'), agents: ['telltest'] })).project;
+  const afterCreate = fs.readFileSync(file, 'utf8');
+  assert.match(afterCreate, /Before name/, 'the premise: creation reached the member boot file');
+
+  // ⚠️ The gate is held by the TOLD STAMP, not by byte-comparing the file:
+  // blockBody carries only name and folder, so a re-tell fired on a
+  // description-only save splices back identical text and the byte
+  // comparison measures idempotence, never the gate (round 4 deleted the
+  // gate outright and the file comparison stayed green). syncAgent stamps
+  // told[key].at on EVERY call, so the stamp moves iff the re-tell fired.
+  const stampOf = () => projects.readAll().find((x) => x.id === made.id).told.telltest.at;
+  const stampAfterCreate = stampOf();
+  assert.ok(stampAfterCreate, 'the premise: creation stamped the told verdict');
+  // The breath goes HERE, before the description-only PUT: the equality
+  // below is the assertion that catches a deleted gate, and it needs the
+  // clock's millisecond granularity cleared far more than the notEqual
+  // does (round 5: the two stamps ran 1ms apart under load).
+  await new Promise((r) => setTimeout(r, 5));
+
+  const descOnly = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'display-side words' }),
+  });
+  assert.equal(descOnly.status, 200, descOnly.body);
+  assert.equal(stampOf(), stampAfterCreate,
+    'a description-only save re-told the member (the stamp moved)');
+  assert.equal(fs.readFileSync(file, 'utf8'), afterCreate,
+    'a description-only save rewrote a boot file the block does not mention');
+
+  // The stamp has millisecond resolution; two writes inside one ms read
+  // equal and flake the inequality below. A 5ms breath is not a sleep-based
+  // assertion, it is the clock's own granularity.
+  await new Promise((r) => setTimeout(r, 5));
+  const renamed = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'After name' }),
+  });
+  assert.equal(renamed.status, 200, renamed.body);
+  assert.notEqual(stampOf(), stampAfterCreate,
+    'the rename did not re-tell the member (the stamp never moved)');
+  const afterRename = fs.readFileSync(file, 'utf8');
+  assert.match(afterRename, /After name/, 'the rename never reached the member');
+  assert.ok(!/Before name/.test(afterRename), 'the boot file still names a project that no longer goes by that');
+  } finally {
+    board.restore();
+  }
+});
+
+test('a save that would move nothing is refused, not answered "saved"', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Immovable', folder: folder('immovable'), description: 'stays' })).project;
+  // {} and a typo'd key both carry no field we recognise -- reporting 200
+  // for either is a save the person believes happened.
+  for (const body of [{}, { descrption: 'typo' }]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 400, `body ${JSON.stringify(body)} should be refused: ${res.body}`);
+  }
+  const list = json(await req('/api/projects')).projects;
+  assert.equal(list[0].description, 'stays');
+  assert.equal(list[0].name, 'Immovable');
+});
+
+test('a name has to be words at the ROUTE boundary too, on both routes', async () => {
+  reset();
+  const posted = await post('/api/projects', { name: { a: 1 }, folder: folder('typed-name') });
+  assert.equal(posted.status, 400, posted.body);
+  const made = json(await post('/api/projects', { name: 'Typed name', folder: folder('typed-name') })).project;
+  const put = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: ['x'] }),
+  });
+  assert.equal(put.status, 400, put.body);
+  assert.equal(json(await req('/api/projects')).projects[0].name, 'Typed name');
+});
+
+test('one rule for what a description IS, on both routes: words or refused', async () => {
+  reset();
+  // POST: String() used to store "[object Object]" while PUT silently
+  // dropped the same value -- one field, two rules, split across routes.
+  const posted = await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: { not: 'words' } });
+  assert.equal(posted.status, 400, posted.body);
+  const made = json(await post('/api/projects', { name: 'Typed', folder: folder('typed-desc'), description: 'real words' })).project;
+  for (const bad of [{ not: 'words' }, ['a', 'b'], 7, true]) {
+    const res = await req(`/api/project/${made.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ description: bad }),
+    });
+    assert.equal(res.status, 400, `description ${JSON.stringify(bad)} should be refused: ${res.body}`);
+  }
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.description, 'real words', 'a refused write changes nothing');
+  // Over-length is refused at the route with the sentence, not cut.
+  const long = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: 'x'.repeat(201) }),
+  });
+  assert.equal(long.status, 400, long.body);
+  assert.match(json(long).error, /longer than 200/);
+  // And null clears, as absence: the one field where null meant malformed.
+  const nulled = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ description: null }),
+  });
+  assert.equal(nulled.status, 200, nulled.body);
+  assert.strictEqual(json(nulled).project.description, '');
+});
+
+test('a failed half of a two-field save applies NOTHING, not the readable half', async () => {
+  reset();
+  const made = json(await post('/api/projects', { name: 'Whole', folder: folder('whole-put'), description: 'original' })).project;
+  // The name is valid, the description is refused: the rename must not have
+  // happened when the route answers failure -- a 400 about a save that half
+  // landed tells the caller a lie in the other direction.
+  const res = await req(`/api/project/${made.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', origin: base },
+    body: JSON.stringify({ name: 'Renamed anyway', description: 42 }),
+  });
+  assert.equal(res.status, 400, res.body);
+  const after = json(await req('/api/projects')).projects[0];
+  assert.equal(after.name, 'Whole', 'the valid half of a refused save must not land');
+  assert.equal(after.description, 'original');
+});
+
 test('a name that cannot be decoded is refused rather than guessed at', async () => {
   const res = await req('/api/project/%ZZ');
   assert.equal(res.status, 400);

@@ -483,6 +483,14 @@ test('the block names each project and its folder', () => {
   const body = projects.blockBody([{ name: 'Henderson lease', folder: '/Users/josh/work/henderson' }]);
   assert.match(body, /Henderson lease/);
   assert.match(body, /\/Users\/josh\/work\/henderson/);
+  // ⚠️ The NEGATIVE half is what the PUT route's re-tell gate leans on: a
+  // description-only save does not re-tell members BECAUSE the block carries
+  // no description. Without this assertion that gate is guarded by a comment;
+  // if the description ever joins the block, this line goes red and the gate
+  // has to be revisited in the same change.
+  const described = projects.blockBody([{ name: 'Henderson lease', folder: '/Users/josh/work/henderson', description: 'the person\u2019s own words' }]);
+  assert.ok(!/own words/.test(described),
+    'the managed block must not carry the description: it is display-side text, and the re-tell gate depends on this');
 });
 
 test('the block for an agent on nothing says so rather than being empty', () => {
@@ -702,6 +710,124 @@ test('a folder path with a newline in it is one line in the block', () => {
   const line = body.split('\n').find((l) => l.startsWith('- '));
   assert.ok(line && line.includes('Not a heading'), 'the path text is kept, just made inert');
   assert.ok(!body.includes('\n\n## Not a heading'));
+});
+
+test('a name has to be words, on every writer', () => {
+  reset();
+  // The guard protects the one field syncAgent writes into every member's
+  // boot file; "[object Object]" was a legal name before it.
+  [{ a: 1 }, 42, ['x'], true].forEach((bad, i) => {
+    assert.throws(() => projects.create({ name: bad, folder: folder('badname-' + i) }), /words/);
+  });
+  const made = projects.create({ name: 'Wordy', folder: folder('wordy') });
+  assert.throws(() => projects.edit(made.id, { name: 42 }), /words/);
+  assert.equal(projects.get(made.id, []).name, 'Wordy', 'a refused write changes nothing');
+  // null keeps its own older sentence: absence-of-a-name, not wrong-typed.
+  assert.throws(() => projects.create({ name: null, folder: folder('nullname') }), /give this project a name/);
+});
+
+test('a refused description does not leave an orphan folder behind', () => {
+  reset();
+  // The type refusal fires BEFORE makeFolder: refused-for-a-bad-body is not
+  // the accepted parked-spot case (an I/O failure the retry adopts), because
+  // a caller refused for a bad body does not retry with the same bad body.
+  const before = (() => {
+    try { return fs.readdirSync(projects.projectsRoot()).length; } catch { return 0; }
+  })();
+  assert.throws(() => projects.create({ name: 'Orphan probe', description: 42 }), /words/);
+  const after = (() => {
+    try { return fs.readdirSync(projects.projectsRoot()).length; } catch { return 0; }
+  })();
+  assert.equal(after, before, 'the refused create made a folder no record points at');
+  // ⚠️ The control: the same shape WITHOUT the bad description does make a
+  // folder, so the equality above measured a refusal, not a name that never
+  // reached makeFolder for some other reason.
+  projects.create({ name: 'Orphan probe' });
+  const control = fs.readdirSync(projects.projectsRoot()).length;
+  assert.equal(control, before + 1, 'the control create did not reach makeFolder, so the test above measured nothing');
+});
+
+test('an over-length description is REFUSED with a sentence, like the name, never silently cut', () => {
+  reset();
+  // Counted in code points: 200 emoji are 400 UTF-16 units and legal.
+  const twoHundredEmoji = '\u{1F600}'.repeat(200);
+  const made = projects.create({ name: 'Emoji cap', folder: folder('emoji-cap'), description: twoHundredEmoji });
+  assert.equal(Array.from(made.description).length, 200);
+  // One over is refused -- a silent truncation answered success while
+  // cutting the person's words with nothing saying so.
+  assert.throws(() => projects.create({ name: 'Over', folder: folder('over-cap'), description: 'x'.repeat(201) }),
+    /longer than 200/);
+  assert.throws(() => projects.edit(made.id, { description: '\u{1F600}'.repeat(201) }), /longer than 200/);
+  assert.equal(Array.from(projects.get(made.id, []).description).length, 200, 'a refused write changes nothing');
+});
+
+test('null means absence for a description, as it does for name and folder', () => {
+  reset();
+  const made = projects.create({ name: 'Nullable', folder: folder('nullable'), description: null });
+  assert.strictEqual(made.description, '', 'null on create is not-provided, not malformed');
+  projects.setDescription(made.id, 'words');
+  assert.strictEqual(projects.edit(made.id, { description: null }).description, '',
+    'null on edit clears, the same deliberate act as the explicit empty');
+});
+
+test('a legacy record READS as the empty description everywhere, API included', () => {
+  reset();
+  const made = projects.create({ name: 'Legacy read', folder: folder('legacy-read') });
+  const all = projects.readAll();
+  delete all.find((p) => p.id === made.id).description;
+  projects.writeAll(all);
+  // describe() is what every route returns: the field must be present and
+  // '', not omitted for API readers to trip over as undefined.
+  const seen = projects.get(made.id, []);
+  assert.strictEqual(seen.description, '');
+});
+
+test('edit applies every carried field in one write, and a refused field refuses the whole save', () => {
+  reset();
+  const made = projects.create({ name: 'Atomic', folder: folder('atomic'), description: 'original' });
+  const both = projects.edit(made.id, { name: 'Atomic II', description: 'new words' });
+  assert.equal(both.name, 'Atomic II');
+  assert.equal(both.description, 'new words');
+  // A valid name beside a refused description applies NOTHING.
+  assert.throws(() => projects.edit(made.id, { name: 'Atomic III', description: 42 }), /words/);
+  const after = projects.get(made.id, []);
+  assert.equal(after.name, 'Atomic II', 'the valid half of a refused save must not land');
+  assert.equal(after.description, 'new words');
+  // No recognised field at all is refused, not answered with the row.
+  assert.throws(() => projects.edit(made.id, {}), /nothing here we can change/);
+});
+
+test('a description is stored trimmed, one-line, capped, and optional', () => {
+  reset();
+  const made = projects.create({ name: 'Described', folder: folder('described'),
+    description: '  Build the campaign calendar,\ndraft content.  ' });
+  // Newlines fold exactly as the name's do: this renders on a card and in a
+  // heading, and the engine is where the folding lives (one derivation).
+  assert.equal(made.description, 'Build the campaign calendar, draft content.');
+  const plain = projects.create({ name: 'Undescribed', folder: folder('undescribed') });
+  assert.strictEqual(plain.description, '', 'absent must store as the explicit empty string');
+  assert.throws(() => projects.create({ name: 'Longform', folder: folder('longform'),
+    description: 'x'.repeat(500) }), /longer than 200/,
+  'over-length is refused with the sentence, never silently cut');
+});
+
+test('setDescription updates, clears on explicit empty, and heals legacy records', () => {
+  reset();
+  const made = projects.create({ name: 'Mutable', folder: folder('mutable'), description: 'first words' });
+  assert.equal(projects.setDescription(made.id, '  second words  ').description, 'second words');
+  // ⚠️ Explicit empty CLEARS -- a description is optional by design and the
+  // settings screen offers clearing; this is deliberately unlike the profile
+  // displayName's blank-drop, whose field is an identity that must survive
+  // accidents.
+  assert.strictEqual(projects.setDescription(made.id, '').description, '');
+  // A record written before the field existed simply gains it.
+  const storeFile = path.join(store.ROOT, projects.FILE);
+  const all = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+  delete all.find((p) => p.id === made.id).description;
+  fs.writeFileSync(storeFile, JSON.stringify(all));
+  assert.equal(projects.setDescription(made.id, 'added later').description, 'added later');
+  assert.throws(() => projects.setDescription(made.id, 'x'.repeat(500)), /longer than 200/,
+    'the refusal holds on update too');
 });
 
 test('renaming is judged by the same rule as naming', () => {

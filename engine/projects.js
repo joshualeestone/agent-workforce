@@ -451,6 +451,10 @@ function describe(project, roster) {
     ...project,
     folder: project.folder,
     folderState: folderState(project.folder),
+    // Normalized here rather than trusted from the record: a legacy project
+    // has no field at all, and "read as ''" has to hold for API readers too,
+    // not only the two web renderers with their own || '' fallbacks.
+    description: project.description || '',
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.
@@ -518,10 +522,60 @@ function projectsFor(sessionName, roster) {
  * derivations of one question always drift; this is the one.
  */
 function cleanName(name) {
+  // Words or refused, like cleanDescription (one asymmetry, deliberate:
+  // null keeps the older "give this project a name" -- absence, not wrong
+  // type): oneLine String()s, so {name: {}} stored "[object Object]" -- and
+  // the name is what syncAgent writes into every member's boot block.
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw new Error('a name has to be words');
+  }
   const title = oneLine(name);
   if (!title) throw new Error('give this project a name');
   if (title.length > 120) throw new Error('that name is longer than a project name should be');
   return title;
+}
+
+/**
+ * A project's one-line description: what this work IS, in the person's words.
+ *
+ * ⚠️ OPTIONAL, and empty is a real value. Unlike the name (a project must be
+ * addressable) a description can legitimately be blank, and clearing one is a
+ * deliberate act the settings screen offers -- so '' is stored, never refused
+ * and never quietly kept. `oneLine` folds newlines like the name's does: this
+ * renders on a card and in a heading, and a stray newline would break both.
+ * Capped at 200 characters: the design renders one line under the title, and
+ * Josh's own twelve fixture descriptions top out under half that.
+ */
+function cleanDescription(text) {
+  // Absent is a legitimate blank; anything present has to BE words. String()
+  // here turned {description: {}} into "[object Object]" on one route while
+  // the other route silently dropped it -- one field, two rules, the exact
+  // "two derivations of one question" cleanName's own comment warns against.
+  // null means absence, exactly as it does for name and folder in create:
+  // round 2 refused it as "a second clear spelling", which made description
+  // the ONE field where null meant malformed while its neighbours read it
+  // as not-provided. (A whitespace-only description folds to '' through
+  // oneLine below and clears the field too -- the same deliberate act as
+  // the explicit empty.)
+  if (text === undefined || text === null || text === '') return '';
+  if (typeof text !== 'string') throw new Error('a description has to be words');
+  const flat = oneLine(text); // oneLine already trims
+  // REFUSED over the cap, like cleanName at 120: a silent truncation
+  // answered success while cutting the person's words with nothing saying
+  // so -- two answers to over-length on two adjacent fields of one form.
+  // Counted in code points (the "200 characters" people count is the
+  // approximation; an all-emoji description is up to 400 UTF-16 units).
+  // ⚠️ Counted in code POINTS, and deliberately NOT the name's rule: the
+  // name caps at 120 UTF-16 units because its input carries maxlength=120,
+  // which counts units, and the cap must agree with the box a person types
+  // into. The description has no input yet -- and when the settings screen
+  // adds one, it must NOT use a raw maxlength=200 (that would cut a pasted
+  // 200-emoji description at 100 while this rule accepts it). The split is
+  // a recorded decision, not drift.
+  if (Array.from(flat).length > 200) {
+    throw new Error('that description is longer than 200 characters');
+  }
+  return flat;
 }
 
 /* ---------------------------------------------------------------------------
@@ -739,7 +793,7 @@ function trueChildName(parent, name) {
  *   which is still fully supported and is the only way to reach work that lives
  *   somewhere else.
  */
-function create({ name, folder, agents, roster } = {}) {
+function create({ name, folder, agents, roster, description } = {}) {
   const asked = String(folder == null ? '' : folder).trim();
   // ⚠️ On the default path the FOLDER-NAME refusal comes first, because it
   // is the sentence the person has been reading: the preview line under the
@@ -752,6 +806,12 @@ function create({ name, folder, agents, roster } = {}) {
     if (problem) throw new Error(problem);
   }
   const title = cleanName(name);
+  // ⚠️ BEFORE makeFolder, with every other refusal. This was the one
+  // validation firing after the mkdir, so a type-refused description left
+  // an empty folder no record pointed at -- and unlike the accepted
+  // I/O-failure case below, nothing adopts it: a caller refused for a bad
+  // body does not retry with the same bad body.
+  const desc = cleanDescription(description);
   // ⚠️ Made BEFORE the duplicate check below rather than after, so a second
   // project of the same name meets "that folder is already the project X"
   // rather than a fresh empty directory nobody asked for. `makeFolder` adopts
@@ -784,6 +844,7 @@ function create({ name, folder, agents, roster } = {}) {
   const project = {
     id: idFor(title, new Set(all.map((p) => p.id))),
     name: title,
+    description: desc,
     folder: given,
     agents: members,
     everSeen: Object.fromEntries(members.map((a) => [
@@ -808,12 +869,38 @@ function mutate(id, fn) {
   return next;
 }
 
+/**
+ * Every writable display field, applied in ONE mutate.
+ *
+ * ⚠️ One write on purpose. The PUT route used to run rename and
+ * setDescription as two independent read-modify-writes -- so a failure in
+ * the second answered the caller "your save failed" about a rename that had
+ * already persisted. Validation happens for every carried field BEFORE any
+ * write, so a request either applies whole or not at all.
+ */
+function edit(id, fields = {}) {
+  const want = {};
+  if (fields.name !== undefined) want.name = cleanName(fields.name);
+  if (fields.description !== undefined) want.description = cleanDescription(fields.description);
+  if (!Object.keys(want).length) {
+    // A save that would move nothing is refused, not answered "saved": a
+    // typo'd key reporting success is a save the person believes happened.
+    throw new Error('nothing here we can change');
+  }
+  return mutate(id, (p) => ({ ...p, ...want }));
+}
+
 function rename(id, name) {
-  const title = cleanName(name);
   // ⚠️ The id does NOT change with the name. It is what the agents' recorded
   // membership and any open URL point at, and renaming is a display change
   // rather than a new project.
-  return mutate(id, (p) => ({ ...p, name: title }));
+  return edit(id, { name });
+}
+
+function setDescription(id, text) {
+  // Records written before this field existed simply gain it here; readers
+  // treat a missing description as ''.
+  return edit(id, { description: text });
 }
 
 function addAgent(id, sessionName, roster) {
@@ -1156,7 +1243,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, rename, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, addAgent, removeAgent, remove,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,

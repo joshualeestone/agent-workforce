@@ -2763,6 +2763,16 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
      'the box clear must key on the takeoff PROJECT (not the full flight gate) plus the sent text: too narrow deletes another project\u2019s words, too wide leaves delivered words armed for a duplicate send (rounds 29/37/38)'],
     [/if \(\(PJ_DRAFTS\[sentProject\] \|\| ''\)\.trim\(\) === text\) delete PJ_DRAFTS\[sentProject\];/,
      'the parked-draft clear must key on the TAKEOFF project and the exact sent text (rounds 34/37: a programmatic clear fires no input event, so the map kept the sent text)'],
+    // The description renders escaped in BOTH places or not at all: a
+    // project named by the person carries their words onto a card and a
+    // heading, and either an unescaped render or a dropped arm would be
+    // invisible to node tests (project-description branch).
+    [/p\.description \? '<span class="pj-desc">' \+ esc\(p\.description\)/,
+     'the card row lost its escaped description arm'],
+    [/desc\.textContent = p\.description \|\| '';/,
+     'the detail description must be written through textContent -- innerHTML here is the injection the card arm escapes against, and no node test can see the swap'],
+    [/desc\.hidden = !p\.description;/,
+     'the detail description lost its hidden-when-absent toggle (an empty grey line under every undescribed project)'],
     // The pick toggle must keep setLive's memory in step with its in-place
     // aria-checked flip, or the next poll rebuilds the list under the
     // focused button (round 39).
