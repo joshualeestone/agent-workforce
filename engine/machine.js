@@ -23,6 +23,8 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const create = require('./create');
 
@@ -496,7 +498,124 @@ function restartCheck(runner) {
    =========================================================================== */
 
 /**
- * @returns {{checks: Array, attention: number, unknown: number}}
+ * The could-not-look answer, defined ONCE. The /api/machine route's degraded
+ * catch path publishes this same row, and a second hand-copied literal there
+ * went stale the moment this wording moved.
+ */
+function appLocationUnknown() {
+  return {
+    key: 'app-location',
+    state: STATE.UNKNOWN,
+    title: 'We could not check where the Kosmos icon is',
+    detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the '
+      + 'top right of your screen, and it will find it.',
+  };
+}
+
+/**
+ * Where the Kosmos icon actually IS, looked up rather than remembered.
+ *
+ * ⚠️ WHY THIS EXISTS (orientation spec, 2026-08-14): the installer's APP_DIR
+ * is a shell variable that was never persisted, so the app had no idea where
+ * its own icon landed -- and the icon legitimately lands in three places:
+ * /Applications (the account could write there), ~/Applications (fallback,
+ * measured on the first real clean-machine run when the tester concluded the
+ * install "did not put it in my applications"), or nowhere. A screen saying
+ * "it is in your Applications folder" without looking would be a state
+ * nobody checked rendered as fact.
+ *
+ * ⚠️ EXISTENCE, not provenance, deliberately: this check says "we found a
+ * Kosmos here" when a Kosmos.app directory is present, and does not try to
+ * prove the bundle is this install's the way install/kosmos's bundle_is_ours
+ * does. The spec weighed this: an honest "we found one" beats a provenance
+ * proof that lands a healthy machine in unknown.
+ *
+ * Four answers, per the spec's table, in this module's check shape:
+ * found in /Applications (ok), found in ~/Applications (ok, its own title,
+ * because the path differs and the installer already words it this way),
+ * found in neither (attention -- with the sentence that absence-of-finding
+ * is not absence: "That is not the same as it not being there"), and could
+ * not look (unknown -- "Nothing is wrong").
+ *
+ * `opts.appDirs` overrides the two real folders so tests never depend on
+ * this machine's actual /Applications -- the same injection shape as
+ * opts.runner and opts.pmset.
+ *
+ * Known limit, not an oversight: the installer accepts KOSMOS_SYS_APP_DIR
+ * and KOSMOS_APP_DIR overrides, and those shell variables are never
+ * persisted -- so a machine installed to a custom folder reads attention
+ * here. The copy stays honest about exactly that ("That is not the same as
+ * it not being there").
+ */
+function appLocationCheck(opts) {
+  // ⚠️ A malformed override THROWS rather than silently probing the real
+  // machine. The fallback used to require length exactly 2, so a test passing
+  // one or three directories by mistake read the operator's real
+  // /Applications under a green run -- the exact leak the override exists to
+  // prevent.
+  let dirs;
+  if (opts && opts.appDirs !== undefined) {
+    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0
+        || !opts.appDirs.every((d) => typeof d === 'string' && d.length > 0)) {
+      // Non-string elements included: path.join would TypeError inside the
+      // look's try, read as errored, and answer a fabricated could-not-look
+      // -- the one state this guard exists to keep honest.
+      throw new Error('appDirs override must be a non-empty array of directory paths');
+    }
+    dirs = opts.appDirs;
+  } else {
+    dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
+  }
+  const TITLES = [
+    'Kosmos is in your Applications folder',
+    'Kosmos is in the Applications folder inside your home folder',
+  ];
+  const OPEN_FROM_THERE = 'Open it from there whenever you want it. Clicking it starts '
+    + 'Kosmos if it is not already running.';
+  // ⚠️ An unreadable FIRST folder no longer ends the look. A machine whose
+  // /Applications errors EACCES but whose home Applications holds the app was
+  // told "we could not check" when a definite yes was one iteration away --
+  // could-not-look is the honest LAST answer, never the eager one.
+  let errored = false;
+  for (let i = 0; i < dirs.length; i++) {
+    try {
+      const st = fs.statSync(path.join(dirs[i], 'Kosmos.app'));
+      // A FILE named Kosmos.app is not the app; keep looking rather than
+      // pointing somebody at a thing that will not open.
+      if (st.isDirectory()) {
+        // Index 0 and 1 are the two real folders; an injected extra gets a
+        // title AND detail that name no folder ("from there" would point at
+        // a place the title deliberately declines to name).
+        const named = i < TITLES.length;
+        const title = named ? TITLES[i] : 'We found the Kosmos icon on this Mac';
+        const detail = named ? OPEN_FROM_THERE
+          : 'Open it from where you found it. Clicking it starts Kosmos if it is not already running.';
+        return { key: 'app-location', state: STATE.OK, title, detail };
+      }
+    } catch (err) {
+      if (err && err.code === 'ENOENT') continue;
+      // Anything but a clean "not there" means we could not complete this
+      // look -- remember it and keep going, because a find anywhere is still
+      // a find.
+      errored = true;
+    }
+  }
+  if (errored) {
+    // "Could not look" must never render as "it is not there".
+    return appLocationUnknown();
+  }
+  return {
+    key: 'app-location',
+    state: STATE.ATTENTION,
+    title: 'We could not find the Kosmos icon',
+    detail: 'That is not the same as it not being there. Type Kosmos into Spotlight, the '
+      + 'magnifying glass at the top right of your screen, and it will find it.',
+  };
+}
+
+/**
+ * @returns {{checks: Array, attention: number, unknown: number,
+ *            appLocation: {key: string, state: string, title: string, detail: string}}}
  */
 function check(opts) {
   const runner = (opts && opts.runner) || run;
@@ -524,7 +643,15 @@ function check(opts) {
     // could not read is a sentence that is false about half of what it counts.
     attention: checks.filter((c) => c.state === STATE.ATTENTION).length,
     unknown: checks.filter((c) => c.state === STATE.UNKNOWN).length,
+    // ⚠️ Its OWN field, deliberately not one of `checks`. Where the app sits
+    // has no bearing on whether an agent runs, so folding it into the rows
+    // step 2 counts and step 4 filters made the wizard state a false cause:
+    // "We could not find the Kosmos icon. An agent made now may not run until
+    // that is sorted" -- on exactly the fresh-install path this check exists
+    // for. Step 5 (getting back to Kosmos) is its one consumer. Separating it
+    // at the SOURCE means no screen has to remember to exclude it.
+    appLocation: appLocationCheck(opts),
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, restartCheck, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, STATE };

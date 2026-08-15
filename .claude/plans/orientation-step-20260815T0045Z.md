@@ -1,0 +1,250 @@
+# orientation-step: the fifth first-run step, "Getting back to Kosmos"
+
+Date: 2026-08-15 (overnight run). Owner: Angel. Spec:
+Josh-Brain/Projects/kosmos-orientation-screens-spec.md (Mona Lisa,
+2026-08-14), pinned by PIN-2026-08-14-1913CDT ("five setup steps --
+welcome, model, this computer, your agents, getting back"). Scope ruling
+from Splinter + Mona Lisa in the overnight channel: the app-location
+CHECK only; the Show-me-where reveal endpoint is explicitly out (its
+fallback needs a fresh decision after Josh cut paths from the UI three
+times tonight), and the drawn button does not bind this branch. Loop cap
+for this branch: 15, set before starting (launch-critical UI, no new
+powerful writes).
+
+## What this adds
+
+- `engine/machine.js appLocationCheck`: looks for `Kosmos.app` in
+  /Applications then ~/Applications and answers the spec's four states in
+  the existing `{key, state, title, detail}` shape, joining the
+  `/api/machine` payload. Existence, not provenance, per the spec's own
+  lean. `opts.appDirs` injects the folders so no test reads the real
+  machine; a FILE wearing the name is skipped; anything but a clean
+  ENOENT is `unknown`, because could-not-look must never render as
+  is-not-there.
+- First-run becomes five steps: `FR_STEPS = 5`, pane 5, and
+  `frPaintReturn` rendering the spec's copy verbatim: the intro, the
+  check row through the existing `frCheckRow` grammar (pre-painted as
+  could-not-look so the pane is never blank during the fetch, upgraded in
+  place), the DRAG Dock instruction (never "Keep in Dock": the tile
+  exits before it can be right-clicked, per the spec's two installer
+  citations), and the narrow closing-tab promise (agents keep working).
+- The fork moves whole from step 4 to step 5's actions via
+  `frForkActions` (one holder for the three path pairs); step 4 gets a
+  plain Continue on every path including the broken-payload one.
+- Harnesses: click-first-run walks the fifth step (four checks painted,
+  the drag guard, the create-path handoff now two clicks); render-first-run
+  gains four engine-generated app-location fixtures with premise
+  controls, ten committed step-5 shots (five states, light and dark), and per-shot assertions
+  (fixture title present, drag present, Keep-in-Dock absent).
+- Contrast: `.fr-bar` and `.fr-mark` move from --label-3 to --label-2.
+  Pre-existing AA failures (3.0-4.0:1, measured; main fails its own
+  render harness with 32 problems tonight) surfaced by running the
+  harness; fixed where the branch was standing. The clear fixture also
+  became engine-generated: the live-route premise ("this machine is
+  all-clear") stopped being satisfiable on any machine without Kosmos.app
+  installed the moment app-location joined the checks, while every real
+  post-install machine still satisfies it; the fixture follows the
+  premise and keeps its control.
+
+## Verification
+
+node --test (machine + server suites green), render-first-run (no
+rendering problems, all shots regenerated and committed),
+click-first-run (all clear, exit 0), against a fully sandboxed server.
+
+## Known and deliberate
+
+- Step 1 still says "Welcome to Agent Workforce" while the new step says
+  Kosmos: the product rename is the terminology sheet's own sweep, a
+  separate branch; new copy follows the spec's naming.
+- The removed-shots renumbering the spec warned about did not arise: the
+  fork's CONTENT stayed on step 4, so firstrun-4-* names remain accurate,
+  and step 5's shots are new files.
+
+## Review round 1 (2026-08-14 evening)
+
+The reviewer found one BLOCKER and it was the branch's own design error:
+appLocationCheck had joined the shared `checks` array, so step 4's create
+path captioned a missing Kosmos.app with "An agent made now may not run
+until that is sorted" (a false cause) and step 2 counted it. Fixed at the
+SOURCE: `check()` now publishes `appLocation` beside the rows, never among
+them, so no screen has to remember to exclude it; tests pin both the field
+and its absence from the rows, and pin that its attention state is not
+added to the counts.
+
+Also from the round: the look no longer gives up on the first unreadable
+folder (could-not-look is the last answer, not the eager one); a malformed
+appDirs override throws instead of silently probing the real machine; the
+step-5 pre-paint is a distinct "checking" state instead of a byte-identical
+copy of the engine's unknown row (placeholder, engine answer, and
+could-not-ask fallback are now three distinguishable wordings, asserted);
+the Dock drag instruction tracks whether a folder was FOUND (the spec wrote
+"out of that folder" under the found case; missing and unknown get a
+Spotlight-anchored variant, my wording, flagged for the designer);
+frPaintReturn gained unit coverage through the harness (fetch stubbed,
+async supported); the live region moved off the pane wrapper onto the row;
+the shape test that read the real machine is sandboxed; step 4 asserts
+Continue is the ONLY button on every path; stale four-step comments and
+the Step 1 of 4 crumb corrected.
+
+## Review round 2 (2026-08-14 evening)
+
+One blocker: the fork moved to step 5 but its adopt GUARD did not -- an
+adopt payload whose fleet could not be counted had step 4 honestly refuse
+to guess while step 5's button read "Take me to my agents". frForkActions
+now keys adopt on the same predicate as frPaintFleet (integer count > 0)
+and every uncountable-adopt shape lands on the neutral pair; the fork test
+drives four such shapes. Also: /api/machine's appLocation is pinned on the
+WIRE (route test), and the route's degraded catch-path payload now carries
+an unknown appLocation row so the broken-runner shape matches the healthy
+one; the click walk asserts the live answer is not the could-not-ask
+fallback; the render harness waits for the answer instead of a fixed
+delay; step 1's preview sentence counts five; the closing sentence no
+longer says "clicking the icon" over a row that found no icon; res.ok is
+checked before json(); check()'s JSDoc moved back onto check() and gained
+the appLocation field; an injected third directory no longer wears the
+home-folder title; the installer-override limit is documented at the
+function; README's shot count corrected.
+
+## Review round 3 (2026-08-14 late evening)
+
+No blockers. Six warnings, five fixed, one deferred with its reason:
+- The step-5 live region now EXISTS in the static markup before anything
+  fills it (a region inserted and populated in one write is the documented
+  way to get no announcement); frPaintReturn writes only the three
+  containers' contents and never recreates the region, which also survives
+  re-entry.
+- frPaintReturn carries an entry generation: a stale fetch resolving after
+  a newer entry cannot repaint over it, and the could-not-ask catch moves
+  the DOCK with the row (an ok drag instruction can no longer outlive the
+  answer that named the folder). The unit test pins the dock on the
+  failure path.
+- The /api/machine look is shared while in flight (the route costs two
+  subprocesses; Back/Continue re-fired it per click). The promise resolves
+  to the parsed body so every awaiter can read it.
+- The route's degraded catch publishes machine.appLocationUnknown(), the
+  engine's own row, instead of a hand-copied literal that drifts.
+- The vacuous placeholder assertion is real now: the placeholder is
+  written into the row stub itself, so the same assertion that could not
+  fail before now proves the upgrade landed.
+- DEFERRED: two product names on one card ("Agent Workforce" chrome over
+  "Getting back to Kosmos" copy). The rename is the terminology sheet's
+  own sweep, queued as its own branch; sequencing recorded as a decision.
+Also: appDirs elements must be strings (a number answered a fabricated
+could-not-look); 'checking' is a LOCAL row state the wire cannot claim (a
+payload saying "checking" falls back to unknown, tested); the
+injected-extra title's detail no longer points at "there"; step-4's
+closing-tab flat claim on the create path is flagged to the designer.
+
+## Review round 4 (2026-08-14, ~10:30 PM)
+
+No blockers. Four warnings, all closed with checks that can fail:
+- Local-ness is the CALLER's argument on frCheckRow, never a field on the
+  row: a wire payload carrying {local:true, state:"checking"} rendered a
+  permanent look-in-progress before; now both sneaky shapes are tested to
+  fall back to unknown.
+- The degraded catch path is pinned two ways: the shared engine row is
+  asserted renderable, and the route SOURCE is pinned to reference
+  machine.appLocationUnknown() (a copied literal reds).
+- The entry token and the shared look have a test that exercises them:
+  two overlapping entries join ONE fetch (call count pinned), the settled
+  look clears for the next entry, and a failing look after a newer entry
+  paints could-not-ask with the dock moving alongside.
+- The checking state is rendered, measured, and photographed: a new
+  firstrun-5-return-checking shot stalls the machine route (goto waits on
+  load, not networkidle, since the stalled request IS the state) and
+  asserts the placeholder class and the absence of completed-look wording.
+Nits: appDirs refuses a non-string element (tested); the live-region
+comment claims only what the code delivers; the five-step comment in the
+button test corrected. The closing-tab sentence's literal falseness about
+this screen (the wizard does not come back) and the two product names
+remain designer/terminology items, recorded.
+
+## Review round 5 (2026-08-14, ~10:40 PM)
+
+One blocker, in the round-4 test itself: the overlapping-entries test
+could not fail on the token half of its name (shared looks mean live
+entries always paint identical content; the reviewer deleted both
+generation guards and the test stayed green). The guard's ONE reachable
+job is now the tested scenario: the person leaves step 5 while the look
+is in flight, and the late answer must not repaint the pane (bumping the
+generation between entry and resolve; verified by planting the deletion
+mutant, which reds this scenario by name). The misleading comment and the
+abandoned-design narration both rewritten to claim what runs. Warnings:
+an answer with nothing to SAY is not an answer ({state:'ok'} with no
+title rendered a confident blank tick over a folder-pointing dock; the
+guard requires title and detail, tested); the static live region is
+pinned in the committed markup (the DOM stub auto-creates ids, so the
+region could have been deleted while every test stayed green); the
+closing sentence now says "brings Kosmos back" (the wizard deliberately
+never returns, and this was the one checkably untrue sentence on the
+page; spec deviation recorded for the designer); README says fourteen.
+Also: the misplaced JSDoc moved onto appLocationCheck; the extra-dir
+branch is rendered by a test. Deferred: unconditional mkdtemp cleanup on
+assertion failure (tmp-only leak). Process note, recorded because it bit
+again: the round-4 mutant restore via git checkout ate the uncommitted
+round-5 web fixes (commit-before-perturb, relearned); re-applied and
+verified before this commit.
+
+## Review round 6 (2026-08-14, ~11 PM)
+
+One blocker, the round-5 blocker one level up: the generation guard had
+no production trigger (only frPaintReturn itself ever moved the counter,
+so "the person left the step" was a transition the app never performed
+and the leave test simulated a mutation nothing performs). Leaving is
+real now: frGo bumps the generation on any non-5 step and frClose bumps
+on the way out, so a look settling after departure retires against a
+counter production actually moved. Both guard copies are covered: the
+leave-then-resolve scenario reds when the success copy is deleted, and a
+new leave-then-fail scenario reds when the catch copy is (the shared-look
+scenarios cannot reach either, which round 5's record now says plainly).
+Warnings: step 2's checks.map no longer feeds the array index into the
+trust parameter (wrapped; local-ness stays deliberate); the five step-5
+shots pin their first-run payload and assert the pinned adopt fork label
+per shot (the fork half of the card came from the live route and would
+have flipped per machine under the same filenames). Nits: the pointless
+pre-write removed from the leave scenario; appFixture's comment names
+root as the blind-fixture failure cause; the folderless closing line
+stops saying Kosmos three times ("they will be here when you open Kosmos
+again").
+
+## Review round 7 (2026-08-14, ~11:45 PM)
+
+No blockers. Warnings closed: the leave TRIGGERS are pinned in committed
+source (round 7 deleted both production bumps and the suite stayed green
+-- the guard was held, the thing making it reachable was not; two source
+pins now red on either bump's removal); the render-first-run header
+states the current rule (every shot-bearing payload pinned AND
+engine-generated with a control -- the old header's own rule, followed,
+would have undone the fix); the last two live-dependent shots
+(firstrun-3-claude-connected, firstrun-4-adopt) are pinned with the
+shared adopt fixture and re-shot. Nits: the generation bump reads the
+CLAMPED step and names FR_STEP_RETURN (a bare 5 and the raw argument
+could drift from the paint branch); the drag helper's parameter no
+longer shadows the row variable. The two-product-names card remains the
+terminology sweep's item, recorded.
+
+## Review round 8 (2026-08-15, ~12:30 AM) -- final code round; convergence
+
+No blockers. The one substantive warning is a SPEC-LEVEL follow-up,
+recorded rather than built tonight: the first folder holding any
+Kosmos.app wins with no ownership check, and the installer's own
+documented two-admin-account path (APP_HOME_FOREIGN) manufactures the
+case where the row names a bundle that is not this install's while the
+real icon sits unnamed in ~/Applications. The spec's recorded fear (a
+provenance proof landing healthy machines in unknown) is answerable now:
+bundle_is_ours in install/setup.sh is a clean match/no-match grep, so
+"found one, but not ours" would be a distinct honest answer, not
+could-not-look. That is a pinned-spec change and therefore the
+designer's morning call, with this paragraph as the evidence. Mechanical
+fixes landed: the dock is a live region (its instruction CHANGES with
+the answer, and a screen-reader user who heard the folderless pre-paint
+never heard the correction; pinned in the markup test beside the row's);
+the generation bump really sits after BOTH clamps and its pin is
+placement-sensitive (the round-7 record had claimed a position the code
+did not have -- the recorded-as-done class, caught here at the comment
+level before it aged); the three navigations name FR_STEP_RETURN and
+the constant's comment says truthfully what it can and cannot reach;
+the fourth real-machine test call site is sandboxed; the plan's shot
+count says ten. The two-product-names card remains the terminology
+sweep's item. 740 tests, both harnesses clean.

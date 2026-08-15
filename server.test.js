@@ -1832,8 +1832,11 @@ test('the roles route carries the copy the creation actually uses', async () => 
 function pageFunction(name, prelude = '') {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const start = script.indexOf('function ' + name);
+  let start = script.indexOf('function ' + name);
   assert.ok(start > -1, name + ' vanished from the page');
+  // An `async function` must keep its keyword: sliced off, the body's awaits
+  // are a SyntaxError inside new Function and the extraction dies confusingly.
+  if (script.slice(start - 6, start) === 'async ') start -= 6;
   let depth = 0; let end = -1;
   for (let k = script.indexOf('{', start); k < script.length; k += 1) {
     if (script[k] === '{') depth += 1;
@@ -3123,6 +3126,51 @@ test('the machine route always answers, with renderable checks and never an erro
   }
   assert.equal(typeof got.attention, 'number');
   assert.equal(typeof got.unknown, 'number');
+  // The wire pin for step 5: engine tests exercise check() directly and the
+  // render harness stubs this route, so without this line a route that
+  // dropped the field would render an honest-looking "we could not check"
+  // forever and no test anywhere would notice.
+  assert.equal(got.appLocation && got.appLocation.key, 'app-location',
+    'the /api/machine response must carry the appLocation field beside the rows');
+});
+
+test('leaving step 5 really retires its pane (the bumps exist in production code)', () => {
+  // The leave scenarios move the counter through t5.leave(), so they pin
+  // the GUARD; these pins hold the TRIGGERS -- round 7 deleted both
+  // production bumps and the suite stayed green, which silently restores
+  // the round-6 state (a guard no production path ever moves).
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /if \(step > FR_STEPS\) step = FR_STEPS;[\s\S]{0,600}?if \(step !== FR_STEP_RETURN\) FR_RETURN_GEN \+= 1;/,
+    'frGo no longer bumps the return generation AFTER both clamps (a text-only pin could not see the placement, and the round-7 record claimed a position the code did not have)');
+  const closeFn = raw.slice(raw.indexOf('function frClose'), raw.indexOf('function frClose') + 400);
+  assert.match(closeFn, /FR_RETURN_GEN \+= 1;/,
+    'frClose no longer bumps the return generation on the way out');
+});
+
+test('the step-5 live region is static markup with its announcement attributes', () => {
+  // The unit harness's DOM stub auto-creates any id, so without this pin
+  // the region (and both its ARIA attributes) could be deleted from the
+  // page while every step-5 test stayed green -- and the announcement,
+  // the whole reason the region was restructured, would silently stop.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /<div id="fr-return-row" role="status" aria-live="polite"><\/div>/,
+    'the step-5 live region must exist in the STATIC markup, before anything fills it');
+  assert.match(raw, /<div id="fr-return-dock" role="status" aria-live="polite"><\/div>/,
+    'the dock is a live region too: its instruction changes with the answer, and the correction must be heard');
+});
+
+test('the degraded machine answer publishes the ENGINE\u2019S could-not-look row', () => {
+  // The catch path cannot be forced over HTTP on a healthy machine, so two
+  // pins hold it: the shared row renders through the row grammar (shape),
+  // and the route SOURCE references the engine's function rather than a
+  // hand-copied literal (reference).
+  const row = require('./engine/machine').appLocationUnknown();
+  assert.equal(row.key, 'app-location');
+  assert.equal(row.state, 'unknown');
+  assert.ok(row.title && row.detail, 'a row with nothing to say renders as an empty box');
+  const src = fs.readFileSync(nodePath.join(__dirname, 'server.js'), 'utf8');
+  assert.match(src, /appLocation: machine\.appLocationUnknown\(\)/,
+    'the degraded catch hand-writes its appLocation again (a copied literal goes stale the moment the wording moves)');
 });
 
 test('a check row carries its state in a WORD, not only in a glyph and a colour', () => {
@@ -3140,7 +3188,7 @@ test('a check row carries its state in a WORD, not only in a glyph and a colour'
   // after the page's own set drifted away from it.
   const raw0 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script0 = raw0.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
     const m = script0.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
     assert.ok(m, n + ' vanished from the page');
     return m[0];
@@ -3218,8 +3266,8 @@ test('first run fails CLOSED: an unreadable answer shows no onboarding at all', 
 
 test('the first-run buttons are ASSIGNED, not accumulated', () => {
   /**
-   * ⚠️ Continue means four different things across four steps, and on step 4 it
-   * means one of three. `addEventListener` on a button whose meaning changes
+   * ⚠️ Continue means a different thing on each of the five steps, and the
+   * one-of-three fork lives on step 5 now. `addEventListener` on a button whose meaning changes
    * leaves every previous meaning still bound, so Back-then-Continue fires two
    * of them — measured as "advanced two steps at once" the first time it was
    * clicked through.
@@ -3350,10 +3398,10 @@ test('the "we could not remember that" message lives outside the step panes', ()
 --------------------------------------------------------------------------- */
 
 /** A fake DOM just big enough for the two painters. */
-function firstRunHarness(name, state) {
+function firstRunHarness(name, state, opts = {}) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const tables = ['FR_SAY', 'FR_GLYPH'].map((n) => {
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
     const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
     assert.ok(m, n + ' vanished from the page');
     return m[0];
@@ -3380,10 +3428,15 @@ function firstRunHarness(name, state) {
     function showTab() {}
     globalThis.__els = __els;
     globalThis.__actions = () => __actions;
+    ${opts.prelude || ''}
   `;
   const fn = pageFunction(name, prelude);
-  fn();
-  return { els: globalThis.__els, actions: globalThis.__actions() };
+  // An async painter returns a promise; `done` lets the caller await the
+  // post-fetch writes while still reading the pre-paint synchronously (the
+  // element stubs are live references, so reads after `await done` see the
+  // upgraded content).
+  const out = fn();
+  return { els: globalThis.__els, actions: globalThis.__actions(), done: Promise.resolve(out) };
 }
 
 test('an unrecognised subscription answer never renders as "you have none"', () => {
@@ -3431,6 +3484,12 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     FR: { path: 'create', fleetCount: 0, fleetNames: [] },
   });
   assert.match(create.els['fr-title'].textContent, /first agent/i);
+  // The healthy paths carry a single Continue too, not only the broken ones
+  // asserted below: the fork lives on step 5 now on every path.
+  assert.ok(/continue/i.test(adopt.actions.primary || '') && !adopt.actions.alt,
+    `adopt at step 4 should offer Continue alone: ${JSON.stringify(adopt.actions)}`);
+  assert.ok(/continue/i.test(create.actions.primary || '') && !create.actions.alt,
+    `create at step 4 should offer Continue alone: ${JSON.stringify(create.actions)}`);
 
   /**
    * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
@@ -3461,16 +3520,233 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     assert.ok(!/undefined|NaN|null/.test(title + body),
       `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
     assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
-    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+    // The fork moved to step 5 (orientation spec): step 4's way onward is
+    // now a single Continue on EVERY path, including the broken-payload
+    // one -- a person must never be stranded, and must also never meet the
+    // fork here where the orientation has not been shown yet.
+    assert.ok(got.actions && /continue/i.test(got.actions.primary || ''),
       `payload ${JSON.stringify(FR)} left the person short of a way onward`);
+    // And ONLY Continue: a second button reappearing here is the fork
+    // creeping back to the step it was deliberately moved off.
+    assert.ok(!got.actions.alt,
+      `payload ${JSON.stringify(FR)} grew a second button at step 4: ${JSON.stringify(got.actions)}`);
   }
 
-  // Both ways out are always offered, whichever path it picked.
-  for (const path of ['adopt', 'create', 'unknown']) {
-    const got = firstRunHarness('frPaintFleet', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
-    assert.ok(got.actions.primary && got.actions.alt,
-      `the ${path} path offers only one door`);
+  // Both ways out are still offered on every path -- at step 5, where the
+  // fork lives now. frForkActions is the single holder of the pairs.
+  for (const [path, primary, alt] of [
+    ['adopt', /take me to my agents/i, /make another agent/i],
+    ['create', /make my first agent/i, /show me around/i],
+    ['unknown', /show me the board/i, /make an agent/i],
+  ]) {
+    const got = firstRunHarness('frForkActions', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
+    assert.ok(got.actions && got.actions.primary && got.actions.alt,
+      `the ${path} path offers only one door at the fork`);
+    assert.match(got.actions.primary, primary, `the ${path} fork primary drifted`);
+    assert.match(got.actions.alt, alt, `the ${path} fork alt drifted`);
   }
+
+  // ⚠️ The fork guards its payload with the SAME predicate as the fleet
+  // screen, or the pairs drift from the path logic (they did, in the move to
+  // step 5): an adopt payload whose fleet could not be counted had step 4
+  // honestly refuse to guess while step 5's button read "Take me to my
+  // agents" -- the fleet we could not count asserted as one that exists.
+  // Every uncountable-adopt shape lands on the neutral pair, which promises
+  // only the board.
+  for (const FR of [
+    { path: 'adopt' },
+    { path: 'adopt', fleetCount: 'lots', fleetNames: [] },
+    { path: 'adopt', fleetCount: 0, fleetNames: [] },
+    { path: 'adopt', fleetCount: null, fleetNames: [] },
+  ]) {
+    const got = firstRunHarness('frForkActions', { FR });
+    assert.match(got.actions.primary, /show me the board/i,
+      `payload ${JSON.stringify(FR)} claimed a fleet nobody counted: ${JSON.stringify(got.actions)}`);
+    assert.match(got.actions.alt, /make an agent/i,
+      `payload ${JSON.stringify(FR)} lost the neutral second door`);
+  }
+});
+
+test('step 5 paints a look in progress, then the engine answer, and could-not-ask on failure', async () => {
+  // The Dock instruction must never point at "that folder" when no folder was
+  // found: the found state gets the spec's drag sentence, the other two get
+  // the Spotlight-anchored variant.
+  const cases = [
+    [{ key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it from there.' },
+      /Drag Kosmos out of that folder/],
+    [{ key: 'app-location', state: 'attention', title: 'We could not find the Kosmos icon', detail: 'Not the same as it not being there.' },
+      /When you have the Kosmos icon in front of you/],
+    [{ key: 'app-location', state: 'unknown', title: 'We could not check where the Kosmos icon is', detail: 'Nothing is wrong.' },
+      /When you have the Kosmos icon in front of you/],
+  ];
+  const PRELUDE_VARS = `
+    function frForkActions() {}
+    let FR_RETURN_GEN = 0;
+    let FR_MACHINE_LOOK = null;
+  `;
+  for (const [row, dockRe] of cases) {
+    const h = firstRunHarness('frPaintReturn', { FR: {} }, {
+      prelude: PRELUDE_VARS + `
+        const fetch = async () => ({ ok: true, json: async () => ({ appLocation: ${JSON.stringify(row)} }) });
+      `,
+    });
+    // The pre-paint is a look IN PROGRESS -- not the completed "could not
+    // check" it used to claim before any look had happened, and not
+    // byte-identical to the engine's real unknown row. Asserted on the ROW
+    // itself: the region is static markup now and the placeholder is written
+    // straight into it, so this stub really is overwritten by the upgrade
+    // (the old wrapper-level assertion could not fail).
+    assert.match(h.els['fr-return-row'].innerHTML, /fr-check checking/);
+    assert.match(h.els['fr-return-row'].innerHTML, /Checking where the Kosmos icon is/);
+    await h.done;
+    assert.match(h.els['fr-return-row'].innerHTML, new RegExp(row.title));
+    assert.match(h.els['fr-return-row'].innerHTML, new RegExp('fr-check ' + row.state));
+    assert.match(h.els['fr-return-dock'].innerHTML, dockRe);
+    assert.ok(!/Checking where the Kosmos icon is/.test(h.els['fr-return-row'].innerHTML),
+      'the placeholder survived the fetch');
+  }
+
+  // Could not ASK: its own wording ("right now"), distinct from the engine's
+  // own could-not-check row -- and the DOCK moves with the row, so a
+  // folder-pointing instruction cannot outlive the answer that named it.
+  const broken = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: PRELUDE_VARS + `
+      const fetch = async () => { throw new Error('down'); };
+    `,
+  });
+  await broken.done;
+  assert.match(broken.els['fr-return-row'].innerHTML, /could not check where the Kosmos icon is right now/);
+  assert.match(broken.els['fr-return-row'].innerHTML, /fr-check unknown/);
+  assert.ok(!/out of that folder/.test(broken.els['fr-return-dock'].innerHTML),
+    'the failure path left a folder-pointing dock over a row that named none');
+
+  // A payload WITHOUT the appLocation field (an old server, a shape drift)
+  // lands on could-not-ask too, never on the placeholder forever.
+  const shapeless = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: PRELUDE_VARS + `
+      const fetch = async () => ({ ok: true, json: async () => ({ checks: [] }) });
+    `,
+  });
+  await shapeless.done;
+  assert.match(shapeless.els['fr-return-row'].innerHTML, /right now/);
+
+  // An answer with nothing to SAY is not an answer: {state:'ok'} with no
+  // title rendered a confident tick over a blank box, above a dock pointing
+  // at a folder the screen never named.
+  const blank = firstRunHarness('frPaintReturn', { FR: {} }, {
+    prelude: PRELUDE_VARS + `
+      const fetch = async () => ({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok' } }) });
+    `,
+  });
+  await blank.done;
+  assert.match(blank.els['fr-return-row'].innerHTML, /right now/,
+    'a contentless ok payload rendered as a confident blank tick');
+  assert.ok(!/out of that folder/.test(blank.els['fr-return-dock'].innerHTML),
+    'the dock pointed at a folder no row named');
+
+  // A wire row claiming the LOCAL state renders as unknown, never as a
+  // permanent look-in-progress.
+  for (const sneaky of [
+    { key: 'app-location', state: 'checking', title: 'sneaky', detail: 'x' },
+    // The row claiming local-ness ITSELF: trust is the caller's argument,
+    // never a field the wire can set.
+    { key: 'app-location', state: 'checking', local: true, title: 'sneakier', detail: 'x' },
+  ]) {
+    const wireChecking = firstRunHarness('frPaintReturn', { FR: {} }, {
+      prelude: PRELUDE_VARS + `
+        const fetch = async () => ({ ok: true, json: async () => ({ appLocation: ${JSON.stringify(sneaky)} }) });
+      `,
+    });
+    await wireChecking.done;
+    assert.match(wireChecking.els['fr-return-row'].innerHTML, /fr-check unknown/,
+      `a wire state of "checking" (${JSON.stringify(sneaky)}) must fall back to unknown`);
+  }
+});
+
+test('step 5: entries share one in-flight look, and a stale look cannot repaint a newer entry', async () => {
+  // One module state, two overlapping entries, a fetch we resolve by hand.
+  const realEsc = pageFunction('esc');
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tables = ['FR_SAY', 'FR_GLYPH', 'FR_SAY_LOCAL', 'FR_GLYPH_LOCAL'].map((n) => {
+    const m = script.match(new RegExp('const ' + n + ' = \\{[^}]*\\};'));
+    assert.ok(m, n + ' vanished from the page');
+    return m[0];
+  }).join('\n');
+  const realRow = pageFunction('frCheckRow', 'const esc = ' + realEsc.toString() + ';\n' + tables);
+  const prelude = `
+    const esc = ${realEsc.toString()};
+    ${tables}
+    const frCheckRow = ${realRow.toString()};
+    const __els = {};
+    const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '' }) };
+    function frForkActions() {}
+    let FR_RETURN_GEN = 0;
+    let FR_MACHINE_LOOK = null;
+    let __calls = 0; let __resolve = null;
+    const fetch = () => { __calls += 1; return new Promise((res) => { __resolve = res; }); };
+    globalThis.__t5 = { els: __els, calls: () => __calls, resolve: (v) => __resolve(v), leave: () => { FR_RETURN_GEN += 1; } };
+  `;
+  const fn = pageFunction('frPaintReturn', prelude);
+  const t5 = globalThis.__t5;
+  const e1 = fn();
+  const e2 = fn();
+  assert.equal(t5.calls(), 1,
+    'the second entry re-fired the route instead of joining the in-flight look');
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  await e1; await e2;
+  // The NEWEST entry's paint is what stands; the stale continuation returned
+  // without touching the pane (both write the same answer here, so the
+  // observable pin is: the answer landed exactly, and the dock matches it).
+  assert.match(t5.els['fr-return-row'].innerHTML, /Kosmos is in your Applications folder/);
+  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos out of that folder/);
+
+  // Second scenario: entries 3 and 4 SHARE one look (asserted by call
+  // count), the shared look fails, and both continuations paint the same
+  // could-not-ask -- what this proves is the failure path repaints the dock
+  // alongside the row, and that a settled look really cleared for a fresh
+  // entry. (It deliberately does NOT prove the generation guard: shared
+  // looks mean live entries always paint identical content. The guard's
+  // one reachable job is tested in the LEAVE scenario below.)
+  const e3 = fn();
+  assert.equal(t5.calls(), 2, 'the settled look was not cleared for the next entry');
+  const e4 = fn();
+  assert.equal(t5.calls(), 2, 'entry 4 should join entry 3\u2019s in-flight look');
+  t5.resolve({ ok: false });
+  await e3; await e4;
+  assert.match(t5.els['fr-return-row'].innerHTML, /right now/,
+    'the failure path did not paint could-not-ask');
+  assert.ok(!/out of that folder/.test(t5.els['fr-return-dock'].innerHTML),
+    'a folder-pointing dock outlived the row that named no folder');
+
+  // ⚠️ THE GUARD'S JOB, and the scenarios that red when the guard lines are
+  // deleted (round 5 proved the shared-look scenarios above pass without
+  // them): the person LEAVES step 5 while the look is in flight, and the
+  // late settlement must not repaint the pane. In production the bump IS
+  // performed by frGo(step !== 5) and frClose (round 6 made the premise
+  // real); here t5.leave() performs the same mutation those perform.
+  // Success copy of the guard:
+  const e5 = fn();
+  assert.equal(t5.calls(), 3);
+  const before = t5.els['fr-return-row'].innerHTML; // this entry's placeholder
+  t5.leave();
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  await e5;
+  assert.equal(t5.els['fr-return-row'].innerHTML, before,
+    'a look resolving after the person left the step repainted the pane');
+  // Failure copy of the guard (the catch's own gen check, which the
+  // shared-look failure scenario cannot exercise):
+  const e6 = fn();
+  assert.equal(t5.calls(), 4);
+  const before6 = t5.els['fr-return-row'].innerHTML;
+  const dock6 = t5.els['fr-return-dock'].innerHTML;
+  t5.leave();
+  t5.resolve({ ok: false });
+  await e6;
+  assert.equal(t5.els['fr-return-row'].innerHTML, before6,
+    'a look FAILING after the person left the step repainted the pane');
+  assert.equal(t5.els['fr-return-dock'].innerHTML, dock6,
+    'the stale failure rewrote the dock of a pane the person left');
 });
 
 test('step 4 does not promise a working agent over a check screen that disagreed', () => {
