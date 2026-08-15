@@ -941,7 +941,52 @@ async function main() {
       await page.waitForTimeout(400);
       const finalBack = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
       if (!finalBack) throw new Error('the second restore did not return the project');
-      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, and the same-day re-archive)');
+      // 8h. The ARCHIVED project's detail (reachable via pjAnswerFrom in the
+      // product): the screen states the fact and flips the control -- and on
+      // a restore whose RE-READ fails, every element tells the same story:
+      // the write landed, the read did not, and "Restored." appears nowhere.
+      // The two prior review rounds both found their blocker in a path this
+      // harness did not visit; this is that path.
+      await api('/api/project/' + encodeURIComponent('quarterclose'), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      await page.waitForTimeout(200);
+      // The page's copy of PROJECTS predates the API archive; the product's
+      // own poll would catch up in 5s, but the harness reloads deliberately
+      // so the detail is painted from the archived record.
+      await page.evaluate(() => loadProjects());
+      await page.waitForTimeout(400);
+      await page.evaluate(() => { openProject('quarterclose'); });
+      await page.waitForTimeout(300);
+      const archDetail = await page.evaluate(() => ({
+        label: document.getElementById('pj-one-archive-label').textContent,
+        btn: document.getElementById('pj-one-archive').textContent,
+      }));
+      if (archDetail.label !== 'This project is archived' || archDetail.btn !== 'Restore it') {
+        throw new Error('the archived detail does not state its own fact: ' + JSON.stringify(archDetail));
+      }
+      await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'stubbed' } }));
+      await page.click('#pj-one-archive');
+      await page.waitForTimeout(500);
+      const failedRead = await page.evaluate(() => ({
+        archMsg: document.getElementById('pj-one-archive-msg').textContent,
+      }));
+      await page.unroute('**/api/projects');
+      if (/^Restored\.$/.test(failedRead.archMsg.trim())) {
+        throw new Error('a restore with a failed re-read still claimed "Restored." beside a page that says archived');
+      }
+      if (!/saved/.test(failedRead.archMsg) || !/could not re-read/.test(failedRead.archMsg)) {
+        throw new Error('the failed-re-read note does not name both halves (write landed, read did not): ' + JSON.stringify(failedRead));
+      }
+      // The write DID land (the PUT went through before the stub), so a
+      // clean reload shows it active again -- which is also the cleanup.
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      const cleanedUp = await page.evaluate(() => !!document.querySelector('#pj-list [data-project="quarterclose"]'));
+      if (!cleanedUp) throw new Error('the restore whose re-read failed did not actually land');
+      console.log('✔ 8-shell (sticky bar, K mark, members wording, scoped toggles, archive/restore, same-day re-archive, and the archived detail with a failed re-read)');
     } finally {
       await ctx.close();
     }

@@ -190,6 +190,18 @@ test('archiving touches nothing else: record, folder, and members stay as they a
   assert.ok(fs.existsSync(path.join(dir, 'work.txt')));
 });
 
+test('re-archiving a record with a stray distrusted date stamps NOW, not the stray', () => {
+  reset();
+  const p = projects.create({ name: 'Stray date', folder: folder('stray-date') });
+  const all = projects.readAll();
+  Object.assign(all.find((x) => x.id === p.id), { archived: false, archivedAt: '2019-03-04T00:00:00.000Z' });
+  projects.writeAll(all);
+  // The read side heals this to null; the write side must not republish it.
+  const on = projects.setArchived(p.id, true);
+  assert.ok(!String(on.archivedAt).startsWith('2019'),
+    'the distrusted stray date was published as the archive date');
+});
+
 test('every hand-mangled archived shape heals on read, in the safe direction', () => {
   reset();
   const p = projects.create({ name: 'Mangled', folder: folder('mangled') });

@@ -929,7 +929,10 @@ function setArchived(id, want) {
   return mutate(id, (p) => ({
     ...p,
     archived: on,
-    archivedAt: on ? (p.archivedAt || new Date().toISOString()) : null,
+    // Gated on the HEALED state like describe's read side: a stray date
+    // beside archived:false is a distrusted field, and carrying it forward
+    // on re-archive published the very date the heal exists to null.
+    archivedAt: on ? ((p.archived === true && p.archivedAt) || new Date().toISOString()) : null,
   }));
 }
 
