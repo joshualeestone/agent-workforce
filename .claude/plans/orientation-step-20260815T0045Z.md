@@ -34,7 +34,7 @@ powerful writes).
 - Harnesses: click-first-run walks the fifth step (four checks painted,
   the drag guard, the create-path handoff now two clicks); render-first-run
   gains four engine-generated app-location fixtures with premise
-  controls, eight committed step-5 shots, and per-shot assertions
+  controls, ten committed step-5 shots (five states, light and dark), and per-shot assertions
   (fixture title present, drag present, Keep-in-Dock absent).
 - Contrast: `.fr-bar` and `.fr-mark` move from --label-3 to --label-2.
   Pre-existing AA failures (3.0-4.0:1, measured; main fails its own
@@ -223,3 +223,28 @@ CLAMPED step and names FR_STEP_RETURN (a bare 5 and the raw argument
 could drift from the paint branch); the drag helper's parameter no
 longer shadows the row variable. The two-product-names card remains the
 terminology sweep's item, recorded.
+
+## Review round 8 (2026-08-15, ~12:30 AM) -- final code round; convergence
+
+No blockers. The one substantive warning is a SPEC-LEVEL follow-up,
+recorded rather than built tonight: the first folder holding any
+Kosmos.app wins with no ownership check, and the installer's own
+documented two-admin-account path (APP_HOME_FOREIGN) manufactures the
+case where the row names a bundle that is not this install's while the
+real icon sits unnamed in ~/Applications. The spec's recorded fear (a
+provenance proof landing healthy machines in unknown) is answerable now:
+bundle_is_ours in install/setup.sh is a clean match/no-match grep, so
+"found one, but not ours" would be a distinct honest answer, not
+could-not-look. That is a pinned-spec change and therefore the
+designer's morning call, with this paragraph as the evidence. Mechanical
+fixes landed: the dock is a live region (its instruction CHANGES with
+the answer, and a screen-reader user who heard the folderless pre-paint
+never heard the correction; pinned in the markup test beside the row's);
+the generation bump really sits after BOTH clamps and its pin is
+placement-sensitive (the round-7 record had claimed a position the code
+did not have -- the recorded-as-done class, caught here at the comment
+level before it aged); the three navigations name FR_STEP_RETURN and
+the constant's comment says truthfully what it can and cannot reach;
+the fourth real-machine test call site is sandboxed; the plan's shot
+count says ten. The two-product-names card remains the terminology
+sweep's item. 740 tests, both harnesses clean.

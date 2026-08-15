@@ -172,7 +172,15 @@ test('a laptop whose battery section we cannot read is unknown, not fine', () =>
 });
 
 test('a pmset that will not run at all does not become a passing check', () => {
-  const got = machine.check({ runner: deadRunner, claudeBin: REAL_BIN, tmuxBin: REAL_BIN });
+  // appDirs sandboxed like every sibling: nothing here can flip on the real
+  // /Applications, but a test that touches the real machine at all is one
+  // more thing a reviewer must reason about.
+  const os2 = require('node:os');
+  const path2 = require('node:path');
+  const fs2 = require('node:fs');
+  const empty = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'kosmos-pmset-'));
+  const got = machine.check({ runner: deadRunner, claudeBin: REAL_BIN, tmuxBin: REAL_BIN, appDirs: [empty, empty] });
+  fs2.rmSync(empty, { recursive: true, force: true });
   const sleep = got.checks.find((c) => c.key === 'sleep');
   assert.equal(sleep.state, 'unknown');
   assert.equal(got.unknown >= 1, true);

@@ -3140,8 +3140,8 @@ test('leaving step 5 really retires its pane (the bumps exist in production code
   // production bumps and the suite stayed green, which silently restores
   // the round-6 state (a guard no production path ever moves).
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-  assert.match(raw, /if \(step !== FR_STEP_RETURN\) FR_RETURN_GEN \+= 1;/,
-    'frGo no longer bumps the return generation on leaving');
+  assert.match(raw, /if \(step > FR_STEPS\) step = FR_STEPS;[\s\S]{0,600}?if \(step !== FR_STEP_RETURN\) FR_RETURN_GEN \+= 1;/,
+    'frGo no longer bumps the return generation AFTER both clamps (a text-only pin could not see the placement, and the round-7 record claimed a position the code did not have)');
   const closeFn = raw.slice(raw.indexOf('function frClose'), raw.indexOf('function frClose') + 400);
   assert.match(closeFn, /FR_RETURN_GEN \+= 1;/,
     'frClose no longer bumps the return generation on the way out');
@@ -3155,6 +3155,8 @@ test('the step-5 live region is static markup with its announcement attributes',
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   assert.match(raw, /<div id="fr-return-row" role="status" aria-live="polite"><\/div>/,
     'the step-5 live region must exist in the STATIC markup, before anything fills it');
+  assert.match(raw, /<div id="fr-return-dock" role="status" aria-live="polite"><\/div>/,
+    'the dock is a live region too: its instruction changes with the answer, and the correction must be heard');
 });
 
 test('the degraded machine answer publishes the ENGINE\u2019S could-not-look row', () => {

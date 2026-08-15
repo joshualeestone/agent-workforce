@@ -1101,7 +1101,12 @@ svg { display: block; }
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
-          <div id="fr-return-dock"></div>
+          <!-- The dock is a live region too: its instruction CHANGES with
+               the answer (folderless upgraded to "out of that folder"), and
+               a screen-reader user who heard the pre-paint would never hear
+               the correction -- step 2's reconciling sentence made the same
+               call for the same SC 4.1.3 reason. -->
+          <div id="fr-return-dock" role="status" aria-live="polite"></div>
         </div>
       </div>
 
@@ -6260,8 +6265,11 @@ setInterval(() => {
 // 5 since the orientation step landed (PIN-2026-08-14-1913CDT: "five setup
 // steps -- welcome, model, this computer, your agents, getting back").
 const FR_STEPS = 5;
-// The return pane's step number, named so the generation bump and the paint
-// branch cannot drift apart the day a sixth step lands.
+// The return pane's step number, named and used by the generation bump and
+// every navigation into the step. (The paint branch is the clamped chain's
+// final else, exhaustive by construction: step is clamped to [1, FR_STEPS],
+// so a sixth step must add its pane AND its branch -- said here because the
+// constant cannot reach an else.)
 const FR_STEP_RETURN = 5;
 let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
@@ -6312,14 +6320,16 @@ function frGo(step) {
    */
   step = Math.trunc(Number(step));
   if (!Number.isFinite(step) || step < 1) step = 1;
+
+  if (step > FR_STEPS) step = FR_STEPS;
   // ⚠️ Leaving step 5 retires its pane: the machine look is async, and an
   // answer landing after the person moved on must not repaint a pane they
   // are no longer on. This bump makes the generation guard's premise REAL
-  // (round 6: without it the guard had no production trigger). AFTER the
-  // clamp, so the bump and the paint branch below agree about what `step`
-  // is, and against the named constant rather than a bare 5.
+  // (round 6: without it the guard had no production trigger). AFTER BOTH
+  // clamps -- round 8 caught the round-7 comment claiming this while the
+  // bump sat between them -- so the bump and the paint branch agree about
+  // what `step` is, against the named constant rather than a bare 5.
   if (step !== FR_STEP_RETURN) FR_RETURN_GEN += 1;
-  if (step > FR_STEPS) step = FR_STEPS;
   FR_STEP = step;
   // ⚠️ Cleared on every step change. It is written once when the completion
   // flag will not stick, and without this it sat on screen for the rest of the
@@ -7158,7 +7168,7 @@ function frPaintFleet() {
       + '</ul>'
       + '<p>You can give any of them a picture, say what they are for, and change what they '
          + 'work on, or make a new one.</p>';
-    frActions({ label: 'Continue', go: () => frGo(5) });
+    frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
     return;
   }
 
@@ -7217,7 +7227,7 @@ function frPaintFleet() {
             + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
             + 'that is sorted.</div>'
           : '');
-    frActions({ label: 'Continue', go: () => frGo(5) });
+    frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
     return;
   }
 
@@ -7234,7 +7244,7 @@ function frPaintFleet() {
     + 'reason to stop. It just means we are not going to guess which of these you want.</p>'
     + '<p>Have a look at the board: if your agents are on it, everything is fine and this was '
     + 'one bad reading. If it is empty, make one.</p>';
-  frActions({ label: 'Continue', go: () => frGo(5) });
+  frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
 }
 
 /**
