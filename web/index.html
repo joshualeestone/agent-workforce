@@ -3927,6 +3927,9 @@ function openCreate() {
   document.getElementById('genav-hint').textContent =
     'A unique mark will be created from the name unless you add a picture.';
   INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
+  const genav = document.getElementById('genav');
+  genav.classList.add('empty');
+  genav.getContext('2d').clearRect(0, 0, genav.width, genav.height);
   document.getElementById('create-go').disabled = false;
   document.getElementById('role-next').disabled = true;
   cstep('role');
@@ -3955,6 +3958,7 @@ document.getElementById('role-next').addEventListener('click', () => {
   document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
   refillDetails(true);
   loadCreateExtras();
+  if (!AVATAR_FILE) drawCreateMark();
   document.getElementById('create-blurb').textContent = role.blurb + '.';
   cstep('name');
   document.getElementById('create-name').focus();
@@ -3997,6 +4001,101 @@ function paintMade(steps, watching) {
   if (watching) document.getElementById('made-say').textContent = watching.text;
 }
 
+/* ---- the generated agent mark (pack, 2026-08-16) ------------------------
+   ⚠️ PORTED from the frozen pack (sha 74b88a9f), constants and all: the
+   letter is the HOLE in a 240-dot field (a measured ceiling; 320 went
+   grainy), drawn at 215px because size, not density, is what makes it
+   read at 64px. The scatter is seeded from the WHOLE name (seeded from
+   the letter alone, leo/lucy/laura were one image). A string color means
+   one flat fill; an ARRAY opts into a palette -- do not invert that: grey
+   passed as a string means "unavailable" wherever provider marks appear,
+   and a palette override would turn a status into decoration. */
+const MARK_FAMS = [
+  ['#d6a62e', '#e3b341', '#b88920'],   // gold (brand, fixed)
+  ['#9c7f3d', '#b2955a', '#836626'],   // amber
+  ['#90a249', '#a5b566', '#77892f'],   // olive
+  ['#59933c', '#74a95a', '#437925'],   // fern
+  ['#47a59e', '#68b5af', '#2f8a83'],   // teal
+  ['#4989a4', '#6a9fb6', '#31707f'],   // steel
+  ['#7f9acb', '#9bb0d7', '#6180b8'],   // slate
+  ['#7d76bf', '#9a94cf', '#615ba6'],   // indigo
+  ['#b289cd', '#c4a3d9', '#9d6fbe'],   // violet
+  ['#b468b2', '#c489c2', '#9e4c9c'],   // orchid
+  ['#c681a8', '#d49dbb', '#b76490'],   // plum
+  ['#b96a7c', '#c98b98', '#a54e63'],   // rose
+  ['#cb847a', '#d8a099', '#bd6659'],   // brick
+  ['#b2784c', '#c49468', '#9a6034'],   // clay
+];
+/* Not one colour per agent and never described as one: 14 buckets is a
+   birthday problem (84% collision by 7 agents). Name-derived beats
+   creation-order because removing an agent must not recolour the rest. */
+function markFamFor(n) {
+  let h = 2166136261;
+  for (let i = 0; i < n.length; i++) { h ^= n.charCodeAt(i); h = (h * 16777619) >>> 0; }
+  return MARK_FAMS[h % MARK_FAMS.length];
+}
+function dotGlyph(cv, letter, color, seedStr) {
+  const S = 256; const C = 128; const R = 118;
+  const g = cv.getContext('2d');
+  const src = seedStr || letter;
+  const PAL = Array.isArray(color) ? color : null;
+  let seed = 2166136261;
+  for (let i = 0; i < src.length; i++) { seed ^= src.charCodeAt(i); seed = (seed * 16777619) >>> 0; }
+  seed = seed & 0x7fffffff;
+  let sv = seed || 1;
+  const rnd = () => { sv = (sv * 1103515245 + 12345) & 0x7fffffff; return sv / 0x7fffffff; };
+  const off = document.createElement('canvas');
+  off.width = S; off.height = S;
+  const o = off.getContext('2d');
+  o.font = '700 215px -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif';
+  o.textAlign = 'center'; o.textBaseline = 'middle';
+  o.fillStyle = '#000';
+  o.fillText(letter, C, C);
+  const mask = o.getImageData(0, 0, S, S).data;
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.save();
+  g.scale(cv.width / S, cv.height / S);
+  const dots = [];
+  let tries = 0;
+  while (dots.length < 240 && tries < 40000) {
+    tries++;
+    const a = rnd() * Math.PI * 2; const rr = Math.sqrt(rnd()) * R;
+    const x = C + Math.cos(a) * rr; const y = C + Math.sin(a) * rr;
+    const rad = 2.5 + rnd() * rnd() * 11;
+    let ok = true;
+    for (const d of dots) {
+      const ddx = d.x - x; const ddy = d.y - y;
+      if (Math.sqrt(ddx * ddx + ddy * ddy) < d.r + rad + 2) { ok = false; break; }
+    }
+    if (!ok) continue;
+    // Clearance around the glyph, not a centre hit test, or dots straddle
+    // the letter edge and close its counters at this size.
+    const clear = rad + 2; let hit = false;
+    for (let ox = -clear; ox <= clear && !hit; ox += clear) {
+      for (let oy = -clear; oy <= clear && !hit; oy += clear) {
+        const qx = Math.round(x + ox); const qy = Math.round(y + oy);
+        if (qx >= 0 && qx < S && qy >= 0 && qy < S && mask[(qy * S + qx) * 4 + 3] > 128) hit = true;
+      }
+    }
+    if (hit) continue;
+    dots.push({ x, y, r: rad });
+    g.fillStyle = PAL ? PAL[Math.floor(rnd() * PAL.length)] : color;
+    g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+/* The create screen's live mark: empty ring before the first keystroke
+   (empty is honest; "?" is spent on "we could not check" in this app),
+   the mark from the first letter + whole-name scatter after. */
+function drawCreateMark() {
+  const cv = document.getElementById('genav');
+  const v = document.getElementById('create-name').value.trim();
+  cv.classList.toggle('empty', !v);
+  const g = cv.getContext('2d');
+  if (!v) { g.clearRect(0, 0, cv.width, cv.height); return; }
+  dotGlyph(cv, v[0].toUpperCase(), markFamFor(v), v);
+}
+
 /**
  * The details form's prefill state.
  *
@@ -4032,8 +4131,10 @@ document.getElementById('create-instr').addEventListener('input', () => { INSTR_
 document.getElementById('create-label').addEventListener('input', () => { LABEL_DIRTY = true; });
 document.getElementById('create-name').addEventListener('input', () => {
   // The typed name flows into an UNTOUCHED editor live; an edited one is
-  // theirs and stays exactly as they left it.
+  // theirs and stays exactly as they left it. The mark redraws every
+  // keystroke (6.5ms, inside one frame, measured in the pack).
   if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
+  if (!AVATAR_FILE) drawCreateMark();
 });
 
 document.getElementById('create-avatar').addEventListener('change', (e) => {
@@ -4272,14 +4373,29 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * uploader is the retry path that already exists. Awaited BEFORE the
    * watch so the board's first paint of the new card can carry it.
    */
-  if (AVATAR_FILE && result.sessionName) {
-    try {
-      await fetch('/api/agent/' + encodeURIComponent(result.sessionName) + '/avatar', {
-        method: 'PUT',
-        headers: { 'content-type': AVATAR_FILE.type || 'application/octet-stream' },
-        body: AVATAR_FILE,
-      });
-    } catch { /* the mark stands in; the detail panel can retry */ }
+  if (result.sessionName) {
+    // The chosen picture, or -- keeping the form's own promise, "a unique
+    // mark will be created from the name" -- the generated mark rendered
+    // to a PNG. Either way the board's existing avatar path shows it
+    // everywhere with no second rendering system.
+    let up = AVATAR_FILE;
+    if (!up) {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = 144; cv.height = 144;
+        dotGlyph(cv, (result.name || name)[0].toUpperCase(), markFamFor(result.name || name), result.name || name);
+        up = await new Promise((r) => cv.toBlob(r, 'image/png'));
+      } catch { up = null; }
+    }
+    if (up) {
+      try {
+        await fetch('/api/agent/' + encodeURIComponent(result.sessionName) + '/avatar', {
+          method: 'PUT',
+          headers: { 'content-type': up.type || 'image/png' },
+          body: up,
+        });
+      } catch { /* initials stand in; the detail panel can retry */ }
+    }
   }
   await watchForAgent(result.name || name, result, attempt);
 });
