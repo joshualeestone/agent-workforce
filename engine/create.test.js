@@ -1505,3 +1505,78 @@ test('the launchd job says WHOSE background item it is, so macOS names Kosmos an
     assert.match(read, /OK/, 'launchd would refuse this plist, so the agent would never start');
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The pane-2 creation options (label, instructions, model), 2026-08-16
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('every pane-2 option is validated BEFORE any write, and refusals leave no trace', () => {
+  recorder();
+  create.setDryRun(false);
+  for (const [opts, why] of [
+    [{ label: 42 }, 'a non-string label'],
+    [{ label: '   ' }, 'a blank label'],
+    [{ label: 'x'.repeat(81) }, 'an 81-character label'],
+    [{ instructions: '' }, 'empty instructions'],
+    [{ instructions: 7 }, 'non-string instructions'],
+    [{ model: 'gpt-5' }, 'a model not on the list'],
+  ]) {
+    const r = create.createAgent({ ...BINS, name: 'opts-refusal', role: 'pm', ...opts });
+    assert.equal(r.outcome, create.OUTCOME.REFUSED, `${why} was not refused: ${r.because}`);
+    // ⚠️ The refusal must land before the folder exists: a rollback nobody
+    // needs is a rollback that will one day half-run.
+    assert.ok(!fs.existsSync(create.workerDir('opts-refusal')),
+      `${why} was refused only after writing the folder`);
+  }
+});
+
+test('custom instructions are written verbatim with a trailing newline, and the role template is not', () => {
+  recorder();
+  create.setDryRun(false);
+  const mine = 'You are **{{NAME}}**, precisely what I typed.\n\nNo template.';
+  const made = create.createAgent({ ...BINS, name: 'own-words', role: 'pm', instructions: mine });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const text = fs.readFileSync(create.instructionFile('own-words'), 'utf8');
+  // ⚠️ Verbatim means no {{NAME}} substitution: these are the person's own
+  // words, and rewriting any part of them is the drift rule broken at birth.
+  assert.equal(text, mine + '\n');
+  assert.ok(!text.includes('project manager'),
+    'the role template leaked into instructions the person replaced');
+});
+
+test('a chosen label lands in the profile only on a completed creation', () => {
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name: 'labelled', role: 'researcher', label: 'Napkin Sketcher' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  assert.equal(store.readProfile('labelled').role, 'Napkin Sketcher',
+    'the label the person chose is not what the board will read');
+});
+
+test('the model choice writes a sixth supervisor argument, and no choice writes the five every existing agent runs', () => {
+  recorder();
+  create.setDryRun(false);
+  const chosen = create.createAgent({ ...BINS, name: 'modelled', role: 'pm', model: 'haiku' });
+  assert.equal(chosen.outcome, create.OUTCOME.CREATED, chosen.because);
+  const plist = fs.readFileSync(create.plistPath('modelled'), 'utf8');
+  assert.match(plist, /claude-haiku-4-5-20251001/,
+    'the chosen model never reached the job, so the agent runs on the default while the menu claims otherwise');
+  const withArgs = plist.match(/<string>/g).length;
+
+  const plain = create.createAgent({ ...BINS, name: 'unmodelled', role: 'pm' });
+  assert.equal(plain.outcome, create.OUTCOME.CREATED, plain.because);
+  const plist2 = fs.readFileSync(create.plistPath('unmodelled'), 'utf8');
+  assert.ok(!/--model|claude-haiku|claude-sonnet/.test(plist2),
+    'an agent created without a choice carries a model flag anyway');
+  assert.equal(plist2.match(/<string>/g).length, withArgs - 1,
+    'the five-argument shape every existing agent runs did not survive');
+});
+
+test('the MODELS list has one default and args the CLI will accept as model ids', () => {
+  const defaults = create.MODELS.filter((m) => m.default);
+  assert.equal(defaults.length, 1, 'the menu needs exactly one preselected model');
+  for (const m of create.MODELS) {
+    assert.ok(m.key && m.label && m.arg, 'a model entry is missing a field the menu or the job needs');
+    assert.match(m.arg, /^claude-[a-z0-9-]+$/, `${m.key}'s arg does not look like a model id`);
+  }
+});

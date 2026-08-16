@@ -817,6 +817,9 @@ const server = http.createServer((req, res) => {
   // created from.
   if (pathname === '/api/roles' && (req.method === 'GET' || req.method === 'HEAD')) {
     sendJson(res, 200, {
+      // The models an agent can be created on, from the engine's own list,
+      // so the menu and the flag the job runs with cannot drift.
+      models: create.MODELS.map((m) => ({ key: m.key, label: m.label, default: m.default === true })),
       roles: roles.ROLES.map((r) => ({
         key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
         // The catalogue's section, so the picker's menu can group without a
@@ -867,11 +870,53 @@ const server = http.createServer((req, res) => {
           throw new Error('we could not read that request');
         }
 
-        const result = create.createAgent({ name: body.name, role: body.role });
+        /**
+         * ⚠️ The projects the new agent should join are validated HERE,
+         * BEFORE the engine writes anything: a refusal after the folder
+         * exists would need the rollback nobody should pay for a typo. The
+         * ATTACH happens after CREATED and is non-gating, exactly like the
+         * project-create route's own telling: a recorded agent whose
+         * membership write failed is a real, reportable state, never a
+         * reason to un-make the agent.
+         */
+        let wantProjects;
+        if (body.projects !== undefined) {
+          if (!Array.isArray(body.projects)
+              || body.projects.some((p) => typeof p !== 'string' || !p.trim())) {
+            sendJson(res, 400, { error: 'projects has to be a list of project ids' });
+            return;
+          }
+          wantProjects = [...new Set(body.projects.map((p) => p.trim()))];
+          const known = projects.readAll();
+          const missing = wantProjects.filter((id) => !known.some((p) => p.id === id));
+          if (missing.length) {
+            sendJson(res, 400, { error: `there is no project by that name (${missing.join(', ')})` });
+            return;
+          }
+        }
+
+        const result = create.createAgent({
+          name: body.name, role: body.role,
+          label: body.label, instructions: body.instructions, model: body.model,
+        });
         // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
         // ours, and it is a 200 because the thing half-happened and the caller
         // needs the detail rather than an error.
         const code = result.outcome === create.OUTCOME.REFUSED ? 400 : 200;
+        if (result.outcome === create.OUTCOME.CREATED && wantProjects && wantProjects.length) {
+          // One roster read for the whole request, same rule as the project
+          // routes: syncAgent refuses to write without an exact match in it.
+          const roster = safeRoster();
+          result.projects = wantProjects.map((id) => {
+            try {
+              projects.addAgent(id, result.sessionName, roster);
+              const told = projects.syncAgent(result.sessionName, roster);
+              return { id, added: true, told };
+            } catch (err) {
+              return { id, added: false, because: String((err && err.message) || 'we could not put it on that project') };
+            }
+          });
+        }
         sendJson(res, code, result);
       })
       // ⚠️ OUR sentence, never the raw message. The first version called
