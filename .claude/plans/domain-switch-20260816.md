@@ -10,7 +10,7 @@ header names this branch's commit.
 
 - install/setup.sh: six occurrences of chaoskosmos.com become
   installkosmos.com (two header comments, KOSMOS_RELEASE_BASE default,
-  the resume line printed on interrupted install, the wrong-account
+  the unrecognized-flag usage message, the wrong-account
   osascript alert, the uninstall hint). KEPT: the CFBundleIdentifier
   `com.chaoskosmos.kosmos` and the comment describing it; both are
   identifiers naming existing state (changeover doc section 1b fourth
