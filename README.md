@@ -7,7 +7,7 @@ Claude subscription.
 
 End users install with one line, which the marketing page distributes:
 
-    curl -fsSL https://chaoskosmos.com/setup | sh
+    curl -fsSL https://installkosmos.com/setup | sh
 
 That runs `install/setup.sh`: it checksum-verifies and installs a private
 tmux bundle and the Kosmos bundle (the app + a pinned Node runtime + the
@@ -45,7 +45,7 @@ KOSMOS_TRUST_FIRST_FETCH=1, see the script header), then
 and `tools/build-kosmos-bundle.sh` (each emits its tarball plus the
 `.sha256` the installer requires, the tmux one carrying the harvested
 upstream licences and dependency versions), published under
-chaoskosmos.com/dist. Named debt before first publish: a minos stamp is a
+installkosmos.com/dist. Named debt before first publish: a minos stamp is a
 promise, not a run; one real macOS 13.x boot should run the tarball.
 
 ## Status: Phase 1

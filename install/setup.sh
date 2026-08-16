@@ -27,7 +27,7 @@
 # and `set -o pipefail` are safe under macOS sh specifically, and that is
 # the only sh this file supports.
 #
-#   curl -fsSL https://chaoskosmos.com/setup | sh
+#   curl -fsSL https://installkosmos.com/setup | sh
 #
 # ⚠️ WHO THIS IS FOR, because it governs every decision below. The person running
 # this has been handed a line to paste by someone they trust, in a room, and has
@@ -50,7 +50,7 @@
 #     the launchd enable/bootout that removes agents' background jobs. The
 #     header sentence above lists the same three exceptions; when one
 #     list changes the other must, because this file is served verbatim at
-#     https://chaoskosmos.com/setup and these sentences are what a cautious
+#     https://installkosmos.com/setup and these sentences are what a cautious
 #     person reads before piping it into sh.
 #   - Running it twice is safe and says so.
 #
@@ -306,7 +306,7 @@ LOG="$LOG_DIR/install.log"
 # a never-touched Mac we want to test the INSTALLER, not the CDN, so
 # KOSMOS_TMUX_SRC and KOSMOS_SRC can point at local files carried over on a
 # thumb drive. Same code path, one variable different.
-KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://chaoskosmos.com/dist}"
+KOSMOS_RELEASE_BASE="${KOSMOS_RELEASE_BASE:-https://installkosmos.com/dist}"
 
 # ⚠️ EVERY DOWNLOAD IS CHECKSUM-VERIFIED before anything is extracted. The
 # build publishes a .sha256 next to each tarball; a mismatch, a truncated
@@ -823,7 +823,7 @@ case "${1:-}" in
   --uninstall) uninstall ;;
   *)
     printf '\n  The only option is --uninstall. To install, run it with no options:\n' >&2
-    printf '    curl -fsSL https://chaoskosmos.com/setup | sh\n\n' >&2
+    printf '    curl -fsSL https://installkosmos.com/setup | sh\n\n' >&2
     exit 2
     ;;
 esac
@@ -1205,7 +1205,7 @@ KOSMOS_HOME="\${KOSMOS_HOME:-$KOSMOS_HOME}"
 # installing account itself whenever KOSMOS_HOME was overridden outside
 # the home folder, and degenerated to match-anything when HOME was empty.
 if [ "\$(/usr/bin/id -u)" != "$owner_uid" ]; then
-  /usr/bin/osascript -e 'display alert "Kosmos was installed by a different account" message "This Kosmos belongs to another user of this Mac. To use Kosmos from this account, paste the install line from chaoskosmos.com into Terminal." as critical' >/dev/null 2>&1
+  /usr/bin/osascript -e 'display alert "Kosmos was installed by a different account" message "This Kosmos belongs to another user of this Mac. To use Kosmos from this account, paste the install line from installkosmos.com into Terminal." as critical' >/dev/null 2>&1
   exit 1
 fi
 # The port this install chose travels with the icon; without it, an install
@@ -1511,7 +1511,7 @@ else
   printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$_alt" "$BIN_DIR"
   printf '  and it will print your dashboard address.\n\n'
 fi
-printf '  To remove it later:  curl -fsSL https://chaoskosmos.com/setup | sh -s -- --uninstall\n\n'
+printf '  To remove it later:  curl -fsSL https://installkosmos.com/setup | sh -s -- --uninstall\n\n'
 
 # ⚠️ A FRESH INSTALL ENDS LOOKING AT KOSMOS, NOT AT A PROMPT. Measured on the
 # first real clean-machine run (2026-08-13): every step succeeded and the

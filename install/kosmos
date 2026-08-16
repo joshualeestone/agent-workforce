@@ -135,9 +135,9 @@ cmd_start() {
   if _oldpid="$(running_pid)"; then
     die "A Kosmos board from this install is already running (process $_oldpid) but is not answering on port $PORT. Stop it first with 'kosmos stop', then start again."
   fi
-  [ -x "$NODE" ] || die "Kosmos looks incomplete: the runtime is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
-  [ -f "$APP" ]  || die "Kosmos looks incomplete: the app is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
-  [ -x "$KOSMOS_HOME/tmux/bin/tmux" ] || die "Kosmos looks incomplete: its terminal manager is missing. Reinstalling fixes this: curl -fsSL https://chaoskosmos.com/setup | sh"
+  [ -x "$NODE" ] || die "Kosmos looks incomplete: the runtime is missing. Reinstalling fixes this: curl -fsSL https://installkosmos.com/setup | sh"
+  [ -f "$APP" ]  || die "Kosmos looks incomplete: the app is missing. Reinstalling fixes this: curl -fsSL https://installkosmos.com/setup | sh"
+  [ -x "$KOSMOS_HOME/tmux/bin/tmux" ] || die "Kosmos looks incomplete: its terminal manager is missing. Reinstalling fixes this: curl -fsSL https://installkosmos.com/setup | sh"
   mkdir -p "$LOG_DIR"
   say "Bringing the board up."
   # Detached from this terminal, with everything it prints kept in a log so a
