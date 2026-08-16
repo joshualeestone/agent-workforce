@@ -577,6 +577,21 @@ function createAgent(opts) {
       && (typeof wantInstructions !== 'string' || !wantInstructions.trim())) {
     return { outcome: OUTCOME.REFUSED, because: 'instructions have to be words, or leave them out and the role\'s own are used', steps };
   }
+  // The SAME bounds the instructions module enforces on every later edit
+  // (its MIN_CHARS and MAX_BYTES), carried here so create cannot mint a
+  // boot file the app's own editor would refuse to read back: an oversize
+  // file makes readWorkerFile refuse forever (anonymous card, unreadable
+  // editor, could_not on every project tell), and a two-character one
+  // would be refused at the first save.
+  if (wantInstructions !== undefined) {
+    const instructions = require('./instructions');
+    if (wantInstructions.trim().length < instructions.MIN_CHARS) {
+      return { outcome: OUTCOME.REFUSED, because: `instructions cannot be this short, say what this agent is for in at least ${instructions.MIN_CHARS} characters`, steps };
+    }
+    if (Buffer.byteLength(wantInstructions, 'utf8') > instructions.MAX_BYTES) {
+      return { outcome: OUTCOME.REFUSED, because: 'those instructions are too long to be a boot file, trim them to under 256KB', steps };
+    }
+  }
   let modelArg = null;
   if (wantModelKey !== undefined) {
     const m = MODELS.find((x) => x.key === String(wantModelKey));

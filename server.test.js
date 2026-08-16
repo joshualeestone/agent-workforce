@@ -2176,13 +2176,79 @@ test('a creation with projects picked really lands on those projects, and the re
     const after = projects.readAll().find((p) => p.id === made.id);
     assert.ok((after.agents || []).includes('route-attached'),
       'the response said added but the project does not list the agent');
-    // The told verdict travels with an added outcome (the screen may render
-    // it later; the route must already carry it).
-    assert.ok(body.projects[0].told !== undefined, 'no told verdict came back with the attach');
+    // The told verdict is honestly NOT_TRIED at create time: the session
+    // launchd will start does not exist yet, so a sync here would store
+    // could_not against every create-with-project (the race this route's
+    // comment documents). The creation screen re-fires the tell through the
+    // member route once the board can see the agent.
+    assert.equal(body.projects[0].told && body.projects[0].told.state, 'not_tried',
+      'the create-time verdict should be not_tried, not a stored failure');
   } finally {
     create.setRunner(null);
     status.setPaneSource(null);
   }
+});
+
+test('the roles payload serves the models list, and the mark family map is whole-name seeded', async () => {
+  // Route half: the model select is built from this payload, and until now
+  // nothing asserted it -- a route that stopped serving `models` would strand
+  // the select empty with the suite green.
+  const rolesRes = await req('/api/roles', {});
+  assert.equal(rolesRes.status, 200);
+  const payload = JSON.parse(rolesRes.body);
+  assert.ok(Array.isArray(payload.models) && payload.models.length >= 3, 'no models list came back');
+  const defaults = payload.models.filter((m) => m.default);
+  assert.equal(defaults.length, 1, 'exactly one model must be preselected');
+  assert.equal(defaults[0].key, 'sonnet', 'the preselected model is not the documented default');
+  for (const m of payload.models) {
+    // key/label/default ONLY: the payload deliberately does not carry the
+    // model args -- the client sends a key and the engine owns the mapping,
+    // so a page can never name the executable-facing id itself.
+    assert.deepEqual(Object.keys(m).sort(), ['default', 'key', 'label'],
+      `model ${m.key} serves fields the screen must not receive`);
+    assert.equal(typeof m.label, 'string');
+  }
+  // The full model ids live in the ENGINE list the route maps from.
+  const engineModels = require('./engine/create').MODELS;
+  for (const m of payload.models) {
+    const src = engineModels.find((x) => x.key === m.key);
+    assert.ok(src && /^claude-/.test(src.arg), `engine model ${m.key} lacks a full model id`);
+  }
+
+  // Extraction half, same harness as the other page-logic tests: the mark
+  // family function is pulled out of the page source and exercised directly,
+  // because the last dead-code defect on this screen lived in exactly this
+  // "only reachable through the browser" layer.
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const famsAt = page.indexOf('const MARK_FAMS');
+  const famForAt = page.indexOf('function markFamFor');
+  assert.ok(famsAt > -1 && famForAt > -1, 'the mark generator moved; re-anchor this test');
+  const sliceEnd = (start) => {
+    let depth = 0;
+    for (let k = page.indexOf('{', start); k < page.length; k += 1) {
+      if (page[k] === '{') depth += 1;
+      else if (page[k] === '}') { depth -= 1; if (depth === 0) return k + 1; }
+    }
+    return -1;
+  };
+  const famsEnd = page.indexOf('];', famsAt);
+  const famForEnd = sliceEnd(famForAt);
+  assert.ok(famsEnd > -1 && famForEnd > -1, 'could not slice the mark generator');
+  // eslint-disable-next-line no-new-func
+  const markFamFor = new Function(
+    `${page.slice(famsAt, famsEnd + 2)}\n${page.slice(famForAt, famForEnd)}\nreturn markFamFor;`)();
+
+  const fams = markFamFor('leo');
+  assert.ok(Array.isArray(fams) && fams.length >= 3, 'a family is a palette, not a colour');
+  assert.deepEqual(markFamFor('leo'), markFamFor('leo'), 'the family map is not deterministic');
+  // ⚠️ leo vs LAURA, not leo vs lucy: measured first, leo and lucy genuinely
+  // collide under whole-name FNV (both bucket 10 of 14), so pinning them
+  // unequal would fail on correct code. laura differs, and letter-only
+  // seeding (the original bug: every l-name one image) would collide it.
+  assert.notDeepEqual(markFamFor('leo'), markFamFor('laura'),
+    'two different l-names share a family: the letter-only seeding bug is back');
+  assert.notDeepEqual(markFamFor('casey'), markFamFor('Casey'),
+    'case-differing names measured to different buckets; sameness means the seed changed');
 });
 
 test('the suggested default role is the project manager, by name and not by position', () => {

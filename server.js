@@ -902,7 +902,18 @@ const server = http.createServer((req, res) => {
             return;
           }
           wantProjects = [...new Set(body.projects.map((p) => p.trim()))];
-          const known = projects.readAll();
+          // ⚠️ Wrapped separately: an UNREADABLE projects store is OUR fact
+          // (500, the engine's own sentence), not a malformed request, and
+          // the route's shared catch would have answered "we could not read
+          // that request" about a file the person never touched.
+          let known;
+          try {
+            known = projects.readAll();
+          } catch (err) {
+            const code = (err && err.code === 'UNREADABLE') ? 500 : 400;
+            sendJson(res, code, { error: String((err && err.message) || 'we could not read your projects') });
+            return;
+          }
           const missing = wantProjects.filter((id) => !known.some((p) => p.id === id));
           if (missing.length) {
             sendJson(res, 400, { error: `there is no project by that name (${missing.join(', ')})` });
@@ -936,11 +947,17 @@ const server = http.createServer((req, res) => {
               return { id, added: false, because: String((err && err.message) || 'we could not put it on that project') };
             }
           });
-          // syncAgent is agent-scoped: one call stamps every project the agent
-          // is on, so it runs once after the adds, not once per project.
-          if (result.projects.some((p) => p.added)) {
-            const told = projects.syncAgent(result.name, roster);
-            for (const p of result.projects) if (p.added) p.told = told;
+          // ⚠️ NO syncAgent here, on purpose. This code runs milliseconds
+          // after `launchctl bootstrap` returns, which is the one moment a
+          // tell is near-guaranteed to fail: the tmux session and its
+          // @kosmos_agent claim do not exist yet (create.js's own comment:
+          // they happen inside the job, after this function has returned).
+          // Syncing now STORED could_not against every create-with-project.
+          // So membership is recorded, told is honestly `not_tried`, and the
+          // creation screen re-fires the tell through the member route the
+          // moment the board can actually see the agent running.
+          for (const p of result.projects) {
+            if (p.added) p.told = { state: projects.TOLD.NOT_TRIED, because: null };
           }
         }
         sendJson(res, code, result);

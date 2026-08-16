@@ -1341,7 +1341,7 @@ svg { display: block; }
       <label class="flabel" for="create-label">Role label</label>
       <div class="fhint">A short label shown below the agent&rsquo;s name.</div>
       <div class="frow">
-        <input type="text" id="create-label" autocomplete="off"
+        <input type="text" id="create-label" autocomplete="off" maxlength="80"
                placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
       </div>
     </div>
@@ -3845,7 +3845,10 @@ function buildPicker() {
     '</optgroup>').join('');
   document.getElementById('pick-pm').hidden = false;
   document.getElementById('pick-list').hidden = false;
-  document.getElementById('pick-own').hidden = false;
+  // Only offered when the payload actually served the entry: a radio whose
+  // Continue silently does nothing (roleByKey('own') -> null -> return) is
+  // worse than the option being absent from an older server.
+  document.getElementById('pick-own').hidden = !OWN_ROLE;
 }
 
 /**
@@ -3959,6 +3962,7 @@ function openCreate() {
     'A unique mark will be created from the name unless you add a picture.';
   INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
   FILLED_ROLE = null; LAST_MARK_SEED = null; PENDING_AVATAR = null;
+  LAST_TYPED_NAME = 'your agent';
   const genav = document.getElementById('genav');
   genav.classList.add('empty');
   genav.getContext('2d').clearRect(0, 0, genav.width, genav.height);
@@ -4063,6 +4067,7 @@ async function uploadPendingAvatar(name) {
   PENDING_AVATAR = null;
   if (!up || !name) return false;
   for (let i = 0; i < 2; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 2000));   // between attempts, never after the last
     try {
       const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/avatar', {
         method: 'PUT',
@@ -4070,8 +4075,7 @@ async function uploadPendingAvatar(name) {
         body: up,
       });
       if (res.ok) return true;
-    } catch { /* the retry below is the answer to a flaky first attempt */ }
-    await new Promise((r) => setTimeout(r, 2000));
+    } catch { /* the retry above is the answer to a flaky first attempt */ }
   }
   return false;
 }
@@ -4154,7 +4158,11 @@ function dotGlyph(cv, letter, color, seedStr) {
     }
     if (hit) continue;
     dots.push({ x, y, r: rad });
-    g.fillStyle = PAL ? PAL[Math.floor(rnd() * PAL.length)] : color;
+    /* min(): rnd() can land on exactly 1.0 (the LCG state can reach its
+       modulus minus one), and floor(1.0 * length) indexes past the palette;
+       the invalid fillStyle would be silently ignored and the dot would
+       reuse the previous colour. One-in-2^31 per dot, still a bug. */
+    g.fillStyle = PAL ? PAL[Math.min(PAL.length - 1, Math.floor(rnd() * PAL.length))] : color;
     g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
   }
   g.restore();
@@ -4199,6 +4207,9 @@ let LAST_MARK_SEED = null;
    picked projects -- "the moment a person edits, the text is theirs". A
    different role is a different template, and that resets on purpose. */
 let FILLED_ROLE = null;
+/* The name currently embedded in the editor's identity opener, so the
+   dirty-editor swap above knows which token to replace. */
+let LAST_TYPED_NAME = 'your agent';
 /* The picture (chosen file or generated mark) waiting for the agent to be
    visible on the board. The avatar PUT requires a known, running agent, so
    uploading right after CREATED raced launchd and 404ed silently. The watch's
@@ -4220,6 +4231,7 @@ function refillDetails(resetDirty) {
   // ("nobody wants an agent whose job is Custom").
   if (!LABEL_DIRTY) document.getElementById('create-label').value = role.label || '';
   if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
+  LAST_TYPED_NAME = document.getElementById('create-name').value.trim() || 'your agent';
   document.getElementById('create-instr-note').textContent = '';
 }
 
@@ -4227,9 +4239,24 @@ document.getElementById('create-instr').addEventListener('input', () => { INSTR_
 document.getElementById('create-label').addEventListener('input', () => { LABEL_DIRTY = true; });
 document.getElementById('create-name').addEventListener('input', () => {
   // The typed name flows into an UNTOUCHED editor live; an edited one is
-  // theirs and stays exactly as they left it. The mark redraws every
-  // keystroke (6.5ms, inside one frame, measured in the pack).
-  if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
+  // theirs and stays exactly as they left it -- EXCEPT the identity
+  // opener's name token. `status.readIdentity` parses "You are **X**," to
+  // name the card, so a dirty editor left holding a corrected-away typo
+  // ("cassey" fixed to "casey") would board the agent under the typo with
+  // nothing on screen saying so. The swap below touches ONLY that token,
+  // and only while the opener still has the exact shape the template wrote:
+  // a person who edited the opener itself keeps every character of it.
+  const el = document.getElementById('create-instr');
+  const nowName = document.getElementById('create-name').value.trim() || 'your agent';
+  if (!INSTR_DIRTY) {
+    el.value = instrTemplate();
+  } else if (nowName !== LAST_TYPED_NAME) {
+    const opener = 'You are **' + LAST_TYPED_NAME + '**,';
+    if (el.value.startsWith(opener)) {
+      el.value = 'You are **' + nowName + '**,' + el.value.slice(opener.length);
+    }
+  }
+  LAST_TYPED_NAME = nowName;
   if (!AVATAR_FILE) drawCreateMark();
 });
 
@@ -4583,6 +4610,19 @@ async function watchForAgent(name, result, attempt) {
       // walks the live roster). Fire-and-forget, then repaint the board so
       // the new card picks the picture up.
       uploadPendingAvatar(name).then((ok) => { if (ok) tick(); });
+      // And the tell can finally succeed: the create route records
+      // membership but deliberately does NOT sync (its told is not_tried,
+      // because at create time the session does not exist yet and a sync
+      // would store could_not). The member route is idempotent on
+      // membership and re-runs the sync against the roster that can now
+      // see the agent. Fire-and-forget: a failed tell is recoverable from
+      // the project screen, which renders the stored verdict.
+      for (const pr of (result.projects || [])) {
+        if (!pr.added) continue;
+        fetch('/api/project/' + encodeURIComponent(pr.id) + '/agent/' + encodeURIComponent(name), {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+        }).catch(() => { /* the project screen's stored verdict is the record */ });
+      }
       paintMade(result.steps, { state: 'done', text: 'The board can see it running' }, result.projects);
       document.getElementById('made-head').textContent = shown + ' is running';
       if (result.firstAction) {
