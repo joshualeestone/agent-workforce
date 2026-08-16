@@ -2139,17 +2139,20 @@ test('the suggested default role is the project manager, by name and not by posi
   // are carefully stated in two places are exactly the two that must never be
   // the silent default.
   const roles = require('./engine/roles');
-  assert.equal(roles.ROLES[0].key, 'pm',
-    'the role library no longer starts with the project manager, so the screen '
-    + 'now preselects something else for everyone');
+  assert.ok(roles.byKey('pm'),
+    'the catalogue no longer carries pm, so the recommended radio preselects '
+    + 'whatever the fallback finds');
 
-  // And the screen still takes its default from the top of that list rather
-  // than from a second copy of the decision.
+  // The 2026-08-16 picker chooses BY NAME (`roleByKey('pm')`), which is what
+  // this test's title always wanted: the old positional pin
+  // (`pickRole(ROLES[0].key)`) kept the decision safe only as long as nobody
+  // reordered engine/roles.js. Now reordering the catalogue cannot change
+  // what a person accepts by pressing Continue.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  assert.match(script, /pickRole\(ROLES\[0\]\.key\)/,
-    'the screen picks its default some other way than the first role, which is a '
-    + 'second place for that decision to live');
+  assert.match(script, /roleByKey\('pm'\)/,
+    'the screen no longer picks its default by name; a positional default '
+    + 'silently changes what Continue accepts when the catalogue reorders');
 });
 
 test('the board SAYS part of the fleet could not be read, in words on the screen', () => {

@@ -819,6 +819,9 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, {
       roles: roles.ROLES.map((r) => ({
         key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+        // The catalogue's section, so the picker's menu can group without a
+        // second copy of the grouping living in the page.
+        group: r.group || null,
         // ⚠️ The limit travels WITH the role. A caution that lives only in the
         // agent's instruction file is read after the person has chosen, which
         // is exactly too late for the two roles that have one.

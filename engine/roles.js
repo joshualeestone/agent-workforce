@@ -64,6 +64,7 @@
 const ROLES = [
   {
     key: 'pm',
+    group: 'Running the work',
     label: 'Project Manager',
     blurb: 'Breaks down work, assigns tasks, and briefs your other agents',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
@@ -84,6 +85,7 @@ const ROLES = [
   },
   {
     key: 'ea',
+    group: 'Running the work',
     label: 'Executive Assistant',
     blurb: 'Manages email, calendars, meeting preparation, and follow-ups',
     caution: 'It never sends anything. It drafts the emails and replies and leaves them ready for you to send.',
@@ -105,6 +107,7 @@ const ROLES = [
   },
   {
     key: 'ops',
+    group: 'Running the work',
     label: 'Operations Manager',
     blurb: 'Keeps recurring work, checklists, and handoffs moving',
     firstAction: 'Tell me which piece of work keeps slipping and I will make it repeatable.',
@@ -125,6 +128,7 @@ const ROLES = [
   },
   {
     key: 'meet',
+    group: 'Running the work',
     label: 'Meeting Assistant',
     blurb: 'Prepares agendas, captures decisions, and tracks follow-ups',
     firstAction: 'Point me at your next meeting and I will get the agenda and the background ready.',
@@ -145,6 +149,7 @@ const ROLES = [
   },
   {
     key: 'process',
+    group: 'Running the work',
     label: 'Process Designer',
     blurb: 'Turns the way you work into clear, repeatable systems',
     firstAction: 'Walk me through how you do something now and I will write down how it could work every time.',
@@ -163,6 +168,7 @@ const ROLES = [
   },
   {
     key: 'researcher',
+    group: 'Words and research',
     label: 'Researcher',
     blurb: 'Finds reliable information and turns it into clear briefs',
     firstAction: 'Tell me what you need to know and I will find it and write it up.',
@@ -182,6 +188,7 @@ const ROLES = [
   },
   {
     key: 'writer',
+    group: 'Words and research',
     label: 'Business Writer',
     blurb: 'Drafts and edits reports, documents, and internal communications',
     firstAction: 'Tell me what needs writing and who is going to read it.',
@@ -201,6 +208,7 @@ const ROLES = [
   },
   {
     key: 'copy',
+    group: 'Words and research',
     label: 'Copywriter',
     blurb: 'Writes marketing and product copy designed to land',
     firstAction: 'Tell me what you are selling and who you are selling it to.',
@@ -220,6 +228,7 @@ const ROLES = [
   },
   {
     key: 'marketing',
+    group: 'Marketing and growth',
     label: 'Marketing Manager',
     blurb: 'Plans campaigns, coordinates content, and tracks results',
     firstAction: 'Tell me what you are trying to grow and I will put a plan against it.',
@@ -241,6 +250,7 @@ const ROLES = [
   },
   {
     key: 'social',
+    group: 'Marketing and growth',
     label: 'Social Media Manager',
     blurb: 'Turns your ideas into posts and a consistent content calendar',
     caution: 'It never posts anything. It writes the posts and lines them up, and you decide what goes out.',
@@ -263,6 +273,7 @@ const ROLES = [
   },
   {
     key: 'seo',
+    group: 'Marketing and growth',
     label: 'SEO Specialist',
     blurb: 'Finds search opportunities and improves pages and content',
     firstAction: 'Point me at your site and tell me who you want to find it.',
@@ -284,6 +295,7 @@ const ROLES = [
   },
   {
     key: 'design',
+    group: 'Marketing and growth',
     label: 'Designer',
     blurb: 'Creates visual concepts, layouts, and production-ready assets',
     firstAction: 'Tell me what you need designed and where it is going to be seen.',
@@ -303,6 +315,7 @@ const ROLES = [
   },
   {
     key: 'sales',
+    group: 'Customers and revenue',
     label: 'Sales Assistant',
     blurb: 'Researches leads, prepares outreach, and updates your pipeline',
     caution: 'It never sends anything. It drafts the follow-ups and keeps track of who is waiting, and you decide who hears from you.',
@@ -323,6 +336,7 @@ const ROLES = [
   },
   {
     key: 'accounts',
+    group: 'Customers and revenue',
     label: 'Account Manager',
     blurb: 'Tracks client work, commitments, and next steps',
     firstAction: 'Tell me which client to look after and I will keep track of what you owe them.',
@@ -342,6 +356,7 @@ const ROLES = [
   },
   {
     key: 'support',
+    group: 'Customers and revenue',
     label: 'Customer Support',
     blurb: 'Drafts helpful replies for you to review and send',
     caution: 'It never replies to a customer. It drafts the answers and digs out the history, and you decide what gets sent.',
@@ -363,6 +378,7 @@ const ROLES = [
   },
   {
     key: 'ecom',
+    group: 'Customers and revenue',
     label: 'E-commerce Manager',
     blurb: 'Maintains product listings, organizes promotions, and summarizes customer feedback',
     firstAction: 'Point me at your store and tell me what needs attention.',
@@ -382,6 +398,7 @@ const ROLES = [
   },
   {
     key: 'data',
+    group: 'Numbers',
     label: 'Data Analyst',
     blurb: 'Cleans your data and turns it into useful answers and reports',
     firstAction: 'Send me the file and tell me what you are trying to find out.',
@@ -400,6 +417,7 @@ const ROLES = [
   },
   {
     key: 'finance',
+    group: 'Numbers',
     label: 'Financial Analyst',
     blurb: 'Builds forecasts, checks models, and explains changes in your numbers',
     caution: 'Not financial advice. It models what you ask it to model and shows its working, for you or your accountant to check.',
@@ -422,6 +440,7 @@ const ROLES = [
   },
   {
     key: 'books',
+    group: 'Numbers',
     label: 'Bookkeeper',
     blurb: 'Categorizes transactions, reconciles statements, and flags mismatches',
     caution: 'Not financial advice. It records and reconciles what you give it, for you or your accountant to check.',
@@ -442,6 +461,7 @@ const ROLES = [
   },
   {
     key: 'product',
+    group: 'Building software',
     label: 'Product Manager',
     blurb: 'Turns customer needs into priorities, requirements, and release plans',
     firstAction: 'Tell me what you are building and who it is for.',
@@ -461,6 +481,7 @@ const ROLES = [
   },
   {
     key: 'engineer',
+    group: 'Building software',
     label: 'Software Engineer',
     blurb: 'Builds, improves, and fixes software',
     firstAction: 'Tell me what is broken or what you want built.',
@@ -478,6 +499,7 @@ const ROLES = [
   },
   {
     key: 'qa',
+    group: 'Building software',
     label: 'QA Tester',
     blurb: 'Tests what was built and clearly reports what breaks',
     firstAction: 'Point me at what was built and tell me what it is supposed to do.',
@@ -498,6 +520,7 @@ const ROLES = [
   },
   {
     key: 'security',
+    group: 'Building software',
     label: 'Security Reviewer',
     blurb: 'Reviews code and systems for vulnerabilities and risk',
     firstAction: 'Point me at the code or the system and I will tell you what worries me.',
@@ -518,6 +541,7 @@ const ROLES = [
   },
   {
     key: 'legal',
+    group: 'Contracts, hiring and suppliers',
     label: 'Contract Reviewer',
     blurb: 'Drafts and reviews contract language for a lawyer to check',
     caution: 'Not a lawyer, and not legal advice. It drafts and explains so you can take something concrete to one.',
@@ -539,6 +563,7 @@ const ROLES = [
   },
   {
     key: 'recruiting',
+    group: 'Contracts, hiring and suppliers',
     label: 'Recruiting Coordinator',
     blurb: 'Drafts job posts, organizes applicants, and prepares interviews',
     caution: 'It makes no hiring decisions. It writes the posts, organizes applicants and prepares interviews, and every call about a person is yours.',
@@ -559,6 +584,7 @@ const ROLES = [
   },
   {
     key: 'vendors',
+    group: 'Contracts, hiring and suppliers',
     label: 'Vendor Manager',
     blurb: 'Compares vendors, tracks renewals, and flags important changes',
     firstAction: 'Tell me which suppliers you use and I will keep track of them.',
