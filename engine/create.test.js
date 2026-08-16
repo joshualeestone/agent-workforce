@@ -663,7 +663,10 @@ test('the board can read the identity the creation writes, for every role', () =
 
   for (const role of roles.ROLES) {
     const name = `ident-${role.key}`;
-    const made = create.createAgent({ ...BINS, name, role: role.key });
+    // own refuses without a label by design (its own test); the identity
+    // property still has to hold for its example text.
+    const made = create.createAgent({ ...BINS, name, role: role.key,
+      ...(role.key === 'own' ? { label: 'Own Thing' } : {}) });
     assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
 
     const identity = status.readIdentity(name);
@@ -1579,4 +1582,41 @@ test('the MODELS list has one default and args the CLI will accept as model ids'
     assert.ok(m.key && m.label && m.arg, 'a model entry is missing a field the menu or the job needs');
     assert.match(m.arg, /^claude-[a-z0-9-]+$/, `${m.key}'s arg does not look like a model id`);
   }
+});
+
+test('own is the 27th entry and the 26th role does not exist', () => {
+  // ⚠️ Both counts asserted BY NAME (catalogue 0ef34cc): 27 entries, 26
+  // pickable. A test that asserted one bare number would not know which
+  // fact it held when the next entry lands.
+  assert.equal(roles.ROLES.length, 27, 'the catalogue grew or shrank; decide which count this is');
+  const menu = roles.ROLES.filter((r) => r.menu !== false);
+  assert.equal(menu.length, 26, 'own leaked into the pickable menu, or a menu role got hidden');
+  assert.ok(!menu.some((r) => r.key === 'own'), 'own is in the grouped menu');
+  // POSITIVE CONTROL: the exclusion is the flag doing work, not a
+  // coincidence of counting -- flipping it in a copy must change the count.
+  const flipped = roles.ROLES.map((r) => (r.key === 'own' ? { ...r, menu: true } : r))
+    .filter((r) => r.menu !== false);
+  assert.equal(flipped.length, 27, 'the menu filter is not reading the flag this test guards');
+  // No label on purpose: it prints under the agent's name, and "Custom" is
+  // nobody's job. The gate lives in create and is tested below.
+  assert.ok(!roles.byKey('own').label, 'own grew a default label');
+});
+
+test('creating own without a label is a gating refusal, never a default', () => {
+  recorder();
+  create.setDryRun(false);
+  for (const opts of [{}, { label: '  ' }]) {
+    const r = create.createAgent({ ...BINS, name: 'own-nolabel', role: 'own', ...opts });
+    assert.equal(r.outcome, create.OUTCOME.REFUSED, r.because);
+    assert.match(r.because, /your own words/i, 'the refusal does not ask the gating question');
+    assert.ok(!fs.existsSync(create.workerDir('own-nolabel')), 'refused after writing');
+  }
+  const made = create.createAgent({ ...BINS, name: 'own-labelled', role: 'own', label: 'Napkin Wrangler' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  assert.equal(store.readProfile('own-labelled').role, 'Napkin Wrangler');
+  const text = fs.readFileSync(create.instructionFile('own-labelled'), 'utf8');
+  assert.match(text, /^You are \*\*own-labelled\*\*, an assistant\./,
+    'the example did not substitute the name in the identity shape the board parses');
+  assert.match(text, /stuck rather than filling the gap/,
+    "the example's posture bullet is missing");
 });

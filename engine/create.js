@@ -560,6 +560,15 @@ function createAgent(opts) {
   const wantLabel = opts && opts.label !== undefined ? opts.label : undefined;
   const wantInstructions = opts && opts.instructions !== undefined ? opts.instructions : undefined;
   const wantModelKey = opts && opts.model !== undefined ? opts.model : undefined;
+  /**
+   * ⚠️ `own` has no label of its own ON PURPOSE (the catalogue's rule): the
+   * board prints this string under the agent's name, and defaulting it to
+   * "Custom" gives somebody an agent whose job is "Custom". An empty label
+   * here is a gating question for the person, never a default.
+   */
+  if (roleKey === 'own' && (wantLabel === undefined || !String(wantLabel).trim())) {
+    return { outcome: OUTCOME.REFUSED, because: 'say what this agent does in the role label, in your own words', steps };
+  }
   if (wantLabel !== undefined
       && (typeof wantLabel !== 'string' || !wantLabel.trim() || wantLabel.trim().length > 80)) {
     return { outcome: OUTCOME.REFUSED, because: 'a role label has to be words (80 characters or fewer)', steps };

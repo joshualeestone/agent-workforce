@@ -601,6 +601,38 @@ const ROLES = [
       '- Say when a price or a term has changed since last time.',
     ].join('\n'),
   },
+  /**
+   * ⚠️ THE 27TH ENTRY, AND THE 26TH ROLE DOES NOT EXIST (catalogue 0ef34cc).
+   * `own` is not in the grouped menu and must not raise any pickable count:
+   * it is the text that prefills the editor when someone picks the third
+   * radio, "Describe it yourself". It works if they change nothing (a
+   * reasonable general assistant, never a bracketed skeleton), it is NOT
+   * the project manager's text (their job is not among the twenty-five),
+   * and it teaches the format by being it. The label is deliberately
+   * ABSENT: it comes from the person's own role field, and an empty one at
+   * create time is a gating refusal, never a default -- nobody wants an
+   * agent whose job is "Custom".
+   */
+  {
+    key: 'own',
+    menu: false,
+    blurb: 'An agent whose job you write yourself',
+    firstAction: 'Give me the first thing and tell me what done looks like.',
+    instructions: [
+      'You are **{{NAME}}**, an assistant.',
+      '',
+      'You take on what they hand you and work it through to something they',
+      'can use.',
+      '',
+      '## How you work',
+      '',
+      '- Ask before you assume. One question early beats an hour in the wrong',
+      '  direction.',
+      '- Show your working. They should be able to see how you got there.',
+      '- Say when you are stuck rather than filling the gap with something',
+      '  plausible.',
+    ].join('\n'),
+  },
 ];
 
 function byKey(key) {

@@ -1802,7 +1802,15 @@ test('the roles route carries the copy the creation actually uses', async () => 
   assert.equal(res.status, 200);
   const got = JSON.parse(res.body).roles;
 
-  assert.equal(got.length, roles.ROLES.length, 'the route drops or invents roles');
+  // MENU roles only: `own` (menu: false) prefills the third radio and is
+  // served whole in its own field, never in the grouped list (catalogue
+  // 0ef34cc: 27 entries, 26 pickable).
+  const menu = roles.ROLES.filter((r) => r.menu !== false);
+  assert.equal(got.length, menu.length, 'the route drops or invents roles');
+  assert.ok(!got.some((r) => r.key === 'own'), 'own leaked into the pickable menu');
+  const ownServed = JSON.parse(res.body).own;
+  assert.ok(ownServed && ownServed.instructions === roles.byKey('own').instructions,
+    "the third radio's prefill is not the engine's own example, so the words a person reads are not the words the agent boots from");
   for (const r of got) {
     const real = roles.byKey(r.key);
     assert.ok(real, `the route served a role '${r.key}' that cannot be created`);

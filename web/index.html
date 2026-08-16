@@ -473,6 +473,9 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 }
 /* Shown only when the board is empty: a recommendation is useful to
    somebody with no agents and noise to somebody who already has six (pack). */
+.p2full { grid-column: 2 / -1; font: var(--text-callout) var(--font-ui);
+  color: var(--label-2); margin-top: 6px; display: none; line-height: 1.45; }
+.pick2.on .p2full { display: block; }
 .prec {
   display: inline-block; margin-left: var(--space-4); font: 700 var(--text-caption) var(--font-ui);
   letter-spacing: .08em; text-transform: uppercase; vertical-align: middle;
@@ -1247,6 +1250,17 @@ svg { display: block; }
         <span class="pickmark" aria-hidden="true">&#10003;</span>
         <span class="p2n">Pick another role</span>
         <span class="p2d" id="pick-list-desc"></span>
+      </button>
+      <!-- ⚠️ Three equivalent options, same border as the other two (the
+           pack rejected a dashed 'provisional' look: describing the job
+           yourself is not a lesser choice). Its editor prefill is the
+           catalogue's own `own` entry, which works unchanged; its label is
+           the person's own words, gated rather than defaulted. -->
+      <button class="pick2 own" type="button" role="radio" aria-checked="false" data-rmode="own" hidden id="pick-own">
+        <span class="pickmark" aria-hidden="true">&#10003;</span>
+        <span class="p2n">Describe it yourself</span>
+        <span class="p2d">Write the job in your own words</span>
+        <span class="p2full">We will start you off with an example you can change, rather than an empty page.</span>
       </button>
       </div>
       <!-- The list only exists once its radio is chosen, so the screen
@@ -3743,6 +3757,7 @@ document.getElementById('d-save').addEventListener('click', async () => {
 
 let ROLES = null;          // the menu, fetched once
 let CREATE_MODELS = [];    // the engine's model list, from the same payload
+let OWN_ROLE = null;       // the third radio's prefill entry, served whole
 let PICKED = null;         // the role key the person chose
 let CREATING = false;      // a create is in flight; guards the double-click
 
@@ -3752,7 +3767,10 @@ function cstep(which) {
   });
 }
 
-function roleByKey(key) { return (ROLES || []).find((r) => r.key === key) || null; }
+function roleByKey(key) {
+  if (key === 'own') return OWN_ROLE;
+  return (ROLES || []).find((r) => r.key === key) || null;
+}
 
 async function loadRoles() {
   const msg = document.getElementById('roles-msg');
@@ -3768,6 +3786,7 @@ async function loadRoles() {
     const data = await res.json();
     ROLES = (data && data.roles) || [];
     CREATE_MODELS = (data && data.models) || [];
+    OWN_ROLE = (data && data.own) || null;
     if (!ROLES.length) throw new Error('none came back');
     msg.textContent = '';
     buildPicker();
@@ -3823,6 +3842,7 @@ function buildPicker() {
     '</optgroup>').join('');
   document.getElementById('pick-pm').hidden = false;
   document.getElementById('pick-list').hidden = false;
+  document.getElementById('pick-own').hidden = false;
 }
 
 /**
@@ -3860,7 +3880,8 @@ function updateRecPill() {
 function pickMode(mode) {
   const pmBtn = document.getElementById('pick-pm');
   const listBtn = document.getElementById('pick-list');
-  [pmBtn, listBtn].forEach((b) => {
+  const ownBtn = document.getElementById('pick-own');
+  [pmBtn, listBtn, ownBtn].forEach((b) => {
     const on = b.dataset.rmode === mode;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
@@ -3870,6 +3891,10 @@ function pickMode(mode) {
   document.getElementById('rolepick').hidden = mode !== 'list';
   if (mode === 'pm') {
     PICKED = (roleByKey('pm') || ROLES[0]).key;
+  } else if (mode === 'own') {
+    // Not in the fetched menu on purpose; the key is the contract with the
+    // engine, which holds the example text and the label gate.
+    PICKED = 'own';
   } else {
     PICKED = document.getElementById('rolesel').value;
     sayRole();
@@ -3911,9 +3936,12 @@ document.getElementById('roles-list').addEventListener('keydown', (e) => {
   if (!keys[e.key] || !ROLES || !ROLES.length) return;
   if (e.target.closest('select')) return;   // the menu owns its own arrows
   e.preventDefault();
-  const mode = document.getElementById('pick-pm').classList.contains('on') ? 'list' : 'pm';
+  const order = ['pm', 'list', 'own'];
+  const cur = order.find((m) =>
+    document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[m]).classList.contains('on')) || 'pm';
+  const mode = order[(order.indexOf(cur) + keys[e.key] + order.length) % order.length];
   pickMode(mode);
-  document.getElementById(mode === 'pm' ? 'pick-pm' : 'pick-list').focus();
+  document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[mode]).focus();
 });
 
 function openCreate() {
@@ -3952,7 +3980,7 @@ document.getElementById('role-next').addEventListener('click', () => {
   // Lowercase for the sentence, except all-caps words: "Name your SEO
   // specialist", never "Name your seo specialist" (the catalogue brought
   // the first acronym labels this line had ever seen).
-  const spoken = role.label.split(' ')
+  const spoken = (role.label || 'agent').split(' ')
     .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
     .join(' ');
   document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
@@ -4122,7 +4150,9 @@ function refillDetails(resetDirty) {
   const role = roleByKey(PICKED);
   if (!role) return;
   if (resetDirty) { INSTR_DIRTY = false; LABEL_DIRTY = false; }
-  if (!LABEL_DIRTY) document.getElementById('create-label').value = role.label;
+  // own's label is the person's own words: empty and gated, never defaulted
+  // ("nobody wants an agent whose job is Custom").
+  if (!LABEL_DIRTY) document.getElementById('create-label').value = role.label || '';
   if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
   document.getElementById('create-instr-note').textContent = '';
 }
@@ -4223,7 +4253,9 @@ document.getElementById('create-go').addEventListener('click', async () => {
         // differently.
         const role2 = roleByKey(PICKED);
         const label = document.getElementById('create-label').value.trim();
-        if (LABEL_DIRTY && label && role2 && label !== role2.label) b.label = label;
+        // own's label ALWAYS travels (the engine refuses without it); for
+        // menu roles only a changed one does.
+        if (PICKED === 'own' ? label : (LABEL_DIRTY && label && role2 && label !== role2.label)) b.label = label;
         const instr = document.getElementById('create-instr').value;
         if (INSTR_DIRTY && instr.trim() && instr !== instrTemplate()) b.instructions = instr;
         const model = document.getElementById('create-model').value;
