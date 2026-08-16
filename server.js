@@ -922,15 +922,26 @@ const server = http.createServer((req, res) => {
           // One roster read for the whole request, same rule as the project
           // routes: syncAgent refuses to write without an exact match in it.
           const roster = safeRoster();
+          // ⚠️ `result.name`, the slug the engine PUBLISHES for exactly this
+          // reason (its comment: act on the machine name). The first version
+          // read `result.sessionName`, a field the CREATED result has never
+          // carried, so every attach refused with "choose an agent" while the
+          // suite stayed green -- nothing exercised this route with projects.
+          // The route test now creates through here and asserts added: true.
           result.projects = wantProjects.map((id) => {
             try {
-              projects.addAgent(id, result.sessionName, roster);
-              const told = projects.syncAgent(result.sessionName, roster);
-              return { id, added: true, told };
+              projects.addAgent(id, result.name, roster);
+              return { id, added: true };
             } catch (err) {
               return { id, added: false, because: String((err && err.message) || 'we could not put it on that project') };
             }
           });
+          // syncAgent is agent-scoped: one call stamps every project the agent
+          // is on, so it runs once after the adds, not once per project.
+          if (result.projects.some((p) => p.added)) {
+            const told = projects.syncAgent(result.name, roster);
+            for (const p of result.projects) if (p.added) p.told = told;
+          }
         }
         sendJson(res, code, result);
       })

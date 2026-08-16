@@ -1305,9 +1305,12 @@ svg { display: block; }
              deliberate empty state (nothing to generate yet is not an
              unknown), and the picture button holds the file client-side to
              upload after the agent exists. -->
-        <label class="btn sav-btn" for="create-avatar">Change picture
-          <input type="file" id="create-avatar" accept="image/png,image/jpeg,image/webp" hidden>
-        </label>
+        <!-- A real button, not a label around a hidden input: a hidden file
+             input is out of the tab order and labels are not keyboard-
+             activatable, so the label-only version made this the one control
+             on the form a keyboard could not reach. -->
+        <button class="btn sav-btn" type="button" id="create-avatar-btn">Change picture</button>
+        <input type="file" id="create-avatar" accept="image/png,image/jpeg,image/webp" hidden>
       </div>
       <p class="fhint" id="genav-hint">A unique mark will be created from the name unless you add a picture.</p>
     </section>
@@ -3955,6 +3958,7 @@ function openCreate() {
   document.getElementById('genav-hint').textContent =
     'A unique mark will be created from the name unless you add a picture.';
   INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
+  FILLED_ROLE = null; LAST_MARK_SEED = null; PENDING_AVATAR = null;
   const genav = document.getElementById('genav');
   genav.classList.add('empty');
   genav.getContext('2d').clearRect(0, 0, genav.width, genav.height);
@@ -3984,8 +3988,13 @@ document.getElementById('role-next').addEventListener('click', () => {
     .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
     .join(' ');
   document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
-  refillDetails(true);
-  loadCreateExtras();
+  // Back then Next with the SAME role keeps everything the person set:
+  // edited words, chosen model, picked projects. A different role is a
+  // different template and resets the form on purpose.
+  const roleChanged = FILLED_ROLE !== PICKED;
+  refillDetails(roleChanged);
+  if (roleChanged) loadCreateExtras();
+  FILLED_ROLE = PICKED;
   if (!AVATAR_FILE) drawCreateMark();
   document.getElementById('create-blurb').textContent = role.blurb + '.';
   cstep('name');
@@ -4019,14 +4028,52 @@ function tickLine(state, text) {
  * that means the person actually has one, so it is drawn separately and only
  * ever from something observed on the board.
  */
-function paintMade(steps, watching) {
+function paintMade(steps, watching, projectOutcomes) {
   const lines = (steps || []).map((s) => (s.undone
     ? tickLine('undone', s.label + ' (undone)')
     : tickLine(s.ok ? 'done' : 'fail', s.label)));
+  // The attach outcomes the route reports (its own comment calls a failed
+  // membership write "a real, reportable state"; a screen that swallows it
+  // reports nothing). Names come from the list the person picked from; the
+  // failure sentence is the engine's own. Membership only here: the told
+  // verdict also travels in the response but is not rendered yet -- at this
+  // moment the agent is still coming up, so its honest value is "could not
+  // see", which would read as a failure while the watch above it is still
+  // green. Flagged in the PR rather than silently interpreted.
+  for (const p of (projectOutcomes || [])) {
+    const nm = CREATE_PROJECT_NAMES[p.id] || 'that project';
+    lines.push(p.added
+      ? tickLine('done', 'On the ' + nm + ' project')
+      : tickLine('fail', 'Not on the ' + nm + ' project: ' + (p.because || 'we could not put it there')));
+  }
   if (watching) lines.push(tickLine(watching.state, watching.text));
   document.getElementById('made-ticks').innerHTML = lines.join('');
   // Only what changed, and only in words -- the glyphs say nothing aloud.
   if (watching) document.getElementById('made-say').textContent = watching.text;
+}
+
+/**
+ * Land the staged picture on an agent the board can now see. One retry two
+ * seconds later covers the PUT racing the roster read; after that the detail
+ * panel's own uploader is the path, and initials stand in meanwhile. Never
+ * throws, never gates the flow.
+ */
+async function uploadPendingAvatar(name) {
+  const up = PENDING_AVATAR;
+  PENDING_AVATAR = null;
+  if (!up || !name) return false;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/avatar', {
+        method: 'PUT',
+        headers: { 'content-type': up.type || 'image/png' },
+        body: up,
+      });
+      if (res.ok) return true;
+    } catch { /* the retry below is the answer to a flaky first attempt */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return false;
 }
 
 /* ---- the generated agent mark (pack, 2026-08-16) ------------------------
@@ -4121,6 +4168,7 @@ function drawCreateMark() {
   cv.classList.toggle('empty', !v);
   const g = cv.getContext('2d');
   if (!v) { g.clearRect(0, 0, cv.width, cv.height); return; }
+  LAST_MARK_SEED = v;
   dotGlyph(cv, v[0].toUpperCase(), markFamFor(v), v);
 }
 
@@ -4138,6 +4186,24 @@ let INSTR_DIRTY = false;
 let LABEL_DIRTY = false;
 let AVATAR_FILE = null;
 let CREATE_PROJECTS = [];
+/* id -> display name, so the made screen can say which project an attach
+   outcome is about without a second fetch. */
+let CREATE_PROJECT_NAMES = {};
+/* The exact string the previewed mark was seeded from. The upload renders
+   from THIS, never from the slug: seeding the preview from "Casey" and the
+   upload from "casey" puts different bytes into the FNV hash, and the person
+   would be shown one mark and given another. */
+let LAST_MARK_SEED = null;
+/* Which role the details form was last filled FOR. Back then Next with the
+   same role re-picked must not wipe an edited editor, a chosen model, or
+   picked projects -- "the moment a person edits, the text is theirs". A
+   different role is a different template, and that resets on purpose. */
+let FILLED_ROLE = null;
+/* The picture (chosen file or generated mark) waiting for the agent to be
+   visible on the board. The avatar PUT requires a known, running agent, so
+   uploading right after CREATED raced launchd and 404ed silently. The watch's
+   success arm is the earliest moment the PUT can land. */
+let PENDING_AVATAR = null;
 
 function instrTemplate() {
   const role = roleByKey(PICKED);
@@ -4167,6 +4233,9 @@ document.getElementById('create-name').addEventListener('input', () => {
   if (!AVATAR_FILE) drawCreateMark();
 });
 
+document.getElementById('create-avatar-btn').addEventListener('click', () => {
+  document.getElementById('create-avatar').click();
+});
 document.getElementById('create-avatar').addEventListener('change', (e) => {
   // Held client-side: there is no agent yet to attach it to. Uploaded right
   // after CREATED, non-gating (an agent whose picture failed to land is a
@@ -4193,6 +4262,8 @@ async function loadCreateExtras() {
     const list = (data && data.projects) || [];
     // Archived projects are resting, not options for new work.
     const live = list.filter((p) => !p.archived);
+    CREATE_PROJECT_NAMES = {};
+    for (const p of live) CREATE_PROJECT_NAMES[p.id] = p.name;
     if (!live.length) { wrap.hidden = true; box.innerHTML = ''; return; }
     box.innerHTML = live.map((p) =>
       `<button class="ppick" type="button" role="checkbox" aria-checked="false" data-pj="${esc(p.id)}">
@@ -4258,6 +4329,13 @@ document.getElementById('create-go').addEventListener('click', async () => {
         if (PICKED === 'own' ? label : (LABEL_DIRTY && label && role2 && label !== role2.label)) b.label = label;
         const instr = document.getElementById('create-instr').value;
         if (INSTR_DIRTY && instr.trim() && instr !== instrTemplate()) b.instructions = instr;
+        // A deliberately blanked editor falls back to the template server-side;
+        // saying so beats silence (the engine's own "instructions have to be
+        // words" refusal never fires because we send nothing).
+        document.getElementById('create-instr-note').textContent =
+          (INSTR_DIRTY && !instr.trim())
+            ? 'The role\'s own instructions stay: an agent cannot start with none.'
+            : '';
         const model = document.getElementById('create-model').value;
         if (model) b.model = model;
         if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;
@@ -4324,7 +4402,7 @@ document.getElementById('create-go').addEventListener('click', async () => {
   document.getElementById('made-bg').hidden = true;
   document.getElementById('made-done').hidden = true;
   document.getElementById('made-retry').hidden = true;
-  paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' });
+  paintMade(result.steps, { state: 'waiting', text: 'Waiting for the board to see it running' }, result.projects);
 
   /**
    * ⚠️ A PARTIAL IS NOT WATCHED, because nothing can arrive.
@@ -4399,35 +4477,33 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * that is; falling back to what was typed keeps an older server working.
    */
   /**
-   * The chosen picture, uploaded now that the agent EXISTS to attach it to.
-   * Non-gating and quiet on failure: an agent whose picture did not land is
-   * a working agent with a generated mark, and the detail panel's own
-   * uploader is the retry path that already exists. Awaited BEFORE the
-   * watch so the board's first paint of the new card can carry it.
+   * The picture is STAGED here and uploaded from the watch's success arm,
+   * not now. Two prior shapes of this block were dead or doomed:
+   *
+   *   - the first gated on `result.sessionName`, a field the CREATED result
+   *     has never carried (the engine publishes `name`), so the whole block
+   *     was dead code and a green suite never noticed;
+   *   - fixed naively, it would still race launchd: the avatar PUT requires
+   *     a known, RUNNING agent, which is exactly what does not exist yet --
+   *     the watch polls up to 30s for it. A PUT fired here 404s, and the
+   *     old code never read `res.ok`, so the failure was silent.
+   *
+   * So: build the blob now (the person's file, or -- keeping the form's own
+   * promise -- the generated mark rendered from the SAME seed the preview
+   * used, never the slug), park it in PENDING_AVATAR, and the success arm
+   * lands it the moment the board can see the agent. Non-gating throughout:
+   * an agent whose picture did not land is a working agent with initials,
+   * and the detail panel's uploader is the retry path that already exists.
    */
-  if (result.sessionName) {
-    // The chosen picture, or -- keeping the form's own promise, "a unique
-    // mark will be created from the name" -- the generated mark rendered
-    // to a PNG. Either way the board's existing avatar path shows it
-    // everywhere with no second rendering system.
-    let up = AVATAR_FILE;
-    if (!up) {
-      try {
-        const cv = document.createElement('canvas');
-        cv.width = 144; cv.height = 144;
-        dotGlyph(cv, (result.name || name)[0].toUpperCase(), markFamFor(result.name || name), result.name || name);
-        up = await new Promise((r) => cv.toBlob(r, 'image/png'));
-      } catch { up = null; }
-    }
-    if (up) {
-      try {
-        await fetch('/api/agent/' + encodeURIComponent(result.sessionName) + '/avatar', {
-          method: 'PUT',
-          headers: { 'content-type': up.type || 'image/png' },
-          body: up,
-        });
-      } catch { /* initials stand in; the detail panel can retry */ }
-    }
+  PENDING_AVATAR = AVATAR_FILE;
+  if (!PENDING_AVATAR && result && result.name && result.outcome !== 'refused') {
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = 144; cv.height = 144;
+      const seed = LAST_MARK_SEED || result.name;
+      dotGlyph(cv, seed[0].toUpperCase(), markFamFor(seed), seed);
+      PENDING_AVATAR = await new Promise((r) => cv.toBlob(r, 'image/png'));
+    } catch { PENDING_AVATAR = null; }
   }
   await watchForAgent(result.name || name, result, attempt);
 });
@@ -4503,7 +4579,11 @@ async function watchForAgent(name, result, attempt) {
 
     const found = agents.find((a) => a.sessionName === name);
     if (boardCanSeeIt(found)) {
-      paintMade(result.steps, { state: 'done', text: 'The board can see it running' });
+      // The agent is visible, so the avatar PUT can finally land (knownAgent
+      // walks the live roster). Fire-and-forget, then repaint the board so
+      // the new card picks the picture up.
+      uploadPendingAvatar(name).then((ok) => { if (ok) tick(); });
+      paintMade(result.steps, { state: 'done', text: 'The board can see it running' }, result.projects);
       document.getElementById('made-head').textContent = shown + ' is running';
       if (result.firstAction) {
         const box = document.getElementById('made-first');
@@ -4520,7 +4600,7 @@ async function watchForAgent(name, result, attempt) {
   // Thirty seconds and the board still cannot see it. Say exactly that, and
   // nothing about why — we do not know why, and the plausible guess is the
   // thing this codebase is written against.
-  paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' });
+  paintMade(result.steps, { state: 'fail', text: 'The board still cannot see it running, 30 seconds on' }, result.projects);
   document.getElementById('made-head').textContent = shown + ' has not come up';
   const warn = document.getElementById('made-warn');
   /**

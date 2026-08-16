@@ -2138,6 +2138,53 @@ test('the create route answers a real creation with the record the screen is bui
   }
 });
 
+test('a creation with projects picked really lands on those projects, and the response says so', async () => {
+  // ⚠️ This test exists because its absence hid a dead feature: the attach
+  // block read `result.sessionName`, a field the CREATED result has never
+  // carried, so every attach refused with "choose an agent" while 775 tests
+  // stayed green -- nothing drove POST /api/agents with a `projects` body.
+  // The assertions here go through the wire AND then read the membership
+  // back from the engine, so a wrong field name (or a wrong key shape) can
+  // never again fail silently.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const projects = require('./engine/projects');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = projects.create({ name: 'Attach Fixture' });
+    const res = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      // The typed name carries a capital ON PURPOSE: the board files agents
+      // under the slug, so an attach keyed on anything but `result.name`
+      // (say, the typed form) would record a member no roster will ever
+      // match.
+      body: JSON.stringify({ name: 'Route-Attached', role: 'writer', projects: [made.id] }),
+    });
+    assert.equal(res.status, 200, 'a legitimate creation with projects was refused');
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, 'created', body.because);
+    assert.ok(Array.isArray(body.projects), 'the attach outcomes never came back to the screen');
+    assert.equal(body.projects.length, 1, 'one project was asked for, a different count came back');
+    assert.equal(body.projects[0].added, true,
+      'the attach refused: ' + (body.projects[0].because || '(no reason given)'));
+    // And the membership is REALLY recorded, under the slug the board uses.
+    // readAll, not get: get() enriches members into described objects, and
+    // this assertion is about what was PERSISTED.
+    const after = projects.readAll().find((p) => p.id === made.id);
+    assert.ok((after.agents || []).includes('route-attached'),
+      'the response said added but the project does not list the agent');
+    // The told verdict travels with an added outcome (the screen may render
+    // it later; the route must already carry it).
+    assert.ok(body.projects[0].told !== undefined, 'no told verdict came back with the attach');
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
 test('the suggested default role is the project manager, by name and not by position', () => {
   // ⚠️ The plan says "Project manager is the suggested default", and the screen
   // implemented it POSITIONALLY: the first row, and `ROLES[0]` on a second

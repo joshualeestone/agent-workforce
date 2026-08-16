@@ -584,7 +584,7 @@ function createAgent(opts) {
     modelArg = m.arg;
   }
 
-    const removedList = require('./remove');
+  const removedList = require('./remove');
   if (removedList.isRemoved(name)) {
     return {
       outcome: OUTCOME.REFUSED,
