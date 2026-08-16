@@ -822,6 +822,12 @@ const server = http.createServer((req, res) => {
       models: create.MODELS.map((m) => ({ key: m.key, label: m.label, default: m.default === true })),
       roles: roles.ROLES.map((r) => ({
         key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+        // The template itself, {{NAME}} and all: the details screen prefills
+        // its editor from this so the words a person reads before creating
+        // are the words the agent boots from. An untouched editor sends
+        // nothing back and the engine writes this same template server-side;
+        // only edited text travels.
+        instructions: r.instructions,
         // The catalogue's section, so the picker's menu can group without a
         // second copy of the grouping living in the page.
         group: r.group || null,

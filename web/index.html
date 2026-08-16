@@ -492,6 +492,35 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
    twin retired with the two-radio picker; this is the one live caution
    rule, in the file's established border token rather than a third
    variant.) */
+/* ---- the details form (pack pane 2, 2026-08-16) ------------------------ */
+.sform-sec { margin: var(--space-6) 0; max-width: 36rem; }
+.sform-h { font: 600 var(--text-title-3) var(--font-ui); margin: 0 0 var(--space-3); }
+.savrow { display: flex; align-items: center; gap: var(--space-6); }
+.genav { width: 62px; height: 62px; flex: 0 0 62px; display: block; border-radius: 50%; }
+/* The deliberate pre-name state: an even ring, not a question mark -- this
+   app spends "?" on "we could not check", and an unnamed agent is not an
+   unknown one (pack). */
+.genav.empty { box-shadow: inset 0 0 0 1.5px var(--separator); }
+.sav-btn { display: inline-block; }
+#cstep-name .field { max-width: 36rem; }
+#create-instr { width: 100%; font: var(--text-callout) var(--font-mono);
+  color: var(--label); background: var(--bg-elevated);
+  border: 1px solid var(--separator); border-radius: var(--radius-control);
+  padding: 10px 12px; resize: vertical; box-sizing: border-box; }
+#create-instr:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+.flabel-soft { font-weight: 400; color: var(--label-2); }
+.projpick { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
+.ppick { display: flex; gap: var(--space-4); align-items: baseline; width: 100%;
+  text-align: left; font: inherit; color: var(--label); cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-control); padding: 8px 12px; }
+.ppick .pickmark { color: transparent; font-weight: 700; font-size: .75rem; }
+.ppick[aria-checked="true"] { border-color: var(--label); }
+.ppick[aria-checked="true"] .pickmark { color: var(--label); }
+.ppick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
+#create-model { font: inherit; color: var(--label); background: var(--bg-elevated);
+  border: 1px solid var(--separator); border-radius: var(--radius-control); padding: 7px 8px; }
+
 .roledesc .caution, #pick-pm-desc .caution {
   display: block; margin-top: var(--space-3); padding-left: var(--space-4);
   border-left: 2px solid var(--border-strong); color: var(--label);
@@ -1245,8 +1274,30 @@ svg { display: block; }
 
   <div class="cstep" id="cstep-name" hidden>
     <p class="crumb">Step 2 of 2</p>
-    <h2 id="create-meet">Name your agent</h2>
+    <h2 id="create-meet">Set up your agent</h2>
     <p id="create-blurb"></p>
+
+    <!-- ⚠️ NO BOX around this form (pack): each step is its own pane now,
+         and a box would be a container drawn around the only thing on
+         screen. The avatar sits ABOVE the fields, not beside them: beside,
+         it stole width and gave the form two field widths (pack, measured
+         there). -->
+    <section class="sform-sec">
+      <h3 class="sform-h">Identity</h3>
+      <div class="savrow">
+        <canvas class="genav empty" id="genav" width="144" height="144" role="img"
+                aria-label="Generated mark for this agent"></canvas>
+        <!-- Slice C wires the generator; until then the ring stays the
+             deliberate empty state (nothing to generate yet is not an
+             unknown), and the picture button holds the file client-side to
+             upload after the agent exists. -->
+        <label class="btn sav-btn" for="create-avatar">Change picture
+          <input type="file" id="create-avatar" accept="image/png,image/jpeg,image/webp" hidden>
+        </label>
+      </div>
+      <p class="fhint" id="genav-hint">A unique mark will be created from the name unless you add a picture.</p>
+    </section>
+
     <div class="field">
       <label class="flabel" for="create-name">Name</label>
       <!-- The rule is stated, not re-implemented. The server owns what a legal
@@ -1266,13 +1317,53 @@ svg { display: block; }
       <div class="frow">
         <input type="text" id="create-name" autocomplete="off" spellcheck="false"
                placeholder="Casey">
-        <button class="btn" id="create-go" type="button">Create it</button>
       </div>
-      <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
     </div>
+
+    <div class="field">
+      <label class="flabel" for="create-label">Role label</label>
+      <div class="fhint">A short label shown below the agent&rsquo;s name.</div>
+      <div class="frow">
+        <input type="text" id="create-label" autocomplete="off"
+               placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="flabel" for="create-instr">Instructions</label>
+      <!-- ⚠️ Prefilled from the SERVED template with the typed name already
+           substituted, and regenerated on name/role changes ONLY while
+           untouched: the moment a person edits, the text is theirs and
+           nothing rewrites it (the drift rule at birth). An untouched
+           editor sends nothing and the engine writes the same template
+           server-side, so the common path has ONE copy of the words. -->
+      <div class="fhint">Describe what this agent does and how it should work. You can edit this later.</div>
+      <textarea id="create-instr" rows="10" spellcheck="false"></textarea>
+      <div class="fmsg" id="create-instr-note" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- ⚠️ ABSENT ENTIRELY when there are no projects (pack's own rule for
+         the archived list): a brand-new person should not meet an empty
+         section explaining a thing they have none of. -->
+    <div class="field" id="create-projects-wrap" hidden>
+      <span class="flabel" id="create-projects-lab">Project <span class="flabel-soft">(optional)</span></span>
+      <div class="fhint">Gives the agent context about where its work belongs. This does not change permissions.</div>
+      <div class="projpick" id="create-projects" role="group" aria-labelledby="create-projects-lab"></div>
+    </div>
+
+    <div class="field">
+      <label class="flabel" for="create-model">Model</label>
+      <div class="fhint">You can change this later.</div>
+      <div class="frow">
+        <select id="create-model"></select>
+      </div>
+    </div>
+
     <div class="frow" style="margin-top: var(--space-6);">
       <button class="btn" id="create-prev" type="button">&#8592; Back</button>
+      <button class="btn" id="create-go" type="button">Create it</button>
     </div>
+    <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
   </div>
 
   <div class="cstep" id="cstep-made" hidden>
@@ -3651,6 +3742,7 @@ document.getElementById('d-save').addEventListener('click', async () => {
 ========================================================================== */
 
 let ROLES = null;          // the menu, fetched once
+let CREATE_MODELS = [];    // the engine's model list, from the same payload
 let PICKED = null;         // the role key the person chose
 let CREATING = false;      // a create is in flight; guards the double-click
 
@@ -3675,6 +3767,7 @@ async function loadRoles() {
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
     ROLES = (data && data.roles) || [];
+    CREATE_MODELS = (data && data.models) || [];
     if (!ROLES.length) throw new Error('none came back');
     msg.textContent = '';
     buildPicker();
@@ -3829,6 +3922,11 @@ function openCreate() {
   WATCH += 1;
   document.getElementById('create-name').value = '';
   document.getElementById('create-msg').textContent = '';
+  AVATAR_FILE = null;
+  document.getElementById('create-avatar').value = '';
+  document.getElementById('genav-hint').textContent =
+    'A unique mark will be created from the name unless you add a picture.';
+  INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
   document.getElementById('create-go').disabled = false;
   document.getElementById('role-next').disabled = true;
   cstep('role');
@@ -3854,7 +3952,9 @@ document.getElementById('role-next').addEventListener('click', () => {
   const spoken = role.label.split(' ')
     .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
     .join(' ');
-  document.getElementById('create-meet').textContent = 'Name your ' + spoken;
+  document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
+  refillDetails(true);
+  loadCreateExtras();
   document.getElementById('create-blurb').textContent = role.blurb + '.';
   cstep('name');
   document.getElementById('create-name').focus();
@@ -3897,6 +3997,94 @@ function paintMade(steps, watching) {
   if (watching) document.getElementById('made-say').textContent = watching.text;
 }
 
+/**
+ * The details form's prefill state.
+ *
+ * ⚠️ The editor and the label are THEIRS the moment they touch them: a
+ * dirty flag per field, and regeneration on name/role changes happens only
+ * while untouched. An untouched editor sends NOTHING back, and the engine
+ * writes the same template server-side -- one copy of the words on the
+ * common path (the served template exists so the preview cannot drift from
+ * what the agent would boot from).
+ */
+let INSTR_DIRTY = false;
+let LABEL_DIRTY = false;
+let AVATAR_FILE = null;
+let CREATE_PROJECTS = [];
+
+function instrTemplate() {
+  const role = roleByKey(PICKED);
+  if (!role || !role.instructions) return '';
+  const typed = document.getElementById('create-name').value.trim() || 'your agent';
+  return role.instructions.split('{{NAME}}').join(typed);
+}
+
+function refillDetails(resetDirty) {
+  const role = roleByKey(PICKED);
+  if (!role) return;
+  if (resetDirty) { INSTR_DIRTY = false; LABEL_DIRTY = false; }
+  if (!LABEL_DIRTY) document.getElementById('create-label').value = role.label;
+  if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
+  document.getElementById('create-instr-note').textContent = '';
+}
+
+document.getElementById('create-instr').addEventListener('input', () => { INSTR_DIRTY = true; });
+document.getElementById('create-label').addEventListener('input', () => { LABEL_DIRTY = true; });
+document.getElementById('create-name').addEventListener('input', () => {
+  // The typed name flows into an UNTOUCHED editor live; an edited one is
+  // theirs and stays exactly as they left it.
+  if (!INSTR_DIRTY) document.getElementById('create-instr').value = instrTemplate();
+});
+
+document.getElementById('create-avatar').addEventListener('change', (e) => {
+  // Held client-side: there is no agent yet to attach it to. Uploaded right
+  // after CREATED, non-gating (an agent whose picture failed to land is a
+  // working agent with a mark, not a failure).
+  AVATAR_FILE = (e.target.files && e.target.files[0]) || null;
+  document.getElementById('genav-hint').textContent = AVATAR_FILE
+    ? AVATAR_FILE.name + ' will be its picture.'
+    : 'A unique mark will be created from the name unless you add a picture.';
+});
+
+async function loadCreateExtras() {
+  // Models, from the same payload as the roles (the engine's own list).
+  const sel = document.getElementById('create-model');
+  const models = CREATE_MODELS;
+  sel.innerHTML = models.map((m) =>
+    `<option value="${esc(m.key)}"${m.default ? ' selected' : ''}>${esc(m.label)}</option>`).join('');
+  // Projects: absent entirely when there are none.
+  const wrap = document.getElementById('create-projects-wrap');
+  const box = document.getElementById('create-projects');
+  CREATE_PROJECTS = [];
+  try {
+    const res = await fetch('/api/projects', { cache: 'no-store' });
+    const data = res.ok ? await res.json() : null;
+    const list = (data && data.projects) || [];
+    // Archived projects are resting, not options for new work.
+    const live = list.filter((p) => !p.archived);
+    if (!live.length) { wrap.hidden = true; box.innerHTML = ''; return; }
+    box.innerHTML = live.map((p) =>
+      `<button class="ppick" type="button" role="checkbox" aria-checked="false" data-pj="${esc(p.id)}">
+        <span class="pickmark" aria-hidden="true">&#10003;</span>${esc(p.name)}
+      </button>`).join('');
+    wrap.hidden = false;
+  } catch {
+    // No projects section beats a broken one; membership is addable later
+    // from the project screen, which is the path that already exists.
+    wrap.hidden = true; box.innerHTML = '';
+  }
+}
+document.getElementById('create-projects').addEventListener('click', (e) => {
+  const b = e.target.closest('.ppick');
+  if (!b) return;
+  const on = b.getAttribute('aria-checked') !== 'true';
+  b.setAttribute('aria-checked', String(on));
+  const id = b.dataset.pj;
+  CREATE_PROJECTS = on
+    ? [...new Set([...CREATE_PROJECTS, id])]
+    : CREATE_PROJECTS.filter((x) => x !== id);
+});
+
 document.getElementById('create-go').addEventListener('click', async () => {
   if (CREATING) return;
   const name = document.getElementById('create-name').value.trim();
@@ -3925,7 +4113,23 @@ document.getElementById('create-go').addEventListener('click', async () => {
     res = await fetch('/api/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, role: PICKED }),
+      body: JSON.stringify((() => {
+        const b = { name, role: PICKED };
+        // Only what the person actually changed travels: an untouched
+        // editor or label keeps the server-side template as the single
+        // copy of those words. The model is always explicit, so the
+        // preselected choice and a deliberate one cannot behave
+        // differently.
+        const role2 = roleByKey(PICKED);
+        const label = document.getElementById('create-label').value.trim();
+        if (LABEL_DIRTY && label && role2 && label !== role2.label) b.label = label;
+        const instr = document.getElementById('create-instr').value;
+        if (INSTR_DIRTY && instr.trim() && instr !== instrTemplate()) b.instructions = instr;
+        const model = document.getElementById('create-model').value;
+        if (model) b.model = model;
+        if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;
+        return b;
+      })()),
     });
     result = await res.json().catch(() => null);
   } catch (err) {
@@ -4061,6 +4265,22 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * screen of the flow. `result.name` is the engine's own answer for which name
    * that is; falling back to what was typed keeps an older server working.
    */
+  /**
+   * The chosen picture, uploaded now that the agent EXISTS to attach it to.
+   * Non-gating and quiet on failure: an agent whose picture did not land is
+   * a working agent with a generated mark, and the detail panel's own
+   * uploader is the retry path that already exists. Awaited BEFORE the
+   * watch so the board's first paint of the new card can carry it.
+   */
+  if (AVATAR_FILE && result.sessionName) {
+    try {
+      await fetch('/api/agent/' + encodeURIComponent(result.sessionName) + '/avatar', {
+        method: 'PUT',
+        headers: { 'content-type': AVATAR_FILE.type || 'application/octet-stream' },
+        body: AVATAR_FILE,
+      });
+    } catch { /* the mark stands in; the detail panel can retry */ }
+  }
   await watchForAgent(result.name || name, result, attempt);
 });
 
