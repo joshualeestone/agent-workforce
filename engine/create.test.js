@@ -458,22 +458,48 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
   // The instruction line is what the AGENT reads, every time it starts, long
   // after any setup screen has been clicked through. A role with only one of
   // them has a limit that either nobody sees or nobody follows.
-  for (const [key, mustSay] of [
-    ['legal', /not a lawyer|not legal advice/i],
-    ['finance', /not financial advice/i],
+  // ⚠️ EVERY cautioned role, DERIVED, each with the boundary its own
+  // instructions must state -- and a cautioned role with no entry here FAILS
+  // rather than slipping through, so the next caution added to the catalogue
+  // arrives with its instruction half or arrives red. (Review round 1: the
+  // literal three-key list left five cautions unpinned, and one of them --
+  // support -- really did promise "never replies" while its instructions
+  // never said so.)
+  const BOUNDARY = {
+    legal: /not a lawyer/i,
+    finance: /do not give financial advice/i,
     // books is deliberately parallel to finance and not identical: recording
     // where analysis models, each caution saying the true thing about each
     // (catalogue build, 2026-08-16).
-    ['books', /not financial advice/i],
-  ]) {
-    const role = roles.byKey(key);
-    assert.ok(role, `${key} is missing entirely`);
-    assert.ok(role.caution, `${key} has no caution, so its limit is invisible while choosing it`);
-    assert.match(role.caution, mustSay, `${key}'s caution does not say what it is not`);
-    assert.match(role.instructions, /not a lawyer|do not give (financial( or tax)?|legal) advice/i,
-      `${key} does not state its own boundary, so the only thing holding it is a `
-      + 'sentence the operator read once');
+    books: /do not give financial or tax advice/i,
+    ea: /draft, never send/i,
+    social: /draft, never post/i,
+    sales: /they send it, always/i,
+    support: /draft, never send/i,
+    recruiting: /every hiring decision is theirs/i,
+  };
+  for (const role of roles.ROLES.filter((r) => r.caution)) {
+    const mustSay = BOUNDARY[role.key];
+    assert.ok(mustSay,
+      `${role.key} carries a caution with no boundary expectation registered `
+      + 'here; add one, because an unpinned caution is how a role ships '
+      + 'promising what its agent was never told');
+    assert.match(role.instructions, mustSay,
+      `${role.key} does not state its own boundary, so the only thing holding `
+      + 'it is a sentence the operator read once');
+    // ⚠️ POSITIVE CONTROL, per the catalogue audit that produced two false
+    // readings in one pass: a boundary check that cannot fail is the next
+    // thing to quietly stop working. Removing the matched boundary from a
+    // COPY must un-match it -- if the pattern still matches the stripped
+    // text, it was matching something other than the boundary.
+    assert.ok(!mustSay.test(role.instructions.replace(mustSay, '')),
+      `${role.key}'s boundary pattern matches more than the boundary, so `
+      + 'deleting the boundary would leave this check green');
   }
+  // The choice-time halves for the two roles whose wording is a shipping
+  // condition (Josh, 2026-08-10) stay pinned exactly:
+  assert.match(roles.byKey('legal').caution, /not a lawyer|not legal advice/i);
+  assert.match(roles.byKey('finance').caution, /not financial advice/i);
 
   // ⚠️ And the roles that DO NOT need one must not have it. A caution on every
   // role is a caution nobody reads -- the same reason the provenance marker was

@@ -444,6 +444,7 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
    row) mapped onto this file's tokens. The old flat .pick list above stays
    for anything else that uses it. */
 .picklist { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); max-width: 36rem; }
+.pickradios { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
 .pick2 {
   display: grid; grid-template-columns: 18px auto 1fr; align-items: baseline;
   gap: var(--space-2) var(--space-5);
@@ -456,8 +457,20 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 .pick2.on { border-color: var(--label); box-shadow: inset 0 0 0 1px var(--label); }
 .pick2 .pickmark { color: transparent; font-weight: 700; }
 .pick2.on .pickmark { color: var(--label); }
-.p2n { font: 600 var(--text-body) var(--font-ui); white-space: nowrap; }
-.p2d { font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+/* ⚠️ NO nowrap AND min-width: 0 ON THE FLEX COLUMN -- the reflow rules.
+   The first cut copied the pack's `white-space: nowrap` name column, and at
+   375px the description rendered OUTSIDE the row border one word per line
+   while 320px scrolled the whole document sideways (SC 1.4.10, measured
+   scrollWidth-clientWidth in review). A grid column whose floor is its own
+   min-content cannot shrink; these two lines are what let it. */
+.p2n { font: 600 var(--text-body) var(--font-ui); }
+.p2d { font: var(--text-callout) var(--font-ui); color: var(--label-2); min-width: 0; }
+/* Below the width where name + description share a line honestly, the
+   description drops under the name (same grid, second row). */
+@media (max-width: 560px) {
+  .pick2 { grid-template-columns: 18px minmax(0, 1fr); }
+  .p2d { grid-column: 2; }
+}
 /* Shown only when the board is empty: a recommendation is useful to
    somebody with no agents and noise to somebody who already has six (pack). */
 .prec {
@@ -473,14 +486,16 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
   border-radius: var(--radius-control); padding: 7px 8px; }
 .rolepick select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 .roledesc { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin: 9px 0 0; }
-.roledesc .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
-  border-left: 2px solid var(--warn-border); color: var(--label); }
 /* The limit on a role that has one, read while choosing rather than discovered
    afterwards. Weight and a rule, never hue: it has to survive greyscale like
-   every other signal on this board. */
-.pick .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
-                 border-left: 2px solid var(--border-strong); color: var(--label);
-                 font: var(--text-callout) var(--font-ui); }
+   every other signal on this board. (The old flat list's `.pick .caution`
+   twin retired with the two-radio picker; this is the one live caution
+   rule, in the file's established border token rather than a third
+   variant.) */
+.roledesc .caution, #pick-pm-desc .caution {
+  display: block; margin-top: var(--space-3); padding-left: var(--space-4);
+  border-left: 2px solid var(--border-strong); color: var(--label);
+  font: var(--text-callout) var(--font-ui); }
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
@@ -1189,7 +1204,11 @@ svg { display: block; }
          The rows are FILLED FROM /api/roles, never hardcoded: the copy a
          person reads while choosing has to be the copy the agent is created
          from (the rule the old flat list already followed). -->
-    <div class="picklist" id="roles-list" role="radiogroup" aria-label="What this agent is for">
+    <div class="picklist" id="roles-list">
+      <!-- ⚠️ The radiogroup wraps ONLY the radios: the menu below is a
+           sibling, because a radiogroup that owns a select announces "1 of
+           2" and then hands AT a child that is neither (review round 1). -->
+      <div class="pickradios" role="radiogroup" aria-label="What this agent is for">
       <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="pm" hidden id="pick-pm">
         <span class="pickmark" aria-hidden="true">&#10003;</span>
         <span class="p2n" id="pick-pm-name"></span>
@@ -1200,6 +1219,7 @@ svg { display: block; }
         <span class="p2n">Pick another role</span>
         <span class="p2d" id="pick-list-desc"></span>
       </button>
+      </div>
       <!-- The list only exists once its radio is chosen, so the screen
            stays two choices tall until someone asks for more (pack). -->
       <div class="rolepick" id="rolepick" hidden>
@@ -1211,7 +1231,10 @@ svg { display: block; }
              is (pack). When the chosen role carries a caution, the FULL
              sentence renders here -- engine/roles.js's condition is that
              the limit is visible at the moment of choice. -->
-        <p class="roledesc" id="roledesc"></p>
+        <!-- polite live region: aria-describedby alone speaks on focus, not on
+             change, so browsing options would skip the one sentence whose
+             visibility is the engine's shipping condition -->
+        <p class="roledesc" id="roledesc" aria-live="polite"></p>
       </div>
     </div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
@@ -1914,6 +1937,8 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    BOARD_SEEN = true;
+    updateRecPill();
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
     BOARD_LOOKED = true;
@@ -2286,6 +2311,10 @@ for (const scope of Object.keys(LAYOUTS)) {
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
 let LAST = [];
+// Whether a status tick has ever ANSWERED. [] before the first answer means
+// "not heard yet", not "empty board", and the two must never be conflated
+// (the Recommended pill reads this).
+let BOARD_SEEN = false;
 // ⚠️ HAVE WE LOOKED YET, which is a different question from whether the list is
 // empty -- and the agent picker answered them with the same value. `LAST` is
 // `[]` until the first /api/status response lands, so opening Projects and
@@ -3639,7 +3668,7 @@ async function loadRoles() {
   // Returning early on the second visit left the picker rendered from last
   // time with its old choice still marked, while `openCreate` had just
   // cleared it -- a screen showing a selection the page did not have.
-  if (ROLES && ROLES.length) { pickMode('pm'); return; }
+  if (ROLES && ROLES.length) { updateRecPill(); pickMode('pm'); return; }
   msg.textContent = 'Loading…';
   try {
     const res = await fetch('/api/roles', { cache: 'no-store' });
@@ -3677,11 +3706,14 @@ async function loadRoles() {
  */
 function buildPicker() {
   const pm = roleByKey('pm') || ROLES[0];
-  // Shown only on an empty board: a recommendation is useful to somebody
-  // with no agents and noise to somebody who already has six.
-  const rec = (LAST || []).length === 0 ? ' <span class="prec">Recommended</span>' : '';
-  document.getElementById('pick-pm-name').innerHTML = esc(pm.label) + rec;
-  document.getElementById('pick-pm-desc').textContent = pm.blurb;
+  document.getElementById('pick-pm-name').textContent = pm.label;
+  // The caution slot exists even though pm carries none: if the recommended
+  // role is ever re-keyed and the fallback promotes a caution role, its
+  // limit renders rather than vanishing (the engine's shipping condition;
+  // review round 1 found the hole).
+  document.getElementById('pick-pm-desc').innerHTML = esc(pm.blurb) +
+    (pm.caution ? `<span class="caution">${esc(pm.caution)}</span>` : '');
+  updateRecPill();
   const rest = ROLES.filter((r) => r.key !== pm.key);
   document.getElementById('pick-list-desc').textContent =
     rest.length + ' ready-made jobs, from bookkeeping to security review';
@@ -3698,6 +3730,33 @@ function buildPicker() {
     '</optgroup>').join('');
   document.getElementById('pick-pm').hidden = false;
   document.getElementById('pick-list').hidden = false;
+}
+
+/**
+ * The Recommended pill, kept TRUE rather than computed once.
+ *
+ * ⚠️ Three paths broke the computed-once version (review round 1): a deep
+ * link raced the first status tick and showed the pill over a full board
+ * (LAST was still its initial []); a second visit early-returned past the
+ * rebuild and kept a stale pill; and "we have not heard yet" was read as
+ * "empty". So: the pill exists only when the board has been SEEN and seen
+ * empty, and this re-runs on every panel open and every status tick.
+ */
+function updateRecPill() {
+  const name = document.getElementById('pick-pm-name');
+  if (!name || !ROLES || !ROLES.length) return;
+  const want = BOARD_SEEN && (LAST || []).length === 0;
+  const has = name.querySelector('.prec');
+  if (want && !has) {
+    const b = document.createElement('span');
+    b.className = 'prec';
+    b.textContent = 'Recommended';
+    name.appendChild(document.createTextNode(' '));
+    name.appendChild(b);
+  } else if (!want && has) {
+    has.previousSibling && has.previousSibling.remove();
+    has.remove();
+  }
 }
 
 /**
@@ -3789,7 +3848,13 @@ document.getElementById('made-retry').addEventListener('click', openCreate);
 document.getElementById('role-next').addEventListener('click', () => {
   const role = roleByKey(PICKED);
   if (!role) return;
-  document.getElementById('create-meet').textContent = 'Name your ' + role.label.toLowerCase();
+  // Lowercase for the sentence, except all-caps words: "Name your SEO
+  // specialist", never "Name your seo specialist" (the catalogue brought
+  // the first acronym labels this line had ever seen).
+  const spoken = role.label.split(' ')
+    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
+    .join(' ');
+  document.getElementById('create-meet').textContent = 'Name your ' + spoken;
   document.getElementById('create-blurb').textContent = role.blurb + '.';
   cstep('name');
   document.getElementById('create-name').focus();

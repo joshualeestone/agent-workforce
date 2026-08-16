@@ -2150,9 +2150,17 @@ test('the suggested default role is the project manager, by name and not by posi
   // what a person accepts by pressing Continue.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  assert.match(script, /roleByKey\('pm'\)/,
-    'the screen no longer picks its default by name; a positional default '
+  // ⚠️ Anchored to the ASSIGNMENT and to the default MODE, not to any
+  // occurrence of the helper: `roleByKey('pm')` also appears in buildPicker,
+  // so a bare substring match stayed green under both mutations it exists to
+  // stop (review round 1 proved it: a positional PICKED assignment and a
+  // pickMode('list') default each passed the loose pin).
+  assert.match(script, /PICKED = \(roleByKey\('pm'\)/,
+    'the default assignment no longer picks by name; a positional default '
     + 'silently changes what Continue accepts when the catalogue reorders');
+  assert.match(script, /pickMode\('pm'\)/,
+    'nothing arms the recommended mode by default any more, so the screen '
+    + 'opens on whatever mode survived the last edit');
 });
 
 test('the board SAYS part of the fleet could not be read, in words on the screen', () => {
