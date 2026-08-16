@@ -140,7 +140,9 @@ async function fresh(browser, opts = {}) {
     ok(await page.isVisible('#panel-create'), 'and the create panel is open');
     // ⚠️ Not just open — usable. The deep-link version of this shipped with an
     // empty role list and a dead Continue once.
-    ok((await page.locator('#roles-list .pick').count()) > 0, 'with its roles actually loaded');
+    // The picker is the two-radio shape now (catalogue build, 2026-08-16):
+    // loaded means the radios are visible, which only the fetch un-hides.
+    ok((await page.locator('#roles-list .pick2:visible').count()) === 2, 'with its roles actually loaded');
     ok(await page.isVisible('#cstep-role'), 'on step one of creating, not somewhere mid-flow');
     await ctx.close();
   }

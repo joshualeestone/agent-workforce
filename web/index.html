@@ -438,12 +438,64 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 .pick-mark { flex: none; width: 18px; color: var(--label); font-weight: 600; }
 .pick[aria-checked="false"] .pick-mark { color: transparent; }
 .pick b { font: 600 var(--text-body) var(--font-ui); display: block; }
+
+/* ---- the two-radio role picker (pack, 2026-08-15) ----------------------
+   .pick2 keeps the pack's geometry (mark / name / description on one grid
+   row) mapped onto this file's tokens. The old flat .pick list above stays
+   for anything else that uses it. */
+.picklist { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); max-width: 36rem; }
+.pickradios { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
+.pick2 {
+  display: grid; grid-template-columns: 18px auto 1fr; align-items: baseline;
+  gap: var(--space-2) var(--space-5);
+  width: 100%; text-align: left; font: inherit; color: var(--label); cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-card); padding: 11px 14px;
+}
+.pick2:hover { border-color: var(--border-strong); }
+.pick2:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
+.pick2.on { border-color: var(--label); box-shadow: inset 0 0 0 1px var(--label); }
+.pick2 .pickmark { color: transparent; font-weight: 700; }
+.pick2.on .pickmark { color: var(--label); }
+/* ⚠️ NO nowrap AND min-width: 0 ON THE FLEX COLUMN -- the reflow rules.
+   The first cut copied the pack's `white-space: nowrap` name column, and at
+   375px the description rendered OUTSIDE the row border one word per line
+   while 320px scrolled the whole document sideways (SC 1.4.10, measured
+   scrollWidth-clientWidth in review). A grid column whose floor is its own
+   min-content cannot shrink; these two lines are what let it. */
+.p2n { font: 600 var(--text-body) var(--font-ui); }
+.p2d { font: var(--text-callout) var(--font-ui); color: var(--label-2); min-width: 0; }
+/* Below the width where name + description share a line honestly, the
+   description drops under the name (same grid, second row). */
+@media (max-width: 560px) {
+  .pick2 { grid-template-columns: 18px minmax(0, 1fr); }
+  .p2d { grid-column: 2; }
+}
+/* Shown only when the board is empty: a recommendation is useful to
+   somebody with no agents and noise to somebody who already has six (pack). */
+.prec {
+  display: inline-block; margin-left: var(--space-4); font: 700 var(--text-caption) var(--font-ui);
+  letter-spacing: .08em; text-transform: uppercase; vertical-align: middle;
+  color: var(--label); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill); padding: .1rem .5rem;
+}
+.rolepick { border: 1px solid var(--separator); border-radius: var(--radius-card);
+  padding: 14px 16px 16px; background: var(--bg-elevated); margin-top: -2px; }
+.rolepick select { width: 100%; font: inherit; color: var(--label);
+  background: var(--bg-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-control); padding: 7px 8px; }
+.rolepick select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+.roledesc { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin: 9px 0 0; }
 /* The limit on a role that has one, read while choosing rather than discovered
    afterwards. Weight and a rule, never hue: it has to survive greyscale like
-   every other signal on this board. */
-.pick .caution { display: block; margin-top: var(--space-3); padding-left: var(--space-4);
-                 border-left: 2px solid var(--border-strong); color: var(--label);
-                 font: var(--text-callout) var(--font-ui); }
+   every other signal on this board. (The old flat list's `.pick .caution`
+   twin retired with the two-radio picker; this is the one live caution
+   rule, in the file's established border token rather than a third
+   variant.) */
+.roledesc .caution, #pick-pm-desc .caution {
+  display: block; margin-top: var(--space-3); padding-left: var(--space-4);
+  border-left: 2px solid var(--border-strong); color: var(--label);
+  font: var(--text-callout) var(--font-ui); }
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
@@ -1141,10 +1193,50 @@ svg { display: block; }
     <h2>What should this agent do?</h2>
     <p>Most people start with a project manager. You can change any of this
        afterwards, and nothing here is permanent.</p>
-    <!-- radiogroup, not group: this is one choice out of five, and
-         `aria-pressed` toggles announce five independent on/off buttons
-         instead of "2 of 5". -->
-    <div id="roles-list" role="radiogroup" aria-label="What this agent is for"></div>
+    <!-- ⚠️ THREE CHOICES IN THE PACK, TWO SHIPPED HERE. The pack's rule
+         (2026-08-15): a radio for the recommended role and a radio that
+         opens the rest as a grouped menu -- twenty-six cards is a wall, and
+         twenty-six options in a menu nobody opens is a wall with a lid on
+         it. The pack's third radio, "Describe it yourself", ships with the
+         details-step slice: it needs the Role label field from that screen
+         to be truthful, and a radio that creates agents labelled wrong is
+         worse than a radio that arrives one slice later.
+         The rows are FILLED FROM /api/roles, never hardcoded: the copy a
+         person reads while choosing has to be the copy the agent is created
+         from (the rule the old flat list already followed). -->
+    <div class="picklist" id="roles-list">
+      <!-- ⚠️ The radiogroup wraps ONLY the radios: the menu below is a
+           sibling, because a radiogroup that owns a select announces "1 of
+           2" and then hands AT a child that is neither (review round 1). -->
+      <div class="pickradios" role="radiogroup" aria-label="What this agent is for">
+      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="pm" hidden id="pick-pm">
+        <span class="pickmark" aria-hidden="true">&#10003;</span>
+        <span class="p2n" id="pick-pm-name"></span>
+        <span class="p2d" id="pick-pm-desc"></span>
+      </button>
+      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="list" hidden id="pick-list">
+        <span class="pickmark" aria-hidden="true">&#10003;</span>
+        <span class="p2n">Pick another role</span>
+        <span class="p2d" id="pick-list-desc"></span>
+      </button>
+      </div>
+      <!-- The list only exists once its radio is chosen, so the screen
+           stays two choices tall until someone asks for more (pack). -->
+      <div class="rolepick" id="rolepick" hidden>
+        <label class="flabel" for="rolesel">Role</label>
+        <select id="rolesel" aria-describedby="roledesc"></select>
+        <!-- ⚠️ The description lives UNDER the menu, not inside it: a native
+             select cannot show a second line, and the second line is the
+             part that tells a non-technical reader what the job actually
+             is (pack). When the chosen role carries a caution, the FULL
+             sentence renders here -- engine/roles.js's condition is that
+             the limit is visible at the moment of choice. -->
+        <!-- polite live region: aria-describedby alone speaks on focus, not on
+             change, so browsing options would skip the one sentence whose
+             visibility is the engine's shipping condition -->
+        <p class="roledesc" id="roledesc" aria-live="polite"></p>
+      </div>
+    </div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
     <div class="frow" style="margin-top: var(--space-6);">
       <button class="btn" id="role-next" type="button" disabled>Continue</button>
@@ -1845,6 +1937,8 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    BOARD_SEEN = true;
+    updateRecPill();
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
     BOARD_LOOKED = true;
@@ -2217,6 +2311,10 @@ for (const scope of Object.keys(LAYOUTS)) {
 // Deep-linkable, so a tab can be shared or bookmarked rather than only reached
 // by clicking. Also the only way to screenshot a panel headlessly.
 let LAST = [];
+// Whether a status tick has ever ANSWERED. [] before the first answer means
+// "not heard yet", not "empty board", and the two must never be conflated
+// (the Recommended pill reads this).
+let BOARD_SEEN = false;
 // ⚠️ HAVE WE LOOKED YET, which is a different question from whether the list is
 // empty -- and the agent picker answered them with the same value. `LAST` is
 // `[]` until the first /api/status response lands, so opening Projects and
@@ -3565,13 +3663,12 @@ function cstep(which) {
 function roleByKey(key) { return (ROLES || []).find((r) => r.key === key) || null; }
 
 async function loadRoles() {
-  const list = document.getElementById('roles-list');
   const msg = document.getElementById('roles-msg');
   // ⚠️ Fetched once, but the DEFAULT is re-applied every time the panel opens.
-  // Returning early on the second visit left the list rendered from last time
-  // with its old row still marked, while `openCreate` had just cleared the
-  // choice — a screen showing a selection the page did not have.
-  if (ROLES && ROLES.length) { pickRole(ROLES[0].key); return; }
+  // Returning early on the second visit left the picker rendered from last
+  // time with its old choice still marked, while `openCreate` had just
+  // cleared it -- a screen showing a selection the page did not have.
+  if (ROLES && ROLES.length) { updateRecPill(); pickMode('pm'); return; }
   msg.textContent = 'Loading…';
   try {
     const res = await fetch('/api/roles', { cache: 'no-store' });
@@ -3580,21 +3677,16 @@ async function loadRoles() {
     ROLES = (data && data.roles) || [];
     if (!ROLES.length) throw new Error('none came back');
     msg.textContent = '';
-    list.innerHTML = ROLES.map((r) => `<button class="pick" type="button" role="radio" aria-checked="false" data-role="${esc(r.key)}">
-      <span class="pick-mark" aria-hidden="true">&#10003;</span>
-      <span><b>${esc(r.label)}</b><small>${esc(r.blurb)}</small>${
-        r.caution ? `<small class="caution">${esc(r.caution)}</small>` : ''}</span>
-    </button>`).join('');
-    // The default is a suggestion, not a decision made for them: it is
-    // preselected and visibly so, and any other row replaces it in one click.
-    const first = list.querySelector('.pick');
-    if (first) pickRole(first.dataset.role);
+    buildPicker();
+    pickMode('pm');
   } catch (err) {
     // ⚠️ Do NOT fall back to a hardcoded list. The blurb a person reads while
     // choosing has to be the copy the agent is actually created from, and a
     // local copy of the menu is exactly how those two drift apart.
     ROLES = null;
-    list.innerHTML = '';
+    ['pick-pm', 'pick-list', 'rolepick'].forEach((id) => {
+      document.getElementById(id).hidden = true;
+    });
     // Not `esc()`: this goes into textContent, which does its own escaping, so
     // escaping first renders an `&` in the error as a literal `&amp;`.
     msg.textContent = 'We could not read the list of roles, so there is nothing safe to choose from. (' + err.message + ')';
@@ -3602,47 +3694,133 @@ async function loadRoles() {
   }
 }
 
-function pickRole(key) {
-  const role = roleByKey(key);
-  if (!role) return;
-  PICKED = key;
-  document.querySelectorAll('#roles-list .pick').forEach((b) => {
-    const on = b.dataset.role === key;
+/**
+ * The two-radio picker, filled from the fetched menu (pack, 2026-08-15).
+ *
+ * ⚠️ The recommended radio IS the pm role's own copy, and the menu holds
+ * everything else, grouped the way the catalogue groups them. Both are
+ * server data: the only hardcoded words here are the second radio's own
+ * name and the menu's framing sentence, which describe the CONTROL, not a
+ * role. The count in that sentence is derived, so the catalogue growing
+ * cannot make it lie.
+ */
+function buildPicker() {
+  const pm = roleByKey('pm') || ROLES[0];
+  document.getElementById('pick-pm-name').textContent = pm.label;
+  // The caution slot exists even though pm carries none: if the recommended
+  // role is ever re-keyed and the fallback promotes a caution role, its
+  // limit renders rather than vanishing (the engine's shipping condition;
+  // review round 1 found the hole).
+  document.getElementById('pick-pm-desc').innerHTML = esc(pm.blurb) +
+    (pm.caution ? `<span class="caution">${esc(pm.caution)}</span>` : '');
+  updateRecPill();
+  const rest = ROLES.filter((r) => r.key !== pm.key);
+  document.getElementById('pick-list-desc').textContent =
+    rest.length + ' ready-made jobs, from bookkeeping to security review';
+  // Optgroups in the catalogue's own order of first appearance.
+  const groups = [];
+  for (const r of rest) {
+    let g = groups.find((x) => x.name === r.group);
+    if (!g) { g = { name: r.group, roles: [] }; groups.push(g); }
+    g.roles.push(r);
+  }
+  document.getElementById('rolesel').innerHTML = groups.map((g) =>
+    `<optgroup label="${esc(g.name || 'Roles')}">` +
+    g.roles.map((r) => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('') +
+    '</optgroup>').join('');
+  document.getElementById('pick-pm').hidden = false;
+  document.getElementById('pick-list').hidden = false;
+}
+
+/**
+ * The Recommended pill, kept TRUE rather than computed once.
+ *
+ * ⚠️ Three paths broke the computed-once version (review round 1): a deep
+ * link raced the first status tick and showed the pill over a full board
+ * (LAST was still its initial []); a second visit early-returned past the
+ * rebuild and kept a stale pill; and "we have not heard yet" was read as
+ * "empty". So: the pill exists only when the board has been SEEN and seen
+ * empty, and this re-runs on every panel open and every status tick.
+ */
+function updateRecPill() {
+  const name = document.getElementById('pick-pm-name');
+  if (!name || !ROLES || !ROLES.length) return;
+  const want = BOARD_SEEN && (LAST || []).length === 0;
+  const has = name.querySelector('.prec');
+  if (want && !has) {
+    const b = document.createElement('span');
+    b.className = 'prec';
+    b.textContent = 'Recommended';
+    name.appendChild(document.createTextNode(' '));
+    name.appendChild(b);
+  } else if (!want && has) {
+    has.previousSibling && has.previousSibling.remove();
+    has.remove();
+  }
+}
+
+/**
+ * One choice, two shapes: the recommended radio picks pm directly; the list
+ * radio opens the menu and the menu's value is the choice. `PICKED` is
+ * always the role KEY the create will use, whichever shape chose it.
+ */
+function pickMode(mode) {
+  const pmBtn = document.getElementById('pick-pm');
+  const listBtn = document.getElementById('pick-list');
+  [pmBtn, listBtn].forEach((b) => {
+    const on = b.dataset.rmode === mode;
+    b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
-    // Roving tabindex: the chosen row is the group's single Tab stop.
+    // Roving tabindex: the chosen radio is the group's single Tab stop.
     b.tabIndex = on ? 0 : -1;
   });
+  document.getElementById('rolepick').hidden = mode !== 'list';
+  if (mode === 'pm') {
+    PICKED = (roleByKey('pm') || ROLES[0]).key;
+  } else {
+    PICKED = document.getElementById('rolesel').value;
+    sayRole();
+  }
   document.getElementById('role-next').disabled = false;
 }
 
+/* The line under the menu: the blurb, and -- for a role that carries one --
+   the FULL caution sentence, because the moment of choice is the moment
+   engine/roles.js requires the limit to be visible. */
+function sayRole() {
+  const r = roleByKey(document.getElementById('rolesel').value);
+  const out = document.getElementById('roledesc');
+  if (!r) { out.textContent = ''; return; }
+  out.innerHTML = esc(r.blurb) +
+    (r.caution ? `<span class="caution">${esc(r.caution)}</span>` : '');
+}
+
 document.getElementById('roles-list').addEventListener('click', (e) => {
-  const btn = e.target.closest('.pick');
-  if (btn) pickRole(btn.dataset.role);
+  const btn = e.target.closest('.pick2');
+  if (btn) pickMode(btn.dataset.rmode);
+});
+document.getElementById('rolesel').addEventListener('change', () => {
+  PICKED = document.getElementById('rolesel').value;
+  sayRole();
 });
 
 /**
  * ⚠️ The keyboard model the ARIA role PROMISES.
  *
- * `role="radiogroup"` tells a screen reader "2 of 6, use the arrows", and only
- * click was bound — so the arrows did nothing and the promise was false. Not a
- * hard trap (every option is a Tab stop and Space activates it), but announcing
- * an interaction the code does not implement is the same defect this branch
- * corrects everywhere else, in the one place a person cannot see it.
- *
- * With a roving tabindex the group is ONE Tab stop, which is also the right
- * behaviour for a single choice: tabbing past six roles to reach Continue is
- * the thing the pattern exists to avoid.
+ * `role="radiogroup"` tells a screen reader "1 of 2, use the arrows", so the
+ * arrows move between the two radios (the menu inside the second is a native
+ * select with its own keyboard). Announcing an interaction the code does not
+ * implement is the defect this file corrects everywhere else, in the one
+ * place a person cannot see it.
  */
 document.getElementById('roles-list').addEventListener('keydown', (e) => {
   const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
-  const step = keys[e.key];
-  if (!step || !ROLES || !ROLES.length) return;
+  if (!keys[e.key] || !ROLES || !ROLES.length) return;
+  if (e.target.closest('select')) return;   // the menu owns its own arrows
   e.preventDefault();
-  const at = ROLES.findIndex((r) => r.key === PICKED);
-  const next = ROLES[((at < 0 ? 0 : at) + step + ROLES.length) % ROLES.length];
-  pickRole(next.key);
-  const el = document.querySelector('#roles-list .pick[data-role="' + next.key + '"]');
-  if (el) el.focus();
+  const mode = document.getElementById('pick-pm').classList.contains('on') ? 'list' : 'pm';
+  pickMode(mode);
+  document.getElementById(mode === 'pm' ? 'pick-pm' : 'pick-list').focus();
 });
 
 function openCreate() {
@@ -3670,7 +3848,13 @@ document.getElementById('made-retry').addEventListener('click', openCreate);
 document.getElementById('role-next').addEventListener('click', () => {
   const role = roleByKey(PICKED);
   if (!role) return;
-  document.getElementById('create-meet').textContent = 'Name your ' + role.label.toLowerCase();
+  // Lowercase for the sentence, except all-caps words: "Name your SEO
+  // specialist", never "Name your seo specialist" (the catalogue brought
+  // the first acronym labels this line had ever seen).
+  const spoken = role.label.split(' ')
+    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
+    .join(' ');
+  document.getElementById('create-meet').textContent = 'Name your ' + spoken;
   document.getElementById('create-blurb').textContent = role.blurb + '.';
   cstep('name');
   document.getElementById('create-name').focus();
