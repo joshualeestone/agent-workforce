@@ -461,12 +461,16 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
   for (const [key, mustSay] of [
     ['legal', /not a lawyer|not legal advice/i],
     ['finance', /not financial advice/i],
+    // books is deliberately parallel to finance and not identical: recording
+    // where analysis models, each caution saying the true thing about each
+    // (catalogue build, 2026-08-16).
+    ['books', /not financial advice/i],
   ]) {
     const role = roles.byKey(key);
     assert.ok(role, `${key} is missing entirely`);
     assert.ok(role.caution, `${key} has no caution, so its limit is invisible while choosing it`);
     assert.match(role.caution, mustSay, `${key}'s caution does not say what it is not`);
-    assert.match(role.instructions, /not a lawyer|do not give (financial|legal) advice/i,
+    assert.match(role.instructions, /not a lawyer|do not give (financial( or tax)?|legal) advice/i,
       `${key} does not state its own boundary, so the only thing holding it is a `
       + 'sentence the operator read once');
   }
@@ -474,10 +478,16 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
   // ⚠️ And the roles that DO NOT need one must not have it. A caution on every
   // role is a caution nobody reads -- the same reason the provenance marker was
   // taken off every card.
-  for (const key of ['pm', 'ea', 'writer', 'researcher']) {
+  // ea moved OUT of this list with the 2026-08-16 catalogue: it gained the
+  // draft-never-send caution (the send-on-your-behalf roles all carry one).
+  // The rule this loop holds is unchanged: most roles carry none, so the
+  // ones that do still mean something. 8 of 26 have one.
+  for (const key of ['pm', 'writer', 'researcher', 'engineer', 'data', 'design']) {
     assert.ok(!roles.byKey(key).caution,
       `${key} carries a caution, and a warning on everything warns about nothing`);
   }
+  assert.ok(roles.ROLES.filter((r) => r.caution).length < roles.ROLES.length / 2,
+    'more than half the catalogue carries a caution, and a warning on most things warns about nothing');
 });
 
 test('the instructions name the agent, and carry no template language', () => {
