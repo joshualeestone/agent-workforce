@@ -53,3 +53,22 @@ re-anchored to the header placement. This wave cuts 0.1.5, which
 fires the four-leg update-flag test on Josh's mini (his board must
 NOTICE the release; do not press Later; agents must survive the
 update; post in channel when cutting so the clock is known).
+
+## 5. MIT license (Josh's ruling, 3:31 PM)
+
+LICENSE + package.json declaration land in this wave. The repo flip
+to public is a SEPARATE, staged act gated on the pre-publication
+sweep, which must cover git HISTORY, not just the tree (public = every
+commit ever; a removed secret is still clonable):
+- git log --all --full-history over env/secret/credential/token paths
+- a content grep over all revisions for key shapes (sk-ant,
+  github_pat, xox[bp]-, AKIA, PRIVATE KEY)
+- if anything is found, rewrite history or start the public repo from
+  a fresh squashed initial commit BEFORE the flip; a delete commit is
+  not a fix
+- deliberate keep/prune list for .claude/plans, review files, and
+  browser-check docs: prune what identifies the fleet (people,
+  machines, channels), keep what shows the work (the plans and review
+  notes are an asset for an MIT project)
+Josh gets the list + recommendation with the wave PR; the flip and the
+site's GitHub button land on his one-word go.
