@@ -372,21 +372,35 @@ function profileRole(card) {
  * Teaching an unambiguous spelling is the next slice; refusing to guess is
  * this one.
  */
-function joinTaskClaims(tasks, all) {
+const AMBIGUITY_COUNTS = new WeakMap();
+function ambiguityCounts(everyProject) {
+  if (AMBIGUITY_COUNTS.has(everyProject)) return AMBIGUITY_COUNTS.get(everyProject);
+  const counts = new Map();
+  for (const p of everyProject) {
+    for (const t of p.tasks || []) {
+      // Non-integer numbers are excluded: they cannot be validly named by a
+      // report at all, and claimFor's "not a whole number" answer is the
+      // truer sentence than an ambiguity one interpolating NaN.
+      if (!t || !t.who || t.closedAt || !Number.isInteger(Number(t.number))) continue;
+      const key = t.who + '\u0000' + Number(t.number);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  AMBIGUITY_COUNTS.set(everyProject, counts);
+  return counts;
+}
+
+function joinTaskClaims(tasks, all, memberOf) {
   const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
   if (!withWho.length) return tasks;
   const tasksMod = require('./tasks');
   const commitments = require('./commitments');
   const everyProject = Array.isArray(all) ? all : readAll();
-  const counts = new Map();
-  for (const p of everyProject) {
-    for (const t of p.tasks || []) {
-      if (!t || !t.who || t.closedAt) continue;
-      const key = t.who + ' ' + Number(t.number);
-      counts.set(key, (counts.get(key) || 0) + 1);
-    }
-  }
-  const ambiguous = (t) => counts.get(t.who + ' ' + Number(t.number)) > 1;
+  // Memoized per `all` snapshot (WeakMap), so list() over P projects builds
+  // the cross-store counts once, not P times.
+  const counts = ambiguityCounts(everyProject);
+  const members = Array.isArray(memberOf) ? memberOf : [];
+  const ambiguous = (t) => counts.get(t.who + '\u0000' + Number(t.number)) > 1;
   const readings = new Map();
   const readFor = (who) => {
     if (!readings.has(who)) {
@@ -399,6 +413,22 @@ function joinTaskClaims(tasks, all) {
   };
   return tasks.map((t) => {
     if (!t || !t.who || t.closedAt) return t;
+    // ⚠️ A departed assignee: removal does not unassign (the given-to record
+    // is the person's, and history should not vanish because membership
+    // changed), but the taught convention and the managed block both derive
+    // from membership, so a non-member's report cannot be checked against
+    // this task. Could-not-tell with the real reason -- rendering a
+    // still-fresh "task N" report as a definite claim here would be the
+    // told-when-not shape back through the removal door.
+    if (!members.includes(t.who)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'this agent is no longer on the project, so what it reports cannot be checked against this task',
+        },
+      };
+    }
     if (ambiguous(t)) {
       return {
         ...t,
@@ -529,7 +559,7 @@ function describe(project, roster, all) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all),
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || []),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the

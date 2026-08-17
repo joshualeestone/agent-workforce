@@ -119,6 +119,14 @@ test('claimFor: deterministic word-bounded matching, three answers never two', (
   const odd = tasks.claimFor({ number: 1.5, who: 'a' }, mk(['task 175']));
   assert.equal(odd.claimed, null);
   assert.match(odd.because, /whole number/);
+  // The decimal boundary cuts the OTHER way too: \b sits happily between
+  // "1" and ".", so without the lookahead "task 1.5" in a REPORT would join
+  // task 1. A sentence merely ending "task 1." still counts.
+  assert.equal(tasks.claimFor({ number: 1, who: 'a' }, mk(['splitting task 1.5 today'])).claimed, false);
+  assert.equal(tasks.claimFor({ number: 1, who: 'a' }, mk(['finished planning task 1.'])).claimed, true);
+  // A state this module does not recognize is could-not-tell, never a
+  // definite answer nobody computed.
+  assert.equal(tasks.claimFor({ number: 1, who: 'a' }, mk(['task 1'], 'someday-vocabulary')).claimed, null);
 });
 
 test('a task cannot be given to an agent that is not on the project', () => {
@@ -158,6 +166,23 @@ test('a task number an agent holds on two projects joins as could-not-tell on bo
   // And closing one twin dissolves the collision for the survivor.
   tasks.close(a.id, 1);
   assert.equal(projects.get(b.id, []).tasks[0].claim.claimed, true, 'a closed twin still blocks the join');
+});
+
+test('a removed member\'s still-assigned task joins as could-not-tell, not as a definite claim', () => {
+  const commitments = require('./commitments');
+  const p = freshProject('Departures');
+  projects.addAgent(p.id, 'leaver', null);
+  tasks.create(p.id, { sentence: 'Held at departure', who: 'leaver' });
+  commitments.report('leaver', [{ what: 'On task 1: the held thing' }]);
+  assert.equal(projects.get(p.id, []).tasks[0].claim.claimed, true, 'the member\'s fresh report did not join');
+  // Removal does not unassign (the given-to record is the person's), but a
+  // non-member's report can no longer be checked against the taught
+  // convention -- so the still-fresh report must stop rendering as definite.
+  projects.removeAgent(p.id, 'leaver');
+  const after = projects.get(p.id, []).tasks[0];
+  assert.equal(after.who, 'leaver', 'removal silently unassigned the task');
+  assert.equal(after.claim.claimed, null, 'a departed agent\'s report rendered as a definite claim');
+  assert.match(after.claim.because, /no longer on the project/);
 });
 
 test('the described project carries claims joined from the real commitments store', () => {

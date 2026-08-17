@@ -159,7 +159,13 @@ function columnTasks(p) {
  */
 function claimFor(task, reading) {
   if (!task || !task.who || task.closedAt) return null;
-  if (!reading || reading.state === 'unknown') {
+  // ⚠️ The DEFINITE branch is allowlisted, never the unknown one: a state
+  // this module does not recognize (a future vocabulary word, a hand-edited
+  // record) must fall to could-not-tell, because falling to true/false would
+  // render a definite answer nobody computed. STATE comes from the producer,
+  // so the two cannot drift.
+  const { STATE } = require('./commitments');
+  if (!reading || (reading.state !== STATE.HOLDING && reading.state !== STATE.CLEAR)) {
     return {
       claimed: null,
       because: (reading && reading.because) || 'we could not read what it reports holding',
@@ -172,7 +178,11 @@ function claimFor(task, reading) {
   if (!Number.isInteger(n)) {
     return { claimed: null, because: 'this task\'s number is not a whole number, so a report cannot name it' };
   }
-  const re = new RegExp('\\btask\\s+' + n + '\\b', 'i');
+  // The trailing guard is two lookaheads, not \b: \b sits happily between
+  // "1" and ".", so "task 1.5" in a report would join task 1. Not-a-digit
+  // blocks "task 12"; not-a-dot-then-digit blocks "task 1.5" while still
+  // matching a sentence that simply ends "task 1."
+  const re = new RegExp('\\btask\\s+' + n + '(?!\\d)(?!\\.\\d)', 'i');
   const named = (reading.commitments || []).some(
     (c) => c && typeof c.what === 'string' && re.test(c.what));
   return { claimed: named, because: null };

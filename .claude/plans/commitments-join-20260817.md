@@ -51,7 +51,22 @@ the join) and Mona Lisa's honesty rulings, under Josh's ship-iterate bar.
   the task ("that agent is not on this project..."), matching the
   member-only dropdown the screen already enforces.
 
-Plus the review's hand-edited-store nit: a non-integer stored number is
+Round 2's two findings, both fixed: (a) member REMOVAL re-created the
+told-when-not shape through the other door, since removal does not
+unassign while the block derives from membership; the join now answers
+could-not-tell with the reason for a non-member assignee's task, so a
+departed agent's still-fresh report never renders as definite. (b) the
+matcher's trailing \b sat happily between "1" and ".", so "task 1.5"
+in a report joined task 1; the boundary is now two lookaheads (not a
+digit, not dot-then-digit), still matching a sentence ending "task 1."
+Round 2's smaller catches: claimFor's definite branch is allowlisted on
+the producer's own STATE vocabulary (an unrecognized state falls to
+could-not-tell, never to a definite answer); the cross-store ambiguity
+counts are memoized per snapshot (WeakMap) so list() builds them once;
+non-integer stored numbers route to the whole-number reason instead of
+an ambiguity sentence interpolating NaN.
+
+Plus round 1's hand-edited-store nit: a non-integer stored number is
 regex when interpolated (1.5 matches "task 175"), so claimFor now
 refuses non-integers as could-not-tell instead of matching by accident.
 
