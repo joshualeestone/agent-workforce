@@ -8,7 +8,7 @@ const BASE = 'http://127.0.0.1:4399';
 const FLAG = process.argv[2];   // the sandboxed first-run.json
 // The About-you record lives at the DATA root (the flag's grandparent, per
 // engine/you.js's BASE), and it is first-run state: left behind by an
-// earlier run it prefills step 4 and arms the gate, so the "Continue waits"
+// earlier run it prefills the About-you step and arms the gate, so the "Continue waits"
 // assertions would measure the leftover, not the gate. Cleared everywhere
 // the flag is cleared.
 const YOU = path.join(path.dirname(path.dirname(FLAG)), 'you.json');
@@ -36,26 +36,43 @@ async function fresh(browser, opts = {}) {
   {
     const { ctx, page } = await fresh(browser);
     ok(await page.isVisible('#firstrun'), 'the overlay is up with no ?first-run flag at all');
-    ok(await page.locator('#fr-title').textContent() === 'Welcome to Kosmos', 'on step 1');
+    ok(await page.locator('#fr-title').textContent() === 'Kosmos is now installed on this computer.', 'on step 1, the Success screen');
+    ok((await page.locator('#fr-eyebrow').textContent()).trim() === 'Success', 'the Success eyebrow is up');
+    ok((await page.locator('#fr-segs .fr-seg').count()) === 0, 'the intro carries no progress segments');
+    // The app-location look lives HERE now (the pack's Success screen).
+    // Against this real machine any state is legitimate; what must be true is
+    // that a row rendered, the answer replaced the placeholder, and the Dock
+    // sentence is the ruled drag line, never the unreachable Keep in Dock.
+    await page.waitForSelector('#fr-return-row .fr-check:not(.checking)', { timeout: 5000 });
+    const introText = await page.locator('#fr-return').textContent();
+    ok(/Drag Kosmos onto the Dock, the strip of icons/.test(introText), 'the ruled Dock drag line is on the Success screen');
+    ok(!/Checking where the Kosmos icon is/.test(introText), 'the live answer replaced the checking placeholder');
+    ok(!/right now/.test(introText), 'and it is the route\'s answer, not the could-not-ask fallback -- this walk is the one place the LIVE route is proven');
+    ok(!/Keep in Dock/.test(introText), 'and never the unreachable Keep in Dock');
     ok(await page.evaluate(() => document.querySelector('.apphead').inert === true),
       'the board behind it is inert');
     // ⚠️ Asked, not assumed: what does a click at the middle of the screen hit?
     ok(await page.evaluate(() => document.querySelector('#firstrun')
       .contains(document.elementFromPoint(300, 400))), 'nothing behind it is clickable');
 
-    console.log('   ...clicking Continue through every step');
+    console.log('   ...clicking through every step, in the pack\'s order');
+    ok(/Set up Kosmos/.test(await page.locator('#fr-next').textContent()), 'the Success primary is Set up Kosmos');
     await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Checking your computer', 'step 2');
-    await page.waitForSelector('.fr-check', { timeout: 5000 });
-    ok((await page.locator('#fr-checks .fr-check').count()) === 3, 'three checks painted from the live route (app-location rides beside the rows, not among them)');
+    ok(await page.locator('#fr-title').textContent() === 'Create and manage AI agents that work for you.', 'step 2, Welcome');
+    ok((await page.locator('#fr-segs .fr-seg').count()) === 5, 'five segments from Welcome on');
     await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Claude', 'step 3');
+    ok(await page.locator('#fr-title').textContent() === 'Choose a model.', 'step 3, Model');
+    ok((await page.locator('#fr-pane-3 .llm').count()) === 6, 'the six-provider list is drawn');
     ok(await page.locator('#fr-sub .fr-ctitle').textContent().then((t) => /connected/.test(t)),
       'the real subscription answer arrived: ' + await page.locator('#fr-sub .fr-ctitle').textContent());
     await page.click('#fr-next');
+    ok(await page.locator('#fr-title').textContent() === 'Checking this computer.', 'step 4, This computer');
+    await page.waitForSelector('#fr-checks .fr-check', { timeout: 5000 });
+    ok((await page.locator('#fr-checks .fr-check').count()) === 3, 'three checks painted from the live route (app-location rides on the Success screen, not among them)');
+    await page.click('#fr-next');
     // Step 4, About you. The gate IS the design (no skip, at Josh's call):
     // Continue WAITS on the two required answers, and the third is optional.
-    ok(await page.locator('#fr-title').textContent() === 'Who are your agents working for?', 'step 4, about you');
+    ok(await page.locator('#fr-title').textContent() === 'Who are your agents working for?', 'step 5, about you');
     ok(await page.locator('#fr-next').isDisabled(), 'Continue waits for the two required answers');
     await page.fill('#fr-you-name', 'Josh');
     ok(await page.locator('#fr-next').isDisabled(), 'one answer alone does not arm it');
@@ -64,28 +81,11 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     // Continue SAVES before it advances (a real PUT on this live server), so
     // wait for the step change rather than reading the title mid-flight.
-    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
-    ok(/already have/.test(await page.locator('#fr-title').textContent()), 'step 5, the adopt path');
-    await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'step 6, getting back');
-    // The check row is painted from the live /api/machine look; against this
-    // real machine any of the four states is legitimate -- what must be true
-    // is that A row rendered and the Dock sentence is the drag instruction,
-    // never "Keep in Dock" (the orientation spec's load-bearing guard: the
-    // Dock tile exits before anyone can right-click it).
-    // Wait for the ANSWER, not the pane: the pane paints instantly with the
-    // "checking" placeholder, so waiting on any .fr-check reads the pre-paint
-    // in a race with the fetch.
-    await page.waitForSelector('#fr-return-row .fr-check:not(.checking)', { timeout: 5000 });
-    const returnText = await page.locator('#fr-return').textContent();
-    ok(/drag it onto the Dock|Drag Kosmos out of that folder/.test(returnText), 'the Dock instruction is a drag (the wording tracks whether a folder was found on THIS machine)');
-    ok(!/Checking where the Kosmos icon is/.test(returnText), 'the live answer replaced the checking placeholder');
-    ok(!/right now/.test(returnText), 'and it is the route\'s answer, not the could-not-ask fallback -- this walk is the one place the LIVE route is proven');
-    ok(!/Keep in Dock/.test(returnText), 'and never the unreachable Keep in Dock');
-    ok(/Closing this tab does not stop your agents/.test(returnText),
-      'the narrow true promise about closing the tab');
-
-    console.log('   ...and out the front door');
+    await page.waitForSelector('#fr-pane-5', { state: 'hidden', timeout: 5000 });
+    ok(/already have/.test(await page.locator('#fr-title').textContent()), 'step 6, the adopt ending');
+    ok(/Take me to my agents/.test(await page.locator('#fr-next').textContent()),
+      'the adopt ending carries the pack\'s single action');
+    console.log('   ...and out the front door, through the adopt ending');
     await page.click('#fr-next');
     await page.waitForTimeout(600);
     ok(await page.isHidden('#firstrun'), 'the overlay closed');
@@ -118,11 +118,11 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     await page.click('#fr-next');
     await page.click('#fr-back');
-    ok(await page.locator('#fr-title').textContent() === 'Checking your computer', 'Back went back one step');
+    ok(await page.locator('#fr-title').textContent() === 'Create and manage AI agents that work for you.', 'Back went back one step');
     // ⚠️ The handler-stacking test. Back then Continue must advance ONE step; if
     // the buttons accumulated listeners it would fire two steps at once.
     await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Claude',
+    ok(await page.locator('#fr-title').textContent() === 'Choose a model.',
       'Continue after Back advanced exactly one step');
     await page.click('#fr-skip');
     await page.waitForTimeout(600);
@@ -146,19 +146,15 @@ async function fresh(browser, opts = {}) {
     const { ctx, page } = await fresh(browser, {
       route: ['**/api/first-run', (r) => r.fulfill({ json: { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max', because: '' } } })],
     });
-    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
-    // About you sits between Claude and the fork now; answer it to pass.
+    // Success -> Welcome -> Model -> This computer -> About you -> ending.
+    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
     await page.fill('#fr-you-name', 'Josh');
     await page.fill('#fr-you-do', 'Testing the create path');
     await page.click('#fr-next');
-    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
-    ok(/first agent/.test(await page.locator('#fr-title').textContent()), 'on the create path');
-    // The fork moved to step 6: step 5's Continue leads to the orientation,
-    // whose primary carries "Make my first agent" on this path.
-    await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'orientation before the fork');
-    ok(/Make my first agent/.test(await page.locator('#fr-next').textContent()),
-      'the create-path fork rode along to step 6');
+    await page.waitForSelector('#fr-pane-5', { state: 'hidden', timeout: 5000 });
+    ok(/Create your first agent/.test(await page.locator('#fr-title').textContent()), 'on the create ending');
+    ok(/Create my first agent/.test(await page.locator('#fr-next').textContent()),
+      'the create ending carries the pack\'s single action');
     await page.click('#fr-next');
     await page.waitForTimeout(800);
     ok(await page.isHidden('#firstrun'), 'the overlay got out of the way');
@@ -196,7 +192,8 @@ async function fresh(browser, opts = {}) {
     const { ctx, page } = await fresh(browser, {
       route: ['**/api/machine', (r) => r.abort()],
     });
-    await page.click('#fr-next');
+    // The machine step is 4 now: Success -> Welcome -> Model -> here.
+    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
     await page.waitForTimeout(800);
     const text = await page.locator('#fr-checks').textContent();
     ok(/could not check/i.test(text), 'it says it could not look: ' + text.slice(0, 60));
@@ -259,13 +256,13 @@ async function fresh(browser, opts = {}) {
     await page.route('**/api/first-run', (r) => r.fulfill({ json: { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max', because: '' } } }));
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
-    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
-    await page.fill('#fr-you-name', 'Josh');      // About you gates step 4
+    // Success -> Welcome -> Model -> This computer -> About you -> ending
+    await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
+    await page.fill('#fr-you-name', 'Josh');      // About you gates step 5
     await page.fill('#fr-you-do', 'Testing');
-    await page.click('#fr-next');                 // step 4 -> 5 (saves first)
-    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
-    await page.click('#fr-next');                 // step 5 -> 6 (the fork moved)
-    await page.click('#fr-next');                 // starts "Make my first agent"
+    await page.click('#fr-next');                 // step 5 -> 6 (saves first)
+    await page.waitForSelector('#fr-pane-5', { state: 'hidden', timeout: 5000 });
+    await page.click('#fr-next');                 // starts "Create my first agent"
     await page.waitForTimeout(150);
     await page.keyboard.press('Escape');          // ...and Escape mid-flight
     await page.keyboard.press('Escape');
@@ -390,7 +387,8 @@ async function fresh(browser, opts = {}) {
       const { ctx, page } = await fresh(browser, {
         route: ['**/api/machine', (r) => r.fulfill({ json: body })],
       });
-      await page.click('#fr-next');
+      // The machine step is 4 now.
+      await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
       await page.waitForTimeout(700);
       const text = (await page.locator('#fr-checks').textContent()).trim();
       ok(text.length > 0, `a ${what} body still says something (${text.slice(0, 40)})`);

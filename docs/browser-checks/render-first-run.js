@@ -142,29 +142,29 @@ const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [],
 const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, fleetNames: ['Splinter', 'Casey Jones', 'Angel'], path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
 
 const SHOTS = [
-  { name: 'firstrun-1-welcome', step: 1 },
-  { name: 'firstrun-2-checks-clear', step: 2, machine: MACHINE_CLEAR },
-  { name: 'firstrun-2-checks-attention', step: 2, machine: MACHINE_MIXED },
-  { name: 'firstrun-3-claude-connected', step: 3, first: FLEET_ADOPT },
-  { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
-  { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
+  // The pack's order (first-run spec): Success opens the flow and carries
+  // the app-location look; the endings close it.
+  { name: 'firstrun-1-success-system', step: 1, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-home', step: 1, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-missing', step: 1, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-unsure', step: 1, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
+  // The look STILL IN PROGRESS: machine: 'hang' stalls the route so the
+  // placeholder is what is measured and photographed.
+  { name: 'firstrun-1-success-checking', step: 1, machine: 'hang', first: FLEET_RETURN },
+  { name: 'firstrun-2-welcome', step: 2 },
+  { name: 'firstrun-3-model-connected', step: 3, first: FLEET_ADOPT },
+  { name: 'firstrun-3-model-none', step: 3, first: SUB_NONE },
+  { name: 'firstrun-3-model-unsure', step: 3, first: SUB_UNSURE },
+  { name: 'firstrun-4-checks-clear', step: 4, machine: MACHINE_CLEAR },
+  { name: 'firstrun-4-checks-attention', step: 4, machine: MACHINE_MIXED },
   // The record stubbed ABSENT: the click drive leaves a saved record in the
   // same sandbox, and without the stub this shot's content depends on which
   // drive ran last (prefilled-and-armed versus the empty gated state the
   // name claims).
-  { name: 'firstrun-4-about-you', step: 4, you: { state: 'absent', you: null, because: null } },
-  { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
-  { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
-  { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
-  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
-  // The look STILL IN PROGRESS: the only genuinely new visual state on this
-  // branch, otherwise never rendered by any harness (both walks wait past
-  // it). machine: 'hang' stalls the route so the placeholder is what is
-  // measured and photographed.
-  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_RETURN },
+  { name: 'firstrun-5-about-you', step: 5, you: { state: 'absent', you: null, because: null } },
+  { name: 'firstrun-6-adopt', step: 6, first: FLEET_ADOPT },
+  { name: 'firstrun-6-create', step: 6, first: FLEET_CREATE },
+  { name: 'firstrun-6-cannot-see', step: 6, first: FLEET_BLIND },
 ];
 
 /**
@@ -344,28 +344,28 @@ async function look(page, name) {
        * it holds the SCREEN to the fixture's name, catching a paint that
        * renders a clear payload as anything but green rows.
        */
-      if (shot.name === 'firstrun-2-checks-clear') {
+      if (shot.name === 'firstrun-4-checks-clear') {
         const rows = await page.evaluate(() =>
           Array.from(document.querySelectorAll('#fr-checks .fr-check')).map((el) => el.className));
         if (!rows.length || rows.some((c) => !/\bok\b/.test(c))) {
-          problems.push(`firstrun-2-checks-clear [${scheme}]: this machine is NOT all-clear `
+          problems.push(`firstrun-4-checks-clear [${scheme}]: this machine is NOT all-clear `
             + `(${rows.join(' | ') || 'no rows'}), so the shot under that name would be a lie`);
         }
       }
 
-      /* Each step-5 shot asserts the row it claims to depict, read from the
+      /* Each Success shot asserts the row it claims to depict, read from the
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
-         is asserted on every one of the four, because the Dock paragraph is
-         static copy and any state could regress it. */
-      if (shot.name.startsWith('firstrun-6-return')) {
-        // The pinned fork really painted: the primary carries the adopt
-        // path's label on every step-5 shot.
-        const forkLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
-        if (!/take me to my agents/i.test(forkLabel)) {
-          problems.push(`${shot.name} [${scheme}]: the fork is not the pinned adopt pair ("${forkLabel}")`);
+         is asserted on every one, because the Dock paragraph is static copy
+         and any state could regress it. */
+      if (shot.name.startsWith('firstrun-1-success')) {
+        // The Success primary is Set up Kosmos on every state (the fork
+        // lives on the endings now).
+        const introLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
+        if (!/set up kosmos/i.test(introLabel)) {
+          problems.push(`${shot.name} [${scheme}]: the Success primary drifted ("${introLabel}")`);
         }
       }
-      if (shot.name === 'firstrun-6-return-checking') {
+      if (shot.name === 'firstrun-1-success-checking') {
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         const cls = await page.evaluate(() => {
           const el = document.querySelector('#fr-return-row .fr-check');
@@ -377,7 +377,7 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
         }
-      } else if (shot.name.startsWith('firstrun-6-return')) {
+      } else if (shot.name.startsWith('firstrun-1-success')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
         // placeholder as a rendering problem rather than a wait. (The
@@ -400,19 +400,10 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask fallback painted over the fixture's answer`);
         }
-        // The Dock instruction tracks the state: only a FOUND app may say
-        // "that folder"; the other states get the Spotlight-anchored drag.
-        if (want.state === 'ok') {
-          if (!/Drag Kosmos out of that folder/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the Dock instruction is not the drag`);
-          }
-        } else {
-          if (/out of that folder/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the Dock copy points at "that folder" over a row that named none`);
-          }
-          if (!/drag it onto the Dock/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the folderless Dock instruction is missing the drag`);
-          }
+        // The ruled dock line names no folder, so ONE sentence must be
+        // present in every state (first-run spec, pack copy).
+        if (!/Drag Kosmos onto the Dock, the strip of icons/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the ruled Dock drag line is missing`);
         }
         if (/Keep in Dock/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the unreachable Keep in Dock advice appeared`);

@@ -3685,6 +3685,11 @@ function firstRunHarness(name, state, opts = {}) {
   const realEsc = pageFunction('esc');
   const realRow = pageFunction('frCheckRow',
     'const esc = ' + realEsc.toString() + ';\n' + tables);
+  // The REAL fork, not a stub: the endings live on the fleet screen now, and
+  // a painter calling a stubbed fork would let the pairs drift untested. Its
+  // free names (FR, frActions, frFinish, ...) rebind to the harness scope.
+  const realFork = pageFunction('frForkActions',
+    'let FR = null; function frActions() {} function frFinish() {} function openCreate() {} function showTab() {}');
 
   const els = {};
   const prelude = `
@@ -3697,6 +3702,7 @@ function firstRunHarness(name, state, opts = {}) {
     let FR_MACHINE = ${JSON.stringify(state.FR_MACHINE === undefined ? null : state.FR_MACHINE)};
     let __actions = null;
     function frActions(primary, alt) { __actions = { primary: primary.label, alt: alt && alt.label }; }
+    ${name === 'frForkActions' ? '' : 'const frForkActions = ' + realFork.toString() + ';'}
     function frGo() {}
     function frFinish() {}
     function frRecheck() {}
@@ -3759,13 +3765,14 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
   const create = firstRunHarness('frPaintFleet', {
     FR: { path: 'create', fleetCount: 0, fleetNames: [] },
   });
-  assert.match(create.els['fr-title'].textContent, /first agent/i);
-  // The healthy paths carry a single Continue too, not only the broken ones
-  // asserted below: the fork lives on step 6 now on every path.
-  assert.ok(/continue/i.test(adopt.actions.primary || '') && !adopt.actions.alt,
-    `adopt at step 5 should offer Continue alone: ${JSON.stringify(adopt.actions)}`);
-  assert.ok(/continue/i.test(create.actions.primary || '') && !create.actions.alt,
-    `create at step 5 should offer Continue alone: ${JSON.stringify(create.actions)}`);
+  assert.match(create.els['fr-title'].textContent, /Create your first agent/i);
+  // The endings ARE this screen's actions now, buttons verbatim from the
+  // pack (spec ed29b78): adopt and create carry ONE action each; only the
+  // unknown ending gets two, asserted in the broken-payload loop below.
+  assert.equal(adopt.actions.primary, 'Take me to my agents', JSON.stringify(adopt.actions));
+  assert.equal(adopt.actions.alt, undefined, 'the adopt ending grew a second button');
+  assert.equal(create.actions.primary, 'Create my first agent', JSON.stringify(create.actions));
+  assert.equal(create.actions.alt, undefined, 'the create ending grew a second button');
 
   /**
    * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
@@ -3796,30 +3803,25 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     assert.ok(!/undefined|NaN|null/.test(title + body),
       `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
     assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
-    // The fork moved to step 6 (orientation spec): step 5's way onward is
-    // now a single Continue on EVERY path, including the broken-payload
-    // one -- a person must never be stranded, and must also never meet the
-    // fork here where the orientation has not been shown yet.
-    assert.ok(got.actions && /continue/i.test(got.actions.primary || ''),
-      `payload ${JSON.stringify(FR)} left the person short of a way onward`);
-    // And ONLY Continue: a second button reappearing here is the fork
-    // creeping back to the step it was deliberately moved off.
-    assert.ok(!got.actions.alt,
-      `payload ${JSON.stringify(FR)} grew a second button at the fork step: ${JSON.stringify(got.actions)}`);
+    // Every malformed shape lands on the pack's ending C, the one screen
+    // in the flow with TWO actions -- it refuses to choose because either
+    // single guess would be a lie (spec ed29b78, pack ENDINGS verbatim).
+    assert.equal(got.actions && got.actions.primary, 'Show me my agents',
+      `payload ${JSON.stringify(FR)} left the person short of a way onward: ${JSON.stringify(got.actions)}`);
+    assert.equal(got.actions.alt, 'Create an agent',
+      `payload ${JSON.stringify(FR)} lost ending C's second door: ${JSON.stringify(got.actions)}`);
   }
 
-  // Both ways out are still offered on every path -- at step 5, where the
-  // fork lives now. frForkActions is the single holder of the pairs.
+  // The pack's endings' buttons, per path: adopt and create carry ONE,
+  // the unknown ending two. frForkActions is the single holder.
   for (const [path, primary, alt] of [
-    ['adopt', /take me to my agents/i, /make another agent/i],
-    ['create', /make my first agent/i, /show me around/i],
-    ['unknown', /show me the board/i, /make an agent/i],
+    ['adopt', 'Take me to my agents', undefined],
+    ['create', 'Create my first agent', undefined],
+    ['unknown', 'Show me my agents', 'Create an agent'],
   ]) {
     const got = firstRunHarness('frForkActions', { FR: { path, fleetCount: 1, fleetNames: ['x'] } });
-    assert.ok(got.actions && got.actions.primary && got.actions.alt,
-      `the ${path} path offers only one door at the fork`);
-    assert.match(got.actions.primary, primary, `the ${path} fork primary drifted`);
-    assert.match(got.actions.alt, alt, `the ${path} fork alt drifted`);
+    assert.equal(got.actions && got.actions.primary, primary, `the ${path} ending primary drifted`);
+    assert.equal(got.actions.alt, alt, `the ${path} ending's second door drifted`);
   }
 
   // ⚠️ The fork guards its payload with the SAME predicate as the fleet
@@ -3837,27 +3839,27 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     { path: 'adopt', fleetCount: null, fleetNames: [] },
   ]) {
     const got = firstRunHarness('frForkActions', { FR });
-    assert.match(got.actions.primary, /show me the board/i,
+    assert.equal(got.actions.primary, 'Show me my agents',
       `payload ${JSON.stringify(FR)} claimed a fleet nobody counted: ${JSON.stringify(got.actions)}`);
-    assert.match(got.actions.alt, /make an agent/i,
+    assert.equal(got.actions.alt, 'Create an agent',
       `payload ${JSON.stringify(FR)} lost the neutral second door`);
   }
 });
 
 test('the return step paints a look in progress, then the engine answer, and could-not-ask on failure', async () => {
-  // The Dock instruction must never point at "that folder" when no folder was
-  // found: the found state gets the spec's drag sentence, the other two get
-  // the Spotlight-anchored variant.
+  // The Success screen's ruled dock line (first-run spec, pack copy) names
+  // no folder, so ONE sentence is true in every app-location state -- the
+  // per-state variants died with the redesign, and every case asserts the
+  // same ruled line.
   const cases = [
     [{ key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it from there.' },
-      /Drag Kosmos out of that folder/],
+      /Drag Kosmos onto the Dock, the strip of icons/],
     [{ key: 'app-location', state: 'attention', title: 'We could not find the Kosmos icon', detail: 'Not the same as it not being there.' },
-      /When you have the Kosmos icon in front of you/],
+      /Drag Kosmos onto the Dock, the strip of icons/],
     [{ key: 'app-location', state: 'unknown', title: 'We could not check where the Kosmos icon is', detail: 'Nothing is wrong.' },
-      /When you have the Kosmos icon in front of you/],
+      /Drag Kosmos onto the Dock, the strip of icons/],
   ];
   const PRELUDE_VARS = `
-    function frForkActions() {}
     let FR_RETURN_GEN = 0;
     let FR_MACHINE_LOOK = null;
   `;
@@ -3894,8 +3896,8 @@ test('the return step paints a look in progress, then the engine answer, and cou
   await broken.done;
   assert.match(broken.els['fr-return-row'].innerHTML, /could not check where the Kosmos icon is right now/);
   assert.match(broken.els['fr-return-row'].innerHTML, /fr-check unknown/);
-  assert.ok(!/out of that folder/.test(broken.els['fr-return-dock'].innerHTML),
-    'the failure path left a folder-pointing dock over a row that named none');
+  assert.match(broken.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/,
+    'the failure path lost the ruled dock line');
 
   // A payload WITHOUT the appLocation field (an old server, a shape drift)
   // lands on could-not-ask too, never on the placeholder forever.
@@ -3957,7 +3959,6 @@ test('the return step: entries share one in-flight look, and a stale look cannot
     const frCheckRow = ${realRow.toString()};
     const __els = {};
     const document = { getElementById: (id) => (__els[id] = __els[id] || { innerHTML: '', textContent: '' }) };
-    function frForkActions() {}
     let FR_RETURN_GEN = 0;
     let FR_MACHINE_LOOK = null;
     let __calls = 0; let __resolve = null;
@@ -3976,7 +3977,7 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   // without touching the pane (both write the same answer here, so the
   // observable pin is: the answer landed exactly, and the dock matches it).
   assert.match(t5.els['fr-return-row'].innerHTML, /Kosmos is in your Applications folder/);
-  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos out of that folder/);
+  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/);
 
   // Second scenario: entries 3 and 4 SHARE one look (asserted by call
   // count), the shared look fails, and both continuations paint the same
@@ -3993,8 +3994,8 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   await e3; await e4;
   assert.match(t5.els['fr-return-row'].innerHTML, /right now/,
     'the failure path did not paint could-not-ask');
-  assert.ok(!/out of that folder/.test(t5.els['fr-return-dock'].innerHTML),
-    'a folder-pointing dock outlived the row that named no folder');
+  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/,
+    'the failure repaint lost the ruled dock line');
 
   // ⚠️ THE GUARD'S JOB, and the scenarios that red when the guard lines are
   // deleted (round 5 proved the shared-look scenarios above pass without
