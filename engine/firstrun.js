@@ -125,7 +125,10 @@ function state() {
     // than silently picking one.
     fleetKnown: here.known,
     fleetCount: here.count,
-    fleetNames: here.names,
+    // No names on the wire: the fleet screen shows the COUNT only (Josh's
+    // ruling, 2026-08-17, the 600-agent case). fleet() still derives names
+    // for callers that need them; a field nothing reads is a claim nothing
+    // checks.
     path: path_,
     subscription: sub,
   };

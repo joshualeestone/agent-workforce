@@ -900,8 +900,9 @@ svg { display: block; }
 .fr-check.checking { border: 1px dashed var(--separator);
                      padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
-           /* --label-2 for the same AA reason as .fr-bar above: the ok tick
-              and the unknown ? measured 3.0-4.0:1 at 15px. The glyph has a
+           /* --label-2, measured: --label-3 at this size sits under the
+              4.5:1 AA floor (the ok tick and the unknown ? read 3.0-4.0:1
+              at 15px). The glyph has a
               visually-hidden spoken word beside it, but a visible glyph a
               sighted-low-vision reader cannot see fails the same floor. */
            line-height: 1.35; color: var(--label-2); }
@@ -9164,8 +9165,8 @@ let FR_MACHINE_LOOK = null;
 async function frPaintReturn() {
   const gen = ++FR_RETURN_GEN;
   // The Success screen's frame (spec screen 1): the check row and the dock
-  // line ARE the body; no separate intro paragraph is drawn in the pack.
-  const intro = '';
+  // line ARE the body; no separate intro paragraph is drawn in the pack
+  // (the container is cleared below so a repaint cannot stack).
   // The spec's ruled dock line (pack copy, unchanged): it names no folder,
   // so it is true in every app-location state and needs no variants.
   const drag = () => '<p><b>Keep it one click away.</b> Drag Kosmos onto the '
@@ -9173,7 +9174,7 @@ async function frPaintReturn() {
   const introEl = document.getElementById('fr-return-intro');
   const rowEl = document.getElementById('fr-return-row');
   const dockEl = document.getElementById('fr-return-dock');
-  introEl.innerHTML = intro;
+  introEl.innerHTML = '';
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
   // what is true at that moment, and a LOCAL state the wire cannot claim.
   rowEl.innerHTML = frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' }, { allowLocal: true });
@@ -9270,8 +9271,8 @@ function frClose() {
 async function frFinish(then) {
   /**
    * ⚠️ ONE FLAG, NOT A DISABLED BUTTON. The first version guarded re-entry by
-   * disabling Continue -- which does nothing about Skip or Escape, and both of
-   * those call this too. Clicking "Make my first agent" and then pressing
+   * disabling Continue -- which does nothing about Escape, which calls this
+   * too. Clicking "Make my first agent" and then pressing
    * Escape while the POST was in flight ran TWO completions: two writes, two
    * closes, and BOTH callbacks, so `openCreate()` opened the create panel and
    * `showTab('agents')` immediately took it away again.

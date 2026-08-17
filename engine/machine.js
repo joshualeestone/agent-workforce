@@ -663,7 +663,7 @@ function revealApp(opts) {
   // synchronously on the server's event loop, so a hung `open` with no
   // timeout blocks every viewer of the board.
   const run = appRevealRunner
-    || ((cmd, args) => require('node:child_process').execFileSync(cmd, args, { timeout: 5000, stdio: 'ignore' }));
+    || ((cmd, args) => execFileSync(cmd, args, { timeout: 5000, stdio: 'ignore' }));
   try {
     run('/usr/bin/open', ['-R', found]);
   } catch (err) {

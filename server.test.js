@@ -4408,3 +4408,27 @@ test('the reveal-app route opens Finder through the engine and honours nothing f
     fs.rmSync(nodePath.join(appsDir, 'Kosmos.app'), { recursive: true, force: true });
   }
 });
+
+test('the reveal-app route keeps refusals and programming errors apart', async () => {
+  // The mapping under test lives in the ROUTE, so the engine is patched
+  // directly (same module instance the server holds): an honest refusal is
+  // a 409 wearing the engine's own sentence, a programming error is a 500
+  // in the sibling routes' shape -- never a refusal in the dock.
+  const machine = require('./engine/machine');
+  const real = machine.revealApp;
+  try {
+    machine.revealApp = () => { throw new Error('we could not look just now, so we cannot say where the icon is'); };
+    const refused = await req('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(refused.status, 409);
+    assert.match(JSON.parse(refused.body).error, /could not look just now/);
+
+    machine.revealApp = () => { throw new TypeError('x is not a function'); };
+    const bug = await req('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(bug.status, 500, 'a programming error answered as an honest refusal');
+    const body = JSON.parse(bug.body);
+    assert.match(body.error, /our side/, 'the 500 sentence leaked internals or vanished');
+    assert.ok(!/not a function/.test(body.error), 'the raw internal sentence reached the refusal slot');
+  } finally {
+    machine.revealApp = real;
+  }
+});

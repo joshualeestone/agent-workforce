@@ -1877,6 +1877,14 @@ const server = http.createServer((req, res) => {
     try {
       sendJson(res, 200, machine.revealApp());
     } catch (err) {
+      // The engine rethrows programming errors so a bug does not wear the
+      // failure's clothes; the route keeps that split. A ReferenceError
+      // painted into the dock as an honest refusal is the same lie one
+      // layer up, so it answers 500 with the sibling routes' shape.
+      if (err instanceof ReferenceError || err instanceof TypeError) {
+        sendJson(res, 500, { error: 'something went wrong on our side showing it', detail: String((err && err.message) || err) });
+        return;
+      }
       sendJson(res, 409, { error: String((err && err.message) || 'we could not show it') });
     }
     return;

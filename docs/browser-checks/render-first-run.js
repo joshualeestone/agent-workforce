@@ -134,12 +134,12 @@ const FLEET_REAL = null; // let the real server answer
 // the live /api/first-run, so a create-path machine would commit different
 // buttons under the same four filenames (the same drift the clear shot was
 // moved off the live route for). Adopt, matching the committed pictures.
-const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, fleetNames: ['Splinter', 'Angel'], path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_RETURN = FLEET_ADOPT;
-const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
-const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, fleetNames: ['Splinter', 'Casey Jones', 'Angel'], path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
+const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
+const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
 
 const SHOTS = [
   // The pack's order (first-run spec): Success opens the flow and carries
@@ -456,6 +456,9 @@ async function look(page, name) {
             { timeout: 4000 },
           ).catch(() => problems.push(`${shot.name} [${scheme}]: the failure sentence outlived a reveal that worked`));
           await page.unroute('**/api/reveal-app');
+          // An unspent allowance must not survive into later shots, where it
+          // would silently absorb one GENUINE 409.
+          plannedRefusals = 0;
         }
       }
       const seen = await look(page, shot.name);

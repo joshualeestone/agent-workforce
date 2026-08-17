@@ -850,6 +850,21 @@ test('revealApp opens Finder at the icon it re-derives, and refuses honestly whe
 
     // The same malformed-override guard as the check.
     assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty array/);
+
+    // Errored is NOT not-found: a folder we cannot read refuses with the
+    // could-not-look sentence, never the not-there one. (Mode 000 does not
+    // seal for root, same caveat as the render harness's blind fixture.)
+    const sealed = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-sealed-'));
+    fs.chmodSync(sealed, 0o000);
+    try {
+      args = null;
+      assert.throws(() => machine.revealApp({ appDirs: [nodePath.join(sealed, 'Applications')] }),
+        /could not look just now/);
+      assert.equal(args, null, 'a could-not-look refusal ran the opener anyway');
+    } finally {
+      fs.chmodSync(sealed, 0o755);
+      fs.rmSync(sealed, { recursive: true, force: true });
+    }
   } finally {
     machine.setAppRevealRunner(null);
     // Leaked sandboxes are how one test's world becomes another's -- the
