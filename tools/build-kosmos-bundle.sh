@@ -209,8 +209,9 @@ rm -rf "$SMOKE_ROOTS"
 
 # ---- the tarball ------------------------------------------------------------
 # What shipped, recorded, same argument as the tmux bundle and stronger
-# here: this is the half that changes between releases, package.json is a
-# static 0.1.0, and a user report must be traceable to a binary.
+# here: this is the half that pins the exact build (package.json is bumped
+# per release since 0.1.1, but the commit is what a user report must be
+# traceable to, and the stamp carries both).
 {
   echo "app:    $(cd "$REPO" && git describe --always --dirty 2>/dev/null || echo unknown) (package.json $(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version' 2>/dev/null || echo '?'))"
   echo "node:   $("$STAGE/runtime/bin/node" --version)"
