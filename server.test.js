@@ -3541,7 +3541,7 @@ test('first run fails CLOSED: an unreadable answer shows no onboarding at all', 
 
 test('the first-run buttons are ASSIGNED, not accumulated', () => {
   /**
-   * ⚠️ Continue means a different thing on each of the five steps, and the
+   * ⚠️ Continue means a different thing on each of the six steps, and the
    * one-of-three fork lives on step 6 now. `addEventListener` on a button whose meaning changes
    * leaves every previous meaning still bound, so Back-then-Continue fires two
    * of them — measured as "advanced two steps at once" the first time it was
@@ -3805,7 +3805,7 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     // And ONLY Continue: a second button reappearing here is the fork
     // creeping back to the step it was deliberately moved off.
     assert.ok(!got.actions.alt,
-      `payload ${JSON.stringify(FR)} grew a second button at step 4: ${JSON.stringify(got.actions)}`);
+      `payload ${JSON.stringify(FR)} grew a second button at the fork step: ${JSON.stringify(got.actions)}`);
   }
 
   // Both ways out are still offered on every path -- at step 5, where the
@@ -3823,10 +3823,11 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
   }
 
   // ⚠️ The fork guards its payload with the SAME predicate as the fleet
-  // screen, or the pairs drift from the path logic (they did, in the move to
-  // step 5): an adopt payload whose fleet could not be counted had step 4
-  // honestly refuse to guess while step 5's button read "Take me to my
-  // agents" -- the fleet we could not count asserted as one that exists.
+  // screen, or the pairs drift from the path logic (they did, when the fork
+  // moved to the orientation step): an adopt payload whose fleet could not
+  // be counted had the fleet screen honestly refuse to guess while the
+  // orientation step's button read "Take me to my agents" -- the fleet we
+  // could not count asserted as one that exists.
   // Every uncountable-adopt shape lands on the neutral pair, which promises
   // only the board.
   for (const FR of [
@@ -4386,7 +4387,7 @@ test('the About-you gate exists in production code (static pins)', () => {
   assert.match(fn.slice(0, 4000), /nameEl\.value\.trim\(\) !== '' && doEl\.value\.trim\(\) !== ''/,
     'the two-answer gate is gone: Continue no longer waits');
   const put = fn.indexOf("fetch('/api/you'");
-  const advance = fn.indexOf('frGo(5)');
+  const advance = fn.indexOf('frGo(FR_STEP_YOU + 1)');
   assert.ok(put > -1 && advance > -1 && put < advance,
     'the save no longer happens before the advance (or either vanished)');
   assert.match(fn.slice(0, 4000), /aria-required="true"/,

@@ -7778,7 +7778,7 @@ setInterval(() => {
        thirteen running agents looks broken.
    ========================================================================== */
 
-// 6 since the About-you step landed (PIN-2026-08-14-1913CDT: "five setup
+// 6 since the About-you step landed at slot 4 (the PIN below predates it and counted five) (PIN-2026-08-14-1913CDT: "five setup
 // steps -- welcome, model, this computer, your agents, getting back").
 const FR_STEPS = 6;
 // The return pane's step number, named and used by the generation bump and
@@ -7991,7 +7991,7 @@ async function frPaintYou() {
         gate();
         return;
       }
-      frGo(5);
+      frGo(FR_STEP_YOU + 1);
     } catch {
       if (entry !== FR_YOU_GEN) return;
       saving = false;
@@ -9028,7 +9028,7 @@ async function frPaintReturn() {
     const body = await FR_MACHINE_LOOK;
     if (gen !== FR_RETURN_GEN) return;
     // Its OWN field, deliberately not one of `checks` -- see engine/machine.js:
-    // folded into the rows, step 2 counted it and step 4 captioned it as a
+    // folded into the rows, step 2 counted it and the fleet screen captioned it as a
     // reason an agent may not run, which it is not.
     const found = body.appLocation;
     // ⚠️ Having something to SAY is part of the shape: {state:'ok'} with no
