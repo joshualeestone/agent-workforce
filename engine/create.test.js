@@ -477,6 +477,10 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
     sales: /they send it, always/i,
     support: /draft, never send/i,
     recruiting: /every hiring decision is theirs/i,
+    // The blurb claims it briefs other agents; until agent-to-agent
+    // messaging exists, the boundary is that it does not do that itself
+    // (Mona Lisa's ruled caution, 2026-08-17; card #51 carries the build).
+    pm: /you do not brief other agents\s+yourself/i,
   };
   for (const role of roles.ROLES.filter((r) => r.caution)) {
     const mustSay = BOUNDARY[role.key];
@@ -506,9 +510,13 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
   // taken off every card.
   // ea moved OUT of this list with the 2026-08-16 catalogue: it gained the
   // draft-never-send caution (the send-on-your-behalf roles all carry one).
+  // pm moved OUT 2026-08-17 (Mona Lisa's ruling, 493b79d): its blurb is
+  // the one in the catalogue claiming it acts on other agents, and until
+  // agent-to-agent messaging (#51) exists that claim needs the same
+  // caution the other overstating blurbs carry.
   // The rule this loop holds is unchanged: most roles carry none, so the
-  // ones that do still mean something. 8 of 26 have one.
-  for (const key of ['pm', 'writer', 'researcher', 'engineer', 'data', 'design']) {
+  // ones that do still mean something. 9 of 26 have one.
+  for (const key of ['writer', 'researcher', 'engineer', 'data', 'design']) {
     assert.ok(!roles.byKey(key).caution,
       `${key} carries a caution, and a warning on everything warns about nothing`);
   }
