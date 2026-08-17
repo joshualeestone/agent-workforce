@@ -33,6 +33,28 @@ the join) and Mona Lisa's honesty rulings, under Josh's ship-iterate bar.
   shipped without it: "<Name> says it is on this." in says-vocabulary,
   never as an observation Kosmos cannot make.
 
+## The blind round's two findings, both fixed
+
+- Cross-project collision: every project counts tasks from 1, so one
+  agent on two projects can hold an open "task 1" on both, and a report
+  saying "task 1" cannot say which. The join now carries an AMBIGUITY
+  guard (joinTaskClaims, computed from the full store): a colliding
+  (who, number) pair joins as claimed null with the reason on every card
+  it touches, because rendering "says it is on this" on either would be
+  a definite claim the system cannot check. Teaching an unambiguous
+  spelling (and matching it) is the next slice; refusing to guess is
+  this one.
+- told-when-not: the API accepted a task assigned to a non-member while
+  syncAgent derives the block strictly from membership, so the route
+  answered told about a block that never listed the task. Assignment now
+  requires membership, refused inside the same atomic mutate that stores
+  the task ("that agent is not on this project..."), matching the
+  member-only dropdown the screen already enforces.
+
+Plus the review's hand-edited-store nit: a non-integer stored number is
+regex when interpolated (1.5 matches "task 175"), so claimFor now
+refuses non-integers as could-not-tell instead of matching by accident.
+
 ## Deliberately not in this slice
 
 The pack's richer card states ("Waiting on you", "2 of 3 assigned"),
@@ -43,7 +65,7 @@ iterate against Josh's use, per the night's directive.
 
 ## Verification
 
-node --test 797/797 (claimFor's boundary/three-answer contract; the
+node --test 799/799 (claimFor's boundary/three-answer contract; the
 described project joining from the REAL commitments store, incl. the
 absent-record-is-null case; the teaching block scoped to the right
 agent with closed tasks excluded and the one-arg compatibility; the

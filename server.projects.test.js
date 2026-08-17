@@ -1609,7 +1609,15 @@ test('the task routes: create over the wire, refusals write nothing, close and r
   assert.equal(t1.number, 1);
   assert.equal(t1.who, null);
 
-  // And one given to somebody; the number advances.
+  // And one given to somebody; the number advances. Assignment requires
+  // membership (a non-member told would be a block write that never
+  // happened), so april joins first and a stranger is refused.
+  await post(`/api/project/${made.project.id}/agent/april`, {});
+  const refused = await post(`/api/project/${made.project.id}/tasks`, {
+    sentence: 'For a stranger', who: 'nobody-here',
+  });
+  assert.equal(refused.status, 400, 'a non-member assignment was accepted');
+  assert.match(json(refused).error, /not on this project/);
   const t2 = json(await post(`/api/project/${made.project.id}/tasks`, {
     sentence: 'Settle the trial length', who: 'april',
   })).task;

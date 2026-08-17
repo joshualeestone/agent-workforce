@@ -67,6 +67,16 @@ function create(projectId, { sentence, detail, who } = {}, roster) {
     : (whoKey ? null : undefined);
   let made;
   projects.mutate(projectId, (p) => {
+    // ⚠️ Membership is checked HERE, inside the same read that stores the
+    // task, never from a separate earlier read. The screen only offers
+    // members, so this refusal is for the API path -- without it the route
+    // answered `told` while syncAgent (which derives the block strictly
+    // from membership) had silently written a block that never mentioned
+    // the task. A refusal is honest; a told-when-not is the lie this
+    // module's header forbids.
+    if (whoKey && !(p.agents || []).includes(whoKey)) {
+      throw new Error('that agent is not on this project, so the task cannot be given to it');
+    }
     const number = (p.taskCounter || 0) + 1;
     made = {
       number,
@@ -155,7 +165,14 @@ function claimFor(task, reading) {
       because: (reading && reading.because) || 'we could not read what it reports holding',
     };
   }
-  const re = new RegExp('\\btask\\s+' + Number(task.number) + '\\b', 'i');
+  // Server-issued numbers are integers; a hand-edited store can hold
+  // anything, and a non-integer interpolated into the pattern is regex
+  // (1.5 matches "task 175"). Same way-out validation commitments.js does.
+  const n = Number(task.number);
+  if (!Number.isInteger(n)) {
+    return { claimed: null, because: 'this task\'s number is not a whole number, so a report cannot name it' };
+  }
+  const re = new RegExp('\\btask\\s+' + n + '\\b', 'i');
   const named = (reading.commitments || []).some(
     (c) => c && typeof c.what === 'string' && re.test(c.what));
   return { claimed: named, because: null };

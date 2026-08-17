@@ -58,6 +58,11 @@ test('who records assignment with the everSeen honesty shape', () => {
   // A real card from the fleet fixture, never a hand-built stand-in (the
   // fixture-discipline lint enforces this for exactly the dead-field class).
   const roster = fleet.install([fleet.agent('april', { state: 'idle' })]).agents;
+  // Assignment requires membership, so the fixtures join first -- including
+  // the typo'd name, because a mistyped MEMBER is a real recorded state
+  // (the everSeen machinery in projects.js exists for exactly it).
+  projects.addAgent(p.id, 'april', roster);
+  projects.addAgent(p.id, 'apirl', roster);
   assert.equal(tasks.create(p.id, { sentence: 'Seen', who: 'april' }, roster).whoSeen, true);
   assert.equal(tasks.create(p.id, { sentence: 'Typo', who: 'apirl' }, roster).whoSeen, false);
   assert.equal(tasks.create(p.id, { sentence: 'No roster', who: 'april' }, null).whoSeen, null);
@@ -66,6 +71,7 @@ test('who records assignment with the everSeen honesty shape', () => {
 
 test('close and reopen edit the record and nothing else', () => {
   const p = freshProject('Closing');
+  projects.addAgent(p.id, 'april', null);
   tasks.create(p.id, { sentence: 'Done soon', who: 'april' });
   const closed = tasks.close(p.id, 1);
   assert.ok(closed.closedAt, 'close did not stamp');
@@ -76,6 +82,8 @@ test('close and reopen edit the record and nothing else', () => {
 
 test("the column shows a task with somebody on it that is not finished; everything else is behind the door", () => {
   const p = freshProject('Doors');
+  projects.addAgent(p.id, 'april', null);
+  projects.addAgent(p.id, 'mikey', null);
   tasks.create(p.id, { sentence: 'Assigned open', who: 'april' });
   tasks.create(p.id, { sentence: 'Nobody yet' });
   tasks.create(p.id, { sentence: 'Assigned closed', who: 'mikey' });
@@ -105,11 +113,58 @@ test('claimFor: deterministic word-bounded matching, three answers never two', (
   // Nothing to compute: unassigned and closed tasks.
   assert.equal(tasks.claimFor({ number: 1, who: null }, mk(['task 1'])), null);
   assert.equal(tasks.claimFor({ number: 1, who: 'a', closedAt: 'x' }, mk(['task 1'])), null);
+  // A hand-edited store can hold a non-integer number, and 1.5 in a
+  // pattern is regex (it would match "task 175"); the matcher refuses to
+  // guess rather than matching by accident.
+  const odd = tasks.claimFor({ number: 1.5, who: 'a' }, mk(['task 175']));
+  assert.equal(odd.claimed, null);
+  assert.match(odd.because, /whole number/);
+});
+
+test('a task cannot be given to an agent that is not on the project', () => {
+  const p = freshProject('Members Only');
+  // The screen only offers members; this refusal is for the API path,
+  // where a 200-with-told for a stranger would claim a block write that
+  // membership-derived syncAgent never made.
+  assert.throws(() => tasks.create(p.id, { sentence: 'For a stranger', who: 'outsider' }),
+    /not on this project/);
+  const after = projects.readAll().find((x) => x.id === p.id);
+  assert.equal((after.tasks || []).length, 0, 'the refusal wrote a task');
+  assert.ok(!after.taskCounter, 'the refusal spent a number');
+});
+
+test('a task number an agent holds on two projects joins as could-not-tell on both', () => {
+  const commitments = require('./commitments');
+  const a = freshProject('Collide A');
+  const b = freshProject('Collide B');
+  projects.addAgent(a.id, 'twohats', null);
+  projects.addAgent(b.id, 'twohats', null);
+  tasks.create(a.id, { sentence: 'First on A', who: 'twohats' });
+  tasks.create(b.id, { sentence: 'First on B', who: 'twohats' });
+  tasks.create(b.id, { sentence: 'Second on B', who: 'twohats' });
+  commitments.report('twohats', [
+    { what: 'On task 1: whichever one this is' },
+    { what: 'also holding task 2: the second thing' },
+  ]);
+  // Both cards refuse the definite answer: "task 1" cannot say which
+  // project it means, and rendering a guess is the lie the null exists for.
+  const gotA = projects.get(a.id, []);
+  const gotB = projects.get(b.id, []);
+  assert.equal(gotA.tasks[0].claim.claimed, null, 'ambiguous task 1 rendered a definite answer on A');
+  assert.match(gotA.tasks[0].claim.because, /more than one/);
+  assert.equal(gotB.tasks[0].claim.claimed, null, 'ambiguous task 1 rendered a definite answer on B');
+  // The guard refuses only what it cannot tell apart: the unique number joins.
+  assert.equal(gotB.tasks[1].claim.claimed, true, 'the guard over-fired on a unique number');
+  // And closing one twin dissolves the collision for the survivor.
+  tasks.close(a.id, 1);
+  assert.equal(projects.get(b.id, []).tasks[0].claim.claimed, true, 'a closed twin still blocks the join');
 });
 
 test('the described project carries claims joined from the real commitments store', () => {
   const commitments = require('./commitments');
   const p = freshProject('Join Home');
+  projects.addAgent(p.id, 'joiner', null);
+  projects.addAgent(p.id, 'never-reported', null);
   tasks.create(p.id, { sentence: 'Rewrite the checklist', who: 'joiner' });
   tasks.create(p.id, { sentence: 'Second thing', who: 'joiner' });
   tasks.create(p.id, { sentence: 'Nobody task' });
@@ -128,6 +183,8 @@ test('the described project carries claims joined from the real commitments stor
 
 test('the managed block teaches the join: tasks listed in the matching spelling, for the right agent only', () => {
   const p = freshProject('Teach Home');
+  projects.addAgent(p.id, 'teachee', null);
+  projects.addAgent(p.id, 'other', null);
   tasks.create(p.id, { sentence: 'Mine to do', who: 'teachee' });
   tasks.create(p.id, { sentence: 'Somebody else\'s', who: 'other' });
   tasks.create(p.id, { sentence: 'Closed already', who: 'teachee' });

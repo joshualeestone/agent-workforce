@@ -361,12 +361,32 @@ function profileRole(card) {
  * engine/commitments.read, required lazily because tasks requires this
  * module at load (the cycle resolves at call time). One read per assignee
  * per project, memoized for the call.
+ *
+ * ⚠️ The AMBIGUITY guard: task numbers are project-scoped and every project
+ * counts from 1, so one agent on two projects can hold an open "task 1" on
+ * both -- and a report saying "task 1" cannot say which. Rendering "says it
+ * is on this" on either card would be a definite claim the system cannot
+ * check, which is exactly what claimed:null exists to refuse. So a
+ * colliding (who, number) pair joins as null-with-because on EVERY card it
+ * touches, computed here from the full store (`all`), never guessed.
+ * Teaching an unambiguous spelling is the next slice; refusing to guess is
+ * this one.
  */
-function joinTaskClaims(tasks) {
+function joinTaskClaims(tasks, all) {
   const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
   if (!withWho.length) return tasks;
   const tasksMod = require('./tasks');
   const commitments = require('./commitments');
+  const everyProject = Array.isArray(all) ? all : readAll();
+  const counts = new Map();
+  for (const p of everyProject) {
+    for (const t of p.tasks || []) {
+      if (!t || !t.who || t.closedAt) continue;
+      const key = t.who + ' ' + Number(t.number);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const ambiguous = (t) => counts.get(t.who + ' ' + Number(t.number)) > 1;
   const readings = new Map();
   const readFor = (who) => {
     if (!readings.has(who)) {
@@ -377,12 +397,24 @@ function joinTaskClaims(tasks) {
     }
     return readings.get(who);
   };
-  return tasks.map((t) => (t && t.who && !t.closedAt
-    ? { ...t, claim: tasksMod.claimFor(t, readFor(t.who)) }
-    : t));
+  return tasks.map((t) => {
+    if (!t || !t.who || t.closedAt) return t;
+    if (ambiguous(t)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'more than one of this agent\'s projects has an open task '
+            + Number(t.number) + ', so a report saying "task '
+            + Number(t.number) + '" cannot say which one it means',
+        },
+      };
+    }
+    return { ...t, claim: tasksMod.claimFor(t, readFor(t.who)) };
+  });
 }
 
-function describe(project, roster) {
+function describe(project, roster, all) {
   const cards = Array.isArray(roster) ? roster : [];
   // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
   // and never revisited -- so an agent added while tmux could not be read was
@@ -497,7 +529,7 @@ function describe(project, roster) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : []),
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the
@@ -541,12 +573,17 @@ function describe(project, roster) {
 }
 
 function list(roster) {
-  return readAll().map((p) => describe(p, roster));
+  // One read of the store shared by every describe: the ambiguity guard
+  // needs the full list anyway, so each project's join reuses it instead
+  // of re-reading per project.
+  const all = readAll();
+  return all.map((p) => describe(p, roster, all));
 }
 
 function get(id, roster) {
-  const found = readAll().find((p) => p.id === id);
-  return found ? describe(found, roster) : null;
+  const all = readAll();
+  const found = all.find((p) => p.id === id);
+  return found ? describe(found, roster, all) : null;
 }
 
 /**
@@ -558,9 +595,10 @@ function get(id, roster) {
 function projectsFor(sessionName, roster) {
   const key = String(sessionName || '');
   if (!key) return [];
-  return readAll()
+  const all = readAll();
+  return all
     .filter((p) => (p.agents || []).includes(key))
-    .map((p) => describe(p, roster));
+    .map((p) => describe(p, roster, all));
 }
 
 /**
