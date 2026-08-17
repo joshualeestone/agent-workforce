@@ -62,10 +62,12 @@ conformance pairs in channel are that checkpoint).
 
 Known deviations of record, flagged in channel with the pairs: the two
 ruled honest-sending sentences (screens 2 and 5); the real count and
-names list on screen 6; the engine's three states on screen 4; Back
-and Skip on steps 2-6 (the wizard's trap-escape, absent from the
-prototype); the darker glyph ink on the check marks (AA floor, the
-pack's gold-deep on its own tint is 2.78).
+names list on screen 6; the engine's three states on screen 4; the
+darker glyph ink on the check marks (AA floor, the
+pack's gold-deep on its own tint is 2.78). Back and Skip were shipped
+as a trap-escape deviation in the first pass and then REMOVED at Josh's
+word (2026-08-17, every step) and the pack's own decisions table; the
+surviving exit is Escape, which marks first run seen.
 
 ## Verification
 

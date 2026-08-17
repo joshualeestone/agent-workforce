@@ -666,7 +666,7 @@ function revealApp(opts) {
   } catch {
     throw new Error('we found the icon but could not open a Finder window for it');
   }
-  return { opened: true };
+  return { ok: true };
 }
 
 /**

@@ -859,15 +859,6 @@ svg { display: block; }
 .fr-box { background: var(--bg-elevated); border: 0.5px solid var(--separator);
           border-radius: 14px; box-shadow: var(--shadow-card);
           max-width: 40rem; width: 100%; overflow: hidden; margin: auto; }
-.fr-bar { padding: var(--space-5) var(--space-7);
-          border-bottom: 0.5px solid var(--separator);
-          /* --label-2, measured (orientation branch): --label-3 at this 12px
-             size reads 3.04:1 light / 3.76:1 dark, under the 4.5:1 AA floor,
-             on every one of the wizard's shots -- the same twice-fixed class
-             as the projects screen's hints. Pre-existing on main (its own
-             harness reports it, 32 problems); fixed where the branch was
-             already standing. */
-          font: var(--text-callout) var(--font-ui); color: var(--label-2); }
 .fr-body { padding: var(--space-8) var(--space-7); }
 .fr-body h2 { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
               margin: 0 0 var(--space-5); }
@@ -921,17 +912,6 @@ svg { display: block; }
 .fr-cdetail { font: var(--text-callout) var(--font-ui); color: var(--label-2);
               line-height: 1.5; }
 
-/* The names of agents already here. Not links and not buttons: nothing on this
-   screen does anything to them, and a chip that looks clickable and is not is a
-   promise the same as any other. */
-.fr-names { display: flex; flex-wrap: wrap; gap: var(--space-3);
-            margin: 0 0 var(--space-6); padding: 0; list-style: none; }
-.fr-name { font: var(--text-callout) var(--font-ui); color: var(--label);
-           background: var(--bg-sunken); border: 0.5px solid var(--separator);
-           border-radius: var(--radius-pill); padding: var(--space-3) var(--space-5); }
-.fr-more { font: var(--text-callout) var(--font-ui); color: var(--label-2);
-           align-self: center; }
-
 .fr-acts { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center;
            padding: var(--space-6) var(--space-7) var(--space-8);
            border-top: 0.5px solid var(--separator); }
@@ -943,12 +923,6 @@ svg { display: block; }
               font-weight: 600; }
 .fr-primary:hover { background: var(--label); opacity: 0.88; }
 .fr-spacer { margin-left: auto; }
-/* The way out. Deliberately quiet and deliberately present: an overlay with no
-   exit is a trap the first time the detection behind it is wrong. */
-.fr-skip { background: none; border: 0; text-decoration: underline;
-           font: var(--text-callout) var(--font-ui); color: var(--label-2);
-           cursor: pointer; padding: var(--space-4); }
-.fr-skip:hover { color: var(--label); }
 .fr-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
            line-height: 1.5; margin-top: var(--space-6);
            padding: var(--space-5) var(--space-6); border-radius: 10px;
@@ -1091,9 +1065,6 @@ svg { display: block; }
 }
 #firstrun #fr-alt:hover { background: rgba(198,154,50,.14); }
 #firstrun #fr-alt:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
-#firstrun #fr-back { border: 0; background: none; text-decoration: underline;
-  font: var(--text-callout) var(--font-ui); color: var(--k-ink-2); cursor: pointer; padding: var(--space-4); }
-#firstrun #fr-back:hover { color: var(--k-ink); }
 /* The heading still TAKES focus on each step (SC 4.1.3); the pack draws no
    ring on it, and a heading is not interactive, so the ring goes. */
 #firstrun .fr-body h2:focus-visible { outline: none; }
@@ -1115,16 +1086,13 @@ svg { display: block; }
    schemes, so every element inside must take its ink from the pack palette,
    never from the app's scheme-aware tokens -- a dark-mode token on this
    forced-light card is white on white (caught by the render checker). */
-#firstrun .fr-skip { color: var(--k-ink-2); }
-#firstrun .fr-skip:hover { color: var(--k-ink); }
 #firstrun .fr-note { color: var(--k-ink-2); background: rgba(184,137,32,.08);
                      border: 1px solid var(--k-rule); }
 #firstrun .fr-note b { color: var(--k-ink); }
 #firstrun .fr-msg { color: var(--k-ink); }
-#firstrun .fr-names .fr-name, #firstrun .fr-names .fr-more { color: var(--k-ink-2);
-  border-color: var(--k-rule); background: rgba(20,22,26,.03); }
 #firstrun .fr-youfine { color: var(--k-ink-2); }
 #firstrun .fc-word { color: var(--k-ink); }
+#firstrun .fr-revealrow { margin: 18px 0 22px; }
 #firstrun .fr-sleepbtn, #firstrun #fr-reveal {
   background: transparent; border: 1px solid var(--gold-deep); color: #14161a;
   border-radius: 10px; padding: calc(.45em - 1px) 1em; cursor: pointer;
@@ -1474,14 +1442,14 @@ svg { display: block; }
              it while the verdict is unknown pushes nobody into a second
              sign-in (the engine's asymmetry rule holds through the re-check). -->
         <p>Your agents run on your own subscription, on this computer.</p>
-        <div class="llm on"><span class="llm-m llm-disc gold" role="img" aria-label="Claude"></span><div class="llm-w"><b>Claude</b><small>Anthropic &middot; works today</small></div>
+        <div class="llm on"><span class="llm-m llm-disc gold" aria-hidden="true"></span><div class="llm-w"><b>Claude</b><small>Anthropic &middot; works today</small></div>
           <button class="connect-b" type="button" id="fr-llm-connect">Connect</button></div>
-        <div class="llm off"><span class="llm-m llm-disc" role="img" aria-label="Gemini"></span><div class="llm-w"><b>Gemini</b><small>Google</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" role="img" aria-label="OpenAI"></span><div class="llm-w"><b>GPT</b><small>OpenAI</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Gemini</b><small>Google</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>GPT</b><small>OpenAI</small></div><span class="soon">Coming soon</span></div>
         <p class="tier">Runs on this computer</p>
-        <div class="llm off"><span class="llm-m llm-disc" role="img" aria-label="Meta"></span><div class="llm-w"><b>Llama</b><small>Meta</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" role="img" aria-label="Qwen"></span><div class="llm-w"><b>Qwen</b><small>Alibaba</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" role="img" aria-label="Mistral"></span><div class="llm-w"><b>Mistral</b><small>Open weights</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Llama</b><small>Meta</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Qwen</b><small>Alibaba</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Mistral</b><small>Open weights</small></div><span class="soon">Coming soon</span></div>
         <div id="fr-sub"></div>
         <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
         <!-- ⚠️ The connect flow's phase announcements, VISUALLY HIDDEN on
@@ -1531,11 +1499,10 @@ svg { display: block; }
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
-          <!-- The dock is a live region too: its instruction CHANGES with
-               the answer (folderless upgraded to "out of that folder"), and
-               a screen-reader user who heard the pre-paint would never hear
-               the correction -- step 2's reconciling sentence made the same
-               call for the same SC 4.1.3 reason. -->
+          <!-- The dock is a live region too: the reveal button's failure
+               sentences land here (frRevealSay), and a screen-reader user
+               who fired that click would otherwise never hear the refusal --
+               the same SC 4.1.3 call as the check row above. -->
           <div id="fr-return-dock" role="status" aria-live="polite"></div>
         </div>
       </div>
@@ -7972,7 +7939,7 @@ let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
 let FR_FORGOT = false;    // the completion flag did not stick, and we said so
-let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and Continue at once
+let FR_FINISHING = false; // a completion is in flight; guards Escape and Continue at once
 // ⚠️ Kept so the fork step cannot promise something step 2 just contradicted. Null
 // until the check screen has actually answered -- an empty array here would be
 // "we looked and found nothing wrong", which is not the same thing.
@@ -7992,9 +7959,10 @@ function frActions(primary, alt) {
   next.textContent = primary.label;
   next.onclick = primary.go;
   next.disabled = false;
-  // ⚠️ And the ARIA mirror with it. Step 4's gate sets aria-disabled on this
-  // shared button; without clearing it here, Back out of an empty About-you
-  // left every later step's Continue announcing "dimmed" while enabled.
+  // ⚠️ And the ARIA mirror with it. Step 5's gate sets aria-disabled on this
+  // shared button; without clearing it here, any later paint of the shared
+  // Continue announced "dimmed" while enabled (first caught through the old
+  // Back button; the reset matters for every repaint, so it stays).
   next.removeAttribute('aria-disabled');
   if (alt) {
     other.hidden = false;
@@ -8911,7 +8879,9 @@ function frConnPaintProgress(progress) {
 function frRevealSay(html) {
   const dock = document.getElementById('fr-return-dock');
   let m = dock.querySelector('.fr-msg');
-  if (!m) { dock.insertAdjacentHTML('afterbegin', '<p class="fr-msg" role="status"></p>'); m = dock.querySelector('.fr-msg'); }
+  // No role on the child: the dock itself is the live region, and a status
+  // inside a status double-announces on some screen readers.
+  if (!m) { dock.insertAdjacentHTML('afterbegin', '<p class="fr-msg"></p>'); m = dock.querySelector('.fr-msg'); }
   m.innerHTML = html;
 }
 document.getElementById('fr-pane-1').addEventListener('click', async (e) => {
@@ -9003,10 +8973,14 @@ function frPaintSubscription() {
    * somebody who just signed in through Terminal gets their green row from the
    * same button — and the two-button bar stays two buttons.
    *
-   * ⚠️ And the `unknown` state above deliberately does NOT get a Connect
-   * button. Unknown means this machine may already be signed in by somebody
-   * who pays; pushing them toward a sign-in flow is the exact asymmetry
-   * `engine/subscription.js` exists to prevent. They keep Check again.
+   * ⚠️ And the VERDICT ROW for the `unknown` state above carries no Connect
+   * of its own. The pack's static provider list (pane 3 markup) does show
+   * its Connect button in every state -- that is the pack's drawing, and it
+   * stays honest because Connect RE-CHECKS the connection before doing
+   * anything, so a machine already signed in by somebody who pays gets its
+   * green row, never a second sign-in. That re-check is what preserves the
+   * asymmetry `engine/subscription.js` exists to prevent; the markup comment
+   * on the list says the same from its side.
    */
   frActions({ label: 'Connect Claude', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
 }
@@ -9175,21 +9149,17 @@ function frForkActions() {
 let FR_RETURN_GEN = 0;
 /* The machine look is SHARED while in flight: the route shells out twice
    with 5s timeouts on the server's event loop (its own header says it was
-   split out of /api/first-run for exactly that cost), and Back/Continue
-   between steps 4 and 5 used to re-fire it as fast as a person could
-   click. The promise resolves to the PARSED body so every awaiter can read
-   it (a Response body can be consumed once). */
+   split out of /api/first-run for exactly that cost), and repainting the
+   step used to re-fire it as fast as a person could click (the wizard had
+   Back then; any repaint racing a slow answer costs the same, so the share
+   stays). The promise resolves to the PARSED body so every awaiter can
+   read it (a Response body can be consumed once). */
 let FR_MACHINE_LOOK = null;
 async function frPaintReturn() {
   const gen = ++FR_RETURN_GEN;
   // The Success screen's frame (spec screen 1): the check row and the dock
   // line ARE the body; no separate intro paragraph is drawn in the pack.
   const intro = '';
-  // ⚠️ The spec's drag sentence says "out of that folder", which is only true
-  // once a folder was FOUND. The missing and could-not-check states name no
-  // folder, so they get a Spotlight-anchored variant -- an instruction
-  // pointing at a thing the row just said we do not have is the screen
-  // contradicting itself.
   // The spec's ruled dock line (pack copy, unchanged): it names no folder,
   // so it is true in every app-location state and needs no variants.
   const drag = () => '<p><b>Keep it one click away.</b> Drag Kosmos onto the '
@@ -9229,7 +9199,7 @@ async function frPaintReturn() {
     // click; a look that has gone stale refuses with its own sentence.
     rowEl.innerHTML = frCheckRow(found)
       + (found.state === 'ok'
-        ? '<div class="frow2" style="margin:18px 0 22px;"><button type="button" id="fr-reveal">Show me where it is</button></div>'
+        ? '<div class="fr-revealrow"><button type="button" id="fr-reveal">Show me where it is</button></div>'
         : '');
     dockEl.innerHTML = drag();
   } catch {
@@ -9361,6 +9331,11 @@ async function frFinish(then) {
 // (the visible Skip link is gone by the pack's ruling; Escape below is the exit)
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // ⚠️ IME guard, the composer's two-spelling rule: an Escape that cancels a
+  // Japanese/Chinese/Korean composition in the About-you fields is about the
+  // composition, not the wizard -- and this Escape is the ONLY exit now, so
+  // eating it here would tear down setup and mark first run seen.
+  if (e.isComposing || e.keyCode === 229) return;
   if (document.getElementById('firstrun').hidden) return;
   frFinish(() => showTab('agents'));
 });

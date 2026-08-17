@@ -4400,7 +4400,7 @@ test('the reveal-app route opens Finder through the engine and honours nothing f
   try {
     const res = await req('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
     assert.equal(res.status, 200);
-    assert.deepEqual(JSON.parse(res.body), { opened: true });
+    assert.deepEqual(JSON.parse(res.body), { ok: true });
     assert.ok(ran && ran[0] === '/usr/bin/open' && ran[1][0] === '-R', 'the engine did not drive the reveal');
     assert.match(ran[1][1], /Kosmos\.app$/, 'the revealed path is not the engine-derived bundle');
   } finally {

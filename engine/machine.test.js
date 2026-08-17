@@ -831,17 +831,18 @@ test('revealApp opens Finder at the icon it re-derives, and refuses honestly whe
   const nodePath = require('node:path');
   const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-'));
   fs.mkdirSync(nodePath.join(dir, 'Kosmos.app'));
+  let empty = null;
   let args = null;
   machine.setAppRevealRunner((cmd, a) => { args = [cmd, a]; });
   try {
     // Found: open -R at the RE-DERIVED path, nothing from any caller.
     const got = machine.revealApp({ appDirs: [dir] });
-    assert.deepEqual(got, { opened: true });
+    assert.deepEqual(got, { ok: true });
     assert.deepEqual(args, ['/usr/bin/open', ['-R', nodePath.join(dir, 'Kosmos.app')]]);
 
     // A FILE named Kosmos.app is not the app; the refusal sentence says
     // what to do, not what threw.
-    const empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-none-'));
+    empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-none-'));
     args = null;
     assert.throws(() => machine.revealApp({ appDirs: [empty] }), /could not find the Kosmos icon just now/);
     assert.equal(args, null, 'a refusal ran the opener anyway');
@@ -850,5 +851,9 @@ test('revealApp opens Finder at the icon it re-derives, and refuses honestly whe
     assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty array/);
   } finally {
     machine.setAppRevealRunner(null);
+    // Leaked sandboxes are how one test's world becomes another's -- the
+    // server suite's after-hook says why; this test holds the same line.
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (empty) fs.rmSync(empty, { recursive: true, force: true });
   }
 });
