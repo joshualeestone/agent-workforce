@@ -178,7 +178,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n5. A first-run route that fails does NOT put onboarding over a working board');
   {
     fs.rmSync(FLAG, { force: true });
-  fs.rmSync(YOU, { force: true });
+    fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
@@ -246,7 +246,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n9. Escape during an in-flight completion does not fire two of them');
   {
     fs.rmSync(FLAG, { force: true });
-  fs.rmSync(YOU, { force: true });
+    fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
@@ -283,7 +283,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n10. A completion POST that never answers does not lock anybody in');
   {
     fs.rmSync(FLAG, { force: true });
-  fs.rmSync(YOU, { force: true });
+    fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));

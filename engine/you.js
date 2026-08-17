@@ -32,6 +32,10 @@ const store = require('./store');
 const instructions = require('./instructions');
 const projects = require('./projects');
 
+// Same layout convention as commitments.js: under a sandbox the env var IS
+// the base (you.json sits directly in $AGENT_WORKFORCE_DATA), while in
+// production store.ROOT carries the AgentWorkforce segment. The click
+// drive's grandparent derivation depends on the sandboxed shape.
 const BASE = process.env.AGENT_WORKFORCE_DATA || store.ROOT;
 const FILE = path.join(BASE, 'you.json');
 

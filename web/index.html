@@ -1379,7 +1379,8 @@ svg { display: block; }
 
       <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
            only message on this screen that can be raised from ANY step — Skip
-           is on all five — so putting it inside step 4's pane, which is where
+           is on every one — so putting it inside the fork pane (fr-pane-5
+           since About-you landed at 4), which is where
            it started, meant a person who skipped from the welcome screen was
            told nothing at all: the sentence was written into a hidden div.
            `alert`, because it is the one thing here somebody must not walk away
@@ -7955,13 +7956,18 @@ async function frPaintYou() {
   const doEl = document.getElementById('fr-you-do');
   const knowEl = document.getElementById('fr-you-know');
   const next = document.getElementById('fr-next');
+  // ⚠️ `saving` participates in the gate, so a late prefill's gate() cannot
+  // re-arm the button while the PUT is in flight (the double-submit window
+  // the disable at the top of Continue exists to close).
+  let saving = false;
   const gate = () => {
-    const ready = nameEl.value.trim() !== '' && doEl.value.trim() !== '';
+    const ready = !saving && nameEl.value.trim() !== '' && doEl.value.trim() !== '';
     next.disabled = !ready;
     next.setAttribute('aria-disabled', ready ? 'false' : 'true');
   };
   frActions({ label: 'Continue', go: async () => {
     if (next.disabled) return;
+    saving = true;
     next.disabled = true;
     next.setAttribute('aria-disabled', 'true');
     try {
@@ -7980,6 +7986,7 @@ async function frPaintYou() {
       if (entry !== FR_YOU_GEN) return;
       if (!res.ok) {
         // The route's own sentence, verbatim — it says what to fix.
+        saving = false;
         document.getElementById('fr-you-msg').textContent = (j && j.error) || 'we could not save that';
         gate();
         return;
@@ -7987,6 +7994,7 @@ async function frPaintYou() {
       frGo(5);
     } catch {
       if (entry !== FR_YOU_GEN) return;
+      saving = false;
       document.getElementById('fr-you-msg').textContent = 'we could not save that';
       gate();
     }
@@ -8210,7 +8218,7 @@ async function frRecheck() {
     const fresh = await res.json();
     // ⚠️ The WHOLE answer is replaced, not just the subscription. The fleet can
     // have changed too while somebody was away signing in, and half-updating it
-    // would leave step 4 describing a machine as it was several minutes ago.
+    // would leave the fleet screen describing a machine as it was several minutes ago.
     FR = fresh;
     /**
      * ⚠️ ONLY REPAINT IF THEY ARE STILL HERE. `/api/first-run` shells out to

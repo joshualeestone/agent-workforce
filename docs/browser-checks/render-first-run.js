@@ -148,7 +148,11 @@ const SHOTS = [
   { name: 'firstrun-3-claude-connected', step: 3, first: FLEET_ADOPT },
   { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
   { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
-  { name: 'firstrun-4-about-you', step: 4 },
+  // The record stubbed ABSENT: the click drive leaves a saved record in the
+  // same sandbox, and without the stub this shot's content depends on which
+  // drive ran last (prefilled-and-armed versus the empty gated state the
+  // name claims).
+  { name: 'firstrun-4-about-you', step: 4, you: { state: 'absent', you: null, because: null } },
   { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
   { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
   { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
@@ -325,6 +329,9 @@ async function look(page, name) {
       }
       if (shot.first) {
         await page.route('**/api/first-run', (r) => r.fulfill({ json: shot.first }));
+      }
+      if (shot.you) {
+        await page.route('**/api/you', (r) => r.fulfill({ json: shot.you }));
       }
       // The hanging-route shot can never reach networkidle -- the stalled
       // machine request IS the state under test.
