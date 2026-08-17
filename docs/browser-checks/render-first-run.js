@@ -130,10 +130,11 @@ const MACHINE_MIXED = (() => {
 })();
 
 const FLEET_REAL = null; // let the real server answer
-// The step-5 shots PIN their fork: without this the action bar came from
-// the live /api/first-run, so a create-path machine would commit different
-// buttons under the same four filenames (the same drift the clear shot was
-// moved off the live route for). Adopt, matching the committed pictures.
+// Every shot PINS its /api/first-run payload: without this the action bar
+// came from the live route, so a create-path machine would commit different
+// buttons under the same filenames (the same drift the clear shot was moved
+// off the live route for). The fork lives on the step-6 endings; the
+// Success frames pin adopt, matching the committed pictures.
 const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_RETURN = FLEET_ADOPT;
 const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
@@ -311,9 +312,6 @@ async function look(page, name) {
     await ctx.close();
   }
 
-  // Armed by the reveal exercise below just before it stubs its one 409;
-  // the console monitor spends it instead of reporting the planned refusal.
-  let plannedRefusals = 0;
   for (const scheme of ['light', 'dark']) {
     for (const shot of SHOTS) {
       const ctx = await browser.newContext({
@@ -325,10 +323,14 @@ async function look(page, name) {
       page.on('pageerror', (e) => problems.push(`${shot.name} [${scheme}] JS ERROR: ${e.message}`));
       // The reveal exercise below DELIBERATELY answers one fetch with a 409
       // (the refusal path under test); the browser logs that as a resource
-      // error, which is the exercise working, not a rendering problem.
+      // error, which is the exercise working, not a rendering problem. The
+      // exemption keys on the resource URL, not a counter: an async console
+      // event cannot race a URL match, and a 409 from any OTHER route still
+      // reports.
       page.on('console', (m) => {
         if (m.type() !== 'error') return;
-        if (/409/.test(m.text()) && plannedRefusals > 0) { plannedRefusals -= 1; return; }
+        const src = (m.location() && m.location().url) || '';
+        if (/409/.test(m.text()) && src.includes('/api/reveal-app')) return;
         problems.push(`${shot.name} [${scheme}] console: ${m.text()}`);
       });
       if (shot.machine === 'hang') {
@@ -439,7 +441,6 @@ async function look(page, name) {
         // (system, light) exercises the click both ways so a broken handler
         // or a failure sentence outliving a success cannot pass the suite.
         if (shot.name === 'firstrun-1-success-system' && scheme === 'light') {
-          plannedRefusals = 1;
           await page.route('**/api/reveal-app', (r) => r.fulfill({
             status: 409, json: { error: 'we could not look just now, so we cannot say where the icon is' },
           }));
@@ -456,9 +457,6 @@ async function look(page, name) {
             { timeout: 4000 },
           ).catch(() => problems.push(`${shot.name} [${scheme}]: the failure sentence outlived a reveal that worked`));
           await page.unroute('**/api/reveal-app');
-          // An unspent allowance must not survive into later shots, where it
-          // would silently absorb one GENUINE 409.
-          plannedRefusals = 0;
         }
       }
       const seen = await look(page, shot.name);
