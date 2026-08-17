@@ -59,3 +59,11 @@ ARE the v1 spec where the pack leans on the commitments join:
   trap holds with real keypresses, column/door split measured, chip-is-
   status, blessed close-note on screen, done and reopen round trip via
   a project-switch bounce, zero page errors. Screenshots committed.
+
+## Flake observed, not this branch's
+
+engine/connect.test.js "cancel mid-download aborts the stream" failed
+once under full-suite parallel load (a leftover .part file), then passed
+twice in isolation and on the full-suite re-run. This branch does not
+touch connect. Recorded so the next person seeing it has a prior, and
+worth its own small fix some daytime.
