@@ -131,6 +131,16 @@ function beginInstall() {
     stdio: 'ignore',
     env: { ...process.env, KOSMOS_RELEASE_BASE: base },
   });
+  // ⚠️ 'error' fires ASYNCHRONOUSLY on spawn failure (EMFILE, EAGAIN); with
+  // no listener it becomes an uncaught exception, and the failure mode of
+  // the one route that runs software would be crashing the board with no
+  // installer running to bring it back -- while the single-flight flag,
+  // stranded true, answered every retry "already updating". Log, release
+  // the flag, and the person's retry gets a real attempt.
+  child.on('error', (err) => {
+    installStarted = false;
+    process.stderr.write(`Kosmos update could not start: ${String((err && err.message) || err)}\n`);
+  });
   child.unref();
 }
 

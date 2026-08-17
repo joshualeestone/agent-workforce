@@ -2944,7 +2944,14 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // A 5xx is not a fact about this agent.
     [/res\.status >= 500/, 'a server error is reported as "we cannot remove this agent"'],
     // Shift+Tab into the modal must not land on the destructive button.
-    [/\(inside \? ends\[1\] : keep\)\.focus\(\)/, 'tabbing into the modal backwards lands on Remove'],
+    // (Re-anchored when the trap was fixed to intercept at the LAST element
+    // in the traversal direction: arriving from outside is now its own arm,
+    // and it still lands on Keep.)
+    [/if \(!inside\) \{ e\.preventDefault\(\); keep\.focus\(\); return; \}/, 'tabbing into the modal backwards lands on Remove'],
+    // And the wrap intercepts at the last tab stop, not the first: the first
+    // is the one natural tabbing never exits by, and intercepting only there
+    // leaked one keystroke onto the board behind the backdrop.
+    [/document\.activeElement === order\[order\.length - 1\]/, 'the focus trap wraps at the wrong end and leaks a keystroke behind the modal'],
     // The removed list is part of the board, so it refreshes with it.
     [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],

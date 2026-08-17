@@ -222,12 +222,18 @@ html { scroll-padding-top: 132px; }
 /* The pack's gold ACTION colour, one home for both the toast's Install and
    the confirm's Update. Two selectors so it outweighs .btn regardless of
    declaration order. */
-button.uprime, .btn.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
-/* Mobile keeps the same below-the-header-row slot as desktop: the pack's
-   top:5 was its own geometry, and at 375 it sat straight across the New
-   agent button (caught by the bounding-box check, same as the desktop
-   guess). The version line hides to keep the toast narrow. */
-@media (max-width: 720px) { .utoast { right: 14px; top: 79px; } .utoast .utxt small { display: none; } }
+button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
+/* ⚠️ Mobile is IN-FLOW, deliberately breaking the desktop float rule: at
+   375 there is no empty region -- the first float guess covered the New
+   agent button and the second covered three of the four tabs, both caught
+   by bounding-box checks. Between "the header grows when an update is
+   waiting" and "three tabs are unclickable until Later is pressed", the
+   first is the harm a person can live with. The version line hides to keep
+   it one row. */
+@media (max-width: 720px) {
+  .utoast { position: static; margin: 6px 0 8px auto; width: fit-content; }
+  .utoast .utxt small { display: none; }
+}
 /* The updating overlay: the board is about to vanish on purpose, and this is
    the sentence that stops that being alarming. Same ground as the modals. */
 .upd-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.86);
@@ -630,6 +636,10 @@ svg { display: block; }
   .ring-fill.ok   { stroke: #4CB782; }
   .ring-fill.warn { stroke: #E0A030; }
   .ring-fill.high { stroke: #F0665A; }
+  /* The toast's attention red lightens the same way the ring's does:
+     #b3261e measures ~2.1:1 on the dark elevated ground and fails AA as
+     13px text; #F0665A is the app's established dark-mode red. */
+  .utoast { --utone: #F0665A; }
 }
 
 .body { flex: 1; min-width: 0; }
@@ -2159,14 +2169,20 @@ document.addEventListener('keydown', (e) => {
   if (back.hidden) return;
   const no = document.getElementById('uc-no');
   const go = document.getElementById('uc-go');
-  // Same shape as rm-modal's trap, disabled-button rule included.
+  // ⚠️ Intercept at the LAST element in the traversal direction and wrap to
+  // the first. The earlier shape (copied from rm-modal) intercepted at the
+  // FIRST -- which natural tabbing never exits by -- and let the last leak
+  // one keystroke onto a live board control behind the aria-modal backdrop.
+  // Measured with real Tab keypresses, both directions. Disabled buttons
+  // are not tab stops and are excluded (an in-flight Update disables uc-go).
   const reachable = [no, go].filter((el) => !el.disabled);
   const order = e.shiftKey ? reachable.slice().reverse() : reachable;
-  const ends = order.length ? [order[0], order[order.length - 1]] : [no, no];
+  if (!order.length) { e.preventDefault(); return; }
   const inside = back.contains(document.activeElement);
-  if (document.activeElement === ends[0] || !inside) {
+  if (!inside) { e.preventDefault(); no.focus(); return; }
+  if (document.activeElement === order[order.length - 1]) {
     e.preventDefault();
-    (inside ? ends[1] : no).focus();
+    order[0].focus();
   }
 });
 document.getElementById('uc-go').addEventListener('click', async () => {
@@ -2195,6 +2211,10 @@ document.getElementById('uc-go').addEventListener('click', async () => {
   back.className = 'upd-back';
   back.innerHTML = '<div class="upd-msg" role="alert" tabindex="-1"><b>Updating.</b> Your agents keep working.</div>';
   document.body.appendChild(back);
+  // Same rule as the first-run overlay: everything behind it goes inert, so
+  // the keyboard cannot operate the dying board through the backdrop. No
+  // un-inert path is needed; every exit from this state is a reload.
+  document.querySelectorAll('body > *:not(.upd-back)').forEach((el) => { el.inert = true; });
   back.querySelector('.upd-msg').focus();   // announced, and the keyboard is off the dying board
   /* The board goes down and comes back; reload on the way back up OR the
      moment the served version changes -- a launchd restart can complete
@@ -3477,21 +3497,25 @@ document.addEventListener('keydown', (e) => {
    */
   const reachable = [keep, go].filter((el) => !el.disabled);
   const order = e.shiftKey ? reachable.slice().reverse() : reachable;
-  const ends = order.length ? [order[0], order[order.length - 1]] : [keep, keep];
   const inside = document.getElementById('rm-modal').contains(document.activeElement);
-  if (document.activeElement === ends[0] || !inside) {
+  /**
+   * ⚠️ ARRIVING from outside lands on Keep -- everything here is built so an
+   * accident lands on the safe button, and Shift+Tab entering backwards used
+   * to land on the destructive one.
+   *
+   * ⚠️ And the trap intercepts at the LAST element in the traversal
+   * direction, wrapping to the first. The earlier shape intercepted at the
+   * FIRST -- which natural tabbing never exits by -- so Tab from the last
+   * button leaked one keystroke onto a live board control behind the
+   * aria-modal backdrop before the !inside arm pulled it back, and Enter
+   * there activated it. Measured with real keypresses, both directions,
+   * when the update confirm copied this shape and inherited the leak.
+   */
+  if (!order.length) { e.preventDefault(); return; }
+  if (!inside) { e.preventDefault(); keep.focus(); return; }
+  if (document.activeElement === order[order.length - 1]) {
     e.preventDefault();
-    /**
-     * ⚠️ WRAPPING lands on the far end; ARRIVING lands on Keep.
-     *
-     * These were one case and they are not the same. Wrapping (`activeElement`
-     * IS the end button) should go to the other end, which is what `ends[1]`
-     * gives. But arriving from OUTSIDE the modal also hit `ends[1]`, and on
-     * Shift+Tab that is "Remove <name>" -- so the one gesture that enters the
-     * dialog backwards put the keyboard on the destructive button. Everything
-     * else here is built so an accident lands on Keep; this was the gap.
-     */
-    (inside ? ends[1] : keep).focus();
+    order[0].focus();
   }
 });
 

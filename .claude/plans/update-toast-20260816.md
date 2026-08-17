@@ -73,3 +73,30 @@ channel tonight.
   bounding-box clearance, frozen copy verbatim, from-source 409
   surfaced inside the modal, Later per-version persistence across
   ticks, zero page errors. Screenshots committed.
+
+## Review round 2 additions (all fixed in-branch)
+
+- The toast's Install had silently lost its gold to the scoped neutral
+  button rule (specificity), visible in the branch's own screenshot; the
+  gold rule now carries a toast-scoped selector and the drive-through
+  asserts the computed colour.
+- BOTH dialogs' focus traps intercepted at the first tab stop (which
+  natural tabbing never exits by) and leaked one keystroke onto the live
+  board behind the backdrop from the last; both now intercept at the last
+  stop in the traversal direction, rm-modal's arriving-lands-on-Keep rule
+  preserved, and the drive-through presses real Tab/Shift+Tab at both
+  boundaries. The pinned regex test moved to the new mechanism and gained
+  a wrong-end pin.
+- Mobile (<=720px) is IN-FLOW below the tabs, deliberately breaking the
+  desktop float rule: at 375 both float positions measured onto controls
+  (New agent first, then three of four tabs). A header that grows beats
+  unclickable tabs.
+- The detached installer child now has an 'error' listener: a spawn
+  failure logged and the single-flight flag released, instead of an
+  uncaught exception crashing the board with no installer running.
+- Dark mode lightens --utone to #F0665A (the app's established dark red;
+  #b3261e measured ~2.1:1 on the dark ground).
+- The updating overlay inerts everything behind it, same rule as
+  first-run; every exit from that state is a reload.
+- Deferred: the toast's role="status" with buttons inside it is the
+  pack's own specified role; flagged for Mona Lisa rather than changed.
