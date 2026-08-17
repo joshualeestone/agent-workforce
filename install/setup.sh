@@ -1470,6 +1470,53 @@ else
   fi
 fi
 
+# ---- the permission acceptance (#46, Josh's ruling 2026-08-17) --------------
+# Agents run Claude Code with permission prompts skipped; the FIRST such run
+# on a machine shows Claude Code's own full-screen acceptance wall, and an
+# agent stuck at it looks exactly like an agent thinking (Josh met this on a
+# clean Mac: his first message sat against a wall of warning text). His
+# ruling, verbatim intent: no extra click, no extra screen -- "when they're
+# installing it they're giving us permission to do all of those things." So
+# the install records the acceptance the wall exists to collect.
+#
+# ⚠️ The key is skipDangerousModePermissionPrompt in ~/.claude/settings.json.
+# The fleet bulletin's trap: defaultMode alone is NOT enough; only this key
+# stops the wall. MERGE, never clobber -- the file may carry a person's real
+# Claude Code settings, and an installer that eats somebody's config to set
+# one flag is worse than the wall. python3 ships on every macOS this
+# installer supports; if the file exists but cannot be parsed as JSON (or is
+# not an object), LEAVE IT ALONE and say so -- fail-soft, because the wall
+# appearing later is recoverable (one Enter in the agent's session, per
+# docs/clean-machine-retest.md), while a clobbered config is not.
+_claude_settings="$HOME/.claude/settings.json"
+if /usr/bin/python3 - "$_claude_settings" <<'PYEOF' 2>/dev/null
+import json, os, sys
+path = sys.argv[1]
+data = {}
+if os.path.exists(path):
+    with open(path) as f:
+        data = json.load(f)          # unparseable -> exception -> nonzero
+    if not isinstance(data, dict):
+        raise SystemExit(1)          # a scalar/list is somebody's file, leave it
+if data.get('skipDangerousModePermissionPrompt') is True:
+    raise SystemExit(0)              # already accepted, nothing to write
+data['skipDangerousModePermissionPrompt'] = True
+d = os.path.dirname(path)
+if d:
+    os.makedirs(d, exist_ok=True)
+tmp = path + '.kosmos.new'
+with open(tmp, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+os.replace(tmp, path)
+PYEOF
+then
+  info "agents will not stop to ask permission for each action; installing is that permission"
+else
+  info "could not record the agent permission setting; the first agent may show a"
+  info "one-time question in its own window, and answering it once clears it for good"
+fi
+
 # ---- start ------------------------------------------------------------------
 step "Starting Kosmos."
 KOSMOS_SAY_INDENT="     " "$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start. What it said is above; it is safe to paste the install line again."
