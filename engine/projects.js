@@ -468,6 +468,12 @@ function describe(project, roster) {
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
     tasks: Array.isArray(project.tasks) ? project.tasks : [],
+    // Whether the folder lives under the Kosmos projects root: the settings
+    // screen's location sentence branches on this (the pack's "In your
+    // Kosmos folder." versus naming the real place), and the server is the
+    // only side that knows where the root is.
+    folderInKosmos: typeof project.folder === 'string'
+      && project.folder.startsWith(projectsRoot() + '/'),
     taskCounter: project.taskCounter || 0,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
@@ -617,6 +623,24 @@ function cleanDescription(text) {
  * suite would create real directories in the operator's home — the same rule
  * every other root in this codebase is held to.
  */
+/**
+ * Open the folder in Finder. `open -R` selects it in its parent, which is
+ * the "show me where it is" a person asked for, rather than dropping them
+ * INSIDE it with no context. The path is the caller-validated stored
+ * record's; runner injectable for tests, same shape as machine.js.
+ */
+let revealRunner = null;
+function setRevealRunner(f) { revealRunner = f; }
+function revealFolder(folder) {
+  try {
+    if (revealRunner) return revealRunner('/usr/bin/open', ['-R', folder]);
+    execFileSync('/usr/bin/open', ['-R', folder], { timeout: 5000, stdio: 'ignore' });
+    return { ok: true };
+  } catch {
+    return { ok: false, because: 'Finder did not open' };
+  }
+}
+
 function projectsRoot() {
   return process.env.AGENT_WORKFORCE_PROJECTS
     || path.join(os.homedir(), 'Kosmos', 'Projects');
@@ -1314,5 +1338,5 @@ module.exports = {
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
-  folderPathPreview, makeFolder,
+  folderPathPreview, makeFolder, revealFolder, setRevealRunner,
 };

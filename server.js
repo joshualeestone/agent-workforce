@@ -1812,6 +1812,36 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * Reveal the project's folder in Finder. POST, guard-inherited (it opens
+   * an app). The path is ALWAYS the stored record's, never the request's,
+   * same rule as the sleep-settings opener: this must not become an
+   * open-arbitrary-path primitive. Refused with the state's own sentence
+   * when the folder is not there to show.
+   */
+  const reveal = pathname.match(/^\/api\/project\/([^/]+)\/reveal-folder$/);
+  if (reveal && req.method === 'POST') {
+    const id = decodeSegment(reveal[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let record;
+    try {
+      record = projects.readAll().find((x) => x.id === id) || null;
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we cannot read your projects right now') });
+      return;
+    }
+    if (!record) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    const state = projects.folderState(record.folder);
+    if (!state || state.state !== projects.FOLDER.READABLE) {
+      sendJson(res, 409, { error: (state && state.because) || 'we cannot find that folder right now, so there is nothing to show' });
+      return;
+    }
+    const opened = projects.revealFolder(record.folder);
+    if (opened.ok) { sendJson(res, 200, { ok: true }); return; }
+    sendJson(res, 409, { error: opened.because });
+    return;
+  }
+
   // --- tasks: things that need doing on THIS project -----------------------
   // POSTs, so they inherit the cross-site guard. The number is issued by the
   // project inside the engine's atomic write; closing is a record edit and

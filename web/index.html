@@ -1607,8 +1607,6 @@ svg { display: block; }
          statement. Hidden entirely when there is none: an empty grey line
          under every undescribed project would read as something missing. -->
     <p class="pj-desc" id="pj-one-desc" hidden></p>
-    <p class="pj-folder" id="pj-one-folder"></p>
-    <p class="pj-folder-state" id="pj-one-folder-state"></p>
 
     <div class="field">
       <span class="flabel">Project members</span>
@@ -1717,38 +1715,77 @@ svg { display: block; }
       </div>
     </div>
 
-    <!-- ⚠️ The pack routes archiving through Project settings, which is not
-         pinned yet -- this placement is provisional and flagged for the
-         designer. The hint sentence is the pack's own. -->
+    <!-- The door to settings: the pack's hierarchy (project, then its
+         settings, then its tasks), and the pack's rule for what lives there:
+         what has nowhere else to live. -->
+    <button class="linkish" id="pj-settings-link" type="button">Project settings</button>
+  </div>
+
+  <!-- ============ PROJECT SETTINGS (pack FROZEN-2026-08-16, section 3099) ====
+       What is here is what has nowhere else to live: name and description
+       (no edit pencils on the project page), the folder (paths were cut from
+       three screens; this is the deliberate exception, because a project IS
+       a folder and settings is the one place a person comes to ask which),
+       archive, and remove. Members and tasks stay on the project page; a
+       settings page that restates the screen it was opened from is a second
+       copy of it. The archive/remove ids are UNCHANGED from their old home,
+       so their battle-tested wiring moved with them untouched. -->
+  <div id="pj-settings-view" hidden>
+    <button class="back" id="pj-settings-back" type="button">&larr; <span id="pj-settings-backname"></span></button>
+    <h2>Project settings</h2>
+    <p class="fhint">Changes here apply to this project only.</p>
+
+    <div class="field">
+      <label class="flabel" for="pjs-name">Name</label>
+      <p class="fhint">Shown wherever this project appears.</p>
+      <input class="tk-inp" type="text" id="pjs-name" maxlength="60">
+    </div>
+    <div class="field">
+      <label class="flabel" for="pjs-desc">Description</label>
+      <p class="fhint">One line about what this project is for. Agents read it.</p>
+      <textarea class="tk-inp" id="pjs-desc" rows="2" maxlength="200"></textarea>
+    </div>
+    <div class="field">
+      <button class="btn uprime" id="pjs-save" type="button">Save changes</button>
+      <p class="fmsg" id="pjs-msg" aria-live="polite"></p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Where the work lives</span>
+      <!-- ⚠️ The pack cut the tilde and the mechanism sentence here (Josh
+           2026-08-15: "~/" is a squiggle to this reader; the never-writes
+           promise lives at the Remove button where the question occurs).
+           The folder NAME answers the question and the location is a plain
+           sentence under it. The pointed-at-elsewhere branch shows the real
+           place written plainly, because for that person "which folder" is
+           exactly the question; flagged for Mona Lisa's wording in the PR. -->
+      <p class="shint" style="margin-top:8px;"><code class="t" id="pjs-folder-name"></code></p>
+      <p class="fhint" id="pjs-folder-where"></p>
+      <p class="pj-folder-state" id="pj-one-folder-state"></p>
+      <p class="pj-folder" id="pj-one-folder" hidden></p>
+      <button class="btn" id="pjs-reveal" type="button">Show me where it is</button>
+      <p class="fmsg" id="pjs-reveal-msg" aria-live="polite"></p>
+    </div>
+
     <div class="field">
       <span class="flabel" id="pj-one-archive-label">Archive this project</span>
-      <p class="fhint" id="pj-one-archive-hint">Archiving takes a project off this list. Nothing in the
-         folder changes and the agents that were on it stay as they are.</p>
+      <p class="fhint" id="pj-one-archive-hint">Hides it from the projects list and stops it counting.
+         Everything stays, and you can restore it whenever you like.</p>
       <button class="btn" id="pj-one-archive" type="button">Archive it</button>
       <p class="fmsg" id="pj-one-archive-msg" aria-live="polite"></p>
     </div>
 
     <div class="field">
-      <span class="flabel">Remove this project</span>
-      <p class="fhint">Takes it off this list. <b>Nothing in the folder is
-         deleted</b>, ever, and you can add it again.</p>
+      <span class="flabel">Remove from Kosmos</span>
+      <p class="fhint">Takes this project off your list. <b>Your folder and everything
+         in it stay exactly where they are.</b> Nothing on disk is deleted.</p>
       <button class="btn" id="pj-one-remove" type="button">Remove from Kosmos</button>
-      <!-- ⚠️ It asks, and it names the project in the question and in BOTH
-           buttons. Removing an agent next to this has a full confirmation and a
-           Restore; removing a project had neither, and while nothing on disk is
-           touched, the name and the whole membership list go with it and cannot
-           be got back by re-adding the folder. Same friction, same reason. -->
       <div class="frow" id="pj-one-confirm" hidden style="margin-top: var(--space-4)">
-        <!-- ⚠️ The question is ATTACHED to the buttons. Focus moves to Keep
-             when this opens, and without `aria-describedby` the only thing a
-             screen-reader user heard was "Keep Quarter close" -- the friction
-             this confirmation exists for, silently removed for the people most
-             dependent on being told what a button does. The agent-removal modal
-             it is explicitly modelled on already does this. -->
         <span class="fhint" id="pj-one-confirm-q" style="flex-basis: 100%; margin: 0"></span>
         <button class="btn" id="pj-one-remove-go" type="button" aria-describedby="pj-one-confirm-q"></button>
         <button class="btn" id="pj-one-remove-keep" type="button" aria-describedby="pj-one-confirm-q"></button>
       </div>
+      <p class="fmsg" id="pj-one-msg-set" aria-live="polite" hidden></p>
     </div>
   </div>
 
@@ -5154,7 +5191,7 @@ let PJ_THREAD_GEN = 0;
 let PJ_NAV_GEN = 0;
 
 function pjView(which) {
-  for (const v of ['list', 'one', 'add']) {
+  for (const v of ['list', 'one', 'add', 'settings']) {
     document.getElementById('pj-' + v + '-view').hidden = (v !== which);
   }
   // Arriving at a project resets the member picker to its resting state (the
@@ -5735,6 +5772,110 @@ document.addEventListener('keydown', (e) => {
       order[0].focus();
     }
     return;
+  }
+});
+
+/* ---- project settings (pack section 3099) -------------------------------
+   Entered from the project page; painted from the same PROJECTS record.
+   Archive/remove wiring is untouched (their ids moved house with them);
+   only what is new lives here: name/description save, the folder
+   sentence, and Show me where it is. */
+function paintProjectSettings(p) {
+  document.getElementById('pj-settings-backname').textContent = p.name;
+  document.getElementById('pjs-name').value = p.name;
+  document.getElementById('pjs-desc').value = p.description || '';
+  document.getElementById('pjs-msg').textContent = '';
+  document.getElementById('pjs-reveal-msg').textContent = '';
+  const folder = String(p.folder || '');
+  const base = folder.split('/').filter(Boolean).pop() || folder;
+  document.getElementById('pjs-folder-name').textContent = base;
+  /* Mona Lisa's ruling (2026-08-16 11:14 PM), one rule and not two cases:
+     name the IMMEDIATE PARENT as a plain sentence. The default case falls
+     out of it (a default project's parent IS Kosmos). No tilde and no full
+     path, a recorded ruling: "In your Documents folder" for something
+     three levels down would be technically true and unfindable, which is
+     why the sentence stays shallow and the "Show me where it is" button
+     is the precise answer. Fallback only when the parent is a disk or
+     volume root rather than a normal folder. */
+  const parts = folder.split('/').filter(Boolean);
+  const parent = parts.length >= 2 ? parts[parts.length - 2] : null;
+  document.getElementById('pjs-folder-where').textContent = p.folderInKosmos
+    ? 'In your Kosmos folder.'
+    : (parent && parts.length >= 3 && parent !== 'Volumes'
+      ? 'In your ' + parent + ' folder.'
+      : 'In a folder you chose.');
+  // The folder-state line keeps its existing painter (paintOneProject
+  // writes it); the raw path element stays hidden here, kept only because
+  // that painter still writes it.
+}
+
+document.getElementById('pj-settings-link').addEventListener('click', () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  paintProjectSettings(p);
+  pjView('settings');
+  document.getElementById('pj-settings-back').focus();
+});
+document.getElementById('pj-settings-back').addEventListener('click', () => {
+  pjView('one');
+  document.getElementById('pj-settings-link').focus();
+});
+
+document.getElementById('pjs-save').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const msg = document.getElementById('pjs-msg');
+  msg.textContent = '';
+  const btn = document.getElementById('pjs-save');
+  btn.disabled = true;
+  try {
+    // Only what changed travels, and a save that would move nothing is the
+    // engine's own refusal ("nothing here we can change"), not a fake
+    // "Saved." over an untouched record.
+    const body = {};
+    const name = document.getElementById('pjs-name').value;
+    const desc = document.getElementById('pjs-desc').value;
+    if (name !== p.name) body.name = name;
+    if (desc !== (p.description || '')) body.description = desc;
+    if (!Object.keys(body).length) { msg.textContent = 'Nothing has changed.'; return; }
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const got = await res.json().catch(() => ({}));
+    if (!res.ok) { msg.textContent = got.error || 'we could not save that'; return; }
+    await loadProjects();
+    const fresh = pjById(PJ_CURRENT);
+    if (fresh) { paintProjectSettings(fresh); paintOneProject(); pjView('settings'); }
+    msg.textContent = 'Saved.';
+  } catch {
+    msg.textContent = 'we could not save that';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('pjs-reveal').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const msg = document.getElementById('pjs-reveal-msg');
+  msg.textContent = '';
+  const btn = document.getElementById('pjs-reveal');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id) + '/reveal-folder', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      msg.textContent = (body && body.error) || 'we could not open it';
+    }
+    // Success needs no message; the Finder window is the feedback.
+  } catch {
+    msg.textContent = 'we could not open it';
+  } finally {
+    btn.disabled = false;
   }
 });
 
