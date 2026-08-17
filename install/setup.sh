@@ -1127,10 +1127,10 @@ make_app() {
     local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
     # ⚠️ TOUCH BEFORE REGISTERING. MEASURED (Josh's clean-machine install,
     # 2026-08-17): app present, Get Info previews the icon, the Dock draws
-    # the generic tile. HYPOTHESIS, not measured: the stage->app mv
-    # preserves the stage's mtime, so the .app directory's mtime predates
-    # the icns inside it, and icon consumers keying a re-read off that
-    # mtime never look again. The touch is the non-invasive subset of the
+    # the generic tile. MEASURED on this machine (2026-08-17): mv preserves
+    # a directory's mtime, so the .app arrives with the stage's timestamp
+    # rather than a fresh one. HYPOTHESIS, unverifiable here: icon consumers
+    # keying a re-read off that mtime never look again. The touch is the non-invasive subset of the
     # manual remedy that ships (touch + register, WITHOUT the killall Dock
     # a person can run); if the Dock's in-session cache was the operative
     # ingredient, a clean install may still draw generic and this area is
