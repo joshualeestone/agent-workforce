@@ -100,3 +100,23 @@ channel tonight.
   first-run; every exit from that state is a reload.
 - Deferred: the toast's role="status" with buttons inside it is the
   pack's own specified role; flagged for Mona Lisa rather than changed.
+
+## Review round 3 additions (closing round, zero blockers)
+
+- An exit listener releases the single-flight flag when the installer
+  pipeline fails AFTER a clean spawn (host 404, dropped download,
+  checksum refusal); a successful install kills the server before the
+  listener matters, so a good update cannot double-run.
+- The stale 'Welcome to Agent Workforce' assertion in the committed
+  click-first-run.js check repointed (the one consumer the name sweep
+  missed).
+- The toast drive-through is committed as
+  docs/browser-checks/render-update-toast.js (portable path, header),
+  so the verification is re-runnable rather than a timestamp; a round-3
+  reviewer independently re-implemented its assertions and passed 26/26
+  before this was committed.
+- The confirm opens with focus on Not now, the safe answer, same rule
+  as every dialog here: Josh's deliberate-click gate must not be one
+  Enter wide. Recorded as the decision.
+- setupUrl's /dist-suffix assumption documented for nonstandard staging
+  bases.

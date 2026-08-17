@@ -97,7 +97,11 @@ function installedRoot() {
        && fs.existsSync(path.join(home, 'app', 'server.js'))) ? home : null;
 }
 
-/** The installer URL, derived from the release base (its sibling /setup). */
+/** The installer URL, derived from the release base (its sibling /setup).
+    ⚠️ Assumes the base ends in /dist, which both the default and the
+    installer's own KOSMOS_RELEASE_BASE convention do; an override without
+    that suffix yields <base>/setup, so a nonstandard staging base must
+    keep the /dist shape. */
 function setupUrl() {
   return base.replace(/\/dist\/?$/, '') + '/setup';
 }
@@ -140,6 +144,21 @@ function beginInstall() {
   child.on('error', (err) => {
     installStarted = false;
     process.stderr.write(`Kosmos update could not start: ${String((err && err.message) || err)}\n`);
+  });
+  // ⚠️ And the PIPELINE failing after a clean spawn (release host 404, a
+  // dropped download, the installer's checksum refusal): the child exits
+  // non-zero while this server is still alive, and a stranded true flag
+  // would answer every retry "already updating" -- each retry costing the
+  // person a three-minute overlay that reloads into the same toast --
+  // until somebody restarts the board. An exit listener works on an
+  // unref'd child while the parent lives; a SUCCESSFUL install kills this
+  // server before the listener matters, which is why releasing on any
+  // non-zero exit cannot double-run a good update.
+  child.on('exit', (code) => {
+    if (code !== 0) {
+      installStarted = false;
+      process.stderr.write(`Kosmos update failed before it could restart the board (exit ${code}); Install can be tried again\n`);
+    }
   });
   child.unref();
 }

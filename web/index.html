@@ -2143,7 +2143,10 @@ function renderUpdateToast(u) {
   document.getElementById('ut-install').addEventListener('click', () => {
     document.getElementById('uc-err').hidden = true;
     document.getElementById('updconfirm').hidden = false;
-    document.getElementById('uc-go').focus();
+    // Focus lands on the SAFE answer, same rule as every dialog here: the
+    // confirm exists as a deliberate-click gate, and opening it with the
+    // keyboard already on gold Update would make that gate one Enter wide.
+    document.getElementById('uc-no').focus();
   });
 }
 /* ⚠️ THE CONFIRM GETS THE SAME MODAL MACHINERY AS rm-modal, not adjacency:

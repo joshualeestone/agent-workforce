@@ -28,7 +28,7 @@ async function fresh(browser, opts = {}) {
   {
     const { ctx, page } = await fresh(browser);
     ok(await page.isVisible('#firstrun'), 'the overlay is up with no ?first-run flag at all');
-    ok(await page.locator('#fr-title').textContent() === 'Welcome to Agent Workforce', 'on step 1');
+    ok(await page.locator('#fr-title').textContent() === 'Welcome to Kosmos', 'on step 1');
     ok(await page.evaluate(() => document.querySelector('body > header').inert === true),
       'the board behind it is inert');
     // ⚠️ Asked, not assumed: what does a click at the middle of the screen hit?
