@@ -357,8 +357,9 @@ function installedCheck(opts) {
     return {
       key: 'installed',
       state: STATE.OK,
-      title: 'Everything it needs to run is installed',
-      detail: 'There is nothing else for you to go and find.',
+      // The pack's row, verbatim (first-run spec, screen 4 ruling).
+      title: 'Everything it needs is installed',
+      detail: 'Nothing for you to go and find.',
     };
   }
 
@@ -433,46 +434,34 @@ function restartCheck(runner) {
     return {
       key: 'restart',
       state: STATE.UNKNOWN,
-      title: 'We could not tell whether your agents will start themselves',
-      detail: 'They are set up to, and nothing here says they will not. We just could not check.',
+      // The pack's unknown row, verbatim, at the pack's length.
+      title: 'We could not check whether agents start themselves',
+      detail: 'Not the same as it being wrong. We could not look.',
     };
   }
   const got = runner('/bin/launchctl', ['print', `gui/${uid}`]);
   if (got.ok) {
     /**
-     * ⚠️ "SET TO", NOT "WILL". The comment above this function already said this
-     * claim is deliberately weaker than the wireframe's, and then the string
-     * underneath it said "Your agents will start themselves. If this computer
-     * restarts, they come back on their own." What was actually established is
-     * that `launchctl` answers for this login session. No plist was opened, no
-     * job was listed, no agent was inspected, and no reboot has happened.
-     *
-     * A safety comment that disagrees with the sentence beside it is worse than
-     * neither, because the next reader trusts the comment.
-     */
-    /**
-     * ⚠️ IT IS A CLAIM ABOUT WHAT KOSMOS DOES, NOT ABOUT ANYBODY'S AGENTS, and
-     * the difference is not pedantry.
-     *
-     * "Your agents are set to start themselves" was FALSE on the adopt path,
-     * which is the path this machine is on. `firstrun.fleet()` counts agents out
-     * of `tmux list-panes` -- thirteen of them here -- and an agent some other
-     * program started may have no launchd job at all. Nothing in this function
-     * opened a plist, listed a job, or looked at a single one of them. On the
-     * create path it was a claim about zero agents.
-     *
-     * What was actually established is that `launchctl` answers for this login
-     * session, which is exactly enough to say that an agent KOSMOS makes will be
-     * registered. So that is what it says, and it says out loud whose agents it
-     * is not talking about.
+     * ⚠️ THE COPY IS JOSH'S, VERBATIM (2026-08-17 screen-4 annotation), AND
+     * HIS RULING SUPERSEDED THE OLD HEDGE. History, kept because this string
+     * has flipped twice: the first version claimed "Your agents will start
+     * themselves" over a probe that only established launchctl answers for
+     * this login session; the hedged rewrite ("set to", plus an out-loud
+     * caveat about agents other programs started) fixed that and was then
+     * replaced by Josh's plainer wording. What survives of the hedge is the
+     * word HERE: "Agents made here" scopes the claim to agents Kosmos makes,
+     * which is exactly what the launchctl probe supports -- an adopted agent
+     * some other program started may have no launchd job, and this sentence
+     * no longer claims otherwise. The detail's "come back on their own" is a
+     * will-claim about those same Kosmos-made agents; Josh ruled the plain
+     * form knowingly, so do not re-hedge it without his word.
      */
     return {
       key: 'restart',
       state: STATE.OK,
-      title: 'Agents made here will start themselves',
-      detail: 'An agent you set up here is registered with the part of macOS that starts things '
-        + 'at login, so it comes back on its own after a restart. Agents another program set up '
-        + 'are that program\'s business, and we have not looked at them.',
+      // Josh's wording, verbatim (2026-08-17 screen-4 annotation).
+      title: 'Agents made here automatically restart themselves',
+      detail: 'They come back on their own after this Mac restarts.',
     };
   }
   /**
@@ -486,10 +475,8 @@ function restartCheck(runner) {
   return {
     key: 'restart',
     state: STATE.UNKNOWN,
-    title: 'We could not tell whether your agents will start themselves',
-    detail: 'The part of macOS that starts things at login did not answer, so we could not '
-      + 'check. They are set up to come back after a restart, and nothing here says they '
-      + 'will not.',
+    title: 'We could not check whether agents start themselves',
+    detail: 'Not the same as it being wrong. We could not look.',
   };
 }
 
@@ -566,9 +553,11 @@ function appLocationCheck(opts) {
   } else {
     dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
   }
+  // The pack's row, verbatim: "you will find it" tells a person what to do
+  // next where "Kosmos is" only reports a fact (screen 1 ruling).
   const TITLES = [
-    'Kosmos is in your Applications folder',
-    'Kosmos is in the Applications folder inside your home folder',
+    'You will find it in your Applications folder',
+    'You will find it in the Applications folder inside your home folder',
   ];
   const OPEN_FROM_THERE = 'Open it from there whenever you want it. Clicking it starts '
     + 'Kosmos if it is not already running.';
@@ -611,6 +600,69 @@ function appLocationCheck(opts) {
     detail: 'That is not the same as it not being there. Type Kosmos into Spotlight, the '
       + 'magnifying glass at the top right of your screen, and it will find it.',
   };
+}
+
+/**
+ * Open Finder AT the Kosmos icon -- the pack's "Show me where it is" on the
+ * Success screen. Reliability-or-no-button, same rule as the sleep row: the
+ * screen only offers this where the look answered ok, and this function
+ * re-derives the location itself with the SAME loop discipline as the check
+ * (never a path from the request, never a remembered one). A location that
+ * cannot be found RIGHT NOW refuses with a sentence rather than opening
+ * nothing.
+ *
+ * ⚠️ The runner seam mirrors projects.setRevealRunner: tests inject, and the
+ * production path is execFileSync open -R (an argument array, no shell).
+ */
+let appRevealRunner = null;
+function setAppRevealRunner(f) { appRevealRunner = f; }
+function revealApp(opts) {
+  let dirs;
+  if (opts && opts.appDirs !== undefined) {
+    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0
+        || !opts.appDirs.every((d) => typeof d === 'string' && d.length > 0)) {
+      throw new Error('appDirs override must be a non-empty array of directory paths');
+    }
+    dirs = opts.appDirs;
+  } else {
+    dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
+  }
+  // The check's own loop discipline: ENOENT keeps looking, anything else
+  // is remembered as could-not-look -- and could-not-look must never render
+  // as "it is not there" (the rule appLocationCheck states at its unknown
+  // return). The opener runs OUTSIDE the stat try, so a found icon whose
+  // reveal fails reports the reveal failing, never "not found".
+  let found = null;
+  let errored = false;
+  for (let i = 0; i < dirs.length && !found; i++) {
+    const candidate = path.join(dirs[i], 'Kosmos.app');
+    try {
+      if (fs.statSync(candidate).isDirectory()) found = candidate;
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') errored = true;
+    }
+  }
+  if (!found) {
+    throw new Error(errored
+      ? 'we could not look just now, so we cannot say where the icon is'
+      : 'we could not find the Kosmos icon just now, so there is nothing to show');
+  }
+  // The sibling revealFolder's bounds, for the sibling's reason: these run
+  // synchronously on the server's event loop, so a hung `open` with no
+  // timeout blocks every viewer of the board.
+  const run = appRevealRunner
+    || ((cmd, args) => execFileSync(cmd, args, { timeout: 5000, stdio: 'ignore' }));
+  try {
+    run('/usr/bin/open', ['-R', found]);
+  } catch (err) {
+    // ⚠️ A programming error must not wear the failure's clothes -- the
+    // rethrow revealFolder documents (a swallowed ReferenceError once blamed
+    // Finder for a missing import, forever, invisibly, while runner-injected
+    // tests replaced the exact broken line).
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
+    throw new Error('we found the icon but could not open a Finder window for it');
+  }
+  return { ok: true };
 }
 
 /**
@@ -734,13 +786,14 @@ function check(opts) {
     unknown: checks.filter((c) => c.state === STATE.UNKNOWN).length,
     // ⚠️ Its OWN field, deliberately not one of `checks`. Where the app sits
     // has no bearing on whether an agent runs, so folding it into the rows
-    // step 2 counts and step 4 filters made the wizard state a false cause:
-    // "We could not find the Kosmos icon. An agent made now may not run until
-    // that is sorted" -- on exactly the fresh-install path this check exists
-    // for. Step 5 (getting back to Kosmos) is its one consumer. Separating it
-    // at the SOURCE means no screen has to remember to exclude it.
+    // step 4 counts and the step-6 endings caption made the wizard state a
+    // false cause: "We could not find the Kosmos icon. An agent made now may
+    // not run until that is sorted" -- on exactly the fresh-install path
+    // this check exists for. The step-1 Success screen is its one consumer.
+    // Separating it at the SOURCE means no screen has to remember to
+    // exclude it.
     appLocation: appLocationCheck(opts),
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, sleepPaneUrl, openSleepSettings, resetSleepPaneCache, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, sleepPaneUrl, openSleepSettings, resetSleepPaneCache, revealApp, setAppRevealRunner, STATE };

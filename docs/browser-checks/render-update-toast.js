@@ -53,7 +53,7 @@ const RELPORT = 4654;
   p.on('pageerror', (e) => errs.push(String(e)));
   try {
     await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
-    if (await p.isVisible('#firstrun')) await p.click('#fr-skip');
+    if (await p.isVisible('#firstrun')) await p.keyboard.press('Escape');
 
     // The first status tick pokes the release host; the second renders the
     // verdict. Wait for the toast.
@@ -123,7 +123,7 @@ const RELPORT = 4654;
     await p.setViewportSize({ width: 375, height: 812 });
     await p.evaluate(() => localStorage.removeItem('kosmos-update-later'));
     await p.reload({ waitUntil: 'networkidle' });
-    if (await p.isVisible('#firstrun')) await p.click('#fr-skip');
+    if (await p.isVisible('#firstrun')) await p.keyboard.press('Escape');
     await p.waitForSelector('.utoast', { state: 'visible', timeout: 20000 });
     const mboxes = {};
     for (const [k, sel] of [['toast', '.utoast'], ['newagent', '#new-agent'], ['checked', '#checked'], ['burger', '.burger']]) {

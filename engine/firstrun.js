@@ -77,7 +77,7 @@ function complete() {
 }
 
 /** How many agents are already here, and can we trust the answer? */
-function fleet() {
+function fleet(opts) {
   try {
     const agents = status.paneRoster();
     /**
@@ -89,10 +89,18 @@ function fleet() {
      * Caught by reading the route's output rather than its status code, which
      * was 200 the whole time.
      */
+    // Names ONLY when asked: each one costs a readIdentity instruction-file
+    // read, and state() (every /api/first-run call, every Check again press)
+    // needs the count alone -- in the 600-agent case that motivated pruning
+    // the wire field, deriving-and-discarding was 600 file reads per call.
+    if (!(opts && opts.withNames)) return { known: true, count: agents.length, names: [] };
     const names = agents.map((a) => {
       try { return status.readIdentity(a.sessionName).displayName || a.sessionName; }
       catch { return a.sessionName; }
     });
+    // The 12-cap predates the wire field it was written for (fleetNames,
+    // pruned when the fleet screen went count-only); it survives as a
+    // courtesy bound for callers that do ask, not a load-bearing rule.
     return { known: true, count: agents.length, names: names.slice(0, 12) };
   } catch {
     // ⚠️ An unreachable tmux is not an empty machine. That confusion is the
@@ -125,7 +133,10 @@ function state() {
     // than silently picking one.
     fleetKnown: here.known,
     fleetCount: here.count,
-    fleetNames: here.names,
+    // No names on the wire: the fleet screen shows the COUNT only (Josh's
+    // ruling, 2026-08-17, the 600-agent case). fleet() still derives names
+    // for callers that need them; a field nothing reads is a claim nothing
+    // checks.
     path: path_,
     subscription: sub,
   };

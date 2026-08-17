@@ -121,11 +121,17 @@ test('the agents it found are named the way the board names them', () => {
 
   const s = firstrun.state();
   assert.equal(s.fleetCount, 2);
-  assert.ok(s.fleetNames.every((n) => typeof n === 'string' && n.length),
-    `the screen would show blanks: ${JSON.stringify(s.fleetNames)}`);
-  assert.ok(s.fleetNames.includes('Marcie'),
-    'an agent with a real name is not shown by it, so nobody recognises their own fleet');
-  // ⚠️ And one with no instruction file falls back to something rather than
-  // nothing -- absence of a nice name is not absence of an agent.
-  assert.ok(s.fleetNames.includes('unnamedagent'));
+  // ⚠️ Names are NOT on the wire (the fleet screen shows the count only,
+  // Josh's ruling for the 600-agent case) -- a field nothing reads must not
+  // quietly return.
+  assert.equal('fleetNames' in s, false, 'the pruned names field came back');
+  // The name derivation itself still holds its hygiene: fleet() keeps
+  // serving names for callers that need them, no blanks, real names read
+  // from the instruction file, a nameless agent falls back to its slug.
+  const here = firstrun.fleet({ withNames: true });
+  assert.ok(here.names.every((n) => typeof n === 'string' && n.length),
+    `a caller would get blanks: ${JSON.stringify(here.names)}`);
+  assert.ok(here.names.includes('Marcie'),
+    'an agent with a real name is not derivable, so no caller can show it');
+  assert.ok(here.names.includes('unnamedagent'));
 });

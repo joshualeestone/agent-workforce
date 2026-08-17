@@ -35,7 +35,7 @@ const PORT = 4679;
   p.on('pageerror', (e) => errs.push(String(e)));
   try {
     await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
-    if (await p.isVisible('#firstrun')) await p.click('#fr-skip');
+    if (await p.isVisible('#firstrun')) await p.keyboard.press('Escape');
     await p.evaluate(async () => {
       const r = await fetch('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Settings Drive' }) });

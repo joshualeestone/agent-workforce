@@ -46,7 +46,7 @@ const MEMBER = 'angel';   // a session name that really exists on this machine
   p.on('pageerror', (e) => errs.push(String(e)));
   try {
     await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
-    if (await p.isVisible('#firstrun')) await p.click('#fr-skip');
+    if (await p.isVisible('#firstrun')) await p.keyboard.press('Escape');
 
     // A project with one member, made through the real routes; a second bare
     // project exists to bounce through (the door's reveal resets on a

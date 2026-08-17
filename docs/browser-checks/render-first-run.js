@@ -130,41 +130,42 @@ const MACHINE_MIXED = (() => {
 })();
 
 const FLEET_REAL = null; // let the real server answer
-// The step-5 shots PIN their fork: without this the action bar came from
-// the live /api/first-run, so a create-path machine would commit different
-// buttons under the same four filenames (the same drift the clear shot was
-// moved off the live route for). Adopt, matching the committed pictures.
-const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, fleetNames: ['Splinter', 'Angel'], path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+// Every shot PINS its /api/first-run payload: without this the action bar
+// came from the live route, so a create-path machine would commit different
+// buttons under the same filenames (the same drift the clear shot was moved
+// off the live route for). The fork lives on the step-6 endings; the
+// Success frames pin adopt, matching the committed pictures.
+const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_RETURN = FLEET_ADOPT;
-const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
-const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, fleetNames: ['Splinter', 'Casey Jones', 'Angel'], path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
+const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
+const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
+const SUB_UNSURE = { done: false, fleetKnown: true, fleetCount: 3, path: 'adopt', subscription: { state: 'unknown', plan: null, because: 'this computer has a Claude account we do not recognise the plan of (claude_max_pro_ultra)' } };
 
 const SHOTS = [
-  { name: 'firstrun-1-welcome', step: 1 },
-  { name: 'firstrun-2-checks-clear', step: 2, machine: MACHINE_CLEAR },
-  { name: 'firstrun-2-checks-attention', step: 2, machine: MACHINE_MIXED },
-  { name: 'firstrun-3-claude-connected', step: 3, first: FLEET_ADOPT },
-  { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
-  { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
+  // The pack's order (first-run spec): Success opens the flow and carries
+  // the app-location look; the endings close it.
+  { name: 'firstrun-1-success-system', step: 1, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-home', step: 1, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-missing', step: 1, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
+  { name: 'firstrun-1-success-unsure', step: 1, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
+  // The look STILL IN PROGRESS: machine: 'hang' stalls the route so the
+  // placeholder is what is measured and photographed.
+  { name: 'firstrun-1-success-checking', step: 1, machine: 'hang', first: FLEET_RETURN },
+  { name: 'firstrun-2-welcome', step: 2 },
+  { name: 'firstrun-3-model-connected', step: 3, first: FLEET_ADOPT },
+  { name: 'firstrun-3-model-none', step: 3, first: SUB_NONE },
+  { name: 'firstrun-3-model-unsure', step: 3, first: SUB_UNSURE },
+  { name: 'firstrun-4-checks-clear', step: 4, machine: MACHINE_CLEAR },
+  { name: 'firstrun-4-checks-attention', step: 4, machine: MACHINE_MIXED },
   // The record stubbed ABSENT: the click drive leaves a saved record in the
   // same sandbox, and without the stub this shot's content depends on which
   // drive ran last (prefilled-and-armed versus the empty gated state the
   // name claims).
-  { name: 'firstrun-4-about-you', step: 4, you: { state: 'absent', you: null, because: null } },
-  { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
-  { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
-  { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
-  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
-  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
-  // The look STILL IN PROGRESS: the only genuinely new visual state on this
-  // branch, otherwise never rendered by any harness (both walks wait past
-  // it). machine: 'hang' stalls the route so the placeholder is what is
-  // measured and photographed.
-  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_RETURN },
+  { name: 'firstrun-5-about-you', step: 5, you: { state: 'absent', you: null, because: null } },
+  { name: 'firstrun-6-adopt', step: 6, first: FLEET_ADOPT },
+  { name: 'firstrun-6-create', step: 6, first: FLEET_CREATE },
+  { name: 'firstrun-6-cannot-see', step: 6, first: FLEET_BLIND },
 ];
 
 /**
@@ -320,7 +321,18 @@ async function look(page, name) {
       });
       const page = await ctx.newPage();
       page.on('pageerror', (e) => problems.push(`${shot.name} [${scheme}] JS ERROR: ${e.message}`));
-      page.on('console', (m) => { if (m.type() === 'error') problems.push(`${shot.name} [${scheme}] console: ${m.text()}`); });
+      // The reveal exercise below DELIBERATELY answers one fetch with a 409
+      // (the refusal path under test); the browser logs that as a resource
+      // error, which is the exercise working, not a rendering problem. The
+      // exemption keys on the resource URL, not a counter: an async console
+      // event cannot race a URL match, and a 409 from any OTHER route still
+      // reports.
+      page.on('console', (m) => {
+        if (m.type() !== 'error') return;
+        const src = (m.location() && m.location().url) || '';
+        if (/409/.test(m.text()) && src.includes('/api/reveal-app')) return;
+        problems.push(`${shot.name} [${scheme}] console: ${m.text()}`);
+      });
       if (shot.machine === 'hang') {
         // Never answered: the checking placeholder is the state under test.
         await page.route('**/api/machine', () => {});
@@ -344,28 +356,28 @@ async function look(page, name) {
        * it holds the SCREEN to the fixture's name, catching a paint that
        * renders a clear payload as anything but green rows.
        */
-      if (shot.name === 'firstrun-2-checks-clear') {
+      if (shot.name === 'firstrun-4-checks-clear') {
         const rows = await page.evaluate(() =>
           Array.from(document.querySelectorAll('#fr-checks .fr-check')).map((el) => el.className));
         if (!rows.length || rows.some((c) => !/\bok\b/.test(c))) {
-          problems.push(`firstrun-2-checks-clear [${scheme}]: this machine is NOT all-clear `
+          problems.push(`firstrun-4-checks-clear [${scheme}]: this machine is NOT all-clear `
             + `(${rows.join(' | ') || 'no rows'}), so the shot under that name would be a lie`);
         }
       }
 
-      /* Each step-5 shot asserts the row it claims to depict, read from the
+      /* Each Success shot asserts the row it claims to depict, read from the
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
-         is asserted on every one of the four, because the Dock paragraph is
-         static copy and any state could regress it. */
-      if (shot.name.startsWith('firstrun-6-return')) {
-        // The pinned fork really painted: the primary carries the adopt
-        // path's label on every step-5 shot.
-        const forkLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
-        if (!/take me to my agents/i.test(forkLabel)) {
-          problems.push(`${shot.name} [${scheme}]: the fork is not the pinned adopt pair ("${forkLabel}")`);
+         is asserted on every one, because the Dock paragraph is static copy
+         and any state could regress it. */
+      if (shot.name.startsWith('firstrun-1-success')) {
+        // The Success primary is Set up Kosmos on every state (the fork
+        // lives on the endings now).
+        const introLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
+        if (!/set up kosmos/i.test(introLabel)) {
+          problems.push(`${shot.name} [${scheme}]: the Success primary drifted ("${introLabel}")`);
         }
       }
-      if (shot.name === 'firstrun-6-return-checking') {
+      if (shot.name === 'firstrun-1-success-checking') {
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         const cls = await page.evaluate(() => {
           const el = document.querySelector('#fr-return-row .fr-check');
@@ -377,7 +389,13 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
         }
-      } else if (shot.name.startsWith('firstrun-6-return')) {
+        // No Show-me button over a look still in progress: the checking
+        // placeholder has not earned the found row's promise.
+        const checkingReveal = await page.evaluate(() => document.querySelectorAll('#fr-reveal').length);
+        if (checkingReveal !== 0) {
+          problems.push(`${shot.name} [${scheme}]: a Show-me button rendered while the look was still checking`);
+        }
+      } else if (shot.name.startsWith('firstrun-1-success')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
         // placeholder as a rendering problem rather than a wait. (The
@@ -400,22 +418,45 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask fallback painted over the fixture's answer`);
         }
-        // The Dock instruction tracks the state: only a FOUND app may say
-        // "that folder"; the other states get the Spotlight-anchored drag.
-        if (want.state === 'ok') {
-          if (!/Drag Kosmos out of that folder/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the Dock instruction is not the drag`);
-          }
-        } else {
-          if (/out of that folder/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the Dock copy points at "that folder" over a row that named none`);
-          }
-          if (!/drag it onto the Dock/.test(text)) {
-            problems.push(`${shot.name} [${scheme}]: the folderless Dock instruction is missing the drag`);
-          }
+        // The ruled dock line names no folder, so ONE sentence must be
+        // present in every state (first-run spec, pack copy).
+        if (!/Drag Kosmos onto the Dock, the strip of icons/.test(text)) {
+          problems.push(`${shot.name} [${scheme}]: the ruled Dock drag line is missing`);
         }
         if (/Keep in Dock/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the unreachable Keep in Dock advice appeared`);
+        }
+        // RELIABILITY-OR-NO-BUTTON, the sleep row's rule: "Show me where it
+        // is" rides the FOUND row only. Asserted on every fetched state, so
+        // a button over a not-found answer, or a missing one over found,
+        // reds here instead of shipping.
+        const revealCount = await page.evaluate(() => document.querySelectorAll('#fr-reveal').length);
+        if (want.state === 'ok' && revealCount !== 1) {
+          problems.push(`${shot.name} [${scheme}]: the found row lost its Show-me button (${revealCount})`);
+        }
+        if (want.state !== 'ok' && revealCount !== 0) {
+          problems.push(`${shot.name} [${scheme}]: a Show-me button rendered over a ${want.state} answer`);
+        }
+        // The failure path SPEAKS and the success path clears it: one shot
+        // (system, light) exercises the click both ways so a broken handler
+        // or a failure sentence outliving a success cannot pass the suite.
+        if (shot.name === 'firstrun-1-success-system' && scheme === 'light') {
+          await page.route('**/api/reveal-app', (r) => r.fulfill({
+            status: 409, json: { error: 'we could not look just now, so we cannot say where the icon is' },
+          }));
+          await page.click('#fr-reveal');
+          await page.waitForFunction(
+            () => /could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            { timeout: 4000 },
+          ).catch(() => problems.push(`${shot.name} [${scheme}]: a refused reveal said nothing in the dock`));
+          await page.unroute('**/api/reveal-app');
+          await page.route('**/api/reveal-app', (r) => r.fulfill({ json: { ok: true } }));
+          await page.click('#fr-reveal');
+          await page.waitForFunction(
+            () => !/could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            { timeout: 4000 },
+          ).catch(() => problems.push(`${shot.name} [${scheme}]: the failure sentence outlived a reveal that worked`));
+          await page.unroute('**/api/reveal-app');
         }
       }
       const seen = await look(page, shot.name);

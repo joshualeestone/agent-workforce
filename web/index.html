@@ -853,21 +853,12 @@ svg { display: block; }
            overflow-y: auto; display: flex; justify-content: center;
            padding: var(--space-8) var(--space-5); }
 /* ⚠️ `margin: auto`, NOT `align-items: center`. Centred that way, a card taller
-   than the window has its top cut off and no way to scroll to it — and step 2
+   than the window has its top cut off and no way to scroll to it — and step 4
    on a machine with three findings is exactly that card on a short screen.
    Auto margins centre when it fits and collapse to the top when it does not. */
 .fr-box { background: var(--bg-elevated); border: 0.5px solid var(--separator);
           border-radius: 14px; box-shadow: var(--shadow-card);
           max-width: 40rem; width: 100%; overflow: hidden; margin: auto; }
-.fr-bar { padding: var(--space-5) var(--space-7);
-          border-bottom: 0.5px solid var(--separator);
-          /* --label-2, measured (orientation branch): --label-3 at this 12px
-             size reads 3.04:1 light / 3.76:1 dark, under the 4.5:1 AA floor,
-             on every one of the wizard's shots -- the same twice-fixed class
-             as the projects screen's hints. Pre-existing on main (its own
-             harness reports it, 32 problems); fixed where the branch was
-             already standing. */
-          font: var(--text-callout) var(--font-ui); color: var(--label-2); }
 .fr-body { padding: var(--space-8) var(--space-7); }
 .fr-body h2 { font: 600 var(--text-title-1) var(--font-ui); color: var(--label);
               margin: 0 0 var(--space-5); }
@@ -884,7 +875,7 @@ svg { display: block; }
 .fr-body p:last-child { margin-bottom: 0; }
 .fr-body p b { color: var(--label); }
 
-/* The progress segments. `aria-hidden`, because the "Step 2 of 6" line above
+/* The progress segments. `aria-hidden`, because the spoken "Step N of 5" crumb
    says the same thing in words — two announcements of one fact is noise. */
 .fr-segs { display: flex; gap: var(--space-3); margin-bottom: var(--space-7); }
 .fr-seg { height: 4px; flex: 1; border-radius: 2px; background: var(--separator); }
@@ -909,8 +900,9 @@ svg { display: block; }
 .fr-check.checking { border: 1px dashed var(--separator);
                      padding: calc(var(--space-5) - 0.5px) calc(var(--space-6) - 0.5px); }
 .fr-mark { flex: none; width: 1.25rem; font: 600 var(--text-title-3) var(--font-ui);
-           /* --label-2 for the same AA reason as .fr-bar above: the ok tick
-              and the unknown ? measured 3.0-4.0:1 at 15px. The glyph has a
+           /* --label-2, measured: --label-3 at this size sits under the
+              4.5:1 AA floor (the ok tick and the unknown ? read 3.0-4.0:1
+              at 15px). The glyph has a
               visually-hidden spoken word beside it, but a visible glyph a
               sighted-low-vision reader cannot see fails the same floor. */
            line-height: 1.35; color: var(--label-2); }
@@ -920,17 +912,6 @@ svg { display: block; }
 .fr-sleepbtn { margin-top: 8px; font-size: .8125rem; }
 .fr-cdetail { font: var(--text-callout) var(--font-ui); color: var(--label-2);
               line-height: 1.5; }
-
-/* The names of agents already here. Not links and not buttons: nothing on this
-   screen does anything to them, and a chip that looks clickable and is not is a
-   promise the same as any other. */
-.fr-names { display: flex; flex-wrap: wrap; gap: var(--space-3);
-            margin: 0 0 var(--space-6); padding: 0; list-style: none; }
-.fr-name { font: var(--text-callout) var(--font-ui); color: var(--label);
-           background: var(--bg-sunken); border: 0.5px solid var(--separator);
-           border-radius: var(--radius-pill); padding: var(--space-3) var(--space-5); }
-.fr-more { font: var(--text-callout) var(--font-ui); color: var(--label-2);
-           align-self: center; }
 
 .fr-acts { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center;
            padding: var(--space-6) var(--space-7) var(--space-8);
@@ -943,12 +924,6 @@ svg { display: block; }
               font-weight: 600; }
 .fr-primary:hover { background: var(--label); opacity: 0.88; }
 .fr-spacer { margin-left: auto; }
-/* The way out. Deliberately quiet and deliberately present: an overlay with no
-   exit is a trap the first time the detection behind it is wrong. */
-.fr-skip { background: none; border: 0; text-decoration: underline;
-           font: var(--text-callout) var(--font-ui); color: var(--label-2);
-           cursor: pointer; padding: var(--space-4); }
-.fr-skip:hover { color: var(--label); }
 .fr-note { font: var(--text-callout) var(--font-ui); color: var(--label-2);
            line-height: 1.5; margin-top: var(--space-6);
            padding: var(--space-5) var(--space-6); border-radius: 10px;
@@ -989,6 +964,143 @@ svg { display: block; }
    live region stops announcing in some screen readers, which is the one thing
    these elements exist to do. */
 .fr-msg:empty { min-height: 0; margin-top: 0; }
+/* ---- first-run: the pack's identity (FROZEN-2026-08-16, verbatim values) --
+   Scoped to #firstrun. The pack's palette is deliberate and single-look: a
+   white flow card on the warm Kosmos ground, gold primaries. Values are the
+   pack's own; do not re-derive them from the app tokens. */
+#firstrun {
+  --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
+  --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
+  background: var(--k-bg);
+}
+#firstrun .fr-box {
+  width: min(660px, 100%); background: #fff; border-radius: 24px; border: 0;
+  box-shadow: 0 1px 2px rgba(20,22,26,.05), 0 12px 40px rgba(20,22,26,.10);
+  color: var(--k-ink);
+}
+#firstrun .fr-body { padding: 40px 44px 36px; }
+#firstrun .fc-head { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 26px; }
+#firstrun .fc-k { width: 42px; height: 42px; flex: 0 0 42px; display: block; border-radius: 10px; }
+#firstrun .fr-segs { gap: 8px; margin-bottom: 34px; }
+#firstrun .fr-seg { height: 5px; border-radius: 100px; background: var(--k-rule); flex: 1; transition: background .3s ease; }
+#firstrun .fr-seg.done { background: var(--gold); }
+#firstrun .fr-seg.now  { background: var(--k-ink); }
+/* ⚠️ `p.fc-eyebrow`, not `.fc-eyebrow`: the eyebrow is a <p> inside
+   .fr-body, and `#firstrun .fr-body p` (1,1,1) beats a bare (1,1,0) class
+   rule -- measured 17px while the rule said 11 (Mona Lisa's eye caught it
+   twice; the computed style settled it). */
+#firstrun .fr-body p.fc-eyebrow { font: 600 .6875rem/1.4 var(--font-ui); letter-spacing: .14em;
+                        text-transform: uppercase; color: var(--k-ink-2); margin: 0 0 14px; max-width: none; }
+#firstrun .fr-body h2 { font: 700 1.875rem/1.2 var(--font-ui); letter-spacing: -0.025em;
+                        color: var(--k-ink); margin: 0 0 20px; text-wrap: balance; }
+#firstrun .fr-body p { font: 400 1.0625rem/1.6 var(--font-ui); color: var(--k-ink-2);
+                       margin: 0 0 14px; max-width: 52ch; }
+#firstrun .fr-body p b { color: var(--k-ink); }
+#firstrun .fr-acts { justify-content: flex-end; gap: 14px; margin-top: 36px; border-top-color: var(--k-rule); }
+/* The secondary action (Check again) sits flush LEFT, the primary right
+   (Josh, 2026-08-17). The DOM order alt / spacer / next carries this: the
+   spacer's auto margin absorbs ALL free space between them. A margin-right
+   auto on the alt itself is the wrong tool -- it SPLITS the free space with
+   the spacer's auto margin and strands the alt mid-row (measured 175px off
+   the edge, 2026-08-17). */
+/* The connect sub-screens (step 3's sign-in phases) ride the same
+   forced-light card, so their input, generic button, log tail and the
+   action row's hairline take pack inks too -- in dark scheme the app
+   tokens would paint dark widgets onto the white card (the single-look
+   rule below; these phases are not in the render-shot list, so the
+   checker cannot catch them). The #fr-next / #fr-alt ID rules outrank
+   the generic .btn pin, so the gold pair is untouched. */
+#firstrun .btn { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+#firstrun .btn:hover { background: rgba(20,22,26,.05); }
+#firstrun .btn:disabled:hover { background: #fff; }
+#firstrun .fr-code-row input { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+#firstrun .fr-conn-tail { color: var(--k-ink-2); background: rgba(20,22,26,.04); border-color: var(--k-rule); }
+#firstrun .llm { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+                 border: 1px solid var(--k-rule); border-radius: 12px; margin-bottom: 10px; background: #fff; }
+#firstrun .llm.off { background: rgba(20,22,26,.02); }
+#firstrun .llm.off .llm-w b, #firstrun .llm.off .llm-w small { color: var(--k-ink-2); }
+#firstrun .llm-w { flex: 1; min-width: 0; }
+#firstrun .llm-w b { display: block; font-size: 1rem; color: var(--k-ink); }
+#firstrun .llm-w small { color: var(--k-ink-2); font-size: .8125rem; }
+#firstrun .soon { font-size: .75rem; color: var(--k-ink-2); border: 1px solid var(--k-rule);
+                  border-radius: 999px; padding: .2rem .7rem; white-space: nowrap; }
+#firstrun .fr-body p.tier { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
+                  color: var(--k-ink-2); margin: 22px 0 10px; }
+#firstrun .connect-b { font-size: .9375rem; font-weight: 600; border: 0; border-radius: 8px;
+                       padding: .5rem 1rem; background: var(--gold-bright); color: #14161a;
+                       font-family: var(--font-ui); cursor: pointer; }
+#firstrun .connect-b:hover { background: var(--gold); }
+#firstrun .connect-b:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
+/* The shared action buttons take the pack's identity without touching
+   frActions: the primary is gold, the alt quiet, Back a plain quiet link. */
+#firstrun #fr-next {
+  border: 0; border-radius: 10px; padding: .9em 1.75em;
+  font: 600 1.0625rem/1.6 var(--font-ui); color: #14161a;
+  background: var(--gold-bright); cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+/* opacity pinned: the app-level .fr-primary:hover sets 0.88, which would
+   make the pack's gold go translucent (the ID rule overrode background
+   only). */
+#firstrun #fr-next:hover { background: var(--gold); transform: translateY(-1px); opacity: 1; }
+#firstrun #fr-next[disabled] { opacity: .45; cursor: not-allowed; transform: none; background: var(--gold-bright); }
+#firstrun #fr-next:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
+#firstrun #fr-alt {
+  background: transparent; border: 1px solid var(--gold-deep); color: #14161a;
+  border-radius: 10px; padding: calc(.9em - 1px) calc(1.75em - 1px);
+  font: 600 1.0625rem/1.6 var(--font-ui); cursor: pointer;
+  transition: background .12s ease;
+}
+#firstrun #fr-alt:hover { background: rgba(198,154,50,.14); }
+#firstrun #fr-alt:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
+/* The heading still TAKES focus on each step (SC 4.1.3); the pack draws no
+   ring on it, and a heading is not interactive, so the ring goes. */
+#firstrun .fr-body h2:focus-visible { outline: none; }
+/* The check rows re-skin to the pack's chk look without changing frCheckRow. */
+#firstrun .fr-check { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0;
+                      background: none; border: 0; border-radius: 0; }
+#firstrun .fr-check + .fr-check { border-top: 1px solid var(--k-rule); }
+/* The checking placeholder keeps its dashed in-progress look through the
+   reskin (the border reset above was flattening it to a plain row). */
+#firstrun .fr-check.checking { border: 1px dashed var(--k-rule); }
+#firstrun .fr-mark { width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px; display: grid;
+                     place-items: center; font-size: .875rem; font-weight: 700;
+                     border: 1px solid var(--k-rule); background: rgba(20,22,26,.04); color: var(--k-ink-2); }
+#firstrun .fr-check.ok .fr-mark, #firstrun .fr-check.attention .fr-mark {
+  /* Ink darker than the pack's gold-deep: the glyph is decorative (the vh
+     word beside it is the content) but the checker holds the AA floor on
+     everything painted, and gold-deep on the gold tint is 2.78. */
+  background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.4); color: #6e5311; }
+#firstrun .fr-ctitle { font-size: 1rem; font-weight: 600; margin-bottom: 2px; color: var(--k-ink); }
+#firstrun .fr-cdetail { font-size: .875rem; color: var(--k-ink-2); line-height: 1.5; }
+/* ⚠️ The pack's card is SINGLE-LOOK (white card, warm ground) in both
+   schemes, so every element inside must take its ink from the pack palette,
+   never from the app's scheme-aware tokens -- a dark-mode token on this
+   forced-light card is white on white (caught by the render checker). */
+#firstrun .fr-note { color: var(--k-ink-2); background: rgba(184,137,32,.08);
+                     border: 1px solid var(--k-rule); }
+#firstrun .fr-note b { color: var(--k-ink); }
+#firstrun .fr-msg { color: var(--k-ink); }
+#firstrun .fr-youfine { color: var(--k-ink-2); }
+#firstrun .fr-revealrow { margin: 18px 0 22px; }
+#firstrun .fr-sleepbtn, #firstrun #fr-reveal {
+  background: transparent; border: 1px solid var(--gold-deep); color: #14161a;
+  border-radius: 10px; padding: calc(.45em - 1px) 1em; cursor: pointer;
+  font: 600 .875rem/1.6 var(--font-ui); transition: background .12s ease;
+}
+#firstrun .fr-sleepbtn:hover, #firstrun #fr-reveal:hover { background: rgba(198,154,50,.14); }
+#firstrun .fr-sleepbtn:focus-visible, #firstrun #fr-reveal:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
+#firstrun .fr-progress { background: var(--k-rule); }
+#firstrun .fr-progress-fill, #firstrun .fr-progress i, #firstrun .fr-progress > div { background: var(--gold-deep); }
+#firstrun .llm-disc { border-radius: 100px; background: radial-gradient(circle at 35% 35%, #d8b65a, #b88920); }
+#firstrun .llm.off .llm-disc { background: radial-gradient(circle at 35% 35%, #d5d3ce, #a9adb3); }
+#firstrun .fieldlab { display: block; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase;
+                      font-weight: 600; color: var(--k-ink-2); margin-bottom: 6px; }
+#firstrun .inp { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem;
+                 padding: .6em .9em; border-radius: 10px; border: 1px solid var(--k-rule);
+                 background: #fff; color: var(--k-ink); }
+#firstrun .inp:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 1px; }
+
 /* ⚠️ `p.fr-next`, not `.fr-next`. `.fr-body p` is one specificity point higher
    than a bare class, so the italic caption rendered as ordinary body copy and
    this rule did nothing at all. Caught by looking at the screen; every text
@@ -1253,60 +1365,52 @@ svg { display: block; }
      screenshot it on a machine that has already been through it. -->
 <div class="fr-back" id="firstrun" hidden>
   <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
-    <div class="fr-bar">Kosmos Setup</div>
     <div class="fr-body">
-      <p class="crumb" id="fr-step">Step 1 of 6</p>
+      <!-- The pack's card head: the real mark, centered. The step crumb is
+           SPOKEN, not shown -- the pack's card carries only the segments, and
+           the sentence stays for screen readers and for the tests that pin
+           whole-step rendering. -->
+      <p class="vh">Press Escape to leave setup at any time; Kosmos will not show it again.</p>
+      <div class="fc-head"><img class="fc-k" src="data:image/png;base64,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" alt="" width="42" height="42"></div>
+      <p class="crumb vh" id="fr-step">Step 1 of 6</p>
       <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
+      <p class="fc-eyebrow" id="fr-eyebrow"></p>
       <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED without joining the tab
            order. Without it `.focus()` here is a silent no-op and the step
            change is announced to nobody -- the identical fix the `<h1>` at the
            top of this file already carries, with the identical reason. -->
       <h2 id="fr-title" tabindex="-1">Welcome</h2>
 
-      <!-- 1. What this is. No account, no email, and where the transcripts go —
+      <!-- 2. Welcome. No account, no email, and where the transcripts go —
            the last of which the requirements ask to be stated here rather than
            discovered later. -->
-      <div class="fr-pane" id="fr-pane-1">
-        <p>This is where you see the agents working for you, and where you make
-           new ones. <b>All of it runs on this computer.</b></p>
-        <p>There is no account to make and no email to give. Nothing here signs
-           you up for anything.</p>
-        <!-- ⚠️ THIS PARAGRAPH HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
-             THE SECOND WRONG VERSION WAS WRITTEN WHILE FIXING THE FIRST.
-
-             It began "so you can always go back and read it" — a capability
-             claim, and this app has no way to show anybody a transcript.
-             Correcting that produced "nothing of it is sent anywhere", which is
-             a PRIVACY claim and flatly false: agents think with Claude, which is
-             the entire reason step 3 exists, so what you ask them goes to
-             Anthropic to be answered. Only the RECORD is local.
-
-             Saying that to a non-technical person on the first screen is the
-             worst version of this defect in the whole flow, and it arrived as
-             the fix for a milder one. So the scope is now stated explicitly: the
-             record stays, the questions go, and there is no account either way.
-             §7b asks for the first sentence; the second is what makes it true.
-
-             ⚠️ THIRD CORRECTION, 2026-08-17. The About-you step made "Nothing
-             else about you is sent anywhere" false again without a word of
-             this paragraph being edited: the profile is prompt text in every
-             agent's boot file. The sentence now names it. The pattern: this
-             paragraph does not go wrong by being rewritten, it goes wrong when
-             a FEATURE changes what is true. Re-read it whenever anything new
-             is added to what agents carry. -->
-        <p>The record of everything your agents do is written down and kept on
-           this Mac, in full. It is yours and it stays here.</p>
-        <p>Your agents think with Claude, so what you ask them goes to Claude to
-           be answered. So does the little you tell Kosmos about yourself,
-           because that is what your agents work from. Nothing else about you is
-           sent anywhere, and there is no account here to send it to.</p>
-        <p class="fr-next">Next: a quick look at this computer, then Claude,
-           then a little about you, then your agents, then how you get back to
-           Kosmos later.</p>
+      <div class="fr-pane" id="fr-pane-2">
+        <!-- ⚠️ THE PRIVACY SENTENCE ON THIS SCREEN HAS BEEN WRONG THREE TIMES,
+             and the pattern is recorded here because the paragraph keeps its
+             guardian even across a redesign: it does not go wrong by being
+             rewritten, it goes wrong when a FEATURE changes what is true.
+             (First: a transcript capability claim nothing implemented. Second:
+             "nothing of it is sent anywhere", false because agents think with
+             Claude. Third, 2026-08-17: About-you made the narrowed claim false
+             AGAIN without an edit -- the profile is prompt text in every boot
+             file.) The middle line below is Mona Lisa's RULED wording from the
+             first-run spec (kosmos-firstrun-spec.md): the pack's own Saturday
+             version predates About-you and must not ship. Re-read this
+             whenever anything new is added to what agents carry. -->
+        <p>Your agents live on this computer, and so does everything they
+           write.</p>
+        <!-- Josh's rewrite, verbatim, and RULED FINAL as written (2026-08-17,
+             "leave that one line the way that I wrote it"): provider-generic
+             so this screen survives new providers, and it reads BEFORE
+             Claude is chosen. The and-your-answers-here addition was offered
+             and declined; do not re-add it without his word. -->
+        <p>They're powered by an AI provider, so your requests are sent to
+           that provider to be answered.</p>
+        <p>No account setup. No email needed.</p>
       </div>
 
-      <!-- 2. The machine checks. Painted from /api/machine. -->
-      <div class="fr-pane" id="fr-pane-2" hidden>
+      <!-- 4. The machine checks. Painted from /api/machine. -->
+      <div class="fr-pane" id="fr-pane-4" hidden>
         <div id="fr-checks" role="status" aria-live="polite"></div>
         <!-- ⚠️ Announced, like its sibling on the next step. This is the one
              sentence that reconciles the three rows above it into an answer
@@ -1316,9 +1420,28 @@ svg { display: block; }
         <div class="fr-msg" id="fr-machine-msg" role="status" aria-live="polite"></div>
       </div>
 
-      <!-- 3. Claude. THREE answers, and the third must never render as the
+      <!-- 3. Model. THREE answers, and the third must never render as the
            second — see engine/subscription.js for what that costs. -->
       <div class="fr-pane" id="fr-pane-3" hidden>
+        <!-- The pack's model list, as drawn and at Josh's explicit word
+             (2026-08-17: "Yes I want that picking a model in the app").
+             Claude is the one that works today and carries Connect; the rest
+             are Coming soon. The verdict row (#fr-sub) renders BENEATH the
+             list, exactly where the pack draws its could-not-tell chk row.
+             The Connect button re-checks before it does anything: a
+             CONNECTED verdict short-circuits to the green row, and an
+             unknown one enters a drive whose REPL detection says "we could
+             not confirm" rather than forcing credential entry (the painter
+             comment states the guarantee precisely). -->
+        <p>Your agents run on your own subscription, on this computer.</p>
+        <div class="llm on"><span class="llm-m llm-disc gold" aria-hidden="true"></span><div class="llm-w"><b>Claude</b><small>Anthropic &middot; works today</small></div>
+          <button class="connect-b" type="button" id="fr-llm-connect">Connect</button></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Gemini</b><small>Google</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>GPT</b><small>OpenAI</small></div><span class="soon">Coming soon</span></div>
+        <p class="tier">Runs on this computer</p>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Llama</b><small>Meta</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Qwen</b><small>Alibaba</small></div><span class="soon">Coming soon</span></div>
+        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Mistral</b><small>Open weights</small></div><span class="soon">Coming soon</span></div>
         <div id="fr-sub"></div>
         <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
         <!-- ⚠️ The connect flow's phase announcements, VISUALLY HIDDEN on
@@ -1338,7 +1461,7 @@ svg { display: block; }
            difference between asking and pretending to ask. The wizard's own
            quiet exit stays: that is the trap-escape for a wrong detection,
            not a skip of this question. -->
-      <div class="fr-pane" id="fr-pane-4" hidden>
+      <div class="fr-pane" id="fr-pane-5" hidden>
         <div id="fr-you"></div>
         <div class="fr-msg" id="fr-you-msg" role="status" aria-live="polite"></div>
       </div>
@@ -1347,40 +1470,39 @@ svg { display: block; }
            this machine is already on the board, because the board is built from
            `tmux list-panes`. So this screen SHOWS them rather than migrating
            them, and there is no progress bar here because there is no work. -->
-      <div class="fr-pane" id="fr-pane-5" hidden>
+      <div class="fr-pane" id="fr-pane-6" hidden>
         <div id="fr-fleet"></div>
       </div>
 
-      <!-- 6. Getting back. ⚠️ The one thing the install said only into
+      <!-- 1. Success. ⚠️ The one thing the install said only into
            Terminal scrollback, now said where the person actually is. The
            check row LOOKS (the app-location check in /api/machine) rather
            than remembering where the installer meant to put the icon: the
            icon legitimately lands in /Applications, ~/Applications, or
            nowhere, and a screen claiming a location nobody checked is the
            defect this codebase is built against. -->
-      <div class="fr-pane" id="fr-pane-6" hidden>
+      <div class="fr-pane" id="fr-pane-1" hidden>
         <!-- ⚠️ The live region is STATIC MARKUP the painter never recreates,
-             like step 2's #fr-checks: a region inserted and populated in one
+             like step 4's #fr-checks: a region inserted and populated in one
              innerHTML write is the documented way to get no announcement.
              The write that matters (the engine answer arriving) lands in a
              region that long predates it; the initial placeholder joins the
-             tree with the pane, the same shape as step 2's "Looking...". -->
+             tree with the pane, the same shape as step 4's "Looking...". -->
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
-          <!-- The dock is a live region too: its instruction CHANGES with
-               the answer (folderless upgraded to "out of that folder"), and
-               a screen-reader user who heard the pre-paint would never hear
-               the correction -- step 2's reconciling sentence made the same
-               call for the same SC 4.1.3 reason. -->
+          <!-- The dock is a live region too: the reveal button's failure
+               sentences land here (frRevealSay), and a screen-reader user
+               who fired that click would otherwise never hear the refusal --
+               the same SC 4.1.3 call as the check row above. -->
           <div id="fr-return-dock" role="status" aria-live="polite"></div>
         </div>
       </div>
 
       <!-- ⚠️ OUTSIDE THE PANES, and that is the whole point of it. This is the
-           only message on this screen that can be raised from ANY step — Skip
-           is on every one — so putting it inside the fork pane (fr-pane-5
-           since About-you landed at 4), which is where
+           only message on this screen that can be raised from ANY step (the
+           Escape exit works everywhere) — so putting it inside one pane,
+           which is where
            it started, meant a person who skipped from the welcome screen was
            told nothing at all: the sentence was written into a hidden div.
            `alert`, because it is the one thing here somebody must not walk away
@@ -1388,10 +1510,17 @@ svg { display: block; }
       <div class="fr-msg" id="fr-forgot" role="alert" aria-live="assertive"></div>
     </div>
     <div class="fr-acts">
-      <button class="btn" id="fr-back" type="button" hidden>&#8592; Back</button>
-      <button class="fr-skip" id="fr-skip" type="button">Skip setup</button>
-      <span class="fr-spacer"></span>
+      <!-- ⚠️ NO BACK, at Josh's word (2026-08-17, every step): the flow only
+           moves forward -- once a model is picked and Continue is hit,
+           nobody is offered a path back down the connect rabbit hole. The
+           exits are Escape (marks first run seen) and finishing. -->
+      <!-- ⚠️ NO VISIBLE SKIP, by the pack's own decisions table ("Skip setup
+           -- Removed from the wizard"): nobody skips setup casually, and the
+           trap-escape survives as Escape (which marks first run seen and
+           exits, exactly what the link did) plus the surfaced way out when a
+           completion write fails (Carry on anyway). -->
       <button class="btn" id="fr-alt" type="button" hidden></button>
+      <span class="fr-spacer"></span>
       <button class="btn fr-primary" id="fr-next" type="button">Continue</button>
     </div>
   </div>
@@ -7786,8 +7915,12 @@ const FR_STEPS = 6;
 // final else, exhaustive by construction: step is clamped to [1, FR_STEPS],
 // so a sixth step must add its pane AND its branch -- said here because the
 // constant cannot reach an else.)
-const FR_STEP_RETURN = 6;
-const FR_STEP_YOU = 4;
+// ⚠️ The machine-look/orientation content IS step 1 now (the pack's Success
+// screen opens the flow; orientation lands before the person is invested,
+// not after they are finished -- the spec calls the move out explicitly).
+// The constant keeps its name so the generation-guard pins keep reading.
+const FR_STEP_RETURN = 1;
+const FR_STEP_YOU = 5;
 // ⚠️ The About-you step's generation, same contract as FR_RETURN_GEN: a
 // continuation captured under one generation must do NOTHING once the
 // generation moves -- a bare step-number check cannot tell "still here"
@@ -7798,8 +7931,8 @@ let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
 let FR_FORGOT = false;    // the completion flag did not stick, and we said so
-let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and Continue at once
-// ⚠️ Kept so the fork step cannot promise something step 2 just contradicted. Null
+let FR_FINISHING = false; // a completion is in flight; guards Escape and Continue at once
+// ⚠️ Kept so the fork step cannot promise something step 4 just contradicted. Null
 // until the check screen has actually answered -- an empty array here would be
 // "we looked and found nothing wrong", which is not the same thing.
 let FR_MACHINE = null;
@@ -7818,9 +7951,10 @@ function frActions(primary, alt) {
   next.textContent = primary.label;
   next.onclick = primary.go;
   next.disabled = false;
-  // ⚠️ And the ARIA mirror with it. Step 4's gate sets aria-disabled on this
-  // shared button; without clearing it here, Back out of an empty About-you
-  // left every later step's Continue announcing "dimmed" while enabled.
+  // ⚠️ And the ARIA mirror with it. Step 5's gate sets aria-disabled on this
+  // shared button; without clearing it here, any later paint of the shared
+  // Continue announced "dimmed" while enabled (first caught through the old
+  // Back button; the reset matters for every repaint, so it stays).
   next.removeAttribute('aria-disabled');
   if (alt) {
     other.hidden = false;
@@ -7873,42 +8007,54 @@ function frGo(step) {
   for (let i = 1; i <= FR_STEPS; i += 1) {
     document.getElementById('fr-pane-' + i).hidden = (i !== step);
   }
-  document.getElementById('fr-step').textContent = 'Step ' + step + ' of ' + FR_STEPS;
-  document.getElementById('fr-segs').innerHTML = Array.from({ length: FR_STEPS }, (_, i) => {
-    const n = i + 1;
-    return '<div class="fr-seg' + (n < step ? ' done' : (n === step ? ' now' : '')) + '"></div>';
-  }).join('');
-  document.getElementById('fr-back').hidden = (step === 1);
+  // Spoken counts match the drawn segments: the intro stands outside the
+  // count (no segments), and Welcome..agents are five.
+  document.getElementById('fr-step').textContent =
+    (step === 1) ? 'Kosmos setup' : 'Step ' + (step - 1) + ' of ' + (FR_STEPS - 1);
+  // The intro carries no segments (the pack's Success screen stands outside
+  // the count it opens); steps 2..6 share five.
+  document.getElementById('fr-segs').innerHTML = (step === 1) ? '' :
+    Array.from({ length: FR_STEPS - 1 }, (_, i) => {
+      const n = i + 2;
+      return '<div class="fr-seg' + (n < step ? ' done' : (n === step ? ' now' : '')) + '"></div>';
+    }).join('');
 
+
+  // The pack's eyebrow, one per screen; the endings keep 'Your agents'.
+  const FR_EYEBROWS = { 1: 'Success', 2: 'Welcome', 3: 'Model', 4: 'This computer', 5: 'About you', 6: 'Your agents' };
+  document.getElementById('fr-eyebrow').textContent = FR_EYEBROWS[step] || '';
   if (step === 1) {
-    document.getElementById('fr-title').textContent = 'Welcome to Kosmos';
-    frActions({ label: 'Continue', go: () => frGo(2) });
+    document.getElementById('fr-title').textContent = 'Kosmos is now installed on this computer.';
+    // The machine look paints the Applications-folder row; the actions are
+    // this branch's (the fork moved back to the endings with the spec).
+    frActions({ label: 'Set up Kosmos', go: () => frGo(2) });
+    frPaintReturn();
   } else if (step === 2) {
-    document.getElementById('fr-title').textContent = 'Checking your computer';
-    frActions({ label: 'Continue', go: () => frGo(3) },
-      { label: 'Check again', go: frPaintMachine });
-    frPaintMachine();
+    document.getElementById('fr-title').textContent = 'Create and manage AI agents that work for you.';
+    frActions({ label: 'Continue', go: () => frGo(3) });
   } else if (step === 3) {
-    document.getElementById('fr-title').textContent = 'Claude';
+    document.getElementById('fr-title').textContent = 'Choose a model.';
     frPaintSubscription();
     // ⚠️ A connect flow may already be running (it keeps going server-side
     // when somebody wanders to another step). If it is, this repaints the
     // live flow over the static verdict once the answer arrives.
     frConnResume();
   } else if (step === 4) {
+    document.getElementById('fr-title').textContent = 'Checking this computer.';
+    frActions({ label: 'Continue', go: () => frGo(5) },
+      { label: 'Check again', go: frPaintMachine });
+    frPaintMachine();
+  } else if (step === 5) {
     document.getElementById('fr-title').textContent = 'Who are your agents working for?';
     frPaintYou();
-  } else if (step === 5) {
-    frPaintFleet();
   } else {
-    document.getElementById('fr-title').textContent = 'Getting back to Kosmos';
-    frPaintReturn();
+    frPaintFleet();
   }
 
   /**
-   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this steps 3
-   * and 4 were announced to nobody at all. Step 2's list is a live region; the
-   * other two are not, and nothing moved the keyboard — so pressing Continue
+   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this the model
+   * and About-you screens were announced to nobody at all. Step 4's check
+   * list is a live region; the others are not, and nothing moved the keyboard — so pressing Continue
    * told a screen-reader user only that a button's label had changed. The
    * subscription verdict and the fleet list were never spoken.
    *
@@ -7920,7 +8066,7 @@ function frGo(step) {
 }
 
 /* --------------------------------------------------------------------------
-   Step 4 — about you
+   Step 5 — about you
    -------------------------------------------------------------------------- */
 
 /**
@@ -7940,17 +8086,17 @@ async function frPaintYou() {
   const box = document.getElementById('fr-you');
   document.getElementById('fr-you-msg').textContent = '';
   box.innerHTML =
-    '<p>Answer once and every agent you make will know it. Your agents carry this to Claude when they work, and it goes nowhere else.' +
-    // Spoken, not shown: the sighted reader learns the requirement from the
-    // waiting Continue; a screen-reader user must not have to guess why the
-    // step will not advance (SC 3.3.2). The fields carry aria-required too.
-    '<span class="vh"> The first two answers are needed before Continue.</span></p>' +
-    '<div class="fr-youfield"><label for="fr-you-name">What should your agents call you?</label>' +
-    '<input type="text" id="fr-you-name" maxlength="80" placeholder="Josh" aria-required="true"></div>' +
-    '<div class="fr-youfield"><label for="fr-you-do">What do you do?</label>' +
-    '<input type="text" id="fr-you-do" maxlength="200" placeholder="I run a company that builds AI tools" aria-required="true"></div>' +
-    '<div class="fr-youfield"><label for="fr-you-know">Anything they should always know?</label>' +
-    '<textarea id="fr-you-know" rows="2" maxlength="2000" placeholder="How you like things written, who your customers are, anything else"></textarea></div>' +
+    // Josh deleted the intro line (2026-08-17): "real simple straightforward
+    // for white-collar business workers". The spoken instruction survives,
+    // invisible: a screen-reader user must not have to guess why the step
+    // will not advance (SC 3.3.2); the fields carry aria-required too.
+    '<p class="vh">The first two answers are needed before Continue.</p>' +
+    '<div class="fr-youfield"><label class="fieldlab" for="fr-you-name">What should your agents call you?</label>' +
+    '<input class="inp" type="text" id="fr-you-name" maxlength="80" placeholder="Josh" aria-required="true"></div>' +
+    '<div class="fr-youfield"><label class="fieldlab" for="fr-you-do">What do you do?</label>' +
+    '<input class="inp" type="text" id="fr-you-do" maxlength="200" placeholder="I run a company that builds AI tools" aria-required="true"></div>' +
+    '<div class="fr-youfield"><label class="fieldlab" for="fr-you-know">Anything they should always know?</label>' +
+    '<textarea class="inp" id="fr-you-know" rows="2" maxlength="2000" placeholder="How you like things written, who your customers are, anything else"></textarea></div>' +
     '<p class="fr-youfine">You can change these later.</p>';
   const nameEl = document.getElementById('fr-you-name');
   const doEl = document.getElementById('fr-you-do');
@@ -8021,7 +8167,7 @@ async function frPaintYou() {
 }
 
 /* --------------------------------------------------------------------------
-   Step 2 — this computer
+   Step 4 — this computer
    -------------------------------------------------------------------------- */
 
 /** The word, for anybody who cannot see the glyph or its colour. */
@@ -8102,12 +8248,12 @@ async function frPaintMachine() {
    * person tapping the button four times can stall the board for everyone
    * looking at it -- including the poll behind this overlay. (An earlier version
    * of this comment called it "the only button in the product that costs a
-   * subprocess per press", which was false: step 3's "Check again" runs `tmux
+   * subprocess per press", which was false: this screen's "Check again" runs `tmux
    * list-panes` and had no guard at all. It has one now.)
    */
   // ⚠️ A TOKEN, not a boolean. An unconditional re-enable in the `finally` let a
-  // STALE request hand the button back while a newer one was still running: leave
-  // step 2 mid-request, come back, press it again, and request #1 finishing
+  // STALE request hand the button back while a newer one was still running: fire
+  // step 4's Check again while a first press is still running, and request #1 finishing
   // unlocks the button under request #2.
   FR_CHECKING += 1;
   const mine = FR_CHECKING;
@@ -8153,7 +8299,7 @@ async function frPaintMachine() {
    * ⚠️ GUARDED ONCE, PROPERLY. The first version tested `got` for null on this
    * line and then dereferenced it bare five lines down (`got.attention ||
    * got.unknown`) -- outside the try, so a 200 whose body is `null` threw an
-   * unhandled rejection and left step 2 saying "Looking…" forever. A body of
+   * unhandled rejection and left step 4 saying "Looking…" forever. A body of
    * `{}` or `[]` rendered a titled, buttoned, empty pane, which is the shape
    * two other guards in this file were written against.
    */
@@ -8199,8 +8345,8 @@ async function frPaintMachine() {
 async function frRecheck() {
   const msg = document.getElementById('fr-sub-msg');
   /**
-   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 2's is. A comment used
-   * to claim step 2's was "the only button in the product that costs a
+   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 4's is. A comment used
+   * to claim step 4's was "the only button in the product that costs a
    * subprocess per press"; it was not. This one calls `/api/first-run`, which
    * runs `firstrun.state()` -> `fleet()` -> `status.paneRoster()` -> `tmux
    * list-panes`. The guard was written one screen away from the button that
@@ -8243,7 +8389,7 @@ async function frRecheck() {
   } finally {
     // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
     // `#fr-alt` is one element that both steps relabel. With a token on one side
-    // only, step 2's late response handed the button back while step 3's request
+    // only, one screen's late response handed the button back while the other's request
     // was still running -- and the comment claiming "only the latest request may
     // hand it back" was true of one caller out of two.
     if (wasAgain && mine === FR_CHECKING) again.disabled = false;
@@ -8719,6 +8865,51 @@ function frConnPaintProgress(progress) {
   }
 }
 
+/* The Success screen's reveal, delegated (the row repaints wholesale).
+   Failure lands in ONE message line with the route's sentence -- replaced,
+   never stacked, so repeated failed clicks do not pile paragraphs. */
+function frRevealSay(html) {
+  const dock = document.getElementById('fr-return-dock');
+  let m = dock.querySelector('.fr-msg');
+  // Clearing REMOVES the node: an empty paragraph parked in a live region
+  // is one more thing for the next reader (human or machine) to reason
+  // about, and nothing needs it kept.
+  if (!html) { if (m) m.remove(); return; }
+  // No role on the child: the dock itself is the live region, and a status
+  // inside a status double-announces on some screen readers.
+  if (!m) { dock.insertAdjacentHTML('afterbegin', '<p class="fr-msg"></p>'); m = dock.querySelector('.fr-msg'); }
+  m.innerHTML = html;
+}
+document.getElementById('fr-pane-1').addEventListener('click', async (e) => {
+  const b = e.target.closest('#fr-reveal');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const res = await fetch('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      frRevealSay(esc((body && body.error) || 'we could not show it'));
+    } else {
+      // A failure sentence from an earlier click must not keep standing
+      // (and re-announcing) over a reveal that just worked.
+      frRevealSay('');
+    }
+  } catch {
+    frRevealSay('we could not show it');
+  } finally {
+    b.disabled = false;
+  }
+});
+
+document.getElementById('fr-pane-3').addEventListener('click', (e) => {
+  const b = e.target.closest('#fr-llm-connect');
+  if (!b) return;
+  // The same one-press guard the primary has: start() is idempotent under
+  // it anyway, but the list button should not LOOK pressable twice.
+  b.disabled = true;
+  Promise.resolve(frConnectStart()).finally(() => { b.disabled = false; });
+});
+
 function frPaintSubscription() {
   const sub = (FR && FR.subscription) || { state: 'unknown', because: 'we have not been able to look' };
   const box = document.getElementById('fr-sub');
@@ -8727,9 +8918,10 @@ function frPaintSubscription() {
     box.innerHTML = frCheckRow({
       state: 'ok',
       title: (sub.plan || 'A Claude subscription') + ' is connected',
-      detail: 'Your agents think with Claude, and this computer is signed in. Nothing to do here.',
+      detail: 'Your agents think with Claude, and this computer is signed in.',
     });
-    frActions({ label: 'Continue', go: () => frGo(4) });
+    frActions({ label: 'Continue', go: () => frGo(4) },
+      { label: 'Check again', go: frRecheck });
     return;
   }
 
@@ -8786,16 +8978,24 @@ function frPaintSubscription() {
    * somebody who just signed in through Terminal gets their green row from the
    * same button — and the two-button bar stays two buttons.
    *
-   * ⚠️ And the `unknown` state above deliberately does NOT get a Connect
-   * button. Unknown means this machine may already be signed in by somebody
-   * who pays; pushing them toward a sign-in flow is the exact asymmetry
-   * `engine/subscription.js` exists to prevent. They keep Check again.
+   * ⚠️ And the VERDICT ROW for the `unknown` state above carries no Connect
+   * of its own. The pack's static provider list (pane 3 markup) does show
+   * its Connect button in every state -- the pack's drawing. What the
+   * re-check actually guarantees, stated precisely: a machine whose verdict
+   * is CONNECTED short-circuits to the green row and never enters the
+   * sign-in drive (engine/connect.js start()). On an `unknown` verdict the
+   * drive IS entered -- and its REPL detection then lands on the honest
+   * "Claude looks signed in here, but we could not confirm a subscription"
+   * rather than forcing credential entry. So the asymmetry rule
+   * (`engine/subscription.js`: never push a possibly-paying customer into a
+   * second sign-in) is preserved by the drive's honesty, not by a
+   * short-circuit; the markup comment on the list says the same.
    */
   frActions({ label: 'Connect Claude', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
 }
 
 /* --------------------------------------------------------------------------
-   Step 4 — the agents already here
+   Step 6 — the agents already here
    -------------------------------------------------------------------------- */
 
 function frPaintFleet() {
@@ -8803,7 +9003,6 @@ function frPaintFleet() {
   const path = (FR && FR.path) || 'unknown';
   const title = document.getElementById('fr-title');
 
-  const names = (FR && Array.isArray(FR.fleetNames)) ? FR.fleetNames : [];
   const count = FR && FR.fleetCount;
 
   /**
@@ -8815,34 +9014,28 @@ function frPaintFleet() {
    * word for it.
    */
   if (path === 'adopt' && Number.isInteger(count) && count > 0) {
-    title.textContent = count === 1 ? 'You already have an agent here' : 'You already have ' + count + ' agents here';
+    // The spec's declension: real count, "one" at one, the pack's period.
+    title.textContent = count === 1 ? 'You already have one agent here.' : 'You already have ' + count + ' agents here.';
     /**
      * ⚠️ NOT AN IMPORT, AND THIS SCREEN MUST NOT MIME ONE. The board is built
      * from `tmux list-panes`, so every one of these was already on it before
      * anybody clicked anything. A progress bar here would be a fake step that
      * can fail, for work that has already happened.
      *
-     * ⚠️ AND THE COUNT CAN EXCEED THE NAMES. The engine sends the first twelve;
-     * this machine has thirteen. Showing twelve chips under the heading "13
-     * agents" and saying nothing is a screen that does not add up — measured,
-     * on the first live call of the route.
+     * ⚠️ NO NAME CHIPS, at Josh's word (2026-08-17): a person can arrive
+     * with hundreds of agents, and the count in the heading is the claim.
+     * The pack's two sentences below, verbatim.
      */
-    box.innerHTML = '<p>They are already on your board. <b>There is nothing to import</b> and '
-      + 'nothing to wait for. Kosmos reads what is running on this computer, so it '
-      + 'could see them before you got here.</p>'
-      + '<ul class="fr-names">'
-      + names.map((n) => '<li class="fr-name">' + esc(n) + '</li>').join('')
-      + (count > names.length
-        ? '<li class="fr-more">and ' + (count - names.length) + ' more</li>' : '')
-      + '</ul>'
-      + '<p>You can give any of them a picture, say what they are for, and change what they '
-         + 'work on, or make a new one.</p>';
-    frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
+    // One sentence, at Josh's word (2026-08-17): the how-it-saw-them
+    // explanation came out.
+    box.innerHTML = '<p>They are already here. There is nothing to import and '
+      + 'nothing to wait for.</p>';
+    frForkActions();
     return;
   }
 
   if (path === 'create') {
-    title.textContent = 'Now make your first agent';
+    title.textContent = 'Create your first agent.';
     /**
      * ⚠️ IT DOES NOT PROMISE OVER THE TOP OF STEP 2. The first version said "It
      * will start straight away, and it will start itself again every time this
@@ -8859,7 +9052,7 @@ function frPaintFleet() {
      * ⚠️ THREE CASES, NOT TWO, and the declaration of `FR_MACHINE` says so while
      * the first version of this line collapsed them: `(FR_MACHINE && ...) || []`
      * made "we never checked" identical to "we checked and it was fine". Somebody
-     * who arrived on `?fr-step=4`, or whose check route failed at step 2, got the
+     * who arrived on `?fr-step=6`, or whose check route failed at step 4, got the
      * unhedged promise.
      *
      * ⚠️ AND `unknown` COUNTS. Filtering only `attention` dropped three "we could
@@ -8871,21 +9064,12 @@ function frPaintFleet() {
     const snags = checked
       ? FR_MACHINE.checks.filter((c) => c.state === 'attention' || c.state === 'unknown')
       : null;
-    box.innerHTML = '<p>There are no agents on this computer yet, so the next thing to do is '
-      + 'make one. It takes two questions: what it is for, and what to call it.</p>'
-      /**
-       * ⚠️ THE FIRST CLAUSE IS HEDGED TOO. The earlier fix softened "it will
-       * start itself again" to "it is set to start itself again" and left "It
-       * starts as soon as it is made" flat -- and that is the clause the check
-       * screen contradicts, sitting directly above a note reading "an agent made
-       * now may not run until that is sorted". One sentence promising and the
-       * next retracting, in that order.
-       */
-      + (checked && !snags.length
-        ? '<p>It starts as soon as it is made, and it is set to start itself again every time '
-          + 'this computer does.</p>'
-        : '<p>Once it is made it is set to start itself again every time this computer '
-          + 'does.</p>')
+    // The pack's ending B, verbatim (spec corrected ed29b78: the pack HAS
+    // all three endings and its copy wins). The outstanding-check honesty
+    // notes stay beneath it: the check screen must never be contradicted
+    // one screen later, and the pack makes no start-promise to hedge.
+    box.innerHTML = '<p>There are none on this computer yet.</p>'
+      + '<p>Two questions: what it is for, and what to call it.</p>'
       + (!checked
         ? '<div class="fr-note">We did not get to look over this computer, so we cannot say '
           + 'in advance whether everything an agent needs is in place. You will find out when '
@@ -8896,7 +9080,7 @@ function frPaintFleet() {
             + snags.map((c) => esc(c.title)).join('. ') + '. An agent made now may not run until '
             + 'that is sorted.</div>'
           : '');
-    frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
+    frForkActions();
     return;
   }
 
@@ -8908,12 +9092,10 @@ function frPaintFleet() {
    * answer.
    */
   title.textContent = 'We could not see what is on this computer';
-  box.innerHTML = '<p>We could not read the agents running here, so <b>we do not know whether '
-    + 'you already have any</b>. That is not the same as there being none, and it is not a '
-    + 'reason to stop. It just means we are not going to guess which of these you want.</p>'
-    + '<p>Have a look at the board: if your agents are on it, everything is fine and this was '
-    + 'one bad reading. If it is empty, make one.</p>';
-  frActions({ label: 'Continue', go: () => frGo(FR_STEP_RETURN) });
+  // The pack's ending C, verbatim.
+  box.innerHTML = '<p>That is not the same as there being none, so we will not guess.</p>'
+    + '<p>Have a look. If your agents are there, this was one bad reading.</p>';
+  frForkActions();
 }
 
 /**
@@ -8934,15 +9116,16 @@ function frForkActions() {
   // the app declined to claim it. An uncountable adopt falls through to the
   // neutral pair, which promises only the board.
   const count = FR && FR.fleetCount;
+  // The pack's ENDINGS, buttons verbatim (spec ed29b78): adopt and create
+  // each carry ONE action; the unknown ending is the only screen in the
+  // flow with two, because either single guess would be a lie.
   if (path === 'adopt' && Number.isInteger(count) && count > 0) {
-    frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) },
-      { label: 'Make another agent', go: () => frFinish(openCreate) });
+    frActions({ label: 'Take me to my agents', go: () => frFinish(() => showTab('agents')) });
   } else if (path === 'create') {
-    frActions({ label: 'Make my first agent', go: () => frFinish(openCreate) },
-      { label: 'Just show me around', go: () => frFinish(() => showTab('agents')) });
+    frActions({ label: 'Create my first agent', go: () => frFinish(openCreate) });
   } else {
-    frActions({ label: 'Show me the board', go: () => frFinish(() => showTab('agents')) },
-      { label: 'Make an agent', go: () => frFinish(openCreate) });
+    frActions({ label: 'Show me my agents', go: () => frFinish(() => showTab('agents')) },
+      { label: 'Create an agent', go: () => frFinish(openCreate) });
   }
 }
 
@@ -8975,45 +9158,29 @@ function frForkActions() {
 let FR_RETURN_GEN = 0;
 /* The machine look is SHARED while in flight: the route shells out twice
    with 5s timeouts on the server's event loop (its own header says it was
-   split out of /api/first-run for exactly that cost), and Back/Continue
-   between steps 4 and 5 used to re-fire it as fast as a person could
-   click. The promise resolves to the PARSED body so every awaiter can read
-   it (a Response body can be consumed once). */
+   split out of /api/first-run for exactly that cost), and repainting the
+   step used to re-fire it as fast as a person could click (the wizard had
+   Back then; any repaint racing a slow answer costs the same, so the share
+   stays). The promise resolves to the PARSED body so every awaiter can
+   read it (a Response body can be consumed once). */
 let FR_MACHINE_LOOK = null;
 async function frPaintReturn() {
   const gen = ++FR_RETURN_GEN;
-  const intro = '<p>Kosmos runs on this Mac and opens in your browser. You come back to it '
-    + 'the same way you open anything else on here.</p>';
-  // ⚠️ The spec's drag sentence says "out of that folder", which is only true
-  // once a folder was FOUND. The missing and could-not-check states name no
-  // folder, so they get a Spotlight-anchored variant -- an instruction
-  // pointing at a thing the row just said we do not have is the screen
-  // contradicting itself.
-  const drag = (locFound) => '<p><b>Keep it one click away.</b> '
-    + (locFound
-      ? 'Drag Kosmos out of that folder and onto the Dock, the strip of icons along the '
-        + 'edge of your screen. It stays there until you take it off.'
-      : 'When you have the Kosmos icon in front of you, drag it onto the Dock, the strip '
-        + 'of icons along the edge of your screen. It stays there until you take it off.')
-    + '</p>'
-    // "...brings KOSMOS back", not "this screen": completing the wizard
-    // sets the seen flag, so this screen deliberately never returns, and
-    // the one sentence on the page that was checkably untrue said it did.
-    // Spec deviation recorded for the designer as an amendment of record.
-    + '<p>Closing this tab does not stop your agents. '
-    + (locFound
-      ? 'They keep working, and clicking the icon brings Kosmos back.'
-      : 'They keep working, and they will be here when you open Kosmos again.')
-    + '</p>';
+  // The Success screen's frame (spec screen 1): the check row and the dock
+  // line ARE the body; no separate intro paragraph is drawn in the pack
+  // (the container is cleared below so a repaint cannot stack).
+  // The spec's ruled dock line (pack copy, unchanged): it names no folder,
+  // so it is true in every app-location state and needs no variants.
+  const drag = () => '<p><b>Keep it one click away.</b> Drag Kosmos onto the '
+    + 'Dock, the strip of icons along the edge of your screen.</p>';
   const introEl = document.getElementById('fr-return-intro');
   const rowEl = document.getElementById('fr-return-row');
   const dockEl = document.getElementById('fr-return-dock');
-  introEl.innerHTML = intro;
+  introEl.innerHTML = '';
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
   // what is true at that moment, and a LOCAL state the wire cannot claim.
   rowEl.innerHTML = frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' }, { allowLocal: true });
-  dockEl.innerHTML = drag(false);
-  frForkActions();
+  dockEl.innerHTML = drag();
   try {
     if (!FR_MACHINE_LOOK) {
       FR_MACHINE_LOOK = fetch('/api/machine', { cache: 'no-store' })
@@ -9036,8 +9203,14 @@ async function frPaintReturn() {
     // pointing at a folder the screen never named. Every sibling screen
     // guards its payload for content; this one now does too.
     if (!found || !found.state || !found.title || !found.detail) throw new Error('no app-location answer');
-    rowEl.innerHTML = frCheckRow(found);
-    dockEl.innerHTML = drag(found.state === 'ok');
+    // The pack's Show-me button rides the FOUND row only: reliability-or-no-
+    // button, the sleep row's rule. The engine re-derives the location on
+    // click; a look that has gone stale refuses with its own sentence.
+    rowEl.innerHTML = frCheckRow(found)
+      + (found.state === 'ok'
+        ? '<div class="fr-revealrow"><button type="button" id="fr-reveal">Show me where it is</button></div>'
+        : '');
+    dockEl.innerHTML = drag();
   } catch {
     if (gen !== FR_RETURN_GEN) return;
     // We could not ASK -- a different fact from the engine's own could-not-
@@ -9051,7 +9224,7 @@ async function frPaintReturn() {
       detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
         + 'right of your screen, and it will find it.',
     });
-    dockEl.innerHTML = drag(false);
+    dockEl.innerHTML = drag();
   }
 }
 
@@ -9070,7 +9243,9 @@ function frOpen() {
    */
   document.querySelectorAll('body > *:not(#firstrun)').forEach((el) => { el.inert = true; });
   frGo(1);
-  document.getElementById('fr-next').focus();
+  // The heading, not the button: frGo already focuses #fr-title per step
+  // (SC 4.1.3), and focusing the gold primary painted a focus ring onto
+  // every opening screenshot (Josh: no black outline on the gold button).
 }
 
 function frClose() {
@@ -9098,8 +9273,8 @@ function frClose() {
 async function frFinish(then) {
   /**
    * ⚠️ ONE FLAG, NOT A DISABLED BUTTON. The first version guarded re-entry by
-   * disabling Continue -- which does nothing about Skip or Escape, and both of
-   * those call this too. Clicking "Make my first agent" and then pressing
+   * disabling Continue -- which does nothing about Escape, which calls this
+   * too. Clicking "Make my first agent" and then pressing
    * Escape while the POST was in flight ran TWO completions: two writes, two
    * closes, and BOTH callbacks, so `openCreate()` opened the create panel and
    * `showTab('agents')` immediately took it away again.
@@ -9159,13 +9334,17 @@ async function frFinish(then) {
   frActions({ label: 'Carry on anyway', go: () => { frClose(); then(); } });
 }
 
-document.getElementById('fr-back').addEventListener('click', () => { if (FR_STEP > 1) frGo(FR_STEP - 1); });
 // ⚠️ Skipping MARKS IT SEEN, and that is not a bug. The flag records that
 // somebody has been here, not that it went well — and the alternative, showing
 // this again every launch to a person who dismissed it, is nagging.
-document.getElementById('fr-skip').addEventListener('click', () => frFinish(() => showTab('agents')));
+// (the visible Skip link is gone by the pack's ruling; Escape below is the exit)
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // ⚠️ IME guard, the composer's two-spelling rule: an Escape that cancels a
+  // Japanese/Chinese/Korean composition in the About-you fields is about the
+  // composition, not the wizard -- and this Escape is the ONLY exit now, so
+  // eating it here would tear down setup and mark first run seen.
+  if (e.isComposing || e.keyCode === 229) return;
   if (document.getElementById('firstrun').hidden) return;
   frFinish(() => showTab('agents'));
 });

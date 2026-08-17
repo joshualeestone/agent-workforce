@@ -1856,6 +1856,34 @@ const server = http.createServer((req, res) => {
   }
 
   /**
+   * The Success screen's "Show me where it is" (the pack draws it; Josh
+   * asked for it by name). POST like its reveal-folder sibling below, same
+   * cross-site posture: this opens an app on the person's machine. The
+   * engine re-derives the location itself; nothing from the request is
+   * honoured, and a location that cannot be found right now refuses with a
+   * sentence instead of opening nothing.
+   */
+  if (pathname === '/api/reveal-app' && req.method === 'POST') {
+    // Cross-site writes were already refused by the global guard that runs
+    // BEFORE every route; an inline re-check here could never fire and only
+    // implied the sibling routes were less covered than they are.
+    try {
+      sendJson(res, 200, machine.revealApp());
+    } catch (err) {
+      // The engine rethrows programming errors so a bug does not wear the
+      // failure's clothes; the route keeps that split. A ReferenceError
+      // painted into the dock as an honest refusal is the same lie one
+      // layer up, so it answers 500 with the sibling routes' shape.
+      if (err instanceof ReferenceError || err instanceof TypeError) {
+        sendJson(res, 500, { error: 'something went wrong on our side showing it', detail: String((err && err.message) || err) });
+        return;
+      }
+      sendJson(res, 409, { error: String((err && err.message) || 'we could not show it') });
+    }
+    return;
+  }
+
+  /**
    * Reveal the project's folder in Finder. POST, guard-inherited (it opens
    * an app). The path is ALWAYS the stored record's, never the request's,
    * same rule as the sleep-settings opener: this must not become an

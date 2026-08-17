@@ -429,8 +429,10 @@ test('launchctl answering is a pass, and launchctl NOT answering is unknown', ()
   assert.match(alive.title, /Agents made here/,
     'the pass claims something about agents nobody looked at');
   assert.doesNotMatch(alive.title, /^Your agents/, 'the pass speaks for the whole fleet again');
-  assert.match(alive.detail, /another program/,
-    'says nothing about the agents it did NOT check, on the path where most of them are');
+  // Josh's one-line rewrite (2026-08-17): the scope caveat about other
+  // programs' agents left the row with the pack's one-line rhythm.
+  assert.match(alive.detail, /come back on their own after this Mac restarts/,
+    'the ok row lost Josh\'s wording');
 
   /**
    * ⚠️ UNKNOWN, NOT ATTENTION. This test pinned `attention` in its first
@@ -442,7 +444,8 @@ test('launchctl answering is a pass, and launchctl NOT answering is unknown', ()
   const dead = machine.restartCheck(deadRunner);
   assert.equal(dead.state, 'unknown',
     'a check we could not run was counted as a problem needing action');
-  assert.match(dead.detail, /could not check/);
+  // The pack's unknown row, at the pack's length (first-run spec, screen 4).
+  assert.match(dead.detail, /could not look/);
 });
 
 test('the restart check asks launchctl about THIS login session', () => {
@@ -819,5 +822,54 @@ test('the sleep row carries the settings flag from the same probe', () => {
     assert.equal(sleep2.settings, false, 'no pane found but the row still offers the button');
   } finally {
     machine.resetSleepPaneCache();
+  }
+});
+
+test('revealApp opens Finder at the icon it re-derives, and refuses honestly when there is none', () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-'));
+  fs.mkdirSync(nodePath.join(dir, 'Kosmos.app'));
+  let empty = null;
+  let args = null;
+  machine.setAppRevealRunner((cmd, a) => { args = [cmd, a]; });
+  try {
+    // Found: open -R at the RE-DERIVED path, nothing from any caller.
+    const got = machine.revealApp({ appDirs: [dir] });
+    assert.deepEqual(got, { ok: true });
+    assert.deepEqual(args, ['/usr/bin/open', ['-R', nodePath.join(dir, 'Kosmos.app')]]);
+
+    // A FILE named Kosmos.app is not the app; the refusal sentence says
+    // what to do, not what threw.
+    empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-none-'));
+    fs.writeFileSync(nodePath.join(empty, 'Kosmos.app'), 'not a bundle');
+    args = null;
+    assert.throws(() => machine.revealApp({ appDirs: [empty] }), /could not find the Kosmos icon just now/);
+    assert.equal(args, null, 'a refusal ran the opener anyway');
+
+    // The same malformed-override guard as the check.
+    assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty array/);
+
+    // Errored is NOT not-found: a folder we cannot read refuses with the
+    // could-not-look sentence, never the not-there one. (Mode 000 does not
+    // seal for root, same caveat as the render harness's blind fixture.)
+    const sealed = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-sealed-'));
+    fs.chmodSync(sealed, 0o000);
+    try {
+      args = null;
+      assert.throws(() => machine.revealApp({ appDirs: [nodePath.join(sealed, 'Applications')] }),
+        /could not look just now/);
+      assert.equal(args, null, 'a could-not-look refusal ran the opener anyway');
+    } finally {
+      fs.chmodSync(sealed, 0o755);
+      fs.rmSync(sealed, { recursive: true, force: true });
+    }
+  } finally {
+    machine.setAppRevealRunner(null);
+    // Leaked sandboxes are how one test's world becomes another's -- the
+    // server suite's after-hook says why; this test holds the same line.
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (empty) fs.rmSync(empty, { recursive: true, force: true });
   }
 });
