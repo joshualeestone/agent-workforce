@@ -2439,6 +2439,26 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* The tab icons (#45, Josh 2026-08-17). An explicit allowlist of the four
+     shipped sizes, because everything else below falls through to the page:
+     without this route, /icons/kosmos-32.png would answer HTML at 200 with
+     the wrong content type, the same silent-success signature the API guard
+     above exists to stop. A name outside the allowlist 404s as JSON rather
+     than serving the page as an image. */
+  const iconGet = pathname.match(/^\/icons\/(kosmos-(?:16|32|48|180)\.png)$/);
+  if (iconGet && req.method === 'GET') {
+    fs.readFile(path.join(__dirname, 'web', 'icons', iconGet[1]), (err, buf) => {
+      if (err) { sendJson(res, 404, { error: 'no such icon' }); return; }
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' });
+      res.end(buf);
+    });
+    return;
+  }
+  if (pathname.startsWith('/icons/')) {
+    sendJson(res, 404, { error: 'no such icon' });
+    return;
+  }
+
   const file = path.join(__dirname, 'web', 'index.html');
   fs.readFile(file, (err, buf) => {
     if (err) {
