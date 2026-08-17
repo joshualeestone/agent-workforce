@@ -847,9 +847,29 @@ function createAgent(opts) {
     if (DRY_RUN) return true;
     // Their words when they gave any, the role's otherwise. A trailing
     // newline either way, matching what instructionsFor produces.
-    const text = wantInstructions !== undefined
+    let text = wantInstructions !== undefined
       ? wantInstructions.replace(/\n?$/, '\n')
       : roles.instructionsFor(roleKey, shown);
+    // The About-you answers ride the boot file from BIRTH, spliced here
+    // rather than told after the fact -- at this moment the session does not
+    // exist yet, so the tell path's tied-session gate would refuse the very
+    // agent being made. Same block machinery as every later re-tell, so an
+    // edit to the answers finds and replaces exactly this block. Non-gating:
+    // a record we could not read must not cost the person their agent.
+    try {
+      const youMod = require('./you');
+      const rec = youMod.read();
+      if (rec.state === 'saved') {
+        const spliced = require('./projects').spliceBlock(text, youMod.blockBody(rec.you), youMod.START, youMod.END);
+        // ⚠️ Only if the result still FITS. Instructions validated just under
+        // MAX_BYTES would cross it once the block lands, making a boot file
+        // the product's own reader then refuses to edit -- at that margin the
+        // record really would have cost the person their agent's file. The
+        // block is the thing to drop, never the person's words.
+        const { MAX_BYTES } = require('./instructions');
+        if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
+      }
+    } catch { /* the boot file simply ships without the block */ }
     fs.writeFileSync(instructionFile(name), text, 'utf8');
   });
 

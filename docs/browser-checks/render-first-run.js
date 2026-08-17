@@ -46,7 +46,7 @@ const LAPTOP_PMSET = [
   'AC Power:', ' lidwake              1', ' sleep                0', ' disksleep            10', '',
 ].join('\n');
 
-/* App-location fixtures for step 5 and the machine payloads, each GENERATED
+/* App-location fixtures for the return step (step 6) and the machine payloads, each GENERATED
    by the real engine against a scratch pair of folders rather than
    hand-written, so the wording on the shots cannot drift from the engine's
    (the same anti-drift property the MIXED fixture has, one step removed).
@@ -135,7 +135,7 @@ const FLEET_REAL = null; // let the real server answer
 // buttons under the same four filenames (the same drift the clear shot was
 // moved off the live route for). Adopt, matching the committed pictures.
 const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, fleetNames: ['Splinter', 'Angel'], path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const FLEET_STEP5 = FLEET_ADOPT;
+const FLEET_RETURN = FLEET_ADOPT;
 const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
@@ -148,18 +148,23 @@ const SHOTS = [
   { name: 'firstrun-3-claude-connected', step: 3, first: FLEET_ADOPT },
   { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
   { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
-  { name: 'firstrun-4-adopt', step: 4, first: FLEET_ADOPT },
-  { name: 'firstrun-4-create', step: 4, first: FLEET_CREATE },
-  { name: 'firstrun-4-cannot-see', step: 4, first: FLEET_BLIND },
-  { name: 'firstrun-5-return-system', step: 5, machine: MACHINE_APP_SYS, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND, first: FLEET_STEP5 },
+  // The record stubbed ABSENT: the click drive leaves a saved record in the
+  // same sandbox, and without the stub this shot's content depends on which
+  // drive ran last (prefilled-and-armed versus the empty gated state the
+  // name claims).
+  { name: 'firstrun-4-about-you', step: 4, you: { state: 'absent', you: null, because: null } },
+  { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
+  { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
+  { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
+  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
   // The look STILL IN PROGRESS: the only genuinely new visual state on this
   // branch, otherwise never rendered by any harness (both walks wait past
   // it). machine: 'hang' stalls the route so the placeholder is what is
   // measured and photographed.
-  { name: 'firstrun-5-return-checking', step: 5, machine: 'hang', first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_RETURN },
 ];
 
 /**
@@ -186,7 +191,7 @@ async function look(page, name) {
       const gr = grid.getBoundingClientRect();
       const mid = document.elementFromPoint(Math.min(window.innerWidth / 2, 400), 300);
       if (mid && !box.contains(mid)) bad.push(`the point (400,300) hits ${mid.tagName}#${mid.id || ''} outside the overlay`);
-      if (gr.height > 0 && getComputedStyle(grid).visibility === 'visible' && !document.querySelector('body > header').inert) {
+      if (gr.height > 0 && getComputedStyle(grid).visibility === 'visible' && !document.querySelector('.apphead').inert) {
         bad.push('the board behind is not inert');
       }
     }
@@ -325,6 +330,9 @@ async function look(page, name) {
       if (shot.first) {
         await page.route('**/api/first-run', (r) => r.fulfill({ json: shot.first }));
       }
+      if (shot.you) {
+        await page.route('**/api/you', (r) => r.fulfill({ json: shot.you }));
+      }
       // The hanging-route shot can never reach networkidle -- the stalled
       // machine request IS the state under test.
       await page.goto(`${BASE}/?first-run=1&fr-step=${shot.step}`,
@@ -349,7 +357,7 @@ async function look(page, name) {
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
-      if (shot.name.startsWith('firstrun-5-return')) {
+      if (shot.name.startsWith('firstrun-6-return')) {
         // The pinned fork really painted: the primary carries the adopt
         // path's label on every step-5 shot.
         const forkLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
@@ -357,7 +365,7 @@ async function look(page, name) {
           problems.push(`${shot.name} [${scheme}]: the fork is not the pinned adopt pair ("${forkLabel}")`);
         }
       }
-      if (shot.name === 'firstrun-5-return-checking') {
+      if (shot.name === 'firstrun-6-return-checking') {
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         const cls = await page.evaluate(() => {
           const el = document.querySelector('#fr-return-row .fr-check');
@@ -369,7 +377,7 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
         }
-      } else if (shot.name.startsWith('firstrun-5-return')) {
+      } else if (shot.name.startsWith('firstrun-6-return')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
         // placeholder as a rendering problem rather than a wait. (The

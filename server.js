@@ -41,6 +41,7 @@ const store = require('./engine/store');
 const create = require('./engine/create');
 const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
+const you = require('./engine/you');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
@@ -1395,6 +1396,48 @@ const server = http.createServer((req, res) => {
         sendJson(res, 200, commitments.read(name));
       })
       .catch((err) => sendJson(res, 400, { error: String(err.message) }));
+    return;
+  }
+
+  // --- the person the agents work for --------------------------------------
+  //
+  // Answered once on the About-you step (no skip, at Josh's call); PUT also
+  // re-teaches every tied agent, because "answer once and every agent you
+  // make will know it" is the step's own sentence and a record nobody was
+  // told about does not make it true. The read shape is three-state
+  // (saved / absent / unknown-with-reason): absent is the wizard's normal
+  // starting state, not an error, so it is a 200 like its commitments
+  // sibling, never a 404 the screen has to special-case.
+  if (pathname === '/api/you' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, you.read()); }
+    catch { sendJson(res, 500, { error: 'that record could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/you' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        // Parsed HERE, refused in OUR sentence: letting JSON.parse's own
+        // message ride the shared catch answers "Unexpected token" where the
+        // sibling routes say what to do.
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = you.save({ name: body.name, does: body.does, know: body.know });
+        // Non-gating, same as every tell: answers that could not be announced
+        // are still saved, and each agent's verdict is carried, never invented.
+        let told;
+        try { told = you.syncEveryone(safeRoster()); }
+        catch (err2) { told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not tell the agents') }]; }
+        sendJson(res, 200, { you: saved, told });
+      })
+      .catch((err) => {
+        // A refusal speaks the field's own sentence at 400; a disk failure
+        // (ENOSPC, EACCES on the rename) is OURS and answers 500, because a
+        // raw errno presented as something the person can fix aims the
+        // complaint at the wrong party.
+        if (err && err.code) { sendJson(res, 500, { error: 'we could not save that record' }); return; }
+        sendJson(res, 400, { error: String((err && err.message) || 'we could not save that') });
+      });
     return;
   }
 

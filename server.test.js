@@ -3401,7 +3401,7 @@ test('the machine route always answers, with renderable checks and never an erro
   }
   assert.equal(typeof got.attention, 'number');
   assert.equal(typeof got.unknown, 'number');
-  // The wire pin for step 5: engine tests exercise check() directly and the
+  // The wire pin for the return step: engine tests exercise check() directly and the
   // render harness stubs this route, so without this line a route that
   // dropped the field would render an honest-looking "we could not check"
   // forever and no test anywhere would notice.
@@ -3409,7 +3409,7 @@ test('the machine route always answers, with renderable checks and never an erro
     'the /api/machine response must carry the appLocation field beside the rows');
 });
 
-test('leaving step 5 really retires its pane (the bumps exist in production code)', () => {
+test('leaving the return step really retires its pane (the bumps exist in production code)', () => {
   // The leave scenarios move the counter through t5.leave(), so they pin
   // the GUARD; these pins hold the TRIGGERS -- round 7 deleted both
   // production bumps and the suite stayed green, which silently restores
@@ -3422,14 +3422,14 @@ test('leaving step 5 really retires its pane (the bumps exist in production code
     'frClose no longer bumps the return generation on the way out');
 });
 
-test('the step-5 live region is static markup with its announcement attributes', () => {
+test('the return-step live region is static markup with its announcement attributes', () => {
   // The unit harness's DOM stub auto-creates any id, so without this pin
   // the region (and both its ARIA attributes) could be deleted from the
-  // page while every step-5 test stayed green -- and the announcement,
+  // page while every return-step test stayed green -- and the announcement,
   // the whole reason the region was restructured, would silently stop.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   assert.match(raw, /<div id="fr-return-row" role="status" aria-live="polite"><\/div>/,
-    'the step-5 live region must exist in the STATIC markup, before anything fills it');
+    'the return-step live region must exist in the STATIC markup, before anything fills it');
   assert.match(raw, /<div id="fr-return-dock" role="status" aria-live="polite"><\/div>/,
     'the dock is a live region too: its instruction changes with the answer, and the correction must be heard');
 });
@@ -3541,8 +3541,8 @@ test('first run fails CLOSED: an unreadable answer shows no onboarding at all', 
 
 test('the first-run buttons are ASSIGNED, not accumulated', () => {
   /**
-   * ⚠️ Continue means a different thing on each of the five steps, and the
-   * one-of-three fork lives on step 5 now. `addEventListener` on a button whose meaning changes
+   * ⚠️ Continue means a different thing on each of the six steps, and the
+   * one-of-three fork lives on step 6 now. `addEventListener` on a button whose meaning changes
    * leaves every previous meaning still bound, so Back-then-Continue fires two
    * of them — measured as "advanced two steps at once" the first time it was
    * clicked through.
@@ -3598,7 +3598,8 @@ test('the fleet screen never shows fewer names than the number in its own headin
 
 test('the "we could not remember that" message lives outside the step panes', () => {
   /**
-   * ⚠️ Skip is on ALL FOUR steps, and this message started inside step 4's pane
+   * ⚠️ Skip is on EVERY step, and this message started inside the fork
+   * pane (fr-pane-5 since About-you landed at 4)
    * — so somebody who skipped from the welcome screen, on a machine where the
    * flag would not stick, was told nothing at all: the sentence was written into
    * a hidden div. Found by clicking Skip from step 1 rather than by reading it.
@@ -3627,12 +3628,12 @@ test('the "we could not remember that" message lives outside the step panes', ()
     }
     return -1;
   };
-  const pane4 = raw.indexOf('id="fr-pane-4"');
-  const pane4End = endOf(pane4);
-  assert.ok(pane4End > pane4, 'could not find the end of the step-4 pane');
-  assert.ok(forgot < pane4 || forgot > pane4End,
-    'the completion-failure message is back inside a pane that is hidden on three of four '
-    + 'steps, so skipping from step 1 says nothing at all');
+  const pane5 = raw.indexOf('id="fr-pane-5"');
+  const pane5End = endOf(pane5);
+  assert.ok(pane5End > pane5, 'could not find the end of the fork pane');
+  assert.ok(forgot < pane5 || forgot > pane5End,
+    'the completion-failure message is back inside a pane that is hidden on '
+    + 'every other step, so skipping from step 1 says nothing at all');
 
   // ⚠️ And it is inside the body it has to be visible in, not floating loose
   // after the action bar where no step would show it either.
@@ -3760,11 +3761,11 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
   });
   assert.match(create.els['fr-title'].textContent, /first agent/i);
   // The healthy paths carry a single Continue too, not only the broken ones
-  // asserted below: the fork lives on step 5 now on every path.
+  // asserted below: the fork lives on step 6 now on every path.
   assert.ok(/continue/i.test(adopt.actions.primary || '') && !adopt.actions.alt,
-    `adopt at step 4 should offer Continue alone: ${JSON.stringify(adopt.actions)}`);
+    `adopt at step 5 should offer Continue alone: ${JSON.stringify(adopt.actions)}`);
   assert.ok(/continue/i.test(create.actions.primary || '') && !create.actions.alt,
-    `create at step 4 should offer Continue alone: ${JSON.stringify(create.actions)}`);
+    `create at step 5 should offer Continue alone: ${JSON.stringify(create.actions)}`);
 
   /**
    * ⚠️ EVERY MALFORMED SHAPE LANDS ON "we could not see", never on a fork. The
@@ -3795,7 +3796,7 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     assert.ok(!/undefined|NaN|null/.test(title + body),
       `payload ${JSON.stringify(FR)} put a placeholder on screen: "${title}"`);
     assert.ok(body.length > 0, `payload ${JSON.stringify(FR)} rendered an empty screen`);
-    // The fork moved to step 5 (orientation spec): step 4's way onward is
+    // The fork moved to step 6 (orientation spec): step 5's way onward is
     // now a single Continue on EVERY path, including the broken-payload
     // one -- a person must never be stranded, and must also never meet the
     // fork here where the orientation has not been shown yet.
@@ -3804,7 +3805,7 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     // And ONLY Continue: a second button reappearing here is the fork
     // creeping back to the step it was deliberately moved off.
     assert.ok(!got.actions.alt,
-      `payload ${JSON.stringify(FR)} grew a second button at step 4: ${JSON.stringify(got.actions)}`);
+      `payload ${JSON.stringify(FR)} grew a second button at the fork step: ${JSON.stringify(got.actions)}`);
   }
 
   // Both ways out are still offered on every path -- at step 5, where the
@@ -3822,10 +3823,11 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
   }
 
   // ⚠️ The fork guards its payload with the SAME predicate as the fleet
-  // screen, or the pairs drift from the path logic (they did, in the move to
-  // step 5): an adopt payload whose fleet could not be counted had step 4
-  // honestly refuse to guess while step 5's button read "Take me to my
-  // agents" -- the fleet we could not count asserted as one that exists.
+  // screen, or the pairs drift from the path logic (they did, when the fork
+  // moved to the orientation step): an adopt payload whose fleet could not
+  // be counted had the fleet screen honestly refuse to guess while the
+  // orientation step's button read "Take me to my agents" -- the fleet we
+  // could not count asserted as one that exists.
   // Every uncountable-adopt shape lands on the neutral pair, which promises
   // only the board.
   for (const FR of [
@@ -3842,7 +3844,7 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
   }
 });
 
-test('step 5 paints a look in progress, then the engine answer, and could-not-ask on failure', async () => {
+test('the return step paints a look in progress, then the engine answer, and could-not-ask on failure', async () => {
   // The Dock instruction must never point at "that folder" when no folder was
   // found: the found state gets the spec's drag sentence, the other two get
   // the Spotlight-anchored variant.
@@ -3938,7 +3940,7 @@ test('step 5 paints a look in progress, then the engine answer, and could-not-as
   }
 });
 
-test('step 5: entries share one in-flight look, and a stale look cannot repaint a newer entry', async () => {
+test('the return step: entries share one in-flight look, and a stale look cannot repaint a newer entry', async () => {
   // One module state, two overlapping entries, a fetch we resolve by hand.
   const realEsc = pageFunction('esc');
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
@@ -3996,9 +3998,9 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
 
   // ⚠️ THE GUARD'S JOB, and the scenarios that red when the guard lines are
   // deleted (round 5 proved the shared-look scenarios above pass without
-  // them): the person LEAVES step 5 while the look is in flight, and the
+  // them): the person LEAVES the return step while the look is in flight, and the
   // late settlement must not repaint the pane. In production the bump IS
-  // performed by frGo(step !== 5) and frClose (round 6 made the premise
+  // performed by frGo(step !== FR_STEP_RETURN) and frClose (round 6 made the premise
   // real); here t5.leave() performs the same mutation those perform.
   // Success copy of the guard:
   const e5 = fn();
@@ -4024,7 +4026,7 @@ test('step 5: entries share one in-flight look, and a stale look cannot repaint 
     'the stale failure rewrote the dock of a pane the person left');
 });
 
-test('step 4 does not promise a working agent over a check screen that disagreed', () => {
+test('the fork step does not promise a working agent over a check screen that disagreed', () => {
   /**
    * ⚠️ THREE CASES, and the first version of this collapsed them to two. "We
    * never checked" is not "we checked and it was fine", and an `unknown` row is
@@ -4337,4 +4339,57 @@ test('the 80-character cap holds on BOTH display-name writers, and no record is 
     status.setPaneSource(null);
     status.setPaneCapture(null);
   }
+});
+
+test('the person record: absent, refused, saved-and-told, prefill round trip', async () => {
+  // Absent is the wizard's normal starting state: a 200 with the state, never
+  // a 404 the screen has to special-case.
+  const empty = JSON.parse((await req('/api/you')).body);
+  assert.equal(empty.state, 'absent');
+
+  // Refusals speak the field's own sentence at 400 and save nothing.
+  const bad = await req('/api/you', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '  ', does: 'x' }),
+  });
+  assert.equal(bad.status, 400);
+  assert.match(JSON.parse(bad.body).error, /call you/);
+  assert.equal(JSON.parse((await req('/api/you')).body).state, 'absent', 'a refusal wrote a record');
+
+  // A good save answers the record AND the tell verdicts (never invented:
+  // an array, whatever this machine's roster held at the time).
+  const put = await req('/api/you', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Josh', does: 'Runs a company', know: 'No em dashes.' }),
+  });
+  assert.equal(put.status, 200);
+  const saved = JSON.parse(put.body);
+  assert.equal(saved.you.name, 'Josh');
+  assert.ok(Array.isArray(saved.told), 'the tell verdicts are carried, not implied');
+
+  const back = JSON.parse((await req('/api/you')).body);
+  assert.equal(back.state, 'saved');
+  assert.equal(back.you.know, 'No em dashes.');
+});
+
+test('the About-you gate exists in production code (static pins)', () => {
+  // The gate IS the design (Josh removed the skip button; Continue waits on
+  // the two required answers) and the save lands BEFORE the step advances.
+  // Only the Playwright drive exercises this live, and the drive is not in
+  // `node --test` -- so without these pins the gate, the pane, or the
+  // save-before-advance could be deleted and this suite would stay green.
+  // Same culture as the return-step pins: hold the TRIGGERS in source.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /<div class="fr-pane" id="fr-pane-4" hidden>/,
+    'the About-you pane left the static markup');
+  const fn = raw.slice(raw.indexOf('async function frPaintYou'));
+  assert.ok(fn.length > 100, 'frPaintYou vanished');
+  assert.match(fn.slice(0, 4000), /nameEl\.value\.trim\(\) !== '' && doEl\.value\.trim\(\) !== ''/,
+    'the two-answer gate is gone: Continue no longer waits');
+  const put = fn.indexOf("fetch('/api/you'");
+  const advance = fn.indexOf('frGo(FR_STEP_YOU + 1)');
+  assert.ok(put > -1 && advance > -1 && put < advance,
+    'the save no longer happens before the advance (or either vanished)');
+  assert.match(fn.slice(0, 4000), /aria-required="true"/,
+    'the required fields lost their programmatic marking');
 });
