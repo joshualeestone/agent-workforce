@@ -91,6 +91,16 @@ lines. Also from round 4: the ambiguity sentence no longer claims
 and a two-arg describe call cannot be thrown out of by the join's own
 store fallback.
 
+Round 5's finding, fixed: the borrowed-name gate failed OPEN when the
+roster itself could not be read (a null roster collapsed into "no pane
+holds the name" while the same payload's member rows answered
+unknown/untied). The join now fails closed like tellAgent and
+borrowedName do, answering could-not-tell with tellAgent's own
+sentence. Also from round 5: the told wire pin is tightened to the two
+states a live sync can actually produce, and commitments readings ride
+the same per-snapshot memo as the ambiguity counts (one read per
+assignee per list, not per project).
+
 Plus round 1's hand-edited-store nit: a non-integer stored number is
 regex when interpolated (1.5 matches "task 175"), so claimFor now
 refuses non-integers as could-not-tell instead of matching by accident.

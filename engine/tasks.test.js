@@ -214,6 +214,11 @@ test('a name held by an untied pane is not spoken for', () => {
   const got = projects.get(p.id, untied).tasks[0];
   assert.equal(got.claim.claimed, null, 'a borrowed name was spoken for');
   assert.match(got.claim.because, /will not speak/);
+  // And the gate fails CLOSED like its siblings: a roster we could not
+  // read is not "we looked and no pane holds the name".
+  const gotNull = projects.get(p.id, null).tasks[0];
+  assert.equal(gotNull.claim.claimed, null, 'an unreadable roster joined as definite');
+  assert.match(gotNull.claim.because, /could not check which agents are running/);
 });
 
 test('the described project carries claims joined from the real commitments store', () => {

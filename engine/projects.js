@@ -398,6 +398,7 @@ function ambiguityCounts(everyProject) {
   return counts;
 }
 
+const READINGS = new WeakMap();
 function joinTaskClaims(tasks, all, memberOf, roster) {
   const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
   if (!withWho.length) return tasks;
@@ -415,8 +416,18 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
   // Memoized per `all` snapshot (WeakMap), so list() over P projects builds
   // the cross-store counts once, not P times.
   const counts = ambiguityCounts(everyProject);
+  // Readings ride the same snapshot as the counts: one commitments read per
+  // assignee per list(), not per project the assignee appears on.
+  let shared = READINGS.get(everyProject);
+  if (!shared) { shared = new Map(); READINGS.set(everyProject, shared); }
   const members = Array.isArray(memberOf) ? memberOf : [];
-  const cards = Array.isArray(roster) ? roster : [];
+  // ⚠️ FAIL CLOSED on an unreadable roster, like every sibling: tellAgent
+  // refuses a non-array roster and borrowedName() answers true from its
+  // catch. "We could not look" is not "we looked and no pane holds the
+  // name" -- collapsing the two had this gate open exactly when the rest of
+  // the payload was answering unknown/untied for the same names.
+  const rosterUnreadable = !Array.isArray(roster);
+  const cards = rosterUnreadable ? [] : roster;
   // ⚠️ The borrowed-name gate, inherited: every sibling consumer of the
   // commitments store refuses to speak for a name an untied pane is holding
   // (/api/status answers unknown, the GET route 404s), and a new consumer
@@ -426,7 +437,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
   // this agent" would have the board speaking with two postures at once.
   const borrowed = (who) => cards.some((a) => a && a.sessionName === who && !a.isNamedOurs);
   const ambiguous = (t) => counts.get(t.who + '\u0000' + Number(t.number)) > 1;
-  const readings = new Map();
+  const readings = shared;
   const readFor = (who) => {
     if (!readings.has(who)) {
       let r;
@@ -451,6 +462,15 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         claim: {
           claimed: null,
           because: 'this agent is no longer on the project, so what it reports cannot be checked against this task',
+        },
+      };
+    }
+    if (rosterUnreadable) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'we could not check which agents are running, so we will not speak for what this name is holding',
         },
       };
     }
@@ -595,7 +615,7 @@ function describe(project, roster, all) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || [], cards),
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || [], roster),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the
