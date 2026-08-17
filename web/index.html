@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Workforce</title>
+<title>Kosmos</title>
 <style>
 /* ---------------------------------------------------------------------------
    macOS-flavoured foundation. Values from docs/apple-style-reference.md, which
@@ -187,6 +187,47 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    bar at 400. */
 html { scroll-padding-top: 132px; }
 @media (max-width: 440px) { html { scroll-padding-top: 170px; } }
+/* ⚠️ THE UPDATE TOAST, ported from the frozen pack (FROZEN-2026-08-16,
+   sha 4091b009). The decisions it carries are the pack's, recorded there and
+   not re-opened here: RED (Josh's call, twice, wanting it unmissable), and
+   #b3261e specifically (the app's one attention red; a second red would be
+   permanent drift). Absolute inside the sticky header so its appearance
+   moves NOTHING underneath; the pack's top:-29px was pack-geometry (their
+   demo chip row), the app value below is measured against this header so
+   the toast clears both the New agent button and the checked stamp.
+   The Install button is gold (#e3b341, the pack's --gold-bright): gold is
+   the primary ACTION colour in the design system even though this app has
+   not adopted a general accent, and an all-red toast would read as an error
+   rather than something waiting for you. */
+.utoast {
+  --utone: #b3261e;
+  /* Measured against this header, not copied from the pack: the header row
+     runs to y77 (the checked stamp is the deepest control) and the tabs strip
+     below it is left-aligned, so its right side is the one empty region.
+     top:79 clears the stamp by 2px and floats over the strip. Verified by
+     bounding-box comparison in the drive-through, which is also what caught
+     the first guess overlapping the New agent button. */
+  position: absolute; top: 79px; right: var(--space-8); z-index: 25;
+  display: flex; align-items: center; gap: 11px;
+  padding: 7px 8px 7px 12px; border-radius: 11px;
+  background: var(--bg-elevated); border: 1px solid var(--utone);
+  box-shadow: 0 6px 22px rgba(20,22,26,.13);
+}
+.utoast .udot { width: 8px; height: 8px; border-radius: 50%; background: var(--utone); flex: 0 0 8px; }
+.utoast .utxt b { display: block; font-size: .8125rem; line-height: 1.3; color: var(--utone); }
+.utoast .utxt small { font-size: .6875rem; color: var(--label-2); }
+.utoast .uacts { display: flex; gap: 6px; margin-left: 4px; }
+.utoast .uacts button { font: inherit; font-size: .75rem; font-weight: 600; cursor: pointer;
+  border-radius: 8px; padding: .4em .7em; border: 1px solid var(--separator); background: var(--bg-elevated); color: var(--label); }
+.utoast .uacts .uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
+@media (max-width: 720px) { .utoast { right: 14px; top: 5px; } .utoast .utxt small { display: none; } }
+/* The updating overlay: the board is about to vanish on purpose, and this is
+   the sentence that stops that being alarming. Same ground as the modals. */
+.upd-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.86);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 60; text-align: center; }
+.upd-back .upd-msg { color: #fff; font-size: 15px; line-height: 1.5; max-width: 26rem; padding: var(--space-8); }
+.upd-back .upd-msg b { display: block; font-size: 17px; margin-bottom: 6px; }
 .apphead { position: sticky; top: 0; z-index: 20; background: var(--bg-sunken);
            margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-6);
            padding: var(--space-8) var(--space-8) 0;
@@ -929,7 +970,7 @@ svg { display: block; }
          the tab order. Without it `h1.focus()` is a silent no-op, and the fallback
          that sends the keyboard here after a removal would do nothing at all --
          an accessibility fix that only appears to work is worse than none. -->
-    <h1 tabindex="-1">Agent Workforce</h1>
+    <h1 tabindex="-1">Kosmos</h1>
   </div>
   <div class="headright">
     <button class="btn" id="new-agent" type="button">New agent</button>
@@ -942,6 +983,9 @@ svg { display: block; }
   <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
+<!-- The update toast renders here (JS below) when the status payload carries
+     a published newer version; absent otherwise. role=status per the pack. -->
+<div id="utoast-slot"></div>
 </div>
 <section class="detail" id="panel-detail" hidden>
   <button class="back" id="detail-back">&#8592; All agents</button>
@@ -1065,6 +1109,24 @@ svg { display: block; }
 
      Keeping it is the default: it holds focus, Escape takes it, and clicking
      the backdrop takes it. Every accident lands on the harmless answer. -->
+<!-- ============ UPDATE CONFIRM (pack FROZEN-2026-08-16) ============
+     Josh's call 2026-08-16: the deliberate click stays even though nothing is
+     at risk. ⚠️ IT IS NOT A WARNING AND MUST NOT BECOME ONE: agents keep
+     working throughout; only the board restarts. The sentence order is the
+     design: first what happens to the person, then the line that stops it
+     being alarming. "Kosmos closes", never "the board closes". -->
+<div class="rm-back" id="updconfirm" hidden>
+  <div class="rm-box" role="dialog" aria-modal="true" aria-labelledby="uc-t" aria-describedby="uc-small">
+    <h2 class="rm-title" id="uc-t">Update Kosmos?</h2>
+    <p class="rm-small" id="uc-small">Kosmos closes for a few seconds while it updates.
+      <b>Your agents keep working the whole time.</b></p>
+    <p class="rm-small" id="uc-err" role="alert" hidden></p>
+    <div class="rm-acts">
+      <button class="btn" type="button" id="uc-no">Not now</button>
+      <button class="btn" type="button" id="uc-go" style="background:#e3b341;border-color:#e3b341;color:#14161a;">Update</button>
+    </div>
+  </div>
+</div>
 <div class="rm-back" id="rm-modal" hidden>
   <div class="rm-box" role="alertdialog" aria-modal="true"
        aria-labelledby="rm-title" aria-describedby="rm-small">
@@ -1094,7 +1156,7 @@ svg { display: block; }
      screenshot it on a machine that has already been through it. -->
 <div class="fr-back" id="firstrun" hidden>
   <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
-    <div class="fr-bar">Agent Workforce &mdash; Setup</div>
+    <div class="fr-bar">Kosmos Setup</div>
     <div class="fr-body">
       <p class="crumb" id="fr-step">Step 1 of 5</p>
       <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
@@ -2032,6 +2094,82 @@ function renderConnection(conn, agents) {
   el.hidden = false;
 }
 
+
+/* ---- the update toast + confirm (pack FROZEN-2026-08-16) ----------------
+   Shown only when the status payload carries a published newer version.
+   Later remembers PER VERSION (localStorage): quiet until the next release,
+   because a toast re-appearing every five seconds after "Later" is nagging,
+   and never showing again would hide the release after this one. */
+let UPDATING_NOW = false;
+function updateLaterVersion() {
+  try { return localStorage.getItem('kosmos-update-later'); } catch { return null; }
+}
+function renderUpdateToast(u) {
+  const slot = document.getElementById('utoast-slot');
+  if (UPDATING_NOW || !u || !u.version || updateLaterVersion() === u.version) {
+    slot.innerHTML = ''; delete slot.dataset.v; return;
+  }
+  if (slot.dataset.v === u.version) return;      // already showing this one
+  slot.dataset.v = u.version;
+  slot.innerHTML = '<div class="utoast" role="status">'
+    + '<span class="udot" aria-hidden="true"></span>'
+    + '<div class="utxt"><b>Update available</b><small>Kosmos ' + esc(u.version) + '</small></div>'
+    + '<div class="uacts">'
+    + '<button type="button" id="ut-later">Later</button>'
+    + '<button type="button" class="uprime" id="ut-install">Install</button>'
+    + '</div></div>';
+  document.getElementById('ut-later').addEventListener('click', () => {
+    try { localStorage.setItem('kosmos-update-later', u.version); } catch { /* shown again next release either way */ }
+    slot.innerHTML = ''; delete slot.dataset.v;
+  });
+  document.getElementById('ut-install').addEventListener('click', () => {
+    document.getElementById('uc-err').hidden = true;
+    document.getElementById('updconfirm').hidden = false;
+    document.getElementById('uc-go').focus();
+  });
+}
+document.getElementById('uc-no').addEventListener('click', () => {
+  document.getElementById('updconfirm').hidden = true;
+});
+document.getElementById('uc-go').addEventListener('click', async () => {
+  const err = document.getElementById('uc-err');
+  err.hidden = true;
+  let res = null;
+  let body = null;
+  try {
+    res = await fetch('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    body = await res.json().catch(() => null);
+  } catch { res = null; }
+  if (!res || !res.ok) {
+    // The route's own sentence: a from-source run, nothing newer published,
+    // or a spawn failure. All are states, not scoldings.
+    err.textContent = (body && body.error) || 'we could not start the update';
+    err.hidden = false;
+    return;
+  }
+  UPDATING_NOW = true;
+  document.getElementById('updconfirm').hidden = true;
+  renderUpdateToast(null);
+  const back = document.createElement('div');
+  back.className = 'upd-back';
+  back.innerHTML = '<div class="upd-msg"><b>Updating.</b> Your agents keep working.</div>';
+  document.body.appendChild(back);
+  /* The board goes down and comes back; reload on the way back up. If it
+     never dips before the deadline (the installer found nothing to do, or
+     died before the swap), reload anyway: the fresh page's own toast then
+     says what is actually true, which beats this overlay guessing. */
+  let sawDown = false;
+  const deadline = Date.now() + 3 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const ping = await fetch('/', { cache: 'no-store' });
+      if (ping.ok && sawDown) break;
+    } catch { sawDown = true; }
+  }
+  location.reload();
+});
+
 async function tick() {
   const checked = document.getElementById('checked');
   try {
@@ -2046,6 +2184,7 @@ async function tick() {
     LAST = data.agents;
     BOARD_SEEN = true;
     updateRecPill();
+    renderUpdateToast(data.update);
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
     BOARD_LOOKED = true;
@@ -4077,16 +4216,44 @@ async function uploadPendingAvatar(name) {
   const up = PENDING_AVATAR;
   PENDING_AVATAR = null;
   if (!up || !name) return false;
-  for (let i = 0; i < 2; i++) {
-    if (i) await new Promise((r) => setTimeout(r, 2000));   // between attempts, never after the last
+  const put = async (blob) => {
+    for (let i = 0; i < 2; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 2000)); // between attempts, never after the last
+      try {
+        const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/avatar', {
+          method: 'PUT',
+          headers: { 'content-type': blob.type || 'image/png' },
+          body: blob,
+        });
+        if (res.ok) return true;
+      } catch { /* the retry above is the answer to a flaky first attempt */ }
+    }
+    return false;
+  };
+  if (await put(up)) return true;
+  /* A failed FILE upload falls back to the generated mark, and only if the
+     mark actually lands does the screen say so -- the sentence "the mark
+     drawn from the name is still there" has to be TRUE to be shown (Mona
+     Lisa, 2026-08-16: naming the fallback is the whole job; without it a
+     person assumes their agent now has no picture). If even the mark fails,
+     silence: the detail panel's uploader is the recovery path, and a
+     reassurance nobody verified is worse than none. */
+  if (up === AVATAR_FILE && AVATAR_FILE) {
     try {
-      const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/avatar', {
-        method: 'PUT',
-        headers: { 'content-type': up.type || 'image/png' },
-        body: up,
-      });
-      if (res.ok) return true;
-    } catch { /* the retry above is the answer to a flaky first attempt */ }
+      const cv = document.createElement('canvas');
+      cv.width = 144; cv.height = 144;
+      const seed = LAST_MARK_SEED || name;
+      dotGlyph(cv, seed[0].toUpperCase(), markFamFor(seed), seed);
+      const mark = await new Promise((r) => cv.toBlob(r, 'image/png'));
+      if (mark && await put(mark)) {
+        const warn = document.getElementById('made-warn');
+        if (warn.hidden) {
+          warn.textContent = 'That picture did not load. The mark drawn from the name is still there.';
+          warn.hidden = false;
+        }
+        return true;
+      }
+    } catch { /* silence: nothing landed, nothing is claimed */ }
   }
   return false;
 }
@@ -4375,6 +4542,17 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * the board. That is the failure the back button's own comment says it fixed,
    * arriving through the earlier window.
    */
+  // A blanked Role label GATES rather than defaults (Mona Lisa's ruling,
+  // 2026-08-16): an empty-field message that tells you what to type beats
+  // one that tells you that you did not. The engine's own gate for the own
+  // role stays behind this.
+  if (!document.getElementById('create-label').value.trim()) {
+    msg.textContent = 'Say what this agent does. One or two words.';
+    document.getElementById('create-label').focus();
+    CREATING = false;
+    document.getElementById('create-go').disabled = false;
+    return;
+  }
   const attempt = ++WATCH;
   // A deliberately blanked editor falls back to the template server-side;
   // saying so beats silence (the engine's own "instructions have to be
@@ -7067,7 +7245,7 @@ function frGo(step) {
   document.getElementById('fr-back').hidden = (step === 1);
 
   if (step === 1) {
-    document.getElementById('fr-title').textContent = 'Welcome to Agent Workforce';
+    document.getElementById('fr-title').textContent = 'Welcome to Kosmos';
     frActions({ label: 'Continue', go: () => frGo(2) });
   } else if (step === 2) {
     document.getElementById('fr-title').textContent = 'Checking your computer';
@@ -7876,7 +8054,7 @@ function frPaintFleet() {
      * on the first live call of the route.
      */
     box.innerHTML = '<p>They are already on your board. <b>There is nothing to import</b> and '
-      + 'nothing to wait for. Agent Workforce reads what is running on this computer, so it '
+      + 'nothing to wait for. Kosmos reads what is running on this computer, so it '
       + 'could see them before you got here.</p>'
       + '<ul class="fr-names">'
       + names.map((n) => '<li class="fr-name">' + esc(n) + '</li>').join('')

@@ -2367,6 +2367,63 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
 });
 
+test('update awareness: the status tick carries the verdict, and the install route refuses honestly', async () => {
+  const updates = require('./engine/update');
+  try {
+    // A newer published version reaches the screen through the payload it
+    // already polls.
+    updates.resetCache();
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+    await updates.refresh();
+    const st = await req('/api/status', {});
+    assert.equal(st.status, 200);
+    assert.deepEqual(JSON.parse(st.body).update, { version: '99.0.0' },
+      'the status payload does not carry the published update');
+
+    // ⚠️ The new POST inherits the cross-site guard. Asserted rather than
+    // assumed, because a new sibling does not inherit a guard by being
+    // adjacent to guarded routes -- only by the guard actually covering it.
+    const cross = await req('/api/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site page can start a software download');
+
+    // From-source runs are refused with the git sentence, and the installer
+    // is never spawned (this checkout has no private runtime beside it).
+    let ran = 0;
+    updates.setInstallRunner(() => { ran += 1; });
+    const src = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(src.status, 409);
+    assert.match(JSON.parse(src.body).error, /source code/, 'the from-source refusal lost its reason');
+    assert.equal(ran, 0, 'the installer ran against a working tree');
+
+    // An installed copy with an update: 200, and the runner fires with the
+    // canonical setup URL.
+    let url = null;
+    updates.setInstalledRoot(() => '/tmp/fake-kosmos-home');
+    updates.setInstallRunner((u) => { ran += 1; url = u; });
+    const go = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(go.status, 200, JSON.parse(go.body).error || '');
+    assert.equal(JSON.parse(go.body).updating, '99.0.0');
+    assert.equal(ran, 1, 'the installer did not run');
+    assert.match(String(url), /\/setup$/, 'the runner was not handed the setup URL');
+
+    // And with nothing newer published, a stray POST changes nothing.
+    updates.resetCache();
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: updates.RUNNING }) }));
+    await updates.refresh();
+    const idle = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(idle.status, 409, 'a no-op update was accepted');
+    assert.equal(ran, 1, 'the installer ran with nothing to install');
+  } finally {
+    updates.resetCache();
+    updates.setFetcher(null);
+    updates.setInstallRunner(null);
+    updates.setInstalledRoot(null);
+  }
+});
+
 test('the removal routes ask, remove, and put back, over the wire', async () => {
   // ⚠️ The engine was well covered and the surface a browser talks to was not.
   // These routes are how the fleet is managed, and the restore route is what
