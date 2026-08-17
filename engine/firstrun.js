@@ -93,6 +93,9 @@ function fleet() {
       try { return status.readIdentity(a.sessionName).displayName || a.sessionName; }
       catch { return a.sessionName; }
     });
+    // The 12-cap predates the wire field it was written for (fleetNames,
+    // pruned when the fleet screen went count-only); it survives as a
+    // courtesy bound for future callers, not a load-bearing rule.
     return { known: true, count: agents.length, names: names.slice(0, 12) };
   } catch {
     // ⚠️ An unreachable tmux is not an empty machine. That confusion is the

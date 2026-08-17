@@ -1058,7 +1058,10 @@ svg { display: block; }
   background: var(--gold-bright); cursor: pointer;
   transition: transform .12s ease, background .12s ease;
 }
-#firstrun #fr-next:hover { background: var(--gold); transform: translateY(-1px); }
+/* opacity pinned: the app-level .fr-primary:hover sets 0.88, which would
+   make the pack's gold go translucent (the ID rule overrode background
+   only). */
+#firstrun #fr-next:hover { background: var(--gold); transform: translateY(-1px); opacity: 1; }
 #firstrun #fr-next[disabled] { opacity: .45; cursor: not-allowed; transform: none; background: var(--gold-bright); }
 #firstrun #fr-next:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 #firstrun #fr-alt {
@@ -1441,9 +1444,11 @@ svg { display: block; }
              Claude is the one that works today and carries Connect; the rest
              are Coming soon. The verdict row (#fr-sub) renders BENEATH the
              list, exactly where the pack draws its could-not-tell chk row.
-             The Connect button re-checks before it does anything, so showing
-             it while the verdict is unknown pushes nobody into a second
-             sign-in (the engine's asymmetry rule holds through the re-check). -->
+             The Connect button re-checks before it does anything: a
+             CONNECTED verdict short-circuits to the green row, and an
+             unknown one enters a drive whose REPL detection says "we could
+             not confirm" rather than forcing credential entry (the painter
+             comment states the guarantee precisely). -->
         <p>Your agents run on your own subscription, on this computer.</p>
         <div class="llm on"><span class="llm-m llm-disc gold" aria-hidden="true"></span><div class="llm-w"><b>Claude</b><small>Anthropic &middot; works today</small></div>
           <button class="connect-b" type="button" id="fr-llm-connect">Connect</button></div>
@@ -8982,12 +8987,16 @@ function frPaintSubscription() {
    *
    * ⚠️ And the VERDICT ROW for the `unknown` state above carries no Connect
    * of its own. The pack's static provider list (pane 3 markup) does show
-   * its Connect button in every state -- that is the pack's drawing, and it
-   * stays honest because Connect RE-CHECKS the connection before doing
-   * anything, so a machine already signed in by somebody who pays gets its
-   * green row, never a second sign-in. That re-check is what preserves the
-   * asymmetry `engine/subscription.js` exists to prevent; the markup comment
-   * on the list says the same from its side.
+   * its Connect button in every state -- the pack's drawing. What the
+   * re-check actually guarantees, stated precisely: a machine whose verdict
+   * is CONNECTED short-circuits to the green row and never enters the
+   * sign-in drive (engine/connect.js start()). On an `unknown` verdict the
+   * drive IS entered -- and its REPL detection then lands on the honest
+   * "Claude looks signed in here, but we could not confirm a subscription"
+   * rather than forcing credential entry. So the asymmetry rule
+   * (`engine/subscription.js`: never push a possibly-paying customer into a
+   * second sign-in) is preserved by the drive's honesty, not by a
+   * short-circuit; the markup comment on the list says the same.
    */
   frActions({ label: 'Connect Claude', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
 }
@@ -9050,7 +9059,7 @@ function frPaintFleet() {
      * ⚠️ THREE CASES, NOT TWO, and the declaration of `FR_MACHINE` says so while
      * the first version of this line collapsed them: `(FR_MACHINE && ...) || []`
      * made "we never checked" identical to "we checked and it was fine". Somebody
-     * who arrived on `?fr-step=4`, or whose check route failed at step 4, got the
+     * who arrived on `?fr-step=6`, or whose check route failed at step 4, got the
      * unhedged promise.
      *
      * ⚠️ AND `unknown` COUNTS. Filtering only `attention` dropped three "we could

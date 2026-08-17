@@ -70,7 +70,7 @@ async function fresh(browser, opts = {}) {
     await page.waitForSelector('#fr-checks .fr-check', { timeout: 5000 });
     ok((await page.locator('#fr-checks .fr-check').count()) === 3, 'three checks painted from the live route (app-location rides on the Success screen, not among them)');
     await page.click('#fr-next');
-    // Step 4, About you. The gate IS the design (no skip, at Josh's call):
+    // Step 5, About you. The gate IS the design (no skip, at Josh's call):
     // Continue WAITS on the two required answers, and the third is optional.
     ok(await page.locator('#fr-title').textContent() === 'Who are your agents working for?', 'step 5, about you');
     ok(await page.locator('#fr-next').isDisabled(), 'Continue waits for the two required answers');

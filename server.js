@@ -1856,15 +1856,8 @@ const server = http.createServer((req, res) => {
   }
 
   /**
-   * Reveal the project's folder in Finder. POST, guard-inherited (it opens
-   * an app). The path is ALWAYS the stored record's, never the request's,
-   * same rule as the sleep-settings opener: this must not become an
-   * open-arbitrary-path primitive. Refused with the state's own sentence
-   * when the folder is not there to show.
-   */
-  /**
    * The Success screen's "Show me where it is" (the pack draws it; Josh
-   * asked for it by name). POST like its reveal-folder sibling, same
+   * asked for it by name). POST like its reveal-folder sibling below, same
    * cross-site posture: this opens an app on the person's machine. The
    * engine re-derives the location itself; nothing from the request is
    * honoured, and a location that cannot be found right now refuses with a
@@ -1890,6 +1883,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * Reveal the project's folder in Finder. POST, guard-inherited (it opens
+   * an app). The path is ALWAYS the stored record's, never the request's,
+   * same rule as the sleep-settings opener: this must not become an
+   * open-arbitrary-path primitive. Refused with the state's own sentence
+   * when the folder is not there to show.
+   */
   const reveal = pathname.match(/^\/api\/project\/([^/]+)\/reveal-folder$/);
   if (reveal && req.method === 'POST') {
     const id = decodeSegment(reveal[1]);
