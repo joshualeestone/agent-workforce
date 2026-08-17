@@ -1601,26 +1601,51 @@ test('the task routes: create over the wire, refusals write nothing, close and r
   let stored = projects.readAll().find((x) => x.id === made.project.id);
   assert.equal((stored.tasks || []).length, 0, 'a refusal wrote a task');
 
-  // A real create, with detail and nobody on it.
-  const t1 = json(await post(`/api/project/${made.project.id}/tasks`, {
+  // A real create, with detail and nobody on it. No assignee, no told:
+  // there was nobody to tell, and the response must not invent a verdict.
+  const r1 = json(await post(`/api/project/${made.project.id}/tasks`, {
     sentence: 'Rewrite the handoff checklist',
     detail: 'The old one mentions the removed billing screen.',
-  })).task;
+  }));
+  const t1 = r1.task;
   assert.equal(t1.number, 1);
   assert.equal(t1.who, null);
+  assert.equal(r1.told, undefined, 'an unassigned create invented a told verdict');
 
-  // And one given to somebody; the number advances.
-  const t2 = json(await post(`/api/project/${made.project.id}/tasks`, {
+  // And one given to somebody; the number advances. Assignment requires
+  // membership (a non-member told would be a block write that never
+  // happened), so april joins first and a stranger is refused.
+  await post(`/api/project/${made.project.id}/agent/april`, {});
+  const refused = await post(`/api/project/${made.project.id}/tasks`, {
+    sentence: 'For a stranger', who: 'nobody-here',
+  });
+  assert.equal(refused.status, 400, 'a non-member assignment was accepted');
+  assert.match(json(refused).error, /not on this project/);
+  const r2 = json(await post(`/api/project/${made.project.id}/tasks`, {
     sentence: 'Settle the trial length', who: 'april',
-  })).task;
+  }));
+  const t2 = r2.task;
   assert.equal(t2.number, 2);
   assert.equal(t2.who, 'april');
+  // An assigned create carries the block write's real outcome. A LIVE sync
+  // can only answer told or could_not -- not_tried is the stored-verdict
+  // word, and its appearance here would mean a stored shape leaked into a
+  // live response.
+  assert.ok(r2.told && typeof r2.told.state === 'string', 'an assigned create carried no told verdict');
+  assert.ok(['told', 'could_not'].includes(r2.told.state),
+    `told.state outside the TOLD vocabulary: ${r2.told && r2.told.state}`);
 
   // Close, reopen, and an honest 404 for a number that never existed.
-  const closed = json(await post(`/api/project/${made.project.id}/task/2/close`, {})).task;
+  const rClose = json(await post(`/api/project/${made.project.id}/task/2/close`, {}));
+  const closed = rClose.task;
   assert.ok(closed.closedAt, 'close did not stamp over the wire');
-  const reopened = json(await post(`/api/project/${made.project.id}/task/2/reopen`, {})).task;
+  assert.ok(rClose.told && ['told', 'could_not'].includes(rClose.told.state),
+    'closing an assigned task did not carry the assignee re-tell verdict');
+  const rReopen = json(await post(`/api/project/${made.project.id}/task/2/reopen`, {}));
+  const reopened = rReopen.task;
   assert.equal(reopened.closedAt, null);
+  assert.ok(rReopen.told && ['told', 'could_not'].includes(rReopen.told.state),
+    'reopening an assigned task did not carry the assignee re-tell verdict');
   const gone = await post(`/api/project/${made.project.id}/task/99/close`, {});
   assert.equal(gone.status, 404);
   assert.match(json(gone).error, /no task by that number/);

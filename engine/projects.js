@@ -353,7 +353,156 @@ function profileRole(card) {
   return Object.prototype.hasOwnProperty.call(profile, 'role') ? profile.role : null;
 }
 
-function describe(project, roster) {
+/**
+ * Attach the commitments claim to each assigned open task.
+ *
+ * ⚠️ ONE derivation of the join, here in the engine, never re-implemented
+ * by a screen: the matcher is engine/tasks.claimFor and the reading is
+ * engine/commitments.read, required lazily because tasks requires this
+ * module at load (the cycle resolves at call time). One read per assignee
+ * per project, memoized for the call.
+ *
+ * ⚠️ The AMBIGUITY guard: task numbers are project-scoped and every project
+ * counts from 1, so one agent on two projects can hold an open "task 1" on
+ * both -- and a report saying "task 1" cannot say which. Rendering "says it
+ * is on this" on either card would be a definite claim the system cannot
+ * check, which is exactly what claimed:null exists to refuse. So a
+ * colliding (who, number) pair joins as null-with-because on EVERY card it
+ * touches, computed here from the full store (`all`), never guessed.
+ * Teaching an unambiguous spelling is the next slice; refusing to guess is
+ * this one.
+ */
+const AMBIGUITY_COUNTS = new WeakMap();
+function ambiguityCounts(everyProject) {
+  if (AMBIGUITY_COUNTS.has(everyProject)) return AMBIGUITY_COUNTS.get(everyProject);
+  const counts = new Map();
+  for (const p of everyProject) {
+    for (const t of p.tasks || []) {
+      // Non-integer numbers are excluded: they cannot be validly named by a
+      // report at all, and claimFor's "not a whole number" answer is the
+      // truer sentence than an ambiguity one interpolating NaN. (SAFE
+      // integer: 1.5e21 passes isInteger and still interpolates a dot.)
+      // ⚠️ And DEPARTED assignees are excluded: the count exists to mirror
+      // the taught convention, and the block only teaches MEMBER tasks --
+      // a leftover assignment on a project the agent has left is not "one
+      // of this agent's projects" (its own join already answers
+      // could-not-tell), so it must not suppress the join on the project
+      // the agent is actually on.
+      if (!t || !t.who || t.closedAt || typeof t.number !== 'number' || !Number.isSafeInteger(t.number)) continue;
+      if (!(p.agents || []).includes(t.who)) continue;
+      const key = t.who + '\u0000' + Number(t.number);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  AMBIGUITY_COUNTS.set(everyProject, counts);
+  return counts;
+}
+
+const READINGS = new WeakMap();
+function joinTaskClaims(tasks, all, memberOf, roster) {
+  const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
+  if (!withWho.length) return tasks;
+  const tasksMod = require('./tasks');
+  const commitments = require('./commitments');
+  // A two-arg caller gets a store read here that its own path never
+  // wrapped; an unreadable store falls back to judging ambiguity from the
+  // one project in hand rather than throwing out of a read.
+  let everyProject;
+  if (Array.isArray(all)) everyProject = all;
+  else {
+    try { everyProject = readAll(); }
+    catch { everyProject = [{ tasks, agents: Array.isArray(memberOf) ? memberOf : [] }]; }
+  }
+  // Memoized per `all` snapshot (WeakMap), so list() over P projects builds
+  // the cross-store counts once, not P times.
+  const counts = ambiguityCounts(everyProject);
+  // Readings ride the same snapshot as the counts: one commitments read per
+  // assignee per list(), not per project the assignee appears on.
+  let shared = READINGS.get(everyProject);
+  if (!shared) { shared = new Map(); READINGS.set(everyProject, shared); }
+  const members = Array.isArray(memberOf) ? memberOf : [];
+  // ⚠️ FAIL CLOSED on an unreadable roster, like every sibling: tellAgent
+  // refuses a non-array roster and borrowedName() answers true from its
+  // catch. "We could not look" is not "we looked and no pane holds the
+  // name" -- collapsing the two had this gate open exactly when the rest of
+  // the payload was answering unknown/untied for the same names.
+  const rosterUnreadable = !Array.isArray(roster);
+  const cards = rosterUnreadable ? [] : roster;
+  // ⚠️ The borrowed-name gate, inherited: every sibling consumer of the
+  // commitments store refuses to speak for a name an untied pane is holding
+  // (/api/status answers unknown, the GET route 404s), and a new consumer
+  // does not get to skip the gate its siblings carry. Only a tied pane can
+  // WRITE the record, so the stored text is genuine -- but rendering it as
+  // this agent's word while the same row says "we cannot tell that it is
+  // this agent" would have the board speaking with two postures at once.
+  const borrowed = (who) => cards.some((a) => a && a.sessionName === who && !a.isNamedOurs);
+  // Same type guard as the count and the matcher: a hand-edited
+  // `number: true` coerces to 1 and would render the ambiguity sentence
+  // where claimFor's "not a whole number" is the truer reason.
+  const ambiguous = (t) => typeof t.number === 'number' && Number.isSafeInteger(t.number)
+    && counts.get(t.who + '\u0000' + t.number) > 1;
+  const readings = shared;
+  const readFor = (who) => {
+    if (!readings.has(who)) {
+      let r;
+      try { r = commitments.read(who); }
+      catch (err) { r = { state: 'unknown', commitments: [], because: String((err && err.message) || 'we could not read its record') }; }
+      readings.set(who, r);
+    }
+    return readings.get(who);
+  };
+  return tasks.map((t) => {
+    if (!t || !t.who || t.closedAt) return t;
+    // ⚠️ A departed assignee: removal does not unassign (the given-to record
+    // is the person's, and history should not vanish because membership
+    // changed), but the taught convention and the managed block both derive
+    // from membership, so a non-member's report cannot be checked against
+    // this task. Could-not-tell with the real reason -- rendering a
+    // still-fresh "task N" report as a definite claim here would be the
+    // told-when-not shape back through the removal door.
+    if (!members.includes(t.who)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'this agent is no longer on the project, so what it reports cannot be checked against this task',
+        },
+      };
+    }
+    if (rosterUnreadable) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'we could not check which agents are running, so we will not speak for what this name is holding',
+        },
+      };
+    }
+    if (borrowed(t.who)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'we cannot tie the pane holding this name to the agent, so we will not speak for what that name is holding',
+        },
+      };
+    }
+    if (ambiguous(t)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: '"task ' + Number(t.number) + '" names more than one of this '
+            + 'agent\'s open tasks, so a report saying it cannot say which '
+            + 'one it means',
+        },
+      };
+    }
+    return { ...t, claim: tasksMod.claimFor(t, readFor(t.who)) };
+  });
+}
+
+function describe(project, roster, all) {
   const cards = Array.isArray(roster) ? roster : [];
   // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
   // and never revisited -- so an agent added while tmux could not be read was
@@ -381,9 +530,11 @@ function describe(project, roster) {
   }
   if (upgraded) {
     try {
-      const all = readAll();
-      const at = all.findIndex((p) => p.id === project.id);
-      if (at >= 0) { all[at].everSeen = { ...(all[at].everSeen || {}), ...upgraded }; writeAll(all); }
+      // (named `stored`, not `all`: describe's `all` parameter is the join's
+      // shared snapshot, and shadowing it here would be a trap.)
+      const stored = readAll();
+      const at = stored.findIndex((p) => p.id === project.id);
+      if (at >= 0) { stored[at].everSeen = { ...(stored[at].everSeen || {}), ...upgraded }; writeAll(stored); }
     } catch { /* a record we cannot update is not a reason to fail a read */ }
     project = { ...project, everSeen: { ...(project.everSeen || {}), ...upgraded } };
   }
@@ -468,7 +619,7 @@ function describe(project, roster) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: Array.isArray(project.tasks) ? project.tasks : [],
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || [], roster),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the
@@ -512,12 +663,17 @@ function describe(project, roster) {
 }
 
 function list(roster) {
-  return readAll().map((p) => describe(p, roster));
+  // One read of the store shared by every describe: the ambiguity guard
+  // needs the full list anyway, so each project's join reuses it instead
+  // of re-reading per project.
+  const all = readAll();
+  return all.map((p) => describe(p, roster, all));
 }
 
 function get(id, roster) {
-  const found = readAll().find((p) => p.id === id);
-  return found ? describe(found, roster) : null;
+  const all = readAll();
+  const found = all.find((p) => p.id === id);
+  return found ? describe(found, roster, all) : null;
 }
 
 /**
@@ -529,9 +685,10 @@ function get(id, roster) {
 function projectsFor(sessionName, roster) {
   const key = String(sessionName || '');
   if (!key) return [];
-  return readAll()
+  const all = readAll();
+  return all
     .filter((p) => (p.agents || []).includes(key))
-    .map((p) => describe(p, roster));
+    .map((p) => describe(p, roster, all));
 }
 
 /**
@@ -1196,19 +1353,39 @@ function oneLine(value) {
     .trim();
 }
 
-function blockBody(projects) {
+function blockBody(projects, sessionName) {
   // ⚠️ Never reached with an empty list any more -- `tellAgent` REMOVES the
   // block instead of writing a placeholder. Kept as a guard rather than
   // deleted, because a caller that does reach it with nothing should not get
   // an empty heading.
   if (!projects.length) return 'Kosmos has not put this agent on a project yet.';
-  const lines = projects.map((p) => `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``);
+  // ⚠️ THE TEACHING HALF OF THE JOIN. The board only ever shows what an
+  // agent SAYS it is on, and the matcher accepts exactly the spelling
+  // "task <number>". These lines are where an agent learns both facts:
+  // its open tasks, in that spelling, in the file it boots from. Without
+  // this the join would be a convention nobody was told about.
+  let any = false;
+  const lines = projects.map((p) => {
+    const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``;
+    const mine = (sessionName && Array.isArray(p.tasks))
+      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
+      : [];
+    if (!mine.length) return head;
+    any = true;
+    return [head, ...mine.map((t) => `  - Task ${Number(t.number)}: ${oneLine(t.sentence)}`)].join('\n');
+  });
   return [
     '## Your projects',
     '',
     'Kosmos records which projects you are on, and this is where their folders are.',
     '',
     ...lines,
+    ...(any ? [
+      '',
+      'The indented lines are tasks written down for you. When you take one up,',
+      'include "task <number>" in the commitment you report, so the board can',
+      'show you are on it.',
+    ] : []),
   ].join('\n');
 }
 
@@ -1294,7 +1471,7 @@ function tellAgent(sessionName, projects, roster) {
     // somebody's instruction file, and "Kosmos has not put this agent on a
     // project yet" sitting in a boot file forever is residue.
     const next = projects.length
-      ? spliceBlock(current.text || '', blockBody(projects))
+      ? spliceBlock(current.text || '', blockBody(projects, sessionName))
       : removeBlock(current.text || '');
     if (next === current.text) return { state: TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);

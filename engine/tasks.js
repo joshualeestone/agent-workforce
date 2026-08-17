@@ -67,6 +67,16 @@ function create(projectId, { sentence, detail, who } = {}, roster) {
     : (whoKey ? null : undefined);
   let made;
   projects.mutate(projectId, (p) => {
+    // ⚠️ Membership is checked HERE, inside the same read that stores the
+    // task, never from a separate earlier read. The screen only offers
+    // members, so this refusal is for the API path -- without it the route
+    // answered `told` while syncAgent (which derives the block strictly
+    // from membership) had silently written a block that never mentioned
+    // the task. A refusal is honest; a told-when-not is the lie this
+    // module's header forbids.
+    if (whoKey && !(p.agents || []).includes(whoKey)) {
+      throw new Error('that agent is not on this project, so the task cannot be given to it');
+    }
     const number = (p.taskCounter || 0) + 1;
     made = {
       number,
@@ -126,4 +136,56 @@ function columnTasks(p) {
   return (p.tasks || []).filter((t) => t.who && !t.closedAt);
 }
 
-module.exports = { create, close, reopen, byNumber, columnTasks, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };
+
+/**
+ * The JOIN, read side: does the assignee SAY it is on this task?
+ *
+ * ⚠️ Assignment is the join (the pack's rule): commitments knows what each
+ * agent says it is holding; a task knows who it was given to. The match is
+ * DETERMINISTIC, never fuzzy: a commitment counts only when its text names
+ * "task <number>" (word-bounded, so task 1 never matches task 12). Agents
+ * learn the convention from the managed block in their own instructions
+ * (projects.blockBody lists their open tasks with exactly that spelling).
+ *
+ * Three answers, never two:
+ *   { claimed: true }          a FRESH report names this task
+ *   { claimed: false }         a fresh report exists and does not name it
+ *                              (which is NOT "not started": it says only
+ *                              that the agent has not said so)
+ *   { claimed: null, because } we could not read what it reports (absent,
+ *                              stale, unreadable) -- and null must never
+ *                              render as either of the others
+ * Unassigned and closed tasks have no claim to compute (null, no because).
+ */
+function claimFor(task, reading) {
+  if (!task || !task.who || task.closedAt) return null;
+  // ⚠️ The DEFINITE branch is allowlisted, never the unknown one: a state
+  // this module does not recognize (a future vocabulary word, a hand-edited
+  // record) must fall to could-not-tell, because falling to true/false would
+  // render a definite answer nobody computed. STATE comes from the producer,
+  // so the two cannot drift.
+  const { STATE } = require('./commitments');
+  if (!reading || (reading.state !== STATE.HOLDING && reading.state !== STATE.CLEAR)) {
+    return {
+      claimed: null,
+      because: (reading && reading.because) || 'we could not read what it reports holding',
+    };
+  }
+  // Server-issued numbers are integers; a hand-edited store can hold
+  // anything, and a non-integer interpolated into the pattern is regex
+  // (1.5 matches "task 175"). Same way-out validation commitments.js does.
+  const n = task.number;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n)) {
+    return { claimed: null, because: 'this task\'s number is not a whole number, so a report cannot name it' };
+  }
+  // The trailing guard is two lookaheads, not \b: \b sits happily between
+  // "1" and ".", so "task 1.5" in a report would join task 1. Not-a-digit
+  // blocks "task 12"; not-a-dot-then-digit blocks "task 1.5" while still
+  // matching a sentence that simply ends "task 1."
+  const re = new RegExp('\\btask\\s+' + n + '(?!\\d)(?!\\.\\d)', 'i');
+  const named = (reading.commitments || []).some(
+    (c) => c && typeof c.what === 'string' && re.test(c.what));
+  return { claimed: named, because: null };
+}
+
+module.exports = { create, close, reopen, byNumber, columnTasks, claimFor, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };

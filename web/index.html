@@ -781,6 +781,7 @@ svg { display: block; }
             background: var(--bg-sunken); border: 1px solid var(--separator);
             font-size: 10px; font-weight: 700; color: var(--label); }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
+.tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
 .tk-inp { display: block; width: 100%; margin-top: var(--space-3); font: inherit;
           padding: .5em .65em; border: 1px solid var(--border-strong);
@@ -5569,7 +5570,16 @@ function paintProjectTasks(p) {
     const n = Number(t.number);   // server-issued, but the one unescaped field deserves the same distrust as the rest
     const who = t.who
       ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
-        + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who)) + '</span>'
+        + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who))
+        /* The join, rendered ONLY as the agent's own words (the pack's
+           phrase for the commitments source: "says it is on this").
+           claimed false is NOT "not started" and renders nothing, and
+           claimed null (could-not-read) renders nothing here -- Mona
+           Lisa's chip-is-the-status ruling stands for both. */
+        + (t.claim && t.claim.claimed === true
+          ? '<em class="tksay">· says it is on this</em>'
+          : '')
+        + '</span>'
       : '<span class="tkcard-who">Nobody yet</span>';
     return '<button class="tkcard' + (t.closedAt ? ' closed' : '') + '" type="button" data-task="' + n + '">'
       + '<span class="tkcard-n">Task ' + n + (t.closedAt ? ' (done)' : '') + '</span>'
@@ -5625,7 +5635,14 @@ function openTaskModal(n) {
      closing stops the agent. Only when somebody is on it and it is open. */
   const note = document.getElementById('tk-note');
   if (who && !t.closedAt) {
-    note.textContent = 'Marking it done closes it here. It does not stop ' + who
+    /* The scene-setting sentence returns in front of the correction, per
+       the ruling made when the correction shipped without it: only when
+       the agent has SAID so (the join), and in says-vocabulary, never as
+       an observation Kosmos cannot make. */
+    const says = (t.claim && t.claim.claimed === true)
+      ? who + ' says it is on this. '
+      : '';
+    note.textContent = says + 'Marking it done closes it here. It does not stop ' + who
       + ' or change what ' + who + ' is doing.';
     note.hidden = false;
   } else {
