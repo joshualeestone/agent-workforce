@@ -63,3 +63,24 @@ appex's own Info.plist, never guessed from a version table:
   button renders because the pane exists, and clicking it REALLY
   launches the pane process (pgrep, 10s window), with no error message
   written. Kills only what it started; quits Settings after.
+
+## Review round 1 additions (zero blockers; all fixed)
+
+- The pane probe accepts an injectable lister beside the runner, so the
+  unit tests no longer depend on the host's real /System dir, and the
+  empty-dir and unreadable-dir worlds are tested as the no-button safe
+  failure.
+- The cache belongs to the real world only: an injected runner/lister
+  bypasses it in both directions (the first test's world was silently
+  deciding `settings` for every later caller, making test order
+  load-bearing), with a test proving an injected probe cannot write what
+  the real world then reads.
+- A successful open clears the step's message line (a retried failure's
+  sentence no longer stands beside an open Settings window).
+- The route test installs its stub BEFORE the cross-site request and
+  proves the guard by count, so a guard regression fails by number
+  instead of launching System Settings on whoever runs the suite.
+- The drive script now enforces its kills-only-what-it-started claim:
+  the precondition refuses to run over an existing Settings window, the
+  killall fires only if this run clicked, and the pane check matches
+  the appex binary path rather than a bare substring.

@@ -2435,12 +2435,17 @@ test('the open-sleep-settings route: guard-inherited, honest 409, and the engine
   const machine = require('./engine/machine');
   const real = machine.openSleepSettings;
   try {
-    // ⚠️ The guard, asserted rather than assumed: this POST launches an app.
+    // ⚠️ The stub is installed BEFORE the cross-site request: if the guard
+    // ever regressed, this test must fail by count, not launch System
+    // Settings on whoever runs the suite as a side effect of failing.
+    let crossOpened = 0;
+    machine.openSleepSettings = () => { crossOpened += 1; return { ok: true }; };
     const cross = await req('/api/open-sleep-settings', {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
     });
     assert.equal(cross.status, 403, 'a cross-site page can open System Settings');
+    assert.equal(crossOpened, 0, 'the guard answered 403 but the route ran anyway');
 
     // No pane on this machine: the route answers 409 with the engine's own
     // sentence and never claims success.

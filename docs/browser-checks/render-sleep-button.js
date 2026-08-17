@@ -19,7 +19,13 @@ const REPO = path.resolve(__dirname, '..', '..');
 const PORT = 4667;
 
 const paneRunning = () => {
-  try { return execFileSync('/usr/bin/pgrep', ['-f', 'PowerPreferences'], { encoding: 'utf8' }).trim().length > 0; }
+  // The appex's full binary path, not a bare substring: a stranger process
+  // merely mentioning "PowerPreferences" in its argv must not count.
+  try { return execFileSync('/usr/bin/pgrep', ['-f', 'PowerPreferences.appex/Contents/MacOS/PowerPreferences'], { encoding: 'utf8' }).trim().length > 0; }
+  catch { return false; }
+};
+const settingsRunning = () => {
+  try { return execFileSync('/usr/bin/pgrep', ['-x', 'System Settings'], { encoding: 'utf8' }).trim().length > 0; }
   catch { return false; }
 };
 
@@ -41,14 +47,20 @@ const paneRunning = () => {
     },
     stdio: 'ignore',
   });
+  // "Kills only what it started" is enforced, not asserted: Settings is
+  // only killalled if THIS run clicked it open, and the precondition
+  // refuses to start over anyone's existing Settings window at all.
+  let weOpenedSettings = false;
   const cleanup = () => {
     srv.kill();
-    try { execFileSync('/usr/bin/killall', ['System Settings']); } catch { /* was not open */ }
+    if (weOpenedSettings) {
+      try { execFileSync('/usr/bin/killall', ['System Settings']); } catch { /* already gone */ }
+    }
   };
   const die = (msg) => { cleanup(); console.error('FAIL', msg); process.exit(1); };
   await new Promise((r) => setTimeout(r, 1200));
 
-  if (paneRunning()) die('precondition: the power pane is already running; close System Settings first');
+  if (settingsRunning() || paneRunning()) die('precondition: System Settings is already open; close it first so this run owns what it kills');
 
   const b = await chromium.launch();
   const p = await b.newPage({ viewport: { width: 1280, height: 900 } });
@@ -65,6 +77,7 @@ const paneRunning = () => {
     await p.screenshot({ path: path.join(REPO, 'docs/browser-checks/shots/sleep-settings-button.png') });
 
     await p.click('.fr-sleepbtn');
+    weOpenedSettings = true;
     let up = false;
     for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 1000));

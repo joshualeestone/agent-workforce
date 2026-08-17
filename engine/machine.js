@@ -650,35 +650,43 @@ const SLEEP_PANE_IDS = [
 const EXTENSIONS_DIR = '/System/Library/ExtensionKit/Extensions';
 let SLEEP_PANE_CACHE;   // undefined = not probed; null = probed, none found
 
-function sleepPaneUrl(runner) {
-  if (SLEEP_PANE_CACHE !== undefined) return SLEEP_PANE_CACHE;
+/**
+ * ⚠️ THE CACHE BELONGS TO THE REAL WORLD ONLY. A supplied runner or lister
+ * (tests) bypasses it in both directions -- neither reading a cached answer
+ * some other runner produced nor writing its own answer into the cache --
+ * because caching the FIRST caller's injected world silently decided
+ * `settings` for every later caller with a different one, and made test
+ * order load-bearing.
+ */
+function sleepPaneUrl(runner, lister) {
+  const injected = Boolean(runner || lister);
+  if (!injected && SLEEP_PANE_CACHE !== undefined) return SLEEP_PANE_CACHE;
   const r = runner || run;
+  const list = lister || ((dir) => fs.readdirSync(dir));
+  const remember = (v) => { if (!injected) SLEEP_PANE_CACHE = v; return v; };
   let names;
   try {
-    names = fs.readdirSync(EXTENSIONS_DIR)
+    names = list(EXTENSIONS_DIR)
       .filter((n) => n.endsWith('.appex') && /power|energy|battery/i.test(n));
   } catch {
-    SLEEP_PANE_CACHE = null;
-    return null;
+    return remember(null);
   }
   for (const n of names) {
     const res = r('/usr/bin/defaults', ['read', path.join(EXTENSIONS_DIR, n, 'Contents', 'Info'), 'CFBundleIdentifier']);
     if (!res.ok) continue;
     const id = String(res.stdout || '').trim();
     if (SLEEP_PANE_IDS.includes(id)) {
-      SLEEP_PANE_CACHE = 'x-apple.systempreferences:' + id;
-      return SLEEP_PANE_CACHE;
+      return remember('x-apple.systempreferences:' + id);
     }
   }
-  SLEEP_PANE_CACHE = null;
-  return null;
+  return remember(null);
 }
 
 /** Open the pane. The URL is ALWAYS derived here, never taken from a caller:
     the route that fronts this must not become a way for a page to `open`
     arbitrary URLs on the machine. */
-function openSleepSettings(runner) {
-  const url = sleepPaneUrl(runner);
+function openSleepSettings(runner, lister) {
+  const url = sleepPaneUrl(runner, lister);
   if (!url) return { ok: false, because: 'we could not find the sleep settings screen on this Mac' };
   const r = runner || run;
   const res = r('/usr/bin/open', [url]);
@@ -707,7 +715,9 @@ function check(opts) {
   };
   // The button's gate travels ON the row (reliability-or-no-button): true
   // only when the pane was found on disk by id, whatever the row's state.
-  sleepRow.settings = sleepPaneUrl(runner) !== null;
+  // An injected runner probes fresh every time (no cache in either
+  // direction); only the real runner's answer is cached for the process.
+  sleepRow.settings = sleepPaneUrl((opts && opts.runner) ? runner : undefined, opts && opts.lister) !== null;
 
   const checks = [
     installedCheck(opts),

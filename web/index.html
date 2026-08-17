@@ -7417,6 +7417,10 @@ document.getElementById('fr-checks').addEventListener('click', async (e) => {
       const body = await res.json().catch(() => null);
       document.getElementById('fr-machine-msg').textContent =
         (body && body.error) || 'we could not open System Settings';
+    } else {
+      // A retry that succeeds must not leave the earlier failure sentence
+      // standing beside an actually-open Settings window.
+      document.getElementById('fr-machine-msg').textContent = '';
     }
   } catch {
     document.getElementById('fr-machine-msg').textContent = 'we could not open System Settings';
