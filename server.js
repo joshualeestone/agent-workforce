@@ -1117,6 +1117,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * Open the Mac's sleep settings screen. POST, so it inherits the
+   * cross-site guard: it launches an app on the person's machine. The pane
+   * URL is derived server-side from what is on disk, never taken from the
+   * request, so this cannot become an open-arbitrary-URL primitive; and when
+   * the pane was not found the button was never rendered, so the 409 here is
+   * a race (an update changed the world) rather than a normal path.
+   */
+  if (pathname === '/api/open-sleep-settings' && req.method === 'POST') {
+    const opened = machine.openSleepSettings();
+    if (opened.ok) { sendJson(res, 200, { ok: true }); return; }
+    sendJson(res, 409, { error: opened.because });
+    return;
+  }
+
   // Marking it done. ⚠️ POST, because it writes -- so it inherits the
   // cross-site guard above rather than being reachable from any page.
   if (pathname === '/api/first-run/complete' && req.method === 'POST') {

@@ -731,3 +731,93 @@ test('the app-location answer rides BESIDE the machine report, never among its r
   assert.ok(!got.checks.some((c) => c.key === 'app-location'),
     'in the rows, step 2 counts it and step 4 captions it as a reason an agent may not run');
 });
+
+test('the sleep-pane capability: derived from disk by id, refusing honestly, never caller-named', () => {
+  const machine = require('./machine');
+  try {
+    // With a runner that answers the accepted id, the URL is built FROM THE
+    // ID THE PLIST ANSWERED, not from a table keyed on anything else.
+    machine.resetSleepPaneCache();
+    const asked = [];
+    const url = machine.sleepPaneUrl((cmd, args) => {
+      asked.push([cmd, args]);
+      return { ok: true, stdout: 'com.apple.Battery-Settings.extension\n' };
+    }, () => ['FakePowerPane.appex']);
+    assert.equal(url, 'x-apple.systempreferences:com.apple.Battery-Settings.extension');
+    assert.ok(asked.every(([cmd]) => cmd === '/usr/bin/defaults'), 'the probe ran something other than defaults');
+
+    // An id OUTSIDE the accepted set is not a pane we claim: no button, no
+    // guessing (reliability-or-no-button).
+    machine.resetSleepPaneCache();
+    const none = machine.sleepPaneUrl(
+      () => ({ ok: true, stdout: 'com.apple.SomethingElse.extension\n' }),
+      () => ['FakePowerPane.appex']);
+    assert.equal(none, null, 'an unrecognised pane id produced a URL');
+
+    // A dir with no matching appex, and a dir that cannot be read at all:
+    // both are the no-button world, never a throw (the safe failure).
+    assert.equal(machine.sleepPaneUrl(() => { throw new Error('runner must not be called'); }, () => []), null);
+    assert.equal(machine.sleepPaneUrl(() => { throw new Error('runner must not be called'); }, () => { throw new Error('EACCES'); }), null);
+
+    // ⚠️ And an injected world never touches the cache in either direction:
+    // the real probe after an injected one answers from the real machine,
+    // not from the injection.
+    machine.resetSleepPaneCache();
+    machine.sleepPaneUrl(() => ({ ok: true, stdout: 'com.apple.Battery-Settings.extension' }), () => ['FakePowerPane.appex']);
+    const realAfterInjected = machine.sleepPaneUrl();
+    const realFresh = (machine.resetSleepPaneCache(), machine.sleepPaneUrl());
+    assert.equal(realAfterInjected, realFresh, 'an injected probe wrote the cache the real world then read');
+
+    // openSleepSettings derives the URL itself and hands `open` exactly that
+    // string; with no pane it refuses with its sentence and runs nothing.
+    machine.resetSleepPaneCache();
+    let opened = null;
+    const ok = machine.openSleepSettings((cmd, args) => {
+      if (cmd === '/usr/bin/defaults') return { ok: true, stdout: 'com.apple.Energy-Saver-Settings.extension' };
+      opened = [cmd, args];
+      return { ok: true, stdout: '' };
+    }, () => ['FakePowerPane.appex']);
+    assert.equal(ok.ok, true);
+    assert.deepEqual(opened, ['/usr/bin/open', ['x-apple.systempreferences:com.apple.Energy-Saver-Settings.extension']]);
+
+    machine.resetSleepPaneCache();
+    let ran = 0;
+    const refused = machine.openSleepSettings((cmd) => {
+      if (cmd === '/usr/bin/defaults') return { ok: false, stdout: '' };
+      ran += 1;
+      return { ok: true, stdout: '' };
+    }, () => ['FakePowerPane.appex']);
+    assert.equal(refused.ok, false);
+    assert.match(refused.because, /could not find the sleep settings screen/);
+    assert.equal(ran, 0, 'open ran with no pane found');
+  } finally {
+    machine.resetSleepPaneCache();
+  }
+});
+
+test('the sleep row carries the settings flag from the same probe', () => {
+  const machine = require('./machine');
+  try {
+    machine.resetSleepPaneCache();
+    const got = machine.check({
+      pmset: DESKTOP_AWAKE,
+      lister: () => ['FakePowerPane.appex'],
+      runner: (cmd) => (cmd === '/usr/bin/defaults'
+        ? { ok: true, stdout: 'com.apple.Battery-Settings.extension' }
+        : { ok: true, stdout: '' }),
+    });
+    const sleep = got.checks.find((c) => c.key === 'sleep');
+    assert.equal(sleep.settings, true, 'the pane exists but the row does not offer the button');
+
+    machine.resetSleepPaneCache();
+    const without = machine.check({
+      pmset: DESKTOP_AWAKE,
+      lister: () => ['FakePowerPane.appex'],
+      runner: (cmd) => (cmd === '/usr/bin/defaults' ? { ok: false, stdout: '' } : { ok: true, stdout: '' }),
+    });
+    const sleep2 = without.checks.find((c) => c.key === 'sleep');
+    assert.equal(sleep2.settings, false, 'no pane found but the row still offers the button');
+  } finally {
+    machine.resetSleepPaneCache();
+  }
+});
