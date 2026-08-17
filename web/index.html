@@ -853,7 +853,7 @@ svg { display: block; }
            overflow-y: auto; display: flex; justify-content: center;
            padding: var(--space-8) var(--space-5); }
 /* ⚠️ `margin: auto`, NOT `align-items: center`. Centred that way, a card taller
-   than the window has its top cut off and no way to scroll to it — and step 2
+   than the window has its top cut off and no way to scroll to it — and step 4
    on a machine with three findings is exactly that card on a short screen.
    Auto margins centre when it fits and collapse to the top when it does not. */
 .fr-box { background: var(--bg-elevated); border: 0.5px solid var(--separator);
@@ -875,7 +875,7 @@ svg { display: block; }
 .fr-body p:last-child { margin-bottom: 0; }
 .fr-body p b { color: var(--label); }
 
-/* The progress segments. `aria-hidden`, because the "Step 2 of 6" line above
+/* The progress segments. `aria-hidden`, because the spoken "Step N of 5" crumb
    says the same thing in words — two announcements of one fact is noise. */
 .fr-segs { display: flex; gap: var(--space-3); margin-bottom: var(--space-7); }
 .fr-seg { height: 4px; flex: 1; border-radius: 2px; background: var(--separator); }
@@ -995,7 +995,7 @@ svg { display: block; }
 #firstrun .fr-body p { font: 400 1.0625rem/1.6 var(--font-ui); color: var(--k-ink-2);
                        margin: 0 0 14px; max-width: 52ch; }
 #firstrun .fr-body p b { color: var(--k-ink); }
-#firstrun .fr-acts { justify-content: flex-end; gap: 14px; margin-top: 36px; }
+#firstrun .fr-acts { justify-content: flex-end; gap: 14px; margin-top: 36px; border-top-color: var(--k-rule); }
 /* The secondary action (Check again) sits flush LEFT, the primary right
    (Josh, 2026-08-17). The DOM order alt / spacer / next carries this: the
    spacer's auto margin absorbs ALL free space between them. A margin-right
@@ -1021,15 +1021,18 @@ svg { display: block; }
 }
 #firstrun .btn-quiet:hover { background: rgba(198,154,50,.14); }
 #firstrun .btn-quiet:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
-#firstrun .chk { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0; }
-#firstrun .chk + .chk { border-top: 1px solid var(--k-rule); }
-#firstrun .chk-m { width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px; display: grid; place-items: center;
-                   font-size: .875rem; font-weight: 700; border: 1px solid var(--k-rule); }
-#firstrun .chk.ok .chk-m  { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.4); color: #6e5311; }
-#firstrun .chk.att .chk-m { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.45); color: #6e5311; }
-#firstrun .chk.unk .chk-m { background: rgba(20,22,26,.04); color: var(--k-ink-2); }
-#firstrun .chk-t { font-size: 1rem; font-weight: 600; margin-bottom: 2px; color: var(--k-ink); }
-#firstrun .chk-d { font-size: .875rem; color: var(--k-ink-2); line-height: 1.5; }
+/* The connect sub-screens (step 3's sign-in phases) ride the same
+   forced-light card, so their input, generic button, log tail and the
+   action row's hairline take pack inks too -- in dark scheme the app
+   tokens would paint dark widgets onto the white card (the single-look
+   rule below; these phases are not in the render-shot list, so the
+   checker cannot catch them). The #fr-next / #fr-alt ID rules outrank
+   the generic .btn pin, so the gold pair is untouched. */
+#firstrun .btn { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+#firstrun .btn:hover { background: rgba(20,22,26,.05); }
+#firstrun .btn:disabled:hover { background: #fff; }
+#firstrun .fr-code-row input { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+#firstrun .fr-conn-tail { color: var(--k-ink-2); background: rgba(20,22,26,.04); border-color: var(--k-rule); }
 #firstrun .llm { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
                  border: 1px solid var(--k-rule); border-radius: 12px; margin-bottom: 10px; background: #fff; }
 #firstrun .llm.off { background: rgba(20,22,26,.02); }
@@ -1091,7 +1094,6 @@ svg { display: block; }
 #firstrun .fr-note b { color: var(--k-ink); }
 #firstrun .fr-msg { color: var(--k-ink); }
 #firstrun .fr-youfine { color: var(--k-ink-2); }
-#firstrun .fc-word { color: var(--k-ink); }
 #firstrun .fr-revealrow { margin: 18px 0 22px; }
 #firstrun .fr-sleepbtn, #firstrun #fr-reveal {
   background: transparent; border: 1px solid var(--gold-deep); color: #14161a;
@@ -1491,11 +1493,11 @@ svg { display: block; }
            defect this codebase is built against. -->
       <div class="fr-pane" id="fr-pane-1" hidden>
         <!-- ⚠️ The live region is STATIC MARKUP the painter never recreates,
-             like step 2's #fr-checks: a region inserted and populated in one
+             like step 4's #fr-checks: a region inserted and populated in one
              innerHTML write is the documented way to get no announcement.
              The write that matters (the engine answer arriving) lands in a
              region that long predates it; the initial placeholder joins the
-             tree with the pane, the same shape as step 2's "Looking...". -->
+             tree with the pane, the same shape as step 4's "Looking...". -->
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
@@ -7940,7 +7942,7 @@ let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
 let FR_FORGOT = false;    // the completion flag did not stick, and we said so
 let FR_FINISHING = false; // a completion is in flight; guards Escape and Continue at once
-// ⚠️ Kept so the fork step cannot promise something step 2 just contradicted. Null
+// ⚠️ Kept so the fork step cannot promise something step 4 just contradicted. Null
 // until the check screen has actually answered -- an empty array here would be
 // "we looked and found nothing wrong", which is not the same thing.
 let FR_MACHINE = null;
@@ -8060,9 +8062,9 @@ function frGo(step) {
   }
 
   /**
-   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this steps 3
-   * and 4 were announced to nobody at all. Step 2's list is a live region; the
-   * other two are not, and nothing moved the keyboard — so pressing Continue
+   * ⚠️ THE HEADING TAKES FOCUS ON EVERY STEP CHANGE, and without this the model
+   * and About-you screens were announced to nobody at all. Step 4's check
+   * list is a live region; the others are not, and nothing moved the keyboard — so pressing Continue
    * told a screen-reader user only that a button's label had changed. The
    * subscription verdict and the fleet list were never spoken.
    *
@@ -8175,7 +8177,7 @@ async function frPaintYou() {
 }
 
 /* --------------------------------------------------------------------------
-   Step 2 — this computer
+   Step 4 — this computer
    -------------------------------------------------------------------------- */
 
 /** The word, for anybody who cannot see the glyph or its colour. */
@@ -8256,12 +8258,12 @@ async function frPaintMachine() {
    * person tapping the button four times can stall the board for everyone
    * looking at it -- including the poll behind this overlay. (An earlier version
    * of this comment called it "the only button in the product that costs a
-   * subprocess per press", which was false: step 3's "Check again" runs `tmux
+   * subprocess per press", which was false: this screen's "Check again" runs `tmux
    * list-panes` and had no guard at all. It has one now.)
    */
   // ⚠️ A TOKEN, not a boolean. An unconditional re-enable in the `finally` let a
-  // STALE request hand the button back while a newer one was still running: leave
-  // step 2 mid-request, come back, press it again, and request #1 finishing
+  // STALE request hand the button back while a newer one was still running: fire
+  // step 4's Check again while a first press is still running, and request #1 finishing
   // unlocks the button under request #2.
   FR_CHECKING += 1;
   const mine = FR_CHECKING;
@@ -8307,7 +8309,7 @@ async function frPaintMachine() {
    * ⚠️ GUARDED ONCE, PROPERLY. The first version tested `got` for null on this
    * line and then dereferenced it bare five lines down (`got.attention ||
    * got.unknown`) -- outside the try, so a 200 whose body is `null` threw an
-   * unhandled rejection and left step 2 saying "Looking…" forever. A body of
+   * unhandled rejection and left step 4 saying "Looking…" forever. A body of
    * `{}` or `[]` rendered a titled, buttoned, empty pane, which is the shape
    * two other guards in this file were written against.
    */
@@ -8353,8 +8355,8 @@ async function frPaintMachine() {
 async function frRecheck() {
   const msg = document.getElementById('fr-sub-msg');
   /**
-   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 2's is. A comment used
-   * to claim step 2's was "the only button in the product that costs a
+   * ⚠️ HELD DOWN WHILE IT RUNS, for the same reason step 4's is. A comment used
+   * to claim step 4's was "the only button in the product that costs a
    * subprocess per press"; it was not. This one calls `/api/first-run`, which
    * runs `firstrun.state()` -> `fleet()` -> `status.paneRoster()` -> `tmux
    * list-panes`. The guard was written one screen away from the button that
@@ -8397,7 +8399,7 @@ async function frRecheck() {
   } finally {
     // ⚠️ THE SAME TOKEN `frPaintMachine` USES, because it is the SAME BUTTON:
     // `#fr-alt` is one element that both steps relabel. With a token on one side
-    // only, step 2's late response handed the button back while step 3's request
+    // only, one screen's late response handed the button back while the other's request
     // was still running -- and the comment claiming "only the latest request may
     // hand it back" was true of one caller out of two.
     if (wasAgain && mine === FR_CHECKING) again.disabled = false;
@@ -8893,6 +8895,10 @@ document.getElementById('fr-pane-1').addEventListener('click', async (e) => {
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       frRevealSay(esc((body && body.error) || 'we could not show it'));
+    } else {
+      // A failure sentence from an earlier click must not keep standing
+      // (and re-announcing) over a reveal that just worked.
+      frRevealSay('');
     }
   } catch {
     frRevealSay('we could not show it');
@@ -9043,7 +9049,7 @@ function frPaintFleet() {
      * ⚠️ THREE CASES, NOT TWO, and the declaration of `FR_MACHINE` says so while
      * the first version of this line collapsed them: `(FR_MACHINE && ...) || []`
      * made "we never checked" identical to "we checked and it was fine". Somebody
-     * who arrived on `?fr-step=4`, or whose check route failed at step 2, got the
+     * who arrived on `?fr-step=4`, or whose check route failed at step 4, got the
      * unhedged promise.
      *
      * ⚠️ AND `unknown` COUNTS. Filtering only `attention` dropped three "we could

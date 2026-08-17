@@ -843,6 +843,7 @@ test('revealApp opens Finder at the icon it re-derives, and refuses honestly whe
     // A FILE named Kosmos.app is not the app; the refusal sentence says
     // what to do, not what threw.
     empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-none-'));
+    fs.writeFileSync(nodePath.join(empty, 'Kosmos.app'), 'not a bundle');
     args = null;
     assert.throws(() => machine.revealApp({ appDirs: [empty] }), /could not find the Kosmos icon just now/);
     assert.equal(args, null, 'a refusal ran the opener anyway');

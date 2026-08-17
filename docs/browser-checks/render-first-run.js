@@ -311,6 +311,9 @@ async function look(page, name) {
     await ctx.close();
   }
 
+  // Armed by the reveal exercise below just before it stubs its one 409;
+  // the console monitor spends it instead of reporting the planned refusal.
+  let plannedRefusals = 0;
   for (const scheme of ['light', 'dark']) {
     for (const shot of SHOTS) {
       const ctx = await browser.newContext({
@@ -320,7 +323,14 @@ async function look(page, name) {
       });
       const page = await ctx.newPage();
       page.on('pageerror', (e) => problems.push(`${shot.name} [${scheme}] JS ERROR: ${e.message}`));
-      page.on('console', (m) => { if (m.type() === 'error') problems.push(`${shot.name} [${scheme}] console: ${m.text()}`); });
+      // The reveal exercise below DELIBERATELY answers one fetch with a 409
+      // (the refusal path under test); the browser logs that as a resource
+      // error, which is the exercise working, not a rendering problem.
+      page.on('console', (m) => {
+        if (m.type() !== 'error') return;
+        if (/409/.test(m.text()) && plannedRefusals > 0) { plannedRefusals -= 1; return; }
+        problems.push(`${shot.name} [${scheme}] console: ${m.text()}`);
+      });
       if (shot.machine === 'hang') {
         // Never answered: the checking placeholder is the state under test.
         await page.route('**/api/machine', () => {});
@@ -377,6 +387,12 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
         }
+        // No Show-me button over a look still in progress: the checking
+        // placeholder has not earned the found row's promise.
+        const checkingReveal = await page.evaluate(() => document.querySelectorAll('#fr-reveal').length);
+        if (checkingReveal !== 0) {
+          problems.push(`${shot.name} [${scheme}]: a Show-me button rendered while the look was still checking`);
+        }
       } else if (shot.name.startsWith('firstrun-1-success')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
@@ -407,6 +423,39 @@ async function look(page, name) {
         }
         if (/Keep in Dock/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the unreachable Keep in Dock advice appeared`);
+        }
+        // RELIABILITY-OR-NO-BUTTON, the sleep row's rule: "Show me where it
+        // is" rides the FOUND row only. Asserted on every fetched state, so
+        // a button over a not-found answer, or a missing one over found,
+        // reds here instead of shipping.
+        const revealCount = await page.evaluate(() => document.querySelectorAll('#fr-reveal').length);
+        if (want.state === 'ok' && revealCount !== 1) {
+          problems.push(`${shot.name} [${scheme}]: the found row lost its Show-me button (${revealCount})`);
+        }
+        if (want.state !== 'ok' && revealCount !== 0) {
+          problems.push(`${shot.name} [${scheme}]: a Show-me button rendered over a ${want.state} answer`);
+        }
+        // The failure path SPEAKS and the success path clears it: one shot
+        // (system, light) exercises the click both ways so a broken handler
+        // or a failure sentence outliving a success cannot pass the suite.
+        if (shot.name === 'firstrun-1-success-system' && scheme === 'light') {
+          plannedRefusals = 1;
+          await page.route('**/api/reveal-app', (r) => r.fulfill({
+            status: 409, json: { error: 'we could not look just now, so we cannot say where the icon is' },
+          }));
+          await page.click('#fr-reveal');
+          await page.waitForFunction(
+            () => /could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            { timeout: 4000 },
+          ).catch(() => problems.push(`${shot.name} [${scheme}]: a refused reveal said nothing in the dock`));
+          await page.unroute('**/api/reveal-app');
+          await page.route('**/api/reveal-app', (r) => r.fulfill({ json: { ok: true } }));
+          await page.click('#fr-reveal');
+          await page.waitForFunction(
+            () => !/could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            { timeout: 4000 },
+          ).catch(() => problems.push(`${shot.name} [${scheme}]: the failure sentence outlived a reveal that worked`));
+          await page.unroute('**/api/reveal-app');
         }
       }
       const seen = await look(page, shot.name);

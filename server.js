@@ -1871,7 +1871,9 @@ const server = http.createServer((req, res) => {
    * sentence instead of opening nothing.
    */
   if (pathname === '/api/reveal-app' && req.method === 'POST') {
-    if (crossSiteWrite(req)) { sendJson(res, 403, { error: 'this can only be done from Kosmos itself' }); return; }
+    // Cross-site writes were already refused by the global guard that runs
+    // BEFORE every route; an inline re-check here could never fire and only
+    // implied the sibling routes were less covered than they are.
     try {
       sendJson(res, 200, machine.revealApp());
     } catch (err) {

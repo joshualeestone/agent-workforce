@@ -64,7 +64,12 @@ Known deviations of record, flagged in channel with the pairs: the two
 ruled honest-sending sentences (screens 2 and 5); the real count and
 names list on screen 6; the engine's three states on screen 4; the
 darker glyph ink on the check marks (AA floor, the
-pack's gold-deep on its own tint is 2.78). Back and Skip were shipped
+pack's gold-deep on its own tint is 2.78). The plan's one-COPY-table
+idea did not survive contact: the pack's own panes are static markup
+with sentences in place, so copy landed inline the way the pack writes
+it, each ruled sentence anchored to its authority in a comment at the
+point of use. A central table would have added a layer the pack does
+not have between the design and the screen. Back and Skip were shipped
 as a trap-escape deviation in the first pass and then REMOVED at Josh's
 word (2026-08-17, every step) and the pack's own decisions table; the
 surviving exit is Escape, which marks first run seen.

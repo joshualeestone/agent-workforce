@@ -659,11 +659,19 @@ function revealApp(opts) {
       ? 'we could not look just now, so we cannot say where the icon is'
       : 'we could not find the Kosmos icon just now, so there is nothing to show');
   }
+  // The sibling revealFolder's bounds, for the sibling's reason: these run
+  // synchronously on the server's event loop, so a hung `open` with no
+  // timeout blocks every viewer of the board.
   const run = appRevealRunner
-    || ((cmd, args) => require('node:child_process').execFileSync(cmd, args));
+    || ((cmd, args) => require('node:child_process').execFileSync(cmd, args, { timeout: 5000, stdio: 'ignore' }));
   try {
     run('/usr/bin/open', ['-R', found]);
-  } catch {
+  } catch (err) {
+    // ⚠️ A programming error must not wear the failure's clothes -- the
+    // rethrow revealFolder documents (a swallowed ReferenceError once blamed
+    // Finder for a missing import, forever, invisibly, while runner-injected
+    // tests replaced the exact broken line).
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
     throw new Error('we found the icon but could not open a Finder window for it');
   }
   return { ok: true };
