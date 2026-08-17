@@ -1125,6 +1125,18 @@ make_app() {
   # harness, and a harness must leave that database alone.
   if [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ]; then
     local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    # ⚠️ TOUCH BEFORE REGISTERING. MEASURED (Josh's clean-machine install,
+    # 2026-08-17): app present, Get Info previews the icon, the Dock draws
+    # the generic tile. MEASURED on this machine (2026-08-17): mv preserves
+    # a directory's mtime, so the .app arrives with the stage's timestamp
+    # rather than a fresh one. HYPOTHESIS, unverifiable here: icon consumers
+    # keying a re-read off that mtime never look again. The touch is the non-invasive subset of the
+    # manual remedy that ships (touch + register, WITHOUT the killall Dock
+    # a person can run); if the Dock's in-session cache was the operative
+    # ingredient, a clean install may still draw generic and this area is
+    # NOT ruled out -- the next clean-machine run is the first real test.
+    # -c so the only thing this line can ever do is bump a time.
+    /usr/bin/touch -c "$app" 2>/dev/null || true
     [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
   fi
   return 0
