@@ -764,6 +764,27 @@ svg { display: block; }
    they are doing", and that is the reason for the size and the weight rather
    than decoration. It is deliberately NOT alarming: removal is reversible, so
    nothing here says otherwise. Loud about WHICH agent, quiet about danger. */
+/* ---- task cards (the pack's .task, in this app's tokens) ---- */
+.tkcards { display: flex; flex-direction: column; gap: var(--space-4); }
+.tkcard { display: block; width: 100%; text-align: left; cursor: pointer;
+        background: var(--bg-elevated); border: 1px solid var(--border-strong);
+        border-radius: var(--radius-card); padding: var(--space-5); font: inherit; color: var(--label); }
+.tkcard:hover { border-color: var(--label-2); }
+.tkcard:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
+.tkcard-n { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2);
+          text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.tkcard-t { font: var(--text-body) var(--font-ui); font-weight: 600; }
+.tkcard-who { display: flex; align-items: center; gap: 6px; margin-top: 6px;
+            font: var(--text-callout) var(--font-ui); color: var(--label-2); }
+.tkcard-who .tkchip { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 18px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--bg-sunken); border: 1px solid var(--separator);
+            font-size: 10px; font-weight: 700; color: var(--label); }
+.tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
+.tk-lab { display: block; margin-top: var(--space-5); }
+.tk-inp { display: block; width: 100%; margin-top: var(--space-3); font: inherit;
+          padding: .5em .65em; border: 1px solid var(--border-strong);
+          border-radius: var(--radius-control); background: var(--bg-elevated); color: var(--label); }
 .rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
@@ -1145,6 +1166,53 @@ svg { display: block; }
     </div>
   </div>
 </div>
+<!-- ============ NEW TASK (pack FROZEN-2026-08-16, copy verbatim) ============
+     Two things asked, one required: the sentence. No status field (status is
+     derived; a typed "Working" is a claim the system is supposed to observe),
+     no number field (the project issues it), no project picker (it was opened
+     from inside one). -->
+<div class="rm-back" id="nt-modal" hidden>
+  <div class="rm-box" role="dialog" aria-modal="true" aria-labelledby="nt-t">
+    <h2 class="rm-title" id="nt-t">New task</h2>
+    <p class="rm-small">In <b id="nt-project"></b>.</p>
+    <label class="flabel tk-lab" for="nt-what">What needs doing?</label>
+    <input class="tk-inp" id="nt-what" type="text" maxlength="200" placeholder="Rewrite the handoff checklist">
+    <label class="flabel tk-lab" for="nt-detail">Anything they should know</label>
+    <textarea class="tk-inp" id="nt-detail" rows="3" maxlength="2000" placeholder="Optional. What it is for, what done looks like, anything you already tried."></textarea>
+    <label class="flabel tk-lab" for="nt-who">Who is on it</label>
+    <select class="tk-inp" id="nt-who"><option value="">Nobody yet</option></select>
+    <!-- "You can give it to somebody later" is the whole reason the field is
+         allowed to default to nobody (pack): without it, a person reads an
+         unassigned task as a mistake they are about to make. -->
+    <p class="fhint" style="margin:8px 0 0;">You can give it to somebody later.</p>
+    <div class="rm-acts">
+      <button class="btn" id="nt-cancel" type="button">Cancel</button>
+      <button class="btn uprime" id="nt-go" type="button" disabled>Create task</button>
+    </div>
+    <div class="fmsg" id="nt-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
+
+<!-- ============ VIEW TASK ============
+     The one human verb and its undo (pack: Mark as done / reopen), plus the
+     correction people need MOST in v1 (Mona Lisa's ruling): the close-note is
+     about KOSMOS's behaviour, not the agent's state, and both its clauses are
+     verifiable tonight. "Back" and not "Close", because a dismiss button
+     reading "Close" beside "Mark as done" is two closings with one word. -->
+<div class="rm-back" id="tk-modal" hidden>
+  <div class="rm-box" role="dialog" aria-modal="true" aria-labelledby="tk-title" aria-describedby="tk-meta">
+    <h2 class="rm-title" id="tk-title"></h2>
+    <p class="rm-small" id="tk-meta"></p>
+    <p class="rm-small" id="tk-detail" hidden></p>
+    <p class="rm-small" id="tk-note" hidden></p>
+    <div class="rm-acts">
+      <button class="btn" id="tk-back" type="button">Back</button>
+      <button class="btn" id="tk-done" type="button"></button>
+    </div>
+    <div class="fmsg" id="tk-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
+
 <div class="rm-back" id="rm-modal" hidden>
   <div class="rm-box" role="alertdialog" aria-modal="true"
        aria-labelledby="rm-title" aria-describedby="rm-small">
@@ -1557,6 +1625,28 @@ svg { display: block; }
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
+    </div>
+
+    <!-- ⚠️ TASKS, the pack's right column in this page's single-column shape.
+         A task is "a thing that needs doing, which exists whether or not
+         anyone is on it" (the pack's definition). What a card may SAY is
+         Mona Lisa's v1 ruling (2026-08-16, in-channel): the who chip IS the
+         status; "Nobody yet" is the only state word; no second word until
+         the commitments join can support one, because "Not started" on an
+         assigned card is a claim about the agent that v1 cannot check.
+         New task sits ABOVE the list (Josh 2026-08-15: at the bottom it was
+         the one thing you had to scroll to find). -->
+    <div class="field" id="pj-tasks-field">
+      <span class="flabel">Tasks</span>
+      <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
+      <div class="tkcards" id="pj-tasklist"></div>
+      <!-- The door, pack rule: the column is a task with somebody on it that
+           is not finished; finished and unpicked are both real and both
+           behind this. v1's door reveals them in place (there is no
+           all-tasks screen yet); the reveal survives repaints and
+           same-project Back-and-return (the page's round-31 rule) and
+           resets on a project SWITCH. -->
+      <button class="linkish" id="pj-alltasks" type="button" hidden></button>
     </div>
 
     <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
@@ -5405,10 +5495,254 @@ async function loadProjects() {
 
 function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
 
+/* ---- tasks: the column, the door, and the two dialogs -------------------
+   What a card may say is deliberately small in v1 (Mona Lisa's ruling): the
+   who chip is the status, "Nobody yet" is the only state word, and closed
+   tasks live behind the door with the unassigned ones. */
+let TK_SHOW_ALL = false;   // the door's reveal; resets when the project changes
+let TK_OPEN = null;        // the task number the view dialog is showing
+
+/** Re-read the store; loadProjects itself repaints the open project on
+    success, so this is a named alias for the intent, not a second paint. */
+async function pjReload() {
+  await loadProjects();
+}
+
+function tkMemberName(p, sessionName) {
+  const m = (p.agents || []).find((a) => a && a.sessionName === sessionName);
+  return (m && m.name) || sessionName;
+}
+
+let TK_LIST_HTML = null;   // change guard, the removed-list's own pattern
+function paintProjectTasks(p) {
+  const list = document.getElementById('pj-tasklist');
+  const door = document.getElementById('pj-alltasks');
+  const all = p.tasks || [];
+  const column = all.filter((t) => t.who && !t.closedAt);
+  const behind = all.length - column.length;
+  const showing = TK_SHOW_ALL ? all : column;
+  // Not "no tasks" when empty: an empty COLUMN coexists with closed and
+  // unpicked tasks behind the door, and the door line below says so.
+  const html = showing.map((t) => {
+    const n = Number(t.number);   // server-issued, but the one unescaped field deserves the same distrust as the rest
+    const who = t.who
+      ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
+        + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who)) + '</span>'
+      : '<span class="tkcard-who">Nobody yet</span>';
+    return '<button class="tkcard' + (t.closedAt ? ' closed' : '') + '" type="button" data-task="' + n + '">'
+      + '<span class="tkcard-n">Task ' + n + (t.closedAt ? ' (done)' : '') + '</span>'
+      + '<div class="tkcard-t">' + esc(t.sentence) + '</div>'
+      + who + '</button>';
+  }).join('');
+  // ⚠️ Change-guarded, the removed-list's own pattern: the five-second poll
+  // repaints this project every tick, and an unconditional innerHTML write
+  // destroys a keyboard user's focus on a card even when nothing changed.
+  if (html !== TK_LIST_HTML) {
+    TK_LIST_HTML = html;
+    list.innerHTML = html;
+  }
+  // The door: pack rule, the column is not the whole list and says so.
+  if (!TK_SHOW_ALL && behind > 0) {
+    door.hidden = false;
+    door.textContent = 'View all tasks (' + all.length + ') →';
+  } else {
+    door.hidden = true;
+  }
+}
+
+document.getElementById('pj-alltasks').addEventListener('click', () => {
+  TK_SHOW_ALL = true;
+  const p = pjById(PJ_CURRENT);
+  if (p) paintProjectTasks(p);
+});
+
+document.getElementById('pj-tasklist').addEventListener('click', (e) => {
+  const card = e.target.closest('.tkcard');
+  if (!card) return;
+  openTaskModal(Number(card.dataset.task));
+});
+
+/* ---- the view dialog: one human verb and its undo ---- */
+let TK_ACT = null;   // the act the visible label promises; see the click handler
+function openTaskModal(n) {
+  const p = pjById(PJ_CURRENT);
+  const t = p && (p.tasks || []).find((x) => x.number === n);
+  if (!t) return;
+  TK_OPEN = n;
+  TK_ACT = t.closedAt ? 'reopen' : 'close';
+  document.getElementById('tk-title').textContent = t.sentence;
+  const who = t.who ? tkMemberName(p, t.who) : null;
+  document.getElementById('tk-meta').textContent =
+    'Task ' + t.number + (t.closedAt ? ', done.' : (who ? ', given to ' + who + '.' : ', nobody on it yet.'));
+  const det = document.getElementById('tk-detail');
+  det.textContent = t.detail || '';
+  det.hidden = !t.detail;
+  /* The close-note, Mona Lisa's blessed v1 wording: both clauses are about
+     what KOSMOS does not do, verifiable tonight, and needed MORE before the
+     commitments join exists, because tonight is when someone will assume
+     closing stops the agent. Only when somebody is on it and it is open. */
+  const note = document.getElementById('tk-note');
+  if (who && !t.closedAt) {
+    note.textContent = 'Marking it done closes it here. It does not stop ' + who
+      + ' or change what ' + who + ' is doing.';
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+  document.getElementById('tk-done').textContent = t.closedAt ? 'Reopen' : 'Mark as done';
+  document.getElementById('tk-msg').textContent = '';
+  document.getElementById('tk-modal').hidden = false;
+  document.getElementById('tk-back').focus();   // the safe answer, every dialog
+}
+function closeTaskModal() {
+  document.getElementById('tk-modal').hidden = true;
+  const was = TK_OPEN;
+  TK_OPEN = null;
+  TK_ACT = null;
+  // Back to the card that opened the dialog; after a done/reopen repaint it
+  // may be gone from the column, and then New task is the stable landing.
+  const card = document.querySelector('.tkcard[data-task="' + was + '"]');
+  (card || document.getElementById('pj-newtask')).focus();
+}
+document.getElementById('tk-back').addEventListener('click', closeTaskModal);
+document.getElementById('tk-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'tk-modal') closeTaskModal();
+});
+document.getElementById('tk-done').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  const t = p && (p.tasks || []).find((x) => x.number === TK_OPEN);
+  // An orphaned dialog (the project vanished under it) closes rather than
+  // being a button that silently does nothing on top of the list view.
+  if (!t) { closeTaskModal(); return; }
+  /* ⚠️ THE ACT IS THE ONE THE LABEL PROMISED. The five-second poll keeps
+     PROJECTS fresher than this dialog, so deriving the act here from t
+     could invert the visible button: it says "Mark as done", the task was
+     closed elsewhere a tick ago, and the click would silently reopen. If
+     the world moved since open, show the new state instead of acting. */
+  if ((t.closedAt ? 'reopen' : 'close') !== TK_ACT) { openTaskModal(t.number); return; }
+  const btn = document.getElementById('tk-done');
+  btn.disabled = true;
+  try {
+    const act = TK_ACT;
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id) + '/task/' + t.number + '/' + act, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      document.getElementById('tk-msg').textContent =
+        (body && body.error) || 'we could not change that task';
+      return;
+    }
+    closeTaskModal();
+    await pjReload();
+  } catch {
+    document.getElementById('tk-msg').textContent = 'we could not change that task';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* ---- the new-task dialog (pack copy verbatim) ---- */
+function openNewTask() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  document.getElementById('nt-project').textContent = p.name;
+  document.getElementById('nt-what').value = '';
+  document.getElementById('nt-detail').value = '';
+  const sel = document.getElementById('nt-who');
+  // Project members only, "Name · role" like the pack; the task belongs to
+  // the project, so its people are the choices.
+  sel.innerHTML = '<option value="">Nobody yet</option>' + (p.agents || []).map((m) =>
+    '<option value="' + esc(m.sessionName) + '">' + esc(m.name || m.sessionName)
+    + (m.role ? ' · ' + esc(m.role) : '') + '</option>').join('');
+  document.getElementById('nt-msg').textContent = '';
+  document.getElementById('nt-go').disabled = true;
+  document.getElementById('nt-modal').hidden = false;
+  document.getElementById('nt-what').focus();
+}
+function closeNewTask() {
+  document.getElementById('nt-modal').hidden = true;
+  document.getElementById('pj-newtask').focus();
+}
+document.getElementById('pj-newtask').addEventListener('click', openNewTask);
+document.getElementById('nt-cancel').addEventListener('click', closeNewTask);
+document.getElementById('nt-modal').addEventListener('click', (e) => {
+  if (e.target.id !== 'nt-modal') return;
+  // ⚠️ The backdrop is the MISCLICK surface, and it must not delete typed
+  // words (the page's never-delete rule; drafts elsewhere are parked at the
+  // keystroke for the same reason). With anything typed, a backdrop click
+  // does nothing; Escape and Cancel remain the explicit discards.
+  if (document.getElementById('nt-what').value.trim()
+      || document.getElementById('nt-detail').value.trim()) return;
+  closeNewTask();
+});
+// Create is held down until the one required thing exists (pack: disabled).
+document.getElementById('nt-what').addEventListener('input', () => {
+  document.getElementById('nt-go').disabled = !document.getElementById('nt-what').value.trim();
+});
+document.getElementById('nt-go').addEventListener('click', async () => {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const go = document.getElementById('nt-go');
+  go.disabled = true;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id) + '/tasks', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sentence: document.getElementById('nt-what').value,
+        detail: document.getElementById('nt-detail').value.trim() || undefined,
+        who: document.getElementById('nt-who').value || undefined,
+      }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      document.getElementById('nt-msg').textContent =
+        (body && body.error) || 'we could not add that task';
+      go.disabled = false;
+      return;
+    }
+    closeNewTask();
+    await pjReload();
+  } catch {
+    document.getElementById('nt-msg').textContent = 'we could not add that task';
+    go.disabled = false;
+  }
+});
+
+/* Escape + focus trap for BOTH task dialogs, the full machinery from the
+   start (tonight's own lesson: a new sibling does not inherit a guard).
+   The trap intercepts at the LAST stop in the traversal direction. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('nt-modal').hidden) closeNewTask();
+  else if (!document.getElementById('tk-modal').hidden) closeTaskModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  for (const [backId, stopIds, home] of [
+    ['nt-modal', ['nt-what', 'nt-detail', 'nt-who', 'nt-cancel', 'nt-go'], 'nt-what'],
+    ['tk-modal', ['tk-back', 'tk-done'], 'tk-back'],
+  ]) {
+    const back = document.getElementById(backId);
+    if (back.hidden) continue;
+    const stops = stopIds.map((id) => document.getElementById(id)).filter((el) => el && !el.disabled);
+    const order = e.shiftKey ? stops.slice().reverse() : stops;
+    if (!order.length) { e.preventDefault(); return; }
+    const inside = back.contains(document.activeElement);
+    if (!inside) { e.preventDefault(); document.getElementById(home).focus(); return; }
+    if (document.activeElement === order[order.length - 1]) {
+      e.preventDefault();
+      order[0].focus();
+    }
+    return;
+  }
+});
+
 function paintOneProject() {
   const p = pjById(PJ_CURRENT);
   if (!p) { pjView('list'); PJ_CURRENT = null; return; }
   document.getElementById('pj-one-name').textContent = p.name;
+  paintProjectTasks(p);
   const desc = document.getElementById('pj-one-desc');
   desc.textContent = p.description || '';
   desc.hidden = !p.description;
@@ -5509,6 +5843,7 @@ function openProject(id) {
      survives Back because nothing but this function writes it. */
   const switching = PJ_LAST_OPENED !== id;
   PJ_LAST_OPENED = id;
+  if (switching) { TK_SHOW_ALL = false; TK_LIST_HTML = null; }
   // Every arrival is a move, including re-opening the same project: a verdict
   // from a send that took off before this navigation belongs to a thread view
   // the switching-clear machinery above has since reset, so it may not paint

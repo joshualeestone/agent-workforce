@@ -464,6 +464,11 @@ function describe(project, roster) {
     // non-string or unparseable value beside archived:true must not become
     // "Archived 1/1/1970" through new Date().
     archivedAt: project.archived === true ? cleanArchivedAt(project.archivedAt) : null,
+    // Same normalization rule as description/archived above: the healed
+    // shape has to hold for API readers too, so a legacy project reads as
+    // "no tasks yet", never as fields that simply are not there.
+    tasks: Array.isArray(project.tasks) ? project.tasks : [],
+    taskCounter: project.taskCounter || 0,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
     // caller for the reason given above the `chat` require.
@@ -1306,7 +1311,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,
