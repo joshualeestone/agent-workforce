@@ -62,3 +62,29 @@ Suite + a board render drive extended to pin the pack pieces (pill
 classes per state, glyphs, presence dot, membadge threshold, lrow
 columns, gold selections, removed hint), plus the existing drives
 re-anchored where markup moved. Pair shot posted in channel.
+
+## Stages 3-6, built 2026-08-17 evening (Josh's pair verdict: pass)
+
+- card() renders the pack .acard column; lrow() the pack list; BOTH read one
+  set of derivations (cardStOf/taskLine/modelLine/roleLine/answerBtn) so the
+  views cannot disagree. CARD_ST maps app states to pack st/pres; the card
+  treatment follows the PACK, not STATE_COPY.attn (red = needs_you only;
+  paused/stopped/unknown get their own quieter shapes).
+- hot = percent>=80 && not attn (the pack renders 88%-attn without hot);
+  membadge at >=80 regardless; presence three-state (unsure != off).
+- The layout toggle flips hidden between #grid/#alist; BOARD_LAYOUT +
+  boardApplyVisibility(onAgents) + onAgentsTab() decouple the tab signal
+  from grid.hidden (three proxies re-anchored; failure path paints both
+  containers).
+- Gold selected on the view toggle (Josh's ruling; ink flips in dark).
+- Removed section restyled to the pack (constant Show label, name-over-meta
+  rows, hairlines between, the nothing-was-deleted hint inside the list).
+- Machine-name chip OFF the card (pack records Josh's audience ruling; the
+  fact moved to the detail meta: "shown by its machine name"). Stale badge
+  and unknown note SURVIVE on the card by recorded reasons.
+- Checks re-anchored: render-projects.js aslist -> hidden-flip;
+  render-thread.js .card/.card-answer -> .acard/.ansgo; server.test.js
+  summary control follows the residual-only design (positive controls kept:
+  partial shows+says, clean is empty AND hides); paintRemoved pin ->
+  onAgentsTab(). 815/815 green.
+- Old card family CSS removed with dated records (not left as green noise).
