@@ -30,6 +30,7 @@ const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
 const connect = require('./engine/connect');
 const machine = require('./engine/machine');
+const updates = require('./engine/update');
 
 // Single source of truth for the version. With no support function, "what
 // version are you on?" is the first question of every diagnosis, so the number
@@ -682,7 +683,12 @@ const server = http.createServer((req, res) => {
       // `checkCached` and not `check`: this runs every 5 seconds and the config
       // is ~95KB. See the cache's own comment for why its key is paranoid.
       const connection = subscription.checkCached();
-      body = JSON.stringify({ ...snap, agents, counts, connection, version });
+      // Update awareness rides the status tick the screen already polls:
+      // poke() returns immediately (six-hour cache, background refresh) and
+      // available() is the cached verdict -- the request path never waits on
+      // the release host, and a down host just means no toast.
+      updates.poke();
+      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available() });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
@@ -1159,6 +1165,45 @@ const server = http.createServer((req, res) => {
       };
     }
     sendJson(res, 200, st);
+    return;
+  }
+
+  /**
+   * Install the published update. POST, so it inherits the cross-site guard:
+   * this one downloads and runs software, the same class as /api/connect/start.
+   *
+   * Two refusals, two different facts, both 409 (a state conflict, not a
+   * malformed request):
+   *  - nothing newer is published: a stray POST must not reinstall the same
+   *    version and restart the board for nothing;
+   *  - a from-source run: the installer must never be pointed at a working
+   *    tree; source updates with git.
+   * Past those, the answer is 200 BEFORE anything happens, because what
+   * happens next kills this server on purpose: the detached installer stages,
+   * verifies, swaps, and restarts the board. Agents keep working throughout;
+   * their launchd jobs and tmux sessions are separate process trees this
+   * update never touches.
+   */
+  if (pathname === '/api/update' && req.method === 'POST') {
+    const avail = updates.available();
+    if (!avail) { sendJson(res, 409, { error: 'there is no update to install right now' }); return; }
+    if (!updates.installedRoot()) {
+      sendJson(res, 409, { error: 'this Kosmos runs from its source code, so it updates from git, not from here' });
+      return;
+    }
+    if (updates.alreadyInstalling()) {
+      // Idempotent: the first POST started it; a retry, a double click, or a
+      // second tab gets the same true answer without a second installer
+      // racing the first through the stage-and-swap.
+      sendJson(res, 200, { ok: true, updating: avail.version, already: true });
+      return;
+    }
+    try { updates.beginInstall(); }
+    catch (err) {
+      sendJson(res, 500, { error: 'we could not start the update', detail: String((err && err.message) || err) });
+      return;
+    }
+    sendJson(res, 200, { ok: true, updating: avail.version });
     return;
   }
 
@@ -2287,7 +2332,7 @@ function start(port = PORT) {
       // Keep a listener attached for the life of the process. Without one, an
       // error after a successful bind is uncaught and exits with a raw stack.
       server.on('error', (err) => {
-        process.stderr.write(`Agent Workforce server error: ${String(err && err.message)}\n`);
+        process.stderr.write(`Kosmos server error: ${String(err && err.message)}\n`);
       });
       resolve(server);
     };
@@ -2304,7 +2349,7 @@ if (require.main === module) {
   start().then(() => {
     // Report the port actually bound, not the one requested, or a `PORT=0` run
     // would announce itself on port 0.
-    process.stdout.write(`Agent Workforce on http://127.0.0.1:${server.address().port}\n`);
+    process.stdout.write(`Kosmos on http://127.0.0.1:${server.address().port}\n`);
     process.stdout.write('Local only. It writes, and it has no login yet.\n');
   }).catch((err) => {
     // Say what to do rather than name an exception. A raw EADDRINUSE stack is
@@ -2313,7 +2358,7 @@ if (require.main === module) {
     const detail = err && err.code === 'EADDRINUSE'
       ? `port ${PORT} is already in use. Is a board already running?`
       : String(err && err.message);
-    process.stderr.write(`Agent Workforce could not start: ${detail}\n`);
+    process.stderr.write(`Kosmos could not start: ${detail}\n`);
     process.exit(1);
   });
 }

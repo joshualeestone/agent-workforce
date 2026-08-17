@@ -93,6 +93,13 @@ process.env.AGENT_WORKFORCE_PROJECTS = fs.mkdtempSync(nodePath.join(os.tmpdir(),
 // home into a test. Directories only, nothing written -- but a listing is
 // still a read of somebody's disk that no test here means to make.
 process.env.HOME = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-home-'));
+// ⚠️ AND THE RELEASE HOST. Every /api/status request pokes the update check;
+// without this override the unit suite fires real HTTPS requests at the
+// production release host on every status test. Port 9 (discard) on loopback
+// refuses instantly; the module fails soft, so everything still passes --
+// offline, and without phoning home. Must be set before server.js is
+// required, because engine/update reads it at load.
+process.env.AGENT_WORKFORCE_RELEASE_BASE = 'http://127.0.0.1:9/dist';
 // And the two programs an agent is made of, so a route test does not depend on
 // whether the machine running the suite happens to have Claude installed where
 // this one does.
@@ -2367,6 +2374,63 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
 });
 
+test('update awareness: the status tick carries the verdict, and the install route refuses honestly', async () => {
+  const updates = require('./engine/update');
+  try {
+    // A newer published version reaches the screen through the payload it
+    // already polls.
+    updates.resetCache();
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+    await updates.refresh();
+    const st = await req('/api/status', {});
+    assert.equal(st.status, 200);
+    assert.deepEqual(JSON.parse(st.body).update, { version: '99.0.0' },
+      'the status payload does not carry the published update');
+
+    // ⚠️ The new POST inherits the cross-site guard. Asserted rather than
+    // assumed, because a new sibling does not inherit a guard by being
+    // adjacent to guarded routes -- only by the guard actually covering it.
+    const cross = await req('/api/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site page can start a software download');
+
+    // From-source runs are refused with the git sentence, and the installer
+    // is never spawned (this checkout has no private runtime beside it).
+    let ran = 0;
+    updates.setInstallRunner(() => { ran += 1; });
+    const src = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(src.status, 409);
+    assert.match(JSON.parse(src.body).error, /source code/, 'the from-source refusal lost its reason');
+    assert.equal(ran, 0, 'the installer ran against a working tree');
+
+    // An installed copy with an update: 200, and the runner fires with the
+    // canonical setup URL.
+    let url = null;
+    updates.setInstalledRoot(() => '/tmp/fake-kosmos-home');
+    updates.setInstallRunner((u) => { ran += 1; url = u; });
+    const go = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(go.status, 200, JSON.parse(go.body).error || '');
+    assert.equal(JSON.parse(go.body).updating, '99.0.0');
+    assert.equal(ran, 1, 'the installer did not run');
+    assert.match(String(url), /\/setup$/, 'the runner was not handed the setup URL');
+
+    // And with nothing newer published, a stray POST changes nothing.
+    updates.resetCache();
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: updates.RUNNING }) }));
+    await updates.refresh();
+    const idle = await req('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(idle.status, 409, 'a no-op update was accepted');
+    assert.equal(ran, 1, 'the installer ran with nothing to install');
+  } finally {
+    updates.resetCache();
+    updates.setFetcher(null);
+    updates.setInstallRunner(null);
+    updates.setInstalledRoot(null);
+  }
+});
+
 test('the removal routes ask, remove, and put back, over the wire', async () => {
   // ⚠️ The engine was well covered and the surface a browser talks to was not.
   // These routes are how the fleet is managed, and the restore route is what
@@ -2618,7 +2682,12 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
    * coverage -- and this one guarded the gesture that ANSWERS the confirmation
    * safely.
    */
-  const esc = raw.slice(raw.indexOf("document.addEventListener('keydown'"));
+  // Anchored to the rm-modal backdrop handler and the first keydown AFTER
+  // it, not the first keydown in the file: the update confirm now registers
+  // its own Escape handler earlier in the source, and the file-position
+  // anchor silently retargeted this assertion onto the wrong dialog.
+  const afterBackdrop = raw.slice(raw.indexOf("rm-modal').addEventListener('click'"));
+  const esc = afterBackdrop.slice(afterBackdrop.indexOf("document.addEventListener('keydown'"));
   const escBody = esc.slice(0, esc.indexOf('\n});'));
   assert.ok(escBody.includes("'Escape'"),
     'the keydown handler does not look at Escape, so it does not dismiss the modal');
@@ -2875,7 +2944,14 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // A 5xx is not a fact about this agent.
     [/res\.status >= 500/, 'a server error is reported as "we cannot remove this agent"'],
     // Shift+Tab into the modal must not land on the destructive button.
-    [/\(inside \? ends\[1\] : keep\)\.focus\(\)/, 'tabbing into the modal backwards lands on Remove'],
+    // (Re-anchored when the trap was fixed to intercept at the LAST element
+    // in the traversal direction: arriving from outside is now its own arm,
+    // and it still lands on Keep.)
+    [/if \(!inside\) \{ e\.preventDefault\(\); keep\.focus\(\); return; \}/, 'tabbing into the modal backwards lands on Remove'],
+    // And the wrap intercepts at the last tab stop, not the first: the first
+    // is the one natural tabbing never exits by, and intercepting only there
+    // leaked one keystroke onto the board behind the backdrop.
+    [/document\.activeElement === order\[order\.length - 1\]/, 'the focus trap wraps at the wrong end and leaks a keystroke behind the modal'],
     // The removed list is part of the board, so it refreshes with it.
     [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],

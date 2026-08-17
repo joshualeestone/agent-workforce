@@ -36,12 +36,21 @@ if ! grep -q "macOS $FLOOR+" "$HERE/README.md"; then
   echo "FAIL: README.md does not state the macOS $FLOOR+ floor" >&2
   exit 1
 fi
-if ! grep -q "Agent Workforce" "$HERE/web/index.html"; then
-  echo "FAIL: web/index.html no longer carries the 'Agent Workforce' identity token that healthy() and the bundle smoke test match on" >&2
+# The page must carry an identity token the health checks match on. Both
+# consumers (install/kosmos healthy() and the bundle smoke test) accept
+# EITHER token -- "Agent Workforce" was the page's name before the 2026-08-16
+# product-name correction, "Kosmos" is its name after -- so the page passes
+# with either, and the consumer check below pins that BOTH matchers really do
+# accept both, or an old page and a new matcher (or vice versa) could stop
+# recognising each other across an update.
+if ! grep -q "Agent Workforce" "$HERE/web/index.html" && ! grep -q "Kosmos" "$HERE/web/index.html"; then
+  echo "FAIL: web/index.html carries neither identity token ('Agent Workforce' or 'Kosmos') that healthy() and the bundle smoke test match on" >&2
   exit 1
 fi
-if ! grep -q "Agent Workforce" "$HERE/install/kosmos" || ! grep -q "Agent Workforce" "$HERE/tools/build-kosmos-bundle.sh"; then
-  echo "FAIL: an identity-token consumer (install/kosmos or the bundle smoke test) no longer matches on 'Agent Workforce'" >&2
-  exit 1
-fi
+for consumer in "$HERE/install/kosmos" "$HERE/tools/build-kosmos-bundle.sh"; do
+  if ! grep -q "Agent Workforce" "$consumer" || ! grep -q "Kosmos" "$consumer"; then
+    echo "FAIL: identity-token consumer $consumer no longer accepts both 'Agent Workforce' and 'Kosmos'" >&2
+    exit 1
+  fi
+done
 echo "floor consistent at $FLOOR; identity tokens consistent"
