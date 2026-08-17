@@ -3936,9 +3936,11 @@ document.getElementById('rolesel').addEventListener('change', () => {
 /**
  * ⚠️ The keyboard model the ARIA role PROMISES.
  *
- * `role="radiogroup"` tells a screen reader "1 of 2, use the arrows", so the
- * arrows move between the two radios (the menu inside the second is a native
- * select with its own keyboard). Announcing an interaction the code does not
+ * `role="radiogroup"` tells a screen reader "1 of 3, use the arrows", so the
+ * arrows move between the visible radios (the menu inside the second is a
+ * native select with its own keyboard, and a radio an older server never
+ * served is hidden AND out of the cycle). Announcing an interaction the code
+ * does not
  * implement is the defect this file corrects everywhere else, in the one
  * place a person cannot see it.
  */
@@ -4305,7 +4307,13 @@ document.getElementById('create-avatar').addEventListener('change', (e) => {
   }
 });
 
+/* Generation counter, the page's own staleness idiom (see WATCH): two
+   overlapping loads (role A, Next, Back, role B, Next) must not let the
+   slower /api/projects response rebuild the checkboxes to all-unchecked
+   underneath selections the faster pass already accepted. */
+let EXTRAS_GEN = 0;
 async function loadCreateExtras() {
+  const gen = ++EXTRAS_GEN;
   // Models, from the same payload as the roles (the engine's own list).
   const sel = document.getElementById('create-model');
   const models = CREATE_MODELS;
@@ -4318,6 +4326,7 @@ async function loadCreateExtras() {
   try {
     const res = await fetch('/api/projects', { cache: 'no-store' });
     const data = res.ok ? await res.json() : null;
+    if (gen !== EXTRAS_GEN) return;   // a newer load owns the panel now
     const list = (data && data.projects) || [];
     // Archived projects are resting, not options for new work.
     const live = list.filter((p) => !p.archived);
@@ -4368,6 +4377,14 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * arriving through the earlier window.
    */
   const attempt = ++WATCH;
+  // A deliberately blanked editor falls back to the template server-side;
+  // saying so beats silence (the engine's own "instructions have to be
+  // words" refusal never fires because we send nothing). A plain statement
+  // here, not a side effect buried in the body-builder below.
+  document.getElementById('create-instr-note').textContent =
+    (INSTR_DIRTY && !document.getElementById('create-instr').value.trim())
+      ? 'The role\'s own instructions stay: an agent cannot start with none.'
+      : '';
   let result;
   let res;
   try {
@@ -4388,13 +4405,6 @@ document.getElementById('create-go').addEventListener('click', async () => {
         if (PICKED === 'own' ? label : (LABEL_DIRTY && label && role2 && label !== role2.label)) b.label = label;
         const instr = document.getElementById('create-instr').value;
         if (INSTR_DIRTY && instr.trim() && instr !== instrTemplate()) b.instructions = instr;
-        // A deliberately blanked editor falls back to the template server-side;
-        // saying so beats silence (the engine's own "instructions have to be
-        // words" refusal never fires because we send nothing).
-        document.getElementById('create-instr-note').textContent =
-          (INSTR_DIRTY && !instr.trim())
-            ? 'The role\'s own instructions stay: an agent cannot start with none.'
-            : '';
         const model = document.getElementById('create-model').value;
         if (model) b.model = model;
         if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;

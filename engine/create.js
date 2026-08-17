@@ -592,7 +592,7 @@ function createAgent(opts) {
     // newline when the input lacks one), or an input of exactly MAX_BYTES
     // would validate and then land on disk one byte over the read limit.
     if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
-      return { outcome: OUTCOME.REFUSED, because: 'those instructions are too long to be a boot file, trim them to under 256KB', steps };
+      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be a boot file, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
     }
   }
   let modelArg = null;

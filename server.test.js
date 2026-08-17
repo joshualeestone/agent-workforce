@@ -2189,6 +2189,39 @@ test('a creation with projects picked really lands on those projects, and the re
   }
 });
 
+test('a create naming an unknown or malformed project refuses BEFORE any write', async () => {
+  // The route's loudest claim ("validated HERE, BEFORE the engine writes
+  // anything") held only by comment: moving the validation below createAgent
+  // would have kept the suite green. These cases pin the ordering to the
+  // filesystem the same way the engine's refusals-leave-no-trace tests do.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    for (const [label, projects] of [
+      ['an unknown id', ['no-such-project']],
+      ['a non-array', 'oops'],
+      ['a non-string entry', [42]],
+      ['a blank entry', ['   ']],
+    ]) {
+      const res = await req('/api/agents', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'never-made', role: 'writer', projects }),
+      });
+      assert.equal(res.status, 400, `${label}: the create was not refused`);
+      assert.ok(!fs.existsSync(create.workerDir('never-made')),
+        `${label}: the refusal left a worker folder behind`);
+      assert.equal(calls.length, 0, `${label}: a command ran for a refused create`);
+    }
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
 test('the roles payload serves the models list, and the mark family map is whole-name seeded', async () => {
   // Route half: the model select is built from this payload, and until now
   // nothing asserted it -- a route that stopped serving `models` would strand

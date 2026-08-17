@@ -48,6 +48,17 @@ hardened the same evening on the post-reset pool.
   moment the honest verdict is usually not_tried; rendering it as a
   failure beside a green watch would mislead). Flagged for Mona Lisa.
 
+## The MODELS args, verified 2026-08-16 evening
+
+The four arg strings cannot be asserted by the suite (only their shape),
+so they were checked against the authoritative current model ids:
+`claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`,
+`claude-haiku-4-5-20251001` match the published Claude model ids exactly,
+and this machine's own fleet runs `claude-fable-5` through the very CLI
+the supervisor invokes (a live existence proof for the newest one). The
+haiku entry's dated form IS its full model id (there is no undated
+alias), so the one pinned-looking string is not drift, it is the id.
+
 ## Deferred with reasoning
 
 - Debouncing dotGlyph on name keystrokes: the pack measured the full

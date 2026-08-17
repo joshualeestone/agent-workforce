@@ -1264,7 +1264,7 @@ test('the job passes the supervisor exactly the arguments it reads, in that orde
 
   // And the script reads them in that order, by position.
   const script = supervisorText();
-  for (const [pos, name] of [[1, 'SESSION'], [2, 'WORKDIR'], [3, 'CLAUDE'], [4, 'TMUX_BIN'], [5, 'LOG']]) {
+  for (const [pos, name] of [[1, 'SESSION'], [2, 'WORKDIR'], [3, 'CLAUDE'], [4, 'TMUX_BIN'], [5, 'LOG'], [6, 'MODEL']]) {
     assert.ok(script.includes(`${name}="\${${pos}`),
       `the supervisor does not read ${name} from argument ${pos}`);
   }
