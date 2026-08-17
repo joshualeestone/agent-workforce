@@ -44,6 +44,29 @@ flag semantics, deep links (?first-run=1&fr-step=N), the focus trap,
 and every honesty rule. The return-step generation machinery
 (FR_RETURN_GEN) moves with its content to step 1.
 
+## Spec corrections folded in mid-build (the pack outranks inventions)
+
+Mona Lisa's ed29b78: the pack DOES define all three endings (her spec's
+"no zero state" was a partial-search zero); the endings ship verbatim:
+adopt ("You already have N agents here." with the real count declining
+at one, single Take-me-to-my-agents action), create ("Create your first
+agent." / "There are none on this computer yet." / "Two questions: what
+it is for, and what to call it.", single Create-my-first-agent action),
+and unknown (the only two-action screen in the flow, "Show me my
+agents" / "Create an agent", because either single guess would lie).
+Her e9d3d5a lists every remaining spec-vs-pack delta as questions for
+Josh; none block this branch. Josh's standing rule, recorded: the pack
+is the source for design AND functionality; gaps surface to him, never
+get invented; and screens post for his verdict BEFORE packaging (the
+conformance pairs in channel are that checkpoint).
+
+Known deviations of record, flagged in channel with the pairs: the two
+ruled honest-sending sentences (screens 2 and 5); the real count and
+names list on screen 6; the engine's three states on screen 4; Back
+and Skip on steps 2-6 (the wizard's trap-escape, absent from the
+prototype); the darker glyph ink on the check marks (AA floor, the
+pack's gold-deep on its own tint is 2.78).
+
 ## Verification
 
 Suite + both first-run drives updated to the new order and re-run
