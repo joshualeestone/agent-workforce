@@ -3562,13 +3562,13 @@ test('the first-run buttons are ASSIGNED, not accumulated', () => {
     'frActions adds listeners to buttons whose meaning changes on every step');
 });
 
-test('the fleet screen never shows fewer names than the number in its own heading', () => {
+test('the fleet screen shows no name chips, and the fork is guarded (static pins)', () => {
   /**
-   * ⚠️ MEASURED ON THE FIRST LIVE CALL OF THE ROUTE: this machine reports 13
-   * agents and the engine sends the first 12. Twelve chips under the heading
-   * "You already have 13 agents here", with nothing accounting for the
-   * thirteenth, is a screen that does not add up in front of somebody who is
-   * being asked to believe it can see their fleet.
+   * ⚠️ The chips DIED at Josh's word (2026-08-17): a person can arrive with
+   * hundreds of agents, and the heading's count is the claim. The old
+   * count-vs-names reconciliation died with them; what must now be pinned
+   * is that the list stays gone (a chip list quietly returning re-creates
+   * the 600-chip screen he vetoed) and the fork stays guarded.
    */
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -3580,14 +3580,8 @@ test('the fleet screen never shows fewer names than the number in its own headin
     else if (script[k] === '}') { d -= 1; if (d === 0) { end = k + 1; break; } }
   }
   const body = script.slice(start, end);
-  assert.match(body, /count\s*>\s*names\.length/,
-    'the heading count and the list length are no longer reconciled, so a fleet larger '
-    + 'than the twelve names the engine sends renders as a heading nobody can verify');
-  // ⚠️ No `|more` alternative here. It used to have one, and `frPaintFleet`
-  // contains the substring "more" in its own `fr-more` class name -- so the
-  // alternation passed even with the reconciliation deleted.
-  assert.match(body, /\(count - names\.length\)/,
-    'nothing computes how many names were not shown, so "and N more" cannot be right');
+  assert.ok(!/fr-name/.test(body), 'the name-chip list came back to the fleet screen');
+  assert.ok(!/fleetNames/.test(body), 'the painter reads the names again, so a list is a one-line regression away');
 
   // And the fork is only offered when the engine could actually count.
   assert.match(body, /path === 'adopt'/);
@@ -3756,10 +3750,9 @@ test('the fleet screen renders every path, and a broken payload lands on "we cou
     FR: { path: 'adopt', fleetCount: 13, fleetNames: ['Splinter', 'Angel'] },
   });
   assert.match(adopt.els['fr-title'].textContent, /13 agents/);
-  // ⚠️ 13 counted, 2 named. The difference has to be on screen or the heading is
-  // a claim the list contradicts.
-  assert.match(adopt.els['fr-fleet'].innerHTML, /and 11 more/,
-    'eleven agents went unaccounted for under a heading that counted them');
+  // No name chips, at Josh's word (2026-08-17): the heading's count is the
+  // claim, and a 600-agent fleet must not become a 600-chip screen.
+  assert.ok(!/fr-name/.test(adopt.els['fr-fleet'].innerHTML), 'the chip list came back');
   assert.match(adopt.els['fr-fleet'].innerHTML, /nothing to import/i);
 
   const create = firstRunHarness('frPaintFleet', {
@@ -4393,4 +4386,25 @@ test('the About-you gate exists in production code (static pins)', () => {
     'the save no longer happens before the advance (or either vanished)');
   assert.match(fn.slice(0, 4000), /aria-required="true"/,
     'the required fields lost their programmatic marking');
+});
+
+test('the reveal-app route opens Finder through the engine and honours nothing from the request', async () => {
+  const machine = require('./engine/machine');
+  // A real bundle under the SANDBOXED home's Applications, so the found
+  // branch is deterministic on any machine; the injected runner proves the
+  // route cannot open anything itself.
+  const appsDir = nodePath.join(os.homedir(), 'Applications');
+  fs.mkdirSync(nodePath.join(appsDir, 'Kosmos.app'), { recursive: true });
+  let ran = null;
+  machine.setAppRevealRunner((cmd, a) => { ran = [cmd, a]; });
+  try {
+    const res = await req('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.body), { opened: true });
+    assert.ok(ran && ran[0] === '/usr/bin/open' && ran[1][0] === '-R', 'the engine did not drive the reveal');
+    assert.match(ran[1][1], /Kosmos\.app$/, 'the revealed path is not the engine-derived bundle');
+  } finally {
+    machine.setAppRevealRunner(null);
+    fs.rmSync(nodePath.join(appsDir, 'Kosmos.app'), { recursive: true, force: true });
+  }
 });

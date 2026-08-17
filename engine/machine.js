@@ -471,10 +471,9 @@ function restartCheck(runner) {
     return {
       key: 'restart',
       state: STATE.OK,
-      title: 'Agents made here will start themselves',
-      detail: 'An agent you set up here is registered with the part of macOS that starts things '
-        + 'at login, so it comes back on its own after a restart. Agents another program set up '
-        + 'are that program\'s business, and we have not looked at them.',
+      // Josh's wording, verbatim (2026-08-17 screen-4 annotation).
+      title: 'Agents made here automatically restart themselves',
+      detail: 'They come back on their own after this Mac restarts.',
     };
   }
   /**
@@ -640,18 +639,34 @@ function revealApp(opts) {
   } else {
     dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
   }
-  for (let i = 0; i < dirs.length; i++) {
+  // The check's own loop discipline: ENOENT keeps looking, anything else
+  // is remembered as could-not-look -- and could-not-look must never render
+  // as "it is not there" (the rule appLocationCheck states at its unknown
+  // return). The opener runs OUTSIDE the stat try, so a found icon whose
+  // reveal fails reports the reveal failing, never "not found".
+  let found = null;
+  let errored = false;
+  for (let i = 0; i < dirs.length && !found; i++) {
     const candidate = path.join(dirs[i], 'Kosmos.app');
     try {
-      if (fs.statSync(candidate).isDirectory()) {
-        const run = appRevealRunner
-          || ((cmd, args) => require('node:child_process').execFileSync(cmd, args));
-        run('/usr/bin/open', ['-R', candidate]);
-        return { opened: true };
-      }
-    } catch { /* not here, or unreadable: keep looking, refuse honestly below */ }
+      if (fs.statSync(candidate).isDirectory()) found = candidate;
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') errored = true;
+    }
   }
-  throw new Error('we could not find the Kosmos icon just now, so there is nothing to show');
+  if (!found) {
+    throw new Error(errored
+      ? 'we could not look just now, so we cannot say where the icon is'
+      : 'we could not find the Kosmos icon just now, so there is nothing to show');
+  }
+  const run = appRevealRunner
+    || ((cmd, args) => require('node:child_process').execFileSync(cmd, args));
+  try {
+    run('/usr/bin/open', ['-R', found]);
+  } catch {
+    throw new Error('we found the icon but could not open a Finder window for it');
+  }
+  return { opened: true };
 }
 
 /**

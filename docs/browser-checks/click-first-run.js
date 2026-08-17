@@ -117,13 +117,9 @@ async function fresh(browser, opts = {}) {
     const { ctx, page } = await fresh(browser);
     await page.click('#fr-next');
     await page.click('#fr-next');
-    await page.click('#fr-back');
-    ok(await page.locator('#fr-title').textContent() === 'Create and manage AI agents that work for you.', 'Back went back one step');
-    // ⚠️ The handler-stacking test. Back then Continue must advance ONE step; if
-    // the buttons accumulated listeners it would fire two steps at once.
-    await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Choose a model.',
-      'Continue after Back advanced exactly one step');
+    // ⚠️ NO BACK anywhere (Josh, 2026-08-17): the flow only moves forward.
+    ok((await page.locator('#fr-back').count()) === 0, 'no Back button exists on any step');
+    ok(await page.locator('#fr-title').textContent() === 'Choose a model.', 'Continue advanced exactly one step');
     // The visible Skip died by the pack's ruling; Escape is the exit and it
     // carries the same contract (marks seen, so it does not nag).
     ok((await page.locator('#fr-skip').count()) === 0, 'no visible Skip link anywhere (pack decisions table)');
@@ -237,7 +233,7 @@ async function fresh(browser, opts = {}) {
       [1, 2, 3, 4, 5, 6].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
     ok(panes.length === 1, `fr-step=${bad} shows exactly one pane (showed ${panes.length})`);
     const crumb = await page.locator('#fr-step').textContent();
-    ok(/^Step [1-6] of 6$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
+    ok(/^(Kosmos setup|Step [1-5] of 5)$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
     ok((await page.locator('#fr-title').textContent()).trim().length > 0, `fr-step=${bad} has a heading`);
     await ctx.close();
   }
@@ -362,7 +358,11 @@ async function fresh(browser, opts = {}) {
     await page.evaluate(() => document.getElementById('fr-title').focus());
     for (let i = 0; i < 8; i += 1) { await page.keyboard.press('Shift+Tab'); seen.add(await where()); }
     ok(seen.has('fr-next'), 'Shift+Tab reaches the primary button (saw: ' + [...seen].join(', ') + ')');
-    ok(seen.has('fr-back') || seen.has('fr-next'), 'Shift+Tab reaches the controls (the way out is Escape now)');
+    // The way out is Escape; prove it WORKS from keyboard-land rather than
+    // asserting something tab-reachable that line above already proved.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    ok(await page.isHidden('#firstrun'), 'Escape closes setup from anywhere in the trap');
 
     // Every step, because the button set changes between them.
     for (const step of [2, 3, 4, 5, 6]) {

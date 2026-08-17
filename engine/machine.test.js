@@ -429,8 +429,10 @@ test('launchctl answering is a pass, and launchctl NOT answering is unknown', ()
   assert.match(alive.title, /Agents made here/,
     'the pass claims something about agents nobody looked at');
   assert.doesNotMatch(alive.title, /^Your agents/, 'the pass speaks for the whole fleet again');
-  assert.match(alive.detail, /another program/,
-    'says nothing about the agents it did NOT check, on the path where most of them are');
+  // Josh's one-line rewrite (2026-08-17): the scope caveat about other
+  // programs' agents left the row with the pack's one-line rhythm.
+  assert.match(alive.detail, /come back on their own after this Mac restarts/,
+    'the ok row lost Josh\'s wording');
 
   /**
    * ⚠️ UNKNOWN, NOT ATTENTION. This test pinned `attention` in its first
