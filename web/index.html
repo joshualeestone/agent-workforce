@@ -1022,6 +1022,9 @@ svg { display: block; }
                        margin: 0 0 14px; max-width: 52ch; }
 #firstrun .fr-body p b { color: var(--k-ink); }
 #firstrun .fr-acts { justify-content: flex-end; gap: 14px; margin-top: 36px; }
+/* The secondary action (Check again) sits flush LEFT, the primary right
+   (Josh, 2026-08-17); with no alt the primary keeps the right edge alone. */
+#firstrun #fr-alt { margin-right: auto; }
 #firstrun .btn-gold {
   display: inline-flex; align-items: center; gap: .5em;
   border: 0; border-radius: 10px; cursor: pointer; padding: .9em 1.75em;
@@ -1059,7 +1062,7 @@ svg { display: block; }
 #firstrun .llm-w small { color: var(--k-ink-2); font-size: .8125rem; }
 #firstrun .soon { font-size: .75rem; color: var(--k-ink-2); border: 1px solid var(--k-rule);
                   border-radius: 999px; padding: .2rem .7rem; white-space: nowrap; }
-#firstrun .tier { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
+#firstrun .tier { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
                   color: var(--k-ink-2); margin: 22px 0 10px; }
 #firstrun .connect-b { font-size: .9375rem; font-weight: 600; border: 0; border-radius: 8px;
                        padding: .5rem 1rem; background: var(--gold-bright); color: #14161a;
@@ -9037,10 +9040,10 @@ function frPaintFleet() {
      * with hundreds of agents, and the count in the heading is the claim.
      * The pack's two sentences below, verbatim.
      */
+    // One sentence, at Josh's word (2026-08-17): the how-it-saw-them
+    // explanation came out.
     box.innerHTML = '<p>They are already here. There is nothing to import and '
-      + 'nothing to wait for.</p>'
-      + '<p>Kosmos reads what is running on this computer, so it could see them '
-      + 'before you got here.</p>';
+      + 'nothing to wait for.</p>';
     frForkActions();
     return;
   }
