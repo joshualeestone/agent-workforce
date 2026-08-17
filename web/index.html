@@ -884,7 +884,7 @@ svg { display: block; }
 .fr-body p:last-child { margin-bottom: 0; }
 .fr-body p b { color: var(--label); }
 
-/* The progress segments. `aria-hidden`, because the "Step 2 of 5" line above
+/* The progress segments. `aria-hidden`, because the "Step 2 of 6" line above
    says the same thing in words — two announcements of one fact is noise. */
 .fr-segs { display: flex; gap: var(--space-3); margin-bottom: var(--space-7); }
 .fr-seg { height: 4px; flex: 1; border-radius: 2px; background: var(--separator); }
@@ -7762,7 +7762,7 @@ setInterval(() => {
 /* ==========================================================================
    FIRST RUN
 
-   The four screens somebody sees before they have a board worth looking at.
+   The screens somebody sees before they have a board worth looking at.
    What to show is decided by `engine/firstrun.state()` and `engine/machine`,
    in one place each, so this file renders answers rather than working them out
    — the instruction editor shipped a second copy of a decision once and it took
@@ -7777,7 +7777,7 @@ setInterval(() => {
        thirteen running agents looks broken.
    ========================================================================== */
 
-// 5 since the orientation step landed (PIN-2026-08-14-1913CDT: "five setup
+// 6 since the About-you step landed (PIN-2026-08-14-1913CDT: "five setup
 // steps -- welcome, model, this computer, your agents, getting back").
 const FR_STEPS = 6;
 // The return pane's step number, named and used by the generation bump and
@@ -7791,7 +7791,7 @@ let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
 let FR_FORGOT = false;    // the completion flag did not stick, and we said so
 let FR_FINISHING = false; // a completion is in flight; guards Skip, Escape and Continue at once
-// ⚠️ Kept so step 4 cannot promise something step 2 just contradicted. Null
+// ⚠️ Kept so the fork step cannot promise something step 2 just contradicted. Null
 // until the check screen has actually answered -- an empty array here would be
 // "we looked and found nothing wrong", which is not the same thing.
 let FR_MACHINE = null;
@@ -7810,6 +7810,10 @@ function frActions(primary, alt) {
   next.textContent = primary.label;
   next.onclick = primary.go;
   next.disabled = false;
+  // ⚠️ And the ARIA mirror with it. Step 4's gate sets aria-disabled on this
+  // shared button; without clearing it here, Back out of an empty About-you
+  // left every later step's Continue announcing "dimmed" while enabled.
+  next.removeAttribute('aria-disabled');
   if (alt) {
     other.hidden = false;
     other.textContent = alt.label;
@@ -7837,7 +7841,7 @@ function frGo(step) {
   if (!Number.isFinite(step) || step < 1) step = 1;
 
   if (step > FR_STEPS) step = FR_STEPS;
-  // ⚠️ Leaving step 5 retires its pane: the machine look is async, and an
+  // ⚠️ Leaving the return step retires its pane: the machine look is async, and an
   // answer landing after the person moved on must not repaint a pane they
   // are no longer on. This bump makes the generation guard's premise REAL
   // (round 6: without it the guard had no production trigger). AFTER BOTH
@@ -7939,6 +7943,7 @@ async function frPaintYou() {
   frActions({ label: 'Continue', go: async () => {
     if (next.disabled) return;
     next.disabled = true;
+    next.setAttribute('aria-disabled', 'true');
     try {
       const res = await fetch('/api/you', {
         method: 'PUT',
@@ -7946,6 +7951,12 @@ async function frPaintYou() {
         body: JSON.stringify({ name: nameEl.value, does: doEl.value, know: knowEl.value }),
       });
       const j = await res.json().catch(() => null);
+      // ⚠️ The person may have pressed Back (or left the wizard) while the
+      // save was in flight. The record is saved either way; advancing or
+      // writing a message into a pane they are no longer on is the
+      // answer-landing-after-they-moved-on shape the return step's
+      // generation guard exists for.
+      if (FR_STEP !== 4) return;
       if (!res.ok) {
         // The route's own sentence, verbatim — it says what to fix.
         document.getElementById('fr-you-msg').textContent = (j && j.error) || 'we could not save that';
@@ -7954,6 +7965,7 @@ async function frPaintYou() {
       }
       frGo(5);
     } catch {
+      if (FR_STEP !== 4) return;
       document.getElementById('fr-you-msg').textContent = 'we could not save that';
       gate();
     }
@@ -8873,7 +8885,7 @@ function frPaintFleet() {
 }
 
 /**
- * The fork, moved whole from step 4 to step 5's actions (orientation spec:
+ * The fork, moved whole to the orientation step's actions (orientation spec:
  * "its primary button carries the existing step-4 action, so the step costs
  * no extra click"). Same three paths, same labels, same destinations --
  * one function so the pairs cannot drift from the path logic that used to
@@ -8902,7 +8914,7 @@ function frForkActions() {
 }
 
 /* --------------------------------------------------------------------------
-   Step 5 -- getting back
+   Step 6 -- getting back
    -------------------------------------------------------------------------- */
 
 /**

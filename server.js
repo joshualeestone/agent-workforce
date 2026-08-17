@@ -1425,7 +1425,14 @@ const server = http.createServer((req, res) => {
         catch (err2) { told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not tell the agents') }]; }
         sendJson(res, 200, { you: saved, told });
       })
-      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || 'we could not save that') }));
+      .catch((err) => {
+        // A refusal speaks the field's own sentence at 400; a disk failure
+        // (ENOSPC, EACCES on the rename) is OURS and answers 500, because a
+        // raw errno presented as something the person can fix aims the
+        // complaint at the wrong party.
+        if (err && err.code) { sendJson(res, 500, { error: 'we could not save that record' }); return; }
+        sendJson(res, 400, { error: String((err && err.message) || 'we could not save that') });
+      });
     return;
   }
 

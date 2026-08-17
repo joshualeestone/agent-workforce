@@ -46,7 +46,7 @@ const LAPTOP_PMSET = [
   'AC Power:', ' lidwake              1', ' sleep                0', ' disksleep            10', '',
 ].join('\n');
 
-/* App-location fixtures for step 5 and the machine payloads, each GENERATED
+/* App-location fixtures for the return step (step 6) and the machine payloads, each GENERATED
    by the real engine against a scratch pair of folders rather than
    hand-written, so the wording on the shots cannot drift from the engine's
    (the same anti-drift property the MIXED fixture has, one step removed).
@@ -350,7 +350,7 @@ async function look(page, name) {
          fixture the engine generated -- and the drag-not-Keep-in-Dock guard
          is asserted on every one of the four, because the Dock paragraph is
          static copy and any state could regress it. */
-      if (shot.name.startsWith('firstrun-5-return')) {
+      if (shot.name.startsWith('firstrun-6-return')) {
         // The pinned fork really painted: the primary carries the adopt
         // path's label on every step-5 shot.
         const forkLabel = await page.evaluate(() => (document.getElementById('fr-next') || {}).textContent || '');
@@ -358,7 +358,7 @@ async function look(page, name) {
           problems.push(`${shot.name} [${scheme}]: the fork is not the pinned adopt pair ("${forkLabel}")`);
         }
       }
-      if (shot.name === 'firstrun-5-return-checking') {
+      if (shot.name === 'firstrun-6-return-checking') {
         const text = await page.evaluate(() => document.getElementById('fr-return').textContent);
         const cls = await page.evaluate(() => {
           const el = document.querySelector('#fr-return-row .fr-check');
@@ -370,7 +370,7 @@ async function look(page, name) {
         if (/right now/.test(text)) {
           problems.push(`${shot.name} [${scheme}]: the could-not-ask wording appeared while the route never answered`);
         }
-      } else if (shot.name.startsWith('firstrun-5-return')) {
+      } else if (shot.name.startsWith('firstrun-6-return')) {
         // Wait for the ANSWER, not a fixed delay: the pane paints instantly
         // with the checking placeholder, and a slow run would report the
         // placeholder as a rendering problem rather than a wait. (The

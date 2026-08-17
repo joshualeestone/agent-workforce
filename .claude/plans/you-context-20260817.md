@@ -38,8 +38,17 @@ Nothing here leaves this computer."
 - ROUTES: GET /api/you answers the read shape at 200 (absent included);
   PUT /api/you validates (400 with the field's own sentence), saves,
   and re-tells every tied agent, carrying the verdicts (never gating).
-- WIZARD: new step 4 of 6, between Claude and the fork. Pack copy
-  verbatim; the two required fields gate Continue (aria-disabled kept
+- WIZARD: new step 4 of 6, between Claude and the fork. Pack copy,
+  EXCEPT the privacy sentence: the pack's "Nothing here leaves this
+  computer" was ruled false before merge (the block is prompt text, so
+  the answers reach Claude with every request the agent makes) and the
+  shipped copy says so honestly in five ruled spots: the step's own
+  line ("Your agents carry this to Claude when they work, and it goes
+  nowhere else"), the welcome pane's privacy paragraph and itinerary,
+  the guardian comment above that paragraph (dated third correction),
+  and the you.js header (module fact vs privacy promise, with an
+  explicit do-not-restore warning). The two required fields gate
+  Continue (aria-disabled kept
   in step); Continue saves through the real route before advancing and
   surfaces the route's own sentence on refusal; re-entering the step
   prefills from the saved record and saves over it, which is the

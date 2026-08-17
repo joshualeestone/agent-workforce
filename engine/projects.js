@@ -86,6 +86,13 @@ const TOLD = {
 
 const BLOCK_START = '<!-- kosmos:projects:start -->';
 const BLOCK_END = '<!-- kosmos:projects:end -->';
+// The you-block's markers live HERE, beside the pair they must never be
+// confused with, because oneLine has to neutralise BOTH pairs: a project
+// name or task sentence carrying the you markers would fabricate a tight
+// pair the you-writer then splices INSIDE the projects block ("beside,
+// never inside" violated by injection). engine/you.js imports these.
+const YOU_START = '<!-- kosmos:you:start -->';
+const YOU_END = '<!-- kosmos:you:end -->';
 
 function file() {
   return path.join(store.ROOT, FILE);
@@ -1350,6 +1357,10 @@ function oneLine(value) {
     // recognisable to the person who typed it instead of silently changing.
     .split(BLOCK_START).join('(kosmos marker)')
     .split(BLOCK_END).join('(kosmos marker)')
+    // The sibling block's pair too -- the older writer must know the newer
+    // sibling's markers or it becomes the injection path into them.
+    .split(YOU_START).join('(kosmos marker)')
+    .split(YOU_END).join('(kosmos marker)')
     .trim();
 }
 
@@ -1518,7 +1529,7 @@ function syncAgent(sessionName, roster) {
 }
 
 module.exports = {
-  FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
+  FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END,
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,

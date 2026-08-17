@@ -35,8 +35,10 @@ const projects = require('./projects');
 const BASE = process.env.AGENT_WORKFORCE_DATA || store.ROOT;
 const FILE = path.join(BASE, 'you.json');
 
-const START = '<!-- kosmos:you:start -->';
-const END = '<!-- kosmos:you:end -->';
+// Defined in projects.js beside the pair they must never be confused with,
+// so oneLine (the projects block's own cleaner) can neutralise both.
+const START = projects.YOU_START;
+const END = projects.YOU_END;
 
 const NAME_MAX = 80;
 const DOES_MAX = 200;
