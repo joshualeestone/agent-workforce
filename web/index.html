@@ -1738,12 +1738,17 @@ svg { display: block; }
     <div class="field">
       <label class="flabel" for="pjs-name">Name</label>
       <p class="fhint">Shown wherever this project appears.</p>
-      <input class="tk-inp" type="text" id="pjs-name" maxlength="60">
+      <input class="tk-inp" type="text" id="pjs-name" maxlength="120">
     </div>
     <div class="field">
       <label class="flabel" for="pjs-desc">Description</label>
       <p class="fhint">One line about what this project is for. Agents read it.</p>
-      <textarea class="tk-inp" id="pjs-desc" rows="2" maxlength="200"></textarea>
+      <!-- No maxlength, a recorded engine decision (projects.js): the engine
+           counts CODE POINTS and HTML maxlength counts UTF-16 units, so a
+           raw 200 here would cut a pasted emoji description at half length
+           while the engine accepts it. The engine's refusal sentence is the
+           cap. -->
+      <textarea class="tk-inp" id="pjs-desc" rows="2"></textarea>
     </div>
     <div class="field">
       <button class="btn uprime" id="pjs-save" type="button">Save changes</button>
@@ -5799,14 +5804,34 @@ function paintProjectSettings(p) {
      volume root rather than a normal folder. */
   const parts = folder.split('/').filter(Boolean);
   const parent = parts.length >= 2 ? parts[parts.length - 2] : null;
+  const grandparent = parts.length >= 3 ? parts[parts.length - 3] : null;
   document.getElementById('pjs-folder-where').textContent = p.folderInKosmos
     ? 'In your Kosmos folder.'
-    : (parent && parts.length >= 3 && parent !== 'Volumes'
+    : (parent && parts.length >= 3 && parent !== 'Volumes' && grandparent !== 'Volumes'
       ? 'In your ' + parent + ' folder.'
       : 'In a folder you chose.');
-  // The folder-state line keeps its existing painter (paintOneProject
-  // writes it); the raw path element stays hidden here, kept only because
-  // that painter still writes it.
+  // The archive control speaks its CURRENT state; the not-archived copy is
+  // the pack's settings sentence (the old project-page sentence used to be
+  // repainted over it every poll tick, which kept the pack's words from
+  // ever being seen).
+  const archLabel = document.getElementById('pj-one-archive-label');
+  const archHint = document.getElementById('pj-one-archive-hint');
+  const archBtn = document.getElementById('pj-one-archive');
+  if (p.archived) {
+    archLabel.textContent = 'This project is archived';
+    archHint.textContent = 'It is off the projects list. Nothing in the folder changed, '
+      + 'and the agents that were on it stayed as they are.';
+    archBtn.textContent = 'Restore it';
+  } else {
+    archLabel.textContent = 'Archive this project';
+    archHint.textContent = 'Hides it from the projects list and stops it counting. '
+      + 'Everything stays, and you can restore it whenever you like.';
+    archBtn.textContent = 'Archive it';
+  }
+  const fl = pjFolderLine(p);
+  const state = document.getElementById('pj-one-folder-state');
+  state.textContent = fl.bad ? fl.text : '';
+  state.className = 'pj-folder-state' + (fl.bad ? ' bad' : '');
 }
 
 document.getElementById('pj-settings-link').addEventListener('click', () => {
@@ -5845,9 +5870,15 @@ document.getElementById('pjs-save').addEventListener('click', async () => {
     });
     const got = await res.json().catch(() => ({}));
     if (!res.ok) { msg.textContent = got.error || 'we could not save that'; return; }
-    await loadProjects();
-    const fresh = pjById(PJ_CURRENT);
-    if (fresh) { paintProjectSettings(fresh); paintOneProject(); pjView('settings'); }
+    // The archive sibling's retry shape; and on a still-failed read, NO
+    // repaint: the typed values are exactly what was saved, and repainting
+    // stale PROJECTS under "Saved." would put the old name back beneath a
+    // sentence claiming the new one landed.
+    const read = (await loadProjects()) || (await loadProjects());
+    if (read) {
+      const fresh = pjById(PJ_CURRENT);
+      if (fresh) { paintProjectSettings(fresh); paintOneProject(); pjView('settings'); }
+    }
     msg.textContent = 'Saved.';
   } catch {
     msg.textContent = 'we could not save that';
@@ -5893,24 +5924,6 @@ function paintOneProject() {
   // one, still offering "Archive it" -- a 200 no-op answered with "It is in
   // the archived list below" for a change that did not occur. (Reachable:
   // pjAnswerFrom opens an agent's only project even when archived.)
-  const archLabel = document.getElementById('pj-one-archive-label');
-  const archHint = document.getElementById('pj-one-archive-hint');
-  const archBtn = document.getElementById('pj-one-archive');
-  if (p.archived) {
-    archLabel.textContent = 'This project is archived';
-    archHint.textContent = 'It is off the projects list. Nothing in the folder changed, '
-      + 'and the agents that were on it stayed as they are.';
-    archBtn.textContent = 'Restore it';
-  } else {
-    archLabel.textContent = 'Archive this project';
-    archHint.textContent = 'Archiving takes a project off this list. Nothing in the '
-      + 'folder changes and the agents that were on it stay as they are.';
-    archBtn.textContent = 'Archive it';
-  }
-  const folder = pjFolderLine(p);
-  const state = document.getElementById('pj-one-folder-state');
-  state.textContent = folder.bad ? folder.text : '';
-  state.className = 'pj-folder-state' + (folder.bad ? ' bad' : '');
 
   setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
     ? p.agents.map((m) => pjMember(m, p.id)).join('')
@@ -7514,7 +7527,11 @@ document.getElementById('pj-one-remove-keep').addEventListener('click', pjCloseC
 document.getElementById('pj-one-remove-go').addEventListener('click', async () => {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
-  const msg = document.getElementById('pj-one-msg');
+  // The settings-local message line: the button moved here, and an error
+  // written into the project page's hidden element was a click that
+  // visibly did nothing (the relocation's one silent casualty).
+  const msg = document.getElementById('pj-one-msg-set');
+  msg.hidden = false;
   msg.textContent = '';
   pjCloseConfirm();
   try {

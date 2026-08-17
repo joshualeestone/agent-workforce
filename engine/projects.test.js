@@ -1534,3 +1534,16 @@ test('two long names sharing their first 64 characters stay two projects', () =>
   assert.notEqual(a.id, b.id);
   assert.equal(projects.readAll().length, 2);
 });
+
+test('revealFolder: the PRODUCTION path runs, with no injected runner standing in for it', () => {
+  const projects = require('./projects');
+  // ⚠️ No setRevealRunner here, on purpose: the injected runner once
+  // replaced the exact line that was broken (execFileSync unimported), and
+  // every test stayed green over a feature dead in production. A
+  // nonexistent path makes the real `open -R` exit non-zero with no Finder
+  // side effect; a missing import now THROWS out of the catch instead of
+  // wearing the failure's sentence.
+  const out = projects.revealFolder('/nonexistent/kosmos-reveal-probe');
+  assert.equal(out.ok, false);
+  assert.equal(out.because, 'Finder did not open');
+});

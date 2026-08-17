@@ -45,3 +45,28 @@ trip landing on all three surfaces, honest no-op save, relocated blocks
 present, no path on the project page, zero page errors. Reveal is not
 clicked in the drive (real Finder side effect); its route is
 wire-tested.
+
+## Review round 1 (2 BLOCKERs, 4 WARNINGs, 2 NITs; all fixed, none deferred)
+
+- BLOCKER: execFileSync was never imported; every production click of
+  Show-me-where-it-is would have answered "Finder did not open" forever,
+  and the runner-injected tests replaced the exact broken line. Fixed
+  three ways: the import (verified absent first), the catch now THROWS
+  programming errors instead of dressing them as open failures, and a
+  new test drives the PRODUCTION path with no injected runner.
+- BLOCKER: the remove flow's failure sentence rendered into the project
+  page's hidden element after the relocation (a click that visibly did
+  nothing). It writes to the settings-local line now.
+- The archive-state painting followed its elements into
+  paintProjectSettings (the old painter was repainting the project-page
+  copy over the pack's sentence every poll tick, so the pack's words
+  could never be seen).
+- Caps follow the engine: name 120 (was a borrowed 60; a 61-120-char
+  name could be created but not edited), and NO maxlength on the
+  description per the engine's recorded code-point decision.
+- The save re-read retries and never repaints stale values under
+  "Saved." (the typed values are the saved values; only a successful
+  fresh read may replace them).
+- folderInKosmos means DIRECT child of the projects root, and a folder
+  sitting on a volume root gets the fallback sentence, keeping the
+  location rule one rule.

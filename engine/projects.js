@@ -37,6 +37,7 @@
  */
 
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 const store = require('./store');
@@ -473,7 +474,7 @@ function describe(project, roster) {
     // Kosmos folder." versus naming the real place), and the server is the
     // only side that knows where the root is.
     folderInKosmos: typeof project.folder === 'string'
-      && project.folder.startsWith(projectsRoot() + '/'),
+      && path.dirname(project.folder) === projectsRoot(),
     taskCounter: project.taskCounter || 0,
     agents: members,
     // Who this project's thread opens on. Published rather than left to the
@@ -636,7 +637,14 @@ function revealFolder(folder) {
     if (revealRunner) return revealRunner('/usr/bin/open', ['-R', folder]);
     execFileSync('/usr/bin/open', ['-R', folder], { timeout: 5000, stdio: 'ignore' });
     return { ok: true };
-  } catch {
+  } catch (err) {
+    // ⚠️ A programming error must not wear the failure's clothes. This
+    // catch once swallowed a ReferenceError (execFileSync unimported) into
+    // "Finder did not open", blaming Finder for a missing import, forever,
+    // invisibly -- and the runner-injected tests replaced the exact broken
+    // line. Real open failures are Errors from execFileSync; anything else
+    // is ours and throws loud.
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
     return { ok: false, because: 'Finder did not open' };
   }
 }
