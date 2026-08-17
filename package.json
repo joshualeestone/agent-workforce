@@ -1,6 +1,6 @@
 {
   "name": "agent-workforce",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "A small team of assistants that runs on your own computer.",
   "scripts": {
