@@ -1010,8 +1010,12 @@ svg { display: block; }
 #firstrun .fr-seg { height: 5px; border-radius: 100px; background: var(--k-rule); flex: 1; transition: background .3s ease; }
 #firstrun .fr-seg.done { background: var(--gold); }
 #firstrun .fr-seg.now  { background: var(--k-ink); }
-#firstrun .fc-eyebrow { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase;
-                        font-weight: 600; color: var(--k-ink-2); margin: 0 0 14px; }
+/* ⚠️ `p.fc-eyebrow`, not `.fc-eyebrow`: the eyebrow is a <p> inside
+   .fr-body, and `#firstrun .fr-body p` (1,1,1) beats a bare (1,1,0) class
+   rule -- measured 17px while the rule said 11 (Mona Lisa's eye caught it
+   twice; the computed style settled it). */
+#firstrun .fr-body p.fc-eyebrow { font: 600 .6875rem/1.4 var(--font-ui); letter-spacing: .14em;
+                        text-transform: uppercase; color: var(--k-ink-2); margin: 0 0 14px; max-width: none; }
 #firstrun .fr-body h2 { font: 700 1.875rem/1.2 var(--font-ui); letter-spacing: -0.025em;
                         color: var(--k-ink); margin: 0 0 20px; text-wrap: balance; }
 #firstrun .fr-body p { font: 400 1.0625rem/1.6 var(--font-ui); color: var(--k-ink-2);
