@@ -183,16 +183,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn:disabled:hover { background: var(--bg); }
 .fmsg { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); min-height: 1em; }
-.card { cursor: pointer; position: relative; }
-/* The card was clickable with nothing to say so. An affordance you have to
-   discover is one most people never find -- Josh's original mock had this
-   pencil and dropping it was a regression, not a simplification. */
-.edit { position: absolute; top: var(--space-4); right: var(--space-4);
-        width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
-        border: 0.5px solid var(--separator); background: var(--bg-elevated);
-        color: var(--label-2); font-size: 12px; line-height: 1;
-        display: flex; align-items: center; justify-content: center; }
-.edit:hover { background: var(--attn-bg); color: var(--label); border-color: var(--border-strong); }
+/* ⚠️ The card pencil retired with the pack rebuild: editing lives on the
+   detail page (the pack's avedit/nameedit), and the card's one action is
+   itself. */
 /* ⚠️ The negative margins MIRROR the body padding (var(--space-8) on the
    sides), so the bar reaches the page edges and content scrolls under it
    edge to edge.
@@ -323,12 +316,17 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .vt svg { display: block; }
 .vt + .vt { border-left: 0.5px solid var(--separator); }
 .vt:hover { color: var(--label); }
-.vt.on { background: var(--label); color: var(--bg-elevated); }
+/* ⚠️ SELECTED IS GOLD, NOT INK (Josh, 2026-08-17, twice: "black indicates
+   what's selected" was true only in light -- --k-ink flips in dark, so an
+   ink fill inverts its meaning between themes. Gold is the one fill that
+   reads as chosen on BOTH grounds, and black-on-gold is legible in either).
+   Same rule as the pack's own .vt.on and the theme switch. */
+.vt.on { background: var(--gold-bright); color: #14161a; }
 .vt:focus-visible { outline: 2px solid var(--label); outline-offset: -2px; }
 /* On the selected button the fill IS var(--label), so the same ring was
    invisible on exactly the control the first Tab can land on (measured
    1.35:1 light / 1.15:1 dark). The ring inverts with the fill. */
-.vt.on:focus-visible { outline-color: var(--bg-elevated); }
+.vt.on:focus-visible { outline-color: #14161a; }
 /* The pack's statsrow: action locked left, counts on the TRUE centre
    (a 1fr column each side keeps them centred on the screen), toggle
    pinned right. */
@@ -380,9 +378,113 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   .statsrow { grid-template-columns: auto auto; justify-content: space-between; }
   .statsrow > .stats { grid-column: 1 / -1; order: 3; }
 }
-/* List mode for the agents board: same cards, one readable column. A second
-   renderer would be a second source of truth for what a card says. */
-.grid.aslist { grid-template-columns: minmax(0, 900px); }
+/* ⚠️ The `.grid.aslist` one-column mode retired with stage 3/4 of the pack
+   rebuild (2026-08-17): the pack's list view is its own .lrow markup (one
+   line per agent, memory as a bar), not the same cards squeezed narrow. The
+   "second renderer is a second source of truth" worry is answered by both
+   renderers reading the same CARD_ST/GLYPH/labels and the same task/model
+   derivations -- the words cannot diverge because they are computed once. */
+/* ---- the agents board: the pack's card grammar (stage 3) ---- */
+.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); }
+.acard { display: flex; flex-direction: column; background: var(--k-surface);
+         border: 1px solid var(--k-rule); border-radius: 16px;
+         padding: 24px 22px 20px; text-align: center; cursor: pointer;
+         box-shadow: 0 1px 2px rgba(20,22,26,.04); }
+.acard.attn { border-color: rgba(179,38,30,.42); box-shadow: 0 1px 3px rgba(179,38,30,.12); }
+.acard.unk { border-style: dashed; }
+/* The heat wash is a GROUND, not a border: borders already mean "needs you". */
+.acard.hot { background: linear-gradient(180deg, rgba(179,38,30,.16) 0%, rgba(179,38,30,0) 42%), var(--k-surface); }
+/* ⚠️ No dimming for stopped (the pack retired it: "Not running" at 72% while
+   "Can't tell" sat full-strength was backwards on honesty grounds). Only the
+   STATE is off; the name, role and face are true either way. */
+.acard.off .astate, .acard.off .atask { color: var(--k-ink-2); }
+.agauge { width: 82px; margin: 0 auto 14px; position: relative; }
+.agauge svg { width: 82px; height: 82px; display: block; }
+.gt { stroke: rgba(20,22,26,.10); }
+/* Green to amber to red as it fills (Josh's call): safe on a gauge because the
+   ARC LENGTH carries the value; colour is redundant, weight is a third cue. */
+.gf { stroke: #2f7d5a; stroke-linecap: round; }
+.gf.warn { stroke: #d97528; stroke-width: 5; }
+.gf.high { stroke: #b3261e; stroke-width: 6; }
+.gu { stroke: rgba(20,22,26,.22); stroke-dasharray: 3 5; }
+.acard .avatar-bg { fill: rgba(20,22,26,.06); stroke: var(--k-rule); stroke-width: 0.5; }
+.acard .avatar-initials { fill: var(--k-ink-2); letter-spacing: .02em; }
+.aname { font-size: 1.125rem; font-weight: 600; letter-spacing: -.01em; }
+/* A BORDERED PILL, so status reads as one object. Border colour follows the
+   state but is the THIRD channel: the glyph distinguishes, the word names. */
+.astate { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+          margin: 12px auto 0; font-size: 1rem; font-weight: 600;
+          padding: .38rem 1rem; border-radius: 100px;
+          border: 1.5px solid var(--k-rule); background: var(--k-surface); }
+.acard > .astate { align-self: center; }
+.astate.st-working { border-color: rgba(47,125,90,.55); }
+.astate.st-attn    { border-color: rgba(179,38,30,.55); }
+.astate.st-idle    { border-color: var(--k-rule); }
+.astate.st-paused  { border-color: rgba(20,22,26,.30); }
+.astate.st-stopped { border-color: rgba(20,22,26,.30); }
+.astate.st-unknown { border-color: rgba(20,22,26,.22); border-style: dashed; }
+.acard > .astate.st-attn { display: flex; align-items: center; gap: 6px; width: 100%; }
+.atask { font-size: .9375rem; color: var(--k-ink-2); margin-top: 6px; }
+.acut { height: 1px; background: var(--k-rule); margin: 16px 0 14px; }
+.acard .ameta { font-weight: 600; color: var(--k-ink); font-size: .9375rem; }
+.acard .amodel { font-size: .875rem; color: var(--k-ink-2); margin-top: 1px; }
+.acard .note { text-align: left; margin-top: 12px; }
+/* presence is NOT status: three states, and the third does not look like off */
+.pres { position: absolute; right: 6px; bottom: 6px; width: 14px; height: 14px;
+        border-radius: 50%; border: 2.5px solid var(--k-surface); box-sizing: content-box; }
+.pres.on { background: #2f7d5a; }
+.pres.off { background: #b8bcc2; }
+.pres.unsure { background: var(--k-surface); box-shadow: inset 0 0 0 2px var(--k-rule); border-style: solid; }
+.pres.unsure::after { content: ""; position: absolute; inset: -1px; border-radius: 50%;
+                      border: 2px dashed #9aa0a6; }
+/* THE MEMORY WARNING IS A NUMBER, NOT A METAPHOR: it sits on the gauge, the
+   instrument it belongs to, not in the status row. */
+.membadge { position: absolute; top: 2px; right: -6px;
+            font: 700 .6875rem var(--mono, ui-monospace, SFMono-Regular, monospace);
+            font-variant-numeric: tabular-nums;
+            color: #fff; background: #b3261e; border-radius: 100px;
+            padding: .12rem .42rem; border: 2px solid var(--k-surface); }
+.ansgo { margin-left: auto; font-size: .8125rem; font-weight: 600; color: var(--k-ink-2);
+         border: 0; border-bottom: 1px solid currentColor; background: none;
+         padding: 0 0 1px; font-family: inherit; cursor: pointer; }
+.ansgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
+.acard:hover .ansgo, .lrow:hover .ansgo { color: var(--k-ink); }
+/* ---- the agents list: the pack's .lrow (stage 4) ---- */
+.alist { display: flex; flex-direction: column; gap: 8px; }
+.lrow { display: grid; align-items: center; gap: 16px;
+        grid-template-columns: 34px minmax(9rem, 1.2fr) minmax(7rem, .7fr) minmax(8rem, 1.4fr) 8.5rem;
+        background: var(--k-surface); border: 1px solid var(--k-rule); border-radius: 12px;
+        padding: 12px 16px; cursor: pointer; }
+.lrow:hover { border-color: rgba(20,22,26,.28); }
+.lrow.attn { border-color: rgba(179,38,30,.42); }
+.lrow.unk { border-style: dashed; }
+.lrow.off .lstate, .lrow.off .ltask { color: var(--k-ink-2); }
+.lav { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+       background: rgba(20,22,26,.06); font-size: .875rem; font-weight: 600;
+       color: var(--k-ink-2); overflow: hidden; }
+.lav img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.lname b { display: block; font-size: 1rem; }
+.lname small { color: var(--k-ink-2); font-size: .8125rem; }
+.lname em { display: block; font-style: normal; font-size: .75rem; color: var(--k-ink-2); }
+.lstate { display: flex; align-items: center; gap: 8px; font-size: .9375rem; font-weight: 600; }
+.lstate .ansgo { margin-left: 10px; }
+.ltask { font-size: .9375rem; color: var(--k-ink-2); overflow: hidden;
+         text-overflow: ellipsis; white-space: nowrap; }
+.lmem { display: flex; align-items: center; gap: 10px; }
+.bar { flex: 1; height: 6px; border-radius: 100px; background: rgba(20,22,26,.10);
+       overflow: hidden; display: block; }
+.bar i { display: block; height: 100%; border-radius: 100px; }
+.bar i.ok { background: #2f7d5a; }
+.bar i.warn { background: #d97528; }
+.bar i.high { background: #b3261e; }
+.bar.unknown { background: repeating-linear-gradient(90deg, rgba(20,22,26,.18) 0 3px, transparent 3px 8px); }
+.pct { font: 600 .8125rem var(--mono, ui-monospace, SFMono-Regular, monospace);
+       font-variant-numeric: tabular-nums; color: var(--k-ink-2);
+       min-width: 2.4rem; text-align: right; }
+@media (max-width: 56rem) {
+  .lrow { grid-template-columns: 34px 1fr; row-gap: 8px; }
+  .lstate, .ltask, .lmem { grid-column: 2; }
+}
 /* Grid mode for the projects list: the same rows laid as cards. */
 .pj-list.asgrid { display: grid;
                   grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
@@ -541,13 +643,6 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
 .pj-msg.unsure .pj-msg-said { color: var(--label); }
 .pj-say { margin-top: var(--space-5); }
 #pj-say { flex: 1 1 auto; }
-/* The one-click route from a card that says "Needs you". 24px minimum, WCAG 2.2
-   SC 2.5.8, the same floor as the Take-off control. */
-.card-answer { display: inline-block; margin-top: var(--space-3); cursor: pointer;
-  font: var(--text-callout) var(--font-ui); color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-control); min-height: 24px;
-  padding: var(--space-3) var(--space-4); }
 .pj-crumbs { font: var(--text-caption) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-4); word-break: break-all; }
 .pj-browse { max-height: 260px; overflow-y: auto; border: 0.5px solid var(--separator);
   border-radius: var(--radius-control); }
@@ -713,58 +808,24 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
                 border-left: 2px solid var(--border-strong); font: var(--text-body) var(--font-ui); }
 .first-action b { display: block; font-weight: 600; margin-bottom: var(--space-3); }
 .first-action q { color: var(--label-2); font-style: italic; }
-.grid { display: grid; gap: var(--space-5); justify-content: center;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
-        max-width: 1320px; margin: 0 auto; }
-
-.card {
-  background: var(--bg-elevated);
-  border: 0.5px solid var(--separator);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  padding: var(--space-6);
-  display: flex; gap: var(--space-5);
-}
-/* Attention is carried by weight and a rule, never by hue. The board reads
-   identically in greyscale, which is the test it has to pass. */
-.card.attn { background: var(--attn-bg); border-color: var(--border-strong); }
-
-.ringwrap { flex: none; }
+/* ⚠️ RETIRED with the stage 3/4 pack rebuild (2026-08-17): the old agent
+   card family (.grid sizing, .card, .ringwrap, the .ring-* gauge, the
+   .body/.name/.meta/.state/.task/.why column, .card-answer, the .edit
+   pencil) has no markup left -- card() and lrow() render the pack's
+   .acard/.lrow grammar, editing lives on the detail page, and the gauge is
+   the pack's .gt/.gf/.gu. Removed rather than left as green noise; the
+   survivors below (.flag, .note, .err, .card-stale, .avatar-*) are still
+   rendered by the new card and the detail page. */
 svg { display: block; }
-.ring-track   { stroke: var(--separator); }
-.ring-fill    { stroke: var(--label); }
-.ring-unknown { stroke: var(--label-3); stroke-dasharray: 5 7; }
 .avatar-bg       { fill: var(--bg-sunken); stroke: var(--separator); stroke-width: 0.5; }
 .avatar-initials { fill: var(--label-2); font: 600 var(--text-body) var(--font-ui); letter-spacing: .02em; }
-.gaugewrap       { text-align: center; }
-.gauge-cap       { font: var(--text-caption) var(--font-ui); color: var(--label-3);
-                   margin-top: var(--space-2); white-space: nowrap; font-style: italic; }
-
-/* Colour reinforces the arc, it never carries the value alone: the arc length
-   says the same thing, so the board still reads correctly in greyscale.
-   Opaque fills only -- a translucent arc lets the desktop behind it shift the
-   hue, which would change what the colour appears to mean. */
-.ring-fill.ok   { stroke: #2C8C5A; }
-.ring-fill.warn { stroke: #B87514; }
-.ring-fill.high { stroke: #C0392B; }
 @media (prefers-color-scheme: dark) {
-  .ring-fill.ok   { stroke: #4CB782; }
-  .ring-fill.warn { stroke: #E0A030; }
-  .ring-fill.high { stroke: #F0665A; }
-  /* The toast's attention red lightens the same way the ring's does:
-     #b3261e measures ~2.1:1 on the dark elevated ground and fails AA as
-     13px text; #F0665A is the app's established dark-mode red. */
+  /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1 on
+     the dark elevated ground and fails AA as 13px text; #F0665A is the
+     app's established dark-mode red. (The ring's own dark bands retired
+     with the old gauge; the pack gauge's dark values arrive with #40.) */
   .utoast { --utone: #F0665A; }
 }
-
-.body { flex: 1; min-width: 0; }
-.name { font: 600 var(--text-title-3) var(--font-ui); letter-spacing: -0.016em; }
-.meta { font: var(--text-subhead) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
-.state { font: 600 var(--text-body) var(--font-ui); margin-bottom: 1px; }
-.task  { font: var(--text-callout) var(--font-ui); color: var(--label-2); overflow-wrap: anywhere; }
-.why   { font: var(--text-caption) var(--font-ui); color: var(--label-3);
-         margin-top: var(--space-4); padding-top: var(--space-3);
-         border-top: 0.5px solid var(--separator); }
 .flag  { display: inline-block; font: var(--text-caption) var(--font-ui); color: var(--label-3);
          border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
          padding: 1px var(--space-3); margin-left: var(--space-3); vertical-align: 1px; }
@@ -2270,7 +2331,7 @@ svg { display: block; }
      limits, and the part-of-the-fleet-is-missing clause. Empty hides. -->
 <div class="summary" id="summary">Loading…</div>
 <div class="build" id="build"></div>
-<div class="grid" id="grid"></div>
+<div class="cards" id="grid"></div>
 <div class="alist" id="alist" hidden></div>
 
 <!-- ⚠️ REMOVED AGENTS ARE NOT LOST, and this is where that becomes true for the
@@ -2334,6 +2395,84 @@ const STATE_COPY = {
 };
 
 /**
+ * The pack's board vocabulary, mapped from this app's states (stage 3).
+ *
+ * ⚠️ TWO AXES, and the pack keeps them apart: PRESENCE answers "is anything
+ * running" (the dot on the gauge), the STATE pill answers "what is it doing".
+ * `unsure` deliberately does not look like `off` -- an agent we could not
+ * read is neither online nor offline, and collapsing them would throw away
+ * the exact distinction this product exists to keep.
+ *
+ * ⚠️ The CARD treatment follows the pack, not STATE_COPY.attn: red border is
+ * needs_you ONLY. Paused, stopped and unknown are attention-worthy in
+ * STATE_COPY (the detail page and counts still treat them so) but the pack
+ * renders them as their own quieter shapes (.off, .unk, dashed pill) so red
+ * stays reserved for "somebody is waiting on you".
+ */
+const CARD_ST = {
+  working:      { st: 'working', pres: 'on' },
+  needs_you:    { st: 'attn',    pres: 'on' },
+  rate_limited: { st: 'paused',  pres: 'on' },
+  idle:         { st: 'idle',    pres: 'on' },
+  stopped:      { st: 'stopped', pres: 'off' },
+  unknown:      { st: 'unknown', pres: 'unsure' },
+};
+const GLYPH = {
+  working: '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>',
+  attn:    '<span class="haz" aria-hidden="true">!</span>',
+  idle:    '<span class="rest" aria-hidden="true"></span>',
+  paused:  '<span class="pause" aria-hidden="true"><i></i><i></i></span>',
+  stopped: '<span class="stop" aria-hidden="true"></span>',
+  unknown: '<span class="qmark" aria-hidden="true">?</span><span class="vh">could not check: </span>',
+};
+const PRESSAY = {
+  on: 'Online', off: 'Not running',
+  unsure: 'We could not check whether this agent is online',
+};
+
+/* One derivation each, shared by BOTH renderers (card and row), so the two
+   views cannot drift apart on what they say about the same agent. */
+function cardStOf(a) { return CARD_ST[a.state] || CARD_ST.unknown; }
+function taskLine(a) {
+  /* rate_limited MEANS waiting out a usage limit -- the pack's own line for
+     the state, said only when the state is the reason there is no task. */
+  return a.task || (a.state === 'rate_limited' ? 'Waiting out a usage limit' : 'no task showing');
+}
+function modelLine(a) {
+  /* Provider-first ("Claude Opus 5"): unambiguous the day a second provider
+     lands, and this is the screen where somebody checks what an agent runs
+     on. Guarded so a modelName that already carries the provider does not
+     become "Claude Claude...". */
+  if (!a.modelName) return 'Unknown Model';
+  return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
+}
+function roleLine(a) {
+  return (a.profile && a.profile.role) || a.role || '';
+}
+function boardMods(a, m) {
+  const pct = a.context.percent;
+  return [
+    m.st === 'attn' ? 'attn' : '',
+    m.st === 'stopped' ? 'off' : '',
+    m.st === 'unknown' ? 'unk' : '',
+    /* hot = nearly full and NOT already red: the heat wash is a ground, and
+       the attn border outranks it (the pack renders 88%-attn without hot). */
+    (pct !== null && pct >= 80 && m.st !== 'attn') ? 'hot' : '',
+  ].filter(Boolean).join(' ');
+}
+function answerBtn(a) {
+  /* ⚠️ Same tie gate as before the redesign (defence-in-depth: upstream
+     forces untied panes to unknown today; the gate is for the day that
+     changes). The accessible name CONTAINS the visible word "Answer"
+     verbatim (SC 2.5.3). */
+  return a.state === 'needs_you' && a.isNamedOurs
+    ? `<button class="ansgo" type="button" data-answer="${esc(a.sessionName)}"`
+      + ` data-answer-name="${esc(a.name)}"`
+      + ` aria-label="Answer ${esc(a.name)}'s question">Answer &rarr;</button>`
+    : '';
+}
+
+/**
  * Lucide icons (ISC), subset to what this page actually uses and inlined.
  *
  * Not a CDN link and not a font file. Two reasons, and both are about what this
@@ -2389,29 +2528,31 @@ function ring(a) {
     : `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
        <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
 
+  /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
+     ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
+     third cue after arc length and colour. The caption is gone at Josh's
+     call; "memory unknown" is carried by the dashed ring's aria-label and,
+     for sighted readers, by the dashed shape the pack pairs with the
+     unknown card. The avatar stays inside the ring (this app's real data;
+     the pack draws faces in the same slot). */
   if (ctx.percent === null) {
-    return `<div class="gaugewrap">
-      <svg width="72" height="72" viewBox="0 0 72 72" role="img"
-           aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
-        <circle class="ring-unknown" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"/>
-        ${av}
-      </svg>
-      <div class="gauge-cap unknown">memory unknown</div>
-    </div>`;
+    return `<svg viewBox="0 0 72 72" role="img"
+         aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
+      <circle class="gu" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
+      ${av}
+    </svg>`;
   }
 
   const dash = (ctx.percent / 100) * C;
   const near = ctx.percent >= 80;
   const band = near ? 'high' : (ctx.percent >= 60 ? 'warn' : 'ok');
-  return `<div class="gaugewrap">
-    <svg width="72" height="72" viewBox="0 0 72 72" role="img"
-         aria-label="${esc(a.name)}. Memory: ${ctx.percent} percent used${near ? ', nearly full' : ''}.">
-      <circle class="ring-track" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"/>
-      <circle class="ring-fill ${band}" cx="36" cy="36" r="${R}" fill="none" stroke-width="5"
-              stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 36 36)"/>
-      ${av}
-    </svg>
-  </div>`;
+  return `<svg viewBox="0 0 72 72" role="img"
+       aria-label="${esc(a.name)}. Memory: ${ctx.percent} percent used${near ? ', nearly full' : ''}.">
+    <circle class="gt" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
+    <circle class="gf ${band}" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"
+            stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 36 36)"/>
+    ${av}
+  </svg>`;
 }
 
 function esc(s) {
@@ -2438,64 +2579,65 @@ function staleBadge(a) {
 }
 
 function card(a) {
+  /* ⚠️ THE PACK'S CARD (stage 3). Column order: gauge -> name -> state pill
+     -> task -> rule -> role -> model. What LEFT with the redesign, each on a
+     recorded pack rule: the pencil (editing lives on the detail page, where
+     the avedit/nameedit controls are drawn), the .why line ("the card
+     carries signals, the panel carries explanation"), and the fullness
+     notes (the ring's colour+weight and the membadge NUMBER carry memory;
+     a nearly-full agent is not asking for anything, so it is not an
+     attention state). What SURVIVES, deliberately: the machine-name .flag
+     chip and the stale badge on the name (honest-state marks with no pack
+     equivalent), and the unknown note -- the pack's own comment requires
+     the reason to ride with any card that shows an unknown. */
+  const m = cardStOf(a);
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  // Provenance deliberately not shown here. It appeared on nearly every card,
-  // and a marker that is always present carries no information. The engine
-  // still tracks it, and it surfaces where it changes a decision: the dashed
-  // unknown ring, and the "we are not telling you it is fine" note.
-  const scraped = '';
+  const pct = a.context.percent;
+  const answer = answerBtn(a);
 
   const unknownNote = a.state === 'unknown'
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
     : '';
 
-  const fullnessNote = a.context.percent === null && a.context.tokens !== null
-    ? `<div class="note">We know it is using ${Math.round(a.context.tokens / 1000)}k, but not how much it can hold, so we will not guess how full it is.</div>`
-    : (a.context.percent !== null && a.context.percent >= 80
-        ? '<div class="note">Nearly full. It will soon forget the earlier part of this conversation, including anything it agreed to do.</div>'
-        : '');
+  const badge = pct !== null && pct >= 80 ? `<span class="membadge">${pct}%</span>` : '';
+  const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
-  /**
-   * ⚠️ THE ONE CLICK OUT OF THE STRANDED STATE. This card is where the product
-   * failed a first run: it said "Needs you — the pane is showing a question"
-   * and offered nowhere to see the question or answer it. The button is only on
-   * the state that means somebody is waiting, and it says what it will show
-   * rather than what it will do to the agent.
-   */
-  // ⚠️ GATED ON THE TIE, not only the state -- as DEFENCE-IN-DEPTH.
-  // Measured (round 13): today's pipeline already forces an untied pane's
-  // state to `unknown` upstream (capture is refused for a pane we cannot
-  // tie), so needs_you cannot currently arrive on a borrowed-name card. The
-  // gate exists for the day that upstream refusal changes: without it, a
-  // stranger's `tmux new -s casey` reading needs_you would offer a button
-  // into a thread that refuses untied members (describe forces them to
-  // `unknown`, the question sentence never fires) -- a promise the next
-  // screen silently cannot keep, which is the exact stranded state this
-  // button was built to remove. Held by the source pin in server.test.js,
-  // because no render check can drive a shape the producer refuses to
-  // produce.
-  const answer = a.state === 'needs_you' && a.isNamedOurs
-    // ⚠️ NAMED, like the pencil button two lines up. On a board of thirteen
-    // agents a screen-reader user hears "See the question" thirteen times with
-    // nothing saying whose; the visible label stays short and the accessible
-    // name carries the agent. The accessible name CONTAINS the visible
-    // label verbatim (round 24): "See <name>'s question" broke SC 2.5.3, a
-    // voice-control user saying the words on the button got no match.
-    ? `<button class="card-answer" type="button" data-answer="${esc(a.sessionName)}" data-answer-name="${esc(a.name)}" aria-label="See the question ${esc(a.name)} is showing">See the question</button>`
-    : '';
+  return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
+    <div class="agauge">${ring(a)}${pres}${badge}</div>
+    <div class="aname">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
+    <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${copy.label}</b>${answer}</div>
+    <div class="atask">${esc(taskLine(a))}</div>
+    ${unknownNote}
+    <div class="acut"></div>
+    <div class="ameta">${esc(roleLine(a))}</div>
+    <div class="amodel">${esc(modelLine(a))}</div>
+  </div>`;
+}
 
-  return `<div class="card ${copy.attn ? 'attn' : ''}" data-agent="${esc(a.sessionName)}">
-    <button class="edit" title="Edit ${esc(a.name)}" aria-label="Edit ${esc(a.name)}">${icon('pencil')}</button>
-    <div class="ringwrap">${ring(a)}</div>
-    <div class="body">
-      <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
-      <div class="meta">${esc([a.profile && a.profile.role || a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
-      <div class="state"><b>${copy.label}</b>${scraped}</div>
-      <div class="task">${esc(a.task || 'no task showing')}</div>
-      ${unknownNote}${fullnessNote}
-      <div class="why">${esc(a.because)}</div>
-      ${answer}
-    </div>
+/**
+ * The pack's list row (stage 4): the same agent, one readable line.
+ * Both renderers read the same derivations (cardStOf/taskLine/modelLine/
+ * roleLine/answerBtn), so grid and list cannot disagree about an agent.
+ * Memory here is a BAR (the row has no room for a ring); unknown memory is
+ * the dashed bar with no number, never a guessed figure.
+ */
+function lrow(a) {
+  const m = cardStOf(a);
+  const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
+  const pct = a.context.percent;
+  const band = pct === null ? null : (pct >= 80 ? 'high' : (pct >= 60 ? 'warn' : 'ok'));
+  const av = a.hasAvatar
+    ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
+    : esc(initials(a.name));
+  const mem = pct === null
+    ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
+    : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
+  return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
+    <div class="lav">${av}</div>
+    <div class="lname"><b>${esc(a.name)}</b><small>${esc(roleLine(a))}</small><em>${esc(modelLine(a))}</em></div>
+    <div class="lstate">${GLYPH[m.st]}${esc(copy.label)}${answerBtn(a)}</div>
+    <div class="ltask">${esc(taskLine(a))}</div>
+    <div class="lmem">${mem}</div>
   </div>`;
 }
 
@@ -2888,6 +3030,10 @@ async function tick() {
     }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
     document.getElementById('grid').innerHTML = shown.map(card).join('');
+    // The list is the SAME agents through the same derivations, painted on
+    // the same tick -- hidden or not. Painting only the visible layout would
+    // hand the toggle a stale copy of whichever view was resting.
+    document.getElementById('alist').innerHTML = shown.map(lrow).join('');
 
     const c = data.counts;
     // The pack's tiles carry the headline counts; working/idle are computed
@@ -2956,14 +3102,11 @@ async function tick() {
      * painting, and `paintRemoved` already keeps what is on screen when its own
      * fetch fails.
      */
-    // ⚠️ Gated on the GRID, not on a `panel-agents` element -- there is no such
-    // element. The agents tab is the absence of a panel (`PANELS` lists the
-    // other five), and `showTab` marks it by unhiding the grid. Checked against
-    // the DOM rather than assumed: `getElementById(...).hidden` on a missing id
-    // throws, which would have taken the whole poll down inside this try and
-    // frozen the board on a stale picture -- the exact failure the freshness
-    // stamp four lines up exists to make visible.
-    if (!document.getElementById('grid').hidden) paintRemoved();
+    // ⚠️ Gated on the TAB, not the grid -- since the stage 3/4 rebuild the
+    // grid is legitimately hidden on the agents tab whenever the list layout
+    // is active, so `grid.hidden` stopped meaning "not on the agents tab".
+    // `onAgentsTab()` reads boardbar, which tracks the tab and nothing else.
+    if (onAgentsTab()) paintRemoved();
   } catch (err) {
     // ⚠️ Recorded and REPAINTED, not just written into `#grid`. The picker in
     // the add-a-project flow reads these globals, that flow hides `#grid`, and
@@ -2974,9 +3117,12 @@ async function tick() {
     if (addViewOnFail && !addViewOnFail.hidden) paintAddAgents();
     checked.className = 'checked stamp stale';
     checked.innerHTML = '<span>Agent status</span><b>could not refresh</b>';
-    document.getElementById('grid').innerHTML =
+    // Both containers: whichever layout is on screen must carry the failure.
+    const boardErr =
       '<div class="err"><b>We cannot read the agents right now.</b><br>' +
       'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
+    document.getElementById('grid').innerHTML = boardErr;
+    document.getElementById('alist').innerHTML = boardErr;
   }
 }
 
@@ -2998,13 +3144,14 @@ function showTab(tab) {
   });
   if (!btn && !BUTTONLESS.includes(tab)) return;
   const agents = tab === 'agents';
-  document.getElementById('grid').hidden = !agents;
+  // Tab first (boardbar is the tab's one honest witness), then the computed
+  // grid/alist visibility that folds the layout in.
+  document.getElementById('boardbar').hidden = !agents;
+  boardApplyVisibility(agents);
   document.getElementById('summary').hidden = !agents;
   document.getElementById('build').hidden = !agents;
-  // The view toggle is board chrome: it shows and hides with the board it
-  // operates on, or it would sit under Settings offering to rearrange a grid
-  // that is not on screen.
-  document.getElementById('boardbar').hidden = !agents;
+  // (boardbar was set above, before the visibility computation that reads
+  // it; the view toggle is board chrome and travels with the board.)
   // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
   // shows at all depends on there being something in it, which `paintRemoved`
   // decides. Unhiding it on every tab switch put an empty box on screen.
@@ -3087,15 +3234,38 @@ document.getElementById('klink').addEventListener('click', () => {
 // The choice is a display preference; it stays in this browser (localStorage),
 // so the welcome promise about nothing leaving the machine is untouched.
 // ---------------------------------------------------------------------------
+/* ⚠️ `#grid.hidden` used to be BOTH the tab signal and the only visibility
+   bit. With two agent containers that stops working: on the agents tab in
+   list layout the grid is hidden while the board is very much on screen.
+   So the LAYOUT is its own state, visibility is COMPUTED from tab+layout in
+   one place, and "are we on the agents tab" gets an explicit reader
+   (boardbar tracks the tab and only the tab). */
+let BOARD_LAYOUT = 'grid';
+function boardApplyVisibility(onAgents) {
+  document.getElementById('grid').hidden = !onAgents || BOARD_LAYOUT === 'list';
+  document.getElementById('alist').hidden = !onAgents || BOARD_LAYOUT === 'grid';
+}
+function onAgentsTab() { return !document.getElementById('boardbar').hidden; }
+
 const LAYOUTS = {
-  agents:   { el: 'grid',    cls: 'aslist', flip: 'list', fallback: 'grid' },
+  /* agents: two real layouts, two containers (the pack's .cards grid and its
+     .lrow list) -- the old one-renderer .aslist squeeze retired with the
+     stage 3/4 rebuild. `swap` names both elements; hidden flips between
+     them, and the blanket [hidden]{display:none !important} makes the flip
+     stick against any author display rule. */
+  agents:   { swap: { grid: 'grid', list: 'alist' }, flip: 'list', fallback: 'grid' },
   projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'list' },
 };
 
 function layoutApply(scope, want) {
   const lay = LAYOUTS[scope];
   if (!lay) return;
-  document.getElementById(lay.el).classList.toggle(lay.cls, want === lay.flip);
+  if (lay.swap) {
+    BOARD_LAYOUT = want;
+    boardApplyVisibility(onAgentsTab());
+  } else {
+    document.getElementById(lay.el).classList.toggle(lay.cls, want === lay.flip);
+  }
   const box = document.querySelector('.viewtoggle[data-scope="' + scope + '"]');
   if (!box) return;
   for (const b of box.querySelectorAll('[data-layout]')) {
@@ -3349,15 +3519,18 @@ function setWritesOffered(a, tied) {
   }
 }
 
-document.getElementById('grid').addEventListener('click', (e) => {
-  // ⚠️ FIRST, because it is INSIDE the card. Checked after `.card` it would
-  // never fire at all: the card's own handler matches the same click and opens
-  // the detail panel instead, which is the screen this button exists to skip.
-  const answer = e.target.closest('[data-answer]');
-  if (answer) { pjAnswerFrom(answer.dataset.answer, answer.dataset.answerName); return; }
-  const card = e.target.closest('.card');
-  if (card) openDetail(card.dataset.agent);
-});
+for (const boardEl of [document.getElementById('grid'), document.getElementById('alist')]) {
+  boardEl.addEventListener('click', (e) => {
+    // ⚠️ FIRST, because it is INSIDE the card. Checked after the card it
+    // would never fire at all: the card's own handler matches the same click
+    // and opens the detail panel instead, the screen this button skips.
+    const answer = e.target.closest('[data-answer]');
+    if (answer) { pjAnswerFrom(answer.dataset.answer, answer.dataset.answerName); return; }
+    // .acard in the grid, .lrow in the list: one contract (data-agent).
+    const card = e.target.closest('.acard[data-agent], .lrow[data-agent]');
+    if (card) openDetail(card.dataset.agent);
+  });
+}
 /**
  * Fetch the instruction file for the open agent.
  *
@@ -4225,7 +4398,8 @@ async function paintRemoved() {
   // flight would unhide the removed-agents section underneath Settings or a
   // detail panel, where nothing hides it again until the next `showTab`. The
   // token answers "is this answer current"; this answers "is this screen".
-  if (document.getElementById('grid').hidden) return;
+  // (Tab, not grid: the grid hides in list layout while this screen is on.)
+  if (!onAgentsTab()) return;
 
   if (gone.length === 0) {
     wrap.hidden = true;
