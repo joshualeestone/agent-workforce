@@ -58,6 +58,13 @@ Nothing here leaves this computer."
 
 ## Deliberately not in this slice
 
+The PUT's told verdicts have no reader yet: the wizard advances on a
+200 and drops them, so a tied agent whose boot file could not be
+written (ambiguous blocks, size cap) is carried in the response but
+surfaced on no screen. The verdicts exist so the surface can be built
+without changing the route; that surface is a follow-up slice.
+
+
 A dedicated edit surface outside the wizard (the deep-linkable step is
 the edit path for now); teaching existing UNTIED or fileless agents
 (the tell refuses honestly and says why); any use of the answers beyond

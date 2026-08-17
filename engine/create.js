@@ -860,7 +860,14 @@ function createAgent(opts) {
       const youMod = require('./you');
       const rec = youMod.read();
       if (rec.state === 'saved') {
-        text = require('./projects').spliceBlock(text, youMod.blockBody(rec.you), youMod.START, youMod.END);
+        const spliced = require('./projects').spliceBlock(text, youMod.blockBody(rec.you), youMod.START, youMod.END);
+        // ⚠️ Only if the result still FITS. Instructions validated just under
+        // MAX_BYTES would cross it once the block lands, making a boot file
+        // the product's own reader then refuses to edit -- at that margin the
+        // record really would have cost the person their agent's file. The
+        // block is the thing to drop, never the person's words.
+        const { MAX_BYTES } = require('./instructions');
+        if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
       }
     } catch { /* the boot file simply ships without the block */ }
     fs.writeFileSync(instructionFile(name), text, 'utf8');

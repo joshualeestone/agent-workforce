@@ -4370,3 +4370,25 @@ test('the person record: absent, refused, saved-and-told, prefill round trip', a
   assert.equal(back.state, 'saved');
   assert.equal(back.you.know, 'No em dashes.');
 });
+
+test('the About-you gate exists in production code (static pins)', () => {
+  // The gate IS the design (Josh removed the skip button; Continue waits on
+  // the two required answers) and the save lands BEFORE the step advances.
+  // Only the Playwright drive exercises this live, and the drive is not in
+  // `node --test` -- so without these pins the gate, the pane, or the
+  // save-before-advance could be deleted and this suite would stay green.
+  // Same culture as the return-step pins: hold the TRIGGERS in source.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /<div class="fr-pane" id="fr-pane-4" hidden>/,
+    'the About-you pane left the static markup');
+  const fn = raw.slice(raw.indexOf('async function frPaintYou'));
+  assert.ok(fn.length > 100, 'frPaintYou vanished');
+  assert.match(fn.slice(0, 4000), /nameEl\.value\.trim\(\) !== '' && doEl\.value\.trim\(\) !== ''/,
+    'the two-answer gate is gone: Continue no longer waits');
+  const put = fn.indexOf("fetch('/api/you'");
+  const advance = fn.indexOf('frGo(5)');
+  assert.ok(put > -1 && advance > -1 && put < advance,
+    'the save no longer happens before the advance (or either vanished)');
+  assert.match(fn.slice(0, 4000), /aria-required="true"/,
+    'the required fields lost their programmatic marking');
+});

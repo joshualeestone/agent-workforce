@@ -7786,6 +7786,13 @@ const FR_STEPS = 6;
 // so a sixth step must add its pane AND its branch -- said here because the
 // constant cannot reach an else.)
 const FR_STEP_RETURN = 6;
+const FR_STEP_YOU = 4;
+// ⚠️ The About-you step's generation, same contract as FR_RETURN_GEN: a
+// continuation captured under one generation must do NOTHING once the
+// generation moves -- a bare step-number check cannot tell "still here"
+// from "left and came back", and the stale save advancing a fresh entry
+// mid-typing is exactly the class the return step already solved.
+let FR_YOU_GEN = 0;
 let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
@@ -7849,6 +7856,10 @@ function frGo(step) {
   // bump sat between them -- so the bump and the paint branch agree about
   // what `step` is, against the named constant rather than a bare 5.
   if (step !== FR_STEP_RETURN) FR_RETURN_GEN += 1;
+  // Same guard for the About-you step: its save and prefill both settle
+  // async, and a settlement landing after the person moved on must not
+  // advance a step or repaint a pane they are no longer on.
+  if (step !== FR_STEP_YOU) FR_YOU_GEN += 1;
   FR_STEP = step;
   // ⚠️ Cleared on every step change. It is written once when the completion
   // flag will not stick, and without this it sat on screen for the rest of the
@@ -7920,16 +7931,25 @@ function frGo(step) {
  * saves over it — that is the "You can change these later" path today.
  */
 async function frPaintYou() {
+  // Every paint is a new generation: continuations below carry `entry` and
+  // stand down the moment it is stale (left the step, closed the wizard,
+  // or re-entered -- re-entry is a NEW generation, which a step-number
+  // check cannot see).
+  const entry = (FR_YOU_GEN += 1);
   const box = document.getElementById('fr-you');
   document.getElementById('fr-you-msg').textContent = '';
   box.innerHTML =
-    '<p>Answer once and every agent you make will know it. Your agents carry this to Claude when they work, and it goes nowhere else.</p>' +
+    '<p>Answer once and every agent you make will know it. Your agents carry this to Claude when they work, and it goes nowhere else.' +
+    // Spoken, not shown: the sighted reader learns the requirement from the
+    // waiting Continue; a screen-reader user must not have to guess why the
+    // step will not advance (SC 3.3.2). The fields carry aria-required too.
+    '<span class="vh"> The first two answers are needed before Continue.</span></p>' +
     '<div class="fr-youfield"><label for="fr-you-name">What should your agents call you?</label>' +
-    '<input type="text" id="fr-you-name" maxlength="80" placeholder="Josh"></div>' +
+    '<input type="text" id="fr-you-name" maxlength="80" placeholder="Josh" aria-required="true"></div>' +
     '<div class="fr-youfield"><label for="fr-you-do">What do you do?</label>' +
-    '<input type="text" id="fr-you-do" maxlength="200" placeholder="I run a company that builds AI tools"></div>' +
+    '<input type="text" id="fr-you-do" maxlength="200" placeholder="I run a company that builds AI tools" aria-required="true"></div>' +
     '<div class="fr-youfield"><label for="fr-you-know">Anything they should always know?</label>' +
-    '<textarea id="fr-you-know" rows="2" placeholder="How you like things written, who your customers are, anything else"></textarea></div>' +
+    '<textarea id="fr-you-know" rows="2" maxlength="2000" placeholder="How you like things written, who your customers are, anything else"></textarea></div>' +
     '<p class="fr-youfine">You can change these later.</p>';
   const nameEl = document.getElementById('fr-you-name');
   const doEl = document.getElementById('fr-you-do');
@@ -7951,12 +7971,13 @@ async function frPaintYou() {
         body: JSON.stringify({ name: nameEl.value, does: doEl.value, know: knowEl.value }),
       });
       const j = await res.json().catch(() => null);
-      // ⚠️ The person may have pressed Back (or left the wizard) while the
-      // save was in flight. The record is saved either way; advancing or
-      // writing a message into a pane they are no longer on is the
-      // answer-landing-after-they-moved-on shape the return step's
-      // generation guard exists for.
-      if (FR_STEP !== 4) return;
+      // ⚠️ The person may have pressed Back, closed the wizard, or left and
+      // COME BACK while the save was in flight. The record is saved either
+      // way; advancing a step, or writing into a pane, that belongs to a
+      // newer generation is the answer-landing-after-they-moved-on shape
+      // FR_RETURN_GEN exists for, and a step-number check cannot see the
+      // came-back case.
+      if (entry !== FR_YOU_GEN) return;
       if (!res.ok) {
         // The route's own sentence, verbatim — it says what to fix.
         document.getElementById('fr-you-msg').textContent = (j && j.error) || 'we could not save that';
@@ -7965,7 +7986,7 @@ async function frPaintYou() {
       }
       frGo(5);
     } catch {
-      if (FR_STEP !== 4) return;
+      if (entry !== FR_YOU_GEN) return;
       document.getElementById('fr-you-msg').textContent = 'we could not save that';
       gate();
     }
@@ -7979,6 +8000,9 @@ async function frPaintYou() {
   try {
     const res = await fetch('/api/you');
     const j = await res.json().catch(() => null);
+    // A late prefill must not touch fields -- or the shared button's state
+    // -- that belong to a newer generation of this pane, or another step.
+    if (entry !== FR_YOU_GEN) return;
     if (res.ok && j && j.state === 'saved' && j.you) {
       if (!nameEl.value) nameEl.value = j.you.name;
       if (!doEl.value) doEl.value = j.you.does;
@@ -8895,8 +8919,9 @@ function frForkActions() {
   const path = (FR && FR.path) || 'unknown';
   // ⚠️ The SAME guard frPaintFleet keys the adopt screen on, or the pairs
   // drift from the path logic (they did, in the move to step 5): a payload
-  // naming "adopt" without a countable fleet had step 4 honestly refuse to
-  // guess and step 5's button then read "Take me to my agents" -- the fleet
+  // naming "adopt" without a countable fleet had the fork step honestly
+  // refuse to guess and the orientation step's button then read "Take me to
+  // my agents" -- the fleet
   // we could not count asserted as a fleet that exists, one screen after
   // the app declined to claim it. An uncountable adopt falls through to the
   // neutral pair, which promises only the board.
@@ -9041,6 +9066,7 @@ function frOpen() {
 }
 
 function frClose() {
+  FR_YOU_GEN += 1;
   // Same retirement on the way out (Skip, Escape, the fork buttons).
   FR_RETURN_GEN += 1;
   document.getElementById('firstrun').hidden = true;

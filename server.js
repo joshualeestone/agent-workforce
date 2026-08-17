@@ -1416,7 +1416,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/you' && req.method === 'PUT') {
     readBody(req)
       .then((buf) => {
-        const body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        // Parsed HERE, refused in OUR sentence: letting JSON.parse's own
+        // message ride the shared catch answers "Unexpected token" where the
+        // sibling routes say what to do.
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
         const saved = you.save({ name: body.name, does: body.does, know: body.know });
         // Non-gating, same as every tell: answers that could not be announced
         // are still saved, and each agent's verdict is carried, never invented.

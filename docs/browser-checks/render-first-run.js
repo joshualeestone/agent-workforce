@@ -135,7 +135,7 @@ const FLEET_REAL = null; // let the real server answer
 // buttons under the same four filenames (the same drift the clear shot was
 // moved off the live route for). Adopt, matching the committed pictures.
 const FLEET_ADOPT = { done: false, fleetKnown: true, fleetCount: 14, fleetNames: ['Splinter', 'Angel'], path: 'adopt', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
-const FLEET_STEP5 = FLEET_ADOPT;
+const FLEET_RETURN = FLEET_ADOPT;
 const FLEET_CREATE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const FLEET_BLIND = { done: false, fleetKnown: false, fleetCount: null, fleetNames: [], path: 'unknown', subscription: { state: 'connected', plan: 'Claude Max 20x', because: '' } };
 const SUB_NONE = { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'none', plan: null, because: 'Claude has not been set up on this computer yet.' } };
@@ -152,15 +152,15 @@ const SHOTS = [
   { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
   { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
   { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
-  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_STEP5 },
-  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_STEP5 },
-  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_STEP5 },
-  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_RETURN },
+  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_RETURN },
   // The look STILL IN PROGRESS: the only genuinely new visual state on this
   // branch, otherwise never rendered by any harness (both walks wait past
   // it). machine: 'hang' stalls the route so the placeholder is what is
   // measured and photographed.
-  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_RETURN },
 ];
 
 /**

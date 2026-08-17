@@ -1648,3 +1648,24 @@ test('a saved About-you record rides the boot file from birth, and its absence c
   assert.equal(r2.outcome, create.OUTCOME.CREATED, r2.because);
   assert.ok(!fs.readFileSync(create.instructionFile('born-plain'), 'utf8').includes('Who you work for'));
 });
+
+test('the birth splice never pushes a boot file past the size its own reader accepts', () => {
+  const you = require('./you');
+  const instructions = require('./instructions');
+  recorder();
+  create.setDryRun(false);
+  you.save({ name: 'Josh', does: 'Runs a company' });
+  // Instructions that validate just under the cap: the block must be the
+  // thing dropped, never the person's words, and never the file's
+  // editability.
+  // Sized so the file lands 10 bytes under the cap: any block is bigger
+  // than that, so a splice that ignored the margin would cross it.
+  const header = 'You are **Margin**, a tester.\n';
+  const nearCap = header + 'x'.repeat(instructions.MAX_BYTES - Buffer.byteLength(header, 'utf8') - 11) + '\n';
+  const r = create.createAgent({ ...BINS, name: 'margin', role: 'pm', instructions: nearCap });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  const text = fs.readFileSync(create.instructionFile('margin'), 'utf8');
+  assert.ok(!text.includes('Who you work for'), 'the block crossed the size margin anyway');
+  assert.ok(Buffer.byteLength(text, 'utf8') <= instructions.MAX_BYTES, 'the boot file outgrew its own reader');
+  fs.rmSync(you.FILE, { force: true });
+});
