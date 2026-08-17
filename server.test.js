@@ -2431,6 +2431,35 @@ test('update awareness: the status tick carries the verdict, and the install rou
   }
 });
 
+test('the open-sleep-settings route: guard-inherited, honest 409, and the engine speaks', async () => {
+  const machine = require('./engine/machine');
+  const real = machine.openSleepSettings;
+  try {
+    // ⚠️ The guard, asserted rather than assumed: this POST launches an app.
+    const cross = await req('/api/open-sleep-settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site page can open System Settings');
+
+    // No pane on this machine: the route answers 409 with the engine's own
+    // sentence and never claims success.
+    machine.openSleepSettings = () => ({ ok: false, because: 'we could not find the sleep settings screen on this Mac' });
+    const none = await req('/api/open-sleep-settings', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(none.status, 409);
+    assert.match(JSON.parse(none.body).error, /sleep settings screen/);
+
+    // With the pane found, 200 and the engine did the opening.
+    let openedCount = 0;
+    machine.openSleepSettings = () => { openedCount += 1; return { ok: true }; };
+    const ok = await req('/api/open-sleep-settings', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(ok.status, 200);
+    assert.equal(openedCount, 1, 'the route answered ok without opening anything');
+  } finally {
+    machine.openSleepSettings = real;
+  }
+});
+
 test('the removal routes ask, remove, and put back, over the wire', async () => {
   // ⚠️ The engine was well covered and the surface a browser talks to was not.
   // These routes are how the fleet is managed, and the restore route is what

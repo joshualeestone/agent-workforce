@@ -895,6 +895,7 @@ svg { display: block; }
 .fr-check.attention .fr-mark { color: var(--warn-ink); }
 .fr-ctitle { font: 600 var(--text-body) var(--font-ui); color: var(--label);
              margin-bottom: var(--space-2); }
+.fr-sleepbtn { margin-top: 8px; font-size: .8125rem; }
 .fr-cdetail { font: var(--text-callout) var(--font-ui); color: var(--label-2);
               line-height: 1.5; }
 
@@ -7391,8 +7392,38 @@ function frCheckRow(c, opts) {
     + '<div class="fr-mark"><span aria-hidden="true">' + glyph[state] + '</span>'
     + '<span class="vh">' + say[state] + ': </span></div>'
     + '<div><div class="fr-ctitle">' + esc(c.title) + '</div>'
-    + '<div class="fr-cdetail">' + esc(c.detail) + '</div></div></div>';
+    + '<div class="fr-cdetail">' + esc(c.detail) + '</div>'
+    // The pack's Open-sleep-settings button, rendered ONLY when the engine
+    // proved the pane exists on this Mac (reliability-or-no-button, the
+    // row's `settings` flag). The click is delegated below; the server
+    // derives the pane URL itself, so nothing here names a pane.
+    + (c.key === 'sleep' && c.settings
+      ? '<button class="btn fr-sleepbtn" type="button">Open sleep settings</button>'
+      : '')
+    + '</div></div>';
 }
+
+/* The sleep row's button: delegated on the container because the rows are
+   repainted wholesale by every check. Failure lands in the step's own
+   message line with the route's sentence; success needs no message, the
+   Settings window itself is the feedback. */
+document.getElementById('fr-checks').addEventListener('click', async (e) => {
+  const b = e.target.closest('.fr-sleepbtn');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const res = await fetch('/api/open-sleep-settings', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      document.getElementById('fr-machine-msg').textContent =
+        (body && body.error) || 'we could not open System Settings';
+    }
+  } catch {
+    document.getElementById('fr-machine-msg').textContent = 'we could not open System Settings';
+  } finally {
+    b.disabled = false;
+  }
+});
 
 async function frPaintMachine() {
   const box = document.getElementById('fr-checks');

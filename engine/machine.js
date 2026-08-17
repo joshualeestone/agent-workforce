@@ -617,6 +617,80 @@ function appLocationCheck(opts) {
  * @returns {{checks: Array, attention: number, unknown: number,
  *            appLocation: {key: string, state: string, title: string, detail: string}}}
  */
+
+/* ---- the Open-sleep-settings capability ---------------------------------
+
+   ⚠️ RELIABILITY-OR-NO-BUTTON is the contract (Josh's rule for this row): a
+   button that lands a person on the wrong System Settings pane is worse than
+   no button, so the capability is claimed ONLY when the pane provably exists
+   on THIS machine. macOS panes are ExtensionKit appexes on disk, so presence
+   is checkable, and the pane id is read from the appex's own Info.plist
+   rather than guessed from a version table:
+
+     macOS 26.5.2 (measured on this machine, 2026-08-16): the power pane is
+     PowerPreferences.appex carrying com.apple.Battery-Settings.extension,
+     desktop and laptop alike. Opening x-apple.systempreferences:<that id>
+     was verified by PROCESS, with a negative control: a bogus pane id opens
+     Settings without launching the pane appex; the real id launches
+     PowerPreferences with the id in its launch arguments.
+
+     Older macOS (the 13.5 floor through the pre-merge layouts) shipped
+     com.apple.Energy-Saver-Settings.extension on desktops. Not verifiable on
+     this machine; it is in the accepted set, and a machine with NEITHER
+     extension on disk simply gets no button, which is the safe failure the
+     contract asks for.
+
+   The scan is cached for the process lifetime: the OS does not change under
+   a running board, and the alternative is two `defaults` subprocesses per
+   /api/machine call. */
+const SLEEP_PANE_IDS = [
+  'com.apple.Battery-Settings.extension',
+  'com.apple.Energy-Saver-Settings.extension',
+];
+const EXTENSIONS_DIR = '/System/Library/ExtensionKit/Extensions';
+let SLEEP_PANE_CACHE;   // undefined = not probed; null = probed, none found
+
+function sleepPaneUrl(runner) {
+  if (SLEEP_PANE_CACHE !== undefined) return SLEEP_PANE_CACHE;
+  const r = runner || run;
+  let names;
+  try {
+    names = fs.readdirSync(EXTENSIONS_DIR)
+      .filter((n) => n.endsWith('.appex') && /power|energy|battery/i.test(n));
+  } catch {
+    SLEEP_PANE_CACHE = null;
+    return null;
+  }
+  for (const n of names) {
+    const res = r('/usr/bin/defaults', ['read', path.join(EXTENSIONS_DIR, n, 'Contents', 'Info'), 'CFBundleIdentifier']);
+    if (!res.ok) continue;
+    const id = String(res.stdout || '').trim();
+    if (SLEEP_PANE_IDS.includes(id)) {
+      SLEEP_PANE_CACHE = 'x-apple.systempreferences:' + id;
+      return SLEEP_PANE_CACHE;
+    }
+  }
+  SLEEP_PANE_CACHE = null;
+  return null;
+}
+
+/** Open the pane. The URL is ALWAYS derived here, never taken from a caller:
+    the route that fronts this must not become a way for a page to `open`
+    arbitrary URLs on the machine. */
+function openSleepSettings(runner) {
+  const url = sleepPaneUrl(runner);
+  if (!url) return { ok: false, because: 'we could not find the sleep settings screen on this Mac' };
+  const r = runner || run;
+  const res = r('/usr/bin/open', [url]);
+  return res.ok
+    ? { ok: true }
+    : { ok: false, because: 'System Settings did not open' };
+}
+
+/* Test hook: the cache makes the probe once-per-process, which is right in
+   production and wrong in a test that wants to exercise both worlds. */
+function resetSleepPaneCache() { SLEEP_PANE_CACHE = undefined; }
+
 function check(opts) {
   const runner = (opts && opts.runner) || run;
 
@@ -624,15 +698,20 @@ function check(opts) {
     ? { ok: true, stdout: opts.pmset }
     : runner('/usr/bin/pmset', ['-g', 'custom']);
 
-  const checks = [
-    installedCheck(opts),
-    pm.ok ? sleepCheck(pm.stdout) : {
+  const sleepRow = pm.ok ? sleepCheck(pm.stdout) : {
       key: 'sleep',
       state: STATE.UNKNOWN,
       title: 'We could not read this Mac\'s sleep settings',
       detail: 'That setting decides whether your agents keep working when you walk away. You '
         + 'can see it in System Settings, under Lock Screen on a desktop or Battery on a laptop.',
-    },
+  };
+  // The button's gate travels ON the row (reliability-or-no-button): true
+  // only when the pane was found on disk by id, whatever the row's state.
+  sleepRow.settings = sleepPaneUrl(runner) !== null;
+
+  const checks = [
+    installedCheck(opts),
+    sleepRow,
     restartCheck(runner),
   ];
 
@@ -654,4 +733,4 @@ function check(opts) {
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, sleepPaneUrl, openSleepSettings, resetSleepPaneCache, STATE };
