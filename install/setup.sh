@@ -1491,9 +1491,14 @@ fi
 _claude_settings="$HOME/.claude/settings.json"
 if /usr/bin/python3 - "$_claude_settings" <<'PYEOF' 2>/dev/null
 import json, os, sys
-path = sys.argv[1]
+# realpath FIRST: ~/.claude/settings.json is a symlink into a dotfiles repo
+# for exactly the audience with a hand-tuned file, and os.replace over the
+# link would sever it, stranding the dotfiles copy while the setting stops
+# tracking. Writing through to the target preserves the arrangement.
+path = os.path.realpath(sys.argv[1])
 data = {}
-if os.path.exists(path):
+if os.path.exists(path) and os.path.getsize(path) > 0:
+    # A zero-byte file carries nobody's settings; it is the absent case.
     with open(path) as f:
         data = json.load(f)          # unparseable -> exception -> nonzero
     if not isinstance(data, dict):

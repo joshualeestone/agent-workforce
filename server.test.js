@@ -4431,6 +4431,12 @@ test('the tab icons are served as images, and a wrong icon path cannot fall thro
   // documented lesson, applied to this sibling).
   const encoded = await req('/icons%2fanything');
   assert.equal(encoded.status, 404, 'the encoded spelling leaked through to the page');
+  // The doubled-slash spelling is refused upstream by pathOf (400,
+  // protocol-relative shape); the invariant that matters is that no
+  // spelling gets the PAGE dressed as an icon.
+  const doubled = await req('//icons/anything');
+  assert.ok(doubled.status === 400 || doubled.status === 404, `unexpected ${doubled.status}`);
+  assert.match(doubled.type, /application\/json/, 'the doubled-slash spelling got the page');
   // HEAD answers like GET, headers only.
   const head = await req('/icons/kosmos-32.png', { method: 'HEAD' });
   assert.equal(head.status, 200);

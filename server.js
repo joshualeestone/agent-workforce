@@ -2457,6 +2457,9 @@ const server = http.createServer((req, res) => {
   // Compared against the DECODED path, the same lesson the /api/ guard
   // above records: /icons%2fx does not start with /icons/ as a string, and
   // an un-decoded check would hand the encoded spelling the page at 200.
+  // (The doubled-slash spelling //icons/x never reaches here: pathOf
+  // refuses protocol-relative shapes with a 400, measured; the test pins
+  // that it cannot get the page either way.)
   if (apiPath.startsWith('/icons/') || apiPath === '/icons') {
     sendJson(res, 404, { error: 'no such icon' });
     return;
