@@ -1541,7 +1541,11 @@ if (data.skipDangerousModePermissionPrompt === true) process.exit(0);
 data.skipDangerousModePermissionPrompt = true;
 fs.mkdirSync(p.dirname(target), { recursive: true });
 const tmp = target + '.kosmos.new';
-fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+// Born at the preserved mode, not chmodded into it: a tightened file's
+// merged contents must never sit world-readable even for the window
+// between write and chmod (the chmod after still runs for umask
+// exactness).
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', prevMode !== null ? { mode: prevMode } : {});
 if (prevMode !== null) {
   // The person may have tightened their settings file; a replace must not
   // silently widen it back to the umask default.
