@@ -1862,6 +1862,24 @@ const server = http.createServer((req, res) => {
    * open-arbitrary-path primitive. Refused with the state's own sentence
    * when the folder is not there to show.
    */
+  /**
+   * The Success screen's "Show me where it is" (the pack draws it; Josh
+   * asked for it by name). POST like its reveal-folder sibling, same
+   * cross-site posture: this opens an app on the person's machine. The
+   * engine re-derives the location itself; nothing from the request is
+   * honoured, and a location that cannot be found right now refuses with a
+   * sentence instead of opening nothing.
+   */
+  if (pathname === '/api/reveal-app' && req.method === 'POST') {
+    if (crossSiteWrite(req)) { sendJson(res, 403, { error: 'this can only be done from Kosmos itself' }); return; }
+    try {
+      sendJson(res, 200, machine.revealApp());
+    } catch (err) {
+      sendJson(res, 409, { error: String((err && err.message) || 'we could not show it') });
+    }
+    return;
+  }
+
   const reveal = pathname.match(/^\/api\/project\/([^/]+)\/reveal-folder$/);
   if (reveal && req.method === 'POST') {
     const id = decodeSegment(reveal[1]);

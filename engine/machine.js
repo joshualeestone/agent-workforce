@@ -614,6 +614,45 @@ function appLocationCheck(opts) {
 }
 
 /**
+ * Open Finder AT the Kosmos icon -- the pack's "Show me where it is" on the
+ * Success screen. Reliability-or-no-button, same rule as the sleep row: the
+ * screen only offers this where the look answered ok, and this function
+ * re-derives the location itself with the SAME loop discipline as the check
+ * (never a path from the request, never a remembered one). A location that
+ * cannot be found RIGHT NOW refuses with a sentence rather than opening
+ * nothing.
+ *
+ * ⚠️ The runner seam mirrors projects.setRevealRunner: tests inject, and the
+ * production path is execFileSync open -R (an argument array, no shell).
+ */
+let appRevealRunner = null;
+function setAppRevealRunner(f) { appRevealRunner = f; }
+function revealApp(opts) {
+  let dirs;
+  if (opts && opts.appDirs !== undefined) {
+    if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0
+        || !opts.appDirs.every((d) => typeof d === 'string' && d.length > 0)) {
+      throw new Error('appDirs override must be a non-empty array of directory paths');
+    }
+    dirs = opts.appDirs;
+  } else {
+    dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
+  }
+  for (let i = 0; i < dirs.length; i++) {
+    const candidate = path.join(dirs[i], 'Kosmos.app');
+    try {
+      if (fs.statSync(candidate).isDirectory()) {
+        const run = appRevealRunner
+          || ((cmd, args) => require('node:child_process').execFileSync(cmd, args));
+        run('/usr/bin/open', ['-R', candidate]);
+        return { opened: true };
+      }
+    } catch { /* not here, or unreadable: keep looking, refuse honestly below */ }
+  }
+  throw new Error('we could not find the Kosmos icon just now, so there is nothing to show');
+}
+
+/**
  * @returns {{checks: Array, attention: number, unknown: number,
  *            appLocation: {key: string, state: string, title: string, detail: string}}}
  */
@@ -743,4 +782,4 @@ function check(opts) {
   };
 }
 
-module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, sleepPaneUrl, openSleepSettings, resetSleepPaneCache, STATE };
+module.exports = { check, parsePmset, sleepCheck, installedCheck, appLocationCheck, appLocationUnknown, restartCheck, sleepPaneUrl, openSleepSettings, resetSleepPaneCache, revealApp, setAppRevealRunner, STATE };

@@ -821,3 +821,31 @@ test('the sleep row carries the settings flag from the same probe', () => {
     machine.resetSleepPaneCache();
   }
 });
+
+test('revealApp opens Finder at the icon it re-derives, and refuses honestly when there is none', () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-'));
+  fs.mkdirSync(nodePath.join(dir, 'Kosmos.app'));
+  let args = null;
+  machine.setAppRevealRunner((cmd, a) => { args = [cmd, a]; });
+  try {
+    // Found: open -R at the RE-DERIVED path, nothing from any caller.
+    const got = machine.revealApp({ appDirs: [dir] });
+    assert.deepEqual(got, { opened: true });
+    assert.deepEqual(args, ['/usr/bin/open', ['-R', nodePath.join(dir, 'Kosmos.app')]]);
+
+    // A FILE named Kosmos.app is not the app; the refusal sentence says
+    // what to do, not what threw.
+    const empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-reveal-none-'));
+    args = null;
+    assert.throws(() => machine.revealApp({ appDirs: [empty] }), /could not find the Kosmos icon just now/);
+    assert.equal(args, null, 'a refusal ran the opener anyway');
+
+    // The same malformed-override guard as the check.
+    assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty array/);
+  } finally {
+    machine.setAppRevealRunner(null);
+  }
+});

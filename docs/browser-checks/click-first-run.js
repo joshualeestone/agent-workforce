@@ -124,10 +124,13 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Choose a model.',
       'Continue after Back advanced exactly one step');
-    await page.click('#fr-skip');
+    // The visible Skip died by the pack's ruling; Escape is the exit and it
+    // carries the same contract (marks seen, so it does not nag).
+    ok((await page.locator('#fr-skip').count()) === 0, 'no visible Skip link anywhere (pack decisions table)');
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(600);
-    ok(await page.isHidden('#firstrun'), 'Skip closed it');
-    ok(fs.existsSync(FLAG), 'Skip marked it seen, so it does not nag');
+    ok(await page.isHidden('#firstrun'), 'Escape closed it');
+    ok(fs.existsSync(FLAG), 'Escape marked it seen, so it does not nag');
     await ctx.close();
   }
   {
@@ -208,7 +211,7 @@ async function fresh(browser, opts = {}) {
     const { ctx, page } = await fresh(browser, {
       route: ['**/api/first-run/complete', (r) => r.fulfill({ status: 500, json: { error: 'we could not remember that, so this may appear again next time' } })],
     });
-    await page.click('#fr-skip');
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(600);
     ok(await page.isVisible('#firstrun'), 'it stayed up long enough to say so');
     const said = await page.locator('#fr-forgot').textContent();
@@ -289,7 +292,7 @@ async function fresh(browser, opts = {}) {
     await page.route('**/api/first-run/complete', () => {});
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
-    await page.click('#fr-skip');
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(10000);            // past the 8s abort
     ok(await page.locator('#fr-forgot').isVisible(), 'a hung POST turned into a message, not a trap');
     ok(await page.isEnabled('#fr-next'), 'and the way out came back');
@@ -359,7 +362,7 @@ async function fresh(browser, opts = {}) {
     await page.evaluate(() => document.getElementById('fr-title').focus());
     for (let i = 0; i < 8; i += 1) { await page.keyboard.press('Shift+Tab'); seen.add(await where()); }
     ok(seen.has('fr-next'), 'Shift+Tab reaches the primary button (saw: ' + [...seen].join(', ') + ')');
-    ok(seen.has('fr-skip'), 'Shift+Tab reaches the way out');
+    ok(seen.has('fr-back') || seen.has('fr-next'), 'Shift+Tab reaches the controls (the way out is Escape now)');
 
     // Every step, because the button set changes between them.
     for (const step of [2, 3, 4, 5, 6]) {

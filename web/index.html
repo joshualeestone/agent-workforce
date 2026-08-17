@@ -1526,7 +1526,11 @@ svg { display: block; }
     </div>
     <div class="fr-acts">
       <button class="btn" id="fr-back" type="button" hidden>&#8592; Back</button>
-      <button class="fr-skip" id="fr-skip" type="button">Skip setup</button>
+      <!-- ⚠️ NO VISIBLE SKIP, by the pack's own decisions table ("Skip setup
+           -- Removed from the wizard"): nobody skips setup casually, and the
+           trap-escape survives as Escape (which marks first run seen and
+           exits, exactly what the link did) plus the surfaced way out when a
+           completion write fails (Carry on anyway). -->
       <span class="fr-spacer"></span>
       <button class="btn" id="fr-alt" type="button" hidden></button>
       <button class="btn fr-primary" id="fr-next" type="button">Continue</button>
@@ -8869,6 +8873,27 @@ function frConnPaintProgress(progress) {
   }
 }
 
+/* The Success screen's reveal, delegated (the row repaints wholesale).
+   Failure lands in the row's own message spot with the route's sentence. */
+document.getElementById('fr-pane-1').addEventListener('click', async (e) => {
+  const b = e.target.closest('#fr-reveal');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const res = await fetch('/api/reveal-app', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      document.getElementById('fr-return-dock').insertAdjacentHTML('afterbegin',
+        '<p class="fr-msg">' + esc((body && body.error) || 'we could not show it') + '</p>');
+    }
+  } catch {
+    document.getElementById('fr-return-dock').insertAdjacentHTML('afterbegin',
+      '<p class="fr-msg">we could not show it</p>');
+  } finally {
+    b.disabled = false;
+  }
+});
+
 document.getElementById('fr-pane-3').addEventListener('click', (e) => {
   if (e.target.closest('#fr-llm-connect')) frConnectStart();
 });
@@ -8986,7 +9011,7 @@ function frPaintFleet() {
     // the best lines in it). The names list stays: it is the proof this
     // screen can actually see somebody's fleet, recorded as a deviation of
     // record for the designer (information, not copy).
-    box.innerHTML = '<p>They are already here. <b>There is nothing to import</b> and '
+    box.innerHTML = '<p>They are already here. There is nothing to import and '
       + 'nothing to wait for.</p>'
       + '<p>Kosmos reads what is running on this computer, so it could see them '
       + 'before you got here.</p>'
@@ -9172,7 +9197,14 @@ async function frPaintReturn() {
     // pointing at a folder the screen never named. Every sibling screen
     // guards its payload for content; this one now does too.
     if (!found || !found.state || !found.title || !found.detail) throw new Error('no app-location answer');
-    rowEl.innerHTML = frCheckRow(found);
+    // The pack's Show-me button rides the FOUND row only: reliability-or-no-
+    // button, the sleep row's rule. The engine re-derives the location on
+    // click; a look that has gone stale refuses with its own sentence.
+    rowEl.innerHTML = frCheckRow(found)
+      + (found.state === 'ok'
+        ? '<div class="frow2" style="margin:14px 0 4px;"><button class="btn-quiet" type="button" id="fr-reveal" '
+          + 'style="font-size:.9375rem;padding:calc(.6em - 1px) calc(1.15em - 1px);">Show me where it is</button></div>'
+        : '');
     dockEl.innerHTML = drag();
   } catch {
     if (gen !== FR_RETURN_GEN) return;
@@ -9299,7 +9331,7 @@ document.getElementById('fr-back').addEventListener('click', () => { if (FR_STEP
 // ⚠️ Skipping MARKS IT SEEN, and that is not a bug. The flag records that
 // somebody has been here, not that it went well — and the alternative, showing
 // this again every launch to a person who dismissed it, is nagging.
-document.getElementById('fr-skip').addEventListener('click', () => frFinish(() => showTab('agents')));
+// (the visible Skip link is gone by the pack's ruling; Escape below is the exit)
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (document.getElementById('firstrun').hidden) return;
