@@ -50,7 +50,10 @@ and its geometry checks move with it.
 ## Verification
 
 Suite + render/click first-run drives + the update-toast drive
-re-anchored to the header placement. This wave cuts 0.1.5, which
+re-anchored to the header placement. The version bump to 0.1.5 is a
+DELIBERATE separate act after this merges (its own one-line branch,
+the same shape as the 0.1.4 bump), then the site release. This wave
+feeds 0.1.5, which
 fires the four-leg update-flag test on Josh's mini (his board must
 NOTICE the release; do not press Later; agents must survive the
 update; post in channel when cutting so the clock is known).

@@ -61,7 +61,7 @@ const RELPORT = 4654;
     const txt = await p.locator('.utoast .utxt').textContent();
     if (!/Update available/.test(txt) || !/Kosmos 9\.9\.9/.test(txt)) die('toast text wrong: ' + txt);
 
-    // It floats: no overlap with the header controls.
+    // In the flow beside the mark; the checks below prove no overlap with the header controls either way.
     const boxes = {};
     for (const [k, sel] of [['toast', '.utoast'], ['newagent', '#new-agent'], ['checked', '#checked']]) {
       boxes[k] = await p.locator(sel).boundingBox();

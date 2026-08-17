@@ -803,6 +803,17 @@ uninstall() {
   else
     printf '\n  Kosmos is removed.\n\n'
   fi
+  # ⚠️ Named, not removed: the install may have recorded the agent
+  # permission setting in Claude Code's own config, but that file can carry
+  # the person's real settings and the same key set by their own hand --
+  # an uninstaller cannot tell, so deleting it would overstep. The
+  # reversibility contract is honored by NAMING what was left, per the
+  # header's rule that anything not removed is left alone and named.
+  if [ -f "$HOME/.claude/settings.json" ] && grep -q 'skipDangerousModePermissionPrompt' "$HOME/.claude/settings.json" 2>/dev/null; then
+    printf '  One setting was left in place: skipDangerousModePermissionPrompt in\n'
+    printf '  ~/.claude/settings.json (agents skip per-action permission prompts).\n'
+    printf '  Delete that line there if you want the question back.\n\n'
+  fi
   exit 0
 }
 
@@ -1483,43 +1494,51 @@ fi
 # The fleet bulletin's trap: defaultMode alone is NOT enough; only this key
 # stops the wall. MERGE, never clobber -- the file may carry a person's real
 # Claude Code settings, and an installer that eats somebody's config to set
-# one flag is worse than the wall. python3 ships on every macOS this
-# installer supports; if the file exists but cannot be parsed as JSON (or is
-# not an object), LEAVE IT ALONE and say so -- fail-soft, because the wall
-# appearing later is recoverable (one Enter in the agent's session, per
-# docs/clean-machine-retest.md), while a clobbered config is not.
+# one flag is worse than the wall. The merge runs on the Node runtime THIS
+# INSTALL just verified runnable -- /usr/bin/python3 is a Command Line Tools
+# shim, and its first invocation on a clean Mac can pop Apple's developer-
+# tools dialog mid-install, the exact machine this block exists for. If the
+# file exists but cannot be parsed as JSON (or is not an object), LEAVE IT
+# ALONE and say so (fail-soft: the wall appearing later is recoverable; a
+# clobbered config is not) -- one Enter in the agent's session clears it,
+# per docs/clean-machine-retest.md. The symlink, mode, and zero-byte edges
+# are each pinned by tools/test-permission-acceptance.sh.
 _claude_settings="$HOME/.claude/settings.json"
-if /usr/bin/python3 - "$_claude_settings" <<'PYEOF' 2>/dev/null
-import json, os, sys
-# realpath FIRST: ~/.claude/settings.json is a symlink into a dotfiles repo
-# for exactly the audience with a hand-tuned file, and os.replace over the
-# link would sever it, stranding the dotfiles copy while the setting stops
-# tracking. Writing through to the target preserves the arrangement.
-path = os.path.realpath(sys.argv[1])
-data = {}
-if os.path.exists(path) and os.path.getsize(path) > 0:
-    # A zero-byte file carries nobody's settings; it is the absent case.
-    with open(path) as f:
-        data = json.load(f)          # unparseable -> exception -> nonzero
-    if not isinstance(data, dict):
-        raise SystemExit(1)          # a scalar/list is somebody's file, leave it
-if data.get('skipDangerousModePermissionPrompt') is True:
-    raise SystemExit(0)              # already accepted, nothing to write
-data['skipDangerousModePermissionPrompt'] = True
-d = os.path.dirname(path)
-if d:
-    os.makedirs(d, exist_ok=True)
-tmp = path + '.kosmos.new'
-with open(tmp, 'w') as f:
-    json.dump(data, f, indent=2)
-    f.write('\n')
-if os.path.exists(path):
-    # The person may have tightened their settings file (it can carry an
-    # env block or an apiKeyHelper); a replace must not silently widen it
-    # back to the umask default.
-    os.chmod(tmp, os.stat(path).st_mode & 0o7777)
-os.replace(tmp, path)
-PYEOF
+if "$KOSMOS_HOME/runtime/bin/node" - "$_claude_settings" <<'NODEEOF' 2>/dev/null
+const fs = require('fs');
+const os = require('os');
+const p = require('path');
+// realpath FIRST: the file may be a symlink into a dotfiles repo, and a
+// rename over the link would sever it, stranding the dotfiles copy while
+// the setting stops tracking. Writing through preserves the arrangement.
+let target = process.argv[2];
+try { target = fs.realpathSync(target); } catch { /* absent: keep the given path */ }
+let data = {};
+let existed = false;
+try {
+  const st = fs.statSync(target);
+  if (st.size > 0) {                     // zero bytes carries nobody's settings
+    existed = true;
+    data = JSON.parse(fs.readFileSync(target, 'utf8'));   // throws -> refusal
+    if (!data || typeof data !== 'object' || Array.isArray(data)) process.exit(1);
+  }
+} catch (err) {
+  if (err && err.code === 'ENOENT') { /* absent is the clean case */ }
+  else if (err instanceof SyntaxError) process.exit(1);   // somebody's file, leave it
+  else process.exit(1);
+}
+if (data.skipDangerousModePermissionPrompt === true) process.exit(0);
+data.skipDangerousModePermissionPrompt = true;
+fs.mkdirSync(p.dirname(target), { recursive: true });
+const tmp = target + '.kosmos.new';
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+if (existed) {
+  // The person may have tightened their settings file; a replace must not
+  // silently widen it back to the umask default.
+  fs.chmodSync(tmp, fs.statSync(target).mode & 0o7777);
+}
+fs.renameSync(tmp, target);
+NODEEOF
 then
   info "agents will not stop to ask permission for each action; installing is that permission"
 else
