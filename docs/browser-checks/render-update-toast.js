@@ -86,6 +86,25 @@ const RELPORT = 4654;
     if (!placement.inLeft || !placement.rightOfMark || !placement.sameBand || !placement.staticPos) {
       die('desktop: the notice is not inline beside the mark ' + JSON.stringify(placement));
     }
+
+    // The old absolute comment's warning, mechanized: a child in the flow
+    // must not re-space the row. Measured 2026-08-17: zero x-shift on the
+    // right group; the header grows 8px taller, the trade the pack's own
+    // mobile comment blesses ("the header grows when an update is waiting"
+    // over anything unclickable). Pin the x-shift at zero.
+    const withToast = await p.evaluate(() => ({
+      newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
+      checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
+    }));
+    await p.evaluate(() => { const s = document.getElementById('utoast-slot'); s.dataset.keep = s.innerHTML; s.innerHTML = ''; });
+    const sansToast = await p.evaluate(() => ({
+      newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
+      checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
+    }));
+    await p.evaluate(() => { const s = document.getElementById('utoast-slot'); s.innerHTML = s.dataset.keep; delete s.dataset.keep; });
+    if (withToast.newagent !== sansToast.newagent || withToast.checked !== sansToast.checked) {
+      die('the notice re-spaces the header row: ' + JSON.stringify({ withToast, sansToast }));
+    }
     await p.screenshot({ path: path.join(REPO, 'docs/browser-checks/shots/update-toast.png') });
 
     // The toast's Install is GOLD (the pack's action colour): the neutral
