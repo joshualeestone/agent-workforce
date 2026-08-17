@@ -1370,7 +1370,6 @@ svg { display: block; }
 
     <div class="field">
       <label class="flabel" for="create-model">Model</label>
-      <div class="fhint">You can change this later.</div>
       <div class="frow">
         <select id="create-model"></select>
       </div>
@@ -1949,7 +1948,7 @@ function card(a) {
     <div class="ringwrap">${ring(a)}</div>
     <div class="body">
       <div class="name">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
-      <div class="meta">${esc([a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
+      <div class="meta">${esc([a.profile && a.profile.role || a.role, a.modelName || 'model unknown'].filter(Boolean).join(' · '))}</div>
       <div class="state"><b>${copy.label}</b>${scraped}</div>
       <div class="task">${esc(a.task || 'no task showing')}</div>
       ${unknownNote}${fullnessNote}
@@ -4460,6 +4459,10 @@ document.getElementById('create-go').addEventListener('click', async () => {
   if (!res.ok || !result || (result.outcome !== 'created' && result.outcome !== 'partial')) {
     msg.textContent = (result && (result.error || result.because))
       || 'we could not make it, and we cannot tell you why';
+    // The own gate's sentence is about the Role label at the top of a
+    // scrolled form; put the person where the fix is (the live region has
+    // already announced the words).
+    if (/role label/i.test(msg.textContent)) document.getElementById('create-label').focus();
     return;
   }
 

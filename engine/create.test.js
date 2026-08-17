@@ -1268,6 +1268,11 @@ test('the job passes the supervisor exactly the arguments it reads, in that orde
     assert.ok(script.includes(`${name}="\${${pos}`),
       `the supervisor does not read ${name} from argument ${pos}`);
   }
+  // ...and MODEL is not merely read: a supervisor that assigns $6 and never
+  // passes it keeps every test green while every model choice silently runs
+  // the default. The flag must reach the claude invocation, quoted.
+  assert.ok(script.includes('--model "$MODEL"'),
+    'the supervisor reads MODEL but never passes --model to claude');
 });
 
 test('a supervisor missing from the app says so, instead of inviting a retry', () => {
