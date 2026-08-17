@@ -1023,8 +1023,11 @@ svg { display: block; }
 #firstrun .fr-body p b { color: var(--k-ink); }
 #firstrun .fr-acts { justify-content: flex-end; gap: 14px; margin-top: 36px; }
 /* The secondary action (Check again) sits flush LEFT, the primary right
-   (Josh, 2026-08-17); with no alt the primary keeps the right edge alone. */
-#firstrun #fr-alt { margin-right: auto; }
+   (Josh, 2026-08-17). The DOM order alt / spacer / next carries this: the
+   spacer's auto margin absorbs ALL free space between them. A margin-right
+   auto on the alt itself is the wrong tool -- it SPLITS the free space with
+   the spacer's auto margin and strands the alt mid-row (measured 175px off
+   the edge, 2026-08-17). */
 #firstrun .btn-gold {
   display: inline-flex; align-items: center; gap: .5em;
   border: 0; border-radius: 10px; cursor: pointer; padding: .9em 1.75em;
@@ -1062,7 +1065,7 @@ svg { display: block; }
 #firstrun .llm-w small { color: var(--k-ink-2); font-size: .8125rem; }
 #firstrun .soon { font-size: .75rem; color: var(--k-ink-2); border: 1px solid var(--k-rule);
                   border-radius: 999px; padding: .2rem .7rem; white-space: nowrap; }
-#firstrun .tier { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
+#firstrun .fr-body p.tier { font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600;
                   color: var(--k-ink-2); margin: 22px 0 10px; }
 #firstrun .connect-b { font-size: .9375rem; font-weight: 600; border: 0; border-radius: 8px;
                        padding: .5rem 1rem; background: var(--gold-bright); color: #14161a;
@@ -1557,8 +1560,8 @@ svg { display: block; }
            trap-escape survives as Escape (which marks first run seen and
            exits, exactly what the link did) plus the surfaced way out when a
            completion write fails (Carry on anyway). -->
-      <span class="fr-spacer"></span>
       <button class="btn" id="fr-alt" type="button" hidden></button>
+      <span class="fr-spacer"></span>
       <button class="btn fr-primary" id="fr-next" type="button">Continue</button>
     </div>
   </div>
