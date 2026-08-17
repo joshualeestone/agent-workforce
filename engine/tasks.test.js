@@ -21,6 +21,11 @@ test('a task is validated whole-or-not-at-all before any write', () => {
     ['a sentence over the cap', { sentence: 'x'.repeat(tasks.SENTENCE_MAX + 1) }],
     ['a non-string detail', { sentence: 'Real work', detail: 42 }],
     ['detail over the cap', { sentence: 'Real work', detail: 'y'.repeat(tasks.DETAIL_MAX + 1) }],
+    // ⚠️ A present who that cannot be a name is REFUSED, never silently
+    // stored as unassigned: a 200 with a "Nobody yet" task is an assignment
+    // the person believes happened.
+    ['a non-string who', { sentence: 'Real work', who: 42 }],
+    ['an oversize who', { sentence: 'Real work', who: 'x'.repeat(tasks.WHO_MAX + 1) }],
   ]) {
     assert.throws(() => tasks.create(p.id, bad), Error, label);
     const after = projects.readAll().find((x) => x.id === p.id);

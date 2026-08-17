@@ -67,3 +67,29 @@ once under full-suite parallel load (a leftover .part file), then passed
 twice in isolation and on the full-suite re-run. This branch does not
 touch connect. Recorded so the next person seeing it has a prior, and
 worth its own small fix some daytime.
+
+## Review round 1 additions (zero blockers; all fixed)
+
+- The view dialog acts on the act its LABEL promised (captured at open):
+  the five-second poll keeps PROJECTS fresher than the dialog, and
+  deriving the act at click time could invert the visible button (says
+  Mark as done, silently reopens). If the world moved since open, the
+  dialog repaints to the new state instead of acting.
+- The task list paint is change-guarded (the removed-list's own
+  pattern): the poll no longer destroys a keyboard user's focus every
+  five seconds; the guard clears on project switch.
+- A present `who` that cannot be an agent's name is REFUSED, never
+  silently stored as unassigned (a 200 with a "Nobody yet" task is an
+  assignment the person believes happened), with a length cap and
+  tests aimed at the dropped-assignment class.
+- The New-task backdrop no longer deletes typed words: with anything
+  typed a backdrop click does nothing (the misclick surface under the
+  never-delete rule); Escape and Cancel stay the explicit discards.
+- describe() normalizes tasks/taskCounter for legacy projects, per its
+  own stated healed-shape rule.
+- The door comment now describes the built behaviour; the dead
+  pj-tasks-msg element removed; focus returns to the opening card (or
+  New task after a repaint); the orphaned dialog closes instead of
+  silently ignoring clicks; the chip initial reads a whole character;
+  pjReload no longer double-paints; the card number is coerced before
+  interpolation.

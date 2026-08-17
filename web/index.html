@@ -1643,9 +1643,10 @@ svg { display: block; }
       <!-- The door, pack rule: the column is a task with somebody on it that
            is not finished; finished and unpicked are both real and both
            behind this. v1's door reveals them in place (there is no
-           all-tasks screen yet); the reveal lasts until the next repaint. -->
+           all-tasks screen yet); the reveal survives repaints and
+           same-project Back-and-return (the page's round-31 rule) and
+           resets on a project SWITCH. -->
       <button class="linkish" id="pj-alltasks" type="button" hidden></button>
-      <p class="fmsg" id="pj-tasks-msg" aria-live="polite"></p>
     </div>
 
     <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
@@ -5501,10 +5502,10 @@ function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
 let TK_SHOW_ALL = false;   // the door's reveal; resets when the project changes
 let TK_OPEN = null;        // the task number the view dialog is showing
 
-/** Re-read the store and repaint the open project (tasks live on it). */
+/** Re-read the store; loadProjects itself repaints the open project on
+    success, so this is a named alias for the intent, not a second paint. */
 async function pjReload() {
   await loadProjects();
-  if (PJ_CURRENT && pjById(PJ_CURRENT)) paintOneProject();
 }
 
 function tkMemberName(p, sessionName) {
@@ -5512,6 +5513,7 @@ function tkMemberName(p, sessionName) {
   return (m && m.name) || sessionName;
 }
 
+let TK_LIST_HTML = null;   // change guard, the removed-list's own pattern
 function paintProjectTasks(p) {
   const list = document.getElementById('pj-tasklist');
   const door = document.getElementById('pj-alltasks');
@@ -5519,21 +5521,25 @@ function paintProjectTasks(p) {
   const column = all.filter((t) => t.who && !t.closedAt);
   const behind = all.length - column.length;
   const showing = TK_SHOW_ALL ? all : column;
-  if (!showing.length) {
-    // Not "no tasks": an empty COLUMN coexists with closed and unpicked
-    // tasks behind the door, and the door line below says so.
-    list.innerHTML = '';
-  } else {
-    list.innerHTML = showing.map((t) => {
-      const who = t.who
-        ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
-          + esc(tkMemberName(p, t.who)[0].toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who)) + '</span>'
-        : '<span class="tkcard-who">Nobody yet</span>';
-      return '<button class="tkcard' + (t.closedAt ? ' closed' : '') + '" type="button" data-task="' + t.number + '">'
-        + '<span class="tkcard-n">Task ' + t.number + (t.closedAt ? ' (done)' : '') + '</span>'
-        + '<div class="tkcard-t">' + esc(t.sentence) + '</div>'
-        + who + '</button>';
-    }).join('');
+  // Not "no tasks" when empty: an empty COLUMN coexists with closed and
+  // unpicked tasks behind the door, and the door line below says so.
+  const html = showing.map((t) => {
+    const n = Number(t.number);   // server-issued, but the one unescaped field deserves the same distrust as the rest
+    const who = t.who
+      ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
+        + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who)) + '</span>'
+      : '<span class="tkcard-who">Nobody yet</span>';
+    return '<button class="tkcard' + (t.closedAt ? ' closed' : '') + '" type="button" data-task="' + n + '">'
+      + '<span class="tkcard-n">Task ' + n + (t.closedAt ? ' (done)' : '') + '</span>'
+      + '<div class="tkcard-t">' + esc(t.sentence) + '</div>'
+      + who + '</button>';
+  }).join('');
+  // ⚠️ Change-guarded, the removed-list's own pattern: the five-second poll
+  // repaints this project every tick, and an unconditional innerHTML write
+  // destroys a keyboard user's focus on a card even when nothing changed.
+  if (html !== TK_LIST_HTML) {
+    TK_LIST_HTML = html;
+    list.innerHTML = html;
   }
   // The door: pack rule, the column is not the whole list and says so.
   if (!TK_SHOW_ALL && behind > 0) {
@@ -5557,11 +5563,13 @@ document.getElementById('pj-tasklist').addEventListener('click', (e) => {
 });
 
 /* ---- the view dialog: one human verb and its undo ---- */
+let TK_ACT = null;   // the act the visible label promises; see the click handler
 function openTaskModal(n) {
   const p = pjById(PJ_CURRENT);
   const t = p && (p.tasks || []).find((x) => x.number === n);
   if (!t) return;
   TK_OPEN = n;
+  TK_ACT = t.closedAt ? 'reopen' : 'close';
   document.getElementById('tk-title').textContent = t.sentence;
   const who = t.who ? tkMemberName(p, t.who) : null;
   document.getElementById('tk-meta').textContent =
@@ -5588,9 +5596,13 @@ function openTaskModal(n) {
 }
 function closeTaskModal() {
   document.getElementById('tk-modal').hidden = true;
+  const was = TK_OPEN;
   TK_OPEN = null;
-  const card = document.querySelector('.tkcard[data-task]');
-  if (card) card.focus();
+  TK_ACT = null;
+  // Back to the card that opened the dialog; after a done/reopen repaint it
+  // may be gone from the column, and then New task is the stable landing.
+  const card = document.querySelector('.tkcard[data-task="' + was + '"]');
+  (card || document.getElementById('pj-newtask')).focus();
 }
 document.getElementById('tk-back').addEventListener('click', closeTaskModal);
 document.getElementById('tk-modal').addEventListener('click', (e) => {
@@ -5599,11 +5611,19 @@ document.getElementById('tk-modal').addEventListener('click', (e) => {
 document.getElementById('tk-done').addEventListener('click', async () => {
   const p = pjById(PJ_CURRENT);
   const t = p && (p.tasks || []).find((x) => x.number === TK_OPEN);
-  if (!t) return;
+  // An orphaned dialog (the project vanished under it) closes rather than
+  // being a button that silently does nothing on top of the list view.
+  if (!t) { closeTaskModal(); return; }
+  /* ⚠️ THE ACT IS THE ONE THE LABEL PROMISED. The five-second poll keeps
+     PROJECTS fresher than this dialog, so deriving the act here from t
+     could invert the visible button: it says "Mark as done", the task was
+     closed elsewhere a tick ago, and the click would silently reopen. If
+     the world moved since open, show the new state instead of acting. */
+  if ((t.closedAt ? 'reopen' : 'close') !== TK_ACT) { openTaskModal(t.number); return; }
   const btn = document.getElementById('tk-done');
   btn.disabled = true;
   try {
-    const act = t.closedAt ? 'reopen' : 'close';
+    const act = TK_ACT;
     const res = await fetch('/api/project/' + encodeURIComponent(p.id) + '/task/' + t.number + '/' + act, {
       method: 'POST', headers: { 'content-type': 'application/json' },
     });
@@ -5647,7 +5667,14 @@ function closeNewTask() {
 document.getElementById('pj-newtask').addEventListener('click', openNewTask);
 document.getElementById('nt-cancel').addEventListener('click', closeNewTask);
 document.getElementById('nt-modal').addEventListener('click', (e) => {
-  if (e.target.id === 'nt-modal') closeNewTask();
+  if (e.target.id !== 'nt-modal') return;
+  // ⚠️ The backdrop is the MISCLICK surface, and it must not delete typed
+  // words (the page's never-delete rule; drafts elsewhere are parked at the
+  // keystroke for the same reason). With anything typed, a backdrop click
+  // does nothing; Escape and Cancel remain the explicit discards.
+  if (document.getElementById('nt-what').value.trim()
+      || document.getElementById('nt-detail').value.trim()) return;
+  closeNewTask();
 });
 // Create is held down until the one required thing exists (pack: disabled).
 document.getElementById('nt-what').addEventListener('input', () => {
@@ -5816,7 +5843,7 @@ function openProject(id) {
      survives Back because nothing but this function writes it. */
   const switching = PJ_LAST_OPENED !== id;
   PJ_LAST_OPENED = id;
-  if (switching) TK_SHOW_ALL = false;
+  if (switching) { TK_SHOW_ALL = false; TK_LIST_HTML = null; }
   // Every arrival is a move, including re-opening the same project: a verdict
   // from a send that took off before this navigation belongs to a thread view
   // the switching-clear machinery above has since reset, so it may not paint

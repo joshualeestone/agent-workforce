@@ -29,7 +29,9 @@ const projects = require('./projects');
 const SENTENCE_MAX = 200;
 const DETAIL_MAX = 2000;
 
-function taskProblem({ sentence, detail } = {}) {
+const WHO_MAX = 80;
+
+function taskProblem({ sentence, detail, who } = {}) {
   if (typeof sentence !== 'string' || !sentence.trim()) {
     return 'say what needs doing';
   }
@@ -40,6 +42,14 @@ function taskProblem({ sentence, detail } = {}) {
       && (typeof detail !== 'string' || detail.length > DETAIL_MAX)) {
     return `anything they should know has to be words (${DETAIL_MAX} characters or fewer)`;
   }
+  // ⚠️ A PRESENT who is refused when it cannot be an agent's name, never
+  // silently dropped: a caller who asked to assign and got a 200 with a
+  // "Nobody yet" task believes an assignment happened. Absent/blank means
+  // nobody, which is the modal's real default.
+  if (who !== undefined && who !== null && who !== ''
+      && (typeof who !== 'string' || !who.trim() || who.trim().length > WHO_MAX)) {
+    return 'who is on it has to be an agent\'s name';
+  }
   return null;
 }
 
@@ -49,7 +59,7 @@ function taskProblem({ sentence, detail } = {}) {
  * the task, so two concurrent creates cannot share one.
  */
 function create(projectId, { sentence, detail, who } = {}, roster) {
-  const problem = taskProblem({ sentence, detail });
+  const problem = taskProblem({ sentence, detail, who });
   if (problem) throw new Error(problem);
   const whoKey = typeof who === 'string' && who.trim() ? who.trim() : null;
   const seen = (whoKey && Array.isArray(roster))
@@ -116,4 +126,4 @@ function columnTasks(p) {
   return (p.tasks || []).filter((t) => t.who && !t.closedAt);
 }
 
-module.exports = { create, close, reopen, byNumber, columnTasks, taskProblem, SENTENCE_MAX, DETAIL_MAX };
+module.exports = { create, close, reopen, byNumber, columnTasks, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };
