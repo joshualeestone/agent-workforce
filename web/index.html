@@ -1285,14 +1285,24 @@ svg { display: block; }
              worst version of this defect in the whole flow, and it arrived as
              the fix for a milder one. So the scope is now stated explicitly: the
              record stays, the questions go, and there is no account either way.
-             §7b asks for the first sentence; the second is what makes it true. -->
+             §7b asks for the first sentence; the second is what makes it true.
+
+             ⚠️ THIRD CORRECTION, 2026-08-17. The About-you step made "Nothing
+             else about you is sent anywhere" false again without a word of
+             this paragraph being edited: the profile is prompt text in every
+             agent's boot file. The sentence now names it. The pattern: this
+             paragraph does not go wrong by being rewritten, it goes wrong when
+             a FEATURE changes what is true. Re-read it whenever anything new
+             is added to what agents carry. -->
         <p>The record of everything your agents do is written down and kept on
            this Mac, in full. It is yours and it stays here.</p>
         <p>Your agents think with Claude, so what you ask them goes to Claude to
-           be answered. Nothing else about you is sent anywhere, and there is no
-           account here to send it to.</p>
+           be answered. So does the little you tell Kosmos about yourself,
+           because that is what your agents work from. Nothing else about you is
+           sent anywhere, and there is no account here to send it to.</p>
         <p class="fr-next">Next: a quick look at this computer, then Claude,
-           then your agents, then how you get back to Kosmos later.</p>
+           then a little about you, then your agents, then how you get back to
+           Kosmos later.</p>
       </div>
 
       <!-- 2. The machine checks. Painted from /api/machine. -->
@@ -7909,7 +7919,7 @@ async function frPaintYou() {
   const box = document.getElementById('fr-you');
   document.getElementById('fr-you-msg').textContent = '';
   box.innerHTML =
-    '<p>Answer once and every agent you make will know it. Nothing here leaves this computer.</p>' +
+    '<p>Answer once and every agent you make will know it. Your agents carry this to Claude when they work, and it goes nowhere else.</p>' +
     '<div class="fr-youfield"><label for="fr-you-name">What should your agents call you?</label>' +
     '<input type="text" id="fr-you-name" maxlength="80" placeholder="Josh"></div>' +
     '<div class="fr-youfield"><label for="fr-you-do">What do you do?</label>' +

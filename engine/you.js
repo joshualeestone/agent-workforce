@@ -18,8 +18,12 @@
  * in the product from eating somebody's words, and a second copy of it is
  * how a fix lands in one and not the other.
  *
- * ⚠️ "Nothing here leaves this computer" is the step's own promise. This
- * module writes one local file and local instruction files; nothing else.
+ * ⚠️ This module writes one local file and local instruction files;
+ * nothing else. That is a fact about the MODULE, not a privacy promise.
+ * Those instruction files are prompt text, so what they contain reaches
+ * Claude with every request the agent makes. The first-run copy says so
+ * explicitly. Do not restore "nothing here leaves this computer" on the
+ * strength of what this module does.
  */
 
 const fs = require('node:fs');
