@@ -442,7 +442,8 @@ test('launchctl answering is a pass, and launchctl NOT answering is unknown', ()
   const dead = machine.restartCheck(deadRunner);
   assert.equal(dead.state, 'unknown',
     'a check we could not run was counted as a problem needing action');
-  assert.match(dead.detail, /could not check/);
+  // The pack's unknown row, at the pack's length (first-run spec, screen 4).
+  assert.match(dead.detail, /could not look/);
 });
 
 test('the restart check asks launchctl about THIS login session', () => {

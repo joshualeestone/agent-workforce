@@ -357,8 +357,9 @@ function installedCheck(opts) {
     return {
       key: 'installed',
       state: STATE.OK,
-      title: 'Everything it needs to run is installed',
-      detail: 'There is nothing else for you to go and find.',
+      // The pack's row, verbatim (first-run spec, screen 4 ruling).
+      title: 'Everything it needs is installed',
+      detail: 'Nothing for you to go and find.',
     };
   }
 
@@ -433,8 +434,9 @@ function restartCheck(runner) {
     return {
       key: 'restart',
       state: STATE.UNKNOWN,
-      title: 'We could not tell whether your agents will start themselves',
-      detail: 'They are set up to, and nothing here says they will not. We just could not check.',
+      // The pack's unknown row, verbatim, at the pack's length.
+      title: 'We could not check whether agents start themselves',
+      detail: 'Not the same as it being wrong. We could not look.',
     };
   }
   const got = runner('/bin/launchctl', ['print', `gui/${uid}`]);
@@ -486,10 +488,8 @@ function restartCheck(runner) {
   return {
     key: 'restart',
     state: STATE.UNKNOWN,
-    title: 'We could not tell whether your agents will start themselves',
-    detail: 'The part of macOS that starts things at login did not answer, so we could not '
-      + 'check. They are set up to come back after a restart, and nothing here says they '
-      + 'will not.',
+    title: 'We could not check whether agents start themselves',
+    detail: 'Not the same as it being wrong. We could not look.',
   };
 }
 
