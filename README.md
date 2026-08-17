@@ -278,4 +278,4 @@ correspondence.
   already a disclosure") read as a ban on the names, and a rule stricter than
   its reason gets worked around rather than followed.
 
-This repo is public, so treat every commit accordingly (the rule predates the flip: it has read this way since the repo was private).
+This repo is public. Anything you commit is public the moment you push it, and so is the history.
