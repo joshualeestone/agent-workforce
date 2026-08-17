@@ -49,4 +49,11 @@ printf '[1,2]' > "$TMP/s5.json"
 if python3 "$TMP/merge.py" "$TMP/s5.json" 2>/dev/null; then fail "non-object did not refuse"; fi
 [ "$(cat "$TMP/s5.json")" = "[1,2]" ] || fail "non-object file was touched"
 
-echo "permission acceptance: five states hold (create, merge, refuse-unparseable, no-op, refuse-non-object)"
+# 6. A tightened file keeps its mode through the merge.
+printf '{"theme":"dark"}' > "$TMP/s6.json"
+chmod 600 "$TMP/s6.json"
+python3 "$TMP/merge.py" "$TMP/s6.json" || fail "tightened-file merge exited nonzero"
+_mode="$(stat -f '%Lp' "$TMP/s6.json" 2>/dev/null || stat -c '%a' "$TMP/s6.json")"
+[ "$_mode" = "600" ] || fail "merge widened a tightened file to $_mode"
+
+echo "permission acceptance: six states hold (create, merge, refuse-unparseable, no-op, refuse-non-object, mode-preserved)"

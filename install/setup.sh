@@ -1508,6 +1508,11 @@ tmp = path + '.kosmos.new'
 with open(tmp, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
+if os.path.exists(path):
+    # The person may have tightened their settings file (it can carry an
+    # env block or an apiKeyHelper); a replace must not silently widen it
+    # back to the umask default.
+    os.chmod(tmp, os.stat(path).st_mode & 0o7777)
 os.replace(tmp, path)
 PYEOF
 then

@@ -28,7 +28,8 @@ to web/index.html head (currently zero rel=icon). Title is already
 Josh's ruling verbatim: no extra click, no extra screen, installing IS
 the permission. install/setup.sh writes skipDangerousModePermissionPrompt
 true into ~/.claude/settings.json (merge, never clobber; create the
-file if absent; jq if available, else a careful fallback). The
+file if absent; python3, the one testable path, preserving a tightened
+file's own mode through the replace). The
 bulletin's trap: defaultMode bypassPermissions alone is NOT enough;
 the acceptance key is what stops the wall. Test protocol: Josh's new
 mini deliberately holds the unaccepted state; after this ships, a
@@ -70,5 +71,9 @@ commit ever; a removed secret is still clonable):
   browser-check docs: prune what identifies the fleet (people,
   machines, channels), keep what shows the work (the plans and review
   notes are an asset for an MIT project)
-Josh gets the list + recommendation with the wave PR; the flip and the
-site's GitHub button land on his one-word go.
+SUPERSEDED BY EVENTS, recorded: Josh gave the go in channel at 3:33 PM
+before the PR; the sweep ran clean (482 revisions, no key shapes, no
+credential-named paths, no fleet identifiers) and the repo flipped
+public at 3:36 PM with the plan/review files deliberately kept (they
+show the work and name no machines or channels). The site's GitHub
+button rides the FAQ branch.

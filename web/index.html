@@ -194,19 +194,29 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    at 400 -- so one value padded from one width put focus 22px under the
    bar at 400. */
 html { scroll-padding-top: 132px; }
-@media (max-width: 440px) { html { scroll-padding-top: 170px; } }
-/* ⚠️ THE UPDATE TOAST, ported from the frozen pack (FROZEN-2026-08-16,
-   sha 4091b009). The decisions it carries are the pack's, recorded there and
-   not re-opened here: RED (Josh's call, twice, wanting it unmissable), and
-   #b3261e specifically (the app's one attention red; a second red would be
-   permanent drift). Absolute inside the sticky header so its appearance
-   moves NOTHING underneath; the pack's top:-29px was pack-geometry (their
-   demo chip row), the app value below is measured against this header so
-   the toast clears both the New agent button and the checked stamp.
-   The Install button is gold (#e3b341, the pack's --gold-bright): gold is
-   the primary ACTION colour in the design system even though this app has
-   not adopted a general accent, and an all-red toast would read as an error
-   rather than something waiting for you. */
+/* Re-measured 2026-08-17 with the inline update notice PRESENT (the worst
+   case; the comment above says per width, and the notice changed the
+   heights): desktop stays 128 tall so 132 still clears; between 441 and
+   720 the notice wraps onto its own row (157 measured at 600); at 440 and
+   below the header wraps further (179 measured at 375). Padded to clear
+   the with-notice height; without a notice the rescue lands a little low,
+   which is harmless in the direction the guard cares about. */
+@media (max-width: 720px) { html { scroll-padding-top: 165px; } }
+@media (max-width: 440px) { html { scroll-padding-top: 187px; } }
+/* ⚠️ THE UPDATE NOTICE, ported from the frozen pack. The decisions it
+   carries are the pack's, recorded there and not re-opened here: RED
+   (Josh's call, twice, wanting it unmissable), and #b3261e specifically
+   (the app's one attention red; a second red would be permanent drift).
+   PLACEMENT superseded 2026-08-17 (Josh; pack 2e4e100): it sits IN THE
+   FLOW of the header's left group beside the mark. The old absolute float
+   -- whose own comment called absolute "the requirement" -- carried a
+   measured offset and a history of covering the agent-status stamp; in
+   the flow it cannot overlap anything, the row's x-positions are pinned
+   unshifted by the toast drive, and the header growing ~8px taller while
+   a notice waits is the accepted trade (the pack's mobile note blessed
+   exactly that direction). The Install button is gold (#e3b341, the
+   pack's --gold-bright): gold is the primary ACTION colour, and an
+   all-red notice would read as an error rather than something waiting. */
 .utoast {
   --utone: #b3261e;
   /* IN THE FLOW, beside the mark (Josh 2026-08-17; pack 2e4e100). The old
@@ -228,13 +238,11 @@ html { scroll-padding-top: 132px; }
    the confirm's Update. Two selectors so it outweighs .btn regardless of
    declaration order. */
 button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
-/* ⚠️ Mobile is IN-FLOW, deliberately breaking the desktop float rule: at
-   375 there is no empty region -- the first float guess covered the New
-   agent button and the second covered three of the four tabs, both caught
-   by bounding-box checks. Between "the header grows when an update is
-   waiting" and "three tabs are unclickable until Later is pressed", the
-   first is the harm a person can live with. The version line hides to keep
-   it one row. */
+/* Narrow screens: in-flow like everywhere else now (the float this rule
+   used to break against is retired). The version line hides and the left
+   group wraps the notice onto its own row -- "the header grows when an
+   update is waiting" is the harm a person can live with, per the original
+   trade. */
 @media (max-width: 720px) {
   /* Inline everywhere now; narrow screens just drop the version line and
      let the header's left group wrap the notice onto its own row. */
@@ -254,6 +262,8 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
            border-bottom: 0.5px solid var(--separator); }
 .apphead .tabs { margin-bottom: 0; padding-bottom: var(--space-4); }
 .headleft { display: flex; align-items: center; gap: var(--space-5); }
+/* An empty slot is a flex item and would spend one trailing gap. */
+#utoast-slot:empty { display: none; }
 .klink { border: 0; background: none; padding: 0; cursor: pointer; display: block; line-height: 0; }
 .klink img { width: 34px; height: 34px; display: block; }
 .klink:focus-visible { outline: 2px solid var(--label); outline-offset: 4px; border-radius: 8px; }

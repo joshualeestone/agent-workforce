@@ -4427,6 +4427,17 @@ test('the tab icons are served as images, and a wrong icon path cannot fall thro
   assert.match(JSON.parse(miss.body).error, /no such icon/);
   const stray = await req('/icons/anything-else.txt');
   assert.equal(stray.status, 404);
+  // The encoded spelling must not reach the page (the /api/ guard's own
+  // documented lesson, applied to this sibling).
+  const encoded = await req('/icons%2fanything');
+  assert.equal(encoded.status, 404, 'the encoded spelling leaked through to the page');
+  // HEAD answers like GET, headers only.
+  const head = await req('/icons/kosmos-32.png', { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.type, 'image/png');
+  // /favicon.ico 404s by design (matching the site); never the page at 200.
+  const ico = await req('/favicon.ico');
+  assert.equal(ico.status, 404, 'favicon.ico got the page dressed as an icon');
   // And the head really declares them: all four links plus the apple one,
   // no favicon.ico anywhere (the site 404s it by design; we match).
   const page = await req('/');

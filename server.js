@@ -2446,16 +2446,26 @@ const server = http.createServer((req, res) => {
      above exists to stop. A name outside the allowlist 404s as JSON rather
      than serving the page as an image. */
   const iconGet = pathname.match(/^\/icons\/(kosmos-(?:16|32|48|180)\.png)$/);
-  if (iconGet && req.method === 'GET') {
+  if (iconGet && (req.method === 'GET' || req.method === 'HEAD')) {
     fs.readFile(path.join(__dirname, 'web', 'icons', iconGet[1]), (err, buf) => {
       if (err) { sendJson(res, 404, { error: 'no such icon' }); return; }
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' });
-      res.end(buf);
+      res.end(req.method === 'HEAD' ? undefined : buf);
     });
     return;
   }
-  if (pathname.startsWith('/icons/')) {
+  // Compared against the DECODED path, the same lesson the /api/ guard
+  // above records: /icons%2fx does not start with /icons/ as a string, and
+  // an un-decoded check would hand the encoded spelling the page at 200.
+  if (apiPath.startsWith('/icons/') || apiPath === '/icons') {
     sendJson(res, 404, { error: 'no such icon' });
+    return;
+  }
+  // /favicon.ico 404s BY DESIGN, matching the site: the icon set is the
+  // four explicit PNGs above, and a probe for the .ico must not receive
+  // the page dressed as an icon (the silent-success signature again).
+  if (apiPath === '/favicon.ico') {
+    sendJson(res, 404, { error: 'no favicon.ico: the icons are /icons/kosmos-<size>.png' });
     return;
   }
 
