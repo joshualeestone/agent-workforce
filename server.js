@@ -2439,6 +2439,45 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* The tab icons (#45, Josh 2026-08-17). An explicit allowlist of the four
+     shipped sizes, because everything else below falls through to the page:
+     without this route, /icons/kosmos-32.png would answer HTML at 200 with
+     the wrong content type, the same silent-success signature the API guard
+     above exists to stop. A name outside the allowlist 404s as JSON rather
+     than serving the page as an image. */
+  const iconGet = pathname.match(/^\/icons\/(kosmos-(?:16|32|48|180)\.png)$/);
+  if (iconGet && (req.method === 'GET' || req.method === 'HEAD')) {
+    fs.readFile(path.join(__dirname, 'web', 'icons', iconGet[1]), (err, buf) => {
+      if (err) { sendJson(res, 404, { error: 'no such icon' }); return; }
+      // A day of cache is a choice: a redesigned icon may serve stale for
+      // up to 24h after an update, accepted for favicon-class assets.
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' });
+      res.end(req.method === 'HEAD' ? undefined : buf);
+    });
+    return;
+  }
+  // Compared against the DECODED path, the same lesson the /api/ guard
+  // above records: /icons%2fx does not start with /icons/ as a string, and
+  // an un-decoded check would hand the encoded spelling the page at 200.
+  // (The doubled-slash spelling //icons/x never reaches here: pathOf
+  // refuses protocol-relative shapes with a 400, measured; the test pins
+  // that it cannot get the page either way.)
+  // Case-insensitive: macOS filesystems are, and /Icons/x reaching the
+  // page as HTML would be the same silent-success shape in one more
+  // spelling. (Browsers request the exact lowercase hrefs; this is
+  // belt-and-braces for probes.)
+  if (/^\/icons(\/|$)/i.test(apiPath)) {
+    sendJson(res, 404, { error: 'no such icon' });
+    return;
+  }
+  // /favicon.ico 404s BY DESIGN, matching the site: the icon set is the
+  // four explicit PNGs above, and a probe for the .ico must not receive
+  // the page dressed as an icon (the silent-success signature again).
+  if (apiPath === '/favicon.ico') {
+    sendJson(res, 404, { error: 'no favicon.ico: the icons are /icons/kosmos-<size>.png' });
+    return;
+  }
+
   const file = path.join(__dirname, 'web', 'index.html');
   fs.readFile(file, (err, buf) => {
     if (err) {

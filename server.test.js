@@ -4409,6 +4409,55 @@ test('the reveal-app route opens Finder through the engine and honours nothing f
   }
 });
 
+test('the tab icons are served as images, and a wrong icon path cannot fall through to the page', async () => {
+  // The page fallthrough serves HTML for every unmatched path, so without
+  // the explicit route an icon URL would answer HTML at 200 -- a browser
+  // shows a broken tab icon while the server reports success. The four
+  // shipped sizes answer as PNGs; anything else under /icons/ is a JSON
+  // 404, never the page dressed as an image.
+  for (const size of [16, 32, 48, 180]) {
+    const res = await req(`/icons/kosmos-${size}.png`);
+    assert.equal(res.status, 200, `kosmos-${size}.png`);
+    assert.equal(res.type, 'image/png');
+    assert.ok(res.body.length > 200, 'a real image, not an empty file');
+    assert.ok(!/^<!doctype/i.test(String(res.body).slice(0, 20)), 'the page leaked through as an icon');
+  }
+  const miss = await req('/icons/kosmos-64.png');
+  assert.equal(miss.status, 404);
+  assert.match(JSON.parse(miss.body).error, /no such icon/);
+  const stray = await req('/icons/anything-else.txt');
+  assert.equal(stray.status, 404);
+  const cased = await req('/Icons/kosmos-32.png');
+  assert.equal(cased.status, 404, 'the cased spelling leaked through to the page');
+  // The encoded spelling must not reach the page (the /api/ guard's own
+  // documented lesson, applied to this sibling).
+  const encoded = await req('/icons%2fanything');
+  assert.equal(encoded.status, 404, 'the encoded spelling leaked through to the page');
+  // The doubled-slash spelling is refused upstream by pathOf (400,
+  // protocol-relative shape); the invariant that matters is that no
+  // spelling gets the PAGE dressed as an icon.
+  const doubled = await req('//icons/anything');
+  assert.ok(doubled.status === 400 || doubled.status === 404, `unexpected ${doubled.status}`);
+  assert.match(doubled.type, /application\/json/, 'the doubled-slash spelling got the page');
+  // HEAD answers like GET, headers only.
+  const head = await req('/icons/kosmos-32.png', { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.type, 'image/png');
+  // /favicon.ico 404s by design (matching the site); never the page at 200.
+  const ico = await req('/favicon.ico');
+  assert.equal(ico.status, 404, 'favicon.ico got the page dressed as an icon');
+  // And the head really declares them: all four links plus the apple one,
+  // no favicon.ico anywhere (the site 404s it by design; we match).
+  const page = await req('/');
+  for (const size of [16, 32, 48]) {
+    assert.ok(page.body.includes(`/icons/kosmos-${size}.png`), `link for ${size}`);
+  }
+  assert.ok(page.body.includes('apple-touch-icon'), 'the 180 link');
+  // The head COMMENT names favicon.ico to document its deliberate absence,
+  // so the pin matches an actual link href, not the string.
+  assert.ok(!/href="[^"]*favicon\.ico/.test(page.body), 'no .ico link: the explicit-PNG shape');
+});
+
 test('the reveal-app route keeps refusals and programming errors apart', async () => {
   // The mapping under test lives in the ROUTE, so the engine is patched
   // directly (same module instance the server holds): an honest refusal is

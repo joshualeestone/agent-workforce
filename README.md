@@ -1,7 +1,7 @@
-# Agent Workforce (working name)
+# Kosmos
 
-A small team of agents that runs on your own computer, under your own
-Claude subscription.
+Manage a workforce of AI agents on your own Mac. Your agents, your
+computer, your AI subscription.
 
 ## Installing (the product's front door)
 
@@ -278,4 +278,4 @@ correspondence.
   already a disclosure") read as a ban on the names, and a rule stricter than
   its reason gets worked around rather than followed.
 
-This repo is private now and public later, so treat every commit as public.
+This repo is public. Anything you commit is public the moment you push it, and so is the history.

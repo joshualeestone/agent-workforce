@@ -61,7 +61,7 @@ const RELPORT = 4654;
     const txt = await p.locator('.utoast .utxt').textContent();
     if (!/Update available/.test(txt) || !/Kosmos 9\.9\.9/.test(txt)) die('toast text wrong: ' + txt);
 
-    // It floats: no overlap with the header controls.
+    // In the flow beside the mark; the checks below prove no overlap with the header controls either way.
     const boxes = {};
     for (const [k, sel] of [['toast', '.utoast'], ['newagent', '#new-agent'], ['checked', '#checked']]) {
       boxes[k] = await p.locator(sel).boundingBox();
@@ -69,6 +69,45 @@ const RELPORT = 4654;
     const overlap = (a, c) => a && c && a.x < c.x + c.width && c.x < a.x + a.width && a.y < c.y + c.height && c.y < a.y + a.height;
     if (overlap(boxes.toast, boxes.newagent)) die('toast overlaps the New agent button');
     if (overlap(boxes.toast, boxes.checked)) die('toast overlaps the checked stamp');
+
+    // The drawn placement (#47, pack 2e4e100): the notice lives INSIDE the
+    // header's left group, in line beside the mark, not floating anywhere.
+    // Without this pin, the clear-of-controls checks pass any placement.
+    const placement = await p.evaluate(() => {
+      const t = document.querySelector('.utoast');
+      const k = document.getElementById('klink');
+      const inLeft = !!t.closest('.headleft');
+      const tb = t.getBoundingClientRect();
+      const kb = k.getBoundingClientRect();
+      return { inLeft, rightOfMark: tb.left >= kb.right,
+               sameBand: Math.abs((tb.top + tb.height / 2) - (kb.top + kb.height / 2)) < kb.height,
+               staticPos: getComputedStyle(t).position === 'static' };
+    });
+    if (!placement.inLeft || !placement.rightOfMark || !placement.sameBand || !placement.staticPos) {
+      die('desktop: the notice is not inline beside the mark ' + JSON.stringify(placement));
+    }
+
+    // The old absolute comment's warning, mechanized: a child in the flow
+    // must not re-space the row. Measured 2026-08-17: zero x-shift on the
+    // right group; the header grows 8px taller, the trade the pack's own
+    // mobile comment blesses ("the header grows when an update is waiting"
+    // over anything unclickable). Pin the x-shift at zero.
+    const withToast = await p.evaluate(() => ({
+      newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
+      checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
+    }));
+    // display:none, not an innerHTML round trip: rebuilding the markup from
+    // a string would strip the buttons' listeners and kill the Install step
+    // this drive runs later.
+    await p.evaluate(() => { document.getElementById('utoast-slot').style.display = 'none'; });
+    const sansToast = await p.evaluate(() => ({
+      newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
+      checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
+    }));
+    await p.evaluate(() => { document.getElementById('utoast-slot').style.display = ''; });
+    if (withToast.newagent !== sansToast.newagent || withToast.checked !== sansToast.checked) {
+      die('the notice re-spaces the header row: ' + JSON.stringify({ withToast, sansToast }));
+    }
     await p.screenshot({ path: path.join(REPO, 'docs/browser-checks/shots/update-toast.png') });
 
     // The toast's Install is GOLD (the pack's action colour): the neutral

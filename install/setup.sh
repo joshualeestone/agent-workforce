@@ -803,6 +803,17 @@ uninstall() {
   else
     printf '\n  Kosmos is removed.\n\n'
   fi
+  # ⚠️ Named, not removed: the install may have recorded the agent
+  # permission setting in Claude Code's own config, but that file can carry
+  # the person's real settings and the same key set by their own hand --
+  # an uninstaller cannot tell, so deleting it would overstep. The
+  # reversibility contract is honored by NAMING what was left, per the
+  # header's rule that anything not removed is left alone and named.
+  if [ -f "$HOME/.claude/settings.json" ] && grep -q 'skipDangerousModePermissionPrompt' "$HOME/.claude/settings.json" 2>/dev/null; then
+    printf '  One setting was left in place: skipDangerousModePermissionPrompt in\n'
+    printf '  ~/.claude/settings.json (agents skip per-action permission prompts).\n'
+    printf '  Delete that line there if you want the question back.\n\n'
+  fi
   exit 0
 }
 
@@ -1468,6 +1479,87 @@ else
   elif [ "$APP_OTHER_OWNER" = "yes" ]; then
     info "(something else has the Kosmos spot in Applications; it was left alone)"
   fi
+fi
+
+# ---- the permission acceptance (#46, Josh's ruling 2026-08-17) --------------
+# Agents run Claude Code with permission prompts skipped; the FIRST such run
+# on a machine shows Claude Code's own full-screen acceptance wall, and an
+# agent stuck at it looks exactly like an agent thinking (Josh met this on a
+# clean Mac: his first message sat against a wall of warning text). His
+# ruling, verbatim intent: no extra click, no extra screen -- "when they're
+# installing it they're giving us permission to do all of those things." So
+# the install records the acceptance the wall exists to collect.
+#
+# ⚠️ The key is skipDangerousModePermissionPrompt in ~/.claude/settings.json.
+# The fleet bulletin's trap: defaultMode alone is NOT enough; only this key
+# stops the wall. MERGE, never clobber -- the file may carry a person's real
+# Claude Code settings, and an installer that eats somebody's config to set
+# one flag is worse than the wall. The merge runs on the Node runtime THIS
+# INSTALL just verified runnable -- /usr/bin/python3 is a Command Line Tools
+# shim, and its first invocation on a clean Mac can pop Apple's developer-
+# tools dialog mid-install, the exact machine this block exists for. If the
+# file exists but cannot be parsed as JSON (or is not an object), LEAVE IT
+# ALONE and say so (fail-soft: the wall appearing later is recoverable; a
+# clobbered config is not) -- one Enter in the agent's session clears it,
+# per docs/clean-machine-retest.md. The symlink, mode, and zero-byte edges
+# are each pinned by tools/test-permission-acceptance.sh.
+_claude_settings="$HOME/.claude/settings.json"
+if "$KOSMOS_HOME/runtime/bin/node" - "$_claude_settings" <<'NODEEOF' 2>/dev/null
+const fs = require('fs');
+const p = require('path');
+// realpath FIRST: the file may be a symlink into a dotfiles repo, and a
+// rename over the link would sever it, stranding the dotfiles copy while
+// the setting stops tracking. Writing through preserves the arrangement.
+let target = process.argv[2];
+try {
+  target = fs.realpathSync(target);
+} catch {
+  // Absent is the clean case -- unless the PATH ITSELF is a dangling
+  // symlink: renaming over that would replace the link with a file, the
+  // exact severing realpath exists to prevent. Somebody's arrangement;
+  // leave it and let the wall be the recoverable outcome.
+  try { if (fs.lstatSync(target).isSymbolicLink()) process.exit(1); } catch { /* truly absent */ }
+}
+let data = {};
+let prevMode = null;                     // any existing file's mode survives,
+                                         // zero-byte included: empty carries
+                                         // nobody's settings but the chmod was
+                                         // still somebody's hand
+try {
+  const st = fs.statSync(target);
+  prevMode = st.mode & 0o7777;
+  if (st.size > 0) {
+    data = JSON.parse(fs.readFileSync(target, 'utf8'));   // throws -> refusal
+    if (!data || typeof data !== 'object' || Array.isArray(data)) process.exit(1);
+  }
+} catch (err) {
+  if (err && err.code === 'ENOENT') { /* absent is the clean case */ }
+  else if (err instanceof SyntaxError) process.exit(1);   // somebody's file, leave it
+  else process.exit(1);
+}
+if (data.skipDangerousModePermissionPrompt === true) process.exit(0);
+data.skipDangerousModePermissionPrompt = true;
+fs.mkdirSync(p.dirname(target), { recursive: true });
+const tmp = target + '.kosmos.new';
+// Born at the preserved mode, not chmodded into it: a tightened file's
+// merged contents must never sit world-readable even for the window
+// between write and chmod (the chmod after still runs for umask
+// exactness).
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', prevMode !== null ? { mode: prevMode } : {});
+if (prevMode !== null) {
+  // The person may have tightened their settings file; a replace must not
+  // silently widen it back to the umask default.
+  fs.chmodSync(tmp, prevMode);
+}
+fs.renameSync(tmp, target);
+NODEEOF
+then
+  info "agents will not stop to ask permission for each action; installing is that permission"
+  info "(this answers Claude Code's one-time skip-permissions question for this whole Mac,"
+  info "so anything else using that mode will not ask either)"
+else
+  info "could not record the agent permission setting; the first agent may show a"
+  info "one-time question in its own window, and answering it once clears it for good"
 fi
 
 # ---- start ------------------------------------------------------------------
