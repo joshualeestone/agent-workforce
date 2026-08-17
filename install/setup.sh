@@ -1125,6 +1125,14 @@ make_app() {
   # harness, and a harness must leave that database alone.
   if [ -z "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ]; then
     local lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    # ⚠️ TOUCH BEFORE REGISTERING. Finder and the Dock decide whether to
+    # re-read a bundle's icon off the bundle directory's mtime, and the icns
+    # is the LAST file staged into it -- so on the machine where this matters
+    # most (a brand-new Mac, measured on Josh's first clean-machine install,
+    # 2026-08-17: app present, Get Info previews the icon, Dock draws the
+    # generic one) the tile can freeze on the pre-icon read. The touch makes
+    # the re-read happen; the register makes it stick.
+    /usr/bin/touch "$app" 2>/dev/null || true
     [ -x "$lsreg" ] && "$lsreg" -f "$app" >/dev/null 2>&1 || true
   fi
   return 0
