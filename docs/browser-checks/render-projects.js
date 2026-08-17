@@ -802,7 +802,10 @@ async function main() {
       // 8c. The agents toggle drives the agents board -- and ONLY it.
       await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
       const agLay = await page.evaluate(() => ({
-        aslist: document.getElementById('grid').classList.contains('aslist'),
+        /* stage 3/4 rebuild: the agents list is its own #alist markup and
+           the toggle flips hidden between the two containers -- .aslist is
+           gone, so the assertion follows the mechanism that replaced it */
+        aslist: document.getElementById('grid').hidden && !document.getElementById('alist').hidden,
         pressed: document.querySelector('.viewtoggle[data-scope="agents"] [data-layout="list"]').getAttribute('aria-pressed'),
         pjTouched: document.getElementById('pj-list').classList.contains('asgrid'),
       }));
@@ -834,7 +837,7 @@ async function main() {
       await page.waitForTimeout(300);
       const kept = await page.evaluate(() => ({
         pj: document.getElementById('pj-list').classList.contains('asgrid'),
-        ag: document.getElementById('grid').classList.contains('aslist'),
+        ag: document.getElementById('grid').hidden && !document.getElementById('alist').hidden,
         pressed: document.querySelector('.viewtoggle[data-scope="projects"] [data-layout="grid"]').getAttribute('aria-pressed'),
       }));
       if (!kept.pj || !kept.ag || kept.pressed !== 'true') {

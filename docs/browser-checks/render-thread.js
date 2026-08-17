@@ -319,12 +319,12 @@ async function main() {
   try {
     /* ── 1. the one click out of the stranded state ─────────────────────── */
     await page.goto(BASE, { waitUntil: 'networkidle' });
-    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.waitForSelector('.acard', { timeout: 10000 });
     await page.screenshot({ path: path.join(OUT, 'thread-0-needs-you-card.png'), fullPage: true });
 
-    const answerBtn = page.locator('.card[data-agent="mara"] .card-answer');
+    const answerBtn = page.locator('.acard[data-agent="mara"] .ansgo');
     check(await answerBtn.count() === 1, 'the "Needs you" card carries exactly one way into the question');
-    check(await page.locator('.card[data-agent="nils"] .card-answer').count() === 0,
+    check(await page.locator('.acard[data-agent="nils"] .ansgo').count() === 0,
       'a card that is NOT asking anything does not offer to show a question');
 
     /* ⚠️ THE BORROWED-NAME CARD, as the pipeline actually serves it.
@@ -337,7 +337,7 @@ async function main() {
        asserted here: the untied card is on the board (the fixture's whole
        point), the API control confirms it arrives untied with its state
        withheld as unknown, and it carries no way into a question. */
-    const rookCard = page.locator('.card[data-agent="rook"]');
+    const rookCard = page.locator('.acard[data-agent="rook"]');
     check(await rookCard.count() === 1, 'CONTROL: the borrowed-name card is on the board at all');
     const rookState = await page.evaluate(async () => {
       const body = await (await fetch('/api/status')).json();
@@ -347,7 +347,7 @@ async function main() {
     check(rookState !== null && rookState.tied === false && rookState.state === 'unknown',
       'CONTROL: the pipeline serves the borrowed name UNTIED with its state withheld as unknown',
       JSON.stringify(rookState));
-    check(await rookCard.locator('.card-answer').count() === 0,
+    check(await rookCard.locator('.ansgo').count() === 0,
       'a borrowed-name card gets NO "See the question" button');
 
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose

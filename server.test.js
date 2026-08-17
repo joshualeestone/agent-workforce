@@ -2347,11 +2347,14 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
     // reconstructs the behaviour it is testing is the same defect as a
     // source-shape assertion, one level in.
     const from = script.indexOf('const bits = [');
-    const write = script.indexOf("document.getElementById('summary').textContent");
-    const body = script.slice(from, script.indexOf('\n', write) + 1);
+    /* stage 2 of the pack rebuild routed the write through `sumEl` (the
+       residual summary hides itself when empty), so the end anchor follows:
+       the slice still INCLUDES the write and the join, per the lesson above. */
+    const write = script.indexOf('sumEl.textContent = bits.join');
+    const body = script.slice(from, script.indexOf('\n', script.indexOf('sumEl.hidden')) + 1);
     // eslint-disable-next-line no-new-func
     new Function('document', 'c', body)(document, counts);
-    return el.textContent;
+    return el;
   };
 
   // ⚠️ Every other count is non-zero on purpose. With them at zero the notice is
@@ -2360,18 +2363,26 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   // notice has to be pinned where it actually sits: LAST, after everything else
   // the line can carry.
   const partial = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 });
-  assert.match(partial, /could not read/,
+  assert.match(partial.textContent, /could not read/,
     'the board shows what it managed to parse as the whole machine, with nothing '
     + 'on screen saying agents are missing from it');
-  assert.match(partial, /1 /, 'the notice does not say how many lines were lost');
+  assert.match(partial.textContent, /1 /, 'the notice does not say how many lines were lost');
+  // The harness-proof (assert presence before absence) rides HERE now: a
+  // rendered notice above proves the extracted block really ran.
+  assert.equal(partial.hidden, false, 'a summary with residual notices must show itself');
 
-  // ⚠️ THE CONTROL. A clean answer must carry NO such notice: a warning that is
-  // always on screen is one nobody reads, which is how the other counts on this
-  // line are written.
+  /* ⚠️ THE CONTROL, updated with the stage-2 pack rebuild: the headline
+     counts moved to the stats tiles, so #summary is RESIDUAL-ONLY -- on a
+     clean board its correct output is EMPTY and it hides itself. The old
+     control asserted "12 agents" appears, which pinned the retired
+     sentence; the positive claim now is emptiness PLUS the self-hide, so a
+     mutation that leaves a permanent warning (or a permanently visible
+     empty box) still fails. */
   const clean = summarise({ total: 12, needsYou: 0, unknown: 0, unknownFullness: 0, unreadableLines: 0 });
-  assert.doesNotMatch(clean, /could not read/,
+  assert.doesNotMatch(clean.textContent, /could not read/,
     'a healthy board carries a permanent warning about unreadable lines');
-  assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
+  assert.equal(clean.textContent, '', 'the residual-only summary invented copy on a clean board');
+  assert.equal(clean.hidden, true, 'an empty summary must hide itself, not sit as a blank line');
 });
 
 test('update awareness: the status tick carries the verdict, and the install route refuses honestly', async () => {
@@ -2987,7 +2998,7 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // leaked one keystroke onto the board behind the backdrop.
     [/document\.activeElement === order\[order\.length - 1\]/, 'the focus trap wraps at the wrong end and leaks a keystroke behind the modal'],
     // The removed list is part of the board, so it refreshes with it.
-    [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
+    [/if \(onAgentsTab\(\)\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],
 
     /* ---- project chat, this branch ---------------------------------------

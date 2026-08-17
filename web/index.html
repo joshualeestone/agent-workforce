@@ -990,23 +990,27 @@ svg { display: block; }
    at 0 the tracks resolve a few pixels wider, the container lands 6px off the
    cards, and "almost aligned" reads worse than not trying. Row gap stays 0:
    `.removed-list` spaces its own rows. */
-.removed-wrap { display: grid; gap: 0 var(--space-5); justify-content: center;
-                grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
-                max-width: 1320px; margin: var(--space-6) auto var(--space-8); }
-.removed-wrap > * { grid-column: 1 / -1; }
-.linkish { background: none; border: 0; padding: var(--space-2) 0;
-           font: var(--text-callout) var(--font-ui); color: var(--label-2);
-           text-decoration: underline; cursor: pointer; }
-.linkish:hover { color: var(--label); }
-.removed-list { margin-top: var(--space-3); display: flex;
-                flex-direction: column; gap: var(--space-2); }
-.removed-row { display: flex; align-items: center; gap: var(--space-4);
-               flex-wrap: wrap; padding: var(--space-3) var(--space-4);
-               border: 0.5px solid var(--separator); border-radius: 8px;
-               background: var(--bg-elevated); }
-.removed-row .who { font: var(--text-body) var(--font-ui); color: var(--label); }
-.removed-row .when { font: var(--text-callout) var(--font-ui); color: var(--label-2);
-                     margin-right: auto; }
+/* The pack's removed-section grammar (stage 5): a quiet rule above, an
+   underlined text toggle, rows that read name-over-meta with Restore on
+   the right, hairlines BETWEEN rows only. The old grid-alignment tricks
+   died with the old card grid; the .cards grid is full-width, so this is
+   an ordinary block under it. */
+.removed-wrap { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-rule); }
+.linkish { background: none; border: 0; padding: 0;
+           font: inherit; font-size: .875rem; font-weight: 600;
+           color: var(--k-ink-2); text-decoration: underline; cursor: pointer; }
+.linkish:hover { color: var(--k-ink); }
+.linkish:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.removed-list { margin-top: 14px; max-width: 34rem; }
+.removed-row { display: flex; align-items: center; justify-content: space-between;
+               gap: 14px; padding: 10px 0; }
+.removed-row + .removed-row { border-top: 1px solid var(--k-rule); }
+.removed-row .who { display: block; font-size: 1rem; font-weight: 600; color: var(--k-ink); }
+.removed-row .when { display: block; font-size: .8125rem; color: var(--k-ink-2); }
+/* the pack's reassurance line, and it is true of this app: removal stops
+   and hides, it never deletes the folder */
+.removed-hint { margin: 10px 0 0; font-size: .8125rem; line-height: 1.5;
+                color: var(--k-ink-2); }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
 .removed-msg { margin-top: var(--space-4); font: var(--text-callout) var(--font-ui);
@@ -2604,7 +2608,7 @@ function card(a) {
 
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="agauge">${ring(a)}${pres}${badge}</div>
-    <div class="aname">${esc(a.name)}${a.nameDerived ? '' : '<span class="flag" title="We could not find a real name for this one, so this is the machine name">machine name</span>'}${staleBadge(a)}</div>
+    <div class="aname">${esc(a.name)}${staleBadge(a)}</div>
     <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${copy.label}</b>${answer}</div>
     <div class="atask">${esc(taskLine(a))}</div>
     ${unknownNote}
@@ -3363,8 +3367,16 @@ function openDetail(sessionName) {
   if (!a) return;
   CURRENT = a;
   document.getElementById('d-name').textContent = a.name;
+  /* ⚠️ The machine-name disclosure moved HERE from the card (Mona Lisa's
+     catch on the stage-3 pair, 2026-08-17): the pack records Josh's
+     audience ruling against machine-name talk on the card, and the pack's
+     own split is "the card carries signals, the panel carries
+     explanation". The fact itself is honest-state and survives -- on the
+     screen with room to explain it. `nameDerived === false` means the
+     display name IS the machine name because no real one was found. */
   document.getElementById('d-meta').textContent =
-    [a.profile && a.profile.role || a.role, a.modelName].filter(Boolean).join(' · ');
+    [a.profile && a.profile.role || a.role, a.modelName,
+     a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   document.getElementById('d-state').textContent =
     copy.label + (a.task ? ' — ' + a.task : '');
@@ -4422,7 +4434,11 @@ async function paintRemoved() {
     return;
   }
   wrap.hidden = false;
-  toggle.textContent = (REMOVED_OPEN ? 'Hide' : 'Show') + ' removed agents (' + gone.length + ')';
+  /* ⚠️ CONSTANT LABEL, the pack's call: the control names the list, not
+     the direction; aria-expanded and the list itself carry open/closed.
+     A flipping Show/Hide made the five-second repaint move the word under
+     the pointer. */
+  toggle.textContent = 'Show removed agents (' + gone.length + ')';
   toggle.setAttribute('aria-expanded', String(REMOVED_OPEN));
   list.hidden = !REMOVED_OPEN;
   /**
@@ -4449,11 +4465,14 @@ async function paintRemoved() {
    * becomes visible.
    */
   const html = gone.map((a) => '<div class="removed-row">'
-    + '<span class="who">' + esc(a.shownAs || a.name) + '</span>'
+    + '<div><span class="who">' + esc(a.shownAs || a.name) + '</span>'
     + '<span class="when">' + esc(whenRemoved(a))
-    + (a.stopped === false ? ' · <b>may still be running</b>' : '') + '</span>'
+    + (a.stopped === false ? ' · <b>may still be running</b>' : '') + '</span></div>'
     + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
-    + '</div>').join('');
+    + '</div>').join('')
+    /* the hint rides INSIDE the list so it shows exactly when the rows do;
+       it restates what makes the light Remove confirmation honest */
+    + '<p class="removed-hint">Nothing was deleted. Their folders and everything you wrote for them are still on this computer, so restoring puts them back as they were.</p>';
 
   /**
    * ⚠️ ONLY REWRITE WHEN THE ANSWER ACTUALLY CHANGED, and this is not an
