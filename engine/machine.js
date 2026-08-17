@@ -566,9 +566,11 @@ function appLocationCheck(opts) {
   } else {
     dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
   }
+  // The pack's row, verbatim: "you will find it" tells a person what to do
+  // next where "Kosmos is" only reports a fact (screen 1 ruling).
   const TITLES = [
-    'Kosmos is in your Applications folder',
-    'Kosmos is in the Applications folder inside your home folder',
+    'You will find it in your Applications folder',
+    'You will find it in the Applications folder inside your home folder',
   ];
   const OPEN_FROM_THERE = 'Open it from there whenever you want it. Clicking it starts '
     + 'Kosmos if it is not already running.';

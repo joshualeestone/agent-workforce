@@ -3852,7 +3852,7 @@ test('the return step paints a look in progress, then the engine answer, and cou
   // per-state variants died with the redesign, and every case asserts the
   // same ruled line.
   const cases = [
-    [{ key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it from there.' },
+    [{ key: 'app-location', state: 'ok', title: 'You will find it in your Applications folder', detail: 'Open it from there.' },
       /Drag Kosmos onto the Dock, the strip of icons/],
     [{ key: 'app-location', state: 'attention', title: 'We could not find the Kosmos icon', detail: 'Not the same as it not being there.' },
       /Drag Kosmos onto the Dock, the strip of icons/],
@@ -3971,12 +3971,12 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   const e2 = fn();
   assert.equal(t5.calls(), 1,
     'the second entry re-fired the route instead of joining the in-flight look');
-  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'You will find it in your Applications folder', detail: 'Open it.' } }) });
   await e1; await e2;
   // The NEWEST entry's paint is what stands; the stale continuation returned
   // without touching the pane (both write the same answer here, so the
   // observable pin is: the answer landed exactly, and the dock matches it).
-  assert.match(t5.els['fr-return-row'].innerHTML, /Kosmos is in your Applications folder/);
+  assert.match(t5.els['fr-return-row'].innerHTML, /You will find it in your Applications folder/);
   assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/);
 
   // Second scenario: entries 3 and 4 SHARE one look (asserted by call
@@ -4008,7 +4008,7 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   assert.equal(t5.calls(), 3);
   const before = t5.els['fr-return-row'].innerHTML; // this entry's placeholder
   t5.leave();
-  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'Kosmos is in your Applications folder', detail: 'Open it.' } }) });
+  t5.resolve({ ok: true, json: async () => ({ appLocation: { key: 'app-location', state: 'ok', title: 'You will find it in your Applications folder', detail: 'Open it.' } }) });
   await e5;
   assert.equal(t5.els['fr-return-row'].innerHTML, before,
     'a look resolving after the person left the step repainted the pane');
