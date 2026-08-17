@@ -857,6 +857,9 @@ svg { display: block; }
    the one thing this screen is for. The board is not dimmed here, it is not
    there yet.
 --------------------------------------------------------------------------- */
+#fr-dots { position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+           pointer-events: none; }
+.fr-box { position: relative; }
 .fr-back { position: fixed; inset: 0; background: var(--bg-sunken); z-index: 60;
            overflow-y: auto; display: flex; justify-content: center;
            padding: var(--space-8) var(--space-5); }
@@ -1372,6 +1375,10 @@ svg { display: block; }
      Deep-linkable as /?first-run=1 (and &fr-step=N), which is the only way to
      screenshot it on a machine that has already been through it. -->
 <div class="fr-back" id="firstrun" hidden>
+  <!-- The pack's dot field (#44, Josh's clean-install catch): the setup
+       backdrop animates the same slow pale drift the pack draws behind its
+       flow card. Decorative and inert; the card stacks above it. -->
+  <canvas id="fr-dots" aria-hidden="true"></canvas>
   <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
     <div class="fr-body">
       <!-- The pack's card head: the real mark, centered. The step crumb is
@@ -8004,6 +8011,9 @@ function frGo(step) {
   // advance a step or repaint a pane they are no longer on.
   if (step !== FR_STEP_YOU) FR_YOU_GEN += 1;
   FR_STEP = step;
+  // The dot field warms from grey toward the golds as the steps advance
+  // (the pack's progression; only the colour survives of the old gather).
+  frDots.progress((step - 1) / (FR_STEPS - 1));
   // ⚠️ Cleared on every step change. It is written once when the completion
   // flag will not stick, and without this it sat on screen for the rest of the
   // session, describing a failure that happened three screens ago.
@@ -9240,6 +9250,135 @@ async function frPaintReturn() {
    Opening, finishing, and getting out
    -------------------------------------------------------------------------- */
 
+/* ---- the dot field (#44) ------------------------------------------------
+   Lifted from the pack (FROZEN-2026-08-17), mechanics verbatim: five golds
+   over grey, density area/8200, pure drift with soft walls and heavy
+   damping (the pack cut the gather-into-a-logo effect deliberately, Josh
+   14 Aug: a field that assembles behind a card competes with the card).
+   Colour warms from grey toward the golds as the steps advance.
+   prefers-reduced-motion settles the field, paints once per step, and
+   never starts the loop -- the pack's own contract. The loop runs only
+   while the wizard is open; frOpen boots it and a hidden overlay ends it. */
+const frDots = (() => {
+  const GOLDS = [[214, 166, 46], [227, 179, 65], [198, 154, 50], [216, 182, 90], [184, 137, 32]];
+  const GREY = [138, 141, 147];
+  const clamp01 = (n) => (n < 0 ? 0 : (n > 1 ? 1 : n));
+  const ease = (n) => (n < 0.5 ? 4 * n * n * n : 1 - Math.pow(-2 * n + 2, 3) / 2);
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const ramp = (bucket, t) => {
+    const g = GOLDS[bucket]; const e = clamp01(t);
+    return Math.round(GREY[0] + (g[0] - GREY[0]) * e) + ',' +
+           Math.round(GREY[1] + (g[1] - GREY[1]) * e) + ',' +
+           Math.round(GREY[2] + (g[2] - GREY[2]) * e);
+  };
+  const canvas = document.getElementById('fr-dots');
+  const ctx = canvas.getContext('2d');
+  let W = 0; let H = 0;
+  const parts = [];
+  let P = 0;
+  let shown = 0;
+  let running = false;
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function build() {
+    parts.length = 0;
+    if (!W || !H) return;
+    const count = Math.round((W * H) / 8200);
+    for (let i = 0; i < count; i++) {
+      parts.push({ x: rand(0, W), y: rand(0, H), vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3), r: rand(1.5, 5.4), g: i % GOLDS.length });
+    }
+  }
+  function fit() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const nw = Math.round(rect.width); const nh = Math.round(rect.height);
+    if (nw === W && nh === H) return false;
+    W = nw; H = nh;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return true;
+  }
+  function step() {
+    const mx = W * 0.02; const my = H * 0.03;
+    for (let i = 0; i < parts.length; i++) {
+      const d = parts[i];
+      d.vx += (Math.random() - 0.5) * 0.13;
+      d.vy += (Math.random() - 0.5) * 0.13;
+      if (d.x < mx) d.vx += (mx - d.x) * 0.004;
+      if (d.x > W - mx) d.vx -= (d.x - (W - mx)) * 0.004;
+      if (d.y < my) d.vy += (my - d.y) * 0.004;
+      if (d.y > H - my) d.vy -= (d.y - (H - my)) * 0.004;
+      d.vx *= 0.986; d.vy *= 0.986;
+      d.x += d.vx; d.y += d.vy;
+    }
+  }
+  function draw(p) {
+    ctx.clearRect(0, 0, W, H);
+    const ge = ease(p);
+    for (let b = 0; b < GOLDS.length; b++) {
+      ctx.fillStyle = 'rgba(' + ramp(b, ge) + ',' + (0.13 + 0.26 * ge).toFixed(3) + ')';
+      ctx.beginPath();
+      let any = false;
+      for (let i = 0; i < parts.length; i++) {
+        const d = parts[i];
+        if (d.g !== b) continue;
+        any = true;
+        ctx.moveTo(d.x + d.r, d.y);
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      }
+      if (any) ctx.fill();
+    }
+  }
+  function frame() {
+    // The overlay closing ends the loop; frOpen boots a fresh one.
+    if (document.getElementById('firstrun').hidden) { running = false; return; }
+    shown += (P - shown) * 0.06;
+    step();
+    draw(shown);
+    requestAnimationFrame(frame);
+  }
+  // ⚠️ The pack's refit lesson, kept verbatim in spirit: the canvas must be
+  // refitted on reflow, not only window resize, or a stretched backing
+  // store draws circles as ellipses. Positions carry across proportionally
+  // so the field does not visibly re-scatter.
+  function refit() {
+    const oldW = W; const oldH = H;
+    if (!fit()) return;
+    if (parts.length && oldW && oldH) {
+      const sx = W / oldW; const sy = H / oldH;
+      const prev = parts.map((d) => ({ x: d.x * sx, y: d.y * sy, vx: d.vx, vy: d.vy }));
+      build();
+      const n = Math.min(parts.length, prev.length);
+      for (let i = 0; i < n; i++) {
+        parts[i].x = prev[i].x; parts[i].y = prev[i].y;
+        parts[i].vx = prev[i].vx; parts[i].vy = prev[i].vy;
+      }
+    } else {
+      build();
+    }
+    if (reduced) { for (let j = 0; j < 400; j++) step(); draw(shown); }
+  }
+  window.addEventListener('resize', refit);
+  return {
+    boot() {
+      if (fit()) build();
+      if (reduced) {
+        shown = P;
+        for (let i = 0; i < 400; i++) step();
+        draw(P);
+      } else if (!running) {
+        running = true;
+        for (let j = 0; j < 160; j++) step();
+        requestAnimationFrame(frame);
+      }
+    },
+    progress(p) {
+      P = clamp01(p);
+      if (reduced) { shown = P; step(); draw(P); }
+    },
+  };
+})();
+
 function frOpen() {
   FR_RETURN = document.activeElement;
   document.getElementById('firstrun').hidden = false;
@@ -9250,6 +9389,7 @@ function frOpen() {
    * reader reads the whole board underneath the welcome message.
    */
   document.querySelectorAll('body > *:not(#firstrun)').forEach((el) => { el.inert = true; });
+  frDots.boot();
   frGo(1);
   // The heading, not the button: frGo already focuses #fr-title per step
   // (SC 4.1.3), and focusing the gold primary painted a focus ring onto
