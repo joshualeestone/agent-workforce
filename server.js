@@ -1191,6 +1191,13 @@ const server = http.createServer((req, res) => {
       sendJson(res, 409, { error: 'this Kosmos runs from its source code, so it updates from git, not from here' });
       return;
     }
+    if (updates.alreadyInstalling()) {
+      // Idempotent: the first POST started it; a retry, a double click, or a
+      // second tab gets the same true answer without a second installer
+      // racing the first through the stage-and-swap.
+      sendJson(res, 200, { ok: true, updating: avail.version, already: true });
+      return;
+    }
     try { updates.beginInstall(); }
     catch (err) {
       sendJson(res, 500, { error: 'we could not start the update', detail: String((err && err.message) || err) });

@@ -93,6 +93,13 @@ process.env.AGENT_WORKFORCE_PROJECTS = fs.mkdtempSync(nodePath.join(os.tmpdir(),
 // home into a test. Directories only, nothing written -- but a listing is
 // still a read of somebody's disk that no test here means to make.
 process.env.HOME = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-home-'));
+// ⚠️ AND THE RELEASE HOST. Every /api/status request pokes the update check;
+// without this override the unit suite fires real HTTPS requests at the
+// production release host on every status test. Port 9 (discard) on loopback
+// refuses instantly; the module fails soft, so everything still passes --
+// offline, and without phoning home. Must be set before server.js is
+// required, because engine/update reads it at load.
+process.env.AGENT_WORKFORCE_RELEASE_BASE = 'http://127.0.0.1:9/dist';
 // And the two programs an agent is made of, so a route test does not depend on
 // whether the machine running the suite happens to have Claude installed where
 // this one does.
@@ -2675,7 +2682,12 @@ test('the confirmation asks by name, defaults to keeping, and never writes its o
    * coverage -- and this one guarded the gesture that ANSWERS the confirmation
    * safely.
    */
-  const esc = raw.slice(raw.indexOf("document.addEventListener('keydown'"));
+  // Anchored to the rm-modal backdrop handler and the first keydown AFTER
+  // it, not the first keydown in the file: the update confirm now registers
+  // its own Escape handler earlier in the source, and the file-position
+  // anchor silently retargeted this assertion onto the wrong dialog.
+  const afterBackdrop = raw.slice(raw.indexOf("rm-modal').addEventListener('click'"));
+  const esc = afterBackdrop.slice(afterBackdrop.indexOf("document.addEventListener('keydown'"));
   const escBody = esc.slice(0, esc.indexOf('\n});'));
   assert.ok(escBody.includes("'Escape'"),
     'the keydown handler does not look at Escape, so it does not dismiss the modal');

@@ -66,17 +66,20 @@ async function refresh() {
   const doFetch = fetcher || fetch;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT);
+  const started = Date.now();
   try {
     const res = await doFetch(`${base}/latest.json`, { signal: ctl.signal, cache: 'no-store' });
-    // A miss is an answer: mark the attempt so a down host is asked once per
-    // TTL, not once per status tick.
-    cache = { at: Date.now(), latest: null };
     if (!res || !res.ok) return;
     const body = await res.json().catch(() => null);
     const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
     cache = { at: Date.now(), latest: v };
   } finally {
     clearTimeout(timer);
+    // ⚠️ A MISS IS AN ANSWER, INCLUDING A THROWN ONE. This stamp used to sit
+    // after the await, so a rejecting fetch (offline, DNS, the abort) never
+    // stamped, and the five-second status poll asked a down host forever --
+    // the exact once-per-TTL promise the comment made and the code broke.
+    if (cache.at < started) cache = { at: started, latest: null };
   }
 }
 
@@ -108,11 +111,25 @@ function setupUrl() {
  * throughout; only the board restarts (their launchd jobs and tmux sessions
  * are separate process trees).
  */
+let installStarted = false;
+function alreadyInstalling() { return installStarted; }
 function beginInstall() {
+  // ⚠️ Single-flight. available() stays truthy until the new server is up,
+  // so a double click or a second tab would spawn a SECOND detached
+  // installer racing the first through the stage-and-swap. One per server
+  // lifetime; the flag dies with the process the installer restarts.
+  if (installStarted) return;
+  installStarted = true;
   if (installRunner) return installRunner(setupUrl());
-  const child = spawn('/bin/sh', ['-c', `curl -fsSL ${setupUrl()} | sh`], {
+  // The URL travels as a positional parameter, never interpolated into the
+  // one command in this product that ends in `| sh`; and KOSMOS_RELEASE_BASE
+  // rides along so the installer stages its tarballs from the SAME host the
+  // script came from (the app's env override and the installer's default
+  // could otherwise split-brain a staging deployment).
+  const child = spawn('/bin/sh', ['-c', 'curl -fsSL "$1" | sh', 'sh', setupUrl()], {
     detached: true,
     stdio: 'ignore',
+    env: { ...process.env, KOSMOS_RELEASE_BASE: base },
   });
   child.unref();
 }
@@ -122,6 +139,6 @@ function setBase(b) { base = b || (process.env.AGENT_WORKFORCE_RELEASE_BASE || D
 function setInstallRunner(f) { installRunner = f; }
 function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
-function resetCache() { cache = { at: 0, latest: null }; inFlight = null; }
+function resetCache() { cache = { at: 0, latest: null }; inFlight = null; installStarted = false; }
 
-module.exports = { available, poke, refresh, newer, installedRoot, setupUrl, beginInstall, setBase, setFetcher, setInstallRunner, setInstalledRoot, resetCache, RUNNING };
+module.exports = { available, poke, refresh, newer, installedRoot, setupUrl, beginInstall, alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot, resetCache, RUNNING };

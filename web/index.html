@@ -219,8 +219,15 @@ html { scroll-padding-top: 132px; }
 .utoast .uacts { display: flex; gap: 6px; margin-left: 4px; }
 .utoast .uacts button { font: inherit; font-size: .75rem; font-weight: 600; cursor: pointer;
   border-radius: 8px; padding: .4em .7em; border: 1px solid var(--separator); background: var(--bg-elevated); color: var(--label); }
-.utoast .uacts .uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
-@media (max-width: 720px) { .utoast { right: 14px; top: 5px; } .utoast .utxt small { display: none; } }
+/* The pack's gold ACTION colour, one home for both the toast's Install and
+   the confirm's Update. Two selectors so it outweighs .btn regardless of
+   declaration order. */
+button.uprime, .btn.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
+/* Mobile keeps the same below-the-header-row slot as desktop: the pack's
+   top:5 was its own geometry, and at 375 it sat straight across the New
+   agent button (caught by the bounding-box check, same as the desktop
+   guess). The version line hides to keep the toast narrow. */
+@media (max-width: 720px) { .utoast { right: 14px; top: 79px; } .utoast .utxt small { display: none; } }
 /* The updating overlay: the board is about to vanish on purpose, and this is
    the sentence that stops that being alarming. Same ground as the modals. */
 .upd-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.86);
@@ -1123,7 +1130,7 @@ svg { display: block; }
     <p class="rm-small" id="uc-err" role="alert" hidden></p>
     <div class="rm-acts">
       <button class="btn" type="button" id="uc-no">Not now</button>
-      <button class="btn" type="button" id="uc-go" style="background:#e3b341;border-color:#e3b341;color:#14161a;">Update</button>
+      <button class="btn uprime" type="button" id="uc-go">Update</button>
     </div>
   </div>
 </div>
@@ -2101,6 +2108,7 @@ function renderConnection(conn, agents) {
    because a toast re-appearing every five seconds after "Later" is nagging,
    and never showing again would hide the release after this one. */
 let UPDATING_NOW = false;
+let LAST_VERSION = null;   // the served version, kept by tick for the update wait loop
 function updateLaterVersion() {
   try { return localStorage.getItem('kosmos-update-later'); } catch { return null; }
 }
@@ -2128,12 +2136,44 @@ function renderUpdateToast(u) {
     document.getElementById('uc-go').focus();
   });
 }
-document.getElementById('uc-no').addEventListener('click', () => {
+/* ⚠️ THE CONFIRM GETS THE SAME MODAL MACHINERY AS rm-modal, not adjacency:
+   aria-modal promises focus is held, Escape leaves, the backdrop leaves, and
+   closing returns the keyboard to the button that opened it. A new sibling
+   does not inherit a guard by sitting beside one. */
+function closeUpdConfirm() {
   document.getElementById('updconfirm').hidden = true;
+  const inst = document.getElementById('ut-install');
+  if (inst) inst.focus();
+}
+document.getElementById('uc-no').addEventListener('click', closeUpdConfirm);
+document.getElementById('updconfirm').addEventListener('click', (e) => {
+  if (e.target.id === 'updconfirm') closeUpdConfirm();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('updconfirm').hidden) closeUpdConfirm();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const back = document.getElementById('updconfirm');
+  if (back.hidden) return;
+  const no = document.getElementById('uc-no');
+  const go = document.getElementById('uc-go');
+  // Same shape as rm-modal's trap, disabled-button rule included.
+  const reachable = [no, go].filter((el) => !el.disabled);
+  const order = e.shiftKey ? reachable.slice().reverse() : reachable;
+  const ends = order.length ? [order[0], order[order.length - 1]] : [no, no];
+  const inside = back.contains(document.activeElement);
+  if (document.activeElement === ends[0] || !inside) {
+    e.preventDefault();
+    (inside ? ends[1] : no).focus();
+  }
 });
 document.getElementById('uc-go').addEventListener('click', async () => {
   const err = document.getElementById('uc-err');
+  const go = document.getElementById('uc-go');
   err.hidden = true;
+  go.disabled = true;   // one click, one installer; the route is idempotent as the backstop
   let res = null;
   let body = null;
   try {
@@ -2145,6 +2185,7 @@ document.getElementById('uc-go').addEventListener('click', async () => {
     // or a spawn failure. All are states, not scoldings.
     err.textContent = (body && body.error) || 'we could not start the update';
     err.hidden = false;
+    go.disabled = false;
     return;
   }
   UPDATING_NOW = true;
@@ -2152,19 +2193,27 @@ document.getElementById('uc-go').addEventListener('click', async () => {
   renderUpdateToast(null);
   const back = document.createElement('div');
   back.className = 'upd-back';
-  back.innerHTML = '<div class="upd-msg"><b>Updating.</b> Your agents keep working.</div>';
+  back.innerHTML = '<div class="upd-msg" role="alert" tabindex="-1"><b>Updating.</b> Your agents keep working.</div>';
   document.body.appendChild(back);
-  /* The board goes down and comes back; reload on the way back up. If it
-     never dips before the deadline (the installer found nothing to do, or
-     died before the swap), reload anyway: the fresh page's own toast then
+  back.querySelector('.upd-msg').focus();   // announced, and the keyboard is off the dying board
+  /* The board goes down and comes back; reload on the way back up OR the
+     moment the served version changes -- a launchd restart can complete
+     inside one two-second gap, and waiting the full deadline for a dip
+     that already happened would hold the overlay over a finished update.
+     If neither happens before the deadline (installer found nothing to do,
+     or died before the swap), reload anyway: the fresh page's own toast
      says what is actually true, which beats this overlay guessing. */
   let sawDown = false;
+  const before = LAST_VERSION;
   const deadline = Date.now() + 3 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 2000));
     try {
-      const ping = await fetch('/', { cache: 'no-store' });
-      if (ping.ok && sawDown) break;
+      const ping = await fetch('/api/status', { cache: 'no-store' });
+      if (ping.ok) {
+        const now = (await ping.json().catch(() => null) || {}).version;
+        if (sawDown || (before && now && now !== before)) break;
+      }
     } catch { sawDown = true; }
   }
   location.reload();
@@ -2185,6 +2234,7 @@ async function tick() {
     BOARD_SEEN = true;
     updateRecPill();
     renderUpdateToast(data.update);
+    LAST_VERSION = data.version || LAST_VERSION;
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
     BOARD_LOOKED = true;
@@ -4527,6 +4577,15 @@ document.getElementById('create-go').addEventListener('click', async () => {
   const msg = document.getElementById('create-msg');
   const role = roleByKey(PICKED);
   if (!role) { msg.textContent = 'Pick what this agent is for first.'; cstep('role'); return; }
+  // A blanked Role label GATES rather than defaults (Mona Lisa's ruling,
+  // 2026-08-16): an empty-field message that tells you what to type beats
+  // one that tells you that you did not, and it runs before the flow claims
+  // anything. The engine's own gate for the own role stays behind this.
+  if (!document.getElementById('create-label').value.trim()) {
+    msg.textContent = 'Say what this agent does. One or two words.';
+    document.getElementById('create-label').focus();
+    return;
+  }
 
   CREATING = true;
   document.getElementById('create-go').disabled = true;
@@ -4542,17 +4601,6 @@ document.getElementById('create-go').addEventListener('click', async () => {
    * the board. That is the failure the back button's own comment says it fixed,
    * arriving through the earlier window.
    */
-  // A blanked Role label GATES rather than defaults (Mona Lisa's ruling,
-  // 2026-08-16): an empty-field message that tells you what to type beats
-  // one that tells you that you did not. The engine's own gate for the own
-  // role stays behind this.
-  if (!document.getElementById('create-label').value.trim()) {
-    msg.textContent = 'Say what this agent does. One or two words.';
-    document.getElementById('create-label').focus();
-    CREATING = false;
-    document.getElementById('create-go').disabled = false;
-    return;
-  }
   const attempt = ++WATCH;
   // A deliberately blanked editor falls back to the template server-side;
   // saying so beats silence (the engine's own "instructions have to be

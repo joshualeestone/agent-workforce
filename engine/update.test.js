@@ -59,4 +59,17 @@ test('a down host is asked once per cache window, not once per status tick', asy
   update.poke();
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(calls, 1, 'poke() re-fetched inside the cache window');
+
+  // ⚠️ And a host that THROWS (offline, DNS, abort), not just one that
+  // answers badly: the attempt stamp used to sit after the await, so a
+  // rejecting fetch never stamped and the five-second status poll asked a
+  // dead host forever.
+  update.resetCache();
+  let throws = 0;
+  update.setFetcher(async () => { throws += 1; throw new Error('offline'); });
+  await update.refresh().catch(() => { });
+  update.poke();
+  update.poke();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(throws, 1, 'a throwing fetch is retried inside the cache window');
 });
