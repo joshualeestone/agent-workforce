@@ -1506,19 +1506,29 @@ fi
 _claude_settings="$HOME/.claude/settings.json"
 if "$KOSMOS_HOME/runtime/bin/node" - "$_claude_settings" <<'NODEEOF' 2>/dev/null
 const fs = require('fs');
-const os = require('os');
 const p = require('path');
 // realpath FIRST: the file may be a symlink into a dotfiles repo, and a
 // rename over the link would sever it, stranding the dotfiles copy while
 // the setting stops tracking. Writing through preserves the arrangement.
 let target = process.argv[2];
-try { target = fs.realpathSync(target); } catch { /* absent: keep the given path */ }
+try {
+  target = fs.realpathSync(target);
+} catch {
+  // Absent is the clean case -- unless the PATH ITSELF is a dangling
+  // symlink: renaming over that would replace the link with a file, the
+  // exact severing realpath exists to prevent. Somebody's arrangement;
+  // leave it and let the wall be the recoverable outcome.
+  try { if (fs.lstatSync(target).isSymbolicLink()) process.exit(1); } catch { /* truly absent */ }
+}
 let data = {};
-let existed = false;
+let prevMode = null;                     // any existing file's mode survives,
+                                         // zero-byte included: empty carries
+                                         // nobody's settings but the chmod was
+                                         // still somebody's hand
 try {
   const st = fs.statSync(target);
-  if (st.size > 0) {                     // zero bytes carries nobody's settings
-    existed = true;
+  prevMode = st.mode & 0o7777;
+  if (st.size > 0) {
     data = JSON.parse(fs.readFileSync(target, 'utf8'));   // throws -> refusal
     if (!data || typeof data !== 'object' || Array.isArray(data)) process.exit(1);
   }
@@ -1532,15 +1542,17 @@ data.skipDangerousModePermissionPrompt = true;
 fs.mkdirSync(p.dirname(target), { recursive: true });
 const tmp = target + '.kosmos.new';
 fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
-if (existed) {
+if (prevMode !== null) {
   // The person may have tightened their settings file; a replace must not
   // silently widen it back to the umask default.
-  fs.chmodSync(tmp, fs.statSync(target).mode & 0o7777);
+  fs.chmodSync(tmp, prevMode);
 }
 fs.renameSync(tmp, target);
 NODEEOF
 then
   info "agents will not stop to ask permission for each action; installing is that permission"
+  info "(this answers Claude Code's one-time skip-permissions question for this whole Mac,"
+  info "so anything else using that mode will not ask either)"
 else
   info "could not record the agent permission setting; the first agent may show a"
   info "one-time question in its own window, and answering it once clears it for good"

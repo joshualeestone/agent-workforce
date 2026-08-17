@@ -1,6 +1,6 @@
 #!/bin/bash
 # The permission-acceptance merge in install/setup.sh (#46), exercised
-# against the eight states that matter. The snippet is EXTRACTED FROM the
+# against the ten states that matter. The snippet is EXTRACTED FROM the
 # installer rather than copied here, so this test cannot drift green while
 # the shipped code changes (a check containing a copy cannot fail).
 set -euo pipefail
@@ -79,4 +79,19 @@ d = json.load(open(sys.argv[1]))
 assert d["theme"] == "dark" and d["skipDangerousModePermissionPrompt"] is True
 PY8
 
-echo "permission acceptance: eight states hold (create, merge, refuse-unparseable, no-op, refuse-non-object, mode-preserved, empty-is-absent, symlink-preserved)"
+# 9. A DANGLING symlink is refused, not severed: the link survives and
+# still dangles at the same target.
+ln -s "$TMP/nowhere/never.json" "$TMP/s9.json"
+if node "$TMP/merge.js" "$TMP/s9.json" 2>/dev/null; then fail "dangling symlink was not refused"; fi
+[ -L "$TMP/s9.json" ] || fail "the dangling symlink was severed"
+[ "$(readlink "$TMP/s9.json")" = "$TMP/nowhere/never.json" ] || fail "the dangling symlink was retargeted"
+
+# 10. A zero-byte file's MODE survives even though its content is the
+# absent case.
+: > "$TMP/s10.json"
+chmod 600 "$TMP/s10.json"
+node "$TMP/merge.js" "$TMP/s10.json" || fail "zero-byte tightened file exited nonzero"
+_mode10="$(stat -f '%Lp' "$TMP/s10.json" 2>/dev/null || stat -c '%a' "$TMP/s10.json")"
+[ "$_mode10" = "600" ] || fail "zero-byte merge widened the mode to $_mode10"
+
+echo "permission acceptance: ten states hold (create, merge, refuse-unparseable, no-op, refuse-non-object, mode-preserved, empty-is-absent, symlink-preserved, dangling-refused, empty-mode-preserved)"

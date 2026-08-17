@@ -28,8 +28,12 @@ to web/index.html head (currently zero rel=icon). Title is already
 Josh's ruling verbatim: no extra click, no extra screen, installing IS
 the permission. install/setup.sh writes skipDangerousModePermissionPrompt
 true into ~/.claude/settings.json (merge, never clobber; create the
-file if absent; python3, the one testable path, preserving a tightened
-file's own mode through the replace). The
+file if absent). SUPERSEDED IN REVIEW: the merge runs on the bundle's
+own verified Node runtime, not python3 -- /usr/bin/python3 is a CLT
+shim whose first invocation on a clean Mac can pop Apple's developer-
+tools dialog mid-install. Mode-preserving (zero-byte included),
+realpath-resolving with dangling symlinks refused, ten states pinned
+by the extraction test. The
 bulletin's trap: defaultMode bypassPermissions alone is NOT enough;
 the acceptance key is what stops the wall. Test protocol: Josh's new
 mini deliberately holds the unaccepted state; after this ships, a

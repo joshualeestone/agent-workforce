@@ -2449,6 +2449,8 @@ const server = http.createServer((req, res) => {
   if (iconGet && (req.method === 'GET' || req.method === 'HEAD')) {
     fs.readFile(path.join(__dirname, 'web', 'icons', iconGet[1]), (err, buf) => {
       if (err) { sendJson(res, 404, { error: 'no such icon' }); return; }
+      // A day of cache is a choice: a redesigned icon may serve stale for
+      // up to 24h after an update, accepted for favicon-class assets.
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' });
       res.end(req.method === 'HEAD' ? undefined : buf);
     });
@@ -2460,7 +2462,11 @@ const server = http.createServer((req, res) => {
   // (The doubled-slash spelling //icons/x never reaches here: pathOf
   // refuses protocol-relative shapes with a 400, measured; the test pins
   // that it cannot get the page either way.)
-  if (apiPath.startsWith('/icons/') || apiPath === '/icons') {
+  // Case-insensitive: macOS filesystems are, and /Icons/x reaching the
+  // page as HTML would be the same silent-success shape in one more
+  // spelling. (Browsers request the exact lowercase hrefs; this is
+  // belt-and-braces for probes.)
+  if (/^\/icons(\/|$)/i.test(apiPath)) {
     sendJson(res, 404, { error: 'no such icon' });
     return;
   }

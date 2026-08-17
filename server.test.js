@@ -4427,6 +4427,8 @@ test('the tab icons are served as images, and a wrong icon path cannot fall thro
   assert.match(JSON.parse(miss.body).error, /no such icon/);
   const stray = await req('/icons/anything-else.txt');
   assert.equal(stray.status, 404);
+  const cased = await req('/Icons/kosmos-32.png');
+  assert.equal(cased.status, 404, 'the cased spelling leaked through to the page');
   // The encoded spelling must not reach the page (the /api/ guard's own
   // documented lesson, applied to this sibling).
   const encoded = await req('/icons%2fanything');
