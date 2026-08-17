@@ -115,7 +115,7 @@ iterate against Josh's use, per the night's directive.
 
 ## Verification
 
-node --test 800/800 (claimFor's boundary/three-answer contract; the
+node --test 801/801 (claimFor's boundary/three-answer contract; the
 described project joining from the REAL commitments store, incl. the
 absent-record-is-null case; the teaching block scoped to the right
 agent with closed tasks excluded and the one-arg compatibility; the

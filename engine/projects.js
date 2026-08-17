@@ -436,7 +436,11 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
   // this agent's word while the same row says "we cannot tell that it is
   // this agent" would have the board speaking with two postures at once.
   const borrowed = (who) => cards.some((a) => a && a.sessionName === who && !a.isNamedOurs);
-  const ambiguous = (t) => counts.get(t.who + '\u0000' + Number(t.number)) > 1;
+  // Same type guard as the count and the matcher: a hand-edited
+  // `number: true` coerces to 1 and would render the ambiguity sentence
+  // where claimFor's "not a whole number" is the truer reason.
+  const ambiguous = (t) => typeof t.number === 'number' && Number.isSafeInteger(t.number)
+    && counts.get(t.who + '\u0000' + t.number) > 1;
   const readings = shared;
   const readFor = (who) => {
     if (!readings.has(who)) {

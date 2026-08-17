@@ -1862,7 +1862,9 @@ const server = http.createServer((req, res) => {
           // The assignee's managed block now lists this task in the exact
           // spelling the join matches on, so the agent is TOLD, not merely
           // recorded. Non-gating, same as every tell: a task that could not
-          // be announced is still a task.
+          // be announced is still a task. (Shape note: `told` here is ONE
+          // bare verdict -- a task has one assignee -- where the project
+          // create/remove routes carry an array of {agent, ...} entries.)
           let told;
           if (made.who) {
             try { told = projects.syncAgent(made.who, roster); }
