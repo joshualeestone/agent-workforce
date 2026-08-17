@@ -1574,3 +1574,59 @@ test('the thread GET returns a bounded tail with the older count stated, never t
     assert.equal(body.messages[199].text, 'row 204');
   });
 });
+
+test('the task routes: create over the wire, refusals write nothing, close and reopen, guard inherited', async () => {
+  const projects = require('./engine/projects');
+  const made = json(await post('/api/projects', { name: 'Task Wire' }));
+
+  // ⚠️ Guard first, and by count of persisted state, not adjacency: this is
+  // a new POST sibling and a sibling does not inherit a guard by proximity.
+  const cross = await req(`/api/project/${made.project.id}/tasks`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: JSON.stringify({ sentence: 'evil task' }),
+  });
+  assert.equal(cross.status, 403, 'a cross-site page can write a task');
+
+  // Refusals: whole-or-not-at-all, proven on the stored record.
+  for (const [label, body, want] of [
+    ['no sentence', {}, /say what needs doing/],
+    ['blank sentence', { sentence: '  ' }, /say what needs doing/],
+    ['oversize sentence', { sentence: 'x'.repeat(201) }, /200 characters or fewer/],
+  ]) {
+    const r = await post(`/api/project/${made.project.id}/tasks`, body);
+    assert.equal(r.status, 400, `${label} was accepted`);
+    assert.match(json(r).error, want, `${label}: wrong sentence`);
+  }
+  let stored = projects.readAll().find((x) => x.id === made.project.id);
+  assert.equal((stored.tasks || []).length, 0, 'a refusal wrote a task');
+
+  // A real create, with detail and nobody on it.
+  const t1 = json(await post(`/api/project/${made.project.id}/tasks`, {
+    sentence: 'Rewrite the handoff checklist',
+    detail: 'The old one mentions the removed billing screen.',
+  })).task;
+  assert.equal(t1.number, 1);
+  assert.equal(t1.who, null);
+
+  // And one given to somebody; the number advances.
+  const t2 = json(await post(`/api/project/${made.project.id}/tasks`, {
+    sentence: 'Settle the trial length', who: 'april',
+  })).task;
+  assert.equal(t2.number, 2);
+  assert.equal(t2.who, 'april');
+
+  // Close, reopen, and an honest 404 for a number that never existed.
+  const closed = json(await post(`/api/project/${made.project.id}/task/2/close`, {})).task;
+  assert.ok(closed.closedAt, 'close did not stamp over the wire');
+  const reopened = json(await post(`/api/project/${made.project.id}/task/2/reopen`, {})).task;
+  assert.equal(reopened.closedAt, null);
+  const gone = await post(`/api/project/${made.project.id}/task/99/close`, {});
+  assert.equal(gone.status, 404);
+  assert.match(json(gone).error, /no task by that number/);
+
+  // The tasks ride the served project payload (the screen reads them there).
+  const listed = json(await req('/api/projects', {})).projects.find((x) => x.id === made.project.id);
+  assert.equal((listed.tasks || []).length, 2, 'the payload does not carry the tasks');
+  assert.equal(listed.taskCounter, 2);
+});

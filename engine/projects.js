@@ -1306,7 +1306,7 @@ function syncAgent(sessionName, roster) {
 module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END,
   file, readAll, writeAll, idFor, folderState, describe,
-  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove,
+  list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder,

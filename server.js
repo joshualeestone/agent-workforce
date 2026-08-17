@@ -43,6 +43,7 @@ const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
+const tasks = require('./engine/tasks');
 const chat = require('./engine/chat');
 const os = require('node:os');
 
@@ -1808,6 +1809,53 @@ const server = http.createServer((req, res) => {
       told = [{ agent: null, state: projects.TOLD.COULD_NOT, because: String((err && err.message) || 'we could not reach the agents that were on it') }];
     }
     sendJson(res, 200, { removed: gone.id, name: gone.name, told });
+    return;
+  }
+
+  // --- tasks: things that need doing on THIS project -----------------------
+  // POSTs, so they inherit the cross-site guard. The number is issued by the
+  // project inside the engine's atomic write; closing is a record edit and
+  // never an act on an agent (engine/tasks.js carries the reasoning, the
+  // screen carries the sentence).
+  const taskMake = pathname.match(/^\/api\/project\/([^/]+)\/tasks$/);
+  if (taskMake && req.method === 'POST') {
+    const id = decodeSegment(taskMake[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}'); }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const roster = safeRoster();
+        try {
+          const made = tasks.create(id, { sentence: body.sentence, detail: body.detail, who: body.who }, roster);
+          sendJson(res, 200, { task: made });
+        } catch (err) {
+          // Three answers for three facts, same split as the member route:
+          // our unreadable store (500), a project that is not there (404),
+          // the person's input (400).
+          const code = (err && err.code === 'UNREADABLE') ? 500
+            : (/no project by that name/.test(String(err && err.message)) ? 404 : 400);
+          sendJson(res, code, { error: String((err && err.message) || 'we could not add that task') });
+        }
+      })
+      .catch((err) => sendJson(res, 400, { error: String((err && err.message) || err) }));
+    return;
+  }
+
+  const taskAct = pathname.match(/^\/api\/project\/([^/]+)\/task\/(\d+)\/(close|reopen)$/);
+  if (taskAct && req.method === 'POST') {
+    const id = decodeSegment(taskAct[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    try {
+      const t = taskAct[3] === 'close' ? tasks.close(id, taskAct[2]) : tasks.reopen(id, taskAct[2]);
+      sendJson(res, 200, { task: t });
+    } catch (err) {
+      const msg = String((err && err.message) || '');
+      const code = (err && err.code === 'UNREADABLE') ? 500
+        : (/no project by that name|no task by that number/.test(msg) ? 404 : 400);
+      sendJson(res, code, { error: msg || 'we could not change that task' });
+    }
     return;
   }
 
