@@ -3,14 +3,22 @@
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
+const path = require('path');
 const BASE = 'http://127.0.0.1:4399';
 const FLAG = process.argv[2];   // the sandboxed first-run.json
+// The About-you record lives at the DATA root (the flag's grandparent, per
+// engine/you.js's BASE), and it is first-run state: left behind by an
+// earlier run it prefills step 4 and arms the gate, so the "Continue waits"
+// assertions would measure the leftover, not the gate. Cleared everywhere
+// the flag is cleared.
+const YOU = path.join(path.dirname(path.dirname(FLAG)), 'you.json');
 
 const fails = [];
 const ok = (cond, what) => { if (!cond) fails.push(what); console.log(`${cond ? '  ok  ' : ' FAIL '} ${what}`); };
 
 async function fresh(browser, opts = {}) {
   fs.rmSync(FLAG, { force: true });
+  fs.rmSync(YOU, { force: true });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
@@ -170,6 +178,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n5. A first-run route that fails does NOT put onboarding over a working board');
   {
     fs.rmSync(FLAG, { force: true });
+  fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
@@ -237,6 +246,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n9. Escape during an in-flight completion does not fire two of them');
   {
     fs.rmSync(FLAG, { force: true });
+  fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
@@ -273,6 +283,7 @@ async function fresh(browser, opts = {}) {
   console.log('\n10. A completion POST that never answers does not lock anybody in');
   {
     fs.rmSync(FLAG, { force: true });
+  fs.rmSync(YOU, { force: true });
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => fails.push('JS ERROR: ' + e.message));
