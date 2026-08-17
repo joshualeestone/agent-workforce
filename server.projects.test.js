@@ -1630,3 +1630,34 @@ test('the task routes: create over the wire, refusals write nothing, close and r
   assert.equal((listed.tasks || []).length, 2, 'the payload does not carry the tasks');
   assert.equal(listed.taskCounter, 2);
 });
+
+test('the reveal-folder route: guard inherited, server-derived path, honest refusals', async () => {
+  const projects = require('./engine/projects');
+  const made = json(await post('/api/projects', { name: 'Reveal Wire' }));
+  try {
+    // Guard, by count: this POST opens an app.
+    let ran = 0;
+    projects.setRevealRunner(() => { ran += 1; return { ok: true }; });
+    const cross = await req(`/api/project/${made.project.id}/reveal-folder`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site page can open Finder');
+    assert.equal(ran, 0, 'the guard answered 403 but Finder opened anyway');
+
+    // Happy path: the runner gets open -R with the STORED folder, nothing
+    // from the request.
+    let args = null;
+    projects.setRevealRunner((cmd, a) => { args = [cmd, a]; return { ok: true }; });
+    const ok = await post(`/api/project/${made.project.id}/reveal-folder`, {});
+    assert.equal(ok.status, 200);
+    const stored = projects.readAll().find((x) => x.id === made.project.id);
+    assert.deepEqual(args, ['/usr/bin/open', ['-R', stored.folder]]);
+
+    // A project that is not there: 404 with the usual sentence.
+    const gone = await post('/api/project/no-such/reveal-folder', {});
+    assert.equal(gone.status, 404);
+  } finally {
+    projects.setRevealRunner(null);
+  }
+});
