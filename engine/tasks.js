@@ -174,8 +174,8 @@ function claimFor(task, reading) {
   // Server-issued numbers are integers; a hand-edited store can hold
   // anything, and a non-integer interpolated into the pattern is regex
   // (1.5 matches "task 175"). Same way-out validation commitments.js does.
-  const n = Number(task.number);
-  if (!Number.isSafeInteger(n)) {
+  const n = task.number;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n)) {
     return { claimed: null, because: 'this task\'s number is not a whole number, so a report cannot name it' };
   }
   // The trailing guard is two lookaheads, not \b: \b sits happily between

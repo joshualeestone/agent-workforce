@@ -79,6 +79,18 @@ still interpolates a dot), applied in the matcher, the ambiguity
 count, and the teaching lines; describe's inner readAll binding no
 longer shadows the join's `all` parameter.
 
+Round 4's two findings, both fixed: (a) the join inherits its siblings'
+borrowed-name gate (the status route answers unknown and the GET route
+404s while an untied pane holds a name; the join now answers
+could-not-tell in the same posture instead of speaking for the name);
+(b) the number guards refuse non-number types outright (Number(true)
+is 1, so a coercing guard let a hand-edited `number: true` render task
+1's definite claim), in the matcher, the count, and the teaching
+lines. Also from round 4: the ambiguity sentence no longer claims
+"projects" when a hand-edited store can duplicate a number within one,
+and a two-arg describe call cannot be thrown out of by the join's own
+store fallback.
+
 Plus round 1's hand-edited-store nit: a non-integer stored number is
 regex when interpolated (1.5 matches "task 175"), so claimFor now
 refuses non-integers as could-not-tell instead of matching by accident.
@@ -93,7 +105,7 @@ iterate against Josh's use, per the night's directive.
 
 ## Verification
 
-node --test 799/799 (claimFor's boundary/three-answer contract; the
+node --test 800/800 (claimFor's boundary/three-answer contract; the
 described project joining from the REAL commitments store, incl. the
 absent-record-is-null case; the teaching block scoped to the right
 agent with closed tasks excluded and the one-arg compatibility; the

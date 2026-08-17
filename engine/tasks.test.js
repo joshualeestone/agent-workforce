@@ -119,6 +119,11 @@ test('claimFor: deterministic word-bounded matching, three answers never two', (
   const odd = tasks.claimFor({ number: 1.5, who: 'a' }, mk(['task 175']));
   assert.equal(odd.claimed, null);
   assert.match(odd.because, /whole number/);
+  // And non-number types: Number(true) is 1 and Number(null) is 0, so a
+  // coercing guard would let a hand-edited `number: true` render task 1's
+  // definite claim.
+  assert.equal(tasks.claimFor({ number: true, who: 'a' }, mk(['task 1'])).claimed, null);
+  assert.equal(tasks.claimFor({ number: '1', who: 'a' }, mk(['task 1'])).claimed, null);
   // The decimal boundary cuts the OTHER way too: \b sits happily between
   // "1" and ".", so without the lookahead "task 1.5" in a REPORT would join
   // task 1. A sentence merely ending "task 1." still counts.
@@ -191,6 +196,24 @@ test('a removed member\'s still-assigned task joins as could-not-tell, not as a 
   tasks.create(q.id, { sentence: 'Current home', who: 'leaver' });
   assert.equal(projects.get(q.id, []).tasks[0].claim.claimed, true,
     'a departed project\'s leftover task suppressed the live project\'s join');
+});
+
+test('a name held by an untied pane is not spoken for', () => {
+  const commitments = require('./commitments');
+  const p = freshProject('Borrowed');
+  projects.addAgent(p.id, 'borrowed-name', null);
+  tasks.create(p.id, { sentence: 'Held under a borrowed name', who: 'borrowed-name' });
+  commitments.report('borrowed-name', [{ what: 'On task 1: the held thing' }]);
+  // Tied pane: the record is the agent's word and the join renders it.
+  const tied = fleet.install([fleet.agent('borrowed-name', { state: 'idle' })]).agents;
+  assert.equal(projects.get(p.id, tied).tasks[0].claim.claimed, true, 'a tied pane did not join');
+  // A stranger's pane under the name: every consumer of the commitments
+  // store refuses to speak for a borrowed name, and the join is a consumer
+  // (a-new-sibling-does-not-inherit-the-guard is how this gate gets missed).
+  const untied = fleet.install([fleet.stranger('borrowed-name')]).agents;
+  const got = projects.get(p.id, untied).tasks[0];
+  assert.equal(got.claim.claimed, null, 'a borrowed name was spoken for');
+  assert.match(got.claim.because, /will not speak/);
 });
 
 test('the described project carries claims joined from the real commitments store', () => {

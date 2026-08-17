@@ -388,7 +388,7 @@ function ambiguityCounts(everyProject) {
       // of this agent's projects" (its own join already answers
       // could-not-tell), so it must not suppress the join on the project
       // the agent is actually on.
-      if (!t || !t.who || t.closedAt || !Number.isSafeInteger(Number(t.number))) continue;
+      if (!t || !t.who || t.closedAt || typeof t.number !== 'number' || !Number.isSafeInteger(t.number)) continue;
       if (!(p.agents || []).includes(t.who)) continue;
       const key = t.who + '\u0000' + Number(t.number);
       counts.set(key, (counts.get(key) || 0) + 1);
@@ -398,16 +398,33 @@ function ambiguityCounts(everyProject) {
   return counts;
 }
 
-function joinTaskClaims(tasks, all, memberOf) {
+function joinTaskClaims(tasks, all, memberOf, roster) {
   const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
   if (!withWho.length) return tasks;
   const tasksMod = require('./tasks');
   const commitments = require('./commitments');
-  const everyProject = Array.isArray(all) ? all : readAll();
+  // A two-arg caller gets a store read here that its own path never
+  // wrapped; an unreadable store falls back to judging ambiguity from the
+  // one project in hand rather than throwing out of a read.
+  let everyProject;
+  if (Array.isArray(all)) everyProject = all;
+  else {
+    try { everyProject = readAll(); }
+    catch { everyProject = [{ tasks, agents: Array.isArray(memberOf) ? memberOf : [] }]; }
+  }
   // Memoized per `all` snapshot (WeakMap), so list() over P projects builds
   // the cross-store counts once, not P times.
   const counts = ambiguityCounts(everyProject);
   const members = Array.isArray(memberOf) ? memberOf : [];
+  const cards = Array.isArray(roster) ? roster : [];
+  // ⚠️ The borrowed-name gate, inherited: every sibling consumer of the
+  // commitments store refuses to speak for a name an untied pane is holding
+  // (/api/status answers unknown, the GET route 404s), and a new consumer
+  // does not get to skip the gate its siblings carry. Only a tied pane can
+  // WRITE the record, so the stored text is genuine -- but rendering it as
+  // this agent's word while the same row says "we cannot tell that it is
+  // this agent" would have the board speaking with two postures at once.
+  const borrowed = (who) => cards.some((a) => a && a.sessionName === who && !a.isNamedOurs);
   const ambiguous = (t) => counts.get(t.who + '\u0000' + Number(t.number)) > 1;
   const readings = new Map();
   const readFor = (who) => {
@@ -437,14 +454,23 @@ function joinTaskClaims(tasks, all, memberOf) {
         },
       };
     }
+    if (borrowed(t.who)) {
+      return {
+        ...t,
+        claim: {
+          claimed: null,
+          because: 'we cannot tie the pane holding this name to the agent, so we will not speak for what that name is holding',
+        },
+      };
+    }
     if (ambiguous(t)) {
       return {
         ...t,
         claim: {
           claimed: null,
-          because: 'more than one of this agent\'s projects has an open task '
-            + Number(t.number) + ', so a report saying "task '
-            + Number(t.number) + '" cannot say which one it means',
+          because: '"task ' + Number(t.number) + '" names more than one of this '
+            + 'agent\'s open tasks, so a report saying it cannot say which '
+            + 'one it means',
         },
       };
     }
@@ -569,7 +595,7 @@ function describe(project, roster, all) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || []),
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : [], all, project.agents || [], cards),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the
@@ -1318,7 +1344,7 @@ function blockBody(projects, sessionName) {
   const lines = projects.map((p) => {
     const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``;
     const mine = (sessionName && Array.isArray(p.tasks))
-      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && Number.isSafeInteger(Number(t.number)))
+      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
       : [];
     if (!mine.length) return head;
     any = true;
