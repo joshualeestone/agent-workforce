@@ -69,6 +69,23 @@ const RELPORT = 4654;
     const overlap = (a, c) => a && c && a.x < c.x + c.width && c.x < a.x + a.width && a.y < c.y + c.height && c.y < a.y + a.height;
     if (overlap(boxes.toast, boxes.newagent)) die('toast overlaps the New agent button');
     if (overlap(boxes.toast, boxes.checked)) die('toast overlaps the checked stamp');
+
+    // The drawn placement (#47, pack 2e4e100): the notice lives INSIDE the
+    // header's left group, in line beside the mark, not floating anywhere.
+    // Without this pin, the clear-of-controls checks pass any placement.
+    const placement = await p.evaluate(() => {
+      const t = document.querySelector('.utoast');
+      const k = document.getElementById('klink');
+      const inLeft = !!t.closest('.headleft');
+      const tb = t.getBoundingClientRect();
+      const kb = k.getBoundingClientRect();
+      return { inLeft, rightOfMark: tb.left >= kb.right,
+               sameBand: Math.abs((tb.top + tb.height / 2) - (kb.top + kb.height / 2)) < kb.height,
+               staticPos: getComputedStyle(t).position === 'static' };
+    });
+    if (!placement.inLeft || !placement.rightOfMark || !placement.sameBand || !placement.staticPos) {
+      die('desktop: the notice is not inline beside the mark ' + JSON.stringify(placement));
+    }
     await p.screenshot({ path: path.join(REPO, 'docs/browser-checks/shots/update-toast.png') });
 
     // The toast's Install is GOLD (the pack's action colour): the neutral

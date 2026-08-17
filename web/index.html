@@ -209,13 +209,10 @@ html { scroll-padding-top: 132px; }
    rather than something waiting for you. */
 .utoast {
   --utone: #b3261e;
-  /* Measured against this header, not copied from the pack: the header row
-     runs to y77 (the checked stamp is the deepest control) and the tabs strip
-     below it is left-aligned, so its right side is the one empty region.
-     top:79 clears the stamp by 2px and floats over the strip. Verified by
-     bounding-box comparison in the drive-through, which is also what caught
-     the first guess overlapping the New agent button. */
-  position: absolute; top: 79px; right: var(--space-8); z-index: 25;
+  /* IN THE FLOW, beside the mark (Josh 2026-08-17; pack 2e4e100). The old
+     absolute float carried a measured top:79 offset and a history of
+     covering the agent-status stamp; an element in the flow cannot overlap
+     anything, so the measurement and its bug class both retire. */
   display: flex; align-items: center; gap: 11px;
   padding: 7px 8px 7px 12px; border-radius: 11px;
   background: var(--bg-elevated); border: 1px solid var(--utone);
@@ -239,7 +236,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    first is the harm a person can live with. The version line hides to keep
    it one row. */
 @media (max-width: 720px) {
-  .utoast { position: static; margin: 6px 0 8px auto; width: fit-content; }
+  /* Inline everywhere now; narrow screens just drop the version line and
+     let the header's left group wrap the notice onto its own row. */
+  .headleft { flex-wrap: wrap; }
   .utoast .utxt small { display: none; }
 }
 /* The updating overlay: the board is about to vanish on purpose, and this is
@@ -1144,6 +1143,17 @@ svg { display: block; }
          that sends the keyboard here after a removal would do nothing at all --
          an accessibility fix that only appears to work is worse than none. -->
     <h1 tabindex="-1">Kosmos</h1>
+    <!-- ⚠️ THE UPDATE NOTICE SITS BESIDE THE MARK, Josh 2026-08-17: "make
+         that appear to the right of the icon in the upper left corner...
+         so that it is right in line with everything else." It used to be
+         absolutely positioned over the header, which is why it once covered
+         the agent-status stamp and needed an 8px nudge. Inline is the
+         structural fix rather than a better offset: an element in the flow
+         CANNOT overlap anything, so the whole class of bug stops being
+         possible instead of being avoided by a number (the pack's own
+         reasoning, drawn 2e4e100). Renders only when a newer version is
+         published; role=status per the pack. -->
+    <div id="utoast-slot"></div>
   </div>
   <div class="headright">
     <button class="btn" id="new-agent" type="button">New agent</button>
@@ -1156,9 +1166,6 @@ svg { display: block; }
   <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
   <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
 </nav>
-<!-- The update toast renders here (JS below) when the status payload carries
-     a published newer version; absent otherwise. role=status per the pack. -->
-<div id="utoast-slot"></div>
 </div>
 <section class="detail" id="panel-detail" hidden>
   <button class="back" id="detail-back">&#8592; All agents</button>
