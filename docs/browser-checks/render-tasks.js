@@ -120,12 +120,29 @@ const MEMBER = 'angel';   // a session name that really exists on this machine
     const nobody = await p.locator('.tkcard').nth(1).locator('.tkcard-who').textContent();
     if (nobody.trim() !== 'Nobody yet') die('unassigned state word: ' + nobody);
 
+    // THE JOIN: the assignee reports holding "task 1" in the taught
+    // spelling; the card grows the pack's says-line and the dialog's note
+    // leads with it. Before the report, no card carries the line (claimed
+    // false and could-not-read both render nothing).
+    if ((await p.locator('.tksay').count()) !== 0) die('a says-line rendered before any report');
+    await p.evaluate(async (member) => {
+      const r = await fetch('/api/agent/' + member + '/commitments', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commitments: [{ what: 'On task 1: the handoff checklist rewrite' }] }),
+      });
+      if (!r.ok) throw new Error('report failed ' + r.status);
+    }, MEMBER);
+    await p.waitForSelector('.tksay', { timeout: 15000 });
+    const say = (await p.locator('.tksay').textContent()).trim();
+    if (!/says it is on this/.test(say)) die('says-line text: ' + say);
+    if ((await p.locator('.tksay').count()) !== 1) die('the says-line leaked onto unclaimed cards');
+
     // The view dialog: meta, the blessed close-note naming the agent.
     await p.locator('.tkcard').first().click();
     await p.waitForSelector('#tk-modal', { state: 'visible' });
     const note = (await p.locator('#tk-note').textContent()).replace(/\s+/g, ' ').trim();
-    if (!note.startsWith('Marking it done closes it here. It does not stop ')
-        || !note.includes(MEMBER)) die('the close-note drifted: ' + note);
+    if (!note.startsWith(MEMBER + ' says it is on this. Marking it done closes it here. It does not stop ')
+        || !note.includes(MEMBER)) die('the joined close-note drifted: ' + note);
     await p.screenshot({ path: path.join(REPO, 'docs/browser-checks/shots/tasks-view-modal.png') });
 
     // Mark as done. The reveal is still on (it persists across same-project
@@ -159,7 +176,7 @@ const MEMBER = 'angel';   // a session name that really exists on this machine
     await p.waitForSelector('#tk-modal', { state: 'hidden', timeout: 10000 });
 
     if (errs.length) die('page errors: ' + errs.join(' | '));
-    console.log('TASKS DRIVE OK: modal verbatim + gated, trap holds, column/door split, chip-is-status, blessed close-note, done and reopen round trip, 0 page errors');
+    console.log('TASKS DRIVE OK: modal verbatim + gated, trap holds, column/door split, chip-is-status, THE JOIN (report -> says-line -> joined note, nothing before the report), done and reopen round trip, 0 page errors');
   } finally {
     await b.close();
     srv.kill();

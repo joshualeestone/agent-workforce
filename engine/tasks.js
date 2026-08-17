@@ -126,4 +126,39 @@ function columnTasks(p) {
   return (p.tasks || []).filter((t) => t.who && !t.closedAt);
 }
 
-module.exports = { create, close, reopen, byNumber, columnTasks, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };
+
+/**
+ * The JOIN, read side: does the assignee SAY it is on this task?
+ *
+ * ⚠️ Assignment is the join (the pack's rule): commitments knows what each
+ * agent says it is holding; a task knows who it was given to. The match is
+ * DETERMINISTIC, never fuzzy: a commitment counts only when its text names
+ * "task <number>" (word-bounded, so task 1 never matches task 12). Agents
+ * learn the convention from the managed block in their own instructions
+ * (projects.blockBody lists their open tasks with exactly that spelling).
+ *
+ * Three answers, never two:
+ *   { claimed: true }          a FRESH report names this task
+ *   { claimed: false }         a fresh report exists and does not name it
+ *                              (which is NOT "not started": it says only
+ *                              that the agent has not said so)
+ *   { claimed: null, because } we could not read what it reports (absent,
+ *                              stale, unreadable) -- and null must never
+ *                              render as either of the others
+ * Unassigned and closed tasks have no claim to compute (null, no because).
+ */
+function claimFor(task, reading) {
+  if (!task || !task.who || task.closedAt) return null;
+  if (!reading || reading.state === 'unknown') {
+    return {
+      claimed: null,
+      because: (reading && reading.because) || 'we could not read what it reports holding',
+    };
+  }
+  const re = new RegExp('\\btask\\s+' + Number(task.number) + '\\b', 'i');
+  const named = (reading.commitments || []).some(
+    (c) => c && typeof c.what === 'string' && re.test(c.what));
+  return { claimed: named, because: null };
+}
+
+module.exports = { create, close, reopen, byNumber, columnTasks, claimFor, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };

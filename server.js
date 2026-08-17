@@ -1859,7 +1859,16 @@ const server = http.createServer((req, res) => {
         const roster = safeRoster();
         try {
           const made = tasks.create(id, { sentence: body.sentence, detail: body.detail, who: body.who }, roster);
-          sendJson(res, 200, { task: made });
+          // The assignee's managed block now lists this task in the exact
+          // spelling the join matches on, so the agent is TOLD, not merely
+          // recorded. Non-gating, same as every tell: a task that could not
+          // be announced is still a task.
+          let told;
+          if (made.who) {
+            try { told = projects.syncAgent(made.who, roster); }
+            catch (err2) { told = { state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not reach that agent') }; }
+          }
+          sendJson(res, 200, { task: made, told });
         } catch (err) {
           // Three answers for three facts, same split as the member route:
           // our unreadable store (500), a project that is not there (404),
@@ -1879,7 +1888,15 @@ const server = http.createServer((req, res) => {
     if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
     try {
       const t = taskAct[3] === 'close' ? tasks.close(id, taskAct[2]) : tasks.reopen(id, taskAct[2]);
-      sendJson(res, 200, { task: t });
+      // Close and reopen change what the assignee's block should list, so
+      // the block follows the record. Non-gating.
+      let told;
+      if (t.who) {
+        const roster = safeRoster();
+        try { told = projects.syncAgent(t.who, roster); }
+        catch (err2) { told = { state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not reach that agent') }; }
+      }
+      sendJson(res, 200, { task: t, told });
     } catch (err) {
       const msg = String((err && err.message) || '');
       const code = (err && err.code === 'UNREADABLE') ? 500

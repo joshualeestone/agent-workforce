@@ -353,6 +353,35 @@ function profileRole(card) {
   return Object.prototype.hasOwnProperty.call(profile, 'role') ? profile.role : null;
 }
 
+/**
+ * Attach the commitments claim to each assigned open task.
+ *
+ * ⚠️ ONE derivation of the join, here in the engine, never re-implemented
+ * by a screen: the matcher is engine/tasks.claimFor and the reading is
+ * engine/commitments.read, required lazily because tasks requires this
+ * module at load (the cycle resolves at call time). One read per assignee
+ * per project, memoized for the call.
+ */
+function joinTaskClaims(tasks) {
+  const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
+  if (!withWho.length) return tasks;
+  const tasksMod = require('./tasks');
+  const commitments = require('./commitments');
+  const readings = new Map();
+  const readFor = (who) => {
+    if (!readings.has(who)) {
+      let r;
+      try { r = commitments.read(who); }
+      catch (err) { r = { state: 'unknown', commitments: [], because: String((err && err.message) || 'we could not read its record') }; }
+      readings.set(who, r);
+    }
+    return readings.get(who);
+  };
+  return tasks.map((t) => (t && t.who && !t.closedAt
+    ? { ...t, claim: tasksMod.claimFor(t, readFor(t.who)) }
+    : t));
+}
+
 function describe(project, roster) {
   const cards = Array.isArray(roster) ? roster : [];
   // ⚠️ Seeing an agent is remembered. `everSeen` was written once, at add time,
@@ -468,7 +497,7 @@ function describe(project, roster) {
     // Same normalization rule as description/archived above: the healed
     // shape has to hold for API readers too, so a legacy project reads as
     // "no tasks yet", never as fields that simply are not there.
-    tasks: Array.isArray(project.tasks) ? project.tasks : [],
+    tasks: joinTaskClaims(Array.isArray(project.tasks) ? project.tasks : []),
     // Whether the folder lives under the Kosmos projects root: the settings
     // screen's location sentence branches on this (the pack's "In your
     // Kosmos folder." versus naming the real place), and the server is the
@@ -1196,19 +1225,39 @@ function oneLine(value) {
     .trim();
 }
 
-function blockBody(projects) {
+function blockBody(projects, sessionName) {
   // ⚠️ Never reached with an empty list any more -- `tellAgent` REMOVES the
   // block instead of writing a placeholder. Kept as a guard rather than
   // deleted, because a caller that does reach it with nothing should not get
   // an empty heading.
   if (!projects.length) return 'Kosmos has not put this agent on a project yet.';
-  const lines = projects.map((p) => `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``);
+  // ⚠️ THE TEACHING HALF OF THE JOIN. The board only ever shows what an
+  // agent SAYS it is on, and the matcher accepts exactly the spelling
+  // "task <number>". These lines are where an agent learns both facts:
+  // its open tasks, in that spelling, in the file it boots from. Without
+  // this the join would be a convention nobody was told about.
+  let any = false;
+  const lines = projects.map((p) => {
+    const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``;
+    const mine = (sessionName && Array.isArray(p.tasks))
+      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt)
+      : [];
+    if (!mine.length) return head;
+    any = true;
+    return [head, ...mine.map((t) => `  - Task ${Number(t.number)}: ${oneLine(t.sentence)}`)].join('\n');
+  });
   return [
     '## Your projects',
     '',
     'Kosmos records which projects you are on, and this is where their folders are.',
     '',
     ...lines,
+    ...(any ? [
+      '',
+      'The indented lines are tasks written down for you. When you take one up,',
+      'include "task <number>" in the commitment you report, so the board can',
+      'show you are on it.',
+    ] : []),
   ].join('\n');
 }
 
@@ -1294,7 +1343,7 @@ function tellAgent(sessionName, projects, roster) {
     // somebody's instruction file, and "Kosmos has not put this agent on a
     // project yet" sitting in a boot file forever is residue.
     const next = projects.length
-      ? spliceBlock(current.text || '', blockBody(projects))
+      ? spliceBlock(current.text || '', blockBody(projects, sessionName))
       : removeBlock(current.text || '');
     if (next === current.text) return { state: TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
