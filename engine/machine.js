@@ -442,31 +442,19 @@ function restartCheck(runner) {
   const got = runner('/bin/launchctl', ['print', `gui/${uid}`]);
   if (got.ok) {
     /**
-     * ⚠️ "SET TO", NOT "WILL". The comment above this function already said this
-     * claim is deliberately weaker than the wireframe's, and then the string
-     * underneath it said "Your agents will start themselves. If this computer
-     * restarts, they come back on their own." What was actually established is
-     * that `launchctl` answers for this login session. No plist was opened, no
-     * job was listed, no agent was inspected, and no reboot has happened.
-     *
-     * A safety comment that disagrees with the sentence beside it is worse than
-     * neither, because the next reader trusts the comment.
-     */
-    /**
-     * ⚠️ IT IS A CLAIM ABOUT WHAT KOSMOS DOES, NOT ABOUT ANYBODY'S AGENTS, and
-     * the difference is not pedantry.
-     *
-     * "Your agents are set to start themselves" was FALSE on the adopt path,
-     * which is the path this machine is on. `firstrun.fleet()` counts agents out
-     * of `tmux list-panes` -- thirteen of them here -- and an agent some other
-     * program started may have no launchd job at all. Nothing in this function
-     * opened a plist, listed a job, or looked at a single one of them. On the
-     * create path it was a claim about zero agents.
-     *
-     * What was actually established is that `launchctl` answers for this login
-     * session, which is exactly enough to say that an agent KOSMOS makes will be
-     * registered. So that is what it says, and it says out loud whose agents it
-     * is not talking about.
+     * ⚠️ THE COPY IS JOSH'S, VERBATIM (2026-08-17 screen-4 annotation), AND
+     * HIS RULING SUPERSEDED THE OLD HEDGE. History, kept because this string
+     * has flipped twice: the first version claimed "Your agents will start
+     * themselves" over a probe that only established launchctl answers for
+     * this login session; the hedged rewrite ("set to", plus an out-loud
+     * caveat about agents other programs started) fixed that and was then
+     * replaced by Josh's plainer wording. What survives of the hedge is the
+     * word HERE: "Agents made here" scopes the claim to agents Kosmos makes,
+     * which is exactly what the launchctl probe supports -- an adopted agent
+     * some other program started may have no launchd job, and this sentence
+     * no longer claims otherwise. The detail's "come back on their own" is a
+     * will-claim about those same Kosmos-made agents; Josh ruled the plain
+     * form knowingly, so do not re-hedge it without his word.
      */
     return {
       key: 'restart',
@@ -798,11 +786,12 @@ function check(opts) {
     unknown: checks.filter((c) => c.state === STATE.UNKNOWN).length,
     // ⚠️ Its OWN field, deliberately not one of `checks`. Where the app sits
     // has no bearing on whether an agent runs, so folding it into the rows
-    // step 2 counts and step 4 filters made the wizard state a false cause:
-    // "We could not find the Kosmos icon. An agent made now may not run until
-    // that is sorted" -- on exactly the fresh-install path this check exists
-    // for. Step 5 (getting back to Kosmos) is its one consumer. Separating it
-    // at the SOURCE means no screen has to remember to exclude it.
+    // step 4 counts and the step-6 endings caption made the wizard state a
+    // false cause: "We could not find the Kosmos icon. An agent made now may
+    // not run until that is sorted" -- on exactly the fresh-install path
+    // this check exists for. The step-1 Success screen is its one consumer.
+    // Separating it at the SOURCE means no screen has to remember to
+    // exclude it.
     appLocation: appLocationCheck(opts),
   };
 }

@@ -128,7 +128,7 @@ test('the agents it found are named the way the board names them', () => {
   // The name derivation itself still holds its hygiene: fleet() keeps
   // serving names for callers that need them, no blanks, real names read
   // from the instruction file, a nameless agent falls back to its slug.
-  const here = firstrun.fleet();
+  const here = firstrun.fleet({ withNames: true });
   assert.ok(here.names.every((n) => typeof n === 'string' && n.length),
     `a caller would get blanks: ${JSON.stringify(here.names)}`);
   assert.ok(here.names.includes('Marcie'),

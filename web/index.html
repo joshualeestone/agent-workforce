@@ -1003,25 +1003,6 @@ svg { display: block; }
    auto on the alt itself is the wrong tool -- it SPLITS the free space with
    the spacer's auto margin and strands the alt mid-row (measured 175px off
    the edge, 2026-08-17). */
-#firstrun .btn-gold {
-  display: inline-flex; align-items: center; gap: .5em;
-  border: 0; border-radius: 10px; cursor: pointer; padding: .9em 1.75em;
-  font-family: var(--font-ui); font-size: 1.0625rem; font-weight: 600; line-height: 1.6;
-  color: #14161a; background: var(--gold-bright);
-  transition: transform .12s ease, background .12s ease;
-}
-#firstrun .btn-gold[disabled] { opacity: .45; cursor: not-allowed; }
-#firstrun .btn-gold:hover { background: var(--gold); transform: translateY(-1px); }
-#firstrun .btn-gold:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
-#firstrun .btn-quiet {
-  display: inline-flex; align-items: center; gap: .5em;
-  background: transparent; border: 1px solid var(--gold-deep); color: #14161a;
-  padding: calc(.9em - 1px) calc(1.75em - 1px); border-radius: 10px; cursor: pointer;
-  font-family: var(--font-ui); font-size: 1.0625rem; font-weight: 600; line-height: 1.6;
-  transition: background .12s ease;
-}
-#firstrun .btn-quiet:hover { background: rgba(198,154,50,.14); }
-#firstrun .btn-quiet:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 /* The connect sub-screens (step 3's sign-in phases) ride the same
    forced-light card, so their input, generic button, log tail and the
    action row's hairline take pack inks too -- in dark scheme the app
@@ -8887,6 +8868,10 @@ function frConnPaintProgress(progress) {
 function frRevealSay(html) {
   const dock = document.getElementById('fr-return-dock');
   let m = dock.querySelector('.fr-msg');
+  // Clearing REMOVES the node: an empty paragraph parked in a live region
+  // is one more thing for the next reader (human or machine) to reason
+  // about, and nothing needs it kept.
+  if (!html) { if (m) m.remove(); return; }
   // No role on the child: the dock itself is the live region, and a status
   // inside a status double-announces on some screen readers.
   if (!m) { dock.insertAdjacentHTML('afterbegin', '<p class="fr-msg"></p>'); m = dock.querySelector('.fr-msg'); }
