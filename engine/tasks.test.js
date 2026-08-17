@@ -183,6 +183,14 @@ test('a removed member\'s still-assigned task joins as could-not-tell, not as a 
   assert.equal(after.who, 'leaver', 'removal silently unassigned the task');
   assert.equal(after.claim.claimed, null, 'a departed agent\'s report rendered as a definite claim');
   assert.match(after.claim.because, /no longer on the project/);
+  // And the leftover does not HAUNT: the ambiguity count mirrors the taught
+  // convention (member tasks only), so the same agent's open task 1 on the
+  // project it is STILL on joins as unique despite the departed leftover.
+  const q = freshProject('Departures Two');
+  projects.addAgent(q.id, 'leaver', null);
+  tasks.create(q.id, { sentence: 'Current home', who: 'leaver' });
+  assert.equal(projects.get(q.id, []).tasks[0].claim.claimed, true,
+    'a departed project\'s leftover task suppressed the live project\'s join');
 });
 
 test('the described project carries claims joined from the real commitments store', () => {

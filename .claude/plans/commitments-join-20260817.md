@@ -66,6 +66,19 @@ counts are memoized per snapshot (WeakMap) so list() builds them once;
 non-integer stored numbers route to the whole-number reason instead of
 an ambiguity sentence interpolating NaN.
 
+Round 3's two findings, both fixed: (a) the ambiguity count now mirrors
+the taught convention exactly, counting member tasks only, so a
+departed project's leftover assignment neither suppresses the live
+project's join nor produces a because-sentence claiming the departed
+project is "one of this agent's projects"; (b) the told verdict on the
+task create/close/reopen responses is now wire-tested (present in the
+TOLD vocabulary when assigned, absent when not), so a regression
+dropping it cannot stay green. Round 3's smaller catches: the
+non-integer guards use safe integers (1.5e21 passes isInteger and
+still interpolates a dot), applied in the matcher, the ambiguity
+count, and the teaching lines; describe's inner readAll binding no
+longer shadows the join's `all` parameter.
+
 Plus round 1's hand-edited-store nit: a non-integer stored number is
 regex when interpolated (1.5 matches "task 175"), so claimFor now
 refuses non-integers as could-not-tell instead of matching by accident.

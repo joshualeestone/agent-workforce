@@ -380,8 +380,16 @@ function ambiguityCounts(everyProject) {
     for (const t of p.tasks || []) {
       // Non-integer numbers are excluded: they cannot be validly named by a
       // report at all, and claimFor's "not a whole number" answer is the
-      // truer sentence than an ambiguity one interpolating NaN.
-      if (!t || !t.who || t.closedAt || !Number.isInteger(Number(t.number))) continue;
+      // truer sentence than an ambiguity one interpolating NaN. (SAFE
+      // integer: 1.5e21 passes isInteger and still interpolates a dot.)
+      // ⚠️ And DEPARTED assignees are excluded: the count exists to mirror
+      // the taught convention, and the block only teaches MEMBER tasks --
+      // a leftover assignment on a project the agent has left is not "one
+      // of this agent's projects" (its own join already answers
+      // could-not-tell), so it must not suppress the join on the project
+      // the agent is actually on.
+      if (!t || !t.who || t.closedAt || !Number.isSafeInteger(Number(t.number))) continue;
+      if (!(p.agents || []).includes(t.who)) continue;
       const key = t.who + '\u0000' + Number(t.number);
       counts.set(key, (counts.get(key) || 0) + 1);
     }
@@ -472,9 +480,11 @@ function describe(project, roster, all) {
   }
   if (upgraded) {
     try {
-      const all = readAll();
-      const at = all.findIndex((p) => p.id === project.id);
-      if (at >= 0) { all[at].everSeen = { ...(all[at].everSeen || {}), ...upgraded }; writeAll(all); }
+      // (named `stored`, not `all`: describe's `all` parameter is the join's
+      // shared snapshot, and shadowing it here would be a trap.)
+      const stored = readAll();
+      const at = stored.findIndex((p) => p.id === project.id);
+      if (at >= 0) { stored[at].everSeen = { ...(stored[at].everSeen || {}), ...upgraded }; writeAll(stored); }
     } catch { /* a record we cannot update is not a reason to fail a read */ }
     project = { ...project, everSeen: { ...(project.everSeen || {}), ...upgraded } };
   }
@@ -1308,7 +1318,7 @@ function blockBody(projects, sessionName) {
   const lines = projects.map((p) => {
     const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``;
     const mine = (sessionName && Array.isArray(p.tasks))
-      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt)
+      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && Number.isSafeInteger(Number(t.number)))
       : [];
     if (!mine.length) return head;
     any = true;
