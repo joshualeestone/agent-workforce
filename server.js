@@ -817,8 +817,26 @@ const server = http.createServer((req, res) => {
   // created from.
   if (pathname === '/api/roles' && (req.method === 'GET' || req.method === 'HEAD')) {
     sendJson(res, 200, {
-      roles: roles.ROLES.map((r) => ({
+      // The models an agent can be created on, from the engine's own list,
+      // so the menu and the flag the job runs with cannot drift.
+      models: create.MODELS.map((m) => ({ key: m.key, label: m.label, default: m.default === true })),
+      // The third radio's prefill, served whole so the screen and the
+      // engine cannot hold two versions of the example. No label field:
+      // that is the person's own words, gated at create.
+      own: (() => {
+        const o = roles.byKey('own');
+        return o ? { key: o.key, blurb: o.blurb, firstAction: o.firstAction, instructions: o.instructions } : null;
+      })(),
+      // ⚠️ MENU roles only: `own` (menu: false) prefills the third radio's
+      // editor and must not appear in the grouped list or raise any count.
+      roles: roles.ROLES.filter((r) => r.menu !== false).map((r) => ({
         key: r.key, label: r.label, blurb: r.blurb, firstAction: r.firstAction,
+        // The template itself, {{NAME}} and all: the details screen prefills
+        // its editor from this so the words a person reads before creating
+        // are the words the agent boots from. An untouched editor sends
+        // nothing back and the engine writes this same template server-side;
+        // only edited text travels.
+        instructions: r.instructions,
         // The catalogue's section, so the picker's menu can group without a
         // second copy of the grouping living in the page.
         group: r.group || null,
@@ -867,11 +885,81 @@ const server = http.createServer((req, res) => {
           throw new Error('we could not read that request');
         }
 
-        const result = create.createAgent({ name: body.name, role: body.role });
+        /**
+         * ⚠️ The projects the new agent should join are validated HERE,
+         * BEFORE the engine writes anything: a refusal after the folder
+         * exists would need the rollback nobody should pay for a typo. The
+         * ATTACH happens after CREATED and is non-gating, exactly like the
+         * project-create route's own telling: a recorded agent whose
+         * membership write failed is a real, reportable state, never a
+         * reason to un-make the agent.
+         */
+        let wantProjects;
+        if (body.projects !== undefined) {
+          if (!Array.isArray(body.projects)
+              || body.projects.some((p) => typeof p !== 'string' || !p.trim())) {
+            sendJson(res, 400, { error: 'projects has to be a list of project ids' });
+            return;
+          }
+          wantProjects = [...new Set(body.projects.map((p) => p.trim()))];
+          // ⚠️ Wrapped separately: an UNREADABLE projects store is OUR fact
+          // (500, the engine's own sentence), not a malformed request, and
+          // the route's shared catch would have answered "we could not read
+          // that request" about a file the person never touched.
+          let known;
+          try {
+            known = projects.readAll();
+          } catch (err) {
+            const code = (err && err.code === 'UNREADABLE') ? 500 : 400;
+            sendJson(res, code, { error: String((err && err.message) || 'we could not read your projects') });
+            return;
+          }
+          const missing = wantProjects.filter((id) => !known.some((p) => p.id === id));
+          if (missing.length) {
+            sendJson(res, 400, { error: `there is no project by that name (${missing.join(', ')})` });
+            return;
+          }
+        }
+
+        const result = create.createAgent({
+          name: body.name, role: body.role,
+          label: body.label, instructions: body.instructions, model: body.model,
+        });
         // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
         // ours, and it is a 200 because the thing half-happened and the caller
         // needs the detail rather than an error.
         const code = result.outcome === create.OUTCOME.REFUSED ? 400 : 200;
+        if (result.outcome === create.OUTCOME.CREATED && wantProjects && wantProjects.length) {
+          // One roster read for the whole request, same rule as the project
+          // routes: syncAgent refuses to write without an exact match in it.
+          const roster = safeRoster();
+          // ⚠️ `result.name`, the slug the engine PUBLISHES for exactly this
+          // reason (its comment: act on the machine name). The first version
+          // read `result.sessionName`, a field the CREATED result has never
+          // carried, so every attach refused with "choose an agent" while the
+          // suite stayed green -- nothing exercised this route with projects.
+          // The route test now creates through here and asserts added: true.
+          result.projects = wantProjects.map((id) => {
+            try {
+              projects.addAgent(id, result.name, roster);
+              return { id, added: true };
+            } catch (err) {
+              return { id, added: false, because: String((err && err.message) || 'we could not put it on that project') };
+            }
+          });
+          // ⚠️ NO syncAgent here, on purpose. This code runs milliseconds
+          // after `launchctl bootstrap` returns, which is the one moment a
+          // tell is near-guaranteed to fail: the tmux session and its
+          // @kosmos_agent claim do not exist yet (create.js's own comment:
+          // they happen inside the job, after this function has returned).
+          // Syncing now STORED could_not against every create-with-project.
+          // So membership is recorded, told is honestly `not_tried`, and the
+          // creation screen re-fires the tell through the member route the
+          // moment the board can actually see the agent running.
+          for (const p of result.projects) {
+            if (p.added) p.told = { state: projects.TOLD.NOT_TRIED, because: null };
+          }
+        }
         sendJson(res, code, result);
       })
       // ⚠️ OUR sentence, never the raw message. The first version called

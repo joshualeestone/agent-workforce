@@ -16,7 +16,7 @@
 #
 # Usage, which is what the launchd job runs:
 #
-#   agent-supervisor.sh <session> <workdir> <claude-bin> <tmux-bin> [log]
+#   agent-supervisor.sh <session> <workdir> <claude-bin> <tmux-bin> [log] [model]
 #
 # ⚠️ THIS VECTOR IS A CONTRACT WITH EVERY AGENT THAT ALREADY EXISTS, and it is
 # the one thing about this file that CANNOT be changed freely.
@@ -53,6 +53,11 @@ WORKDIR="${2:?a working directory is required}"
 CLAUDE="${3:?the path to claude is required}"
 TMUX_BIN="${4:?the path to tmux is required}"
 LOG="${5:-}"
+# The model this agent runs on, optional and NEW as of the create-agent
+# branch (2026-08-16). Empty means claude's own default. Existing plists
+# pass five arguments and keep working untouched; only agents created with
+# an explicit model choice carry a sixth.
+MODEL="${6:-}"
 
 # ⚠️ TWO SPELLINGS OF THE SAME SESSION, and which commands take which was
 # MEASURED on tmux 3.6a rather than assumed, because assuming it broke the claim
@@ -170,8 +175,16 @@ done
 # stamping @kosmos_agent onto somebody else's session would make the NEXT run of
 # this script recognise it as ours and kill it.
 if [ -z "$adopt" ]; then
-  "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \
-    "$CLAUDE" --dangerously-skip-permissions || exit 1
+  # ⚠️ The model flag is appended ONLY when a model was chosen, as two more
+  # quoted arguments -- never interpolated into a string this file's header
+  # forbids. An empty MODEL adds nothing and claude picks its own default.
+  if [ -n "$MODEL" ]; then
+    "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \
+      "$CLAUDE" --dangerously-skip-permissions --model "$MODEL" || exit 1
+  else
+    "$TMUX_BIN" new-session -d -s "$SESSION" -c "$WORKDIR" \
+      "$CLAUDE" --dangerously-skip-permissions || exit 1
+  fi
 fi
 
 # The claim. `set-option` cannot take the `=exact` form, and it is safe here

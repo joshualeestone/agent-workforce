@@ -1802,7 +1802,15 @@ test('the roles route carries the copy the creation actually uses', async () => 
   assert.equal(res.status, 200);
   const got = JSON.parse(res.body).roles;
 
-  assert.equal(got.length, roles.ROLES.length, 'the route drops or invents roles');
+  // MENU roles only: `own` (menu: false) prefills the third radio and is
+  // served whole in its own field, never in the grouped list (catalogue
+  // 0ef34cc: 27 entries, 26 pickable).
+  const menu = roles.ROLES.filter((r) => r.menu !== false);
+  assert.equal(got.length, menu.length, 'the route drops or invents roles');
+  assert.ok(!got.some((r) => r.key === 'own'), 'own leaked into the pickable menu');
+  const ownServed = JSON.parse(res.body).own;
+  assert.ok(ownServed && ownServed.instructions === roles.byKey('own').instructions,
+    "the third radio's prefill is not the engine's own example, so the words a person reads are not the words the agent boots from");
   for (const r of got) {
     const real = roles.byKey(r.key);
     assert.ok(real, `the route served a role '${r.key}' that cannot be created`);
@@ -2128,6 +2136,152 @@ test('the create route answers a real creation with the record the screen is bui
     create.setRunner(null);
     status.setPaneSource(null);
   }
+});
+
+test('a creation with projects picked really lands on those projects, and the response says so', async () => {
+  // ⚠️ This test exists because its absence hid a dead feature: the attach
+  // block read `result.sessionName`, a field the CREATED result has never
+  // carried, so every attach refused with "choose an agent" while 775 tests
+  // stayed green -- nothing drove POST /api/agents with a `projects` body.
+  // The assertions here go through the wire AND then read the membership
+  // back from the engine, so a wrong field name (or a wrong key shape) can
+  // never again fail silently.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const projects = require('./engine/projects');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    const made = projects.create({ name: 'Attach Fixture' });
+    const res = await req('/api/agents', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      // The typed name carries a capital ON PURPOSE: the board files agents
+      // under the slug, so an attach keyed on anything but `result.name`
+      // (say, the typed form) would record a member no roster will ever
+      // match.
+      body: JSON.stringify({ name: 'Route-Attached', role: 'writer', projects: [made.id] }),
+    });
+    assert.equal(res.status, 200, 'a legitimate creation with projects was refused');
+    const body = JSON.parse(res.body);
+    assert.equal(body.outcome, 'created', body.because);
+    assert.ok(Array.isArray(body.projects), 'the attach outcomes never came back to the screen');
+    assert.equal(body.projects.length, 1, 'one project was asked for, a different count came back');
+    assert.equal(body.projects[0].added, true,
+      'the attach refused: ' + (body.projects[0].because || '(no reason given)'));
+    // And the membership is REALLY recorded, under the slug the board uses.
+    // readAll, not get: get() enriches members into described objects, and
+    // this assertion is about what was PERSISTED.
+    const after = projects.readAll().find((p) => p.id === made.id);
+    assert.ok((after.agents || []).includes('route-attached'),
+      'the response said added but the project does not list the agent');
+    // The told verdict is honestly NOT_TRIED at create time: the session
+    // launchd will start does not exist yet, so a sync here would store
+    // could_not against every create-with-project (the race this route's
+    // comment documents). The creation screen re-fires the tell through the
+    // member route once the board can see the agent.
+    assert.equal(body.projects[0].told && body.projects[0].told.state, 'not_tried',
+      'the create-time verdict should be not_tried, not a stored failure');
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
+test('a create naming an unknown or malformed project refuses BEFORE any write', async () => {
+  // The route's loudest claim ("validated HERE, BEFORE the engine writes
+  // anything") held only by comment: moving the validation below createAgent
+  // would have kept the suite green. These cases pin the ordering to the
+  // filesystem the same way the engine's refusals-leave-no-trace tests do.
+  const create = require('./engine/create');
+  const status = require('./engine/status');
+  const calls = [];
+  create.setRunner((file, args) => { calls.push([file, args]); return { ok: true, stdout: '' }; });
+  create.setDryRun(false);
+  status.setPaneSource(() => '');
+  try {
+    for (const [label, projects] of [
+      ['an unknown id', ['no-such-project']],
+      ['a non-array', 'oops'],
+      ['a non-string entry', [42]],
+      ['a blank entry', ['   ']],
+    ]) {
+      const res = await req('/api/agents', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'never-made', role: 'writer', projects }),
+      });
+      assert.equal(res.status, 400, `${label}: the create was not refused`);
+      assert.ok(!fs.existsSync(create.workerDir('never-made')),
+        `${label}: the refusal left a worker folder behind`);
+      assert.equal(calls.length, 0, `${label}: a command ran for a refused create`);
+    }
+  } finally {
+    create.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
+test('the roles payload serves the models list, and the mark family map is whole-name seeded', async () => {
+  // Route half: the model select is built from this payload, and until now
+  // nothing asserted it -- a route that stopped serving `models` would strand
+  // the select empty with the suite green.
+  const rolesRes = await req('/api/roles', {});
+  assert.equal(rolesRes.status, 200);
+  const payload = JSON.parse(rolesRes.body);
+  assert.ok(Array.isArray(payload.models) && payload.models.length >= 3, 'no models list came back');
+  const defaults = payload.models.filter((m) => m.default);
+  assert.equal(defaults.length, 1, 'exactly one model must be preselected');
+  assert.equal(defaults[0].key, 'sonnet', 'the preselected model is not the documented default');
+  for (const m of payload.models) {
+    // key/label/default ONLY: the payload deliberately does not carry the
+    // model args -- the client sends a key and the engine owns the mapping,
+    // so a page can never name the executable-facing id itself.
+    assert.deepEqual(Object.keys(m).sort(), ['default', 'key', 'label'],
+      `model ${m.key} serves fields the screen must not receive`);
+    assert.equal(typeof m.label, 'string');
+  }
+  // The full model ids live in the ENGINE list the route maps from.
+  const engineModels = require('./engine/create').MODELS;
+  for (const m of payload.models) {
+    const src = engineModels.find((x) => x.key === m.key);
+    assert.ok(src && /^claude-/.test(src.arg), `engine model ${m.key} lacks a full model id`);
+  }
+
+  // Extraction half, same harness as the other page-logic tests: the mark
+  // family function is pulled out of the page source and exercised directly,
+  // because the last dead-code defect on this screen lived in exactly this
+  // "only reachable through the browser" layer.
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const famsAt = page.indexOf('const MARK_FAMS');
+  const famForAt = page.indexOf('function markFamFor');
+  assert.ok(famsAt > -1 && famForAt > -1, 'the mark generator moved; re-anchor this test');
+  const sliceEnd = (start) => {
+    let depth = 0;
+    for (let k = page.indexOf('{', start); k < page.length; k += 1) {
+      if (page[k] === '{') depth += 1;
+      else if (page[k] === '}') { depth -= 1; if (depth === 0) return k + 1; }
+    }
+    return -1;
+  };
+  const famsEnd = page.indexOf('];', famsAt);
+  const famForEnd = sliceEnd(famForAt);
+  assert.ok(famsEnd > -1 && famForEnd > -1, 'could not slice the mark generator');
+  // eslint-disable-next-line no-new-func
+  const markFamFor = new Function(
+    `${page.slice(famsAt, famsEnd + 2)}\n${page.slice(famForAt, famForEnd)}\nreturn markFamFor;`)();
+
+  const fams = markFamFor('leo');
+  assert.ok(Array.isArray(fams) && fams.length >= 3, 'a family is a palette, not a colour');
+  assert.deepEqual(markFamFor('leo'), markFamFor('leo'), 'the family map is not deterministic');
+  // ⚠️ leo vs LAURA, not leo vs lucy: measured first, leo and lucy genuinely
+  // collide under whole-name FNV (both bucket 10 of 14), so pinning them
+  // unequal would fail on correct code. laura differs, and letter-only
+  // seeding (the original bug: every l-name one image) would collide it.
+  assert.notDeepEqual(markFamFor('leo'), markFamFor('laura'),
+    'two different l-names share a family: the letter-only seeding bug is back');
+  assert.notDeepEqual(markFamFor('casey'), markFamFor('Casey'),
+    'case-differing names measured to different buckets; sameness means the seed changed');
 });
 
 test('the suggested default role is the project manager, by name and not by position', () => {

@@ -53,6 +53,24 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const roles = require('./roles');
+
+/**
+ * The models an agent can be created on.
+ *
+ * ⚠️ Served to the screen from HERE (via the create panel's boot data), so
+ * the menu a person chooses from and the flag the job runs with cannot
+ * drift -- the design pack's own check asserts its display list against
+ * this one. `arg` is the exact string handed to `claude --model`; `key` is
+ * what the route accepts. DEFAULT (sonnet) sends the flag too: an explicit
+ * choice and the preselected one must not behave differently, or the menu
+ * lies about what changing it does.
+ */
+const MODELS = [
+  { key: 'fable', label: 'Claude Fable 5', arg: 'claude-fable-5' },
+  { key: 'opus', label: 'Claude Opus 5', arg: 'claude-opus-5' },
+  { key: 'sonnet', label: 'Claude Sonnet 5', arg: 'claude-sonnet-5', default: true },
+  { key: 'haiku', label: 'Claude Haiku 4.5', arg: 'claude-haiku-4-5-20251001' },
+];
 // ⚠️ The ROSTER, from the module that defines what an agent name is. A second
 // reading of tmux here would be a second definition of "who is already
 // running", and this codebase's worst defects have all been two definitions of
@@ -378,8 +396,12 @@ function xml(value) {
  * the notice is coming, in as many words, rather than letting somebody meet it
  * unexplained and switch their own agent off.
  */
-function plistFor(name, claudeBin, tmuxBin) {
+function plistFor(name, claudeBin, tmuxBin, modelArg) {
   const label = serviceLabel(name);
+  // The optional sixth supervisor argument. Log ($5) must be present when
+  // model ($6) is, and it always is below; an agent created without a model
+  // choice writes the five-argument job every existing agent already runs.
+  const modelLine = modelArg ? `\n    <string>${xml(modelArg)}</string>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -393,7 +415,7 @@ function plistFor(name, claudeBin, tmuxBin) {
     <string>${xml(workerDir(name))}</string>
     <string>${xml(claudeBin)}</string>
     <string>${xml(tmuxBin)}</string>
-    <string>${xml(logFile(name))}</string>
+    <string>${xml(logFile(name))}</string>${modelLine}
   </array>
   <key>WorkingDirectory</key><string>${xml(workerDir(name))}</string>
   <key>EnvironmentVariables</key>
@@ -519,6 +541,67 @@ function createAgent(opts) {
    * config, no eslint dependency and no lint script in this repo, so it was
    * decoration that read as a rule.)
    */
+  /**
+   * ⚠️ The pane-2 options, EVERY one validated before ANY write (the same
+   * whole-or-not-at-all rule the projects PUT converged on): a refusal
+   * after the folder exists is a rollback nobody should need for a typo.
+   *
+   * - `label` overrides the role's display label (the board's "what they
+   *   do" line). Words or refused; the profile write itself happens only
+   *   past the point of no rollback, beside displayName, and is non-gating
+   *   for the same reason.
+   * - `instructions` replaces the role template wholesale. Same tolerance
+   *   as the edit path a person reaches afterwards: their words, not ours,
+   *   but never empty -- an empty boot file is an agent with no idea what
+   *   it is, which the blank-box rule exists to prevent.
+   * - `model` must be one of MODELS; the arg it maps to is what the job
+   *   runs with forever, so an unknown key is refused rather than guessed.
+   */
+  const wantLabel = opts && opts.label !== undefined ? opts.label : undefined;
+  const wantInstructions = opts && opts.instructions !== undefined ? opts.instructions : undefined;
+  const wantModelKey = opts && opts.model !== undefined ? opts.model : undefined;
+  /**
+   * ⚠️ `own` has no label of its own ON PURPOSE (the catalogue's rule): the
+   * board prints this string under the agent's name, and defaulting it to
+   * "Custom" gives somebody an agent whose job is "Custom". An empty label
+   * here is a gating question for the person, never a default.
+   */
+  if (roleKey === 'own' && (wantLabel === undefined || !String(wantLabel).trim())) {
+    return { outcome: OUTCOME.REFUSED, because: 'say what this agent does in the role label, in your own words', steps };
+  }
+  if (wantLabel !== undefined
+      && (typeof wantLabel !== 'string' || !wantLabel.trim() || wantLabel.trim().length > 80)) {
+    return { outcome: OUTCOME.REFUSED, because: 'a role label has to be words (80 characters or fewer)', steps };
+  }
+  if (wantInstructions !== undefined
+      && (typeof wantInstructions !== 'string' || !wantInstructions.trim())) {
+    return { outcome: OUTCOME.REFUSED, because: 'instructions have to be words, or leave them out and the role\'s own are used', steps };
+  }
+  // The SAME bounds the instructions module enforces on every later edit
+  // (its MIN_CHARS and MAX_BYTES), carried here so create cannot mint a
+  // boot file the app's own editor would refuse to read back: an oversize
+  // file makes readWorkerFile refuse forever (anonymous card, unreadable
+  // editor, could_not on every project tell), and a two-character one
+  // would be refused at the first save.
+  if (wantInstructions !== undefined) {
+    const instructions = require('./instructions');
+    if (wantInstructions.trim().length < instructions.MIN_CHARS) {
+      return { outcome: OUTCOME.REFUSED, because: `instructions cannot be this short, say what this agent is for in at least ${instructions.MIN_CHARS} characters`, steps };
+    }
+    // Measured on the NORMALIZED text (the write step appends a trailing
+    // newline when the input lacks one), or an input of exactly MAX_BYTES
+    // would validate and then land on disk one byte over the read limit.
+    if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
+      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be a boot file, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
+    }
+  }
+  let modelArg = null;
+  if (wantModelKey !== undefined) {
+    const m = MODELS.find((x) => x.key === String(wantModelKey));
+    if (!m) return { outcome: OUTCOME.REFUSED, because: 'pick a model from the list', steps };
+    modelArg = m.arg;
+  }
+
   const removedList = require('./remove');
   if (removedList.isRemoved(name)) {
     return {
@@ -762,7 +845,12 @@ function createAgent(opts) {
 
   const wroteInstructions = step('wrote its instructions', () => {
     if (DRY_RUN) return true;
-    fs.writeFileSync(instructionFile(name), roles.instructionsFor(roleKey, shown), 'utf8');
+    // Their words when they gave any, the role's otherwise. A trailing
+    // newline either way, matching what instructionsFor produces.
+    const text = wantInstructions !== undefined
+      ? wantInstructions.replace(/\n?$/, '\n')
+      : roles.instructionsFor(roleKey, shown);
+    fs.writeFileSync(instructionFile(name), text, 'utf8');
   });
 
   /**
@@ -828,7 +916,7 @@ function createAgent(opts) {
   const wroteJob = (wroteInstructions && installedSupervisor) && step('wrote its startup job', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
-    fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin), 'utf8');
+    fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin, modelArg), 'utf8');
   });
 
   /**
@@ -913,9 +1001,19 @@ function createAgent(opts) {
   // file fallback would not answer identically, while costing the
   // record-wins hazards for every agent instead of only the capitalised
   // ones the record exists for.
-  if (!DRY_RUN && shown && shown !== name) {
-    try { store.writeProfile(name, { displayName: shown }); }
-    catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
+  // ...and the chosen role label rides the same record: one merged write,
+  // not two back-to-back read-merge-write cycles on the same JSON file
+  // (which also carried a window where the first landed and the second did
+  // not). Both fields follow the same rules: written only past the point
+  // of no rollback, non-gating, validated long before any write.
+  if (!DRY_RUN) {
+    const profile = {};
+    if (shown && shown !== name) profile.displayName = shown;
+    if (wantLabel !== undefined) profile.role = wantLabel.trim();
+    if (Object.keys(profile).length) {
+      try { store.writeProfile(name, profile); }
+      catch { /* a card that reads `casey` with the role template's words is a working agent, not a failure */ }
+    }
   }
   return {
     outcome: OUTCOME.CREATED,
@@ -940,6 +1038,7 @@ function createAgent(opts) {
 }
 
 module.exports = {
+  MODELS,
   createAgent,
   binPaths,
   unusablePath,
