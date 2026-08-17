@@ -1245,7 +1245,7 @@ function remove(id) {
  * paragraph described a "first end with a start before it" scan that appears
  * nowhere in the file and does not mention the refusal at all.
  */
-function findBlock(text) {
+function findBlock(text, startMark = BLOCK_START, endMark = BLOCK_END) {
   const original = String(text == null ? '' : text);
   // ⚠️ THIS FUNCTION HAS BEEN WRONG THREE TIMES, each time in a damaged shape
   // the version before it had not considered, and each fix was written against
@@ -1260,13 +1260,13 @@ function findBlock(text) {
   // which is how two of the three earlier versions destroyed text.
   const tight = [];
   for (let at = 0; ; ) {
-    const start = original.indexOf(BLOCK_START, at);
+    const start = original.indexOf(startMark, at);
     if (start < 0) break;
-    const end = original.indexOf(BLOCK_END, start + BLOCK_START.length);
+    const end = original.indexOf(endMark, start + startMark.length);
     if (end < 0) break;
-    const next = original.indexOf(BLOCK_START, start + BLOCK_START.length);
-    if (next < 0 || next > end) tight.push({ start, end: end + BLOCK_END.length });
-    at = start + BLOCK_START.length;
+    const next = original.indexOf(startMark, start + startMark.length);
+    if (next < 0 || next > end) tight.push({ start, end: end + endMark.length });
+    at = start + startMark.length;
   }
   if (!tight.length) return null;
   // ⚠️ TWO WELL-FORMED BLOCKS ARE AMBIGUOUS, AND WE REFUSE RATHER THAN GUESS.
@@ -1290,10 +1290,10 @@ function findBlock(text) {
  * "the most powerful write in the product", and a projects feature has no
  * business being the thing that truncates one.
  */
-function spliceBlock(text, body) {
+function spliceBlock(text, body, startMark = BLOCK_START, endMark = BLOCK_END) {
   const original = String(text == null ? '' : text);
-  const block = `${BLOCK_START}\n${body}\n${BLOCK_END}`;
-  const at = findBlock(original);
+  const block = `${startMark}\n${body}\n${endMark}`;
+  const at = findBlock(original, startMark, endMark);
   // Unchanged, byte for byte, when we cannot tell which block is ours. The
   // caller reports it; writing anything here would be the guess.
   if (at && at.ambiguous) return original;
@@ -1314,9 +1314,9 @@ function spliceBlock(text, body) {
  * of their OWN last edit) and flips the agent to "running on older
  * instructions" for a change that was not a change.
  */
-function removeBlock(text) {
+function removeBlock(text, startMark = BLOCK_START, endMark = BLOCK_END) {
   const original = String(text == null ? '' : text);
-  const at = findBlock(original);
+  const at = findBlock(original, startMark, endMark);
   if (!at || at.ambiguous) return original;
   const before = original.slice(0, at.start);
   const after = original.slice(at.end);

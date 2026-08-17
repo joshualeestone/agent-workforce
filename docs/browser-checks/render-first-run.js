@@ -148,18 +148,19 @@ const SHOTS = [
   { name: 'firstrun-3-claude-connected', step: 3, first: FLEET_ADOPT },
   { name: 'firstrun-3-claude-none', step: 3, first: SUB_NONE },
   { name: 'firstrun-3-claude-unsure', step: 3, first: SUB_UNSURE },
-  { name: 'firstrun-4-adopt', step: 4, first: FLEET_ADOPT },
-  { name: 'firstrun-4-create', step: 4, first: FLEET_CREATE },
-  { name: 'firstrun-4-cannot-see', step: 4, first: FLEET_BLIND },
-  { name: 'firstrun-5-return-system', step: 5, machine: MACHINE_APP_SYS, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-home', step: 5, machine: MACHINE_APP_HOME, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-missing', step: 5, machine: MACHINE_APP_NONE, first: FLEET_STEP5 },
-  { name: 'firstrun-5-return-unsure', step: 5, machine: MACHINE_APP_BLIND, first: FLEET_STEP5 },
+  { name: 'firstrun-4-about-you', step: 4 },
+  { name: 'firstrun-5-adopt', step: 5, first: FLEET_ADOPT },
+  { name: 'firstrun-5-create', step: 5, first: FLEET_CREATE },
+  { name: 'firstrun-5-cannot-see', step: 5, first: FLEET_BLIND },
+  { name: 'firstrun-6-return-system', step: 6, machine: MACHINE_APP_SYS, first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-home', step: 6, machine: MACHINE_APP_HOME, first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-missing', step: 6, machine: MACHINE_APP_NONE, first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-unsure', step: 6, machine: MACHINE_APP_BLIND, first: FLEET_STEP5 },
   // The look STILL IN PROGRESS: the only genuinely new visual state on this
   // branch, otherwise never rendered by any harness (both walks wait past
   // it). machine: 'hang' stalls the route so the placeholder is what is
   // measured and photographed.
-  { name: 'firstrun-5-return-checking', step: 5, machine: 'hang', first: FLEET_STEP5 },
+  { name: 'firstrun-6-return-checking', step: 6, machine: 'hang', first: FLEET_STEP5 },
 ];
 
 /**
@@ -186,7 +187,7 @@ async function look(page, name) {
       const gr = grid.getBoundingClientRect();
       const mid = document.elementFromPoint(Math.min(window.innerWidth / 2, 400), 300);
       if (mid && !box.contains(mid)) bad.push(`the point (400,300) hits ${mid.tagName}#${mid.id || ''} outside the overlay`);
-      if (gr.height > 0 && getComputedStyle(grid).visibility === 'visible' && !document.querySelector('body > header').inert) {
+      if (gr.height > 0 && getComputedStyle(grid).visibility === 'visible' && !document.querySelector('.apphead').inert) {
         bad.push('the board behind is not inert');
       }
     }

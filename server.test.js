@@ -4338,3 +4338,34 @@ test('the 80-character cap holds on BOTH display-name writers, and no record is 
     status.setPaneCapture(null);
   }
 });
+
+test('the person record: absent, refused, saved-and-told, prefill round trip', async () => {
+  // Absent is the wizard's normal starting state: a 200 with the state, never
+  // a 404 the screen has to special-case.
+  const empty = JSON.parse((await req('/api/you')).body);
+  assert.equal(empty.state, 'absent');
+
+  // Refusals speak the field's own sentence at 400 and save nothing.
+  const bad = await req('/api/you', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '  ', does: 'x' }),
+  });
+  assert.equal(bad.status, 400);
+  assert.match(JSON.parse(bad.body).error, /call you/);
+  assert.equal(JSON.parse((await req('/api/you')).body).state, 'absent', 'a refusal wrote a record');
+
+  // A good save answers the record AND the tell verdicts (never invented:
+  // an array, whatever this machine's roster held at the time).
+  const put = await req('/api/you', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Josh', does: 'Runs a company', know: 'No em dashes.' }),
+  });
+  assert.equal(put.status, 200);
+  const saved = JSON.parse(put.body);
+  assert.equal(saved.you.name, 'Josh');
+  assert.ok(Array.isArray(saved.told), 'the tell verdicts are carried, not implied');
+
+  const back = JSON.parse((await req('/api/you')).body);
+  assert.equal(back.state, 'saved');
+  assert.equal(back.you.know, 'No em dashes.');
+});

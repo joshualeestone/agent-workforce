@@ -29,7 +29,7 @@ async function fresh(browser, opts = {}) {
     const { ctx, page } = await fresh(browser);
     ok(await page.isVisible('#firstrun'), 'the overlay is up with no ?first-run flag at all');
     ok(await page.locator('#fr-title').textContent() === 'Welcome to Kosmos', 'on step 1');
-    ok(await page.evaluate(() => document.querySelector('body > header').inert === true),
+    ok(await page.evaluate(() => document.querySelector('.apphead').inert === true),
       'the board behind it is inert');
     // ⚠️ Asked, not assumed: what does a click at the middle of the screen hit?
     ok(await page.evaluate(() => document.querySelector('#firstrun')
@@ -45,9 +45,21 @@ async function fresh(browser, opts = {}) {
     ok(await page.locator('#fr-sub .fr-ctitle').textContent().then((t) => /connected/.test(t)),
       'the real subscription answer arrived: ' + await page.locator('#fr-sub .fr-ctitle').textContent());
     await page.click('#fr-next');
-    ok(/already have/.test(await page.locator('#fr-title').textContent()), 'step 4, the adopt path');
+    // Step 4, About you. The gate IS the design (no skip, at Josh's call):
+    // Continue WAITS on the two required answers, and the third is optional.
+    ok(await page.locator('#fr-title').textContent() === 'Who are your agents working for?', 'step 4, about you');
+    ok(await page.locator('#fr-next').isDisabled(), 'Continue waits for the two required answers');
+    await page.fill('#fr-you-name', 'Josh');
+    ok(await page.locator('#fr-next').isDisabled(), 'one answer alone does not arm it');
+    await page.fill('#fr-you-do', 'I run a company that builds AI tools');
+    ok(!(await page.locator('#fr-next').isDisabled()), 'both answers arm Continue; the third stays optional');
     await page.click('#fr-next');
-    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'step 5, getting back');
+    // Continue SAVES before it advances (a real PUT on this live server), so
+    // wait for the step change rather than reading the title mid-flight.
+    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
+    ok(/already have/.test(await page.locator('#fr-title').textContent()), 'step 5, the adopt path');
+    await page.click('#fr-next');
+    ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'step 6, getting back');
     // The check row is painted from the live /api/machine look; against this
     // real machine any of the four states is legitimate -- what must be true
     // is that A row rendered and the Dock sentence is the drag instruction,
@@ -70,7 +82,7 @@ async function fresh(browser, opts = {}) {
     await page.waitForTimeout(600);
     ok(await page.isHidden('#firstrun'), 'the overlay closed');
     ok(await page.isVisible('#grid'), 'the board is there');
-    ok(await page.evaluate(() => document.querySelector('body > header').inert === false),
+    ok(await page.evaluate(() => document.querySelector('.apphead').inert === false),
       'the board is interactive again');
     ok(fs.existsSync(FLAG), 'the flag was written, so it will not reappear');
     // ⚠️ The control for that last one: it was NOT there a moment ago.
@@ -86,7 +98,7 @@ async function fresh(browser, opts = {}) {
     await page.goto(BASE, { waitUntil: 'networkidle' });
     await page.waitForTimeout(700);
     ok(await page.isHidden('#firstrun'), 'a returning person gets their board, not onboarding');
-    ok(await page.evaluate(() => document.querySelector('body > header').inert === false),
+    ok(await page.evaluate(() => document.querySelector('.apphead').inert === false),
       'and nothing left the page inert');
     await ctx.close();
   }
@@ -115,7 +127,7 @@ async function fresh(browser, opts = {}) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(600);
     ok(await page.isHidden('#firstrun'), 'Escape closed it');
-    ok(await page.evaluate(() => document.querySelector('body > header').inert === false),
+    ok(await page.evaluate(() => document.querySelector('.apphead').inert === false),
       'Escape did not leave the page inert and unusable');
     await ctx.close();
   }
@@ -127,22 +139,29 @@ async function fresh(browser, opts = {}) {
       route: ['**/api/first-run', (r) => r.fulfill({ json: { done: false, fleetKnown: true, fleetCount: 0, fleetNames: [], path: 'create', subscription: { state: 'connected', plan: 'Claude Max', because: '' } } })],
     });
     await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
+    // About you sits between Claude and the fork now; answer it to pass.
+    await page.fill('#fr-you-name', 'Josh');
+    await page.fill('#fr-you-do', 'Testing the create path');
+    await page.click('#fr-next');
+    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
     ok(/first agent/.test(await page.locator('#fr-title').textContent()), 'on the create path');
-    // The fork moved to step 5: step 4's Continue leads to the orientation,
+    // The fork moved to step 6: step 5's Continue leads to the orientation,
     // whose primary carries "Make my first agent" on this path.
     await page.click('#fr-next');
     ok(await page.locator('#fr-title').textContent() === 'Getting back to Kosmos', 'orientation before the fork');
     ok(/Make my first agent/.test(await page.locator('#fr-next').textContent()),
-      'the create-path fork rode along to step 5');
+      'the create-path fork rode along to step 6');
     await page.click('#fr-next');
     await page.waitForTimeout(800);
     ok(await page.isHidden('#firstrun'), 'the overlay got out of the way');
     ok(await page.isVisible('#panel-create'), 'and the create panel is open');
     // ⚠️ Not just open — usable. The deep-link version of this shipped with an
     // empty role list and a dead Continue once.
-    // The picker is the two-radio shape now (catalogue build, 2026-08-16):
-    // loaded means the radios are visible, which only the fetch un-hides.
-    ok((await page.locator('#roles-list .pick2:visible').count()) === 2, 'with its roles actually loaded');
+    // The picker is the three-radio shape now (pm / list / own since the
+    // write-my-own build): loaded means the radios are visible, which only
+    // the fetch un-hides.
+    await page.waitForSelector('#roles-list .pick2', { state: 'visible', timeout: 5000 }).catch(() => {});
+    ok((await page.locator('#roles-list .pick2:visible').count()) === 3, 'with its roles actually loaded');
     ok(await page.isVisible('#cstep-role'), 'on step one of creating, not somewhere mid-flow');
     await ctx.close();
   }
@@ -206,10 +225,10 @@ async function fresh(browser, opts = {}) {
     // dialog: frGo(3.7) matched no pane, so it hid all four and painted step 4
     // into one it had just hidden.
     const panes = await page.evaluate(() =>
-      [1, 2, 3, 4, 5].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
+      [1, 2, 3, 4, 5, 6].filter((i) => !document.getElementById('fr-pane-' + i).hidden));
     ok(panes.length === 1, `fr-step=${bad} shows exactly one pane (showed ${panes.length})`);
     const crumb = await page.locator('#fr-step').textContent();
-    ok(/^Step [1-5] of 5$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
+    ok(/^Step [1-6] of 6$/.test(crumb), `fr-step=${bad} prints a whole step ("${crumb}")`);
     ok((await page.locator('#fr-title').textContent()).trim().length > 0, `fr-step=${bad} has a heading`);
     await ctx.close();
   }
@@ -231,7 +250,11 @@ async function fresh(browser, opts = {}) {
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
     await page.click('#fr-next'); await page.click('#fr-next'); await page.click('#fr-next');
-    await page.click('#fr-next');                 // step 4 -> 5 (the fork moved)
+    await page.fill('#fr-you-name', 'Josh');      // About you gates step 4
+    await page.fill('#fr-you-do', 'Testing');
+    await page.click('#fr-next');                 // step 4 -> 5 (saves first)
+    await page.waitForSelector('#fr-pane-4', { state: 'hidden', timeout: 5000 });
+    await page.click('#fr-next');                 // step 5 -> 6 (the fork moved)
     await page.click('#fr-next');                 // starts "Make my first agent"
     await page.waitForTimeout(150);
     await page.keyboard.press('Escape');          // ...and Escape mid-flight
@@ -265,7 +288,7 @@ async function fresh(browser, opts = {}) {
     await page.click('#fr-next');
     await page.waitForTimeout(400);
     ok(await page.isHidden('#firstrun'), 'and it actually let them out');
-    ok(await page.evaluate(() => document.querySelector('body > header').inert === false),
+    ok(await page.evaluate(() => document.querySelector('.apphead').inert === false),
       'and did not leave the board inert');
     await ctx.close();
   }
@@ -297,7 +320,7 @@ async function fresh(browser, opts = {}) {
     await page.evaluate(() => {
       document.querySelectorAll('body > *').forEach((el) => { el.inert = false; el.removeAttribute('inert'); });
     });
-    ok(await page.evaluate(() => !document.querySelector('body > header').inert),
+    ok(await page.evaluate(() => !document.querySelector('.apphead').inert),
       'inert really is off, so what follows measures the fallback and not the browser');
 
     ok(await inside(), 'focus starts inside the dialog (on ' + await where() + ')');
@@ -331,7 +354,7 @@ async function fresh(browser, opts = {}) {
     ok(seen.has('fr-skip'), 'Shift+Tab reaches the way out');
 
     // Every step, because the button set changes between them.
-    for (const step of [2, 3, 4, 5]) {
+    for (const step of [2, 3, 4, 5, 6]) {
       await page.goto(`${BASE}/?first-run=1&fr-step=${step}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
       // Same reason as above: a reload restores inert, which would make the rest

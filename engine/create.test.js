@@ -1625,3 +1625,26 @@ test('creating own without a label is a gating refusal, never a default', () => 
   assert.match(text, /stuck rather than filling the gap/,
     "the example's posture bullet is missing");
 });
+
+test('a saved About-you record rides the boot file from birth, and its absence costs nothing', () => {
+  const you = require('./you');
+  recorder();
+  create.setDryRun(false);
+
+  // With a record: the block is spliced into the SAME write that creates the
+  // file, because at create time the session does not exist yet and the tell
+  // path's tied-session gate would refuse the very agent being made.
+  you.save({ name: 'Josh', does: 'Runs a company that builds AI tools' });
+  const r1 = create.createAgent({ ...BINS, name: 'born-knowing', role: 'pm' });
+  assert.equal(r1.outcome, create.OUTCOME.CREATED, r1.because);
+  const text = fs.readFileSync(create.instructionFile('born-knowing'), 'utf8');
+  assert.match(text, /Who you work for/, 'the boot file does not carry the answers');
+  assert.match(text, /Josh\. Runs a company/);
+  assert.match(text, /You are \*\*born-knowing\*\*/, 'the role instructions were displaced');
+
+  // Without one: the boot file simply ships without the block.
+  fs.rmSync(you.FILE, { force: true });
+  const r2 = create.createAgent({ ...BINS, name: 'born-plain', role: 'pm' });
+  assert.equal(r2.outcome, create.OUTCOME.CREATED, r2.because);
+  assert.ok(!fs.readFileSync(create.instructionFile('born-plain'), 'utf8').includes('Who you work for'));
+});

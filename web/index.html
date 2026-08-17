@@ -953,6 +953,16 @@ svg { display: block; }
            line-height: 1.5; margin-top: var(--space-6);
            padding: var(--space-5) var(--space-6); border-radius: 10px;
            background: var(--attn-bg); }
+/* Step 4 -- about you. Same control look as the project form's field. */
+.fr-youfield { margin-top: var(--space-5); }
+.fr-youfield label { display: block; font: var(--text-callout) var(--font-ui);
+                     color: var(--label-2); margin-bottom: var(--space-2); }
+.fr-youfield input[type=text], .fr-youfield textarea {
+  width: 100%; box-sizing: border-box; font: var(--text-body) var(--font-ui);
+  padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
+  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+.fr-youfine { font: var(--text-caption) var(--font-ui); color: var(--label-3);
+              margin-top: var(--space-5); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
           margin-top: var(--space-5); min-height: 1em; }
 /* The connect flow (step 3). The bar is quiet monochrome on purpose: this
@@ -1245,7 +1255,7 @@ svg { display: block; }
   <div class="fr-box" role="dialog" aria-modal="true" aria-labelledby="fr-title">
     <div class="fr-bar">Kosmos Setup</div>
     <div class="fr-body">
-      <p class="crumb" id="fr-step">Step 1 of 5</p>
+      <p class="crumb" id="fr-step">Step 1 of 6</p>
       <div class="fr-segs" id="fr-segs" aria-hidden="true"></div>
       <!-- ⚠️ `tabindex="-1"` so it can be FOCUSED without joining the tab
            order. Without it `.focus()` here is a silent no-op and the step
@@ -1309,22 +1319,36 @@ svg { display: block; }
         <div class="vh" id="fr-conn-say" role="status" aria-live="polite"></div>
       </div>
 
-      <!-- 4. The fork. ⚠️ "Adopting" is not an import: every agent already on
+      <!-- 4. About you. The pack's step, its copy verbatim: two required
+           answers and one genuinely optional one. ⚠️ NO SKIP, at Josh's call
+           ("if they don't want to tell what they wanna be called and who they
+           are then they have no purpose in using this") -- and removing the
+           skip only means something if Continue WAITS, so the first two
+           answers gate the button and the third stays optional, which is the
+           difference between asking and pretending to ask. The wizard's own
+           quiet exit stays: that is the trap-escape for a wrong detection,
+           not a skip of this question. -->
+      <div class="fr-pane" id="fr-pane-4" hidden>
+        <div id="fr-you"></div>
+        <div class="fr-msg" id="fr-you-msg" role="status" aria-live="polite"></div>
+      </div>
+
+      <!-- 5. The fork. ⚠️ "Adopting" is not an import: every agent already on
            this machine is already on the board, because the board is built from
            `tmux list-panes`. So this screen SHOWS them rather than migrating
            them, and there is no progress bar here because there is no work. -->
-      <div class="fr-pane" id="fr-pane-4" hidden>
+      <div class="fr-pane" id="fr-pane-5" hidden>
         <div id="fr-fleet"></div>
       </div>
 
-      <!-- 5. Getting back. ⚠️ The one thing the install said only into
+      <!-- 6. Getting back. ⚠️ The one thing the install said only into
            Terminal scrollback, now said where the person actually is. The
            check row LOOKS (the app-location check in /api/machine) rather
            than remembering where the installer meant to put the icon: the
            icon legitimately lands in /Applications, ~/Applications, or
            nowhere, and a screen claiming a location nobody checked is the
            defect this codebase is built against. -->
-      <div class="fr-pane" id="fr-pane-5" hidden>
+      <div class="fr-pane" id="fr-pane-6" hidden>
         <!-- ⚠️ The live region is STATIC MARKUP the painter never recreates,
              like step 2's #fr-checks: a region inserted and populated in one
              innerHTML write is the documented way to get no announcement.
@@ -7745,13 +7769,13 @@ setInterval(() => {
 
 // 5 since the orientation step landed (PIN-2026-08-14-1913CDT: "five setup
 // steps -- welcome, model, this computer, your agents, getting back").
-const FR_STEPS = 5;
+const FR_STEPS = 6;
 // The return pane's step number, named and used by the generation bump and
 // every navigation into the step. (The paint branch is the clamped chain's
 // final else, exhaustive by construction: step is clamped to [1, FR_STEPS],
 // so a sixth step must add its pane AND its branch -- said here because the
 // constant cannot reach an else.)
-const FR_STEP_RETURN = 5;
+const FR_STEP_RETURN = 6;
 let FR = null;            // what /api/first-run said
 let FR_STEP = 1;
 let FR_RETURN = null;     // where the keyboard was before this opened
@@ -7846,6 +7870,9 @@ function frGo(step) {
     // live flow over the static verdict once the answer arrives.
     frConnResume();
   } else if (step === 4) {
+    document.getElementById('fr-title').textContent = 'Who are your agents working for?';
+    frPaintYou();
+  } else if (step === 5) {
     frPaintFleet();
   } else {
     document.getElementById('fr-title').textContent = 'Getting back to Kosmos';
@@ -7864,6 +7891,79 @@ function frGo(step) {
    * this project's floor.
    */
   document.getElementById('fr-title').focus();
+}
+
+/* --------------------------------------------------------------------------
+   Step 4 — about you
+   -------------------------------------------------------------------------- */
+
+/**
+ * The pack's About-you step. ⚠️ The gate IS the design: Josh removed the
+ * skip button, and that only means something if Continue waits on the two
+ * required answers. The third field is genuinely optional. Values go in via
+ * `.value`, never innerHTML, so nothing typed here is ever parsed as markup.
+ * Re-entering the step (deep link, back) prefills from the saved record and
+ * saves over it — that is the "You can change these later" path today.
+ */
+async function frPaintYou() {
+  const box = document.getElementById('fr-you');
+  document.getElementById('fr-you-msg').textContent = '';
+  box.innerHTML =
+    '<p>Answer once and every agent you make will know it. Nothing here leaves this computer.</p>' +
+    '<div class="fr-youfield"><label for="fr-you-name">What should your agents call you?</label>' +
+    '<input type="text" id="fr-you-name" maxlength="80" placeholder="Josh"></div>' +
+    '<div class="fr-youfield"><label for="fr-you-do">What do you do?</label>' +
+    '<input type="text" id="fr-you-do" maxlength="200" placeholder="I run a company that builds AI tools"></div>' +
+    '<div class="fr-youfield"><label for="fr-you-know">Anything they should always know?</label>' +
+    '<textarea id="fr-you-know" rows="2" placeholder="How you like things written, who your customers are, anything else"></textarea></div>' +
+    '<p class="fr-youfine">You can change these later.</p>';
+  const nameEl = document.getElementById('fr-you-name');
+  const doEl = document.getElementById('fr-you-do');
+  const knowEl = document.getElementById('fr-you-know');
+  const next = document.getElementById('fr-next');
+  const gate = () => {
+    const ready = nameEl.value.trim() !== '' && doEl.value.trim() !== '';
+    next.disabled = !ready;
+    next.setAttribute('aria-disabled', ready ? 'false' : 'true');
+  };
+  frActions({ label: 'Continue', go: async () => {
+    if (next.disabled) return;
+    next.disabled = true;
+    try {
+      const res = await fetch('/api/you', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: nameEl.value, does: doEl.value, know: knowEl.value }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) {
+        // The route's own sentence, verbatim — it says what to fix.
+        document.getElementById('fr-you-msg').textContent = (j && j.error) || 'we could not save that';
+        gate();
+        return;
+      }
+      frGo(5);
+    } catch {
+      document.getElementById('fr-you-msg').textContent = 'we could not save that';
+      gate();
+    }
+  } });
+  gate();
+  nameEl.addEventListener('input', gate);
+  doEl.addEventListener('input', gate);
+  // Prefill AFTER the gate is wired: a saved record makes this an edit. The
+  // fields are only filled while untouched, so the fetch landing late never
+  // overwrites something the person is mid-typing.
+  try {
+    const res = await fetch('/api/you');
+    const j = await res.json().catch(() => null);
+    if (res.ok && j && j.state === 'saved' && j.you) {
+      if (!nameEl.value) nameEl.value = j.you.name;
+      if (!doEl.value) doEl.value = j.you.does;
+      if (!knowEl.value) knowEl.value = j.you.know || '';
+      gate();
+    }
+  } catch { /* absent is the normal start; the fields just start empty */ }
 }
 
 /* --------------------------------------------------------------------------
