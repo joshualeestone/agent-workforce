@@ -96,12 +96,15 @@ const RELPORT = 4654;
       newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
       checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
     }));
-    await p.evaluate(() => { const s = document.getElementById('utoast-slot'); s.dataset.keep = s.innerHTML; s.innerHTML = ''; });
+    // display:none, not an innerHTML round trip: rebuilding the markup from
+    // a string would strip the buttons' listeners and kill the Install step
+    // this drive runs later.
+    await p.evaluate(() => { document.getElementById('utoast-slot').style.display = 'none'; });
     const sansToast = await p.evaluate(() => ({
       newagent: Math.round(document.getElementById('new-agent').getBoundingClientRect().x),
       checked: Math.round(document.getElementById('checked').getBoundingClientRect().x),
     }));
-    await p.evaluate(() => { const s = document.getElementById('utoast-slot'); s.innerHTML = s.dataset.keep; delete s.dataset.keep; });
+    await p.evaluate(() => { document.getElementById('utoast-slot').style.display = ''; });
     if (withToast.newagent !== sansToast.newagent || withToast.checked !== sansToast.checked) {
       die('the notice re-spaces the header row: ' + JSON.stringify({ withToast, sansToast }));
     }
