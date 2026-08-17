@@ -3799,7 +3799,12 @@ async function loadRoles() {
     // choosing has to be the copy the agent is actually created from, and a
     // local copy of the menu is exactly how those two drift apart.
     ROLES = null;
-    ['pick-pm', 'pick-list', 'rolepick'].forEach((id) => {
+    // And the pane-2 caches: a reopened panel whose fetch failed must not
+    // proceed on the previous load's own-entry or models (the drift the
+    // no-hardcoded-list rule exists for, arriving through a stale cache).
+    OWN_ROLE = null;
+    CREATE_MODELS = [];
+    ['pick-pm', 'pick-list', 'pick-own', 'rolepick'].forEach((id) => {
       document.getElementById(id).hidden = true;
     });
     // Not `esc()`: this goes into textContent, which does its own escaping, so
@@ -3942,7 +3947,12 @@ document.getElementById('roles-list').addEventListener('keydown', (e) => {
   if (!keys[e.key] || !ROLES || !ROLES.length) return;
   if (e.target.closest('select')) return;   // the menu owns its own arrows
   e.preventDefault();
-  const order = ['pm', 'list', 'own'];
+  // Hidden radios are not in the cycle: against an older server that never
+  // served `own`, arrowing must not park the group's one Tab stop on a
+  // hidden element with Continue silently dead.
+  const order = ['pm', 'list', 'own'].filter((m) =>
+    !document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[m]).hidden);
+  if (!order.length) return;
   const cur = order.find((m) =>
     document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[m]).classList.contains('on')) || 'pm';
   const mode = order[(order.indexOf(cur) + keys[e.key] + order.length) % order.length];
@@ -4271,6 +4281,28 @@ document.getElementById('create-avatar').addEventListener('change', (e) => {
   document.getElementById('genav-hint').textContent = AVATAR_FILE
     ? AVATAR_FILE.name + ' will be its picture.'
     : 'A unique mark will be created from the name unless you add a picture.';
+  // Show the picture that will actually be used: leaving the generated mark
+  // frozen at however much of the name existed at pick time made the canvas
+  // disagree with the hint beside it.
+  const cv = document.getElementById('genav');
+  if (AVATAR_FILE) {
+    const url = URL.createObjectURL(AVATAR_FILE);
+    const img = new Image();
+    img.onload = () => {
+      const g = cv.getContext('2d');
+      cv.classList.remove('empty');
+      g.clearRect(0, 0, cv.width, cv.height);
+      const scale = Math.max(cv.width / img.width, cv.height / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      g.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); drawCreateMark(); };
+    img.src = url;
+  } else {
+    drawCreateMark();
+  }
 });
 
 async function loadCreateExtras() {

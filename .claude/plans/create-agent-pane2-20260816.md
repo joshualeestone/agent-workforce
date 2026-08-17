@@ -50,6 +50,10 @@ hardened the same evening on the post-reset pool.
 
 ## Deferred with reasoning
 
+- Debouncing dotGlyph on name keystrokes: the pack measured the full
+  render at 6.5ms, inside one frame; a debounce would trade measured
+  headroom for latency on the flagship interaction.
+
 - A note when a blanked label falls back to the role default: the
   fallback is the documented dirty-hold contract, and a second note
   element is new UI copy that routes through Mona Lisa.

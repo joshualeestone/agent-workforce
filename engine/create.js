@@ -588,7 +588,10 @@ function createAgent(opts) {
     if (wantInstructions.trim().length < instructions.MIN_CHARS) {
       return { outcome: OUTCOME.REFUSED, because: `instructions cannot be this short, say what this agent is for in at least ${instructions.MIN_CHARS} characters`, steps };
     }
-    if (Buffer.byteLength(wantInstructions, 'utf8') > instructions.MAX_BYTES) {
+    // Measured on the NORMALIZED text (the write step appends a trailing
+    // newline when the input lacks one), or an input of exactly MAX_BYTES
+    // would validate and then land on disk one byte over the read limit.
+    if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
       return { outcome: OUTCOME.REFUSED, because: 'those instructions are too long to be a boot file, trim them to under 256KB', steps };
     }
   }
@@ -998,17 +1001,19 @@ function createAgent(opts) {
   // file fallback would not answer identically, while costing the
   // record-wins hazards for every agent instead of only the capitalised
   // ones the record exists for.
-  if (!DRY_RUN && shown && shown !== name) {
-    try { store.writeProfile(name, { displayName: shown }); }
-    catch { /* a name we could not record is a card that reads `casey`, not a failure */ }
-  }
-  // The chosen role label, same rules as displayName: written only past the
-  // point of no rollback, non-gating (an agent whose label could not be
-  // recorded is a working agent showing its role's default), and validated
-  // long before any write.
-  if (!DRY_RUN && wantLabel !== undefined) {
-    try { store.writeProfile(name, { role: wantLabel.trim() }); }
-    catch { /* the card shows the role template's own words instead */ }
+  // ...and the chosen role label rides the same record: one merged write,
+  // not two back-to-back read-merge-write cycles on the same JSON file
+  // (which also carried a window where the first landed and the second did
+  // not). Both fields follow the same rules: written only past the point
+  // of no rollback, non-gating, validated long before any write.
+  if (!DRY_RUN) {
+    const profile = {};
+    if (shown && shown !== name) profile.displayName = shown;
+    if (wantLabel !== undefined) profile.role = wantLabel.trim();
+    if (Object.keys(profile).length) {
+      try { store.writeProfile(name, profile); }
+      catch { /* a card that reads `casey` with the role template's words is a working agent, not a failure */ }
+    }
   }
   return {
     outcome: OUTCOME.CREATED,
