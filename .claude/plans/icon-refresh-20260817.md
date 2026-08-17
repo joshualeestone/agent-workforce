@@ -9,9 +9,14 @@ runs, so what remains is macOS not re-reading artwork it first saw
 absent: the icns is the LAST file staged into the bundle, and Finder
 and the Dock key their re-read off the bundle directory's mtime.
 
-One-line fix in the installer's register step: `touch "$app"` before
-`lsregister -f`, inside the same never-from-a-sandbox guard. Failure
-stays non-fatal (`|| true`), matching the step's existing posture.
+One-line fix in the installer's register step: `touch -c "$app"`
+before `lsregister -f`, inside the same never-from-a-sandbox guard.
+Failure stays non-fatal (`|| true`), matching the step's posture. The
+comment separates what was MEASURED (the symptom triple) from the
+HYPOTHESIS (mtime-keyed icon re-read; the mv preserves the stage's
+mtime) and says plainly that the fix is the non-invasive subset of the
+manual remedy and remains unverified until the next clean-machine
+install -- a still-generic tile there does NOT rule this area out.
 
 Josh's current machine was handed the manual equivalent in channel
 (touch + lsregister -f + killall Dock); this fixes the NEXT install.
