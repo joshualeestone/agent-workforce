@@ -1219,7 +1219,7 @@ svg { display: block; }
 
    ⚠️ OPAQUE, not the removal modal's tinted backdrop. This is the first thing
    somebody sees, and half-showing them a board they have not set up yet — with
-   thirteen cards and four tabs behind the words "welcome" — is the opposite of
+   thirteen cards and the tab bar behind the words "welcome" — is the opposite of
    the one thing this screen is for. The board is not dimmed here, it is not
    there yet.
 --------------------------------------------------------------------------- */
@@ -10538,7 +10538,15 @@ async function firstRunBoot(force, step) {
 // Deep-link straight to one agent, so a page can be shared or bookmarked.
 const PARAMS = new URLSearchParams(location.search);
 const WANT_AGENT = PARAMS.get('agent');
-const BOOT_TAB = PARAMS.get('tab') || 'agents';
+/* ⚠️ An unknown ?tab= value falls back to the board rather than stranding
+   the tablist with nothing selected (showTab deselects before it bails on
+   a tab it cannot find). `joint` is aliased, not unknown: the tab retired
+   with the three-tab ruling and everything that lived behind it is in
+   Projects, so a bookmark of the old tab lands where its content went. */
+const RAW_TAB = PARAMS.get('tab') || 'agents';
+const KNOWN_TABS = ['agents', 'projects', 'settings', 'detail', 'create'];
+const BOOT_TAB = RAW_TAB === 'joint' ? 'projects'
+  : (KNOWN_TABS.includes(RAW_TAB) ? RAW_TAB : 'agents');
 showTab(BOOT_TAB);
 // /?tab=create is a deep link like any other, so it has to arrive with its
 // menu. Without this it renders an empty role list and a dead Continue —
