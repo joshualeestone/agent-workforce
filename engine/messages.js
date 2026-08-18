@@ -368,7 +368,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      envelope, attributed to its real sender. */
   const lowered = chat.cleanMessage(text).toLowerCase();
   if (MARKERS.some((m) => lowered.includes(m))) {
-    return refuse(toName, 'that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
+    return refuse(toName, 'that message contains a delivery marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
   const rec = record();
@@ -559,7 +559,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
   }
   const lowered = chat.cleanMessage(text).toLowerCase();
   if (MARKERS.some((m) => lowered.includes(m))) {
-    return refuse('that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
+    return refuse('that message contains a delivery marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
   const rec = record();
@@ -573,8 +573,8 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
      driving the room is that remedy already happening -- a valve that
      fires AT them, in those words, reads as broken and fires at the one
      participant it exists to protect (Splinter's catch, 2026-08-18).
-     Today every post is pane-derived so the exemption is vacuous; the
-     operator path must implement it when it mints its sender marker. The valve row keeps kind 'valve' with `to` as
+     The operator path below implements exactly that: its posts count
+     nothing and its sends are never refused here. The valve row keeps kind 'valve' with `to` as
      the project id (a string, per the record's shape rule) and a
      `project` field, which is what marks it as the room's rather than a
      pair's; logged once per project per window. The copy is the pair

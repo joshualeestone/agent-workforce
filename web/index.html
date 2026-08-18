@@ -7792,7 +7792,11 @@ function pjJoinNames(list) {
 function pjReceiptSentence(outcomes, p) {
   const groups = { placed: [], unconfirmed: [], could_not: [] };
   for (const [who, state] of Object.entries(outcomes || {})) {
-    (groups[state] || groups.could_not).push(pjNameOf(p, who));
+    /* An UNKNOWN state lands in the not-confirmed clause: "could not be
+       reached" is a definite failure claim that licenses a free re-send,
+       which an unknown state does not -- and the pill's weight already
+       reads unknown as unsure, so the sentence must agree with it. */
+    (groups[state] || groups.unconfirmed).push(pjNameOf(p, who));
   }
   const bits = [];
   if (groups.placed.length) bits.push('Placed with ' + pjJoinNames(groups.placed) + '.');
@@ -7845,13 +7849,24 @@ function paintRoom(body) {
      no-state-as-silence, the same rule as every list on this app. */
   const note = body.ok === false
     ? '<div class="msg-valve">We could not read some of this room just now; what is below may be missing recent posts.</div>' : '';
-  const html = note + (rows
-    || '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>');
-  const changed = box.__lastRoom !== html;
-  if (changed) {
+  /* "Could not look" is never "nothing here": with the record unreadable
+     and nothing parsed, only the note renders -- the affirmative empty
+     claim would be the unreadable-as-empty defect. */
+  const empty = body.ok === false ? ''
+    : '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>';
+  const html = note + (rows || empty);
+  if (box.__lastRoom !== html) {
     box.__lastRoom = html;
     setLive(box, html);
-    box.scrollTop = box.scrollHeight;
+    /* Scrolled only when the POSTS changed, not on a relabel: pjWhen
+       re-words every minute, and yanking a person who scrolled up to
+       read history to the bottom on a poll tick is the poll fighting
+       the reader. */
+    const key = (body.rows || []).map((m) => m.id || m.at).join('\u0000');
+    if (box.__lastRoomKey !== key) {
+      box.__lastRoomKey = key;
+      box.scrollTop = box.scrollHeight;
+    }
   }
 }
 
@@ -7884,13 +7899,26 @@ async function pjPostSend() {
   if (!p) return;
   const input = document.getElementById('pj-post');
   const msg = document.getElementById('pj-room-msg');
-  const said = document.getElementById('pj-room-say');
   const text = input.value;
   if (!text.trim()) { msg.textContent = 'Say something first.'; return; }
+  /* The flight can outlive the page state (a fan-out is seconds of tmux
+     per recipient), so the sibling composer's discipline applies whole:
+     the TAKEOFF project is captured, verdicts land only if the person is
+     still looking at it, the box clears only if it still holds exactly
+     the sent words (typed-on-top survives, the round-29 case), and the
+     parked draft retires by exact match under the takeoff key so
+     leave-and-return does not re-offer delivered words armed for a
+     double post (rounds 37/38). */
+  const sentProject = PJ_CURRENT;
+  const sentText = text.trim();
   PJ_POSTING = true;
   document.getElementById('pj-post-go').disabled = true;
+  const verdict = (line) => {
+    if (PJ_CURRENT === sentProject) msg.textContent = line;
+    pjRoomAnnounce(line);
+  };
   try {
-    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/room', {
+    const res = await fetch('/api/project/' + encodeURIComponent(sentProject) + '/room', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
@@ -7898,24 +7926,40 @@ async function pjPostSend() {
     const body = await res.json().catch(() => ({}));
     const d = (body && body.delivery) || {};
     if (!res.ok || !d.state) {
-      msg.textContent = (body && body.error) || 'We could not post that.';
+      verdict((body && body.error) || 'We could not post that.');
       return;
     }
     if (d.state === 'could_not') {
-      /* The engine's own sentence, verbatim -- including the room valve's. */
-      msg.textContent = d.because || 'We could not post that.';
+      /* The engine's own sentence, verbatim. */
+      verdict(d.because || 'We could not post that.');
       return;
     }
-    input.value = '';
-    PJ_ROOM_DRAFTS[PJ_CURRENT] = '';
-    msg.textContent = '';
-    said.textContent = 'Posted. ' + pjReceiptSentence(d.outcomes || {}, p);
-    await loadRoom();
+    if (PJ_CURRENT === sentProject && input.value.trim() === sentText) input.value = '';
+    if ((PJ_ROOM_DRAFTS[sentProject] || '').trim() === sentText) delete PJ_ROOM_DRAFTS[sentProject];
+    if (PJ_CURRENT === sentProject) msg.textContent = '';
+    pjRoomAnnounce('Posted. ' + pjReceiptSentence(d.outcomes || {}, p));
+    if (PJ_CURRENT === sentProject) await loadRoom();
   } catch {
-    msg.textContent = 'We could not reach Kosmos to post that.';
+    verdict('We could not reach Kosmos to post that.');
   } finally {
     PJ_POSTING = false;
     document.getElementById('pj-post-go').disabled = false;
+  }
+}
+
+/* The room's announcer: same repeat-still-announces contract as
+   pjAnnounce (round 33 -- an identical second verdict must not read as
+   "nothing happened"), on the room's own live region. */
+let PJ_ROOM_SAY_TIMER = null;
+function pjRoomAnnounce(text) {
+  const say = document.getElementById('pj-room-say');
+  if (!say) return;
+  if (PJ_ROOM_SAY_TIMER) { clearTimeout(PJ_ROOM_SAY_TIMER); PJ_ROOM_SAY_TIMER = null; }
+  if (say.textContent === text) {
+    say.textContent = '';
+    PJ_ROOM_SAY_TIMER = setTimeout(() => { PJ_ROOM_SAY_TIMER = null; say.textContent = text; }, 80);
+  } else {
+    say.textContent = text;
   }
 }
 

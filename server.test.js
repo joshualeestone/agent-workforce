@@ -5196,8 +5196,11 @@ test('a room post renders as a room post everywhere: the agent page names the pr
   assert.equal(receipt({ leo: 'placed', mara: 'placed' }, {}), 'Placed with leo and mara.');
   assert.equal(receipt({ leo: 'placed', mara: 'unconfirmed', april: 'could_not' }, {}),
     'Placed with leo. mara may have it; not confirmed, so it is not re-sent. april could not be reached.');
-  // An unknown state must land in the honest bucket, never vanish.
-  assert.match(receipt({ leo: 'something-new' }, {}), /leo could not be reached/);
+  // An unknown state lands in the NOT-CONFIRMED clause, never vanishes
+  // and never claims a definite failure: "could not be reached" licenses
+  // a free re-send an unknown state does not, and the pill weighs the
+  // same post as unsure -- one send must not carry two verdicts.
+  assert.match(receipt({ leo: 'something-new' }, {}), /leo may have it; not confirmed/);
 });
 
 test('the conversation rows hold the spec grammar: attributed peers, verbatim refusals, the valve as reassurance', () => {

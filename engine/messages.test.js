@@ -727,3 +727,33 @@ test('an agent cannot smuggle operator authority: the operator markers are refus
     assert.equal(tmux.sends().length, 0);
   });
 });
+
+test('the arrivals are charged up front: the refusal fires in the band where an uncharged count would allow', () => {
+  withFleet(room3(), (board) => {
+    const now = Date.now();
+    fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+    // 13 posts x 3 recipients = 39 arrivals: UNDER the cap of 40, so an
+    // uncharged `arrivals >= CAP` rule would let anything through. The
+    // charged rule refuses a 2-arrival post (41) and allows a 1-arrival
+    // post (40) from the same seed -- the pair that separates the rules.
+    assert.equal(messages.ROOM_ARRIVALS_CAP, 40, 'the seed arithmetic below assumes the recorded cap');
+    for (let i = 0; i < 13; i += 1) {
+      fs.appendFileSync(messages.LOG, JSON.stringify({
+        kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+        from: 'ghost', to: MEMBERS, text: 'round ' + i,
+        at: new Date(now - 60000).toISOString(), outcomes: {},
+      }) + '\n');
+    }
+    armSender('leo-discord');
+    arm([]);
+    const two = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'two arrivals' }, board.agents, MEMBERS);
+    assert.equal(two.state, chat.DELIVERY.COULD_NOT,
+      'a post whose own arrivals cross the budget was allowed (charged-up-front is not implemented)');
+    chat.resetForTests();
+    armSender('leo-discord');
+    arm([]);
+    const one = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'one arrival' }, board.agents, ['leo', 'mara']);
+    assert.equal(one.state, chat.DELIVERY.PLACED,
+      'a post that exactly fills the budget was refused: ' + (one.because || ''));
+  });
+});

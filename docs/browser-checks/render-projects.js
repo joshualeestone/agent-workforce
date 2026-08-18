@@ -491,7 +491,11 @@ async function main() {
      and route tests (scripted tmux); what only a browser can prove is
      the RENDERING: attribution, the operator's own treatment, the
      receipt naming each recipient's real state, escaping, and the valve
-     as reassurance. */
+     as reassurance. (The room's text tokens -- msg-t, delivery, the
+     valve row -- ride the same k-ink-2-on-k-surface pair the sweep
+     already measures on the cards; the log is wiped before the sweep so
+     they are not measured HERE, a recorded acceptance, not an
+     oversight.) */
   {
     const logFile = path.join(SANDBOX, 'data', 'AgentWorkforce', 'messages.jsonl');
     const at = new Date().toISOString();
@@ -513,10 +517,16 @@ async function main() {
         const box = document.getElementById('pj-room');
         const msgs = [...box.querySelectorAll('.msg')];
         const you = box.querySelector('.msg.you');
+        const agentChip = box.querySelector('.msg:not(.you) .msg-av');
         const receipt = you && you.querySelector('.delivery');
         return {
           rows: msgs.length,
           youNamed: you ? you.querySelector('.msg-h b').textContent : null,
+          /* The PRESENCE control for the absence claim below: the agent
+             chip carries the disc's inline tint, so "the You chip has no
+             inline style" is measured against a mechanism proven live,
+             not against a refactor that moved tints to classes. */
+          agentChipFromFaceSet: agentChip ? Boolean(agentChip.getAttribute('style')) : null,
           youChipFromFaceSet: you ? Boolean(you.querySelector('.msg-av').getAttribute('style')) : null,
           receipt: receipt ? receipt.textContent : null,
           receiptCls: receipt ? receipt.className : null,
@@ -528,6 +538,7 @@ async function main() {
       });
       if (!seen.visible || seen.rows !== 2) throw new Error('the room did not render its two posts: ' + JSON.stringify(seen));
       if (seen.youNamed !== 'You') throw new Error('the operator post is not attributed as You');
+      if (seen.agentChipFromFaceSet !== true) throw new Error('the disc mechanism moved (no inline tint on an agent chip), so the You-chip check below cannot mean anything');
       if (seen.youChipFromFaceSet) throw new Error('the person\u2019s chip was drawn from the agent face set (an inline disc style)');
       if (!seen.receipt || !/could not be reached/.test(seen.receipt) || !/Placed with /.test(seen.receipt)) {
         throw new Error('a post that reached one of two does not say so per recipient: ' + JSON.stringify(seen.receipt));

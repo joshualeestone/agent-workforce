@@ -62,3 +62,26 @@ generation-counter discipline as the thread. The drive gains 3b-room
 board and a route post would fan into live panes): attribution, the
 You-chip never from the face set, the per-recipient receipt with the
 failed weight, escaping, and the valve as reassurance.
+
+The blind pass (one blocker, all findings landed):
+- the room composer inherited NONE of the sibling's flight-race
+  discipline and a fan-out flight is seconds long: typed-on-top words
+  were deleted, a mid-flight project switch wiped the wrong project's
+  draft and left the takeoff draft armed for a double post. Rewritten
+  with the sibling's shape whole: takeoff capture, exact-match clear,
+  exact-match parked-draft retire, verdicts landing only on the takeoff
+  project, plus the room's own repeat-still-announces live region for
+  every verdict (success, refusal, and network failure alike).
+- an unknown outcome state lands in the not-confirmed clause, matching
+  the pill's unsure weight ("could not be reached" licenses a free
+  re-send an unknown state does not).
+- unreadable-and-empty renders the note alone (never "Nothing here
+  yet"), and the thread scrolls only when the POSTS change, keyed on
+  ids, so the minute-relabel poll cannot yank a reader out of history.
+- the charged-up-front arithmetic has its distinguishing-band test (39
+  seeded arrivals: a two-arrival post refuses, a one-arrival post
+  lands).
+- the stale operator-exemption comment, the forgery sentence misnaming
+  operator markers, and the drive's missing presence control on the
+  You-chip check all fixed; the room tokens' absence from the AA sweep
+  is a recorded acceptance (same measured token pair as the cards).
