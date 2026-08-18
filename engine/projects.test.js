@@ -1607,19 +1607,29 @@ test('every singular could_not because the engine authors has a plural sibling',
   const mapEnd = projSrc.indexOf(']);', mapStart);
   assert.ok(mapStart > -1 && mapEnd > mapStart,
     'could not locate the GROUP_BECAUSE declaration to strip; re-point this pin');
-  const authors = [
-    projSrc.slice(0, mapStart) + projSrc.slice(mapEnd),
-    fs.readFileSync(path.join(__dirname, 'you.js'), 'utf8'),
-    fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8'),
-  ].join('\n');
+  const stripped = projSrc.slice(0, mapStart) + projSrc.slice(mapEnd);
+  // ⚠️ Each singular is pinned to the SPECIFIC module whose verdicts reach
+  // project.told: tellAgent (projects.js, stripped) authors seven; the
+  // folder sentence comes up through workerfile. you.js carries verbatim
+  // twins of these for the you-block, and scanning it here let an edit to
+  // the FEEDING copy pass while the twin kept the pin green (iteration 3).
+  const sources = {
+    'projects.js': stripped,
+    'workerfile.js': fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8'),
+  };
   // CONTROL: the strip really removed the map keys' own copies -- a plural
   // draft lives ONLY in the map, so it must be absent from the stripped
   // text, or the pin is scanning the copy again.
-  assert.ok(!authors.includes('none of them has a folder on this computer yet'),
+  assert.ok(!stripped.includes('none of them has a folder on this computer yet'),
     'CONTROL: a map-only plural survived the strip; the pin is scanning its own copy');
+  const authorOf = {
+    'this agent has no folder on this computer yet': 'workerfile.js',
+  };
   for (const singular of [...Object.keys(expectPlural), neutral]) {
-    assert.ok(authors.includes(singular),
-      'a mapped singular no longer appears in any author module (edited without its row?): ' + singular);
+    const file = authorOf[singular] || 'projects.js';
+    assert.ok(sources[file].includes(singular),
+      'a mapped singular no longer appears in its feeding author module ' + file
+      + ' (edited without its row?): ' + singular);
   }
 });
 

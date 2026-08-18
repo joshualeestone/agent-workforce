@@ -85,6 +85,25 @@ wrong splice.
   "Remove from Kosmos"; the scope word is what tells the person their
   agent survives. Button text and aria-label both.
 
+## Iteration 3 (review): the collapse may never lose a reason
+
+The reasonless group line interacted badly with suppression: an
+unmapped-but-identical because (the interpolated N-blocks sentence, raw
+error strings) collapsed to a line naming NO reason while the per-member
+rows that carried it were suppressed -- total information loss, which her
+reasonless-interim ruling did not contemplate. Collapse is now
+conditional: told always collapses (constant sentence); could_not
+collapses ONLY when the plural sibling exists. Unmapped reasons keep
+their per-member rows. The reasonless sentence survives as
+pjToldGroupLine's defensive arm only. Flagged to Mona Lisa with the PR
+for explicit confirmation.
+
+Also from review: the source pin scans ONLY the modules whose verdicts
+feed project.told (stripped projects.js, workerfile.js) -- you.js
+carries verbatim twins for the you-block and scanning it let an edit to
+the feeding copy pass; aria-label reworked so the accessible name starts
+with the visible label (true substring, WCAG 2.5.3).
+
 ## Follow-ups recorded, not in scope
 
 - Mona Lisa's pass on the eight group drafts (bless-or-replace; the

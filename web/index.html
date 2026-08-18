@@ -7217,7 +7217,17 @@ function pjSharedTold(roster) {
   for (const m of roster.slice(1)) {
     if (pjToldLine(m.told || {}) !== first) return '';
   }
-  return pjToldGroupLine(roster[0].told || {});
+  // ⚠️ A collapse may never LOSE a reason. Collapsing suppresses every
+  // per-member line, so it is only allowed when the group line carries
+  // everything those lines carried: the told sentence (constant), or a
+  // could_not whose because has a plural sibling. A could_not whose
+  // reason has NO plural form keeps its per-member rows -- three
+  // repeated sentences are weight, but a vanished reason is a lie of
+  // omission (iteration 3: the N-blocks because collapsed to a line
+  // that named no reason at all).
+  const t = roster[0].told || {};
+  if (t.state === 'could_not' && !t.becauseGroup) return '';
+  return pjToldGroupLine(t);
 }
 
 function pjToldGroupLine(told) {
@@ -7285,7 +7295,7 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance: the member list holds the Take-off buttons, so an unconditional
+ * performance: the member list holds the Remove-from-project buttons, so an unconditional
  * repaint threw keyboard focus back to the body every 5 seconds.
  *
  * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated

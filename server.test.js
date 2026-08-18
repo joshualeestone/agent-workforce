@@ -5808,12 +5808,20 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   assert.ok(!g.includes('this agent has no folder'),
     'the singular because leaked into the plural frame: ' + g);
 
-  // No plural sibling (unmapped or null because): the line carries NO
-  // reason at all -- an incomplete true sentence beats a complete
-  // confusing one (her interim, kept as the permanent fallback).
+  // No plural sibling (unmapped because): NO collapse at all. Collapsing
+  // suppresses the per-member rows, and a group line that names no reason
+  // would then have LOST the reason entirely (iteration 3) -- repeated
+  // sentences are weight, a vanished reason is a lie of omission.
   const gf = shared([cn('some unmapped sentence'), cn('some unmapped sentence')]);
-  assert.equal(gf, 'We could not tell any of them where this folder is.',
-    'an unmapped because did not fall back to the reasonless sentence: ' + gf);
+  assert.equal(gf, '',
+    'unmapped-identical reasons collapsed and lost their per-member rows: ' + gf);
+
+  // The reasonless sentence itself stays as pjToldGroupLine's defensive
+  // arm for a razed could_not (no because at all) reached directly.
+  const gline = pageFunction('pjToldGroupLine', TOLD_PRELUDE);
+  assert.equal(gline({ state: 'could_not' }),
+    'We could not tell any of them where this folder is.',
+    'the defensive reasonless arm changed or vanished');
 
   // The group line lands in the page as raw HTML (paintOneProject), so a
   // markup-carrying plural form must arrive ESCAPED, not verbatim-dangerous.
@@ -5900,10 +5908,9 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
 
   // The removal action reads "Remove from <scope>" (the pack's pattern,
   // her ruling 2026-08-18): the scope word is what tells the person their
-  // agent survives this. The accessible name must CONTAIN the visible
-  // label as a substring (WCAG 2.5.3) -- asserted as the property, not as
-  // a copy of the current string, so a rewrite that breaks containment
-  // fails even if both strings change together.
+  // agent survives this. VISIBLE is a copy pin (a rewrite fails it first
+  // and forces an update here); the containment assertion below it is the
+  // WCAG 2.5.3 property, re-checked against whatever VISIBLE becomes.
   const rendered = member(m, 'p1');
   const VISIBLE = 'Remove from project';
   assert.ok(rendered.includes('>' + VISIBLE + '</button>'),
