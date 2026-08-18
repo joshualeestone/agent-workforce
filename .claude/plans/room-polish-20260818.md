@@ -64,6 +64,20 @@ screenshot (channel, 2026-08-18 ~3:54 PM).
   `.delivery.placed` with 121,197,157 (guards the trio from losing its dark
   twins again).
 
+## Added in review (2026-08-18 ~4:10 PM)
+
+- Mona Lisa's drawing pass found the valve band concatenating sentence and
+  timestamp with no separator ("…bring you in.2 minutes ago"): in a .msg
+  row the flex header supplies the gap, the band is a plain block. Fix is
+  the pack's measured value verbatim: `.msg-valve .msg-t { margin-left: .5em; }`
+  (FROZEN-2026-08-18c).
+- Iteration-1 review fixes: the group-line test now pins the because
+  verbatim AND its escaping (the line lands as raw HTML); TOLD_PRELUDE
+  uses the page's real esc via pageFnSource instead of a hand copy; the
+  dark-block pin brace-matches the enclosing block (with a light-rule
+  negative control) instead of inferring from marker order; STATE_COPY
+  stand-in commented as deliberately partial.
+
 ## Out of scope
 
 - The pack's own rgba widening (Mona Lisa owns the pack and the

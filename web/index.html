@@ -841,6 +841,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 /* The room valve's row: reassurance, not an error. */
 .msg-valve { font-size: .8125rem; color: var(--k-ink-2); border-left: 2px solid var(--k-rule);
              padding-left: 10px; }
+/* In a .msg row the flex header supplies the gap before the timestamp; the
+   band is a plain block, so nothing does and the sentence ran straight into
+   it ("…bring you in.2 minutes ago"). Pack value, measured (FROZEN-2026-08-18c). */
+.msg-valve .msg-t { margin-left: .5em; }
 .composer { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 .composer input { flex: 1; min-width: 10rem; }
 @media (prefers-color-scheme: dark) {

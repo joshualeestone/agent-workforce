@@ -5781,8 +5781,10 @@ test('a borrowed-name pane cannot lend a project card its photograph', () => {
  * after the #71 dark pass and never met it).
  * ------------------------------------------------------------------------ */
 
-// The prelude the told-line family closes over: esc (real page shape).
-const TOLD_PRELUDE = "const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n";
+// The prelude the told-line family closes over: the page's own esc, not a
+// hand copy of it (a copied producer drifts; the real one cannot -- the
+// first cut of this line copied esc and got the null-handling wrong).
+const TOLD_PRELUDE = pageFnSource('esc') + '\n';
 
 test('identical roster verdicts collapse to one group line, and only then', () => {
   const shared = pageFunction('pjSharedTold',
@@ -5791,10 +5793,22 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   const cn = (because) => ({ told: { state: 'could_not', because } });
   const told = () => ({ told: { state: 'told' } });
 
-  // Collapses: same state, same because, 2+ members.
-  const g = shared([cn('we could not write to its instructions'), cn('we could not write to its instructions'), cn('we could not write to its instructions')]);
+  // Collapses: same state, same because, 2+ members. The because rides
+  // along VERBATIM (the plan's honesty constraint: the group claim carries
+  // exactly what each row it replaces carried).
+  const g = shared([cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet')]);
   assert.ok(g.startsWith('We could not tell any of them where this folder is'),
     'three identical could_not verdicts did not collapse: ' + g);
+  assert.ok(g.includes('this agent has no folder on this computer yet'),
+    'the group sentence dropped the because: ' + g);
+
+  // The group line lands in the page as raw HTML (paintOneProject), so a
+  // markup-carrying because must arrive ESCAPED, not verbatim-dangerous.
+  const gx = shared([cn('a <b>note</b> & more'), cn('a <b>note</b> & more')]);
+  assert.ok(gx.includes('a &lt;b&gt;note&lt;/b&gt; &amp; more'),
+    'the group because was not escaped: ' + gx);
+  assert.ok(!gx.includes('<b>note</b>'),
+    'raw markup from a because survived into the group line');
 
   // Collapses: the told state too, with the hedge intact (the group form
   // must not promise more than the per-member form it replaces).
@@ -5816,6 +5830,9 @@ test('identical roster verdicts collapse to one group line, and only then', () =
 });
 
 test('pjMember suppressTold removes the per-member verdict span, and only with it', () => {
+  // STATE_COPY here is a DELIBERATELY partial stand-in (two of six keys):
+  // it only feeds the state caption, which no assertion below reads, and
+  // the real const is not a `function` pageFnSource can lift.
   const prelude = TOLD_PRELUDE
     + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
     + pageFnSource('pjToldLine') + '\n';
@@ -5866,12 +5883,25 @@ test('the receipt pill borders have dark twins (the trio that missed the #71 pas
   const darkPlaced = raw.indexOf('.delivery.placed { border-color: rgba(121,197,157,.5); }');
   assert.ok(darkFailed > -1, 'the failed receipt border has no dark twin');
   assert.ok(darkPlaced > -1, 'the placed receipt border has no dark twin');
-  // Both dark rules sit under a dark marker that OPENS after the light
-  // rules: a dark twin pasted into the light sheet would pass a bare
-  // presence check and still ship the wrong color in both schemes.
-  const marker = raw.lastIndexOf('@media (prefers-color-scheme: dark)', darkFailed);
-  assert.ok(marker > lightFailed && marker > lightPlaced,
-    'the dark receipt rules are not inside a dark block after the light rules');
-  assert.ok(raw.lastIndexOf('@media (prefers-color-scheme: dark)', darkPlaced) > lightPlaced,
-    'the dark placed rule is not inside a dark block after the light rules');
+  // Both dark rules sit INSIDE a dark block (a twin pasted into the light
+  // sheet passes a bare presence check and ships the wrong color in both
+  // schemes). "Inside" is measured, not inferred from marker order: the
+  // stylesheet has several dark blocks, so we brace-match the one whose
+  // opener precedes each rule and require the rule to land before it closes.
+  const insideDark = (at) => {
+    const marker = raw.lastIndexOf('@media (prefers-color-scheme: dark)', at);
+    if (marker === -1) return false;
+    let depth = 0;
+    for (let k = raw.indexOf('{', marker); k < raw.length; k += 1) {
+      if (raw[k] === '{') depth += 1;
+      else if (raw[k] === '}') { depth -= 1; if (depth === 0) return at < k; }
+    }
+    return false;
+  };
+  assert.ok(insideDark(darkFailed), 'the dark failed rule is not inside a dark block');
+  assert.ok(insideDark(darkPlaced), 'the dark placed rule is not inside a dark block');
+  // Presence control for the measurer itself: a light rule must NOT read
+  // as inside a dark block, or insideDark answers yes to everything.
+  assert.ok(!insideDark(lightFailed),
+    'CONTROL: insideDark claims the light rule is in a dark block; the measurer is broken');
 });
