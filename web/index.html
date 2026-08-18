@@ -1525,15 +1525,18 @@ svg { display: block; }
     <div id="utoast-slot"></div>
   </div>
   <!-- The pack's centre column: the nav lives IN the header grid, centred,
-       and collapses behind the burger under 56rem. Four tabs where the pack
-       draws three: Joint Projects is a real surface here -- surfaced for
-       ruling in the pair, not silently folded. Class names stay .tabs/.tab
-       (the app's JS and drives address them); the LOOK is the pack's
-       .apptabs/.apptab verbatim. -->
+       and collapses behind the burger under 56rem. THREE tabs, the pack's,
+       named the pack's way -- Josh ruled the Joint Projects tab out
+       (2026-08-17 in-channel, "drop to the pack's 3 tabs"), and the bare
+       "Projects" name only works in this three-tab world, so the tab and
+       the name moved together. The sharing surface's copy (including the
+       part-we-would-charge-for honesty note) lives in git history for the
+       day sharing is built. Class names stay .tabs/.tab (the app's JS and
+       drives address them); the LOOK is the pack's .apptabs/.apptab
+       verbatim. -->
   <nav class="tabs closed" id="tabs" role="tablist">
     <button class="tab on"  data-tab="agents"   role="tab" aria-selected="true">Agents</button>
-    <button class="tab"     data-tab="projects" role="tab" aria-selected="false">My Projects</button>
-    <button class="tab"     data-tab="joint"    role="tab" aria-selected="false">Joint Projects</button>
+    <button class="tab"     data-tab="projects" role="tab" aria-selected="false">Projects</button>
     <button class="tab"     data-tab="settings" role="tab" aria-selected="false">Settings</button>
   </nav>
   <div class="headright appright">
@@ -2174,7 +2177,7 @@ svg { display: block; }
   <!-- The list, and the empty state, which is the screen first-run hands you. -->
   <div id="pj-list-view">
     <div class="pj-head">
-      <h2>My Projects</h2>
+      <h2>Projects</h2>
       <div class="pj-headright">
         <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
           <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Show projects as a grid">
@@ -2509,17 +2512,6 @@ svg { display: block; }
     </div>
     <p class="fmsg" id="pj-add-msg" aria-live="polite"></p>
   </div>
-</section>
-<section class="panel" id="panel-joint" hidden>
-  <h2>Working with other people's agents isn't built yet.</h2>
-  <p>This is where you'll share a project with someone else, so their agents
-     and yours can work on the same thing. You'll be able to invite someone, or
-     join a project you've been invited to.</p>
-  <p>Everything else here runs on your computer and costs nothing. This one needs
-     something in the middle to introduce two computers to each other, so
-     <b>it's the part we'd charge for</b>. Saying so now rather than after you've
-     put your work into it.</p>
-  <p class="soon">Coming later.</p>
 </section>
 <section class="panel" id="panel-settings" hidden>
   <!-- ⚠️ THE PACK'S SETTINGS (view K, pack-pass, scrappy). Every card renders
@@ -3524,7 +3516,7 @@ async function tick() {
 
 // A tab that does nothing reads as broken rather than as forthcoming, so each
 // unbuilt one says what it will be and why it isn't here yet.
-const PANELS = ['projects', 'joint', 'settings', 'detail', 'create'];
+const PANELS = ['projects', 'settings', 'detail', 'create'];
 // Panels with no tab button of their own: reached by clicking an agent, or the
 // New agent button. Bailing when no button exists would silently do nothing,
 // which is how the detail page failed to open at all — so the exception is a
