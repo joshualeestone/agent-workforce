@@ -682,8 +682,12 @@ function list(agent) {
   const log = readLog();
   if (!agent) return log;
   // A post's `to` is an array (View D ripple 4): membership, not
-  // equality, or every room post vanishes from every agent page.
-  return log.filter((m) => m && (m.from === agent || m.to === agent
+  // equality, or every room post vanishes from every agent page. A
+  // PROJECT-typed `to` (room valves and room refusals log the project id
+  // there) is never matched against an agent name -- an agent named like
+  // a project must not inherit that room's bookkeeping rows.
+  return log.filter((m) => m && (m.from === agent
+    || (typeof m.to === 'string' && !m.project && m.to === agent)
     || (Array.isArray(m.to) && m.to.includes(agent))));
 }
 

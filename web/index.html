@@ -2503,15 +2503,6 @@ svg { display: block; }
       <p class="fmsg" id="pj-room-msg"></p>
       <p class="vh" id="pj-room-say" role="status" aria-live="polite"></p>
 
-    <!-- ⚠️ TASKS, the pack's right column in this page's single-column shape.
-         A task is "a thing that needs doing, which exists whether or not
-         anyone is on it" (the pack's definition). What a card may SAY is
-         Mona Lisa's v1 ruling (2026-08-16, in-channel): the who chip IS the
-         status; "Nobody yet" is the only state word; no second word until
-         the commitments join can support one, because "Not started" on an
-         assigned card is a claim about the agent that v1 cannot check.
-         New task sits ABOVE the list (Josh 2026-08-15: at the bottom it was
-         the one thing you had to scroll to find). -->
     <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
          the room was waiting on exactly this question: when five agents are on a
          project, who answers. The answer is ONE of them, chosen here. Everything
@@ -2583,7 +2574,16 @@ svg { display: block; }
     </section>
 
     <aside class="pjcol">
-    <div class="field" id="pj-tasks-field" data-room-move="tasks">
+    <!-- ⚠️ TASKS, now genuinely the pack's right column. A task is "a thing
+         that needs doing, which exists whether or not anyone is on it" (the
+         pack's definition). What a card may SAY is Mona Lisa's v1 ruling
+         (2026-08-16, in-channel): the who chip IS the status; "Nobody yet"
+         is the only state word; no second word until the commitments join
+         can support one, because "Not started" on an assigned card is a
+         claim about the agent that v1 cannot check. New task sits ABOVE the
+         list (Josh 2026-08-15: at the bottom it was the one thing you had
+         to scroll to find). -->
+    <div class="field" id="pj-tasks-field">
       <span class="flabel">Tasks</span>
       <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
       <div class="tkcards" id="pj-tasklist"></div>
@@ -7744,6 +7744,10 @@ function openProject(id) {
     document.getElementById('pj-room-msg').textContent = '';
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
+    /* The scroll key too: left standing, a quick A-to-B-to-A (B's fetch
+       failed or still in flight) re-enters A with the key already equal,
+       skips the scroll branch, and lands the reader on the OLDEST post. */
+    roomBox.__lastRoomKey = undefined;
     setLive(roomBox, '');
     /**
      * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
@@ -7853,7 +7857,9 @@ function paintRoom(body) {
      and nothing parsed, only the note renders -- the affirmative empty
      claim would be the unreadable-as-empty defect. */
   const empty = body.ok === false ? ''
-    : '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>';
+    : ((p.agents || []).length
+      ? '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>'
+      : '<p class="fhint" style="margin:0;">Put an agent on this project and the room opens.</p>');
   const html = note + (rows || empty);
   if (box.__lastRoom !== html) {
     box.__lastRoom = html;
@@ -7900,7 +7906,7 @@ async function pjPostSend() {
   const input = document.getElementById('pj-post');
   const msg = document.getElementById('pj-room-msg');
   const text = input.value;
-  if (!text.trim()) { msg.textContent = 'Say something first.'; return; }
+  if (!text.trim()) { msg.textContent = 'Say something first.'; pjRoomAnnounce('Say something first.'); return; }
   /* The flight can outlive the page state (a fan-out is seconds of tmux
      per recipient), so the sibling composer's discipline applies whole:
      the TAKEOFF project is captured, verdicts land only if the person is
@@ -7937,7 +7943,10 @@ async function pjPostSend() {
     if (PJ_CURRENT === sentProject && input.value.trim() === sentText) input.value = '';
     if ((PJ_ROOM_DRAFTS[sentProject] || '').trim() === sentText) delete PJ_ROOM_DRAFTS[sentProject];
     if (PJ_CURRENT === sentProject) msg.textContent = '';
-    pjRoomAnnounce('Posted. ' + pjReceiptSentence(d.outcomes || {}, p));
+    /* The headline carries the aggregate: "Posted." over a partial
+       delivery would say more on the audio channel than the engine did. */
+    const allPlaced = Object.values(d.outcomes || {}).every((v) => v === 'placed');
+    pjRoomAnnounce((allPlaced ? 'Posted. ' : 'Posted, not to everyone. ') + pjReceiptSentence(d.outcomes || {}, p));
     if (PJ_CURRENT === sentProject) await loadRoom();
   } catch {
     verdict('We could not reach Kosmos to post that.');

@@ -5149,6 +5149,79 @@ test('the post route resolves the project, derives the member list, and fans out
   }
 });
 
+test('the room routes: the operator flag is minted only here, and the thread filters by project alone', async () => {
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })]);
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-room-route-'));
+  try {
+    const sends = [];
+    chatEngine.setRunner((args) => {
+      sends.push(args);
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    chatEngine.setDryRun(false);
+
+    const missing = await req('/api/project/no-such-room/room', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello' }),
+    });
+    assert.match(JSON.parse(missing.body).delivery.because, /no project by that name/);
+
+    await req('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Ops room', folder: dir, agents: ['leo', 'mara'] }),
+    });
+    sends.length = 0;
+
+    // The MINT: no pane in the body, and the row carries the flag. A
+    // body claiming operator-adjacent fields changes nothing because the
+    // route forwards only text.
+    const posted = await req('/api/project/opsroom/room', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '@leo take the runway', operator: false, from_pane: '%9' }),
+    });
+    const verdict = JSON.parse(posted.body).delivery;
+    assert.equal(verdict.state, 'placed', verdict.because || '');
+    // Scoped to THIS room: the suite's sandbox record is shared across
+    // route tests, and an earlier test's agent post would be found first.
+    const row = messagesEngine.record().rows.find((m) => m.kind === 'post' && m.project === 'opsroom');
+    assert.ok(row, 'the operator post never reached the record');
+    assert.equal(row.operator, true, 'the operator route did not mint the flag');
+    assert.equal(row.from, 'you');
+    const typed = sends.filter((a) => a[0] === 'send-keys' && typeof a[5] === 'string' && a[5].startsWith('['));
+    assert.match(typed.map((a) => a[5]).find((t) => t.includes('· project opsroom')) || '', /from your operator/,
+      'an operator arrival did not carry the operator marker');
+
+    // The THREAD, filtered by project alone: a foreign project's post and
+    // a room valve row seeded straight into the record.
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({
+      kind: 'post', id: 'm900', project: 'otherroom', from: 'leo', to: ['mara'],
+      text: 'foreign', at: new Date().toISOString(), outcomes: { mara: 'placed' },
+    }) + '\n');
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({
+      kind: 'valve', from: 'leo', to: 'opsroom', project: 'opsroom',
+      because: 'stopped', at: new Date().toISOString(),
+    }) + '\n');
+    const thread = await req('/api/project/opsroom/room');
+    assert.equal(thread.status, 200);
+    const bodyT = JSON.parse(thread.body);
+    assert.equal(bodyT.ok, true);
+    const kinds = bodyT.rows.map((m) => m.kind);
+    assert.deepEqual(kinds.sort(), ['post', 'valve'], 'the thread is not the record filtered by project alone: ' + JSON.stringify(kinds));
+    assert.ok(!bodyT.rows.some((m) => m.text === 'foreign'), 'another project\u2019s post leaked into this room');
+  } finally {
+    messagesEngine.resetForTests();
+    chatEngine.resetForTests();
+    board.restore();
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
 test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {
   /* View D ripple 5 on the agent page, and the receipt grammar on the
      room itself, extracted from the page so a rename cannot leave these

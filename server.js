@@ -1552,8 +1552,13 @@ const server = http.createServer((req, res) => {
       if (!rec.ok) unreadable.push({ kind: 'unreadable', what: 'your agents\u2019 messages', at: null });
       for (const m of rec.rows) {
         // A post's `to` is an array (View D ripple 4): membership, not
-        // equality, or every room post vanishes from this feed.
-        const involved = m.from === name || m.to === name
+        // equality, or every room post vanishes from this feed. And a
+        // PROJECT-typed `to` (a room valve or a room refusal logs the
+        // project id there) is never matched against an agent NAME: an
+        // agent named like a project would inherit that room's
+        // bookkeeping rows onto its own page.
+        const toIsAgent = typeof m.to === 'string' && !m.project;
+        const involved = m.from === name || (toIsAgent && m.to === name)
           || (Array.isArray(m.to) && m.to.includes(name));
         if (!involved) continue;
         if (m.kind === 'message') {

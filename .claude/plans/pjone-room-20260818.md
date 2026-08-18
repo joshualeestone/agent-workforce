@@ -85,3 +85,27 @@ The blind pass (one blocker, all findings landed):
   operator markers, and the drive's missing presence control on the
   You-chip check all fixed; the room tokens' absence from the AA sweep
   is a recorded acceptance (same measured token pair as the cards).
+
+Pass 2 (blind, blocker-free: converged with pass 1's fixes):
+- the two room routes gained route-level tests (the operator flag is
+  minted only there and a body claiming operator changes nothing; the
+  thread filters by project alone with a foreign-project control).
+- the scroll key resets with the switching clear (A-B-A no longer lands
+  a reader on the oldest post), the empty-composer refusal announces,
+  the partial-delivery headline says "Posted, not to everyone" instead
+  of a bare Posted, the memberless empty-room hint stops promising a
+  delivery the engine would refuse.
+- an agent named like a project no longer inherits that room's
+  bookkeeping rows: project-typed `to` values (room valves, room
+  refusals) are never matched against agent names on either read side.
+- the stranded tasks comment moved with its field; the dead attribute
+  dropped.
+
+Queued next (Josh's ruling, 12:52 PM, with Mona Lisa's design): the
+valve caps become a Settings control, in the PERSON'S unit (exchanges;
+the engine converts to arrivals), her control copy and honest off-state
+sentence verbatim, off ALLOWED (their machine, their agents; my
+floor-above-zero instinct is overridden by both of them), defaults as
+shipped. Also hers for the record: the pair cap's 10 is an inherited
+convergence number doing a cost job; the room cap is derived. If a real
+conversation gets cut short, the inherited number was wrong.
