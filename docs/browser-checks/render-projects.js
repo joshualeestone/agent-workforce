@@ -319,6 +319,39 @@ async function main() {
   await post('/api/projects', { name: 'Reed handover', folder: path.join(demo, 'reed-handover') });
   await shot('2-list');
 
+  /* ⚠️ THE FACES ROW IS GEOMETRY, and this check exists because a plain
+     aria-hidden wrapper inside the flex row blockified and stacked the
+     chips vertically while every text assertion stayed green (pj-cards
+     pass 3). Bounding rects, not classes: every chip in a multi-member
+     card's row shares a top, laid left to right with the pack's gap
+     (separate chips, no overlap -- the pack's .pc-a draws no facepile). */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    try {
+    const page = await ctx.newPage();
+    await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    const faceGeo = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.pjfaces')]
+        .map((f) => [...f.querySelectorAll('.lav')].map((c) => c.getBoundingClientRect()))
+        .filter((chips) => chips.length > 1);
+      if (!rows.length) return { rows: 0 };
+      return {
+        rows: rows.length,
+        oneRow: rows.every((chips) => chips.every((r) => Math.abs(r.top - chips[0].top) < 2)),
+        leftToRight: rows.every((chips) => chips.every((r, i) => i === 0 || r.left > chips[i - 1].left)),
+        separated: rows.every((chips) => chips.every((r, i) => i === 0 || r.left >= chips[i - 1].right - 1)),
+      };
+    });
+    if (!faceGeo.rows) throw new Error('no multi-member card rendered, so the faces-row geometry was never checked');
+    if (!faceGeo.oneRow || !faceGeo.leftToRight || !faceGeo.separated) {
+      throw new Error('the member faces are not one separated left-to-right row: ' + JSON.stringify(faceGeo));
+    }
+    } finally {
+      await ctx.close();
+    }
+  }
+
   /* The description, on the RENDERED page in both places it lives, with the
      absence arm as its own assertion (project-description branch): a
      described project shows the sentence on its row and under its detail
@@ -338,9 +371,9 @@ async function main() {
         const bare = [...document.querySelectorAll('.pj-row')]
           .find((r) => r.textContent.includes('Reed handover'));
         return {
-          onRow: row ? ((row.querySelector('.pj-desc') || {}).textContent || null) : null,
-          rowHasBold: row ? Boolean(row.querySelector('.pj-desc b')) : null,
-          bareHasDesc: bare ? Boolean(bare.querySelector('.pj-desc')) : null,
+          onRow: row ? ((row.querySelector('.pc-t') || {}).textContent || null) : null,
+          rowHasBold: row ? Boolean(row.querySelector('.pc-t b')) : null,
+          bareHasDesc: bare ? Boolean(bare.querySelector('.pc-t')) : null,
         };
       });
       // ⚠️ RENDERED escaping, not only the source-regex pin: the fixture's
@@ -365,16 +398,17 @@ async function main() {
       if (detail.text !== 'Review the <b>renewal terms</b> & prepare the counter.' || detail.hidden !== false) {
         throw new Error('the detail description is wrong or hidden: ' + JSON.stringify(detail));
       }
-      // The row and the detail render the SAME token size: this is the check
-      // that reds the round-1 cascade regression (bare .pj-desc losing font
-      // to .panel p, the detail silently at body size under a comment
-      // claiming callout).
+      // Each surface at ITS pack size, replacing the old same-token equality
+      // (the pack draws them apart on purpose: .pc-t at .875rem on the card,
+      // .pjdesc at .9375rem on the detail). Pinned to exact px so the round-1
+      // cascade regression -- a bare selector losing its font to .panel p and
+      // silently inheriting -- still reds: an inherited size matches neither.
       const sizes = await page.evaluate(() => ({
-        row: getComputedStyle(document.querySelector('#pj-list .pj-desc')).fontSize,
+        row: getComputedStyle(document.querySelector('#pj-list .pc-t')).fontSize,
         detail: getComputedStyle(document.getElementById('pj-one-desc')).fontSize,
       }));
-      if (sizes.row !== sizes.detail) {
-        throw new Error('the description renders at two sizes (the cascade regression): ' + JSON.stringify(sizes));
+      if (sizes.row !== '14px' || sizes.detail !== '15px') {
+        throw new Error('a description lost its pack size (card .875rem, detail .9375rem): ' + JSON.stringify(sizes));
       }
       // The DETAIL's absence arm, exercised, not inferred from the row's: an
       // undescribed project's detail must hide the element (hidden === true),
@@ -406,8 +440,9 @@ async function main() {
       if (bareDetail.hidden !== true || bareDetail.display !== 'none' || bareDetail.w > 0 || bareDetail.h > 0) {
         throw new Error('an undescribed project\u2019s detail description is ON SCREEN (attribute vs rendering): ' + JSON.stringify(bareDetail));
       }
-      // A description AT THE CAP stays one line on the row: nowrap+ellipsis
-      // is a claim about rendering, and no fixture carried a long sentence.
+      // A description AT THE CAP wraps FULLY on the pack card (the one-line
+      // ellipsis retired with the pj-cards restyle): the claim is that the
+      // whole sentence is on screen, wrapped, not clipped.
       const cap = 'C'.repeat(200);
       await api('/api/project/' + encodeURIComponent('reedhandover'), {
         method: 'PUT',
@@ -419,18 +454,18 @@ async function main() {
       const longRow = await page.evaluate(() => {
         const row = [...document.querySelectorAll('.pj-row')]
           .find((r) => r.textContent.includes('Reed handover'));
-        const el = row && row.querySelector('.pj-desc');
+        const el = row && row.querySelector('.pc-t');
         if (!el) return null;
         const cs = getComputedStyle(el);
         return {
           lines: Math.round(el.getBoundingClientRect().height / parseFloat(cs.lineHeight)),
-          truncated: el.scrollWidth > el.clientWidth,
-          whiteSpace: cs.whiteSpace,
+          clippedX: el.scrollWidth > el.clientWidth + 1,
+          clippedY: el.scrollHeight > el.clientHeight + 1,
         };
       });
-      if (!longRow) throw new Error('the 200-char description never rendered on its row');
-      if (longRow.lines !== 1 || longRow.whiteSpace !== 'nowrap' || !longRow.truncated) {
-        throw new Error('a description at the cap did not truncate to one row line: ' + JSON.stringify(longRow));
+      if (!longRow) throw new Error('the 200-char description never rendered on its card');
+      if (longRow.lines < 2 || longRow.clippedX || longRow.clippedY) {
+        throw new Error('a description at the cap should wrap fully on the pack card, unclipped: ' + JSON.stringify(longRow));
       }
       await api('/api/project/' + encodeURIComponent('reedhandover'), {
         method: 'PUT',
@@ -587,6 +622,12 @@ async function main() {
   await shot('6-confirm-remove', async (page) => {
     await page.click('[data-project="quarterclose"]');
     await page.waitForTimeout(300);
+    // The remove control moved behind Project settings with the pack
+    // restyle (rare-and-destructive off the reading surface), so the
+    // question is now two clicks from the card, and this state renders
+    // the settings view it actually lives on.
+    await page.click('#pj-settings-link');
+    await page.waitForTimeout(200);
     await page.click('#pj-one-remove');
     await page.waitForTimeout(300);
     const seen = await page.evaluate(() => {
@@ -619,6 +660,35 @@ async function main() {
     const page = await ctx.newPage();
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.waitForTimeout(600);
+    // ⚠️ ONE definition of the background walk, shared by every measuring
+    // block on this page as `window.__kbg` -- four verbatim copies is how
+    // helpers silently diverge. COMPOSITED, not the first painted color:
+    // the slug chip's rgba(20,22,26,.05) wash read as near-opaque BLACK and
+    // produced a 2.20:1 "failure" in both schemes for text that actually
+    // clears 7:1 -- a translucent layer must be folded over what is beneath
+    // it before it can be a background.
+    await page.evaluate(() => {
+      window.__kbg = (el) => {
+        const layers = [];
+        let n = el;
+        while (n) {
+          const c = getComputedStyle(n).backgroundColor;
+          if (c && c !== 'rgba(0, 0, 0, 0)') {
+            layers.push(c);
+            const m = String(c).match(/[\d.]+/g).map(Number);
+            if (m.length < 4 || m[3] >= 1) break;
+          }
+          n = n.parentElement;
+        }
+        let acc = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
+          const a = p.length > 3 ? p[3] : 1;
+          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
+        }
+        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
+      };
+    });
     // ⚠️ MEASURED FROM THE ONE-PROJECT VIEW, not the list. On a freshly loaded
     // list view `#pj-one-agents` is empty and `#pj-one-view` is hidden, so four
     // of the nine selectors -- including the told-line and the folder warning,
@@ -630,22 +700,54 @@ async function main() {
     // one-project view carries the member and told copy. Both are needed, so
     // the members are read first and the list rules are read before the click.
     const listEls = await page.evaluate(() => {
-      const bgOf = (el) => {
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
-          n = n.parentElement;
-        }
-        return 'rgb(255, 255, 255)';
-      };
+      const bgOf = window.__kbg;
       const out = [];
-      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pj-desc',
+      // Every text token the pack card carries, not only the honesty lines:
+      // the plan's hand-checked ratios were a one-time verification, and a
+      // palette edit after it would regress silently. The disc initials
+      // (.pjfaces .lav) measure the inline TINT/INK pair the renderer chose.
+      for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pc-t',
+                         '#pj-list .pjcard-h b', '#pj-list .pjpill', '#pj-list .pjslug',
+                         '#pj-list .pjcount', '#pj-list .pjfaces .lav',
                          '#pj-list-view .viewtoggle .vt', '#pj-list-view .viewtoggle .vt.on']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
         out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      }
+      // The needs-you pill variant, measured as a STYLE on real markup: the
+      // sandbox roster cannot manufacture a live needs-you pane, so the
+      // class is toggled onto an existing pill for the read and toggled
+      // straight back off. A state claim it is not; the red-on-card ratio
+      // is what it pins.
+      {
+        const pill = document.querySelector('#pj-list .pjpill');
+        if (!pill) { out.push({ sel: '#pj-list .pjpill.attn (toggled)', missing: true }); }
+        else {
+          pill.classList.add('attn');
+          const cs = getComputedStyle(pill);
+          out.push({ sel: '#pj-list .pjpill.attn (toggled)', fg: cs.color, bg: bgOf(pill), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+          pill.classList.remove('attn');
+        }
+      }
+      // The blind-spot sentence (.pj-who), same synthetic treatment: every
+      // member in this sandbox is seen, so the sentence is not on screen to
+      // measure -- and it is the one line this branch pinned to a FIXED ink
+      // for dark-mode survival, so leaving it unmeasured is the exact
+      // narration-outruns-the-check gap. Real card, real class, removed
+      // after the read.
+      {
+        const row = document.querySelector('#pj-list .pj-row');
+        if (!row) { out.push({ sel: '#pj-list .pj-who (injected)', missing: true }); }
+        else {
+          const who = document.createElement('span');
+          who.className = 'pj-who';
+          who.textContent = '1 we cannot see';
+          row.appendChild(who);
+          const cs = getComputedStyle(who);
+          out.push({ sel: '#pj-list .pj-who (injected)', fg: cs.color, bg: bgOf(who), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+          who.remove();
+        }
       }
       return out;
     });
@@ -658,18 +760,15 @@ async function main() {
     // the class WITHOUT `bad` and the selector could not have matched even if
     // it had been listed. Narration outrunning the check, in the file rewritten
     // because the previous check could not fail. It is a real measurement now.
+    // ⚠️ AND MEASURED INSIDE PROJECT SETTINGS, where the folder facts moved
+    // with the pack restyle -- on the reading surface they live on the card's
+    // own .pj-warn line, measured in listEls above.
+    await page.click('#pj-settings-link');
+    await page.waitForTimeout(200);
     const badFolderEls = await page.evaluate(() => {
-      const bgOf = (el) => {
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
-          n = n.parentElement;
-        }
-        return 'rgb(255, 255, 255)';
-      };
+      const bgOf = window.__kbg;
       const out = [];
-      for (const sel of ['#pj-one-view .pj-folder-state.bad']) {
+      for (const sel of ['#pj-settings-view .pj-folder-state.bad']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
@@ -677,6 +776,8 @@ async function main() {
       }
       return out;
     });
+    await page.click('#pj-settings-back');
+    await page.waitForTimeout(200);
     // ⚠️ A typed draft SURVIVES Back-then-reopen OF THE SAME PROJECT
     // (round 34): the round-33 switch-time park read PJ_CURRENT after the
     // back button had nulled it, so this exact sequence deleted the words
@@ -711,15 +812,7 @@ async function main() {
     await page.click('[data-project="hendersonlease"]');
     await page.waitForTimeout(400);
     const els = await page.evaluate(() => {
-      const bgOf = (el) => {
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
-          n = n.parentElement;
-        }
-        return 'rgb(255, 255, 255)';
-      };
+      const bgOf = window.__kbg;
       const out = [];
       // ⚠️ SCOPED to the projects panel. Unscoped, `.fhint` and `.flabel`
       // matched the FIRST one in the document -- inside a hidden panel -- and
@@ -731,7 +824,7 @@ async function main() {
       // `.pj-folder-state.bad` in the `badFolderEls` pass below, while the
       // project whose folder is missing is open. This list is the one-project
       // view of a HEALTHY project, so it cannot carry either.
-      for (const sel of ['#panel-projects .pj-folder', '#panel-projects .pj-member b',
+      for (const sel of ['#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
         '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel',
         '#pj-one-view #pj-one-desc']) {
@@ -744,7 +837,24 @@ async function main() {
       }
       return out;
     });
-    for (const e of [...listEls, ...badFolderEls, ...els]) {
+    // The healthy project's folder facts moved into Project settings with
+    // the pack restyle -- and the raw-path .pj-folder element retired with
+    // the pack's tilde cut, so the folder NAME chip and the location
+    // sentence are what carry them now. Measured on the view they render on.
+    await page.click('#pj-settings-link');
+    await page.waitForTimeout(200);
+    const settingsEls = await page.evaluate(() => {
+      const bgOf = window.__kbg;
+      const out = [];
+      for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where']) {
+        const el = document.querySelector(sel);
+        if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
+        const cs = getComputedStyle(el);
+        out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      }
+      return out;
+    });
+    for (const e of [...listEls, ...badFolderEls, ...els, ...settingsEls]) {
       if (e.missing) {
         contrastFails += 1;
         console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);
@@ -769,21 +879,40 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 520 } });
     try {
       const page = await ctx.newPage();
-      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
 
       // 8a. The bar stays while the page goes. Asserted as the SYMPTOM (after
       // scrolling, the tabs still sit at the top of the screen), not as a
       // computed-style reading of `position: sticky`.
-      const stick = await page.evaluate(() => {
-        window.scrollTo(0, 400);
-        const bar = document.querySelector('.apphead');
-        const r = bar.getBoundingClientRect();
-        return { scrolled: window.scrollY, top: r.top, visible: r.height > 0 };
-      });
-      if (stick.scrolled < 100) throw new Error('the page did not scroll, so stickiness was never exercised (scrollY ' + stick.scrolled + ')');
-      if (!stick.visible || stick.top < -1 || stick.top > 1) {
-        throw new Error('after scrolling ' + stick.scrolled + 'px the bar is not at the top of the screen (top ' + stick.top + ') -- the nav is not sticking');
+      // ⚠️ The pack's card GRID made three projects one short row, so the
+      // page stopped being taller than any viewport and scrollY stayed 0 --
+      // a check that never scrolls has not exercised stickiness. Fillers go
+      // through the real create route (default folder, inside the sandboxed
+      // AGENT_WORKFORCE_PROJECTS) and are deleted before the next check.
+      const fillers = [];
+      try {
+        for (let i = 0; i < 12; i++) {
+          // `id` is the field the route guarantees; `project` is null when the
+          // post-write re-read throws, and a filler must not die on that.
+          const made = await post('/api/projects', { name: 'Scroll filler ' + i });
+          fillers.push(made.id);
+        }
+        await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+        const stick = await page.evaluate(() => {
+          window.scrollTo(0, 400);
+          const bar = document.querySelector('.apphead');
+          const r = bar.getBoundingClientRect();
+          return { scrolled: window.scrollY, top: r.top, visible: r.height > 0 };
+        });
+        if (stick.scrolled < 100) throw new Error('the page did not scroll, so stickiness was never exercised (scrollY ' + stick.scrolled + ')');
+        if (!stick.visible || stick.top < -1 || stick.top > 1) {
+          throw new Error('after scrolling ' + stick.scrolled + 'px the bar is not at the top of the screen (top ' + stick.top + ') -- the nav is not sticking');
+        }
+      } finally {
+        // Unconditional, like the outer fixture-tree teardown: a thrown
+        // assertion must not leave twelve fillers in the store.
+        for (const id of fillers) await api('/api/project/' + encodeURIComponent(id), { method: 'DELETE' });
       }
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
       await page.evaluate(() => window.scrollTo(0, 0));
 
       // 8b. The K mark goes to the Agents board through the real tab control.
@@ -800,6 +929,10 @@ async function main() {
       if (!landed.barShown) throw new Error('the agents view toggle is not shown with the board it operates on');
 
       // 8c. The agents toggle drives the agents board -- and ONLY it.
+      // ⚠️ Independence is BEFORE == AFTER, not "asgrid absent": the pack
+      // restyle made grid the projects DEFAULT, so the class is present on
+      // a fresh load and its presence alone no longer implicates this click.
+      const pjBefore = await page.evaluate(() => document.getElementById('pj-list').classList.contains('asgrid'));
       await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
       const agLay = await page.evaluate(() => ({
         /* stage 3/4 rebuild: the agents list is its own #alist markup and
@@ -807,10 +940,10 @@ async function main() {
            gone, so the assertion follows the mechanism that replaced it */
         aslist: document.getElementById('grid').hidden && !document.getElementById('alist').hidden,
         pressed: document.querySelector('.viewtoggle[data-scope="agents"] [data-layout="list"]').getAttribute('aria-pressed'),
-        pjTouched: document.getElementById('pj-list').classList.contains('asgrid'),
+        pjGrid: document.getElementById('pj-list').classList.contains('asgrid'),
       }));
       if (!agLay.aslist || agLay.pressed !== 'true') throw new Error('the agents list toggle did not change the board: ' + JSON.stringify(agLay));
-      if (agLay.pjTouched) throw new Error('the agents toggle drove the PROJECTS list -- the scopes are not independent');
+      if (agLay.pjGrid !== pjBefore) throw new Error('the agents toggle drove the PROJECTS list -- the scopes are not independent');
       // The AGENTS toggle's contrast, measured here where it is on screen
       // (the sweep runs on the projects tab, where this one is hidden).
       const agContrast = await page.evaluate(() => {
@@ -912,6 +1045,10 @@ async function main() {
         wrapHidden: document.getElementById('pj-arch-wrap').hidden,
       }));
       if (!before.wrapHidden) throw new Error('the archived disclosure is on screen with nothing archived');
+      // The archive control moved behind Project settings with the pack
+      // restyle, one hop from the detail like Remove.
+      await page.click('#pj-settings-link');
+      await page.waitForTimeout(200);
       await page.click('#pj-one-archive');
       await page.waitForTimeout(400);
       const archivedNow = await page.evaluate(() => ({
@@ -1009,6 +1146,10 @@ async function main() {
       await page.waitForTimeout(400);
       await page.evaluate(() => { openProject('quarterclose'); });
       await page.waitForTimeout(300);
+      // The archive statement and control live in Project settings now;
+      // the whole 8h block stays on that view.
+      await page.click('#pj-settings-link');
+      await page.waitForTimeout(200);
       const archDetail = await page.evaluate(() => ({
         label: document.getElementById('pj-one-archive-label').textContent,
         btn: document.getElementById('pj-one-archive').textContent,

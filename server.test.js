@@ -3592,7 +3592,11 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // project named by the person carries their words onto a card and a
     // heading, and either an unescaped render or a dropped arm would be
     // invisible to node tests (project-description branch).
-    [/p\.description \? '<span class="pj-desc">' \+ esc\(p\.description\)/,
+    // (class renamed pj-desc -> pjdesc -> pc-t with the pack-card restyle;
+    // the pin follows the arm it protects, not the spelling. pc-t is the
+    // pack's own card-sentence class, and the pack spends .pjdesc on the
+    // detail page.)
+    [/p\.description \? '<span class="pc-t">' \+ esc\(p\.description\)/,
      'the card row lost its escaped description arm'],
     [/desc\.textContent = p\.description \|\| '';/,
      'the detail description must be written through textContent -- innerHTML here is the injection the card arm escapes against, and no node test can see the swap'],
@@ -5256,6 +5260,123 @@ test('an attributed refusal is an event: logged once per window with its because
     try { fs.rmSync(messagesEngine.LOG, { force: true }); } catch { /* clean */ }
     messagesEngine.resetForTests();
     chatEngine.resetForTests();
+    board.restore();
+  }
+});
+
+test('the project pill claims only what the counts support', () => {
+  /* Pack view C's state pill, driven at its honesty boundaries: "Nothing
+     running" is a CLAIM made only when every member was actually seen; a
+     blind roster or unseen members get the unsure treatment, never a
+     reassurance. */
+  const pjPillOf = pageFunction('pjPillOf');
+  assert.equal(pjPillOf({ summary: { total: 3, needsYou: 1, working: 1 } }, false).label, 'Needs you');
+  assert.equal(pjPillOf({ summary: { total: 3, working: 2 } }, false).label, 'Working');
+  assert.equal(pjPillOf({ summary: { total: 2 } }, false).label, 'Nothing running');
+  assert.equal(pjPillOf({ summary: { total: 0 } }, false).label, 'No agents yet');
+  assert.equal(pjPillOf({ summary: { total: 2, unseen: 1 } }, false).label, 'Can’t tell',
+    'an unseen member let the card claim nothing is running');
+  assert.equal(pjPillOf({ summary: { total: 2, working: 1 } }, true).label, 'Can’t tell',
+    'a blind roster let the card keep claiming Working');
+  assert.equal(pjPillOf({ summary: { total: 2, needsYou: 1 } }, true).label, 'Can’t tell',
+    'a blind roster let the card keep claiming Needs you, the strongest reassurance it could leak');
+});
+
+test('the projects tiles DRAW, not just compute: present at non-zero, hidden at zero and blind', () => {
+  /* Splinter's boundary: a count test answers does-the-number-come-out;
+     this drives the WRITE, so a tile that computes correctly and never
+     draws cannot pass. Slice includes the writes (the summary test's
+     lesson). */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (projects, unreadable) => {
+    const els = { 'st-pj': { textContent: '' }, 'st-pjattn': { textContent: '' }, 'st-pjattn-tile': { hidden: 'untouched' } };
+    const from = script.indexOf('const attnProjects = PJ_AGENTS_UNREADABLE');
+    const write = script.indexOf("document.getElementById('st-pjattn-tile').hidden = !attnProjects;");
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end, 'the tile writes fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'active', 'PJ_AGENTS_UNREADABLE', script.slice(from, end))(
+      { getElementById: (id) => els[id] }, projects, unreadable);
+    return els;
+  };
+  const hot = drive([{ summary: { needsYou: 2 } }, { summary: {} }], false);
+  assert.equal(hot['st-pjattn-tile'].hidden, false, 'a project needs you and the tile never drew');
+  assert.equal(hot['st-pjattn'].textContent, '1', 'the tile counts members, not projects (or nothing)');
+  assert.equal(hot['st-pj'].textContent, '2');
+  const calm = drive([{ summary: {} }], false);
+  assert.equal(calm['st-pjattn-tile'].hidden, true, 'the alert tile shows a zero');
+  const blind = drive([{ summary: { needsYou: 3 } }], true);
+  assert.equal(blind['st-pjattn-tile'].hidden, true,
+    'a blind roster drew a needs-you claim it cannot make');
+});
+
+test('the disc hash spreads: the pack seven-bucket system, order-sensitive, all buckets reachable', () => {
+  /* Distribution and structure, NOT distinctness (seven buckets is a
+     birthday problem and the pack says so where it defines the
+     families): a name corpus must reach every bucket without gross
+     clustering, and anagram pairs must be separable -- the property
+     char-sum failed structurally. */
+  // The palette comes from the PAGE, not a stand-in: a copied bucket
+  // count would keep certifying spread at mod 7 after the palette moved.
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tintsLine = pageScript.slice(pageScript.indexOf('const DISC_TINTS'), pageScript.indexOf('\n', pageScript.indexOf('const DISC_TINTS')) + 1);
+  const inksLine = pageScript.slice(pageScript.indexOf('const DISC_INKS'), pageScript.indexOf('\n', pageScript.indexOf('const DISC_INKS')) + 1);
+  assert.ok(tintsLine.includes('[') && inksLine.includes('['), 'the palette lines vanished from the page');
+  // The pair lengths must match: discIndex mods by TINTS.length and
+  // discInk indexes INKS with it, so an unbalanced edit emits undefined.
+  // eslint-disable-next-line no-new-func
+  const lens = new Function(tintsLine + inksLine + 'return [DISC_TINTS.length, DISC_INKS.length];')();
+  assert.equal(lens[0], lens[1], 'DISC_TINTS and DISC_INKS diverged; discInk would emit undefined');
+  const discIndex = pageFunction('discIndex', tintsLine);
+  const corpus = ['leo','mara','rook','nils','vex','angel','april','donnie','mikey','casey','raph','splinter','krang','jennika','shredder','tom','ana','ben','cleo','dora','eli','fern','gus','hana','ivan','june','kira','liam','nora','omar','pia','quinn','rosa','sam','tara','uma','vic','wren','xena','yuri','zed'];
+  const seen = new Map();
+  for (const n of corpus) seen.set(discIndex(n), (seen.get(discIndex(n)) || 0) + 1);
+  assert.equal(seen.size, lens[0], 'a 41-name corpus left buckets unreached: hit '
+    + seen.size + ' of ' + lens[0]);
+  const max = Math.max(...seen.values());
+  assert.ok(max <= Math.ceil((corpus.length / lens[0]) * 2), 'gross clustering: one bucket took ' + max + ' of ' + corpus.length);
+  /* ⚠️ Order sensitivity as a STATISTICAL property, not a pair list: the
+     claim is "anagrams are no more likely to collide than any other
+     pair" -- an order-INDEPENDENT hash collides on every single pair
+     (char-sum: 40/40 by construction), a good hash collides at roughly
+     chance (~1/7). The bound sits far above chance and far below
+     catastrophe, so it cannot go red on a correct hash that got
+     ordinarily unlucky, and it survives a bucket-count change. A
+     fixed-small-list assertion here would be the seven-distinct-tints
+     mistake in another costume. */
+  const words = corpus.filter((w) => w.length >= 3 && w !== [...w].reverse().join(''));
+  const anagramPairs = words.map((w) => [w, [...w].reverse().join('')]);
+  const collisions = anagramPairs.filter(([a, b]) => discIndex(a) === discIndex(b)).length;
+  assert.ok(anagramPairs.length >= 30, 'the corpus shrank under the anagram test');
+  assert.ok(collisions <= Math.ceil(anagramPairs.length / 3),
+    'anagrams collide ' + collisions + '/' + anagramPairs.length
+    + ' -- far above chance, the hash is order-independent or near it');
+});
+
+test('a borrowed-name pane cannot lend a project card its photograph', () => {
+  /* The hasAvatar tied-gate is defence-in-depth (snapshot already zeroes
+     hasAvatar on untied cards), so this test holds it LIVE the way the
+     role gate's own flipped-card test does: a produced card with the tie
+     flag deliberately flipped and an avatar claimed. */
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const pdir = nodePath.join(SANDBOX, 'face-gate-proj');
+  fs.mkdirSync(pdir, { recursive: true });
+  try {
+    projectsEngine.create({ name: 'Face Gate', folder: pdir, agents: ['leo'], roster: board.agents });
+    const real = board.agents.find((a) => a.sessionName === 'leo');
+    const flipped = [{ ...real, isNamedOurs: false, hasAvatar: true }];
+    const row = projectsEngine.list(flipped).find((x) => x.name === 'Face Gate');
+    assert.equal(row.agents[0].hasAvatar, false,
+      'a pane we cannot tie to the name lent the card a photograph');
+    // CONTROL: the tied card with an avatar passes the face through, so
+    // the refusal above is the gate and not a dropped field.
+    const tied = [{ ...real, hasAvatar: true }];
+    assert.equal(projectsEngine.list(tied).find((x) => x.name === 'Face Gate').agents[0].hasAvatar, true,
+      'CONTROL: a tied avatar did not reach the row, so the gate assertion proves nothing');
+  } finally {
     board.restore();
   }
 });

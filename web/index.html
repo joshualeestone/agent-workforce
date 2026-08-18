@@ -630,6 +630,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
        background: rgba(20,22,26,.06); font-size: .875rem; font-weight: 600;
        color: var(--k-ink-2); overflow: hidden; }
 .lav img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The tinted disc fallback fills its chip (the tint rides the inner span
+   because the row builds the chip's INSIDE, not the chip). */
+.lavtint { width: 100%; height: 100%; display: grid; place-items: center; border-radius: 50%; }
 .lname b { display: block; font-size: 1rem; }
 .lname small { color: var(--k-ink-2); font-size: .8125rem; }
 .lname em { display: block; font-style: normal; font-size: .75rem; color: var(--k-ink-2); }
@@ -653,9 +656,19 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   .lstate, .ltask, .lmem { grid-column: 2; }
 }
 /* Grid mode for the projects list: the same rows laid as cards. */
-.pj-list.asgrid { display: grid;
-                  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
-.pj-list.asgrid .pj-row { height: 100%; }
+.pj-list.asgrid { display: grid; gap: 16px;
+                  /* 23rem min yields the pack's three-across at the 1320
+                     stage; 19rem was packing four narrower cards. */
+                  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
+/* Flex column, not block: a stretched button vertically CENTERS its
+   content in Chromium, so the short card in a row floated its name to
+   the middle while its neighbors sat top-aligned (seen on the shot,
+   invisible to every text check). */
+.pj-list.asgrid .pj-row { height: 100%; display: flex; flex-direction: column;
+                          align-items: stretch; justify-content: flex-start; }
+/* As a flex item the inline-block chip stretches to the card edge;
+   the pack's chip hugs its text. */
+.pj-list.asgrid .pjslug { align-self: flex-start; }
 /* The empty state and the read-failure card span the grid: the failure
    message is the one that matters and it must not squeeze into one cell. */
 .pj-list.asgrid .pj-empty, .pj-list.asgrid .err { grid-column: 1 / -1; }
@@ -671,9 +684,17 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .panel { max-width: 720px; margin: 0 auto; background: var(--bg-elevated);
          border: 0.5px solid var(--separator); border-radius: var(--radius-card);
          box-shadow: var(--shadow-card); padding: var(--space-8); }
-/* Settings sits on the pack's paper ground: its dboxes ARE the cards, so
-   the panel shell would be a white box behind white boxes. */
-#panel-settings { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* Settings and Projects sit on the pack's paper ground: their cards ARE
+   the surfaces, so the panel shell would be a white box behind white
+   boxes. */
+#panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* The paper ground belongs to the LIST view only; the one-project, add,
+   and project-settings views (view D territory, not this chunk) keep the
+   shell the panel used to give them. */
+#pj-one-view, #pj-add-view, #pj-settings-view {
+  max-width: 860px; margin: 0 auto; background: var(--bg-elevated);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card); padding: var(--space-8); }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -681,9 +702,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* --- projects ---------------------------------------------------------- */
 .panel-wide { max-width: 860px; }
 .pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
-.pj-headright { display: flex; align-items: center; gap: var(--space-4); }
-.pj-lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin: var(--space-4) 0 var(--space-6); }
-.pj-list { display: flex; flex-direction: column; gap: var(--space-4); }
+.pj-list { display: flex; flex-direction: column; gap: 14px; max-width: 1320px; margin: 0 auto; }
 .pj-arch-wrap { margin-top: var(--space-6); }
 /* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
    failure. A <button> does NOT inherit the page's colour -- it uses the UA's
@@ -691,49 +710,76 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    right, so the row passed by luck; in dark mode the project NAME rendered
    dark-grey on dark-grey. Every text test passed either way, because the
    words were all present. Caught by looking at the dark screenshot. */
+/* ---- the pack's project cards (view C, pj-cards) ----
+   .pj-row keeps its name (the click contract and the drives address it);
+   the LOOK is the pack's .pcard. Fixed-light k-surface cards, fixed ink. */
+.pjcard-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); min-width: 0; overflow-wrap: anywhere; }
+.pjpill { display: inline-flex; align-items: center; gap: 6px; flex: none;
+          font-size: .8125rem; font-weight: 600; color: var(--k-ink-2); }
+.pjpill.attn { color: #b3261e; }
+.pjpill .act, .pjpill .rest, .pjpill .haz { flex: none; }
+.pjslug { display: inline-block; font: 600 .75rem var(--k-mono); color: var(--k-ink-2);
+          max-width: 100%; overflow-wrap: anywhere;
+          background: rgba(20,22,26,.05); border-radius: 6px; padding: .18rem .5rem;
+          margin-top: 8px; }
+/* The pack's .pc-a idiom: separate chips with a visible gap -- NO
+   facepile overlap, no ring (an earlier cut invented one; the packshot
+   draws plain gapped chips at 22px and pack wins). The aria-hidden
+   wrapper is a flex ROW of its own: as a plain span it blockifies into
+   a single flex item and the chips stack vertically -- found by the
+   third pass reading geometry no text check sees; the drive now holds
+   that with bounding rects. */
+.pjfaces { display: flex; align-items: center; gap: 5px; margin-top: 10px; }
+.pjfaces > [aria-hidden] { display: flex; align-items: center; gap: 5px; }
+.pjfaces .lav { width: 22px; height: 22px; font-size: .625rem; }
+.pjcount { font-size: .8125rem; color: var(--k-ink-2); margin-left: 8px; }
+/* The pack's .pc-t, name included: the pack spends `.pjdesc` on the DETAIL
+   page's description (.9375rem/1.45), so the card's sentence takes the
+   card's own pack class or the pjone rebuild inherits 14px by collision. */
+.pc-t { display: block; font-size: .875rem; color: var(--k-ink-2); line-height: 1.4; margin-top: 10px;
+  /* A pasted URL or other unbroken token must wrap, not slide under the
+     card edge; the drive's 200-char cap fixture reds without this. */
+  overflow-wrap: anywhere; }
 .pj-row { display: block; width: 100%; text-align: left; cursor: pointer;
-  color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--separator); border-radius: var(--radius-card);
-  padding: var(--space-5); }
-.pj-row:hover { background: var(--attn-bg); }
-.pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
-/* The description line, card and detail alike. On the ROW `--label-2`, not
-   `--label-3` (the detail's p.pj-desc overrides to full --label below):
-   this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
-   floor on this screen already at caption size (rounds 20 and 37 of the chat
-   branch). The harness asserts row and detail render the SAME size, which
-   is the check that catches the cascade regression this rule once had.
-   One line in the ROW: `oneLine` folds newlines at the engine, and the
-   ellipsis keeps a 200-char description from wrapping the row. Both selectors carry the element for specificity --
-   bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),
-   so the detail paragraph silently rendered at body size under a comment
-   claiming callout. */
-span.pj-desc, p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
-  color: var(--label-2); }
-span.pj-desc { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-p.pj-desc { margin-top: 2px; margin-bottom: 2px;
-  /* The person's sentence in full ink; the machine path below it stays
-     --label-2 -- the two rendered byte-identical and read as one grey
-     metadata block instead of the title-plus-statement pair the pin asks
-     for (round 5, confirmed on the rendered page). */
-  color: var(--label); }
+  color: var(--k-ink); font-family: inherit;
+  background: var(--k-surface); border: 1px solid var(--k-rule); border-radius: 12px;
+  padding: 18px 20px;
+  /* the pack's .pcard shell: 12px radius, a resting shadow, and a hover
+     that lifts rather than only recolouring (pass 4's side-by-side) */
+  box-shadow: 0 1px 2px rgba(20,22,26,.05);
+  transition: border-color .12s ease, box-shadow .12s ease; }
+.pj-row:hover { border-color: rgba(20,22,26,.28); box-shadow: 0 2px 6px rgba(20,22,26,.08); }
+.pj-row.attn { border-color: rgba(179,38,30,.42); }
+/* The one-project view's description, at the pack's .pjdesc values (the
+   card's sentence lives on .pc-t above). Round 5 pinned this line to full
+   ink because at callout size it rendered byte-identical to the machine
+   path below it; at the pack's .9375rem the size split carries that
+   distinction, so the pack's ink-2 stands. */
+p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
+  line-height: 1.45; color: var(--label-2); max-width: 62ch;
+  /* --label-2, not the pack's k-ink-2: the detail sits on the ADAPTIVE
+     panel, and the pack's fixed light-page ink measured 1.69:1 in dark
+     mode (the fixed inks belong to the fixed-light cards only). */
+  overflow-wrap: anywhere; }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
    together into one unreadable string -- which every one of the 408 text tests
    passed, because the words were all present and in order. This is the whole
    reason a screenshot is part of the work. */
-.pj-row .pj-path { display: block; font: var(--text-subhead) var(--font-ui); color: var(--label-2);
-  margin-top: 2px; word-break: break-all; }
-.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-3); }
+/* Fixed ink: these sit on the fixed-light card now (the hold-the-line
+   doctrine) -- the blind-spot sentence must survive dark mode. */
+.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink-2); margin-top: var(--space-3); }
 /* ⚠️ A state, not a decoration. A folder we cannot read has to look different
    from one we can, or the row quietly reports a project that is fine. */
-.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--label);
+.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink);
   margin-top: var(--space-3); padding-left: var(--space-4);
-  border-left: 2px solid var(--warn-ink); }
+  /* the light warn literal, not the theme token: the card is fixed-light,
+     and dark's #ffca55 border is faint on white */
+  border-left: 2px solid #7a5200; }
 .pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
   padding: var(--space-7); text-align: center; }
 .pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
-.pj-folder { font: var(--text-callout) var(--font-ui); color: var(--label-2); word-break: break-all; }
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -2215,22 +2261,36 @@ svg { display: block; }
 
   <!-- The list, and the empty state, which is the screen first-run hands you. -->
   <div id="pj-list-view">
-    <div class="pj-head">
-      <h2>Projects</h2>
-      <div class="pj-headright">
-        <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
-          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Show projects as a grid">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
-          </button>
-          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="Show projects as a list">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
-          </button>
+    <!-- ⚠️ The pack's stats row (view C), the same grammar as the agents
+         board: the New-project action as a dashed tile locked left, the
+         two counts on the centre (the pack deliberately dropped the other
+         tiles: a number nobody can name is not information), the view
+         toggle pinned right. The alert tile hides at zero, same as the
+         board's. The old lede sentence moved out with the header (pack
+         draws none on the list); its definition of a project survives in
+         the empty state and the add flow. ids pj-new and the toggle's
+         data-scope keep the existing click contracts. -->
+    <div class="statsrow">
+      <button class="stat action" id="pj-new" type="button">
+        <span class="plus" aria-hidden="true">+</span>
+        <span class="slab">New project</span>
+      </button>
+      <div class="stats">
+        <div class="stat"><b id="st-pj">0</b><span class="slab">Projects</span></div>
+        <div class="stat alert" id="st-pjattn-tile" hidden>
+          <span class="haz" aria-hidden="true">!</span>
+          <b id="st-pjattn">0</b><span class="slab">Needs you</span>
         </div>
-        <button class="btn" id="pj-new" type="button">Add a project</button>
+      </div>
+      <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
+        <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show projects as a grid" title="Show projects as a grid">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
+        </button>
+        <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show projects as a list" title="Show projects as a list">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
+        </button>
       </div>
     </div>
-    <p class="pj-lede">A project is a folder you already have on this computer,
-       and the agents you have put on it.</p>
     <p class="fmsg" id="pj-list-msg" aria-live="polite"></p>
     <div id="pj-list" class="pj-list"></div>
     <!-- ⚠️ Absent entirely when nothing is archived (hidden on the WRAP, same
@@ -2383,6 +2443,11 @@ svg { display: block; }
     <button class="back" id="pj-settings-back" type="button">&larr; <span id="pj-settings-backname"></span></button>
     <h2>Project settings</h2>
     <p class="fhint">Changes here apply to this project only.</p>
+    <!-- The read-failure note, on THIS view: the folder facts and archive
+         control below repaint from every poll, so when the poll stops
+         landing the person sitting here has to be told the page went
+         stale, same as the detail and add views. -->
+    <p class="fmsg" id="pjs-read-msg" aria-live="polite"></p>
 
     <div class="field">
       <label class="flabel" for="pjs-name">Name</label>
@@ -2416,7 +2481,6 @@ svg { display: block; }
       <p class="shint" style="margin-top:8px;"><code class="t" id="pjs-folder-name"></code></p>
       <p class="fhint" id="pjs-folder-where"></p>
       <p class="pj-folder-state" id="pj-one-folder-state"></p>
-      <p class="pj-folder" id="pj-one-folder" hidden></p>
       <button class="btn" id="pjs-reveal" type="button">Show me where it is</button>
       <p class="fmsg" id="pjs-reveal-msg" aria-live="polite"></p>
     </div>
@@ -2892,10 +2956,39 @@ function icon(name, extraClass) {
   return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
 }
 
+/* The disc fallback: the pack's seven tint-and-ink PAIRS (faceSVG in
+   the freeze) -- a muted pale disc with a matched deep initial -- under
+   famFor's FNV-1a, the pack's OTHER hash: the disc section's own
+   polynomial was measured colliding four of six anagram pairs at mod 7
+   (see discIndex below for the arithmetic), so the disc keeps its pairs
+   and borrows its sibling's spread. Name-derived, so the mark is stable
+   identity across the fleet changing. Shared by every surface that
+   draws the fallback (board rings, list chips, project cards, the
+   detail header). The initial is singular, the pack's word. Not a
+   distinctness guarantee: seven buckets is a birthday problem and the
+   pack says so where it defines the families. */
 function initials(name) {
-  const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
-  return parts.map((w) => w[0]).join('').toUpperCase() || '?';
+  const first = [...String(name || '?').trim()][0] || '?';
+  return first.toUpperCase();
 }
+const DISC_TINTS = ['#dfe5ea', '#e3e7dd', '#e9e1e4', '#dde6e6', '#eae3d9', '#e0e4ea', '#e6e2dd'];
+const DISC_INKS  = ['#4a5560', '#525c48', '#5c4f55', '#47585a', '#5e5344', '#4c5462', '#585048'];
+/* The HASH is famFor's FNV-1a (the pack's mark hash), not the disc
+   section's own polynomial: measured at seven buckets, the polynomial
+   collides four of six fixed anagram pairs (31 and 997 interact badly
+   with mod 7) while FNV separates five of six and reaches every bucket
+   across a 41-name corpus. Both hashes are the pack's; the disc keeps
+   its tint/ink pairs and borrows its sibling's spread. Flagged to the
+   pack (the disc section's hash does not deliver the variety its
+   comment promises). */
+function discIndex(name) {
+  let h = 2166136261;
+  const k = String(name || '');
+  for (let i = 0; i < k.length; i += 1) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h % DISC_TINTS.length;
+}
+function discTint(name) { return DISC_TINTS[discIndex(name)]; }
+function discInk(name) { return DISC_INKS[discIndex(name)]; }
 
 /**
  * Memory gauge, the pack's: arc on the ring, avatar in the middle, no
@@ -2919,8 +3012,13 @@ function ring(a) {
        <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
               x="13" y="13" width="46" height="46" preserveAspectRatio="xMidYMid slice"
               clip-path="url(#${clip})"/>`
-    : `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
-       <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
+    /* style="", not a fill attribute: an SVG presentation attribute sits
+       BELOW every author CSS rule, and .avatar-bg declares fill -- the
+       tint never rendered until this was inline style (found by the pass;
+       no text-reading test can see a cascade defeat). The matched ink
+       rides the same way. */
+    : `<circle cx="36" cy="36" r="23" class="avatar-bg" style="fill:${discTint(a.name)}"/>
+       <text x="36" y="41" text-anchor="middle" class="avatar-initials" style="fill:${discInk(a.name)}">${esc(initials(a.name))}</text>`;
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
@@ -3030,7 +3128,7 @@ function lrow(a) {
   const band = memBand(pct);
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
-    : esc(initials(a.name));
+    : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
   const mem = pct === null
     ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
@@ -3844,7 +3942,10 @@ const LAYOUTS = {
      [hidden]{display:none !important} making the flip stick against any
      author display rule. */
   agents:   { swap: true, flip: 'list', fallback: 'grid' },
-  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'list' },
+  // Grid is the pack's default for projects (view C); the stored choice
+  // still wins via the restore path. `flip` NAMES THE LAYOUT THAT GETS
+  // THE CLASS (asgrid == grid mode), the default rides `fallback`.
+  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'grid' },
 };
 
 function layoutApply(scope, want) {
@@ -3930,9 +4031,29 @@ function renderAvatar(a) {
     img.src = '/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar?t=' + Date.now();
     img.hidden = false;
     ini.hidden = true;
+    // The tint is the PREVIOUS agent's identity: cleared, or it flashes
+    // behind every photo load (the cache-buster reloads each open) and
+    // sits permanently under a transparent or failed avatar.
+    ini.style.background = '';
+    ini.style.color = '';
+    ini.parentElement.style.background = '';
   } else {
     img.hidden = true;
     ini.hidden = false;
+    // The fourth surface of the shared disc: the same tint and ink the
+    // board, list, and project cards derive, so an agent's mark is one
+    // identity everywhere including its own page.
+    if (a) {
+      ini.style.background = discTint(a.name);
+      ini.style.color = discInk(a.name);
+      ini.parentElement.style.background = discTint(a.name);
+    } else {
+      // Same clearing as the photo branch: without it a falsy `a` shows
+      // the PREVIOUS agent's identity colors on the blank disc.
+      ini.style.background = '';
+      ini.style.color = '';
+      ini.parentElement.style.background = '';
+    }
   }
 }
 
@@ -6581,6 +6702,18 @@ function paintProjects() {
   const active = PROJECTS.filter((p) => !p.archived);
   const archived = PROJECTS.filter((p) => p.archived);
   paintArchived(archived);
+  /* ⚠️ The tiles write BEFORE any return: the empty-state branches used to
+     leave "3 Projects" (and a red Needs-you) sitting above "No projects
+     yet", the exact stale juxtaposition this list hides the archived
+     disclosure to avoid. Counted as PROJECTS NEEDING YOU, matching the
+     red cards below one-for-one, so this tile and the agents tab's twin
+     count different things and say so by their labels; the alert hides at
+     zero and under a blind roster (a claim we cannot make). */
+  const attnProjects = PJ_AGENTS_UNREADABLE ? 0
+    : active.filter((p) => (((p.summary || {}).needsYou) || 0) > 0).length;
+  document.getElementById('st-pj').textContent = String(active.length);
+  document.getElementById('st-pjattn').textContent = String(attnProjects);
+  document.getElementById('st-pjattn-tile').hidden = !attnProjects;
   if (!PROJECTS.length) {
     setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
@@ -6598,33 +6731,69 @@ function paintProjects() {
       + '</div>');
     return;
   }
-  setIfChanged(list, active.map((p) => {
-    const s = p.summary || {};
-    const folder = pjFolderLine(p);
-    // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
-    // A summary that hides its own blind spot is the defect this codebase keeps
-    // finding, and a project row is exactly where it would hide.
-    let who;
-    if (!s.total) who = 'No agents on it yet.';
-    else if (PJ_AGENTS_UNREADABLE) who = s.total + (s.total === 1 ? ' agent' : ' agents') + ' — we cannot see how they are doing right now.';
-    else {
-      const bits = [];
-      if (s.needsYou) bits.push(s.needsYou + ' needs you');
-      if (s.working) bits.push(s.working + ' working');
-      if (s.unseen) bits.push(s.unseen + ' we cannot see');
-      who = (p.agents || []).map((a) => esc(a.name)).join(' · ') + (bits.length ? ' — ' + bits.join(', ') : '');
-    }
-    return '<button class="pj-row" type="button" data-project="' + esc(p.id) + '">'
-      + '<b>' + esc(p.name) + '</b>'
-      // The description is what makes a list of twelve projects readable
-      // (Josh's fixtures made the case); absent, the line is absent, per
-      // the same no-empty-grey-line rule as the detail.
-      + (p.description ? '<span class="pj-desc">' + esc(p.description) + '</span>' : '')
-      + '<span class="pj-path">' + esc(p.folder) + '</span>'
-      + '<span class="pj-who">' + who + '</span>'
-      + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
-      + '</button>';
-  }).join(''));
+  setIfChanged(list, active.map((p) => projectCard(p, PJ_AGENTS_UNREADABLE)).join(''));
+}
+
+/* The failure treatment for the tiles, called by loadProjects' catch:
+   confident counts above "we cannot read your projects" are claims the
+   failed read cannot back (the board's tiles blank the same way). */
+function pjTilesUnknown() {
+  document.getElementById('st-pj').textContent = '?';
+  document.getElementById('st-pjattn').textContent = '?';
+  document.getElementById('st-pjattn-tile').hidden = true;
+}
+
+/* The pack's state pill (view C): Needs you > Working > Can't tell >
+   Nothing running. "Nothing running" is a CLAIM -- it is only made when
+   every member was actually seen; a blind roster or unseen members get
+   the board's own unsure treatment instead of a reassurance. */
+function pjPillOf(p, unreadable) {
+  const s = p.summary || {};
+  if (!unreadable && s.needsYou) return { cls: 'attn', glyph: '<span class="haz" aria-hidden="true">!</span>', label: 'Needs you' };
+  if (!unreadable && s.working) return { cls: '', glyph: '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>', label: 'Working' };
+  if (!s.total) return { cls: '', glyph: '', label: 'No agents yet' };
+  if (unreadable || s.unseen) return { cls: '', glyph: '', label: 'Can\u2019t tell' };
+  return { cls: '', glyph: '<span class="rest" aria-hidden="true"></span>', label: 'Nothing running' };
+}
+
+function projectCard(p, unreadable) {
+  const s = p.summary || {};
+  const folder = pjFolderLine(p);
+  const pill = pjPillOf(p, unreadable);
+  /* Faces: the avatar when the TIED agent has one, the initials chip
+     otherwise (hasAvatar is gated on tied in the engine -- a borrowed
+     pane must not lend the card somebody else's photograph). */
+  /* aria-hidden: the card is a button whose accessible name is its text,
+     and bare initials read as stray letters to a screen reader while the
+     "N agents" count already carries the fact. The title names each face
+     for sighted hover. */
+  const faces = (p.agents || []).slice(0, 5).map((a) => a.hasAvatar
+    ? '<span class="lav" title="' + esc(a.name) + '"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav" title="' + esc(a.name) + '" style="background:' + discTint(a.name) + ';color:' + discInk(a.name) + '">' + esc(initials(a.name)) + '</span>').join('');
+  const count = s.total ? '<span class="pjcount">' + Number(s.total) + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
+  const facesRow = (faces || count)
+    ? '<span class="pjfaces"><span aria-hidden="true">' + faces + '</span>' + count + '</span>' : '';
+  /* ⚠️ The card NEVER says everything is fine when part of it was
+     unreadable -- the pill claims only what the counts support, and the
+     blind spot is SAID in words below, same rule as before the restyle. */
+  const bits = [];
+  if (!unreadable && s.unseen) bits.push(s.unseen + ' we cannot see');
+  if (unreadable && s.total) bits.push('we cannot see how they are doing right now');
+  return '<button class="pj-row' + (pill.cls === 'attn' ? ' attn' : '') + '" type="button" data-project="' + esc(p.id) + '">'
+    + '<span class="pjcard-h"><b>' + esc(p.name) + '</b>'
+    + '<span class="pjpill ' + pill.cls + '">' + pill.glyph + esc(pill.label) + '</span></span>'
+    /* The slug chip shows the FOLDER'S real basename (what sits on their
+       disk), not the engine's collapsed id -- the chip's job is naming
+       the thing the person can find in Finder. */
+    + '<span class="pjslug">' + esc(String(p.folder || '').split('/').filter(Boolean).pop() || p.id) + '</span>'
+    + facesRow
+    // The description is what makes a list of twelve projects readable
+    // (Josh's fixtures made the case); absent, the line is absent, per
+    // the same no-empty-grey-line rule as the detail.
+    + (p.description ? '<span class="pc-t">' + esc(p.description) + '</span>' : '')
+    + (bits.length ? '<span class="pj-who">' + esc(bits.join(', ')) + '</span>' : '')
+    + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
+    + '</button>';
 }
 
 // ---------------------------------------------------------------------------
@@ -6809,6 +6978,10 @@ async function loadProjects() {
     setIfChanged(document.getElementById('pj-list'),
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
       + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    // The tiles are claims too: confident counts one element above the
+    // could-not-look sentence are the same stale juxtaposition the
+    // archived disclosure below is hidden to avoid.
+    pjTilesUnknown();
     // The archived disclosure goes with the list: its count and Restore
     // buttons derive from a read that did not happen, and "Show archived
     // projects (3)" is a confident sentence one element below the one saying
@@ -6818,6 +6991,11 @@ async function loadProjects() {
     const add = document.getElementById('pj-add-msg');
     if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
     if (!document.getElementById('pj-add-view').hidden && add.textContent !== note) add.textContent = note;
+    // Settings holds poll-repainted facts (folder, archive state), so the
+    // person dwelling there is told too -- the branch that added the
+    // success-path repaint owed the failure path the same symmetry.
+    const set = document.getElementById('pjs-read-msg');
+    if (!document.getElementById('pj-settings-view').hidden && set.textContent !== note) set.textContent = note;
     // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
     // open project as "there is no project by that name" on a transient
     // network failure -- turning "we could not look" into "it is gone".
@@ -6825,6 +7003,14 @@ async function loadProjects() {
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  // The settings view holds the archive control now, so a poll that lands
+  // while it is open must repaint IT from the truth too -- without this,
+  // "Restore failed. Try again" outlives a restore whose write landed and
+  // whose re-read has since succeeded (the drive's 8h recovery arm).
+  if (PJ_CURRENT && !document.getElementById('pj-settings-view').hidden) {
+    const cur = pjById(PJ_CURRENT);
+    if (cur) paintSettingsFacts(cur);
+  }
   // ⚠️ A successful read retires the error sentences ITS OWN failure path
   // wrote (and only that sentence, matched exactly): the failed-restore
   // flow left "We cannot read your projects right now..." in #pj-one-msg
@@ -6832,6 +7018,10 @@ async function loadProjects() {
   const oneMsg = document.getElementById('pj-one-msg');
   if (oneMsg && oneMsg.textContent.startsWith('We cannot read your projects right now')) {
     oneMsg.textContent = '';
+  }
+  const setMsg = document.getElementById('pjs-read-msg');
+  if (setMsg && setMsg.textContent.startsWith('We cannot read your projects right now')) {
+    setMsg.textContent = '';
   }
   return true;
 }
@@ -7108,6 +7298,15 @@ function paintProjectSettings(p) {
   document.getElementById('pjs-desc').value = p.description || '';
   document.getElementById('pjs-msg').textContent = '';
   document.getElementById('pjs-reveal-msg').textContent = '';
+  paintSettingsFacts(p);
+}
+
+/* The state-derived half of the settings view, callable from the poll: the
+   folder facts and the archive control repaint from the truth on every
+   read, while the editable fields and the messages above belong to
+   paintProjectSettings alone -- a poll that rewrote pjs-name would eat a
+   rename mid-type, the same draft-eater the say box fought (round 33). */
+function paintSettingsFacts(p) {
   const folder = String(p.folder || '');
   const base = folder.split('/').filter(Boolean).pop() || folder;
   document.getElementById('pjs-folder-name').textContent = base;
@@ -7187,12 +7386,15 @@ document.getElementById('pjs-save').addEventListener('click', async () => {
     });
     const got = await res.json().catch(() => ({}));
     if (!res.ok) { msg.textContent = got.error || 'we could not save that'; return; }
-    // The archive sibling's retry shape; and on a still-failed read, NO
-    // repaint: the typed values are exactly what was saved, and repainting
-    // stale PROJECTS under "Saved." would put the old name back beneath a
-    // sentence claiming the new one landed.
-    const read = (await loadProjects()) || (await loadProjects());
-    if (read) {
+    // The archive sibling's retry shape (retry only when a NEWER read
+    // retired ours -- loadProjects answers true on a recorded failure, so
+    // `||` never retried and a truthy answer was read as a good read); and
+    // on a still-failed read, NO repaint: the typed values are exactly what
+    // was saved, and repainting stale PROJECTS under "Saved." would put the
+    // old name back beneath a sentence claiming the new one landed. The
+    // read-failure note itself lands in #pjs-read-msg via the poll path.
+    if (!(await loadProjects())) await loadProjects();
+    if (!PJ_READ_FAILED) {
       const fresh = pjById(PJ_CURRENT);
       if (fresh) { paintProjectSettings(fresh); paintOneProject(); pjView('settings'); }
     }
@@ -7235,12 +7437,14 @@ function paintOneProject() {
   const desc = document.getElementById('pj-one-desc');
   desc.textContent = p.description || '';
   desc.hidden = !p.description;
-  document.getElementById('pj-one-folder').textContent = p.folder;
-  // ⚠️ The detail STATES the archived fact and flips the control. Without
-  // this, an archived project's page was indistinguishable from an active
-  // one, still offering "Archive it" -- a 200 no-op answered with "It is in
-  // the archived list below" for a change that did not occur. (Reachable:
-  // pjAnswerFrom opens an agent's only project even when archived.)
+  /* The raw-path element retired with the pack cut ("~/" is a squiggle to
+     this reader): the folder facts live on #pjs-folder-name and
+     #pjs-folder-where in Project settings. */
+  // The archived statement and its control moved to Project settings
+  // (paintSettingsFacts flips them from the truth on paint and on every
+  // poll). The reachable archived-detail case -- pjAnswerFrom opens an
+  // agent's only project even when archived -- is stated THERE now; the
+  // pack's pjone rebuild decides whether the detail itself says it too.
 
   setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
     ? p.agents.map((m) => pjMember(m, p.id)).join('')
