@@ -655,6 +655,7 @@ async function main() {
 
   // 7. Contrast, on the list where every text token on this screen appears.
   let contrastFails = 0;
+  const surfacesByScheme = {};
   for (const scheme of ['light', 'dark']) {
     const ctx = await browser.newContext({ colorScheme: scheme });
     const page = await ctx.newPage();
@@ -868,9 +869,85 @@ async function main() {
         console.log(`  ⚠️ contrast ${cr.toFixed(2)} (needs ${need}) — ${e.sel} @${e.size}px, ${scheme}`);
       }
     }
+    // The surfaces this scheme actually painted, for the flip check below.
+    // Read from the LIST view: the sweep leaves the page on the settings
+    // view, so navigate back rather than assume.
+    await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    surfacesByScheme[scheme] = await page.evaluate(() => {
+      const read = (sel, prop) => {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error('the flip probe found nothing at ' + sel + ' -- a surface that is not on screen cannot prove it flips');
+        return getComputedStyle(el)[prop];
+      };
+      return {
+        ground: getComputedStyle(document.body).backgroundColor,
+        card: read('#pj-list .pj-row', 'backgroundColor'),
+        band: read('.apphead', 'backgroundColor'),
+        tile: read('#panel-projects .stat:not(.action)', 'backgroundColor'),
+      };
+    });
+    // The AGENTS board's surfaces too -- the dark-tokens review found the
+    // needs-you borders and gauge geometry invisible in dark precisely
+    // because no instrument looked at that tab in both schemes.
+    await page.click('#klink');
+    await page.waitForTimeout(400);
+    Object.assign(surfacesByScheme[scheme], await page.evaluate(() => {
+      const read = (sel, prop) => {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error('the flip probe found nothing at ' + sel + ' -- a surface that is not on screen cannot prove it flips');
+        return getComputedStyle(el)[prop];
+      };
+      return {
+        acard: read('.acard', 'backgroundColor'),
+        /* .gt draws only for agents with a KNOWN memory pct; a machine
+           where every agent is unreadable renders .gu dashes instead --
+           a correct page, so the probe follows the renderer's own
+           branches rather than misreporting it as a rendering bug. */
+        gaugeTrack: document.querySelector('.acard .gt')
+          ? read('.acard .gt', 'stroke')
+          : read('.acard .gu', 'stroke'),
+      };
+    }));
+    // The memory .bar exists only in the LIST layout (the grid card draws
+    // the gauge instead), so the probe switches through the real toggle
+    // rather than reading a hidden renderer's computed style.
+    await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
+    await page.waitForTimeout(300);
+    Object.assign(surfacesByScheme[scheme], await page.evaluate(() => {
+      /* Not the first bar blindly: an unknown-memory row draws
+         .bar.unknown, whose gradient shorthand resets background-color to
+         transparent -- a correct page the transparent-read guard would
+         red. Prefer a known-memory bar; fall back to the unknown dash
+         pattern's backgroundImage, which is equally scheme-derived. */
+      const known = document.querySelector('#alist .bar:not(.unknown)');
+      if (known) return { memBar: getComputedStyle(known).backgroundColor };
+      const unknown = document.querySelector('#alist .bar.unknown');
+      if (unknown) return { memBar: getComputedStyle(unknown).backgroundImage };
+      throw new Error('the flip probe found no #alist .bar at all -- a surface that is not on screen cannot prove it flips');
+    }));
     await ctx.close();
   }
   console.log(contrastFails ? `✖ ${contrastFails} contrast failures` : '✔ 7-contrast (WCAG AA, light and dark)');
+
+  // 7b. THE FLIP ITSELF, which no contrast assertion can see: dark ink on a
+  // literal-white card passes AA in both themes, and that is exactly how a
+  // grid whose k-tokens never flipped survived six review passes and this
+  // sweep (Mona Lisa measured card interior 255,255,255 in dark,
+  // 2026-08-18). The failing property is "does the surface token CHANGE
+  // between schemes", so that is the property asserted.
+  {
+    const light = surfacesByScheme.light; const dark = surfacesByScheme.dark;
+    for (const key of ['ground', 'card', 'band', 'tile', 'acard', 'gaugeTrack', 'memBar']) {
+      if (!light[key] || light[key] === 'rgba(0, 0, 0, 0)' || !dark[key] || dark[key] === 'rgba(0, 0, 0, 0)') {
+        throw new Error(`the ${key} surface was not painted to measure (light ${light[key]}, dark ${dark[key]}) -- a transparent surface cannot prove it flips`);
+      }
+      if (light[key] === dark[key]) {
+        throw new Error(`the ${key} surface does not flip between schemes (${light[key]} in both) -- literal-white-in-dark is the defect this check exists for`);
+      }
+    }
+    console.log('✔ 7b-theme-flip (ground, card, band, tile, acard, gauge track, memory bar all change between schemes)');
+  }
 
   // 8. The app shell: sticky bar, the K mark, the member wording, the two
   //    scoped view toggles, and the archived disclosure. Behaviour in one

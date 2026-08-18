@@ -28,8 +28,10 @@
      and the three golds are the values the wizard pinned under #firstrun;
      surface and the mono stack are net-new here, promoted as each view
      rebuilds to the pack. Track/knob arrived with the settings toggles
-     (the control that consumes them); dark inverses with the theme pass
-     (#40), not before. */
+     (the control that consumes them); the dark inverses live in the
+     prefers-color-scheme block below (the pack's own set, added when
+     Mona Lisa measured literal-white cards on the dark ground); the
+     manual data-theme toggle remains #40's. */
   --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-surface: #ffffff; --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
@@ -50,8 +52,9 @@
   /* Light -- REPOINTED AT THE PACK (pack-pass, scrappy): every surface
      still on these older tokens (projects, create, the modals) adopts the
      pack's warm paper ground, ink, and rules in one move, structure
-     untouched. The dark redefinitions below are unchanged, so dark keeps
-     working exactly as before until #40. */
+     untouched. The dark redefinitions below carry the legacy set AND the
+     pack's k-token dark set (dark-tokens); the manual theme toggle is
+     what remains with #40. */
   --bg:            #faf9f7;
   --bg-elevated:   #ffffff;
   --bg-sunken:     #f4f2ee;
@@ -85,6 +88,20 @@
     --warn-bg:       rgba(255,190,60,0.12);
     --warn-border:   rgba(255,190,60,0.32);
     --warn-ink:      #ffca55;
+    /* The pack's own dark set for the k-tokens, verbatim (17c line 49).
+       Until this block existed the k-tokens held their light values in
+       both schemes, so every card riding --k-surface sat literal-white
+       on the flipped page ground -- measured by Mona Lisa 2026-08-18
+       (card interior 255,255,255 in dark). This was the deferred half
+       of the theme pass (#40); the card-surface flip ships here, the
+       manual data-theme toggle stays with #40. */
+    --k-bg:      #0c0d0f;
+    --k-surface: #17191c;
+    --k-ink:     #f5f5f4;
+    --k-ink-2:   #a9adb3;
+    --k-rule:    #2a2d31;
+    --k-track:   rgba(245,245,244,.22);
+    --k-knob:    #e8e9eb;
   }
 }
 @media (prefers-contrast: more) {
@@ -155,10 +172,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 [hidden] { display: none !important; }
 /* ---- the agent page: the pack's view B shell (pack-pass, scrappy).
    The elevated 720px card retired; the page is pack ground with dhead +
-   dgrid, and each field lives inside a fixed-light .dbox. Field internals
-   inside boxes carry FIXED ink (the dark hold-the-line lesson: a
-   theme-following --label inside a fixed-light card goes light-on-light
-   in dark). */
+   dgrid, and each field lives inside a k-surface .dbox. Field internals
+   ride k-ink, the SAME token system as their surface (the hold-the-line
+   lesson, restated for flipping tokens: mixing --label furniture into a
+   k-surface box pairs values from two systems that flip separately). */
 .detail { max-width: 1320px; margin: 0 auto; background: none;
           border: 0; box-shadow: none; padding: 0; color: var(--k-ink); }
 .dhead { display: flex; gap: 18px; align-items: center; margin-bottom: 30px; }
@@ -174,8 +191,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .runnow { margin: 0 0 14px; font-size: .9375rem; color: var(--k-ink-2); }
 .runnow b { color: var(--k-ink); font-weight: 650; }
 .memrow { display: flex; align-items: center; gap: 12px; max-width: 22rem; }
-/* The conversation rows (messaging screens): fixed ink inside the
-   fixed-light dbox. A colleague's row reads differently from yours by
+/* The conversation rows (messaging screens): k-ink inside the k-surface
+   dbox, one token system so surface and ink flip together. A colleague's row reads differently from yours by
    the who-line and the gold mark, per the spec's rule that a person must
    see the distinction the product already teaches the agent. */
 .cvrow { padding: 10px 0; border-top: 1px solid var(--k-rule); }
@@ -358,6 +375,11 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   .apphead .tab { text-align: left; padding: 12px 14px; margin-bottom: 0;
                   border-bottom: 0; border-radius: 8px; }
   .apphead .tab.on { background: rgba(20,22,26,.05); border-bottom: 0; }
+  /* The tint is the ONLY selected cue at this width (the underline is
+     gone), and the dark-ink shade vanishes on the flipped dark band. */
+  @media (prefers-color-scheme: dark) {
+    .apphead .tab.on { background: rgba(245,245,244,.08); }
+  }
 }
 .headleft { display: flex; align-items: center; gap: var(--space-5); }
 /* An empty slot is a flex item and would spend one trailing gap. */
@@ -463,9 +485,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .acard.unk { border-style: dashed; }
 /* The heat wash is a GROUND, not a border: borders already mean "needs you". */
 .acard.hot { background: linear-gradient(180deg, rgba(179,38,30,.16) 0%, rgba(179,38,30,0) 42%), var(--k-surface); }
-/* ⚠️ Fixed-light surfaces carry FIXED ink: --k-surface does not flip until
-   #40, so text on it must not either (round 1's dark render had white names
-   on white cards where the ink inherited the body's flipped label). */
+/* Surface and ink flip TOGETHER, both on k-tokens (the dark-tokens set):
+   text on a k-surface must ride k-ink, never the legacy --label family --
+   round 1's dark render had white names on white cards where an ink
+   inherited a token from a different system than its surface. */
 /* ⚠️ No dimming for stopped (the pack retired it: "Not running" at 72% while
    "Can't tell" sat full-strength was backwards on honesty grounds). Only the
    STATE is off; the name, role and face are true either way. */
@@ -541,9 +564,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .acard:hover .ansgo, .lrow:hover .ansgo { color: var(--k-ink); }
 /* ---- the settings screen: the pack's view K (pack-pass, scrappy) ----
    Ported from CURRENT-FREEZE (17c) with the 17c full-width ruling
-   (.stack > .dbox stretches). Cards are fixed-light k-surface, so per the
-   dark hold-the-line convention they carry fixed ink and are right in
-   both themes until #40. */
+   (.stack > .dbox stretches). Cards ride k-surface and k-ink, which flip
+   together (the dark-tokens set), so the pairing is right in both
+   themes by construction. */
 .dgrid { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr));
          max-width: 1320px; margin: 0 auto; }
 @media (max-width: 56rem) { .dgrid { grid-template-columns: minmax(0, 1fr); } }
@@ -712,7 +735,8 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    words were all present. Caught by looking at the dark screenshot. */
 /* ---- the pack's project cards (view C, pj-cards) ----
    .pj-row keeps its name (the click contract and the drives address it);
-   the LOOK is the pack's .pcard. Fixed-light k-surface cards, fixed ink. */
+   the LOOK is the pack's .pcard, on k-surface with k-ink: surface and
+   ink flip together since the dark-tokens set. */
 .pjcard-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); min-width: 0; overflow-wrap: anywhere; }
 .pjpill { display: inline-flex; align-items: center; gap: 6px; flex: none;
@@ -758,25 +782,27 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    distinction, so the pack's ink-2 stands. */
 p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   line-height: 1.45; color: var(--label-2); max-width: 62ch;
-  /* --label-2, not the pack's k-ink-2: the detail sits on the ADAPTIVE
-     panel, and the pack's fixed light-page ink measured 1.69:1 in dark
-     mode (the fixed inks belong to the fixed-light cards only). */
+  /* --label-2, not k-ink-2: the detail sits on the legacy-token panel,
+     and its ink stays in the same token system as that surface (the
+     1.69:1 dark measurement dates from when k-ink-2 did not flip; the
+     one-system-per-surface rule is what survives the flip). */
   overflow-wrap: anywhere; }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
    together into one unreadable string -- which every one of the 408 text tests
    passed, because the words were all present and in order. This is the whole
    reason a screenshot is part of the work. */
-/* Fixed ink: these sit on the fixed-light card now (the hold-the-line
-   doctrine) -- the blind-spot sentence must survive dark mode. */
+/* k-ink-2 on the k-surface card: token and surface flip together (the
+   dark-tokens set), so the blind-spot sentence survives dark mode by
+   construction rather than by a fixed literal. */
 .pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink-2); margin-top: var(--space-3); }
 /* ⚠️ A state, not a decoration. A folder we cannot read has to look different
    from one we can, or the row quietly reports a project that is fine. */
 .pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink);
   margin-top: var(--space-3); padding-left: var(--space-4);
-  /* the light warn literal, not the theme token: the card is fixed-light,
-     and dark's #ffca55 border is faint on white */
-  border-left: 2px solid #7a5200; }
+  /* back on the theme token: the card surface flips with the pack's dark
+     set now, so the warn ink flips with it (#7a5200 light, #ffca55 dark) */
+  border-left: 2px solid var(--warn-ink); }
 .pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
   padding: var(--space-7); text-align: center; }
 .pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
@@ -1039,8 +1065,9 @@ svg { display: block; }
 @media (prefers-color-scheme: dark) {
   /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1 on
      the dark elevated ground and fails AA as 13px text; #F0665A is the
-     app's established dark-mode red. (The ring's own dark bands retired
-     with the old gauge; the pack gauge's dark values arrive with #40.) */
+     app's established dark-mode red, predating the pack's 255,140,130
+     family; unifying the two dark reds is flagged for Mona Lisa. (The
+     pack gauge's dark track/dashes landed with dark-tokens below.) */
   .utoast { --utone: #F0665A; }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
@@ -1115,13 +1142,12 @@ svg { display: block; }
   background: var(--warn-bg); color: var(--label);
   font: var(--text-callout) var(--font-ui); line-height: 1.45;
 }
-/* ⚠️ FIXED ink: this badge sits inside .acard/.lrow, fixed-light surfaces
-   that do not flip until #40, so a theme-following --warn-ink turned it
-   ~1.5:1 invisible in dark (round 2 measured rgb(255,202,85) on white).
-   #7a5200 is the light warn ink, correct on white in both themes. */
+/* Theme ink again: .acard/.lrow flip with the pack's dark k-token set,
+   so --warn-ink is correct on each surface. (Round 2's fixed #7a5200 was
+   the compensation for the pre-flip literal-white card.) */
 .card-stale {
   display: inline-flex; align-items: center; gap: 4px;
-  margin-left: 6px; vertical-align: middle; color: #7a5200;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
 }
 .card-stale svg { width: 13px; height: 13px; }
 
@@ -1228,10 +1254,11 @@ svg { display: block; }
    and hides, it never deletes the folder */
 .removed-hint { margin: 10px 0 0; font-size: .8125rem; line-height: 1.5;
                 color: var(--k-ink-2); }
-/* ⚠️ HOLD-THE-LINE until #40 (round 1: the old board was legible in dark and
-   the rebuild must not regress it). Fixed-light surfaces (--k-surface
-   cards, tiles, pills) carry fixed ink and are right in both themes;
-   elements on the BODY ground get theme-following tokens here.
+/* ⚠️ HOLD-THE-LINE, dark patches for the BODY-ground furniture (round 1:
+   the old board was legible in dark and the rebuild must not regress
+   it). k-surface cards and their k-ink text flip together since the
+   dark-tokens set and need nothing here; this block maps the legacy-token
+   furniture that sits on the ground.
    ⚠️ DECLARED AFTER every rule it overrides, deliberately: the first cut of
    this block sat 170 lines EARLIER than the pack's .linkish/.removed rules
    at equal specificity, so the later light rules won in dark too -- the
@@ -1242,12 +1269,16 @@ svg { display: block; }
    real dark values replace all of this in #40. */
 @media (prefers-color-scheme: dark) {
   /* border too: the light dashed value (rgba ink at .26) is near-invisible
-     over the dark elevated ground, and a vanished dashed border is the
-     whole "add" affordance gone until #40's real dark pass */
-  .stat.action { background: var(--bg-elevated); border-color: var(--label-3); }
+     over the dark ground, and a vanished dashed border is the whole
+     "add" affordance gone (the rule below also joins its surface to the
+     sibling tiles' k-surface) */
+  .stat.action { background: var(--k-surface); border-color: var(--label-3); }
   /* hover carries higher specificity (0,3,0) than the line above, so it
-     needs its own dark ground or the tile flickers transparent on hover */
-  .stat.action:hover { background: var(--bg-elevated); border-color: var(--gold-deep); }
+     needs its own dark ground or the tile flickers transparent on hover.
+     ONE surface declaration per rule: an earlier cut carried a second
+     .stat.action pair later in this block, resolved only by within-block
+     order -- do not reintroduce one. */
+  .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
   .stat.action .slab, .stat.action .plus { color: var(--label); }
   .linkish { color: var(--label-2); }
   .linkish:hover { color: var(--label); }
@@ -1258,16 +1289,57 @@ svg { display: block; }
   /* focus rings drawn ON the body ground flip with it; being AFTER the
      outline shorthand declarations is what makes these effective */
   .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
-  /* pack-pass ground text: the new fixed-ink furniture that sits on the
-     BODY ground (the agent-page header, both dremove strips) needs its
-     dark patch, same lesson as .linkish above. Everything inside a .dbox
-     is a fixed-light surface and stays fixed on purpose. */
+  /* pack-pass ground text on the BODY ground (the agent-page header,
+     both dremove strips), mapped to the legacy dark tokens, same lesson
+     as .linkish above. Since the dark-tokens set the .dbox surfaces flip
+     too (k-surface + k-ink together), so these patches cover only the
+     ground furniture, and --label/--k-ink dark values are near-twins. */
   .detail { color: var(--label); }
   .dname { color: var(--label); }
   .dremove { border-top-color: var(--separator); color: var(--label); }
   .dremove .dhint, .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--label-2); }
   .dremove .btn-quiet { color: var(--label); }
   .dprojlab { color: var(--label-2); }
+  /* The pack's dark set leaves its attn red at #b3261e, which measures
+     2.69:1 on the dark card (a pack defect, recorded in the plan; its own
+     dark .pending already uses the 255,140,130 family, which is the red
+     it chose for dark grounds -- 8.0:1 here). */
+  .pjpill.attn { color: #ff8c82; }
+  .pj-row.attn { border-color: rgba(255,140,130,.55); }
+  /* The whole attn family, not just the projects pair: these composited
+     ~1.35:1 against the dark card and the needs-you cue vanished on the
+     board (dark-tokens review, blocker 1). */
+  .acard.attn { border-color: rgba(255,140,130,.55); box-shadow: 0 1px 3px rgba(255,140,130,.14); }
+  .lrow.attn { border-color: rgba(255,140,130,.55); }
+  .astate.st-attn { border-color: rgba(255,140,130,.62); }
+  .stat.alert { border-color: rgba(255,140,130,.55); }
+  .acard.hot { background: linear-gradient(180deg, rgba(255,140,130,.15) 0%, rgba(255,140,130,0) 42%), var(--k-surface); }
+  /* Instrument geometry drawn in light-ink alphas: the gauge track, the
+     unknown dashes, and the list memory bar were ~invisible over the
+     dark card, and the dashes are the SOLE carrier of memory-unknown
+     (blocker 2). Same alphas, light ink. */
+  .gt { stroke: rgba(245,245,244,.14); }
+  .gu { stroke: rgba(245,245,244,.28); }
+  .bar { background: rgba(245,245,244,.14); }
+  .bar.unknown { background: repeating-linear-gradient(90deg, rgba(245,245,244,.24) 0 3px, transparent 3px 8px); }
+  /* The family's two instrument FILLS (pass 2): the high-severity arc and
+     bar segment kept the light red at ~1.8:1 against their own dark
+     tracks; and the hazard triangle, so an attn pill does not draw two
+     different reds side by side. Its glyph flips to the dark ink. */
+  .gf.high { stroke: #ff8c82; }
+  .bar i.high { background: #ff8c82; }
+  .haz { background: #ff8c82; color: #0c0d0f; }
+  .membadge { background: #ff8c82; color: #0c0d0f; }
+  /* Working's green border outranked BY the quiet states after their fix
+     (~1.9 vs ~2.7): the third channel's ordering held with a lighter
+     green from the same fill family. */
+  .astate.st-working { border-color: rgba(121,197,157,.62); }
+  /* The state pill's third channel (border) for the three quiet states,
+     and the hover/selected cues, all dark-ink literals gone flat. */
+  .astate.st-paused, .astate.st-stopped { border-color: rgba(245,245,244,.32); }
+  .astate.st-unknown { border-color: rgba(245,245,244,.24); }
+  .lrow:hover { border-color: rgba(245,245,244,.30); }
+  .pj-row:hover { border-color: rgba(245,245,244,.30); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
 }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
@@ -1409,8 +1481,14 @@ svg { display: block; }
    white flow card on the warm Kosmos ground, gold primaries. Values are the
    pack's own; do not re-derive them from the app tokens. */
 #firstrun {
-  /* The k tokens now live at :root (board-pack); the wizard keeps only its
-     forced ground. */
+  /* Single-look, enforced: the ruling above says a white flow card on the
+     warm ground in BOTH themes, so the wizard re-pins the k-tokens to the
+     pack's light values for its own subtree. Without this the dark
+     k-token set (added when the cards learned to flip) turned the wizard
+     light-ink-on-white -- measured 1.09:1 on its own heading. */
+  --k-bg: #faf9f7; --k-surface: #ffffff; --k-ink: #14161a;
+  --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
+  --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
   background: var(--k-bg);
 }
 #firstrun .fr-box {
@@ -1551,7 +1629,10 @@ svg { display: block; }
    the 4.5:1 floor this file's own header says it deviates from Apple's defaults
    in order to clear. It had been invisible because the rule was doing nothing.
    `--label-2` at callout size is the same pair `.fr-cdetail` uses, at 5.7:1. */
-.fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+/* --k-ink-2, not --label-2: this caption renders inside the forced-light
+   #firstrun subtree, where a scheme-aware legacy token would go
+   white-on-white in dark (dead markup today; pinned while adjacent). */
+.fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--k-ink-2);
                      margin-top: var(--space-7); font-style: italic; }
 </style>
 </head>
