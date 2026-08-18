@@ -556,6 +556,65 @@ async function main() {
     fs.writeFileSync(logFile, '');
   }
 
+  /* 3c. ENGINEERING MODE. The raw window is HIDDEN by default -- hiding
+     is the point (the block Josh called garbage nonsense to a business
+     person) -- and revealed by the person's own switch, driven through
+     the real settings toggle. The question panel ignores the switch
+     (safety, not chrome), and the number-answer teaching line ships in
+     both modes. */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    // Hermetic: a KILLED earlier run can leave the switch on in the
+    // sandbox (the flip-back lives at the end of this state), and the
+    // default-Off assertion below would then red against its own
+    // leftovers rather than the product.
+    const engFile = path.join(SANDBOX, 'data', 'engmode.json');
+    fs.rmSync(engFile, { force: true });
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(400);
+      const dfl = await page.evaluate(() => ({
+        viewportHidden: document.querySelector('.pj-viewport').hidden,
+        teach: [...document.querySelectorAll('#pj-question .fhint')]
+          .some((e) => /Answer by sending the number/.test(e.textContent)),
+      }));
+      if (!dfl.viewportHidden) throw new Error('the raw window is on screen in the default Off state');
+      if (!dfl.teach) throw new Error('the number-answer teaching line is missing in Off, where it is needed most');
+
+      // The person's own switch, through the real card.
+      await page.click('.tab[data-tab="settings"]');
+      await page.waitForTimeout(300);
+      await page.click('#eng-toggle');
+      await page.waitForTimeout(400);
+      const tog = await page.evaluate(() => document.getElementById('eng-toggle').getAttribute('aria-checked'));
+      if (tog !== 'true') throw new Error('the engineering toggle did not flip on');
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(500);
+      // The tab returns to the DETAIL we left open (the card list is
+      // hidden beneath it); the save already re-applied the mode to the
+      // open page, which is itself part of the claim.
+      const revealed = await page.evaluate(() => ({
+        viewportHidden: document.querySelector('.pj-viewport').hidden,
+        questionPanelUntouched: Boolean(document.getElementById('pj-question')),
+      }));
+      if (revealed.viewportHidden) throw new Error('the switch is On and the raw window stayed hidden');
+      if (!revealed.questionPanelUntouched) throw new Error('the question panel vanished with the mode change');
+      // Back Off through the same switch, so later states see the default.
+      await page.click('.tab[data-tab="settings"]');
+      await page.waitForTimeout(300);
+      await page.click('#eng-toggle');
+      await page.waitForTimeout(400);
+      const back = await page.evaluate(() => document.getElementById('eng-toggle').getAttribute('aria-checked'));
+      if (back !== 'false') throw new Error('the engineering toggle did not flip back off');
+    } finally {
+      fs.rmSync(engFile, { force: true });
+      await ctx.close();
+    }
+  }
+
   // 4. The project whose members we could NOT tell.
   await shot('4-could-not-tell', async (page) => {
     await page.click('[data-project="quarterclose"]');

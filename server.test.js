@@ -5357,6 +5357,46 @@ test('the limit card shows each caution only when it matters (her always-on-scre
     'the tier handler hardcoded On instead of reading the toggle');
 });
 
+test('engineering mode round-trips, and the agent window route sits behind the knownAgent gate', async () => {
+  const engmodeEngine = require('./engine/engmode');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  try {
+    const got = JSON.parse((await req('/api/engmode')).body);
+    assert.equal(got.on, false, 'engineering mode does not default Off');
+
+    const bad = await req('/api/engmode', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on: 'yes' }),
+    });
+    assert.equal(bad.status, 400);
+    const put = await req('/api/engmode', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on: true }),
+    });
+    assert.equal(JSON.parse(put.body).on, true);
+
+    // The window: an unknown name 404s (no which-panes-exist oracle),
+    // a real one carries the engine's own answer through.
+    const ghost = await req('/api/agent/ghost/window');
+    assert.equal(ghost.status, 404);
+    chatEngine.setRunner((args) => {
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      if (args[0] === 'capture-pane') return { ran: true, spawnFailed: false, status: 0, out: 'the raw pane text\n\n', err: '' };
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    const win = await req('/api/agent/leo/window');
+    assert.equal(win.status, 200);
+    assert.equal(JSON.parse(win.body).text, 'the raw pane text', 'the viewport did not pass through (or kept its padding)');
+  } finally {
+    chatEngine.resetForTests();
+    board.restore();
+    fs.rmSync(engmodeEngine.FILE, { force: true });
+  }
+});
+
 test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {
   /* View D ripple 5 on the agent page, and the receipt grammar on the
      room itself, extracted from the page so a rename cannot leave these

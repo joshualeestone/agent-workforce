@@ -43,6 +43,7 @@ const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const you = require('./engine/you');
 const limits = require('./engine/limits');
+const engmode = require('./engine/engmode');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
@@ -1607,6 +1608,43 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
+  /* --- engineering mode (whether the raw session is shown) ---------------- */
+  if (pathname === '/api/engmode' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, engmode.read()); }
+    catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/engmode' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = engmode.write({ on: body.on });
+        if (!saved.ok) { sendJson(res, 400, { error: saved.because }); return; }
+        sendJson(res, 200, engmode.read());
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not save that setting' }));
+    return;
+  }
+  /* The agent page's raw window: the SAME derivation as the project
+     viewport (chat.viewport, refusals and all), behind the same
+     knownAgent gate as the instructions read, for the same reason: a
+     name-shaped probe must not become a which-panes-exist oracle. */
+  const agentWindow = pathname.match(/^\/api\/agent\/([^/]+)\/window$/);
+  if (agentWindow && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(agentWindow[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    try {
+      const roster = safeRoster();
+      sendJson(res, 200, chat.viewport(name, roster));
+    } catch {
+      sendJson(res, 500, { error: 'we could not read its window just now' });
+    }
+    return;
+  }
+
   /* --- the conversation limit (the person's control) ---------------------- */
   if (pathname === '/api/limits' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, { ...limits.read(), tiers: limits.TIERS }); }

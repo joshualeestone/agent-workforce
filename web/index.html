@@ -1830,6 +1830,17 @@ svg { display: block; }
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
   </section>
 
+  <!-- Engineering mode's surface on this page (eng-mode): the raw
+       session, shown only when the person turned the switch on. Same
+       viewport-not-transcript honesty as the project page's block. -->
+  <section class="dbox" id="d-window-box" hidden>
+    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
+    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;">As it looks right now. It is not a transcript, and it is not what the agent said to you.</p>
+    <pre class="pj-screen" id="d-window" tabindex="0" hidden
+         role="region" aria-labelledby="d-window-label"></pre>
+    <p class="dhint" id="d-window-msg" hidden></p>
+  </section>
+
   <section class="dbox">
   <div class="field">
     <label class="flabel" for="d-file">Picture</label>
@@ -2533,6 +2544,13 @@ svg { display: block; }
              floor, so this is in scope rather than a later pass. -->
         <pre class="pj-screen" id="pj-question-text" tabindex="0"
              role="region" aria-labelledby="pj-question-label"></pre>
+        <!-- Mona Lisa's ruled line (2026-08-18): teach the MECHANISM (a
+             number typed into the message box is how you answer); the
+             quoted pane above says what the numbers mean. NOT gated on
+             Engineering mode: needed in Off, the default. Recorded for
+             her: a prompt with more than two options makes the trailing
+             numbers wrong; some day the range comes from the pane. -->
+        <p class="fhint" style="margin:8px 0 0;">Answer by sending the number: 1 or 2.</p>
       </div>
 
       <!-- What we have sent, and how each one went. Ours to keep, because we
@@ -2892,13 +2910,18 @@ svg { display: block; }
     </section>
 
     <section class="dbox">
+      <!-- LIVE now (eng-mode): On reveals the raw session on the project
+           page and the agent page; Off hides them, and hiding is the
+           point (the raw pane is what Josh called garbage nonsense to a
+           business person). The waiting-on-an-answer panel is safety,
+           not chrome, and ignores this switch. -->
       <h3 class="dlab">Engineering mode</h3>
-      <div class="setrow off">
+      <div class="setrow" id="eng-row">
         <div><b>Show the window each agent is running in</b>
           <p class="dhint" style="margin:2px 0 0;">Off by default. Your chat shows what an agent says to you. Turn this on to watch the session underneath it.</p></div>
-        <span class="toggle" aria-hidden="true"><i></i></span>
+        <button class="toggle" id="eng-toggle" role="switch" aria-checked="false" aria-label="Show the window each agent is running in"><i></i></button>
       </div>
-      <p class="dhint" style="margin:8px 0 0;"><b>Not built yet.</b> The switch arrives with the clean-chat work.</p>
+      <p class="dhint" id="eng-msg" role="status" style="margin:8px 0 0;"></p>
     </section>
   </div>
 
@@ -4012,6 +4035,7 @@ async function paintSettings() {
     ver.textContent = 'We could not read the version just now.';
   }
   await paintLimits();
+  await refreshEngMode();
 }
 
 /* The conversation limit card: painted from the engine's read, and the
@@ -4093,6 +4117,61 @@ function limTierChange() {
 }
 document.getElementById('lim-toggle').addEventListener('click', limToggleClick);
 document.getElementById('lim-tier').addEventListener('change', limTierChange);
+
+/* Engineering mode: the page-wide flag the raw-window surfaces key on.
+   Learned at boot, on entering a project, on opening an agent, and
+   after a save here; a preference is not polled every five seconds (a
+   mid-session change lands on the next navigation). */
+let ENG_ON = false;
+async function refreshEngMode() {
+  try {
+    const r = await (await fetch('/api/engmode')).json();
+    ENG_ON = r.on === true;
+    const tog = document.getElementById('eng-toggle');
+    tog.classList.toggle('on', ENG_ON);
+    tog.setAttribute('aria-checked', ENG_ON ? 'true' : 'false');
+    const msg = document.getElementById('eng-msg');
+    msg.textContent = r.ok === false
+      ? 'We could not read this setting, so the windows stay hidden (the default).' : '';
+  } catch { /* the flag keeps its last honest value */ }
+  return ENG_ON;
+}
+let ENG_SAVING = false;
+async function engToggleClick() {
+  if (ENG_SAVING) return;
+  ENG_SAVING = true;
+  const msg = document.getElementById('eng-msg');
+  try {
+    const on = document.getElementById('eng-toggle').getAttribute('aria-checked') !== 'true';
+    const res = await fetch('/api/engmode', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
+    ENG_ON = body.on === true;
+    const tog = document.getElementById('eng-toggle');
+    tog.classList.toggle('on', ENG_ON);
+    tog.setAttribute('aria-checked', ENG_ON ? 'true' : 'false');
+    msg.textContent = '';
+    pjApplyEngMode();
+  } catch {
+    msg.textContent = 'We could not save that setting.';
+  } finally {
+    ENG_SAVING = false;
+  }
+}
+document.getElementById('eng-toggle').addEventListener('click', engToggleClick);
+
+/* The one place the project page's viewport visibility is decided: the
+   block hides whole unless Engineering mode is on. The question panel
+   is NOT here on purpose -- safety, not chrome. */
+function pjApplyEngMode() {
+  const vp = document.querySelector('.pj-viewport');
+  if (vp) vp.hidden = !ENG_ON;
+}
+refreshEngMode().then(pjApplyEngMode);
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {
@@ -4451,6 +4530,40 @@ function convoRow(r, agentName) {
 }
 
 let CONVO_LOAD = 0;
+/* The raw window, only when Engineering mode is on; a refusal is said
+   in the engine's own sentence, never rendered as an empty terminal. */
+let WINDOW_LOAD = 0;
+async function paintAgentWindow(sessionName) {
+  const box = document.getElementById('d-window-box');
+  const pre = document.getElementById('d-window');
+  const msg = document.getElementById('d-window-msg');
+  const mine = ++WINDOW_LOAD;
+  const on = await refreshEngMode();
+  if (mine !== WINDOW_LOAD) return;
+  if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+  box.hidden = !on;
+  if (!on) return;
+  try {
+    const r = await (await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/window')).json();
+    if (mine !== WINDOW_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    if (r.text != null) {
+      pre.textContent = r.text;
+      pre.hidden = false;
+      msg.hidden = true;
+    } else {
+      pre.hidden = true;
+      msg.textContent = r.because || 'We could not read its window just now.';
+      msg.hidden = false;
+    }
+  } catch {
+    if (mine !== WINDOW_LOAD) return;
+    pre.hidden = true;
+    msg.textContent = 'We could not read its window just now.';
+    msg.hidden = false;
+  }
+}
+
 async function paintConversation(sessionName, agentName) {
   const box = document.getElementById('d-convo');
   // The INSTR_LOAD pattern: two fetches for the SAME agent (A, B, A
@@ -4526,6 +4639,7 @@ function openDetail(sessionName) {
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
+  paintAgentWindow(a.sessionName);
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
@@ -7891,6 +8005,7 @@ function openProject(id) {
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
+  refreshEngMode().then(pjApplyEngMode);
   loadThread();
   loadRoom();
 }
@@ -8383,7 +8498,7 @@ function paintThread(body) {
       + (body.questionBecause
         || 'we cannot find the question on its screen right now')
       + '.'
-      + (body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
+      + (ENG_ON && body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
     pjSetScreen(qText, '');
     /* ⚠️ Focus is RESCUED before either hide (round 31): round 30 moves
        focus INTO qText, and hiding a focused element drops focus to
