@@ -1430,8 +1430,13 @@ svg { display: block; }
    white flow card on the warm Kosmos ground, gold primaries. Values are the
    pack's own; do not re-derive them from the app tokens. */
 #firstrun {
-  /* The k tokens now live at :root (board-pack); the wizard keeps only its
-     forced ground. */
+  /* Single-look, enforced: the ruling above says a white flow card on the
+     warm ground in BOTH themes, so the wizard re-pins the k-tokens to the
+     pack's light values for its own subtree. Without this the dark
+     k-token set (added when the cards learned to flip) turned the wizard
+     light-ink-on-white -- measured 1.09:1 on its own heading. */
+  --k-bg: #faf9f7; --k-surface: #ffffff; --k-ink: #14161a;
+  --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   background: var(--k-bg);
 }
 #firstrun .fr-box {
