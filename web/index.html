@@ -660,7 +660,15 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
                   /* 23rem min yields the pack's three-across at the 1320
                      stage; 19rem was packing four narrower cards. */
                   grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
-.pj-list.asgrid .pj-row { height: 100%; }
+/* Flex column, not block: a stretched button vertically CENTERS its
+   content in Chromium, so the short card in a row floated its name to
+   the middle while its neighbors sat top-aligned (seen on the shot,
+   invisible to every text check). */
+.pj-list.asgrid .pj-row { height: 100%; display: flex; flex-direction: column;
+                          align-items: stretch; justify-content: flex-start; }
+/* As a flex item the inline-block chip stretches to the card edge;
+   the pack's chip hugs its text. */
+.pj-list.asgrid .pjslug { align-self: flex-start; }
 /* The empty state and the read-failure card span the grid: the failure
    message is the one that matters and it must not squeeze into one cell. */
 .pj-list.asgrid .pj-empty, .pj-list.asgrid .err { grid-column: 1 / -1; }
