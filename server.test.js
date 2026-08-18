@@ -2568,6 +2568,27 @@ test('the settings screen renders the engine\'s three answers, and offers only w
     'a real not-connected must draw attention, not the could-not-look grey');
 });
 
+test('the detail memory box reads the same derivations as the board, and stays honest at unknown', () => {
+  /* Scrappy-pass pin (pack view B): memoryBox is a READING off memBand/
+     pctOf -- the same functions the grid and list read -- so this page
+     cannot disagree with the board about how full an agent is. */
+  const memoryBox = pageFunction('memoryBox',
+    'const NEARLY_FULL = 80; const WARM = 60;'
+    + 'const memBand = (p) => p === null ? null : (p >= NEARLY_FULL ? "high" : (p >= WARM ? "warn" : "ok"));'
+    + 'const pctOf = (c) => Number.isFinite(c.percent) ? c.percent : null;'
+    + 'const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\"": "&quot;" }[c]));');
+  const at80 = memoryBox({ name: 'leo', context: { percent: 80 } });
+  assert.match(at80, /<i class="high" style="width:80%"/, 'the box bar disagrees with the board at the shared threshold');
+  assert.match(at80, /nearly full/i, 'a nearly-full agent is not told what happens next');
+  assert.match(memoryBox({ name: 'leo', context: { percent: 79 } }), /Room to spare/,
+    'below the threshold the sentence must not warn');
+  const unk = memoryBox({ name: 'leo', context: { percent: null } });
+  assert.match(unk, /bar unknown/, 'an unknown percent must draw the dashed unknown, never a guessed bar');
+  assert.match(unk, /not the same as it being empty/, 'the unknown sentence lost its honesty clause');
+  assert.doesNotMatch(memoryBox({ name: '<img src=x>', context: { percent: null } }), /<img src=x/,
+    'an agent name reached the memory box as a live tag');
+});
+
 test('the detail meta line keeps the machine-name disclosure the card gave up', () => {
   /* ⚠️ The SECOND instance of the removal pattern in one branch (Mona
      Lisa's check, 2026-08-17): a removal is two changes, and only one of
