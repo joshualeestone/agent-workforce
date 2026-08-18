@@ -2523,6 +2523,103 @@ test('the detail panel carries the explanation the card gave up', () => {
   assert.equal(healthy.hidden, true, 'an empty explanation must hide its line, not sit as a grey gap');
 });
 
+test('the settings screen renders the engine\'s three answers, and offers only what can work', () => {
+  /* Scrappy-pass pin (pack view K): the settings renderers are pure
+     functions like card()/lrow(), driven here without a server. Three
+     claims: the three-answer rule survives the trip to CSS classes, engine
+     text cannot break out of the markup, and the account row keeps
+     not-connected and could-not-check apart (different claims, per the
+     engine's own design). */
+  // ⚠️ The const maps come from the PAGE, not a copy in this prelude: a
+  // check containing a copy cannot fail when the page's mapping drifts
+  // (the repo's own recorded lesson).
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const constLine = (name) => {
+    const at = pageScript.indexOf('const ' + name + ' = ');
+    assert.ok(at > -1, name + ' vanished from the page');
+    return pageScript.slice(at, pageScript.indexOf('\n', at) + 1);
+  };
+  const escSlice = (() => {
+    const at = pageScript.indexOf('function esc(');
+    let depth = 0; let end = -1;
+    for (let k = pageScript.indexOf('{', at); k < pageScript.length; k += 1) {
+      if (pageScript[k] === '{') depth += 1;
+      else if (pageScript[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    return pageScript.slice(at, end);
+  })();
+  const chkRow = pageFunction('chkRow', constLine('CHK_CLASS') + constLine('CHK_MARK') + escSlice);
+  assert.match(chkRow({ state: 'ok', title: 'T', detail: 'D' }), /class="chk ok"/);
+  assert.match(chkRow({ state: 'attention', title: 'T', detail: 'D' }), /class="chk att"/);
+  assert.match(chkRow({ state: 'unknown', title: 'T', detail: 'D' }), /class="chk unk"/);
+  assert.match(chkRow({ state: 'martian', title: 'T', detail: 'D' }), /class="chk unk"/,
+    'an unrecognised check state must degrade to could-not-check, never to fine');
+  const hostile = chkRow({ state: 'ok', title: '<img src=x onerror=1>', detail: 'D' });
+  assert.doesNotMatch(hostile, /<img src=x/, 'an engine title reached the settings DOM as a live tag');
+  assert.match(hostile, /&lt;img/, 'CONTROL: the escaped title is absent, so the tag assertion proves nothing');
+
+  // accountRow closes over chkRow and esc; hand it their REAL page sources
+  // via the prelude (a stub would reconstruct the grammar under test).
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const slice = (name) => {
+    let start = script.indexOf('function ' + name);
+    assert.ok(start > -1, name + ' vanished from the page');
+    let depth = 0; let end = -1;
+    for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+      if (script[k] === '{') depth += 1;
+      else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    return script.slice(start, end);
+  };
+  const accountRow = pageFunction('accountRow',
+    constLine('CHK_CLASS') + constLine('CHK_MARK')
+    + slice('esc') + '\n' + slice('chkRow'));
+  assert.match(accountRow({ state: 'connected', plan: 'Claude Max 20x' }), /Claude Max 20x · connected/,
+    'a connected account does not show its plan');
+  assert.match(accountRow({ state: 'unknown', because: 'we could not read the file' }), /class="chk unk"/,
+    'could-not-check rendered as a definite not-connected, which is a different claim');
+  // `none` is the engine's real not-connected state (subscription.js STATE).
+  assert.match(accountRow({ state: 'none', because: 'no subscription found' }), /class="chk att"/,
+    'a real not-connected must draw attention, not the could-not-look grey');
+  // The null leg is the CATCH path (the /api/status fetch failed) and the
+  // one place a definite "not connected" would be a lie about a failed read.
+  const failed = accountRow(null);
+  assert.match(failed, /class="chk unk"/,
+    'a failed status read renders as a definite not-connected, which sends someone to buy a subscription they have');
+  assert.match(failed, /could not check the connection/i,
+    'CONTROL: the failed-read row lost its could-not-check sentence');
+});
+
+test('the detail memory box reads the same derivations as the board, and stays honest at unknown', () => {
+  /* Scrappy-pass pin (pack view B): memoryBox is a READING off memBand/
+     pctOf -- the same functions the grid and list read -- so this page
+     cannot disagree with the board about how full an agent is. */
+  /* ⚠️ The derivations come from the PAGE (a prelude copy cannot fail when
+     the page's memBand drifts). NEARLY_FULL..pctOf is one contiguous block
+     in the page, sliced whole with an anchors-landed guard. */
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const from = pageScript.indexOf('const NEARLY_FULL');
+  const end = pageScript.indexOf('\n}', pageScript.indexOf('function pctOf(')) + 2;
+  assert.ok(from > -1 && end > from, 'the shared memory derivations fell outside the extracted slice');
+  const escAt = pageScript.indexOf('function esc(');
+  const escEnd = pageScript.indexOf('\n}', escAt) + 2;
+  const memoryBox = pageFunction('memoryBox',
+    pageScript.slice(from, end) + '\n' + pageScript.slice(escAt, escEnd));
+  const at80 = memoryBox({ name: 'leo', context: { percent: 80 } });
+  assert.match(at80, /<i class="high" style="width:80%"/, 'the box bar disagrees with the board at the shared threshold');
+  assert.match(at80, /nearly full/i, 'a nearly-full agent is not told what happens next');
+  assert.match(memoryBox({ name: 'leo', context: { percent: 79 } }), /Room to spare/,
+    'below the threshold the sentence must not warn');
+  const unk = memoryBox({ name: 'leo', context: { percent: null } });
+  assert.match(unk, /bar unknown/, 'an unknown percent must draw the dashed unknown, never a guessed bar');
+  assert.match(unk, /not the same as it being empty/, 'the unknown sentence lost its honesty clause');
+  assert.doesNotMatch(memoryBox({ name: '<img src=x>', context: { percent: null } }), /<img src=x/,
+    'an agent name reached the memory box as a live tag');
+});
+
 test('the detail meta line keeps the machine-name disclosure the card gave up', () => {
   /* ⚠️ The SECOND instance of the removal pattern in one branch (Mona
      Lisa's check, 2026-08-17): a removal is two changes, and only one of
