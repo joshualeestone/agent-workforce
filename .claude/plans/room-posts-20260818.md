@@ -67,3 +67,35 @@ when the screen chunk builds it. Also acknowledged from the same note:
 a fixed per-project cap means bigger rooms are tighter per head (five
 members get four posts each where two get ten). Accepted for now as the
 cost bound; flagged alongside the ROOM_CAP number for Mona Lisa.
+
+The blind pass (no blockers, six warnings, all landed):
+- the pair valve's dedup could be suppressed by a room-valve row when an
+  agent name collides with a project id (both mint from one charset):
+  the pair dedup now excludes project-carrying rows, so no closing is
+  ever rendered as silence.
+- the forgery gate on the post path, and send()'s background half, were
+  untested (deletable with a green suite): both now have presence tests
+  with a no-marker control.
+- the mention tokenizer gained its two boundary rules: a left boundary
+  (an email-shaped string must never promote a remark to a request, the
+  dangerous direction) and a trailing-punctuation strip ("@mara." still
+  addresses mara), each pinned to the pane it delivers at.
+- the CLI verdict globs anchor on the top-level keys (the post response
+  embeds outcomes keyed by AGENT NAMES, so an agent named "state" could
+  flip an unanchored verdict), and the timeout arm is its own truthful
+  sentence at exit 3 (a server mid-fan-out is not unreachable, and
+  "could not reach" invites the re-post unconfirmed exists to stop);
+  -m 120 covers a room of wedged recipients at ~15s each.
+- /api/post has a server-level test (project resolution, the no-project
+  sentence, members off the project record, marking through the route).
+
+Recorded trades from the same pass:
+- an archived project still accepts posts (commented at the route):
+  archive hides and un-counts, it does not close.
+- agents born before this branch never learn `kosmos post` (the block
+  splices at birth only). The screen chunk owns surfacing the room to
+  the existing fleet, alongside its operator path.
+- the room valve's everyone-sentence is person-facing copy delivered to
+  a refused AGENT; what the agent should DO (stop; the person has been
+  asked for) reaches its audience properly in chunk 2, where the
+  sentence also meets the person.

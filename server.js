@@ -1483,6 +1483,12 @@ const server = http.createServer((req, res) => {
           sendJson(res, 200, { delivery: { state: 'could_not', because: 'there is no project by that name, so there is no room to post into' } });
           return;
         }
+        // An archived project still accepts posts, a RECORDED trade: the
+        // archive hides a project from the list and stops it counting,
+        // and nothing else in the app gates behavior on it (an archived
+        // project's detail is still reachable and its members are still
+        // its members). If archive ever comes to mean "closed", this is
+        // the line that changes.
         const members = (found.agents || []).map((a) => a.sessionName);
         const delivery = messages.sendPost({
           fromPane: body.from_pane,

@@ -384,7 +384,11 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     // The CLOSING is logged once per pair per window, not once per retry:
     // a retry-looping agent must not grow the record without bound while
     // the valve is the thing refusing it.
-    const already = log.some((m) => m && m.kind === 'valve'
+    // !m.project: a ROOM valve row carries to = its project id, and an
+    // agent named like a project would otherwise satisfy this pairKey and
+    // suppress the pair closing's row -- a refusal the screens then
+    // render as silence, the exact thing the header forbids.
+    const already = log.some((m) => m && m.kind === 'valve' && !m.project
       && pairKey(m.from, m.to) === pairKey(from, toName)
       && Date.parse(m.at) >= now - PAIR_WINDOW_MS);
     if (!already) appendLog({ kind: 'valve', from, to: toName, at, because });
@@ -559,14 +563,24 @@ function sendPost({ fromPane, project, text }, roster, members) {
     body = cleaned.slice(0, 200) + '\u2026 (long message; the full text is at ' + spillFile + ')';
   }
 
-  /* Addressed is an @mention naming a member, matched EXACTLY (agents
-     are taught exact names; forgiving matching is a screen decision,
-     not a wire one). Everyone else in the room receives the same words
-     marked as background -- the one thing that must not happen is
-     background arriving unmarked. */
+  /* Addressed is an @mention naming a member. Names match exactly, and
+     the TOKENIZER carries two boundary rules the charset alone gets
+     wrong: a left boundary, because "admin@mara" is an email-shaped
+     string, and promoting it to a request manufactures an ask nobody
+     made (the dangerous direction); and a trailing-punctuation retry,
+     because "have a look @mara." captures "mara." and would silently
+     demote an addressed mention to background. Demotion still arrives
+     marked, promotion is the one to be strict about -- so the left
+     boundary is absolute and the retry only STRIPS, never fuzzes.
+     Everyone else in the room receives the same words marked as
+     background -- the one thing that must not happen is background
+     arriving unmarked. */
   const mentioned = new Set();
-  for (const m of cleaned.matchAll(/@([A-Za-z0-9._-]+)/g)) {
-    if (recipients.includes(m[1])) mentioned.add(m[1]);
+  for (const m of cleaned.matchAll(/(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]+)/g)) {
+    const token = m[2];
+    if (recipients.includes(token)) { mentioned.add(token); continue; }
+    const stripped = token.replace(/[._-]+$/, '');
+    if (stripped && recipients.includes(stripped)) mentioned.add(stripped);
   }
 
   const outcomes = {};

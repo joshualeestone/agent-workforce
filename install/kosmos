@@ -312,14 +312,29 @@ cmd_post() {
   esc_project=$(printf '%s' "$project" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
   esc_text=$(printf '%s' "$text" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
   esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
-  body=$(curl -sS -m 30 -X POST "$URL/api/post" \
+  # -m 120, not msg's 15: delivery fans out SERIALLY and a wedged tmux
+  # can stall ~15s per recipient, so a room-sized timeout has to cover
+  # several. And the timeout arm is distinguished from unreachable (curl
+  # exit 28 vs the rest): "could not reach" for a server mid-delivery is
+  # the misdiagnosis cmd_msg's own comment warns about, and it invites
+  # the re-post the unconfirmed state exists to stop.
+  body=$(curl -sS -m 120 -X POST "$URL/api/post" \
     -H 'content-type: application/json' \
-    --data "{\"project\":\"$esc_project\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
+    --data "{\"project\":\"$esc_project\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -eq 28 ]; then
+    say "Kosmos is still delivering that post and we stopped waiting. Do not re-post; the room screen shows who got it."
+    exit 3
+  elif [ "$rc" -ne 0 ]; then
     say "We could not reach Kosmos to post that. Is it running at $URL?"
     exit 1
-  }
+  fi
+  # ⚠️ Globs are ANCHORED on the top-level keys. The post response embeds
+  # `outcomes`, an object keyed by AGENT NAMES -- an agent named "state"
+  # or "error" would otherwise put the matching substring into the body
+  # and flip the verdict (a partial post reading "everyone received it").
   case "$body" in
-    *'"error"'*)
+    '{"error":'*)
       because=$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
       say "Kosmos refused that request: ${because:-it did not say why}."
       exit 1
@@ -329,8 +344,8 @@ cmd_post() {
   # EVERY member got it; unconfirmed means the room is partly reached
   # (the outcomes live in the record for the screens to draw).
   case "$body" in
-    *'"state":"placed"'*)      say "Posted to $project. Everyone on it received it." ;;
-    *'"state":"unconfirmed"'*)
+    '{"delivery":{"state":"placed"'*)      say "Posted to $project. Everyone on it received it." ;;
+    '{"delivery":{"state":"unconfirmed"'*)
       because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
       say "Posted, but not everyone is confirmed${because:+: $because}. Do not re-post; the room screen shows who got it."
       exit 3
