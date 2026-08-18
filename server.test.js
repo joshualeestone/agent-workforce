@@ -5790,35 +5790,38 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   const shared = pageFunction('pjSharedTold',
     TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'));
 
-  const cn = (because) => ({ told: { state: 'could_not', because } });
+  const cn = (because, becauseGroup) => ({ told: { state: 'could_not', because, becauseGroup } });
   const told = () => ({ told: { state: 'told' } });
 
-  // Collapses: same state, same because, 2+ members. The because rides
-  // along VERBATIM (the plan's honesty constraint: the group claim carries
-  // exactly what each row it replaces carried).
-  const g = shared([cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet')]);
+  // Collapses: same state, same because, 2+ members. The reason in the
+  // group line is the ENGINE'S PLURAL SIBLING (becauseGroup), never the
+  // singular spliced into a plural frame -- "any of them … this agent"
+  // read as a contradiction (her ruling).
+  const g = shared([
+    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
+    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
+    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet')]);
   assert.ok(g.startsWith('We could not tell any of them where this folder is'),
     'three identical could_not verdicts did not collapse: ' + g);
-  // The engine writes becauses SINGULAR ("this agent…"), so the frame must
-  // introduce the reason rather than splice it into the plural sentence --
-  // "any of them — this agent has…" read as a contradiction (iteration 3).
-  assert.ok(g.includes('Each for the same reason: this agent has no folder on this computer yet.'),
-    'the group sentence dropped or re-spliced the because: ' + g);
+  assert.ok(g.includes('none of them has a folder on this computer yet'),
+    'the group sentence did not carry the plural sibling: ' + g);
+  assert.ok(!g.includes('this agent has no folder'),
+    'the singular because leaked into the plural frame: ' + g);
 
-  // A missing because collapses into the group's OWN fallback, which is
-  // plural (our text takes the plural the frame needs; engine text stays
-  // verbatim singular).
-  const gf = shared([{ told: { state: 'could_not' } }, { told: { state: 'could_not' } }]);
-  assert.ok(gf.includes('we could not write to their instructions'),
-    'the group fallback is not the plural form: ' + gf);
+  // No plural sibling (unmapped or null because): the line carries NO
+  // reason at all -- an incomplete true sentence beats a complete
+  // confusing one (her interim, kept as the permanent fallback).
+  const gf = shared([cn('some unmapped sentence'), cn('some unmapped sentence')]);
+  assert.equal(gf, 'We could not tell any of them where this folder is.',
+    'an unmapped because did not fall back to the reasonless sentence: ' + gf);
 
   // The group line lands in the page as raw HTML (paintOneProject), so a
-  // markup-carrying because must arrive ESCAPED, not verbatim-dangerous.
-  const gx = shared([cn('a <b>note</b> & more'), cn('a <b>note</b> & more')]);
+  // markup-carrying plural form must arrive ESCAPED, not verbatim-dangerous.
+  const gx = shared([cn('x', 'a <b>note</b> & more'), cn('x', 'a <b>note</b> & more')]);
   assert.ok(gx.includes('a &lt;b&gt;note&lt;/b&gt; &amp; more'),
-    'the group because was not escaped: ' + gx);
+    'the group reason was not escaped: ' + gx);
   assert.ok(!gx.includes('<b>note</b>'),
-    'raw markup from a because survived into the group line');
+    'raw markup from a group reason survived into the group line');
 
   // Collapses: the told state too, with the hedge intact (the group form
   // must not promise more than the per-member form it replaces).

@@ -84,6 +84,46 @@ const TOLD = {
   NOT_TRIED: 'not_tried',
 };
 
+/**
+ * A plural sibling for each singular could_not because.
+ *
+ * The singular strings are written for a one-agent context ("this agent
+ * has no folder…") and do not survive being quoted inside a plural frame:
+ * "we could not tell ANY OF THEM … THIS AGENT has…" reads as a
+ * contradiction (Mona Lisa's ruling, 2026-08-18). The screen's group line
+ * asks here for the plural form; anything unmapped gets `null`, and the
+ * screen states no reason it does not have rather than splicing.
+ *
+ * ⚠️ Keyed on the EXACT singular string, so an edited engine sentence
+ * silently falls back to the reasonless group line instead of pairing
+ * with a stale plural. Edit the singular, edit its row here.
+ * The one entry mapping to itself has no singular referent to begin with.
+ */
+const GROUP_BECAUSE = new Map([
+  ['this agent has no folder on this computer yet',
+    'none of them has a folder on this computer yet'],
+  ['this agent has no instructions file yet, and we will not create one for it',
+    'none of them has an instructions file yet, and we will not create one for them'],
+  ['we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything',
+    'we cannot tie any of them by exactly their names to sessions on this computer, so we did not write to anything'],
+  ['we could not check which agents are running, so we did not write to anything',
+    'we could not check which agents are running, so we did not write to anything'],
+  ['this agent keeps its instructions somewhere we cannot safely change',
+    'they keep their instructions somewhere we cannot safely change'],
+  ['taking this out would leave its instructions almost empty, so we left them alone',
+    'taking this out would leave their instructions almost empty, so we left them alone'],
+  ['its instructions are already at the size limit, so we left them alone',
+    'their instructions are already at the size limit, so we left them alone'],
+  ['we could not write to this agent’s instructions',
+    'we could not write to their instructions'],
+]);
+
+/** The plural form for a singular because, or null. NEVER invents. */
+function groupBecause(because) {
+  if (typeof because !== 'string') return null;
+  return GROUP_BECAUSE.get(because) || null;
+}
+
 const BLOCK_START = '<!-- kosmos:projects:start -->';
 const BLOCK_END = '<!-- kosmos:projects:end -->';
 // The you-block's markers live HERE, beside the pair they must never be
@@ -607,7 +647,15 @@ function describe(project, roster, all) {
           // them looking for something that was never there.
           ? 'we have never seen an agent by this name on this computer'
           : 'we cannot see this agent on this computer right now'),
-      told: project.told && project.told[sessionName] ? project.told[sessionName] : { state: TOLD.NOT_TRIED, because: null },
+      // becauseGroup is DERIVED at read time from the verbatim singular,
+      // never stored: old verdicts get their plural sibling for free, and
+      // an edited singular falls back to null rather than pairing with a
+      // stale plural. null means the screen states no reason (its rule).
+      told: (() => {
+        const t = project.told && project.told[sessionName]
+          ? project.told[sessionName] : { state: TOLD.NOT_TRIED, because: null };
+        return { ...t, becauseGroup: groupBecause(t.because) };
+      })(),
     };
   });
 
@@ -1542,7 +1590,7 @@ module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END,
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
-  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent,
+  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder, revealFolder, setRevealRunner,
 };

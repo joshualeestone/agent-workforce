@@ -1557,3 +1557,69 @@ test('revealFolder: the PRODUCTION path runs, with no injected runner standing i
   assert.equal(out.ok, false);
   assert.equal(out.because, 'Finder did not open');
 });
+
+/* ---------------------------------------------------------------------------
+ * group-reasons: a plural sibling for each singular could_not because.
+ * ------------------------------------------------------------------------ */
+
+test('every singular could_not because the engine authors has a plural sibling', () => {
+  // The keys are the engine's own sentences, verbatim. If one of these
+  // fails, a singular was edited without its group row (the map's own
+  // rule: edit the singular, edit its row).
+  const expectPlural = {
+    'this agent has no folder on this computer yet':
+      'none of them has a folder on this computer yet',
+    'this agent has no instructions file yet, and we will not create one for it':
+      'none of them has an instructions file yet, and we will not create one for them',
+    'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything':
+      'we cannot tie any of them by exactly their names to sessions on this computer, so we did not write to anything',
+    'this agent keeps its instructions somewhere we cannot safely change':
+      'they keep their instructions somewhere we cannot safely change',
+    'taking this out would leave its instructions almost empty, so we left them alone':
+      'taking this out would leave their instructions almost empty, so we left them alone',
+    'its instructions are already at the size limit, so we left them alone':
+      'their instructions are already at the size limit, so we left them alone',
+    'we could not write to this agent’s instructions':
+      'we could not write to their instructions',
+  };
+  for (const [singular, plural] of Object.entries(expectPlural)) {
+    assert.equal(projects.groupBecause(singular), plural,
+      'no or wrong plural sibling for: ' + singular);
+  }
+  // The one sentence with no singular referent maps to itself.
+  const neutral = 'we could not check which agents are running, so we did not write to anything';
+  assert.equal(projects.groupBecause(neutral), neutral);
+});
+
+test('groupBecause NEVER invents: unmapped, null, and non-string yield null', () => {
+  assert.equal(projects.groupBecause('a sentence nobody wrote'), null);
+  assert.equal(projects.groupBecause(null), null);
+  assert.equal(projects.groupBecause(undefined), null);
+  assert.equal(projects.groupBecause(42), null);
+  // CONTROL: the mapper does answer for a known key, so the nulls above
+  // are refusals, not a broken lookup.
+  assert.ok(projects.groupBecause('this agent has no folder on this computer yet'),
+    'CONTROL: a known singular no longer maps; the null assertions prove nothing');
+});
+
+test('list() derives becauseGroup at read time, beside the stored verdict', () => {
+  const dir = path.join(SANDBOX, 'group-reasons-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  const made = projects.create({ name: 'Group Reasons', folder: dir, agents: ['mara'], roster: cards([fleet.agent('mara')]) });
+  // Store a could_not verdict whose because has a known plural sibling,
+  // shaped exactly as syncAgent stores one.
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'could_not', because: 'this agent has no folder on this computer yet', at: new Date().toISOString() } } }));
+  const row = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
+  assert.equal(row.agents[0].told.becauseGroup, 'none of them has a folder on this computer yet',
+    'the plural sibling was not derived at read time');
+  // An unmapped because yields null, and the stored record is untouched
+  // (derived, never written back).
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'could_not', because: 'a sentence nobody wrote', at: new Date().toISOString() } } }));
+  const row2 = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
+  assert.equal(row2.agents[0].told.becauseGroup, null);
+  const raw = projects.readAll().find((p) => p.name === 'Group Reasons');
+  assert.ok(!('becauseGroup' in raw.told.mara),
+    'the derived field leaked into the stored record');
+});

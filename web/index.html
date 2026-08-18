@@ -7231,14 +7231,15 @@ function pjToldGroupLine(told) {
   // the honesty guarantee (no sentence for not_tried/empty) must hold here
   // too, not only in the current caller.
   if (told.state !== 'could_not') return '';
-  // The because is spliced VERBATIM and the engine writes it singular
-  // ("this agent has no folder…"), so the frame introduces it as the one
-  // shared reason rather than continuing the plural sentence into it --
-  // "any of them … this agent" read as a contradiction.
-  // The fallback is OUR text (not an engine verbatim), so it takes the
-  // plural the frame needs; a real because stays verbatim.
-  return 'We could not tell any of them where this folder is. Each for the same reason: '
-    + esc(told.because || 'we could not write to their instructions') + '.';
+  // The engine supplies the plural sibling (becauseGroup, derived at read
+  // time from the verbatim singular). Without one, the line carries NO
+  // reason: an incomplete true sentence beats a complete confusing one
+  // (her ruling), because the singular because is written for a one-agent
+  // context and does not survive being quoted inside a plural frame.
+  if (told.becauseGroup) {
+    return 'We could not tell any of them where this folder is — ' + esc(told.becauseGroup) + '.';
+  }
+  return 'We could not tell any of them where this folder is.';
 }
 
 /**
@@ -7262,8 +7263,12 @@ function pjMember(m, projectId, suppressTold) {
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
         + (m.state === 'unknown' && m.because ? ' — ' + esc(m.because) : '') + '</small>'
       : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
-    + (projectId ? '<button class="drop" type="button" aria-label="Take ' + esc(m.name)
-      + ' off this project" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
+    /* "Remove from <scope>" is the pack's removal pattern (beside the
+       destructive "Remove from Kosmos"): the scope word is what tells the
+       person their agent survives this. "Take off" was vague about WHICH
+       removal it was (her ruling, 2026-08-18). */
+    + (projectId ? '<button class="drop" type="button" aria-label="Remove ' + esc(m.name)
+      + ' from this project" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }
