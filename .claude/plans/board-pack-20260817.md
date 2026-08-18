@@ -88,3 +88,12 @@ re-anchored where markup moved. Pair shot posted in channel.
   partial shows+says, clean is empty AND hides); paintRemoved pin ->
   onAgentsTab(). 815/815 green.
 - Old card family CSS removed with dated records (not left as green noise).
+
+## Rider of record (round 1 CONVENTION, kept deliberately)
+
+- engine/roles.js PM caution + create.test.js BOUNDARY entry rode this
+  branch from its first WIP commit (they were in flight when the board work
+  paused and resumed around them). Unbraiding a merged-in ruled copy change
+  costs more than recording it: the caution is Mona Lisa's ruled text, the
+  test follows the suite's both-places rule, and this line is the plan's
+  record that the rider was chosen, not smuggled.
