@@ -5263,10 +5263,10 @@ test('the limits routes round-trip the person\u2019s control, and the valve rows
   })();
   const convoRow = pageFunction('convoRow', escSrc);
   const toldPair = convoRow({ kind: 'valve', from: 'leo', to: 'mara', stopped: false, at: 'x' }, 'mara');
-  assert.match(toldPair, /letting them continue and telling you instead/);
+  assert.match(toldPair, /did not step in, because you have the limit turned off/);
   assert.doesNotMatch(toldPair, /stopped them/, 'a told-only pair row claims Kosmos stopped them');
   const toldRoom = convoRow({ kind: 'valve', from: 'leo', to: 'p1', project: 'p1', stopped: false, at: 'x' }, 'mara');
-  assert.match(toldRoom, /letting it continue and telling you instead/);
+  assert.match(toldRoom, /did not step in, because you have the limit turned off/);
   const legacyPair = convoRow({ kind: 'valve', from: 'leo', to: 'mara', at: 'x' }, 'mara');
   assert.match(legacyPair, /stopped them and asked leo/, 'a pre-field row lost its refusal history');
   // The ROUTE's own pre-field default, not only the renderer's: a

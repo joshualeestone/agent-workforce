@@ -790,7 +790,7 @@ test('with the limit Off, crossing a budget tells once and the conversation cont
       const valves = messages.record().rows.filter((m) => m.kind === 'valve' && !m.project);
       assert.equal(valves.length, 1, 'the tell did not log exactly once');
       assert.equal(valves[0].stopped, false, 'the row claims Kosmos stopped a conversation it let continue');
-      assert.match(valves[0].because, /letting it continue/,
+      assert.match(valves[0].because, /did not step in, because the limit is turned off/,
         'the told-only row carries the stopping copy');
       // A second send past the budget: still delivered, still ONE row.
       chat.resetForTests();
@@ -864,7 +864,7 @@ test('with the limit Off the room tells and continues, in the told-only grammar'
       const valve = messages.record().rows.find((m) => m.kind === 'valve' && m.project === 'henderson-lease');
       assert.ok(valve, 'the room tell never logged');
       assert.equal(valve.stopped, false);
-      assert.match(valve.because, /letting it continue/);
+      assert.match(valve.because, /did not step in, because you have the limit turned off/);
     } finally {
       fs.rmSync(limits.FILE, { force: true });
     }
