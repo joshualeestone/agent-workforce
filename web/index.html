@@ -4596,8 +4596,11 @@ async function paintAgentWindow(sessionName, opts) {
   }
   if (mine !== WINDOW_LOAD) return;
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
-  box.hidden = !on;
-  if (!on) return;
+  if (!on) { box.hidden = true; return; }
+  /* The box reveals with CONTENT (a capture or a refusal in words), not
+     before it: a bare heading over an empty pre for a round-trip is the
+     quiet end of the affirmative-claim family. A tick repaint finds the
+     box already visible and leaves it so. */
   try {
     const r = await (await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/window')).json();
     if (mine !== WINDOW_LOAD) return;
@@ -4607,17 +4610,27 @@ async function paintAgentWindow(sessionName, opts) {
       pre.hidden = false;
       document.getElementById('d-window-hint').textContent = 'As it looks right now. It is not a transcript, and it is not what the agent said to you.';
       msg.hidden = true;
+      box.hidden = false;
     } else {
       pre.hidden = true;
       document.getElementById('d-window-hint').textContent = '';
       msg.textContent = r.because || r.error || 'We could not read its window just now.';
       msg.hidden = false;
+      box.hidden = false;
     }
   } catch {
     if (mine !== WINDOW_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
     pre.hidden = true;
+    /* Mirrors the refusal branch WHOLE: a tick whose fetch throws after
+       a successful paint would otherwise leave "As it looks right now"
+       standing over a hidden pre and a could-not-read sentence -- the
+       affirmative-hint-over-absent-screen class again, through the one
+       branch that forgot. */
+    document.getElementById('d-window-hint').textContent = '';
     msg.textContent = 'We could not read its window just now.';
     msg.hidden = false;
+    box.hidden = false;
   }
 }
 

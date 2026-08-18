@@ -320,9 +320,12 @@ async function main() {
     /* ── 0. Engineering mode: Off hides the raw screen; this drive's
        screen sections need it ON. Asserted in BOTH states rather than
        just flipped: with the switch off (the shipped default) the
-       viewport container must be hidden and the send verdicts must not
-       point below -- the eng-mode chunk's whole claim on this page.
-       Flipped through the real route, not by poking state. ─────────── */
+       viewport container is hidden, the question panel and teaching
+       line still render (safety, not chrome), and an UNCONFIRMED send's
+       verdict points at checking with the agent, never "below" at a
+       screen the mode has hidden -- the eng-mode chunk's whole claim on
+       this page, each half driven rather than narrated. Flipped through
+       the real route, not by poking state. ─────────────────────────── */
     await page.goto(BASE + '?tab=projects', { waitUntil: 'networkidle' });
     // Set Off through the real route first (a fixture server that
     // outlives a previous run may hold a flipped switch), then assert
@@ -356,6 +359,25 @@ async function main() {
     check(offQuestion.teachShown === true, 'the number-answer teaching line renders in Off, where it is needed most');
     check(/Answer by sending the number/.test(offQuestion.teachText),
       'and it carries the ruled wording', offQuestion.teachText);
+    // The Off arm of the verdict pointer, DRIVEN: the ambiguous-send
+    // fixture produces the unconfirmed verdict, and in Off it must send
+    // the person to the agent, not "below" to a hidden screen.
+    await page.selectOption('#pj-thread-who', 'casey');
+    // In Off the screen label rightly claims nothing (the served window
+    // is gated), so the settle signal is the picker itself, not a label
+    // that must never name a screen nobody can see.
+    await page.waitForFunction(() => document.getElementById('pj-thread-who').value === 'casey',
+      null, { timeout: 10000 });
+    await page.waitForTimeout(600);
+    await page.fill('#pj-say', 'ambiguous while off');
+    await page.click('#pj-send');
+    await page.waitForFunction(() => /Could not confirm/i.test(
+      document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 10000 });
+    const offUnsure = await page.locator('#pj-thread-msg').textContent();
+    check(/check whether it already arrived/i.test(offUnsure),
+      'the Off verdict tells the person to check with the agent', offUnsure);
+    check(!/screen is below/i.test(offUnsure),
+      'and never points below at a screen the mode has hidden', offUnsure);
     await page.evaluate(async () => {
       await fetch('/api/engmode', { method: 'PUT',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) });
@@ -970,6 +992,13 @@ async function main() {
   check(pageErrors.length === 0,
     'no console errors or page exceptions on any driven state', pageErrors.join(' | '));
 
+  // The switch goes back Off on the way out: a fixture server outliving
+  // this run must not hand the NEXT run a flipped mode (section 0
+  // defends inward; this defends whoever comes after).
+  try {
+    await fetch(BASE + '/api/engmode', { method: 'PUT',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+  } catch { /* best effort */ }
   process.stdout.write(failures.length
     ? `\n${failures.length} failed:\n  ${failures.join('\n  ')}\n`
     : `\nall checks passed; shots in ${OUT}\n`);

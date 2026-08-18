@@ -1642,6 +1642,13 @@ const server = http.createServer((req, res) => {
       // spelling that passes the gate via the safeKey fallback would
       // exact-miss viewport's roster lookup and answer a refusal about
       // an agent that is right there).
+      if (!engmode.read().on) {
+        // The same gate as the thread's viewport: Off stops the capture
+        // itself, and a stale client that asks anyway gets the truth in
+        // words rather than a window the person turned off.
+        sendJson(res, 200, { text: null, because: 'engineering mode is off, so the window is not read' });
+        return;
+      }
       let exact = name;
       try { const card = claimantFor(name); if (card && card.sessionName) exact = card.sessionName; } catch { /* the gate already passed */ }
       sendJson(res, 200, chat.viewport(exact, roster));
@@ -2469,6 +2476,12 @@ const server = http.createServer((req, res) => {
         historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
       }
     }
+    /* ⚠️ The capture ALWAYS runs: the question region derives from this
+       same read (chat.questionIn(view.text) below), and the question is
+       safety, not chrome -- a first cut gated the capture itself and
+       silently blinded the needs-you flow in Off, which is the one
+       thing the spec says the mode must never touch. What Engineering
+       mode gates is what is SERVED as the raw window, further down. */
     const view = chat.viewport(name, roster);
     /**
      * ⚠️ The question region is offered only when the BOARD says this agent is
@@ -2529,7 +2542,12 @@ const server = http.createServer((req, res) => {
       // (An `agents` copy of the membership used to ride here; nothing read
       // it -- the picker builds from the projects poll -- so it was dropped
       // rather than left as surface with no consumer. Round 19.)
-      viewport: view,
+      /* Engineering mode gates the SERVED window, not the capture (the
+         capture feeds the question above): Off answers the truth in
+         words so a stale client cannot render a window the person
+         turned off. */
+      viewport: engmode.read().on ? view
+        : { text: null, because: 'engineering mode is off, so the window is not shown' },
       asking,
       question,
       questionBecause,

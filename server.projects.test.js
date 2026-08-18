@@ -979,7 +979,19 @@ async function withThread(spec, answers, fn) {
   }
 }
 
+/* The raw-window tests below run with Engineering mode ON: eng-mode
+   gates the SERVED viewport (never the capture the question derives
+   from), and these assert the window's own mechanics. Each test writes
+   the mode explicitly rather than assuming a default, and the Off
+   serving gets its own test after them. */
+function withEngMode(on) {
+  const engmodeEngine = require('./engine/engmode');
+  assert.equal(engmodeEngine.write({ on }).ok, true);
+  return () => { try { fs.rmSync(engmodeEngine.FILE, { force: true }); } catch { /* fresh */ } };
+}
+
 test('the thread shows what the agent’s screen shows, labelled as the screen and not as speech', async () => {
+  const restoreEng = withEngMode(true);
   reset();
   await withThread(fleet.agent('zeta', { state: 'working' }), [said('Reading the lease\n· Working\n')],
     async ({ project, calls }) => {
@@ -997,6 +1009,7 @@ test('the thread shows what the agent’s screen shows, labelled as the screen a
       assert.ok(calls[0].includes('-J'));
       assert.ok(calls[0].some((a) => typeof a === 'string' && a.startsWith('=zeta-discord:')));
     });
+  restoreEng();
 });
 
 test('an agent the board calls "Needs you" hands the thread the question region', async () => {
@@ -1016,7 +1029,29 @@ test('an agent the board calls "Needs you" hands the thread the question region'
     });
 });
 
+test('with Engineering mode off the served window is the truth in words, and the QUESTION still flows', async () => {
+  const restoreEng = withEngMode(false);
+  reset();
+  await withThread(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('Do you want to proceed?\n \u276f 1. Yes\n 2. No\n')],
+    async ({ project }) => {
+      const res = await req(`/api/project/${project.id}/thread/zeta`);
+      assert.equal(res.status, 200);
+      const body = json(res);
+      // The window is gated in words, never silently absent.
+      assert.equal(body.viewport.text, null);
+      assert.match(body.viewport.because, /engineering mode is off/);
+      // ⚠️ THE CONTROL that makes the gate safe: the question derives
+      // from the same capture, and Off must not blind it -- the first
+      // cut of this gate did exactly that.
+      assert.ok(body.question && /Do you want to proceed/.test(body.question.text),
+        'Off blinded the needs-you question (safety gated as chrome)');
+    });
+  restoreEng();
+});
+
 test('a card that says "Needs you" over a screen we cannot read SAYS so, rather than showing nothing', async () => {
+  const restoreEng = withEngMode(true);
   reset();
   // The two reads are milliseconds apart and the pane redraws between them. A
   // silent empty question box under a "Needs you" card is the stranded state
@@ -1036,9 +1071,11 @@ test('a card that says "Needs you" over a screen we cannot read SAYS so, rather 
       assert.equal(body.viewport.text, null);
       assert.match(body.viewport.because, /could not read its window/);
     });
+  restoreEng();
 });
 
 test('a "Needs you" card over a READABLE screen missing the markers says that, not could-not-read', async () => {
+  const restoreEng = withEngMode(true);
   reset();
   // The other half of the split: the capture SUCCEEDED and the question
   // markers are not in it (the pane redrew between the two reads).
@@ -1052,6 +1089,7 @@ test('a "Needs you" card over a READABLE screen missing the markers says that, n
       assert.doesNotMatch(body.questionBecause, /could not read its screen/);
       assert.ok(body.viewport.text != null, 'control: the screen really was read');
     });
+  restoreEng();
 });
 
 test('a POST to a project that is not there is the 404 sentence, not a raw throw', async () => {
