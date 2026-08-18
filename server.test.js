@@ -2523,6 +2523,51 @@ test('the detail panel carries the explanation the card gave up', () => {
   assert.equal(healthy.hidden, true, 'an empty explanation must hide its line, not sit as a grey gap');
 });
 
+test('the settings screen renders the engine\'s three answers, and offers only what can work', () => {
+  /* Scrappy-pass pin (pack view K): the settings renderers are pure
+     functions like card()/lrow(), driven here without a server. Three
+     claims: the three-answer rule survives the trip to CSS classes, engine
+     text cannot break out of the markup, and the account row keeps
+     not-connected and could-not-check apart (different claims, per the
+     engine's own design). */
+  const chkRow = pageFunction('chkRow', 'const CHK_CLASS = { ok: "ok", attention: "att", unknown: "unk" };'
+    + 'const CHK_MARK = { ok: "\\u2713", attention: "!", unknown: "?" };'
+    + 'const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\"": "&quot;" }[c]));');
+  assert.match(chkRow({ state: 'ok', title: 'T', detail: 'D' }), /class="chk ok"/);
+  assert.match(chkRow({ state: 'attention', title: 'T', detail: 'D' }), /class="chk att"/);
+  assert.match(chkRow({ state: 'unknown', title: 'T', detail: 'D' }), /class="chk unk"/);
+  assert.match(chkRow({ state: 'martian', title: 'T', detail: 'D' }), /class="chk unk"/,
+    'an unrecognised check state must degrade to could-not-check, never to fine');
+  const hostile = chkRow({ state: 'ok', title: '<img src=x onerror=1>', detail: 'D' });
+  assert.doesNotMatch(hostile, /<img src=x/, 'an engine title reached the settings DOM as a live tag');
+  assert.match(hostile, /&lt;img/, 'CONTROL: the escaped title is absent, so the tag assertion proves nothing');
+
+  // accountRow closes over chkRow and esc; hand it their REAL page sources
+  // via the prelude (a stub would reconstruct the grammar under test).
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const slice = (name) => {
+    let start = script.indexOf('function ' + name);
+    assert.ok(start > -1, name + ' vanished from the page');
+    let depth = 0; let end = -1;
+    for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+      if (script[k] === '{') depth += 1;
+      else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    return script.slice(start, end);
+  };
+  const accountRow = pageFunction('accountRow',
+    'const CHK_CLASS = { ok: "ok", attention: "att", unknown: "unk" };'
+    + 'const CHK_MARK = { ok: "\\u2713", attention: "!", unknown: "?" };'
+    + slice('esc') + '\n' + slice('chkRow'));
+  assert.match(accountRow({ state: 'connected', plan: 'Claude Max 20x' }), /Claude Max 20x · connected/,
+    'a connected account does not show its plan');
+  assert.match(accountRow({ state: 'unknown', because: 'we could not read the file' }), /class="chk unk"/,
+    'could-not-check rendered as a definite not-connected, which is a different claim');
+  assert.match(accountRow({ state: 'disconnected', because: 'no subscription found' }), /class="chk att"/,
+    'a real not-connected must draw attention, not the could-not-look grey');
+});
+
 test('the detail meta line keeps the machine-name disclosure the card gave up', () => {
   /* ⚠️ The SECOND instance of the removal pattern in one branch (Mona
      Lisa's check, 2026-08-17): a removal is two changes, and only one of
