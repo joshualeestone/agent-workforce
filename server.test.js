@@ -5820,7 +5820,32 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
     + pageFnSource('pjToldLine') + '\n';
   const member = pageFunction('pjMember', prelude);
-  const m = { name: 'leo', sessionName: 'leo', present: true, state: 'idle', told: { state: 'could_not', because: 'x' } };
+  const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
+
+  // The member is a REAL row from the producer (fleet board -> create ->
+  // list), not a hand-built stand-in, so it carries exactly the fields the
+  // screen actually receives -- fixture discipline, same as the face-gate
+  // test above.
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const pdir = nodePath.join(SANDBOX, 'suppress-told-proj');
+  fs.mkdirSync(pdir, { recursive: true });
+  let m;
+  try {
+    projectsEngine.create({ name: 'Suppress Told', folder: pdir, agents: ['leo'], roster: board.agents });
+    // The verdict is written by the sync pass, not by create; without it
+    // every member sits at not_tried and there is nothing to suppress.
+    projectsEngine.syncAgent('leo', board.agents);
+    m = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents[0];
+  } finally {
+    board.restore();
+  }
+
+  // Pre-control: the real row must have a verdict to suppress, whichever
+  // state the sandbox create produced, or both assertions below are vacuous.
+  assert.ok(toldLine(m.told || {}),
+    'PRE-CONTROL: the produced member carries no told verdict at all (state: '
+    + ((m.told || {}).state || '<none>') + ')');
 
   // CONTROL first: without the flag the span is there, so the absence
   // below is the suppression and not a dropped field.
