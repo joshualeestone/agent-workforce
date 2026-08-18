@@ -609,13 +609,21 @@ async function main() {
       }));
       if (revealed.viewportHidden) throw new Error('the switch is On and the raw window stayed hidden');
       // The SECOND surface: the agent page's window box, on the same
-      // switch. The sandbox roster is the real board, so the capture
-      // either succeeds or refuses in words -- both are honest renders,
-      // and the claim here is the box is PRESENT and never an empty
-      // terminal under an affirmative hint.
+      // switch, opened on a card PROVEN TIED (an untied card correctly
+      // hides the box since the tied gate, so clicking blind would red
+      // with a wrong-cause message against correct behavior). For a
+      // tied agent the capture either succeeds or refuses in words --
+      // both honest renders -- and the claim is the box is PRESENT and
+      // never an empty terminal under an affirmative hint.
+      const tiedName = await page.evaluate(async () => {
+        const b2 = await (await fetch('/api/status')).json();
+        const t = (b2.agents || []).find((x) => x.isNamedOurs === true);
+        return t ? t.sessionName : null;
+      });
+      if (!tiedName) throw new Error('no tied agent on the board, so the second surface cannot be proven');
       await page.click('#klink');
       await page.waitForTimeout(400);
-      await page.click('.acard');
+      await page.click('.acard[data-agent=' + JSON.stringify(tiedName) + ']');
       await page.waitForTimeout(800);
       const win = await page.evaluate(() => {
         const box = document.getElementById('d-window-box');

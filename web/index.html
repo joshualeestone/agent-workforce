@@ -3585,12 +3585,22 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     BOARD_SEEN = true;
-    if (CURRENT && CURRENT.isNamedOurs === true && ENG_ON && !WINDOW_OPENING
+    if (CURRENT && ENG_ON && !WINDOW_OPENING
       && !document.getElementById('panel-detail').hidden) {
       // The panel-visibility term: CURRENT survives closing the detail,
       // and a capture every five seconds for an invisible surface is a
       // standing subprocess nobody is watching.
-      paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+      // ⚠️ The tie is re-checked on the FRESH card every poll, like the
+      // write controls beside it (setWritesOffered below): CURRENT's
+      // open-time flag froze, and a pane dying mid-open (a stranger
+      // taking the name) kept painting "no agent by that name" into the
+      // box -- the pass-5 sentence rebuilt through the tick.
+      const freshCard = data.agents.find((x) => x.sessionName === CURRENT.sessionName);
+      if (freshCard && freshCard.isNamedOurs === true) {
+        paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+      } else {
+        document.getElementById('d-window-box').hidden = true;
+      }
     }
     updateRecPill();
     renderUpdateToast(data.update);
@@ -4174,9 +4184,10 @@ async function engToggleClick() {
     });
     const body = await res.json().catch(() => ({}));
     // A newer refresh can retire a successful PUT's paint (a navigation
-    // right after the click): it fails toward hidden and the next
-    // refresh reads the saved truth, so the race costs a beat, never a
-    // lie.
+    // right after the click): the On direction fails toward hidden, the
+    // Off direction can leave the container visible over the server's
+    // honest Off sentence until the next refresh -- a beat of stale
+    // chrome either way, never a lie, and the server gate backstops it.
     if (mine !== ENG_EPOCH) return;
     if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
     ENG_ON = body.on === true;

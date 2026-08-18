@@ -314,7 +314,17 @@ async function main() {
      goes unreported, on the renderer this branch wrote from scratch. */
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
+  /* One named exemption: opening an UNTIED agent's panel (the rook
+     check) fires the removal probe, whose refusal for untied agents is
+     a 400 by design and logs as a failed-resource console error --
+     pre-existing product behavior this drive newly exercises, recorded
+     rather than silenced wholesale. Everything else still fails the
+     run. */
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    if (/Failed to load resource.*400/.test(m.text()) && /removal/.test(m.location().url || '')) return;
+    pageErrors.push(m.text());
+  });
 
   try {
     /* ── 0. Engineering mode: Off hides the raw screen; this drive's
@@ -416,6 +426,21 @@ async function main() {
       JSON.stringify(rookState));
     check(await rookCard.locator('.ansgo').count() === 0,
       'a borrowed-name card gets NO "See the question" button');
+    // The window box's untied arm, driven (the pass-5 gate would be
+    // deletable-green otherwise): opening the borrowed-name panel with
+    // Engineering mode ON must hide the box, and never paint a refusal
+    // sentence into it about an agent the person is looking at.
+    await rookCard.click();
+    await page.waitForSelector('#panel-detail:not([hidden])', { timeout: 10000 });
+    await page.waitForTimeout(700);
+    const rookWindow = await page.evaluate(() => ({
+      boxHidden: document.getElementById('d-window-box').hidden,
+      msgText: document.getElementById('d-window-msg').textContent,
+    }));
+    check(rookWindow.boxHidden === true,
+      'an untied agent\u2019s panel hides the window box (nothing here is its window to show)', JSON.stringify(rookWindow));
+    await page.click('#detail-back');
+    await page.waitForTimeout(300);
 
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose
     // own handler opens the detail panel — so a wrongly-ordered listener would
@@ -987,19 +1012,18 @@ async function main() {
       `label reads: ${failedState.label}`);
     await page.screenshot({ path: path.join(OUT, 'thread-9-screen-unread.png'), fullPage: true });
   } finally {
+    // The switch goes back Off IN the finally: a thrown section must not
+    // hand a long-lived fixture server a flipped mode (section 0 defends
+    // inward; this defends whoever comes after, on every exit).
+    try {
+      await fetch(BASE + '/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+    } catch { /* best effort */ }
     await browser.close();
   }
 
   check(pageErrors.length === 0,
     'no console errors or page exceptions on any driven state', pageErrors.join(' | '));
-
-  // The switch goes back Off on the way out: a fixture server outliving
-  // this run must not hand the NEXT run a flipped mode (section 0
-  // defends inward; this defends whoever comes after).
-  try {
-    await fetch(BASE + '/api/engmode', { method: 'PUT',
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
-  } catch { /* best effort */ }
   process.stdout.write(failures.length
     ? `\n${failures.length} failed:\n  ${failures.join('\n  ')}\n`
     : `\nall checks passed; shots in ${OUT}\n`);
