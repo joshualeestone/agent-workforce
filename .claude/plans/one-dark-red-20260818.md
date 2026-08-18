@@ -16,3 +16,9 @@ of the family.
 One declaration changed (.utoast --utone in the dark block), plus its
 comment rewritten to carry the ruling. No light-theme delta: the light
 --utone is untouched.
+
+Blind pass: no blockers or warnings. Its independent arithmetic
+reproduced every claim and surfaced one bonus fact now recorded in the
+comment: the retired #F0665A was itself below AA on the toast's ground
+(4.48:1 for the 13px bold headline), so the swap fixes a margin failure
+as well as the two-reds drift. #ff8c82 measures 6.19:1 there.
