@@ -105,3 +105,27 @@ re-anchored where markup moved. Pair shot posted in channel.
   shift is subtle. It is PACK-VERBATIM (.apptab.on), so it is Mona Lisa's
   ruling to make in the pack, not this branch's deviation to invent a fix
   for; flagged to her in-channel with the board pair follow-ups.
+
+## Round 3 record
+
+- The re-anchored 8d reload assertion false-failed a correct build (the
+  drive reloads onto ?tab=projects, where BOTH agent containers hide, so
+  container visibility cannot witness the agents choice). Fixed: persistence
+  read from the store + the toggle's pressed state, visibility asserted
+  after clicking back to agents; probe-verified on the sandbox.
+- The plan's promised renderer pins now exist: server.test.js drives the
+  extracted card()/lrow() with REAL fleet.install cards (fixture-discipline
+  honored; the axes fleet cannot arrange are spread onto real cards), plus
+  source pins for the gold selected state and the removed-list reassurance.
+  The escaping control was re-aimed once (its first cut asserted the
+  absence of inert escaped text and failed a correct renderer).
+- Stale comments folded (removed-wrap grid tricks, ring's caption block);
+  the dead summary-slice guard became a real assertion.
+- ENVIRONMENTAL, control-proven on main: the projects drive's 6a
+  (#pj-one-remove not visible after opening quarterclose) reproduces
+  byte-identically on MAIN's page against this sandbox, so it is sandbox
+  data drift from tonight's repeated drive runs, not this branch. The 8d
+  logic this branch changed is probe-verified instead.
+- Surfaced for the pack (Mona Lisa), not fixed here: burger DOM order
+  (menu precedes trigger, pack-verbatim), the unknown note's dark island,
+  the gold tab underline contrast.

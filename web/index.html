@@ -1015,18 +1015,11 @@ svg { display: block; }
 /* Both answers are full-size and legible. The destructive one is marked by its
    border, never by hue alone -- this screen reads the same in greyscale. */
 .rm-acts .btn { padding: var(--space-5) var(--space-7); }
-/* The removed list. */
-/* ⚠️ SHARES `.grid`'S TRACKS, not just its max-width, and the difference is the
-   whole fix. The cards are CENTRED columns rather than a full-width block, so
-   `max-width: 1320px` alone still left this list running the full window --
-   starting a third of a screen left of the board it belongs to, at every
-   viewport narrower than the cap. Repeating the template makes this container
-   resolve to exactly the width the grid resolved to, whatever that is.
-   Its own children then span every track. */
-/* ⚠️ The COLUMN gap has to match `.grid`'s too, not just the template. With it
-   at 0 the tracks resolve a few pixels wider, the container lands 6px off the
-   cards, and "almost aligned" reads worse than not trying. Row gap stays 0:
-   `.removed-list` spaces its own rows. */
+/* The removed list. (The old share-the-grid-tracks alignment machinery and
+   its two hard-won comments retired with the centred card grid itself:
+   the pack's .cards is a full-width auto-fill, so there are no tracks to
+   share and this container is an ordinary block. Git history holds the
+   alignment lesson for the day a centred grid returns.) */
 /* The pack's removed-section grammar (stage 5): a quiet rule above, an
    underlined text toggle, rows that read name-over-meta with Restore on
    the right, hairlines BETWEEN rows only. The old grid-alignment tricks
@@ -2552,14 +2545,12 @@ function initials(name) {
 }
 
 /**
- * Memory gauge. The avatar sits in the middle, so the number lives beneath it.
- *
- * Two things that must survive the number moving out of the centre:
- *  - Unknown loses its home. A dashed track alone is a shape difference, and
- *    shape alone is not a label, so the caption carries "memory unknown" in
- *    words.
- *  - The value must still exist for a screen reader. The arc is not readable,
- *    so the accessible name spells it out as a sentence.
+ * Memory gauge, the pack's: arc on the ring, avatar in the middle, no
+ * caption and no number in the layout (Josh's call; the membadge carries
+ * the figure at >=80, where it matters). What survives from the old
+ * gauge's lessons: the value must still exist for a screen reader -- the
+ * arc is not readable, so the accessible name spells it out as a
+ * sentence, including the unknown case in words.
  */
 function ring(a) {
   const ctx = a.context;

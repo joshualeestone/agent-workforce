@@ -835,13 +835,29 @@ async function main() {
       if (!pjLay) throw new Error('the projects grid toggle did not change the list');
       await page.reload({ waitUntil: 'networkidle' });
       await page.waitForTimeout(300);
+      /* ⚠️ The reload lands on the PROJECTS tab (the drive's own URL), where
+         the new mechanism hides BOTH agent containers -- container
+         visibility cannot witness the agents choice from here (the first
+         re-anchor of this line false-failed a correct build on exactly
+         that). Persistence is read from the signals that survive tabs
+         (the store + the toggle's pressed state), and the visible half is
+         asserted AFTER clicking back to the agents tab. */
       const kept = await page.evaluate(() => ({
         pj: document.getElementById('pj-list').classList.contains('asgrid'),
-        ag: document.getElementById('grid').hidden && !document.getElementById('alist').hidden,
+        agSaved: (() => { try { return localStorage.getItem('kosmos.layout.agents'); } catch { return null; } })(),
+        agPressed: document.querySelector('.viewtoggle[data-scope="agents"] [data-layout="list"]').getAttribute('aria-pressed'),
         pressed: document.querySelector('.viewtoggle[data-scope="projects"] [data-layout="grid"]').getAttribute('aria-pressed'),
       }));
-      if (!kept.pj || !kept.ag || kept.pressed !== 'true') {
+      if (!kept.pj || kept.agSaved !== 'list' || kept.agPressed !== 'true' || kept.pressed !== 'true') {
         throw new Error('the layout choice did not survive a reload: ' + JSON.stringify(kept));
+      }
+      await page.click('.tab[data-tab="agents"]');
+      await page.waitForTimeout(200);
+      const keptVisible = await page.evaluate(() => ({
+        ag: document.getElementById('grid').hidden && !document.getElementById('alist').hidden,
+      }));
+      if (!keptVisible.ag) {
+        throw new Error('the surviving agents choice did not drive the board on return: ' + JSON.stringify(keptVisible));
       }
       // Back to the defaults so the shots below show the shipped resting state.
       await page.click('.viewtoggle[data-scope="projects"] [data-layout="list"]');

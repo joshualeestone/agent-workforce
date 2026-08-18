@@ -2351,7 +2351,12 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
        residual summary hides itself when empty), so the end anchor follows:
        the slice still INCLUDES the write and the join, per the lesson above. */
     const write = script.indexOf('sumEl.textContent = bits.join');
-    const body = script.slice(from, script.indexOf('\n', script.indexOf('sumEl.hidden')) + 1);
+    const end = script.indexOf('\n', script.indexOf('sumEl.hidden')) + 1;
+    // The write must sit INSIDE the slice: this is the guard the old end
+    // anchor gave for free, and without it a slice that stops short would
+    // re-create the reconstructed-join defect the comment above records.
+    assert.ok(write > from && write < end, 'the summary write fell outside the extracted slice');
+    const body = script.slice(from, end);
     // eslint-disable-next-line no-new-func
     // onAgentsTab is injectable: the write is tab-gated (the residual
     // notice must not float beside Settings on the poll), so the harness
@@ -2395,6 +2400,105 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
     'a healthy board carries a permanent warning about unreadable lines');
   assert.equal(clean.textContent, '', 'the residual-only summary invented copy on a clean board');
   assert.equal(clean.hidden, true, 'an empty summary must hide itself, not sit as a blank line');
+});
+
+test('the board renderers hold the pack grammar: thresholds, states, parity, escaping', async () => {
+  /* ⚠️ BEHAVIOURAL, like the summary test above: the renderer block is
+     extracted from the page and DRIVEN, because the pack rebuild moved the
+     board's whole state grammar into card()/lrow() and no render drive
+     reads most of it -- flipping the membadge threshold, scrambling the
+     state map, or dropping the presence dot would otherwise go green.
+     ⚠️ The cards come from the REAL producers via test-support/fleet (the
+     fixture-discipline rule: a hand-built card is free to carry fields the
+     producer does not emit). The axes fleet cannot arrange -- an exact
+     memory percent, a stale instruction finding, and the untied-needs_you
+     shape the pipeline itself refuses -- are SPREAD onto a real card, so
+     every other field keeps the producer's shape. */
+  const board = fleet.install([
+    fleet.agent('leo', { state: 'working', role: 'Project Manager' }),
+    fleet.agent('mara', { state: 'needs_you' }),
+    fleet.agent('rook', { state: 'rate_limited' }),
+    fleet.agent('nils', { state: 'stopped' }),
+    fleet.agent('vex', { state: 'unknown' }),
+  ]);
+  try {
+    const cards = JSON.parse((await req('/api/status')).body).agents;
+    const by = (n) => cards.find((a) => a.name === n);
+    const leo = by('leo'), mara = by('mara'), rook = by('rook'), nils = by('nils'), vex = by('vex');
+    assert.ok(leo && mara && rook && nils && vex, 'the fixture board is missing an agent');
+
+    const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const from = script.indexOf('const STATE_COPY = {');
+    const lrowAt = script.indexOf('function lrow(a)');
+    const end = script.indexOf('\n}', script.indexOf('</div>`;', lrowAt)) + 2;
+    assert.ok(from > -1 && lrowAt > from && end > lrowAt, 'renderer block not found');
+    // eslint-disable-next-line no-new-func
+    const api = new Function(script.slice(from, end) + '\n; return { card, lrow };')();
+    const withPct = (a, pct) => ({ ...a, context: { ...a.context, percent: pct, tokens: 1 } });
+
+    // The membadge fires AT 80, not around it, and the heat wash yields to red.
+    assert.match(api.card(withPct(leo, 80)), /membadge/,
+      'the memory badge does not fire at its own threshold');
+    assert.doesNotMatch(api.card(withPct(leo, 79)), /membadge/,
+      'the memory badge fires below its threshold');
+    const attn88 = api.card(withPct(mara, 88));
+    assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
+    assert.doesNotMatch(attn88, /\bhot\b/,
+      'the heat wash stacked onto an attn card (the pack renders 88%-attn without hot)');
+    assert.match(api.card(withPct(leo, 94)), /acard hot/,
+      'a nearly-full working card lost the heat wash');
+
+    // The state grammar: presence is not status, unknown is not idle.
+    const unk = api.card(vex);
+    assert.match(unk, /acard unk/, 'unknown lost its dashed card');
+    assert.match(unk, /pres unsure/, 'unknown presence collapsed into on/off');
+    assert.match(unk, /st-unknown/, 'unknown lost its own pill');
+    assert.match(unk, /could not check/, 'the unknown pill lost its screen-reader words');
+    assert.match(unk, /not telling you it is fine/, 'the unknown card lost its note');
+    const off = api.card(nils);
+    assert.match(off, /acard off/, 'stopped lost its off treatment');
+    assert.match(off, /pres off/, 'a stopped agent shows a live presence dot');
+    assert.match(api.card(leo), /pres on/, 'a working agent lost its presence dot');
+    assert.match(api.card({ ...rook, task: null }), /Waiting out a usage limit/,
+      'the paused card lost its reason line');
+    assert.match(api.card({ ...rook, task: 'Drafting' }), /Drafting/,
+      'a paused agent with a real task shows the canned line instead');
+
+    // Grid/list parity on the shared facts, including the stale badge.
+    const staleLeo = { ...leo, instructions: { state: 'stale' } };
+    assert.match(api.card(staleLeo), /card-stale/, 'the stale badge left the card');
+    assert.match(api.lrow(staleLeo), /card-stale/, 'the stale badge is missing from the list view');
+    assert.match(api.lrow(vex), /bar unknown/, 'unknown memory in the list invented a bar value');
+    for (const piece of ['lav', 'lname', 'lstate', 'ltask', 'lmem']) {
+      assert.match(api.lrow(leo), new RegExp(piece), 'the list row lost its ' + piece + ' column');
+    }
+
+    // The answer route: gated on the tie, labelled with its visible word.
+    const ask = api.card(mara);
+    assert.match(ask, /ansgo/, 'the needs_you card lost its answer route');
+    assert.match(ask, /aria-label="Answer /, 'the answer button accessible name lost its visible word');
+    // The untied-needs_you shape cannot come through real routes (the
+    // pipeline forces untied panes to unknown; that refusal is its own
+    // tested fact elsewhere) -- so the gate's negative is driven by
+    // perturbing the one field the gate reads, on an otherwise-real card.
+    assert.doesNotMatch(api.card({ ...mara, isNamedOurs: false }), /ansgo/,
+      'a borrowed-name card offers a button into a thread that will refuse it');
+
+    // Hostile names render inert in both views. The controls aim at the two
+    // real failure modes: a live tag in text position, and a quote breaking
+    // out of an attribute value. (The inert ESCAPED text still contains the
+    // attack's letters; asserting their absence fails a correct renderer,
+    // which the first cut of this control did.)
+    const hostile = { ...leo, name: '<img src=x onerror=alert(1)>"' };
+    for (const html of [api.card(hostile), api.lrow(hostile)]) {
+      assert.doesNotMatch(html, /<img src=x/, 'an agent name reached the DOM as a live tag');
+      assert.match(html, /&lt;img/, 'CONTROL: the escaped name is absent, so the tag assertions prove nothing');
+      assert.doesNotMatch(html, /aria-label="Open <img/, 'a hostile name terminated the aria-label attribute');
+    }
+  } finally {
+    board.restore();
+  }
 });
 
 test('update awareness: the status tick carries the verdict, and the install route refuses honestly', async () => {
@@ -3026,6 +3130,16 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // untied-needs_you shape and no render check can hold the gate. If the
     // upstream refusal ever changes, this gate is what stops a borrowed-name
     // pane offering a button into a thread that will refuse it silently.
+    // The gold selected state on the view toggle is Josh's ruling twice
+    // over (ink flips in dark and inverts the meaning); a quiet revert to
+    // an ink fill would pass every behavioural check.
+    [/\.vt\.on \{ background: var\(--gold-bright\); color: #14161a; \}/,
+     'the selected view-toggle state lost its gold (an ink fill inverts meaning in dark)'],
+    // The removed list's reassurance line is the sentence that makes the
+    // light Remove confirmation honest; it rides inside paintRemoved's
+    // generated html where no render drive currently reads it.
+    [/Nothing was deleted\. Their folders and everything you wrote for them/,
+     'the removed list lost the nothing-was-deleted reassurance that keeps Remove honest'],
     [/a\.state === 'needs_you' && a\.isNamedOurs/,
      'the answer button lost its tie gate, so a borrowed-name pane promises a question '
      + 'the thread cannot show'],
