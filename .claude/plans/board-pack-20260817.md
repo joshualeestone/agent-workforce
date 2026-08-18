@@ -97,3 +97,11 @@ re-anchored where markup moved. Pair shot posted in channel.
   costs more than recording it: the caution is Mona Lisa's ruled text, the
   test follows the suite's both-places rule, and this line is the plan's
   record that the rider was chosen, not smuggled.
+
+## Round 2 pack-ruling flag (surfaced, not fixed here)
+
+- The selected tab's gold underline measures ~2.1:1 on --k-bg, under the
+  3:1 non-text floor the drives enforce elsewhere; the co-carrier ink
+  shift is subtle. It is PACK-VERBATIM (.apptab.on), so it is Mona Lisa's
+  ruling to make in the pack, not this branch's deviation to invent a fix
+  for; flagged to her in-channel with the board pair follow-ups.

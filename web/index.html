@@ -858,6 +858,9 @@ svg { display: block; }
   .removed-row + .removed-row { border-top-color: var(--separator); }
   .removed-row .who { color: var(--label); }
   .removed-row .when, .removed-hint { color: var(--label-2); }
+  /* focus rings drawn ON the body ground flip with it, or a keyboard
+     user's ring vanishes exactly where the text colors above were fixed */
+  .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
          font: var(--text-callout) var(--font-ui); color: var(--label);
@@ -931,9 +934,13 @@ svg { display: block; }
   background: var(--warn-bg); color: var(--label);
   font: var(--text-callout) var(--font-ui); line-height: 1.45;
 }
+/* ⚠️ FIXED ink: this badge sits inside .acard/.lrow, fixed-light surfaces
+   that do not flip until #40, so a theme-following --warn-ink turned it
+   ~1.5:1 invisible in dark (round 2 measured rgb(255,202,85) on white).
+   #7a5200 is the light warn ink, correct on white in both themes. */
 .card-stale {
   display: inline-flex; align-items: center; gap: 4px;
-  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
+  margin-left: 6px; vertical-align: middle; color: #7a5200;
 }
 .card-stale svg { width: 13px; height: 13px; }
 
@@ -1048,7 +1055,6 @@ svg { display: block; }
 .removed-msg:empty { display: none; }
 .icon { width: 16px; height: 16px; display: block; stroke: currentColor;
         fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.edit .icon { width: 15px; height: 15px; }
 
 /* ---------------------------------------------------------------------------
    First run.
@@ -2529,11 +2535,8 @@ function answerBtn(a) {
  * CC BY 4.0, which would put a credit line in a product we intend to sell.
  */
 const ICONS = {
-  // Mirrored horizontally so it points the other way, which is what Josh asked
-  // for. The old control was the text character U+270E, whose exact shape is
-  // chosen by the operating system and differs per machine -- flipping a glyph
-  // would have fixed the direction and not the cause.
-  pencil: '<g transform="translate(24 0) scale(-1 1)"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>',
+  // (the pencil glyph left with the card's edit control; the detail-page
+  // rebuild re-adds it from the pack when that view lands)
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
 
@@ -2679,7 +2682,7 @@ function lrow(a) {
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
-    <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></b><small>${esc(roleLine(a))}</small><em>${esc(modelLine(a))}</em></div>
+    <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</b><small>${esc(roleLine(a))}</small><em>${esc(modelLine(a))}</em></div>
     <div class="lstate">${GLYPH[m.st]}${esc(copy.label)}${answerBtn(a)}</div>
     <div class="ltask">${esc(taskLine(a))}</div>
     <div class="lmem">${mem}</div>
@@ -3198,7 +3201,14 @@ function showTab(tab) {
   // grid/alist visibility that folds the layout in.
   document.getElementById('boardbar').hidden = !agents;
   boardApplyVisibility(agents);
-  document.getElementById('summary').hidden = !agents;
+  {
+    /* Arrival must not reveal a blank line: the residual summary is
+       content-gated as well as tab-gated (its own test asserts an empty
+       summary hides itself; this path was the way around that). The boot
+       "Loading…" text counts as content and still shows. */
+    const sum = document.getElementById('summary');
+    sum.hidden = !agents || sum.textContent === '';
+  }
   document.getElementById('build').hidden = !agents;
   // (boardbar was set above, before the visibility computation that reads
   // it; the view toggle is board chrome and travels with the board.)
@@ -3258,7 +3268,12 @@ function burgerClose() {
    the last resort (it still holds tabindex for the a11y name). */
 function focusBoardHome() {
   const tab = document.querySelector('.tab[data-tab="agents"]');
-  if (tab) tab.focus();
+  /* ⚠️ Focusable, not merely present: below 56rem the tabs sit
+     display:none behind the burger, where focus() is a silent no-op and
+     the keyboard user lands on body -- the exact loss this function
+     exists to prevent (round 2 measured it at 780px). No client rects
+     means not rendered; the h1 keeps tabindex for exactly this. */
+  if (tab && tab.getClientRects().length) tab.focus();
   else document.querySelector('h1').focus();
 }
 document.getElementById('burger').addEventListener('click', () => {
