@@ -717,6 +717,12 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
           background: rgba(20,22,26,.05); border-radius: 6px; padding: .18rem .5rem;
           margin-top: 8px; }
 .pjfaces { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+/* The aria-hidden wrapper is a flex ROW of its own: as a plain span it
+   blockifies into a single flex item and the chips stack vertically --
+   found by the third pass reading geometry no text check sees. The
+   overlap margins live between chips inside it; the parent's gap
+   separates the row from the count. */
+.pjfaces > [aria-hidden] { display: flex; align-items: center; }
 .pjfaces .lav { width: 26px; height: 26px; font-size: .6875rem; border: 2px solid var(--k-surface); }
 .pjfaces .lav + .lav { margin-left: -8px; }
 .pjcount { font-size: .8125rem; color: var(--k-ink-2); margin-left: 8px; }
@@ -727,19 +733,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   padding: 18px 20px; }
 .pj-row:hover { border-color: rgba(20,22,26,.28); }
 .pj-row.attn { border-color: rgba(179,38,30,.42); }
-/* The description line, card and detail alike. On the ROW `--label-2`, not
-   `--label-3` (the detail's p.pj-desc overrides to full --label below):
-   this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
-   floor on this screen already at caption size (rounds 20 and 37 of the chat
-   branch). The harness asserts row and detail render the SAME size, which
-   is the check that catches the cascade regression this rule once had.
-   One line in the ROW: `oneLine` folds newlines at the engine, and the
-   ellipsis keeps a 200-char description from wrapping the row. Both selectors carry the element for specificity --
-   bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),
-   so the detail paragraph silently rendered at body size under a comment
-   claiming callout. */
-/* span.pj-desc retired with the pack cards (the list uses .pjdesc); the
-   p form remains the one-project view's description. */
+/* The one-project view's description. The CARD's description retired to
+   .pjdesc with the pack-card restyle (fixed ink, wraps fully); this rule
+   serves the detail alone. */
 p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
   color: var(--label-2); }
 p.pj-desc { margin-top: 2px; margin-bottom: 2px;
@@ -4016,6 +4012,14 @@ function renderAvatar(a) {
   } else {
     img.hidden = true;
     ini.hidden = false;
+    // The fourth surface of the shared disc: the same tint and ink the
+    // board, list, and project cards derive, so an agent's mark is one
+    // identity everywhere including its own page.
+    if (a) {
+      ini.style.background = discTint(a.name);
+      ini.style.color = discInk(a.name);
+      ini.parentElement.style.background = discTint(a.name);
+    }
   }
 }
 

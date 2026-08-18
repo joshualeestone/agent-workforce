@@ -5315,8 +5315,19 @@ test('the disc hash spreads: the pack seven-bucket system, order-sensitive, all 
      families): a name corpus must reach every bucket without gross
      clustering, and anagram pairs must be separable -- the property
      char-sum failed structurally. */
-  const discIndex = pageFunction('discIndex',
-    "const DISC_TINTS = ['a','b','c','d','e','f','g'];");
+  // The palette comes from the PAGE, not a stand-in: a copied bucket
+  // count would keep certifying spread at mod 7 after the palette moved.
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tintsLine = pageScript.slice(pageScript.indexOf('const DISC_TINTS'), pageScript.indexOf('\n', pageScript.indexOf('const DISC_TINTS')) + 1);
+  const inksLine = pageScript.slice(pageScript.indexOf('const DISC_INKS'), pageScript.indexOf('\n', pageScript.indexOf('const DISC_INKS')) + 1);
+  assert.ok(tintsLine.includes('[') && inksLine.includes('['), 'the palette lines vanished from the page');
+  // The pair lengths must match: discIndex mods by TINTS.length and
+  // discInk indexes INKS with it, so an unbalanced edit emits undefined.
+  // eslint-disable-next-line no-new-func
+  const lens = new Function(tintsLine + inksLine + 'return [DISC_TINTS.length, DISC_INKS.length];')();
+  assert.equal(lens[0], lens[1], 'DISC_TINTS and DISC_INKS diverged; discInk would emit undefined');
+  const discIndex = pageFunction('discIndex', tintsLine);
   const corpus = ['leo','mara','rook','nils','vex','angel','april','donnie','mikey','casey','raph','splinter','krang','jennika','shredder','tom','ana','ben','cleo','dora','eli','fern','gus','hana','ivan','june','kira','liam','nora','omar','pia','quinn','rosa','sam','tara','uma','vic','wren','xena','yuri','zed'];
   const seen = new Map();
   for (const n of corpus) seen.set(discIndex(n), (seen.get(discIndex(n)) || 0) + 1);
