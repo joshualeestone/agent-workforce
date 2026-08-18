@@ -5931,3 +5931,16 @@ test('the receipt pill borders have dark twins (the trio that missed the #71 pas
   assert.ok(!insideDark(lightFailed),
     'CONTROL: insideDark claims the light rule is in a dark block; the measurer is broken');
 });
+
+test('the group line is wired into paintOneProject, not just extractable', () => {
+  // The function-level tests stay green if the append is dropped, which
+  // would leave every verdict suppressed and stated NOWHERE -- the
+  // merge-only wiring class. Pin the wiring at source level, with a
+  // control that the CSS the literal targets still exists.
+  const src = pageFnSource('paintOneProject');
+  assert.ok(src.includes('pjSharedTold('), 'paintOneProject no longer consults pjSharedTold');
+  assert.ok(src.includes('pj-told-group'), 'paintOneProject no longer emits the pj-told-group line');
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.ok(raw.includes('.pj-members .pj-told-group {'),
+    'CONTROL: the .pj-told-group CSS rule is gone, so the emitted class styles nothing');
+});
