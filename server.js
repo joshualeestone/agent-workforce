@@ -42,6 +42,7 @@ const create = require('./engine/create');
 const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const you = require('./engine/you');
+const limits = require('./engine/limits');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
@@ -1572,7 +1573,11 @@ const server = http.createServer((req, res) => {
             operator: m.operator === true, text: m.text, at: m.at,
             state: (m.outcomes && m.outcomes[name]) || null });
         } else if (m.kind === 'valve') {
-          rows.push({ kind: 'valve', from: m.from, to: m.to, project: m.project || null, at: m.at });
+          // stopped defaults TRUE for rows that predate the field: every
+          // valve row logged before the person's control existed was a
+          // refusal, and rendering one as told-only would rewrite history.
+          rows.push({ kind: 'valve', from: m.from, to: m.to, project: m.project || null,
+            stopped: m.stopped !== false, at: m.at });
         } else if (m.kind === 'refused') {
           rows.push({ kind: 'refused', from: m.from, to: m.to, because: m.because || null, at: m.at });
         }
@@ -1602,6 +1607,26 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
+  /* --- the conversation limit (the person's control) ---------------------- */
+  if (pathname === '/api/limits' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, { ...limits.read(), tiers: limits.TIERS }); }
+    catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/limits' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = limits.write({ on: body.on, perHour: body.perHour });
+        if (!saved.ok) { sendJson(res, 400, { error: saved.because }); return; }
+        sendJson(res, 200, { ...limits.read(), tiers: limits.TIERS });
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not save that setting' }));
+    return;
+  }
+
   if (pathname === '/api/you' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, you.read()); }
     catch { sendJson(res, 500, { error: 'that record could not be read' }); }

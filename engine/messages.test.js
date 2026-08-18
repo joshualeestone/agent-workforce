@@ -24,6 +24,10 @@ const path = require('node:path');
 
 const chat = require('./chat');
 const messages = require('./messages');
+const limits = require('./limits');
+// The default budgets the valves enforce (the dial's shipped position).
+const PAIR_BUDGET = limits.DEFAULTS.perHour;
+const ROOM_BUDGET = limits.DEFAULTS.perHour * limits.ROOM_FACTOR;
 const fleet = require('../test-support/fleet');
 
 function withFleet(specs, fn) {
@@ -164,7 +168,7 @@ test('the pair valve: the send past the cap is refused with the surface-to-your-
     // OWN artifact (the jsonl it writes), not a hand-built producer object.
     const now = Date.now();
     fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
-    for (let i = 0; i < messages.PAIR_CAP; i += 1) {
+    for (let i = 0; i < PAIR_BUDGET; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'message', id: 'm' + (i + 1), from: i % 2 ? 'leo' : 'mara', to: i % 2 ? 'mara' : 'leo',
         text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
@@ -174,6 +178,7 @@ test('the pair valve: the send past the cap is refused with the surface-to-your-
     const tmux = arm([ok(), ok()]);
     const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'one more round' }, board.agents);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
+    assert.match(sent.because, /in the last hour/);
     assert.match(sent.because, /surface where you are to your operator/,
       'the valve closed without telling the agent what to do instead');
     assert.equal(tmux.sends().length, 0, 'the valve refused and the message was typed anyway');
@@ -184,11 +189,11 @@ test('the pair valve: the send past the cap is refused with the surface-to-your-
     // the valve -- without this, a valve that always refuses would pass the
     // refusal assertions above.
     wipeLog();
-    for (let i = 0; i < messages.PAIR_CAP; i += 1) {
+    for (let i = 0; i < PAIR_BUDGET; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'message', id: 'm' + (i + 1), from: 'leo', to: 'mara',
         text: 'old round', in_reply_to: null,
-        at: new Date(now - messages.PAIR_WINDOW_MS - 60000).toISOString(), state: 'placed',
+        at: new Date(now - limits.WINDOW_MS - 60000).toISOString(), state: 'placed',
       }) + '\n');
     }
     chat.resetForTests();
@@ -487,7 +492,7 @@ test('the room valve closes across the whole thread regardless of sender, once, 
     fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
     // The seed alternates senders: no PAIR exceeds its cap, which is the
     // exact loop the room valve exists for.
-    for (let i = 0; i < messages.ROOM_ARRIVALS_CAP / 2; i += 1) {
+    for (let i = 0; i < ROOM_BUDGET / 2; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
         from: MEMBERS[i % 3], to: MEMBERS.filter((m) => m !== MEMBERS[i % 3]),
@@ -510,11 +515,11 @@ test('the room valve closes across the whole thread regardless of sender, once, 
     // ⚠️ THE CONTROLS: the same volume OUTSIDE the window does not close
     // it, and a DIFFERENT project's room is untouched.
     wipeLog();
-    for (let i = 0; i < messages.ROOM_ARRIVALS_CAP / 2; i += 1) {
+    for (let i = 0; i < ROOM_BUDGET / 2; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
         from: 'leo', to: ['mara', 'april'], text: 'old round ' + i,
-        at: new Date(now - messages.ROOM_WINDOW_MS - 60000).toISOString(), outcomes: {},
+        at: new Date(now - limits.WINDOW_MS - 60000).toISOString(), outcomes: {},
       }) + '\n');
     }
     chat.resetForTests();
@@ -534,7 +539,7 @@ test('the two valves compose: room posts do not count toward the pair cap, nor p
   withFleet(room3(), (board) => {
     const now = Date.now();
     fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
-    for (let i = 0; i < messages.ROOM_ARRIVALS_CAP / 2; i += 1) {
+    for (let i = 0; i < ROOM_BUDGET / 2; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
         from: i % 2 ? 'leo' : 'mara', to: i % 2 ? ['mara', 'april'] : ['leo', 'april'],
@@ -547,7 +552,7 @@ test('the two valves compose: room posts do not count toward the pair cap, nor p
     assert.equal(direct.state, chat.DELIVERY.PLACED,
       'twenty room posts between this pair closed their DIRECT channel (ripple 2)');
     wipeLog();
-    for (let i = 0; i < messages.PAIR_CAP; i += 1) {
+    for (let i = 0; i < PAIR_BUDGET; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'message', id: 'm' + (i + 1), from: i % 2 ? 'leo' : 'mara', to: i % 2 ? 'mara' : 'leo',
         text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
@@ -683,7 +688,7 @@ test('an operator post fans to every member with the operator markers, flagged o
     // does not close the room on an agent.
     wipeLog();
     const now = Date.now();
-    for (let i = 0; i < messages.ROOM_ARRIVALS_CAP / 2; i += 1) {
+    for (let i = 0; i < ROOM_BUDGET / 2; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
         from: MEMBERS[i % 3], to: MEMBERS.filter((m) => m !== MEMBERS[i % 3]),
@@ -697,7 +702,7 @@ test('an operator post fans to every member with the operator markers, flagged o
       'the valve fired AT the person it exists to protect: ' + (operatorThrough.because || ''));
 
     wipeLog();
-    for (let i = 0; i < messages.ROOM_ARRIVALS_CAP / 2; i += 1) {
+    for (let i = 0; i < ROOM_BUDGET / 2; i += 1) {
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease', operator: true,
         from: 'you', to: MEMBERS, text: 'driving ' + i,
@@ -732,17 +737,21 @@ test('the arrivals are charged up front: the refusal fires in the band where an 
   withFleet(room3(), (board) => {
     const now = Date.now();
     fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
-    // 13 posts x 3 recipients = 39 arrivals: UNDER the cap of 40, so an
-    // uncharged `arrivals >= CAP` rule would let anything through. The
-    // charged rule refuses a 2-arrival post (41) and allows a 1-arrival
-    // post (40) from the same seed -- the pair that separates the rules.
-    assert.equal(messages.ROOM_ARRIVALS_CAP, 40, 'the seed arithmetic below assumes the recorded cap');
-    for (let i = 0; i < 13; i += 1) {
+    // Seeded to ONE UNDER the budget, so an uncharged `arrivals >= CAP`
+    // rule would let anything through. The charged rule refuses a
+    // 2-arrival post (budget + 1) and allows a 1-arrival post (exactly
+    // the budget) from the same seed -- the pair that separates the
+    // rules. Derived from the dial so a default change moves the seed.
+    const seedTo = ROOM_BUDGET - 1;
+    let seeded = 0;
+    for (let i = 0; seeded < seedTo; i += 1) {
+      const to = (seedTo - seeded >= 3) ? MEMBERS : MEMBERS.slice(0, seedTo - seeded);
       fs.appendFileSync(messages.LOG, JSON.stringify({
         kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
-        from: 'ghost', to: MEMBERS, text: 'round ' + i,
+        from: 'ghost', to, text: 'round ' + i,
         at: new Date(now - 60000).toISOString(), outcomes: {},
       }) + '\n');
+      seeded += to.length;
     }
     armSender('leo-discord');
     arm([]);
@@ -755,5 +764,109 @@ test('the arrivals are charged up front: the refusal fires in the band where an 
     const one = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'one arrival' }, board.agents, ['leo', 'mara']);
     assert.equal(one.state, chat.DELIVERY.PLACED,
       'a post that exactly fills the budget was refused: ' + (one.because || ''));
+  });
+});
+
+/* ── the person's control: tell always, stop only when On ────────────────── */
+
+test('with the limit Off, crossing a budget tells once and the conversation continues', () => {
+  withFleet(room3(), (board) => {
+    assert.equal(limits.write({ on: false, perHour: 10 }).ok, true);
+    try {
+      const now = Date.now();
+      fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+      for (let i = 0; i < 10; i += 1) {
+        fs.appendFileSync(messages.LOG, JSON.stringify({
+          kind: 'message', id: 'm' + (i + 1), from: i % 2 ? 'leo' : 'mara', to: i % 2 ? 'mara' : 'leo',
+          text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
+        }) + '\n');
+      }
+      armSender('leo-discord');
+      const tmux = arm([]);
+      const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'round eleven' }, board.agents);
+      assert.equal(sent.state, chat.DELIVERY.PLACED,
+        'the limit is Off and the send was still refused: ' + (sent.because || ''));
+      assert.ok(tmux.sends().length > 0, 'Off refused silently: nothing was typed');
+      const valves = messages.record().rows.filter((m) => m.kind === 'valve' && !m.project);
+      assert.equal(valves.length, 1, 'the tell did not log exactly once');
+      assert.equal(valves[0].stopped, false, 'the row claims Kosmos stopped a conversation it let continue');
+      assert.match(valves[0].because, /letting it continue/,
+        'the told-only row carries the stopping copy');
+      // A second send past the budget: still delivered, still ONE row.
+      chat.resetForTests();
+      armSender('leo-discord');
+      arm([]);
+      assert.equal(messages.send({ fromPane: '%7', to: 'mara', text: 'round twelve' }, board.agents).state,
+        chat.DELIVERY.PLACED);
+      assert.equal(messages.record().rows.filter((m) => m.kind === 'valve' && !m.project).length, 1);
+    } finally {
+      fs.rmSync(limits.FILE, { force: true });
+    }
+  });
+});
+
+test('the dial moves both budgets: a lower tier refuses the pair sooner and the room at four times the tier', () => {
+  withFleet(room3(), (board) => {
+    assert.equal(limits.write({ on: true, perHour: 10 }).ok, true);
+    try {
+      const now = Date.now();
+      fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+      for (let i = 0; i < 10; i += 1) {
+        fs.appendFileSync(messages.LOG, JSON.stringify({
+          kind: 'message', id: 'm' + (i + 1), from: 'leo', to: 'mara',
+          text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
+        }) + '\n');
+      }
+      armSender('leo-discord');
+      arm([]);
+      const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'over the lower tier' }, board.agents);
+      assert.equal(sent.state, chat.DELIVERY.COULD_NOT, 'the lower tier did not bite at ten');
+      assert.match(sent.because, /exchanged 10 messages in the last hour/);
+      assert.equal(messages.record().rows.find((m) => m.kind === 'valve' && !m.project).stopped, true);
+
+      // The room at 4x the tier: 40 arrivals refuses the next post.
+      wipeLog();
+      for (let i = 0; i < 20; i += 1) {
+        fs.appendFileSync(messages.LOG, JSON.stringify({
+          kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+          from: 'ghost', to: ['leo', 'mara'], text: 'round ' + i,
+          at: new Date(now - 60000).toISOString(), outcomes: {},
+        }) + '\n');
+      }
+      chat.resetForTests();
+      armSender('leo-discord');
+      arm([]);
+      const post = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'one more' }, board.agents, MEMBERS);
+      assert.equal(post.state, chat.DELIVERY.COULD_NOT, 'the room did not follow the dial at four times the tier');
+    } finally {
+      fs.rmSync(limits.FILE, { force: true });
+    }
+  });
+});
+
+test('with the limit Off the room tells and continues, in the told-only grammar', () => {
+  withFleet(room3(), (board) => {
+    assert.equal(limits.write({ on: false, perHour: 10 }).ok, true);
+    try {
+      const now = Date.now();
+      fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+      for (let i = 0; i < 20; i += 1) {
+        fs.appendFileSync(messages.LOG, JSON.stringify({
+          kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+          from: 'ghost', to: ['leo', 'mara'], text: 'round ' + i,
+          at: new Date(now - 60000).toISOString(), outcomes: {},
+        }) + '\n');
+      }
+      armSender('leo-discord');
+      arm([]);
+      const post = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'still talking' }, board.agents, MEMBERS);
+      assert.equal(post.state, chat.DELIVERY.PLACED, post.because || '');
+      const valve = messages.record().rows.find((m) => m.kind === 'valve' && m.project === 'henderson-lease');
+      assert.ok(valve, 'the room tell never logged');
+      assert.equal(valve.stopped, false);
+      assert.match(valve.because, /letting it continue/);
+    } finally {
+      fs.rmSync(limits.FILE, { force: true });
+    }
   });
 });

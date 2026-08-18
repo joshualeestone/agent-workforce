@@ -55,6 +55,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const chat = require('./chat');
 const store = require('./store');
+const limits = require('./limits');
 
 const LOG = path.join(store.ROOT, 'messages.jsonl');
 const SPILL_DIR = path.join(store.ROOT, 'messages');
@@ -75,35 +76,21 @@ const SPILL_AT = 700;
    surprise. */
 const MAX_BODY = 64 * 1024;
 
-/* The valve: at most PAIR_CAP messages between one unordered pair inside
-   PAIR_WINDOW_MS. Ten messages is about five rounds, the same threshold
-   the fleet this is ported from surfaces at. */
-const PAIR_CAP = 10;
-const PAIR_WINDOW_MS = 30 * 60 * 1000;
+/* The valve budgets live in engine/limits.js now -- ONE dial the person
+   owns (2026-08-18): each pair gets perHour exchanges an hour, each room
+   four times that in arrivals, and the window is an hour because that is
+   the unit on the screen. The split that matters: crossing a budget
+   ALWAYS logs the tell (stopped: true|false on the row); the setting
+   decides only whether the send is also refused. The default equals the
+   previously hard-coded 10-per-half-hour rate exactly. */
 
-/* The ROOM's own bound (View D): a room can loop without any two
-   participants looping (A to B, B to C, C to A never trips a pair cap),
-   so the project thread carries a cap ACROSS the whole thread regardless
-   of sender. The two valves COMPOSE: the pair cap still governs direct
-   messages, and posts do not count toward it (see pairCount).
-
-   ⚠️ The unit is ARRIVALS, not posts (Mona Lisa, 2026-08-18): the valve
-   exists for COST, and one post into a five-member room is four agent
-   turns. Counted in arrivals, a bigger room tightens automatically
-   because a post genuinely costs more there.
-
-   ⚠️ The LEVEL is a deliberate allowance, not parity (Splinter's catch:
-   at parity with the pair's budget -- 10 arrivals -- a five-member room
-   gets two and a half posts per half hour, which strangles a working
-   room, and a two-member room at this cap gets 40 posts against the
-   pair's 10). 40 arrivals per half hour says rooms get FOUR TIMES a
-   pair's budget on purpose: the room is the collaboration surface, its
-   spend happens in front of the record where the person can see it,
-   and the valve is here to catch a runaway loop, not to ration work.
-   A cap that breaks a productive conversation is worse than one that
-   runs long. Operator posts count nothing (see the valve). */
-const ROOM_ARRIVALS_CAP = 40;
-const ROOM_WINDOW_MS = PAIR_WINDOW_MS;
+/* The ROOM's bound composes with the pair's (View D): a room can loop
+   without any two participants looping, so the thread carries its own
+   cap in ARRIVALS (Mona Lisa: the cost of a post genuinely rises with
+   the room), at the recorded 4x allowance over the pair budget
+   (Splinter: a deliberate allowance, not parity -- the room is the
+   visible collaboration surface). Both budgets derive from the one
+   dial in engine/limits.js. Operator posts count nothing. */
 
 /* Every envelope marker this module can mint, refused inside any BODY on
    any path: a body carrying one would read, on a recipient's screen, as
@@ -269,9 +256,9 @@ function pairKey(a, b) {
     ripple 2): room posts must not count toward a direct-message cap
     (the room has its own valve), and pairKey(m.from, m.to) on a post's
     array `to` would produce a garbage key silently. */
-function pairCount(log, a, b, now) {
+function pairCount(log, a, b, now, windowMs = limits.WINDOW_MS) {
   const key = pairKey(a, b);
-  const floor = now - PAIR_WINDOW_MS;
+  const floor = now - windowMs;
   return log.filter((m) => m
     && m.kind === 'message'
     && pairKey(m.from, m.to) === key
@@ -318,7 +305,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
       const now2 = Date.parse(at);
       const already = readLog().some((m) => m && m.kind === 'refused'
         && m.from === from && m.to === toLogged && m.because === because
-        && Date.parse(m.at) >= now2 - PAIR_WINDOW_MS);
+        && Date.parse(m.at) >= now2 - limits.WINDOW_MS);
       if (!already) appendLog({ kind: 'refused', from, to: toLogged, because, at });
     } catch { /* the record is best-effort; the verdict is not */ }
     return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
@@ -401,24 +388,32 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     replyTo = wanted;
   }
 
-  /* THE VALVE. Counted before the send so the refusal happens instead of
-     the delivery, and logged so the screens can draw it. */
+  /* THE VALVE, split per the person's control (limits.js): crossing the
+     budget ALWAYS logs the tell, once per pair per window (the counter
+     is not configurable); the setting decides only whether this send is
+     also refused. Counted before the send so a refusal happens instead
+     of the delivery. */
   const now = Date.parse(at);
-  if (pairCount(log, from, toName, now) >= PAIR_CAP) {
-    const because = 'you two have exchanged ' + PAIR_CAP + ' messages in half an hour. '
-      + 'Stop and surface where you are to your operator instead of another round.';
-    // The CLOSING is logged once per pair per window, not once per retry:
-    // a retry-looping agent must not grow the record without bound while
-    // the valve is the thing refusing it.
+  const lim = limits.caps();
+  if (pairCount(log, from, toName, now, lim.windowMs) >= lim.pairPerWindow) {
+    const because = lim.on
+      ? 'you two have exchanged ' + lim.pairPerWindow + ' messages in the last hour. '
+        + 'Stop and surface where you are to your operator instead of another round.'
+      /* Told-only copy is an Angel draft attributed for Mona Lisa's
+         pass, aligned with her ruled Off sentence. */
+      : 'you two have exchanged ' + lim.pairPerWindow + ' messages in the last hour '
+        + 'without landing. Kosmos is letting it continue and telling your operator instead.';
+    // The tell is logged once per pair per window, not once per retry:
+    // a retry-looping agent must not grow the record without bound.
     // !m.project: a ROOM valve row carries to = its project id, and an
     // agent named like a project would otherwise satisfy this pairKey and
     // suppress the pair closing's row -- a refusal the screens then
     // render as silence, the exact thing the header forbids.
     const already = log.some((m) => m && m.kind === 'valve' && !m.project
       && pairKey(m.from, m.to) === pairKey(from, toName)
-      && Date.parse(m.at) >= now - PAIR_WINDOW_MS);
-    if (!already) appendLog({ kind: 'valve', from, to: toName, at, because });
-    return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
+      && Date.parse(m.at) >= now - lim.windowMs);
+    if (!already) appendLog({ kind: 'valve', from, to: toName, at, because, stopped: lim.on });
+    if (lim.on) return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
   }
 
   // Over the PARSE-ONLY rows: a foreign append that fails shape must
@@ -515,7 +510,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
       const now2 = Date.parse(at);
       const already = readLog().some((m) => m && m.kind === 'refused'
         && m.from === from && m.to === toLogged && m.because === because
-        && Date.parse(m.at) >= now2 - PAIR_WINDOW_MS);
+        && Date.parse(m.at) >= now2 - limits.WINDOW_MS);
       if (!already) appendLog({ kind: 'refused', from, to: toLogged, because, at });
     } catch { /* the record is best-effort; the verdict is not */ }
     return { state: chat.DELIVERY.COULD_NOT, because, id: null, at, outcomes: null };
@@ -581,21 +576,27 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
      valve's grammar with "everyone" on purpose: a room has no single
      sender whose turn it was, and naming one would be untrue. */
   const now = Date.parse(at);
+  const lim = limits.caps();
   // !m.operator: operator posts do not count toward the cap, and the
   // operator is never refused by it (the recorded decision above). The
   // sum is ARRIVALS (each post costs its recipient count), and this
   // post's own arrivals are charged up front: a nine-arrival post at
   // thirty-nine is over the budget, not under it.
   const arrivals = log.filter((m) => m && m.kind === 'post' && !m.operator
-    && m.project === projectId && Date.parse(m.at) >= now - ROOM_WINDOW_MS)
+    && m.project === projectId && Date.parse(m.at) >= now - lim.windowMs)
     .reduce((n, m) => n + (Array.isArray(m.to) ? m.to.length : 0), 0);
-  if (operator !== true && arrivals + recipients.length > ROOM_ARRIVALS_CAP) {
-    const because = 'This conversation went back and forth for a while without landing, '
-      + 'so Kosmos stopped it and asked everyone to bring you in.';
+  if (operator !== true && arrivals + recipients.length > lim.roomArrivalsPerWindow) {
+    const because = lim.on
+      ? 'This conversation went back and forth for a while without landing, '
+        + 'so Kosmos stopped it and asked everyone to bring you in.'
+      /* Told-only draft attributed for Mona Lisa's pass, her Off-state
+         grammar. */
+      : 'This conversation has gone back and forth for a while without landing. '
+        + 'Kosmos is letting it continue and telling you instead.';
     const already = log.some((m) => m && m.kind === 'valve'
-      && m.project === projectId && Date.parse(m.at) >= now - ROOM_WINDOW_MS);
-    if (!already) appendLog({ kind: 'valve', from, to: projectId, project: projectId, at, because });
-    return { state: chat.DELIVERY.COULD_NOT, because, id: null, at, outcomes: null };
+      && m.project === projectId && Date.parse(m.at) >= now - lim.windowMs);
+    if (!already) appendLog({ kind: 'valve', from, to: projectId, project: projectId, at, because, stopped: lim.on });
+    if (lim.on) return { state: chat.DELIVERY.COULD_NOT, because, id: null, at, outcomes: null };
   }
 
   const id = 'm' + (rec.parsed.reduce((n, m) => Math.max(n, m && m.id ? Number(String(m.id).slice(1)) || 0 : 0), 0) + 1);
@@ -727,7 +728,7 @@ function blockBody() {
 
 module.exports = {
   START, END, blockBody,
-  LOG, PAIR_CAP, PAIR_WINDOW_MS, ROOM_ARRIVALS_CAP, ROOM_WINDOW_MS,
+  LOG,
   resolveSender, send, sendPost, list, pairCount, readLog, record,
   setRunner, resetForTests,
 };
