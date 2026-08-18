@@ -1429,6 +1429,13 @@ const server = http.createServer((req, res) => {
           bad.status = 400;
           throw bad;
         }
+        // `null` is valid JSON and survives the parse; dereferencing it
+        // would answer a raw TypeError -- codes, not sentences.
+        if (!body || typeof body !== 'object') {
+          const bad = new Error('that request is not the shape we expect');
+          bad.status = 400;
+          throw bad;
+        }
         const roster = safeRoster();
         if (roster === null) {
           sendJson(res, 200, { delivery: { state: 'could_not', because: 'we could not check which agents are running, so nothing was sent' } });

@@ -247,16 +247,30 @@ cmd_msg() {
     exit 1
   fi
   # JSON-escaped by hand, because this must run on a clean Mac's bash 3.2
-  # with no python3 (see the header). Backslash first, then quotes; control
-  # characters are the server's to refuse, not ours to smuggle.
+  # with no python3 (see the header). Newlines and tabs become spaces FIRST
+  # (the server collapses them identically, so nothing is lost; left raw
+  # they break the JSON in transit and never reach the server's refusal at
+  # all); then backslash, then quotes.
   local esc_to esc_text esc_pane
-  esc_to=$(printf '%s' "$to" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  esc_text=$(printf '%s' "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  body=$(curl -fsS -X POST "$URL/api/msg"     -H 'content-type: application/json'     --data "{\"to\":\"$esc_to\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
+  esc_to=$(printf '%s' "$to" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_text=$(printf '%s' "$text" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  # No -f: an HTTP error still carries the server's own sentence, and
+  # "could not reach" is a wrong diagnosis for a reachable server that
+  # refused. Only a transport failure gets the unreachable sentence.
+  body=$(curl -sS -X POST "$URL/api/msg" \
+    -H 'content-type: application/json' \
+    --data "{\"to\":\"$esc_to\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
     say "We could not reach Kosmos to send that. Is it running at $URL?"
     exit 1
   }
+  case "$body" in
+    *'"error"'*)
+      because=$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
+      say "Kosmos refused that request: ${because:-it did not say why}."
+      exit 1
+      ;;
+  esac
   # The verdict, in the server's own words. Three states: placed is a
   # delivery, unconfirmed means the text may already be in their composer
   # (do NOT re-send), could_not names why.
