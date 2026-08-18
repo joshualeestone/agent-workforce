@@ -2533,6 +2533,9 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
      is exactly how the because sentence vanished. */
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // The REAL modelLine, because the meta line routes through it: a stub
+  // here would reconstruct the derivation this line exists to share.
+  const modelLine = pageFunction('modelLine');
   const drive = (card) => {
     const el = { textContent: 'seeded' };
     const from = script.indexOf("document.getElementById('d-meta').textContent =");
@@ -2541,8 +2544,8 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
     assert.ok(from > -1 && write > from && write < end,
       'the meta-line write fell outside the extracted slice');
     // eslint-disable-next-line no-new-func
-    new Function('document', 'a', script.slice(from, end))(
-      { getElementById: () => el }, card);
+    new Function('document', 'a', 'modelLine', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine);
     return el.textContent;
   };
   const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
@@ -2553,6 +2556,14 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
   assert.doesNotMatch(named, /machine name/,
     'an agent with a real display name is told it is shown by its machine name');
+  // The panel reads the SAME model derivation as both board renderers: a
+  // provider-less name gets the same provider-first treatment everywhere,
+  // and a missing name is the card's honest "Unknown Model", not an
+  // omission.
+  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /r · Claude Fable 5/,
+    'the panel model line diverged from the card on a provider-less name');
+  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /r · Unknown Model/,
+    'a missing model is silently omitted on the panel while the card says Unknown Model');
 });
 
 test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
@@ -3406,6 +3417,12 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // an ink fill would pass every behavioural check.
     [/\.vt\.on \{ background: var\(--gold-bright\); color: #14161a; \}/,
      'the selected view-toggle state lost its gold (an ink fill inverts meaning in dark)'],
+    // The Answer control is the ONE card control whose function nothing
+    // else on the card duplicates (the card body opens detail, not the
+    // thread), so the undersized-target exceptions do not apply to it and
+    // it carries the retired .card-answer's SC 2.5.8 floor itself.
+    [/\.ansgo \{[^}]*min-height: 24px/,
+     'the Answer control lost its 24px minimum target (SC 2.5.8), shrinking back to a text-height target'],
     // The removed list's reassurance line is the sentence that makes the
     // light Remove confirmation honest; it rides inside paintRemoved's
     // generated html where no render drive currently reads it.

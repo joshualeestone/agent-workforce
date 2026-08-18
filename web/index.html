@@ -477,8 +477,17 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
             color: #fff; background: #b3261e; border-radius: 100px;
             padding: .12rem .42rem; border: 2px solid var(--k-surface); }
 .ansgo { margin-left: auto; font-size: .8125rem; font-weight: 600; color: var(--k-ink-2);
-         border: 0; border-bottom: 1px solid currentColor; background: none;
-         padding: 0 0 1px; font-family: inherit; cursor: pointer; }
+         border: 0; background: none;
+         padding: 0; font-family: inherit; cursor: pointer;
+         /* ⚠️ 24px minimum (WCAG 2.2 SC 2.5.8), the floor the retired
+            .card-answer carried and .linkish duplicates: this is the one
+            control on the card whose function nothing else duplicates
+            (the card body opens DETAIL, not the thread), so the
+            undersized-target exceptions do not apply. The underline moves
+            to a span so the stretched hit area does not drag a bar across
+            its full height. */
+         min-height: 24px; display: inline-flex; align-items: center; }
+.ansgo > u { text-decoration: none; border-bottom: 1px solid currentColor; padding-bottom: 1px; }
 .ansgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 .acard:hover .ansgo, .lrow:hover .ansgo { color: var(--k-ink); }
 /* ---- the agents list: the pack's .lrow (stage 4) ---- */
@@ -2545,7 +2554,12 @@ function boardMods(a, m) {
        the attn border outranks it (the pack renders 88%-attn without hot).
        On .lrow the class is pack-parity with no rule of its own -- the
        pack's own list emits it unstyled and the bar band carries the heat
-       there; a future pack rule lands here for free. */
+       there; a future pack rule lands here for free.
+       ⚠️ DELIBERATELY not gated on the agent running: a tied stopped pane
+       still reads its own transcript, so its figure is real -- it is the
+       memory the session holds and would resume into, and the ring/bar
+       draw it for the same reason. Heat rides the figure, not the
+       process. */
     (pct !== null && pct >= NEARLY_FULL && m.st !== 'attn') ? 'hot' : '',
   ].filter(Boolean).join(' ');
 }
@@ -2557,7 +2571,7 @@ function answerBtn(a) {
   return a.state === 'needs_you' && a.isNamedOurs
     ? `<button class="ansgo" type="button" data-answer="${esc(a.sessionName)}"`
       + ` data-answer-name="${esc(a.name)}"`
-      + ` aria-label="Answer ${esc(a.name)}'s question">Answer &rarr;</button>`
+      + ` aria-label="Answer ${esc(a.name)}'s question"><u>Answer &rarr;</u></button>`
     : '';
 }
 
@@ -3535,8 +3549,12 @@ function openDetail(sessionName) {
      explanation". The fact itself is honest-state and survives -- on the
      screen with room to explain it. `nameDerived === false` means the
      display name IS the machine name because no real one was found. */
+  /* modelLine, not raw modelName: the same derivation both renderers read,
+     or the card says "Claude X" while this panel says "X" the day a name
+     arrives without its provider. The panel gains the card's honest
+     "Unknown Model" for a missing name rather than silently omitting it. */
   document.getElementById('d-meta').textContent =
-    [a.profile && a.profile.role || a.role, a.modelName,
+    [a.profile && a.profile.role || a.role, modelLine(a),
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   document.getElementById('d-state').textContent =
