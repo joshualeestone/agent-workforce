@@ -104,8 +104,10 @@ Pass 2 (blind, blocker-free: converged with pass 1's fixes):
 Queued next (Josh's ruling, 12:52 PM, with Mona Lisa's design): the
 valve caps become a Settings control, in the PERSON'S unit (exchanges;
 the engine converts to arrivals), her control copy and honest off-state
-sentence verbatim, off ALLOWED (their machine, their agents; my
-floor-above-zero instinct is overridden by both of them), defaults as
-shipped. Also hers for the record: the pair cap's 10 is an inherited
+sentence verbatim. Whether a floor above zero exists is JOSH'S open
+call, flagged to him in-channel (12:53 PM): with a floor, a runaway
+always terminates on our terms; without one, it terminates on his
+subscription's terms, which is a limit he chose. Defaults as shipped
+either way. Also hers for the record: the pair cap's 10 is an inherited
 convergence number doing a cost job; the room cap is derived. If a real
 conversation gets cut short, the inherited number was wrong.
