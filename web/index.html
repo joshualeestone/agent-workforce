@@ -171,11 +171,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .dprojlab { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
             font-weight: 600; color: var(--k-ink-2); }
-.dtag { font-size: .8125rem; padding: .22rem .7rem; border-radius: 100px;
-       border: 1px solid var(--k-rule); background: var(--k-surface); color: var(--k-ink); }
 .runnow { margin: 0 0 14px; font-size: .9375rem; color: var(--k-ink-2); }
 .runnow b { color: var(--k-ink); font-weight: 650; }
-.runacct { font-size: .875rem; color: var(--k-ink-2); }
 .memrow { display: flex; align-items: center; gap: 12px; max-width: 22rem; }
 .detail .field { border-top: 0; padding-top: 0; margin-top: 0; }
 .detail .dbox .flabel, .detail .dbox .fhint, .detail .dbox .fmsg, .detail .dbox .fpath { color: var(--k-ink-2); }
@@ -191,13 +188,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .back { background: none; border: 0; color: var(--label-2); cursor: pointer;
         font: var(--text-callout) var(--font-ui); padding: 0; margin-bottom: var(--space-6); }
 .back:hover { color: var(--label); }
-.detail-head { display: flex; gap: var(--space-6); align-items: center; margin-bottom: var(--space-8); }
 .detail-av { width: 72px; height: 72px; flex: none; border-radius: 50%; overflow: hidden;
              background: var(--bg-sunken); border: 0.5px solid var(--separator);
              display: flex; align-items: center; justify-content: center; }
 .detail-av img { width: 100%; height: 100%; object-fit: cover; }
 .detail-initials { font: 600 var(--text-title-3) var(--font-ui); color: var(--label-3); }
-.detail-name { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-meta { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-top: 2px; }
 .detail-state { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); }
 /* The panel's half of the pack split ("the card carries signals, the panel
@@ -1200,6 +1195,16 @@ svg { display: block; }
   /* focus rings drawn ON the body ground flip with it; being AFTER the
      outline shorthand declarations is what makes these effective */
   .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
+  /* pack-pass ground text: the new fixed-ink furniture that sits on the
+     BODY ground (the agent-page header, both dremove strips) needs its
+     dark patch, same lesson as .linkish above. Everything inside a .dbox
+     is a fixed-light surface and stays fixed on purpose. */
+  .detail { color: var(--label); }
+  .dname { color: var(--label); }
+  .dremove { border-top-color: var(--separator); color: var(--label); }
+  .dremove .dhint, .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--label-2); }
+  .dremove .btn-quiet { color: var(--label); }
+  .dprojlab { color: var(--label-2); }
 }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
@@ -1591,7 +1596,7 @@ svg { display: block; }
   <section class="dbox">
     <h3 class="dlab">Runs on</h3>
     <p class="runnow" id="d-runson"></p>
-    <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model and account an agent runs on are shown here; switching them arrives later.</p>
+    <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
   </section>
 
   <section class="dbox">
@@ -1635,7 +1640,7 @@ svg { display: block; }
          hand" is Kosmos declining to pretend there is no file, which is a trust
          signal for the person who does want to look. Hiding it would buy
          simplicity with a small dishonesty. -->
-    <label class="flabel" for="d-instr">Their special purpose</label>
+    <label class="flabel" for="d-instr">Instructions</label>
     <div class="fhint">What this agent is for, in your words. It is the first thing they read every time they start.</div>
     <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
@@ -1644,7 +1649,11 @@ svg { display: block; }
          empty editor whose Save button does nothing when clicked. -->
     <textarea id="d-instr" rows="14" spellcheck="true" disabled></textarea>
     <div class="frow instr-foot">
-      <div class="fpath" id="d-instr-foot" hidden>Saved to <code id="d-instr-path"></code> &middot; a real file you can also edit by hand</div>
+      <!-- Pack wins (Josh, 2026-08-17 in-channel: "what we had in the pack is
+         the wording we go with"): the path is NOT shown. The app's older
+         demoted-not-hidden ruling stays in history below; the reassurance
+         sentence is what survives on screen. -->
+    <div class="fpath" id="d-instr-foot" hidden>A real file you can also edit by hand.</div>
       <button class="btn" id="d-instr-save" type="button" disabled>Save</button>
     </div>
     <!-- Announced: this is the only channel for every outcome of the most
@@ -2539,6 +2548,7 @@ svg { display: block; }
     <section class="dbox">
       <h3 class="dlab">Keeping agents running</h3>
       <div id="set-machine"><p class="dhint">Checking this computer…</p></div>
+      <p class="dhint" id="set-machine-msg" role="status" hidden></p>
     </section>
 
     <section class="dbox">
@@ -2586,7 +2596,7 @@ svg { display: block; }
       <div class="setrow off">
         <div><b>Tell me when there is a new version</b>
           <p class="dhint" style="margin:2px 0 0;">Kosmos always tells you. Turning that off is not built yet.</p></div>
-        <span class="toggle" role="switch" aria-checked="false" aria-disabled="true"><i></i></span>
+        <span class="toggle" aria-hidden="true"><i></i></span>
       </div>
       <p class="dhint" id="set-version" style="margin:12px 0 0;"></p>
     </section>
@@ -2596,7 +2606,7 @@ svg { display: block; }
       <div class="setrow off">
         <div><b>Show the window each agent is running in</b>
           <p class="dhint" style="margin:2px 0 0;">Off by default. Your chat shows what an agent says to you. Turn this on to watch the session underneath it.</p></div>
-        <span class="toggle" role="switch" aria-checked="false" aria-disabled="true"><i></i></span>
+        <span class="toggle" aria-hidden="true"><i></i></span>
       </div>
       <p class="dhint" style="margin:8px 0 0;"><b>Not built yet.</b> The switch arrives with the clean-chat work.</p>
     </section>
@@ -3614,10 +3624,14 @@ function accountRow(conn) {
       + '<span class="settings-connected"><span aria-hidden="true">✓</span> Connected</span></div>';
   }
   // Not connected and could-not-check are DIFFERENT claims and the engine
-  // keeps them apart; its own sentence carries which one this is.
+  // keeps them apart; its own sentence carries which one this is. A MISSING
+  // report (the fetch failed, conn is null) is could-not-check too -- a
+  // definite "not connected" off a failed read is the sentence that sends
+  // somebody off to buy a subscription they already have.
+  const couldNotCheck = !conn || conn.state === 'unknown';
   return chkRow({
-    state: conn && conn.state === 'unknown' ? 'unknown' : 'attention',
-    title: conn && conn.state === 'unknown' ? 'We could not check the connection' : 'No Claude subscription is connected',
+    state: couldNotCheck ? 'unknown' : 'attention',
+    title: couldNotCheck ? 'We could not check the connection' : 'No Claude subscription is connected',
     detail: (conn && conn.because) || 'We could not read the connection state.',
   });
 }
@@ -3629,10 +3643,19 @@ async function paintSettings() {
   try {
     const m = await (await fetch('/api/machine')).json();
     mach.innerHTML = machineRows(m);
-    const sleepBtn = mach.querySelector('[data-sleep-settings]');
-    if (sleepBtn) {
-      sleepBtn.addEventListener('click', () => {
-        fetch('/api/open-sleep-settings', { method: 'POST' }).catch(() => {});
+    for (const sleepBtn of mach.querySelectorAll('[data-sleep-settings]')) {
+      sleepBtn.addEventListener('click', async () => {
+        // The pane opening IS the success feedback; words appear on refusal
+        // (a click that silently does nothing reads as a broken button).
+        const failMsg = document.getElementById('set-machine-msg');
+        try {
+          const r = await fetch('/api/open-sleep-settings', { method: 'POST' });
+          failMsg.hidden = r.ok;
+          if (!r.ok) failMsg.textContent = 'We could not open sleep settings just now.';
+        } catch {
+          failMsg.hidden = false;
+          failMsg.textContent = 'We could not open sleep settings just now.';
+        }
       });
     }
     const al = m.appLocation;
@@ -4045,7 +4068,7 @@ async function paintAgentProjects(sessionName) {
   // Restored, because the failure arm above changes it: a panel opened after a
   // failed read and then a good one would otherwise keep the weaker heading.
   const okLabel = document.getElementById('d-projects-label');
-  if (okLabel) okLabel.textContent = 'Projects it is on';
+  if (okLabel) okLabel.textContent = 'Assigned to';
   document.getElementById('d-projects').innerHTML =
     // Archived travels with the name here: archiving keeps the membership
     // (the engine's own rule), so the tag stays -- but a project that left
@@ -4188,11 +4211,9 @@ async function loadInstructions(sessionName) {
   INSTR_READY = false;
   const box = document.getElementById('d-instr');
   const saveBtn = document.getElementById('d-instr-save');
-  const pathEl = document.getElementById('d-instr-path');
   const msg = document.getElementById('d-instr-msg');
   box.value = '';
   msg.textContent = '';
-  pathEl.textContent = '';
   // Re-enabled on every load: a previous agent whose file could not be edited
   // left both of these disabled.
   // ⚠️ Disabled and hidden UNTIL the answer lands, not from the moment the
@@ -4245,10 +4266,9 @@ async function loadInstructions(sessionName) {
     // knows about is half a safety net, and this is the screen where someone
     // is about to replace an agent's entire boot file.
     document.getElementById('d-instr-prev').hidden = !data.hasPrevious;
-    // Only name the file when it is one this screen can actually save to.
-    // Otherwise the footer said "a real file you can also edit by hand" about
-    // a path the panel had just refused, or about an agent with no folder.
-    pathEl.textContent = data.editable ? (data.path || '').replace(/^\/Users\/[^/]+/, '~') : '';
+    // Only claim editability when it is a file this screen can actually
+    // save to (the sentence about an agent with no folder would be false).
+    // The PATH itself is not shown -- pack ruling, Josh 2026-08-17.
     document.getElementById('d-instr-foot').hidden = !data.editable;
 
     // Any message left over from the in-flight window (a Save clicked before

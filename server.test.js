@@ -2530,9 +2530,26 @@ test('the settings screen renders the engine\'s three answers, and offers only w
      text cannot break out of the markup, and the account row keeps
      not-connected and could-not-check apart (different claims, per the
      engine's own design). */
-  const chkRow = pageFunction('chkRow', 'const CHK_CLASS = { ok: "ok", attention: "att", unknown: "unk" };'
-    + 'const CHK_MARK = { ok: "\\u2713", attention: "!", unknown: "?" };'
-    + 'const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\"": "&quot;" }[c]));');
+  // ⚠️ The const maps come from the PAGE, not a copy in this prelude: a
+  // check containing a copy cannot fail when the page's mapping drifts
+  // (the repo's own recorded lesson).
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const constLine = (name) => {
+    const at = pageScript.indexOf('const ' + name + ' = ');
+    assert.ok(at > -1, name + ' vanished from the page');
+    return pageScript.slice(at, pageScript.indexOf('\n', at) + 1);
+  };
+  const escSlice = (() => {
+    const at = pageScript.indexOf('function esc(');
+    let depth = 0; let end = -1;
+    for (let k = pageScript.indexOf('{', at); k < pageScript.length; k += 1) {
+      if (pageScript[k] === '{') depth += 1;
+      else if (pageScript[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    return pageScript.slice(at, end);
+  })();
+  const chkRow = pageFunction('chkRow', constLine('CHK_CLASS') + constLine('CHK_MARK') + escSlice);
   assert.match(chkRow({ state: 'ok', title: 'T', detail: 'D' }), /class="chk ok"/);
   assert.match(chkRow({ state: 'attention', title: 'T', detail: 'D' }), /class="chk att"/);
   assert.match(chkRow({ state: 'unknown', title: 'T', detail: 'D' }), /class="chk unk"/);
@@ -2557,26 +2574,40 @@ test('the settings screen renders the engine\'s three answers, and offers only w
     return script.slice(start, end);
   };
   const accountRow = pageFunction('accountRow',
-    'const CHK_CLASS = { ok: "ok", attention: "att", unknown: "unk" };'
-    + 'const CHK_MARK = { ok: "\\u2713", attention: "!", unknown: "?" };'
+    constLine('CHK_CLASS') + constLine('CHK_MARK')
     + slice('esc') + '\n' + slice('chkRow'));
   assert.match(accountRow({ state: 'connected', plan: 'Claude Max 20x' }), /Claude Max 20x · connected/,
     'a connected account does not show its plan');
   assert.match(accountRow({ state: 'unknown', because: 'we could not read the file' }), /class="chk unk"/,
     'could-not-check rendered as a definite not-connected, which is a different claim');
-  assert.match(accountRow({ state: 'disconnected', because: 'no subscription found' }), /class="chk att"/,
+  // `none` is the engine's real not-connected state (subscription.js STATE).
+  assert.match(accountRow({ state: 'none', because: 'no subscription found' }), /class="chk att"/,
     'a real not-connected must draw attention, not the could-not-look grey');
+  // The null leg is the CATCH path (the /api/status fetch failed) and the
+  // one place a definite "not connected" would be a lie about a failed read.
+  const failed = accountRow(null);
+  assert.match(failed, /class="chk unk"/,
+    'a failed status read renders as a definite not-connected, which sends someone to buy a subscription they have');
+  assert.match(failed, /could not check the connection/i,
+    'CONTROL: the failed-read row lost its could-not-check sentence');
 });
 
 test('the detail memory box reads the same derivations as the board, and stays honest at unknown', () => {
   /* Scrappy-pass pin (pack view B): memoryBox is a READING off memBand/
      pctOf -- the same functions the grid and list read -- so this page
      cannot disagree with the board about how full an agent is. */
+  /* ⚠️ The derivations come from the PAGE (a prelude copy cannot fail when
+     the page's memBand drifts). NEARLY_FULL..pctOf is one contiguous block
+     in the page, sliced whole with an anchors-landed guard. */
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const pageScript = rawPage.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const from = pageScript.indexOf('const NEARLY_FULL');
+  const end = pageScript.indexOf('\n}', pageScript.indexOf('function pctOf(')) + 2;
+  assert.ok(from > -1 && end > from, 'the shared memory derivations fell outside the extracted slice');
+  const escAt = pageScript.indexOf('function esc(');
+  const escEnd = pageScript.indexOf('\n}', escAt) + 2;
   const memoryBox = pageFunction('memoryBox',
-    'const NEARLY_FULL = 80; const WARM = 60;'
-    + 'const memBand = (p) => p === null ? null : (p >= NEARLY_FULL ? "high" : (p >= WARM ? "warn" : "ok"));'
-    + 'const pctOf = (c) => Number.isFinite(c.percent) ? c.percent : null;'
-    + 'const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\"": "&quot;" }[c]));');
+    pageScript.slice(from, end) + '\n' + pageScript.slice(escAt, escEnd));
   const at80 = memoryBox({ name: 'leo', context: { percent: 80 } });
   assert.match(at80, /<i class="high" style="width:80%"/, 'the box bar disagrees with the board at the shared threshold');
   assert.match(at80, /nearly full/i, 'a nearly-full agent is not told what happens next');
