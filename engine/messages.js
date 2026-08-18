@@ -89,13 +89,19 @@ const PAIR_WINDOW_MS = 30 * 60 * 1000;
 
    ⚠️ The unit is ARRIVALS, not posts (Mona Lisa, 2026-08-18): the valve
    exists for COST, and one post into a five-member room is four agent
-   turns -- a post-count cap chosen to look "the same order" as the pair
-   cap would be eight times the spend. Counted in arrivals, a bigger
-   room tightens automatically because a post genuinely costs more
-   there. 40 per half hour is Angel's value: a five-member room gets
-   ten posts (the pair's own post count), and a cap that breaks a
-   productive conversation is worse than one that runs long. Operator
-   posts count nothing (see the valve). */
+   turns. Counted in arrivals, a bigger room tightens automatically
+   because a post genuinely costs more there.
+
+   ⚠️ The LEVEL is a deliberate allowance, not parity (Splinter's catch:
+   at parity with the pair's budget -- 10 arrivals -- a five-member room
+   gets two and a half posts per half hour, which strangles a working
+   room, and a two-member room at this cap gets 40 posts against the
+   pair's 10). 40 arrivals per half hour says rooms get FOUR TIMES a
+   pair's budget on purpose: the room is the collaboration surface, its
+   spend happens in front of the record where the person can see it,
+   and the valve is here to catch a runaway loop, not to ration work.
+   A cap that breaks a productive conversation is worse than one that
+   runs long. Operator posts count nothing (see the valve). */
 const ROOM_ARRIVALS_CAP = 40;
 const ROOM_WINDOW_MS = PAIR_WINDOW_MS;
 
