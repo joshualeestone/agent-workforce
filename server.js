@@ -1508,6 +1508,8 @@ const server = http.createServer((req, res) => {
           rows.push({ kind: 'colleague', id: m.id, from: m.from, to: m.to, text: m.text, in_reply_to: m.in_reply_to || null, at: m.at, state: m.state || null });
         } else if (m.kind === 'valve') {
           rows.push({ kind: 'valve', from: m.from, to: m.to, at: m.at });
+        } else if (m.kind === 'refused') {
+          rows.push({ kind: 'refused', from: m.from, to: m.to, because: m.because || null, at: m.at });
         }
       }
       rows.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));

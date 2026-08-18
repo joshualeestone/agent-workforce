@@ -5215,3 +5215,47 @@ test('the conversation tail cap is said, and an unreadable record rides ahead of
     board.restore();
   }
 });
+
+test('an attributed refusal is an event: logged once per window with its because, drawn with her copy, and the anonymous knock still is not', () => {
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  try {
+    fs.rmSync(messagesEngine.LOG, { recursive: true, force: true });
+    messagesEngine.setRunner(() => ({ ok: true, session: 'leo-discord' }));
+    chatEngine.setRunner(() => ({ ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' }));
+    chatEngine.setDryRun(false);
+    // A self-send: post-resolution, attributed, refused.
+    messagesEngine.send({ fromPane: '%7', to: 'leo', text: 'note to self' }, board.agents);
+    let refused = messagesEngine.record().rows.filter((m) => m.kind === 'refused');
+    assert.equal(refused.length, 1, 'an attributed refusal did not become an event');
+    assert.match(refused[0].because, /your own name/, 'the event lost its verbatim because');
+    // The retries are chrome: the same refusal inside the window logs once.
+    messagesEngine.send({ fromPane: '%7', to: 'leo', text: 'note to self again' }, board.agents);
+    refused = messagesEngine.record().rows.filter((m) => m.kind === 'refused');
+    assert.equal(refused.length, 1, 'a retry-looping agent grew the record');
+    // A DIFFERENT because is a different event.
+    messagesEngine.send({ fromPane: '%7', to: 'april', text: {} }, board.agents);
+    refused = messagesEngine.record().rows.filter((m) => m.kind === 'refused');
+    assert.equal(refused.length, 2, 'a distinct refusal was deduped into the first');
+    // The one unattributed exit stays out of the record.
+    messagesEngine.setRunner(() => ({ ok: true, session: 'nobody-we-know' }));
+    messagesEngine.send({ fromPane: '%9', to: 'leo', text: 'knock' }, board.agents);
+    assert.equal(messagesEngine.record().rows.filter((m) => m.kind === 'refused').length, 2,
+      'an anonymous knock appended to the record');
+
+    // The row draws with her copy, because verbatim.
+    const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const escAt = sc.indexOf('function esc(');
+    const convoRow = pageFunction('convoRow', sc.slice(escAt, sc.indexOf('\n}', escAt) + 2));
+    const drawn = convoRow({ kind: 'refused', from: 'leo', to: 'april', because: 'that agent’s pane is a shell' }, 'leo');
+    assert.match(drawn, /leo tried to message april\./, 'the refusal row lost her sentence');
+    assert.match(drawn, /<b>Not sent:<\/b> that agent’s pane is a shell/, 'the because did not ship verbatim');
+  } finally {
+    try { fs.rmSync(messagesEngine.LOG, { force: true }); } catch { /* clean */ }
+    messagesEngine.resetForTests();
+    chatEngine.resetForTests();
+    board.restore();
+  }
+});

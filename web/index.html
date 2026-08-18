@@ -3983,6 +3983,14 @@ function convoRow(r, agentName) {
       + ' were going back and forth, so Kosmos stopped them and asked '
       + esc(r.from) + ' to bring you in.</p></div>';
   }
+  if (r.kind === 'refused') {
+    // Her copy, the because verbatim: a refusal their agent met is an
+    // event, and silence is the wrong way to learn your agent is
+    // confusing itself.
+    return '<div class="cvrow peer"><span class="cv-who">' + esc(r.from) + ' · to ' + esc(r.to) + '</span><p>'
+      + esc(r.from) + ' tried to message ' + esc(r.to) + '.</p>'
+      + '<span class="cv-state"><b>Not sent:</b>' + (r.because ? ' ' + esc(r.because) : '') + '</span></div>';
+  }
   if (r.kind === 'unreadable') {
     return '<div class="cvrow"><span class="cv-who">Kosmos</span><p>We could not read '
       + esc(r.what) + ' just now, so part of this conversation may be missing.</p></div>';
