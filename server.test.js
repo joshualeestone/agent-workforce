@@ -3592,9 +3592,11 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // project named by the person carries their words onto a card and a
     // heading, and either an unescaped render or a dropped arm would be
     // invisible to node tests (project-description branch).
-    // (class renamed pj-desc -> pjdesc with the pack-card restyle; the
-    // pin follows the arm it protects, not the spelling.)
-    [/p\.description \? '<span class="pjdesc">' \+ esc\(p\.description\)/,
+    // (class renamed pj-desc -> pjdesc -> pc-t with the pack-card restyle;
+    // the pin follows the arm it protects, not the spelling. pc-t is the
+    // pack's own card-sentence class, and the pack spends .pjdesc on the
+    // detail page.)
+    [/p\.description \? '<span class="pc-t">' \+ esc\(p\.description\)/,
      'the card row lost its escaped description arm'],
     [/desc\.textContent = p\.description \|\| '';/,
      'the detail description must be written through textContent -- innerHTML here is the injection the card arm escapes against, and no node test can see the swap'],
@@ -5331,9 +5333,10 @@ test('the disc hash spreads: the pack seven-bucket system, order-sensitive, all 
   const corpus = ['leo','mara','rook','nils','vex','angel','april','donnie','mikey','casey','raph','splinter','krang','jennika','shredder','tom','ana','ben','cleo','dora','eli','fern','gus','hana','ivan','june','kira','liam','nora','omar','pia','quinn','rosa','sam','tara','uma','vic','wren','xena','yuri','zed'];
   const seen = new Map();
   for (const n of corpus) seen.set(discIndex(n), (seen.get(discIndex(n)) || 0) + 1);
-  assert.equal(seen.size, 7, 'a 41-name corpus left buckets unreached: ' + [...seen.keys()].sort().join(','));
+  assert.equal(seen.size, lens[0], 'a 41-name corpus left buckets unreached: hit '
+    + seen.size + ' of ' + lens[0]);
   const max = Math.max(...seen.values());
-  assert.ok(max <= 12, 'gross clustering: one bucket took ' + max + ' of 41');
+  assert.ok(max <= Math.ceil((corpus.length / lens[0]) * 2), 'gross clustering: one bucket took ' + max + ' of ' + corpus.length);
   /* ⚠️ Order sensitivity as a STATISTICAL property, not a pair list: the
      claim is "anagrams are no more likely to collide than any other
      pair" -- an order-INDEPENDENT hash collides on every single pair
