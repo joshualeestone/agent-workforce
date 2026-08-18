@@ -252,13 +252,13 @@ cmd_msg() {
   # they break the JSON in transit and never reach the server's refusal at
   # all); then backslash, then quotes.
   local esc_to esc_text esc_pane
-  esc_to=$(printf '%s' "$to" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
-  esc_text=$(printf '%s' "$text" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
-  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_to=$(printf '%s' "$to" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_text=$(printf '%s' "$text" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
   # No -f: an HTTP error still carries the server's own sentence, and
   # "could not reach" is a wrong diagnosis for a reachable server that
   # refused. Only a transport failure gets the unreachable sentence.
-  body=$(curl -sS -X POST "$URL/api/msg" \
+  body=$(curl -sS -m 15 -X POST "$URL/api/msg" \
     -H 'content-type: application/json' \
     --data "{\"to\":\"$esc_to\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
     say "We could not reach Kosmos to send that. Is it running at $URL?"
@@ -276,7 +276,16 @@ cmd_msg() {
   # (do NOT re-send), could_not names why.
   case "$body" in
     *'"state":"placed"'*)      say "Delivered to $to." ;;
-    *'"state":"unconfirmed"'*) say "The text reached $to's session but we could not confirm it was submitted. Do not re-send; check with them." ;;
+    *'"state":"unconfirmed"'*)
+      # The server's own sentence: unconfirmed has two flavors (typed with
+      # Enter unconfirmed, or a send that timed out mid-flight) and only
+      # the server knows which. Exit 3, distinct from placed, so an
+      # exit-code caller cannot read "maybe" as "delivered" -- but never
+      # nonzero-1, which would invite the retry the state exists to stop.
+      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
+      say "Not confirmed: ${because:-the text may already be in their composer}. Do not re-send; check with them."
+      exit 3
+      ;;
     *)
       because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
       say "Not delivered: ${because:-we could not tell why}."

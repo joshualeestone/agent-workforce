@@ -300,10 +300,37 @@ test('in_reply_to must name a real message in the sender\'s own conversation, no
     assert.equal(ghost.state, chat.DELIVERY.COULD_NOT,
       'a nonexistent id was asserted as fact in the recipient\'s pane');
     assert.match(ghost.because, /your own conversation/);
-    const foreign = messages.send({ fromPane: '%7', to: 'rook', text: 'about that', inReplyTo: 'm1' }, board.agents);
-    // CONTROL of the control: m1 involves rook, so citing it TO rook is fine.
-    assert.equal(foreign.state, chat.DELIVERY.PLACED,
-      'a message the recipient really was part of got refused');
-    assert.equal(tmux.sends().length, 2, 'the delivered citation did not reach the pane');
+    // The SENDER must have been in the cited message: leo citing a
+    // rook-to-mara message asserts a thread membership he never had, even
+    // to a recipient who WAS there.
+    const foreign = messages.send({ fromPane: '%7', to: 'mara', text: 'about that', inReplyTo: 'm1' }, board.agents);
+    assert.equal(foreign.state, chat.DELIVERY.COULD_NOT,
+      'a sender cited a conversation they were never part of');
+    // CONTROL: the message's own author citing it delivers.
+    chat.resetForTests();
+    armSender('rook-discord');
+    const tmux2 = arm([ok(), ok()]);
+    const own = messages.send({ fromPane: '%5', to: 'mara', text: 'following up', inReplyTo: 'm1' }, board.agents);
+    assert.equal(own.state, chat.DELIVERY.PLACED,
+      'a genuine reply to your own message got refused');
+    assert.match(tmux2.sends()[0][5], /· answers m1\] following up$/);
+  });
+});
+
+
+test('past the document ceiling a body is refused with somewhere better to put it', () => {
+  withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
+    armSender('leo-discord');
+    const tmux = arm([ok(), ok()]);
+    const doc = 'x'.repeat(65 * 1024);
+    const sent = messages.send({ fromPane: '%7', to: 'mara', text: doc }, board.agents);
+    assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
+    assert.match(sent.because, /document, not a message/,
+      'the refusal does not name what to do instead');
+    assert.equal(tmux.sends().length, 0);
+    // CONTROL: just under the ceiling spills and delivers.
+    const brief = 'y'.repeat(63 * 1024);
+    const okSend = messages.send({ fromPane: '%7', to: 'mara', text: brief }, board.agents);
+    assert.equal(okSend.state, chat.DELIVERY.PLACED, okSend.because || '');
   });
 });
