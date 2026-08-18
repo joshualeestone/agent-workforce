@@ -3195,6 +3195,17 @@ async function tick() {
       'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
     document.getElementById('grid').innerHTML = boardErr;
     document.getElementById('alist').innerHTML = boardErr;
+    /* The tiles are claims too. Left alone they hold last-success numbers
+       beside "we cannot see them" -- concrete headline counts asserting a
+       fleet this poll just failed to read. "?" is the tile-sized unknown.
+       The alert tile HIDES rather than shows a red "?": red is reserved for
+       a known alarm (it hides at zero for the same lesson), and the failure
+       card above already says the whole board is blind. */
+    document.getElementById('st-agents').textContent = '?';
+    document.getElementById('st-working').textContent = '?';
+    document.getElementById('st-idle').textContent = '?';
+    document.getElementById('st-attn').textContent = '?';
+    document.getElementById('st-attn-tile').hidden = true;
   }
 }
 
@@ -3268,7 +3279,18 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab');
   // Same reason as the back button: a tab click is also walking away from a
   // creation in flight.
-  if (btn) { WATCH += 1; showTab(btn.dataset.tab); burgerClose(); }
+  if (btn) {
+    WATCH += 1; showTab(btn.dataset.tab);
+    /* Choosing from the OPEN menu display:none's the element focus is on --
+       the same hazard the Escape path below guards -- and this is the common
+       path, so it carries the same guard: back to the burger, the visible
+       control the person can move on from. Gated on the menu actually being
+       open, or every wide-screen tab click would have its focus stolen. */
+    const b = document.getElementById('burger');
+    const wasOpen = b.getAttribute('aria-expanded') === 'true';
+    burgerClose();
+    if (wasOpen) b.focus();
+  }
 });
 
 /* The pack's narrow nav: the burger toggles a class (not [hidden]; the
@@ -3303,6 +3325,12 @@ document.getElementById('burger').addEventListener('click', () => {
   const open = b.getAttribute('aria-expanded') === 'true';
   document.getElementById('tabs').classList.toggle('closed', open);
   b.setAttribute('aria-expanded', String(!open));
+  /* The menu sits BEFORE its trigger in the DOM (pack order -- surfaced to
+     the pack, not reordered here), so Tab from the open burger walks forward
+     OUT of the header and the menu is only reachable backwards. Focusing the
+     first tab on open gives the keyboard its forward path without touching
+     the pack's DOM; :focus-visible keeps it invisible for the mouse. */
+  if (!open) { const first = document.querySelector('#tabs .tab'); if (first) first.focus(); }
 });
 document.addEventListener('click', (e) => {
   const b = document.getElementById('burger');

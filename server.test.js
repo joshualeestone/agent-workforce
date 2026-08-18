@@ -2402,6 +2402,179 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   assert.equal(clean.hidden, true, 'an empty summary must hide itself, not sit as a blank line');
 });
 
+test('the stats tiles count the real fleet, and the alert tile hides at zero', () => {
+  /* ⚠️ BEHAVIOURAL, same harness discipline as the summary test above: the
+     tile writes are tick-level wiring no other test reads -- the
+     working/idle filters and the alert tile's hide-at-zero were computed in
+     code nothing drove, which is the exact condition the renderer test
+     names as the reason it exists. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  const drive = (agents, counts) => {
+    const el = () => ({ textContent: '', hidden: undefined });
+    const els = {
+      'st-agents': el(), 'st-working': el(), 'st-idle': el(),
+      'st-attn': el(), 'st-attn-tile': el(),
+    };
+    // The slice INCLUDES every tile write (the summary test's lesson: a
+    // harness that stops short of the write reconstructs the behaviour).
+    const from = script.indexOf('const c = data.counts;');
+    const write = script.indexOf("document.getElementById('st-attn-tile').hidden = !c.needsYou;");
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the tile writes fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'data', script.slice(from, end))(
+      { getElementById: (id) => els[id] }, { agents, counts });
+    return els;
+  };
+
+  // ⚠️ Mixed states on purpose: needs_you and unknown agents sit in the
+  // fleet so a filter that counts "not working" as idle (or vice versa)
+  // cannot agree with these pins by accident.
+  const fleet = [
+    { state: 'working' }, { state: 'working' }, { state: 'working' },
+    { state: 'idle' }, { state: 'idle' },
+    { state: 'needs_you' }, { state: 'unknown' },
+  ];
+  const live = drive(fleet, { total: 7, needsYou: 1 });
+  assert.equal(live['st-agents'].textContent, '7', 'the agents tile stopped carrying the full-fleet total');
+  assert.equal(live['st-working'].textContent, '3', 'the working tile does not count exactly the working agents');
+  assert.equal(live['st-idle'].textContent, '2', 'the idle tile does not count exactly the idle agents');
+  assert.equal(live['st-attn'].textContent, '1', 'the needs-you tile lost its count');
+  assert.equal(live['st-attn-tile'].hidden, false, 'a nonzero needs-you must show the alert tile');
+
+  const calm = drive(fleet.filter((a) => a.state !== 'needs_you'), { total: 6, needsYou: 0 });
+  assert.equal(calm['st-attn-tile'].hidden, true,
+    'the alert tile must hide at zero: a red-bordered zero teaches people to ignore red');
+});
+
+test('a failed poll blanks the stats tiles instead of asserting the last fleet it saw', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  // ⚠️ Seeded with a LAST-SUCCESS picture first (presence before absence):
+  // the defect this pins is precisely stale numbers surviving the failure,
+  // so the tiles must demonstrably hold numbers before the catch runs.
+  const el = (t) => ({ textContent: t, hidden: undefined, innerHTML: '' });
+  const els = {
+    grid: el(''), alist: el(''),
+    'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
+    'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
+  };
+  const from = script.indexOf("checked.className = 'checked stamp stale';");
+  const write = script.indexOf("document.getElementById('st-attn-tile').hidden = true;");
+  const end = script.indexOf('\n', write) + 1;
+  assert.ok(from > -1 && write > from && write < end,
+    'the failure-path tile blanking fell outside the extracted slice');
+  const checked = { className: '', innerHTML: '' };
+  // eslint-disable-next-line no-new-func
+  new Function('document', 'checked', 'esc', 'err', script.slice(from, end))(
+    { getElementById: (id) => els[id] }, checked, (s) => String(s), { message: 'boom' });
+
+  // The rendered failure card proves the extracted block really ran.
+  assert.match(els.grid.innerHTML, /cannot read the agents/,
+    'the failure card never painted, so nothing below can mean anything');
+  assert.match(els.alist.innerHTML, /cannot read the agents/,
+    'the failure card must reach both containers, whichever layout is up');
+  for (const id of ['st-agents', 'st-working', 'st-idle', 'st-attn']) {
+    assert.equal(els[id].textContent, '?',
+      `${id} still asserts a count beside "we cannot see them" -- a headline number the failed poll cannot stand behind`);
+  }
+  assert.equal(els['st-attn-tile'].hidden, true,
+    'the alert tile must hide on a blind poll: red is reserved for a known alarm');
+});
+
+test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
+  /* ⚠️ The menu precedes its trigger in the DOM (pack order, surfaced to the
+     pack rather than reordered here), and it display:none's on close -- two
+     shapes that each strand a keyboard. These are DRIVEN, not shape-asserted:
+     the listeners run against a stub DOM and the assertions read where focus
+     actually landed. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const from = script.indexOf("document.getElementById('tabs').addEventListener('click'");
+  const chooseGuard = script.indexOf('if (wasOpen) b.focus();');
+  const escGuard = script.indexOf('b.focus();', script.indexOf('drops to <body>'));
+  const end = script.indexOf('});', escGuard) + 3;
+  assert.ok(from > -1 && chooseGuard > from && escGuard > chooseGuard && end > escGuard,
+    'the burger listener block was not found where expected');
+
+  const mkBtn = (dataset = {}) => {
+    const n = {
+      attrs: {}, focused: 0, dataset, listeners: {},
+      addEventListener(t, fn) { n.listeners[t] = fn; },
+      setAttribute(k, v) { n.attrs[k] = v; },
+      getAttribute(k) { return k in n.attrs ? n.attrs[k] : null; },
+      focus() { n.focused += 1; },
+      getClientRects: () => [{}],
+    };
+    return n;
+  };
+  const classes = new Set(['closed']);
+  const tabs = {
+    listeners: {},
+    addEventListener(t, fn) { tabs.listeners[t] = fn; },
+    classList: {
+      add: (c) => classes.add(c),
+      toggle: (c, force) => { if (force) classes.add(c); else classes.delete(c); },
+    },
+  };
+  const burger = mkBtn();
+  burger.attrs['aria-expanded'] = 'false';
+  const firstTab = mkBtn({ tab: 'agents' });
+  const docListeners = {};
+  const doc = {
+    getElementById: (id) => ({ tabs, burger }[id]),
+    querySelector: (sel) => (sel === '#tabs .tab' ? firstTab : null),
+    addEventListener: (t, fn) => { (docListeners[t] = docListeners[t] || []).push(fn); },
+  };
+  // eslint-disable-next-line no-new-func
+  const api = new Function('document',
+    'let WATCH = 0; const SHOWN = [];\nconst showTab = (t) => SHOWN.push(t);\n'
+    + script.slice(from, end)
+    + '\n; return { SHOWN };')(doc);
+  const chooseTab = () => tabs.listeners.click({ target: { closest: (s) => (s === '.tab' ? firstTab : null) } });
+
+  // ⚠️ THE CONTROL: on a wide screen the menu is closed and the tabs are
+  // plainly visible, so a tab click must keep its natural focus -- a guard
+  // that fires unconditionally would steal focus on every desktop click.
+  chooseTab();
+  assert.equal(api.SHOWN[0], 'agents', 'the tab click never reached showTab, so nothing below means anything');
+  assert.equal(burger.focused, 0, 'a wide-screen tab click had its focus stolen by the burger guard');
+
+  // Open: aria flips, the class comes off, and focus moves INTO the menu --
+  // the forward path the inverted DOM order otherwise denies.
+  burger.listeners.click();
+  assert.equal(burger.attrs['aria-expanded'], 'true');
+  assert.ok(!classes.has('closed'), 'opening the burger did not reveal the menu');
+  assert.equal(firstTab.focused, 1,
+    'opening the burger leaves the menu reachable only backwards: the menu precedes its trigger in the DOM');
+
+  // Choose from the OPEN menu: the common path. The menu display:none's
+  // under the focused element, so focus must land back on the burger.
+  chooseTab();
+  assert.ok(classes.has('closed'), 'choosing a tab did not close the menu');
+  assert.equal(burger.attrs['aria-expanded'], 'false');
+  assert.equal(burger.focused, 1,
+    'choosing from the open menu display:none\'d the element under focus and dropped the keyboard to <body>');
+
+  // Escape closes and refocuses the burger; a non-Escape key does nothing.
+  burger.listeners.click();
+  for (const fn of docListeners.keydown) fn({ key: 'a' });
+  assert.ok(!classes.has('closed'), 'a non-Escape key must not close the menu');
+  for (const fn of docListeners.keydown) fn({ key: 'Escape' });
+  assert.ok(classes.has('closed'), 'Escape did not close the menu');
+  assert.equal(burger.focused, 2, 'Escape must hand focus back to the burger');
+
+  // A click landing outside both the menu and the burger closes it.
+  burger.listeners.click();
+  for (const fn of docListeners.click) fn({ target: { closest: () => null } });
+  assert.ok(classes.has('closed'), 'an outside click did not close the menu');
+  assert.equal(burger.attrs['aria-expanded'], 'false');
+});
+
 test('the board renderers hold the pack grammar: thresholds, states, parity, escaping', async () => {
   /* ⚠️ BEHAVIOURAL, like the summary test above: the renderer block is
      extracted from the page and DRIVEN, because the pack rebuild moved the
