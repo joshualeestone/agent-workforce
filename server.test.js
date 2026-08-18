@@ -5071,3 +5071,84 @@ test('the msg route derives the sender from the pane, ignores any typed claim, a
     board.restore();
   }
 });
+
+test('the conversation rows hold the spec grammar: attributed peers, verbatim refusals, the valve as reassurance', () => {
+  /* Mona Lisa's messaging-screens spec, driven: a colleague's row reads
+     differently from yours, no delivery state renders as silence, the
+     because sentence ships verbatim, replies indent one level, and the
+     valve row is the product doing its job rather than an error. */
+  const convoRow = pageFunction('convoRow',
+    (() => {
+      const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+      const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+      const at = sc.indexOf('function esc(');
+      return sc.slice(at, sc.indexOf('\n}', at) + 2);
+    })());
+
+  const you = convoRow({ kind: 'operator', text: 'have a look at the lease', project: 'Vendor Review', state: 'placed' }, 'leo');
+  assert.match(you, /class="cvrow you"/, 'the operator row lost its own treatment');
+  assert.match(you, /You · on Vendor Review/);
+  assert.doesNotMatch(you, /cv-state/, 'a placed message grew a state line it does not need');
+
+  const peer = convoRow({ kind: 'colleague', from: 'mara', to: 'leo', text: 'the numbers are in', state: 'placed', in_reply_to: null }, 'leo');
+  assert.match(peer, /class="cvrow peer"/, 'a colleague reads like the operator, the distinction the spec exists for');
+  assert.match(peer, /mara · to leo/);
+
+  const reply = convoRow({ kind: 'colleague', from: 'leo', to: 'mara', text: 'thanks', state: 'placed', in_reply_to: 'm1' }, 'leo');
+  assert.match(reply, /peer indent/, 'a reply does not indent under what it answers');
+
+  const maybe = convoRow({ kind: 'colleague', from: 'leo', to: 'mara', text: 'ping', state: 'unconfirmed', in_reply_to: null }, 'leo');
+  assert.match(maybe, /Sent to mara\. We could not confirm it arrived\./, 'unconfirmed rendered as silence or as failure');
+
+  const no = convoRow({ kind: 'operator', text: 'x', project: 'P', state: 'could_not', because: 'the pane was in copy-mode' }, 'leo');
+  assert.match(no, /<b>Not sent\.<\/b> the pane was in copy-mode/, "the engine's own sentence did not ship verbatim");
+
+  const valve = convoRow({ kind: 'valve', from: 'leo', to: 'mara' }, 'leo');
+  assert.match(valve, /leo and mara were going back and forth, so Kosmos stopped them and asked leo to bring you in\./,
+    'the valve row lost the sentence that makes it reassurance rather than error');
+  assert.doesNotMatch(valve, /err|Not sent/, 'the valve row dressed as an error');
+
+  const hostile = convoRow({ kind: 'colleague', from: 'mara', to: 'leo', text: '<img src=x onerror=1>', state: 'placed', in_reply_to: null }, 'leo');
+  assert.doesNotMatch(hostile, /<img src=x/, 'a message body reached the conversation as a live tag');
+  assert.match(hostile, /&lt;img/, 'CONTROL: the escaped body is absent, so the tag assertion proves nothing');
+});
+
+test('the conversation route merges the project threads and the a2a record into one honest, ordered tail', async () => {
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })]);
+  const pdir = nodePath.join(SANDBOX, 'convo-proj');
+  fs.mkdirSync(pdir, { recursive: true });
+  try {
+    // A real project with leo on it, one operator message in its thread.
+    projectsEngine.create({ name: 'Convo Proof', folder: pdir, agents: ['leo'], roster: board.agents });
+    const proj = projectsEngine.list(board.agents).find((x) => x.name === 'Convo Proof');
+    assert.ok(proj, 'the fixture project was not created');
+    chatEngine.appendMessage(proj.id, 'leo',
+      { text: 'from your operator', at: '2026-08-18T13:00:01Z', delivery: { state: 'placed', because: null, at: '2026-08-18T13:00:01Z' } },
+      proj.createdAt);
+    // The a2a record: a colleague message BEFORE it and a valve entry after.
+    fs.mkdirSync(nodePath.dirname(messagesEngine.LOG), { recursive: true });
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({ kind: 'message', id: 'm900', from: 'mara', to: 'leo', text: 'from a colleague', in_reply_to: null, at: '2026-08-18T13:00:00Z', state: 'placed' }) + '\n');
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({ kind: 'valve', from: 'leo', to: 'mara', at: '2026-08-18T13:00:02Z', because: 'x' }) + '\n');
+
+    const r = await req('/api/agent/leo/conversation');
+    assert.equal(r.status, 200);
+    const data = JSON.parse(r.body);
+    const kinds = data.rows.map((x) => x.kind + ':' + (x.at || ''));
+    const colleagueAt = kinds.findIndex((k) => k.startsWith('colleague'));
+    const operatorAt = kinds.findIndex((k) => k.startsWith('operator'));
+    const valveAt = kinds.findIndex((k) => k.startsWith('valve'));
+    assert.ok(colleagueAt > -1 && operatorAt > -1 && valveAt > -1,
+      'a source is missing from the merge: ' + kinds.join(' '));
+    assert.ok(colleagueAt < operatorAt && operatorAt < valveAt,
+      'the merge is not in time order: ' + kinds.join(' '));
+    const op = data.rows[operatorAt];
+    assert.equal(op.project, 'Convo Proof', 'the operator row lost which project it was said on');
+    assert.ok(data.total >= 3, 'the total does not carry what the tail may have dropped');
+  } finally {
+    try { fs.rmSync(messagesEngine.LOG, { force: true }); } catch { /* clean */ }
+    board.restore();
+  }
+});
