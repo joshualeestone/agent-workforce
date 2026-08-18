@@ -1665,6 +1665,9 @@ test('list() derives becauseGroup at read time, beside the stored verdict', () =
     { ...p, told: { mara: { state: 'could_not', because: 'a sentence nobody wrote', at: new Date().toISOString() } } }));
   const row2 = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
   assert.equal(row2.agents[0].told.becauseGroup, null);
+  // Write-back is the failure this guards: readAll re-parses from disk, so
+  // only a PERSISTED leak is visible here -- an unwritten in-place mutation
+  // dies with the parse and needs no guard.
   const raw = projects.readAll().find((p) => p.name === 'Group Reasons');
   assert.ok(!('becauseGroup' in raw.told.mara),
     'the derived field leaked into the stored record');
