@@ -900,7 +900,13 @@ async function main() {
       };
       return {
         acard: read('.acard', 'backgroundColor'),
-        gaugeTrack: read('.acard .gt', 'stroke'),
+        /* .gt draws only for agents with a KNOWN memory pct; a machine
+           where every agent is unreadable renders .gu dashes instead --
+           a correct page, so the probe follows the renderer's own
+           branches rather than misreporting it as a rendering bug. */
+        gaugeTrack: document.querySelector('.acard .gt')
+          ? read('.acard .gt', 'stroke')
+          : read('.acard .gu', 'stroke'),
       };
     }));
     // The memory .bar exists only in the LIST layout (the grid card draws
@@ -909,9 +915,16 @@ async function main() {
     await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
     await page.waitForTimeout(300);
     Object.assign(surfacesByScheme[scheme], await page.evaluate(() => {
-      const el = document.querySelector('#alist .bar');
-      if (!el) throw new Error('the flip probe found nothing at #alist .bar -- a surface that is not on screen cannot prove it flips');
-      return { memBar: getComputedStyle(el).backgroundColor };
+      /* Not the first bar blindly: an unknown-memory row draws
+         .bar.unknown, whose gradient shorthand resets background-color to
+         transparent -- a correct page the transparent-read guard would
+         red. Prefer a known-memory bar; fall back to the unknown dash
+         pattern's backgroundImage, which is equally scheme-derived. */
+      const known = document.querySelector('#alist .bar:not(.unknown)');
+      if (known) return { memBar: getComputedStyle(known).backgroundColor };
+      const unknown = document.querySelector('#alist .bar.unknown');
+      if (unknown) return { memBar: getComputedStyle(unknown).backgroundImage };
+      throw new Error('the flip probe found no #alist .bar at all -- a surface that is not on screen cannot prove it flips');
     }));
     await ctx.close();
   }

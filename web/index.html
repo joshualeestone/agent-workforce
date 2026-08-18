@@ -1270,14 +1270,14 @@ svg { display: block; }
 @media (prefers-color-scheme: dark) {
   /* border too: the light dashed value (rgba ink at .26) is near-invisible
      over the dark ground, and a vanished dashed border is the whole
-     "add" affordance gone (its surface is re-joined to the sibling tiles
-     further down, in the k-token dark block) */
+     "add" affordance gone (the rule below also joins its surface to the
+     sibling tiles' k-surface) */
   .stat.action { background: var(--k-surface); border-color: var(--label-3); }
   /* hover carries higher specificity (0,3,0) than the line above, so it
      needs its own dark ground or the tile flickers transparent on hover.
-     ONE surface declaration per rule (pass 2): a second .stat.action pair
-     later in this block resolved the duplicate by within-block order,
-     which a reorder would silently regress. */
+     ONE surface declaration per rule: an earlier cut carried a second
+     .stat.action pair later in this block, resolved only by within-block
+     order -- do not reintroduce one. */
   .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
   .stat.action .slab, .stat.action .plus { color: var(--label); }
   .linkish { color: var(--label-2); }
@@ -1329,6 +1329,7 @@ svg { display: block; }
   .gf.high { stroke: #ff8c82; }
   .bar i.high { background: #ff8c82; }
   .haz { background: #ff8c82; color: #0c0d0f; }
+  .membadge { background: #ff8c82; color: #0c0d0f; }
   /* Working's green border outranked BY the quiet states after their fix
      (~1.9 vs ~2.7): the third channel's ordering held with a lighter
      green from the same fill family. */
@@ -1628,7 +1629,10 @@ svg { display: block; }
    the 4.5:1 floor this file's own header says it deviates from Apple's defaults
    in order to clear. It had been invisible because the rule was doing nothing.
    `--label-2` at callout size is the same pair `.fr-cdetail` uses, at 5.7:1. */
-.fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--label-2);
+/* --k-ink-2, not --label-2: this caption renders inside the forced-light
+   #firstrun subtree, where a scheme-aware legacy token would go
+   white-on-white in dark (dead markup today; pinned while adjacent). */
+.fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--k-ink-2);
                      margin-top: var(--space-7); font-style: italic; }
 </style>
 </head>

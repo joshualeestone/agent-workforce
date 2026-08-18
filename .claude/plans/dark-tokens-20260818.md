@@ -68,3 +68,24 @@ Recorded, deliberately not changed here:
   the card. Text and rings on them ride flipping tokens, nothing is
   unreadable; the pack's own dark treatment is token-only, so the
   flattening matches the pack until it rules otherwise.
+
+## Passes 2-3 (blind, both blocker-free: converged)
+
+Pass 2: the attn family's instrument FILLS (.gf.high, .bar i.high, .haz)
+had kept the light red against their own dark tracks; working's border
+had ended up dimmer than the quiet states; four comments still claimed
+the tokens do not flip; the .stat.action dark duplicate; probe hygiene.
+All fixed.
+
+Pass 3: .membadge was the one remaining attn carrier (now the same dark
+red as .haz, dark-ink number); the flip probe follows the renderer's own
+branches (gt/gu, known/unknown bar) so an all-unreadable-memory machine
+does not red a correct page; two comment inaccuracies; the dead
+.fr-body p.fr-next rule pinned to k-ink-2 inside the forced-light
+wizard.
+
+Recorded out-of-scope (same token-from-the-wrong-scheme class, predates
+this branch): @media (prefers-contrast: more) re-sets --label-2 and
+--separator to dark-on-light values unconditionally, so dark plus
+increased-contrast gets near-black secondary ink on dark grounds.
+Follow-up candidate, not taken here.
