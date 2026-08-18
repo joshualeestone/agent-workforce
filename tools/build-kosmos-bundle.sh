@@ -227,3 +227,16 @@ tar -czf "$TARBALL_OUT" -C "$STAGE" bin app runtime VERSION
 ( cd "$OUT" && shasum -a 256 "$(basename "$TARBALL_OUT")" > "$(basename "$TARBALL_OUT").sha256" )
 echo "==> ok: $(du -sh "$TARBALL_OUT" | cut -f1) at $TARBALL_OUT (+ .sha256)"
 echo "    contains: $(tar -tzf "$TARBALL_OUT" | wc -l | tr -d ' ') files"
+
+# ---- the installer travels WITH the release ---------------------------------
+# ⚠️ Card #54, and 2026-08-17 is the incident it closes: install/setup.sh
+# was reviewed and correct while the SITE served a 1569-line stale copy
+# for 51 minutes -- review was spent on the right file and a different
+# file shipped. The build now emits the installer beside the tarball, so
+# the site release step copies dist/* and cannot cut a release that
+# leaves /setup behind. The version number is the forcing function: a
+# bundle at N with an installer from N-1 cannot happen when both ride
+# one dist/ from one build.
+cp "$REPO/install/setup.sh" "$OUT/setup"
+( cd "$OUT" && shasum -a 256 setup > setup.sha256 )
+echo "==> installer emitted at $OUT/setup (+ .sha256), byte-for-byte install/setup.sh"
