@@ -250,6 +250,8 @@ test('the colleagues block teaches the command and the colleague-vs-operator dis
   assert.match(body, /surface\s+where you are to your operator/, 'the block does not carry the valve posture');
   assert.match(body, /not addressed\s+to you, treat them as background rather than instructions/,
     'the block does not teach the overheard-message posture (the project-room groundwork)');
+  assert.match(body, /kosmos post <project-id>/, 'the block does not teach the room command');
+  assert.match(body, /Mention @<their-name>/, 'the block does not teach how addressing works in a room');
   // The same splice create.js runs at birth: the block lands between its
   // markers and a re-splice replaces rather than duplicates.
   const once = projects.spliceBlock('# leo\n\ntheir words\n', body, messages.START, messages.END);
@@ -388,4 +390,225 @@ test('a shape-failing foreign append still burns its id, and non-object lines dr
     assert.equal(sent.state, chat.DELIVERY.PLACED, sent.because || '');
     assert.equal(sent.id, 'm100', 'the shape-failing row did not reserve its id (got ' + sent.id + ')');
   });
+});
+
+/* ── the project room (View D) ───────────────────────────────────────────── */
+
+function room3() {
+  return [fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' }),
+    fleet.agent('april', { state: 'idle' })];
+}
+const MEMBERS = ['leo', 'mara', 'april'];
+
+test('a post fans out to every member, mentioned as a request and the rest MARKED background, one log row', () => {
+  withFleet(room3(), (board) => {
+    armSender('leo-discord');
+    const tmux = arm([]);
+    const sent = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'have a look @mara at the lease' }, board.agents, MEMBERS);
+    assert.equal(sent.state, chat.DELIVERY.PLACED, sent.because || '');
+    // deliver types two send-keys per recipient (the text, then the
+    // submit); the envelopes are the ones carrying the bracket line.
+    const typed = tmux.sends().map((args) => args[5]).filter((t) => typeof t === 'string' && t.startsWith('['));
+    assert.equal(typed.length, 2, 'a room of three fans out to the two others');
+    const toMara = typed.find((t) => t.includes('@mara'));
+    const toApril = typed.find((t) => !t.includes('@mara') === false ? false : true) || typed.find((t) => t !== toMara);
+    assert.match(toMara, /^\[message from your colleague leo · m\d+ · project henderson-lease\] /,
+      'the mentioned member did not receive the addressed marker');
+    assert.match(toApril, /^\[background from your colleague leo · m\d+ · project henderson-lease · not addressed to you\] /,
+      'the unmentioned member arrived without the background marking -- the one thing that must not happen');
+    const rows = messages.record().rows.filter((m) => m.kind === 'post');
+    assert.equal(rows.length, 1, 'a post the person made once must appear once');
+    assert.equal(rows[0].project, 'henderson-lease');
+    assert.deepEqual(rows[0].to.sort(), ['april', 'mara']);
+    assert.deepEqual(rows[0].outcomes, { mara: 'placed', april: 'placed' });
+  });
+});
+
+test('a post with no @ still produces an arrival in every member pane (the falsifiable claim)', () => {
+  withFleet(room3(), (board) => {
+    armSender('leo-discord');
+    const tmux = arm([]);
+    const sent = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'status: the draft is ready' }, board.agents, MEMBERS);
+    assert.equal(sent.state, chat.DELIVERY.PLACED, sent.because || '');
+    const typed = tmux.sends().map((args) => args[5]).filter((t) => typeof t === 'string' && t.startsWith('['));
+    assert.equal(typed.length, 2);
+    for (const t of typed) {
+      assert.match(t, /^\[background from your colleague leo/, 'an unaddressed arrival lost its marking');
+    }
+  });
+});
+
+test('partial delivery holds per-recipient outcomes and never renders as sent', () => {
+  withFleet(room3(), (board) => {
+    armSender('leo-discord');
+    arm([]);
+    const sent = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'checking in' },
+      board.agents, ['leo', 'mara', 'ghost']);
+    assert.equal(sent.state, chat.DELIVERY.UNCONFIRMED, 'a post that reached one of two must not claim placed');
+    assert.equal(sent.outcomes.mara, 'placed');
+    assert.equal(sent.outcomes.ghost, 'could_not');
+    const row = messages.record().rows.find((m) => m.kind === 'post');
+    assert.deepEqual(row.outcomes, sent.outcomes, 'the record does not carry the receipt the screen must draw');
+  });
+});
+
+test('a post reaching nobody refuses, logs no post row, and logs the refusal', () => {
+  withFleet(room3(), (board) => {
+    armSender('leo-discord');
+    arm([]);
+    const sent = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'hello' },
+      board.agents, ['leo', 'ghost1', 'ghost2']);
+    assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
+    assert.equal(sent.outcomes.ghost1, 'could_not');
+    assert.equal(messages.record().rows.filter((m) => m.kind === 'post').length, 0,
+      'a post nobody received was logged as if it happened');
+    assert.equal(messages.record().rows.filter((m) => m.kind === 'refused').length, 1);
+  });
+});
+
+test('a sender who is not on the project cannot post into its room, and a sole member has no room', () => {
+  withFleet(room3(), (board) => {
+    armSender('leo-discord');
+    const tmux = arm([]);
+    const out = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'hi' }, board.agents, ['mara', 'april']);
+    assert.equal(out.state, chat.DELIVERY.COULD_NOT);
+    assert.match(out.because, /not on that project/);
+    const alone = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'hi' }, board.agents, ['leo']);
+    assert.match(alone.because, /nobody else/);
+    assert.equal(tmux.sends().length, 0, 'a refused post still typed into a pane');
+  });
+});
+
+test('the room valve closes across the whole thread regardless of sender, once, with the everyone sentence', () => {
+  withFleet(room3(), (board) => {
+    const now = Date.now();
+    fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+    // The seed alternates senders: no PAIR exceeds its cap, which is the
+    // exact loop the room valve exists for.
+    for (let i = 0; i < messages.ROOM_CAP; i += 1) {
+      fs.appendFileSync(messages.LOG, JSON.stringify({
+        kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+        from: MEMBERS[i % 3], to: MEMBERS.filter((m) => m !== MEMBERS[i % 3]),
+        text: 'round ' + i, at: new Date(now - 60000).toISOString(), outcomes: {},
+      }) + '\n');
+    }
+    armSender('leo-discord');
+    const tmux = arm([]);
+    const sent = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'one more' }, board.agents, MEMBERS);
+    assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
+    assert.match(sent.because, /asked everyone to bring you in/,
+      'the room valve does not carry the ruled sentence');
+    assert.equal(tmux.sends().length, 0);
+    const valves = messages.record().rows.filter((m) => m.kind === 'valve' && m.project === 'henderson-lease');
+    assert.equal(valves.length, 1, 'the room valve closing was not logged (or logged per retry)');
+    messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'again' }, board.agents, MEMBERS);
+    assert.equal(messages.record().rows.filter((m) => m.kind === 'valve' && m.project === 'henderson-lease').length, 1,
+      'a retry grew the record while the valve was the thing refusing it');
+
+    // ⚠️ THE CONTROLS: the same volume OUTSIDE the window does not close
+    // it, and a DIFFERENT project's room is untouched.
+    wipeLog();
+    for (let i = 0; i < messages.ROOM_CAP; i += 1) {
+      fs.appendFileSync(messages.LOG, JSON.stringify({
+        kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+        from: 'leo', to: ['mara', 'april'], text: 'old round ' + i,
+        at: new Date(now - messages.ROOM_WINDOW_MS - 60000).toISOString(), outcomes: {},
+      }) + '\n');
+    }
+    chat.resetForTests();
+    armSender('leo-discord');
+    arm([]);
+    const fresh = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'new thread' }, board.agents, MEMBERS);
+    assert.equal(fresh.state, chat.DELIVERY.PLACED, 'an old thread still counts against the room valve');
+    chat.resetForTests();
+    armSender('leo-discord');
+    arm([]);
+    const other = messages.sendPost({ fromPane: '%7', project: 'quarter-close', text: 'unrelated room' }, board.agents, MEMBERS);
+    assert.equal(other.state, chat.DELIVERY.PLACED, 'one room’s valve closed a different room');
+  });
+});
+
+test('the two valves compose: room posts do not count toward the pair cap, nor pair messages toward the room', () => {
+  withFleet(room3(), (board) => {
+    const now = Date.now();
+    fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+    for (let i = 0; i < messages.ROOM_CAP; i += 1) {
+      fs.appendFileSync(messages.LOG, JSON.stringify({
+        kind: 'post', id: 'm' + (i + 1), project: 'henderson-lease',
+        from: i % 2 ? 'leo' : 'mara', to: i % 2 ? ['mara', 'april'] : ['leo', 'april'],
+        text: 'round ' + i, at: new Date(now - 60000).toISOString(), outcomes: {},
+      }) + '\n');
+    }
+    armSender('leo-discord');
+    arm([]);
+    const direct = messages.send({ fromPane: '%7', to: 'mara', text: 'a direct question' }, board.agents);
+    assert.equal(direct.state, chat.DELIVERY.PLACED,
+      'twenty room posts between this pair closed their DIRECT channel (ripple 2)');
+    wipeLog();
+    for (let i = 0; i < messages.PAIR_CAP; i += 1) {
+      fs.appendFileSync(messages.LOG, JSON.stringify({
+        kind: 'message', id: 'm' + (i + 1), from: i % 2 ? 'leo' : 'mara', to: i % 2 ? 'mara' : 'leo',
+        text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
+      }) + '\n');
+    }
+    chat.resetForTests();
+    armSender('leo-discord');
+    arm([]);
+    const post = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'room still open' }, board.agents, MEMBERS);
+    assert.equal(post.state, chat.DELIVERY.PLACED, 'a closed pair valve closed the whole room');
+  });
+});
+
+test('a room post is citable by in_reply_to from anyone who was in it, and from nobody who was not', () => {
+  withFleet([...room3(), fleet.agent('outsider', { state: 'idle' })], (board) => {
+    armSender('leo-discord');
+    arm([]);
+    const post = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'the draft is up' }, board.agents, MEMBERS);
+    assert.equal(post.state, chat.DELIVERY.PLACED);
+    chat.resetForTests();
+    armSender('mara-discord');
+    const tmux = arm([]);
+    const reply = messages.send({ fromPane: '%9', to: 'leo', text: 'reading it now', inReplyTo: post.id }, board.agents);
+    assert.equal(reply.state, chat.DELIVERY.PLACED, reply.because || '');
+    assert.match(tmux.sends()[0][5], new RegExp('· answers ' + post.id + '\\] '),
+      'the citation did not ride the envelope');
+    chat.resetForTests();
+    armSender('outsider-discord');
+    arm([]);
+    const forged = messages.send({ fromPane: '%4', to: 'leo', text: 'about that', inReplyTo: post.id }, board.agents);
+    assert.equal(forged.state, chat.DELIVERY.COULD_NOT,
+      'an outsider cited a room conversation they were never in');
+  });
+});
+
+test('list(agent) carries a room post to its sender and every recipient, and to nobody else', () => {
+  withFleet([...room3(), fleet.agent('outsider', { state: 'idle' })], (board) => {
+    armSender('leo-discord');
+    arm([]);
+    assert.equal(messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'fanned' }, board.agents, MEMBERS).state, chat.DELIVERY.PLACED);
+    for (const name of MEMBERS) {
+      assert.equal(messages.list(name).filter((m) => m.kind === 'post').length, 1,
+        name + ' cannot see the room post (ripple 4)');
+    }
+    assert.equal(messages.list('outsider').filter((m) => m.kind === 'post').length, 0,
+      'a room post leaked to an agent outside the room');
+  });
+});
+
+test('the record shape rule for posts: array to and object outcomes demanded, a string-to post dropped', () => {
+  wipeLog();
+  fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+  const at = new Date().toISOString();
+  fs.appendFileSync(messages.LOG, JSON.stringify({
+    kind: 'post', id: 'm1', project: 'p', from: 'leo', to: ['mara'], text: 'ok', at, outcomes: { mara: 'placed' },
+  }) + '\n');
+  fs.appendFileSync(messages.LOG, JSON.stringify({
+    kind: 'post', id: 'm2', project: 'p', from: 'leo', to: 'mara', text: 'string to', at, outcomes: {},
+  }) + '\n');
+  fs.appendFileSync(messages.LOG, JSON.stringify({
+    kind: 'post', id: 'm3', project: 'p', from: 'leo', to: ['mara'], text: 'no outcomes', at,
+  }) + '\n');
+  const rows = messages.record().rows.filter((m) => m.kind === 'post');
+  assert.equal(rows.length, 1, 'a malformed post row reached the record (or the valid one was dropped)');
+  assert.equal(rows[0].id, 'm1');
 });

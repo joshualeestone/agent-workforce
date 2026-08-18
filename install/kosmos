@@ -294,6 +294,55 @@ cmd_msg() {
   esac
 }
 
+cmd_post() {
+  local project text body because
+  project="${1:-}"
+  shift 2>/dev/null || true
+  text="$*"
+  if [ -z "$project" ] || [ -z "$text" ]; then
+    say "Usage: kosmos post <project-id> <what you want to tell the room>"
+    exit 2
+  fi
+  if ! healthy; then
+    say "Kosmos is not running, so nothing can be posted. Start it with: kosmos start"
+    exit 1
+  fi
+  # Same hand-rolled JSON escaping as cmd_msg, same bash-3.2 reason.
+  local esc_project esc_text esc_pane
+  esc_project=$(printf '%s' "$project" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_text=$(printf '%s' "$text" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  body=$(curl -sS -m 30 -X POST "$URL/api/post" \
+    -H 'content-type: application/json' \
+    --data "{\"project\":\"$esc_project\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
+    say "We could not reach Kosmos to post that. Is it running at $URL?"
+    exit 1
+  }
+  case "$body" in
+    *'"error"'*)
+      because=$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
+      say "Kosmos refused that request: ${because:-it did not say why}."
+      exit 1
+      ;;
+  esac
+  # Three states, the same contract as msg -- but a post's placed means
+  # EVERY member got it; unconfirmed means the room is partly reached
+  # (the outcomes live in the record for the screens to draw).
+  case "$body" in
+    *'"state":"placed"'*)      say "Posted to $project. Everyone on it received it." ;;
+    *'"state":"unconfirmed"'*)
+      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
+      say "Posted, but not everyone is confirmed${because:+: $because}. Do not re-post; the room screen shows who got it."
+      exit 3
+      ;;
+    *)
+      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
+      say "Not posted: ${because:-we could not tell why}."
+      exit 1
+      ;;
+  esac
+}
+
 cmd_restart() {
   # The point is that start then runs the code that is on disk NOW, which
   # is what an update needs. The `|| true` tolerates "was not running";
@@ -313,8 +362,9 @@ case "${1:-}" in
   open)    cmd_open ;;
   version) cmd_version ;;
   msg)     shift; cmd_msg "$@" ;;
+  post)    shift; cmd_post "$@" ;;
   *)
-    printf '\n  kosmos start | stop | restart | status | open | version | msg\n\n'
+    printf '\n  kosmos start | stop | restart | status | open | version | msg | post\n\n'
     printf '  The dashboard lives at %s once started.\n\n' "$URL"
     exit 2
     ;;
