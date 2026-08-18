@@ -2,7 +2,7 @@
 pre_challenge: true
 method: challenge-loop
 branch: pj-cards
-diff_hash: e8d38729de31a4ddca8f0c90a9dc8e893b7f6f37cf5c42144dafb2113a0c1934
+diff_hash: 49de0090696c4c47ffb1fd4637dab26f4692e2148c1de26f8b7018b82d7baf4b
 subdir_audit: passed
 timestamp: 2026-08-18T15:05:00Z
 iterations: 6
@@ -52,7 +52,7 @@ was fixed rather than deferred.
 ## Final state
 
 - 846/846 unit tests, shell checks green, validation-log clean for this
-  diff (hash e8d38729de31).
+  diff (hash 49de0090696c).
 - render-projects.js drive fully green against a sandboxed server: all
   nine state groups, WCAG AA light and dark, 18 screenshots, no console
   errors on any state.
