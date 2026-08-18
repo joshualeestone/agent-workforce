@@ -1557,3 +1557,128 @@ test('revealFolder: the PRODUCTION path runs, with no injected runner standing i
   assert.equal(out.ok, false);
   assert.equal(out.because, 'Finder did not open');
 });
+
+/* ---------------------------------------------------------------------------
+ * group-reasons: a plural sibling for each singular could_not because.
+ * ------------------------------------------------------------------------ */
+
+test('every singular could_not because the engine authors has a plural sibling', () => {
+  // ⚠️ Two assertions per row, because they catch DIFFERENT events. The
+  // mapping assertion catches the map changing. The SOURCE assertion below
+  // catches the drift this table most fears: a singular edited at its
+  // author site without its row -- the map key then matches nothing, every
+  // affected group line silently degrades to the reasonless sentence, and
+  // a copy-only test stays green (a check containing a copy cannot fail).
+  const expectPlural = {
+    'this agent has no folder on this computer yet':
+      'none of them has a folder on this computer yet',
+    'this agent has no instructions file yet, and we will not create one for it':
+      'none of them has an instructions file yet, and we will not create one for them',
+    'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything':
+      'we cannot tie any of them by exactly their names to sessions on this computer, so we did not write to anything',
+    'this agent keeps its instructions somewhere we cannot safely change':
+      'they keep their instructions somewhere we cannot safely change',
+    'taking this out would leave its instructions almost empty, so we left them alone':
+      'taking this out would leave their instructions almost empty, so we left them alone',
+    'its instructions are already at the size limit, so we left them alone':
+      'their instructions are already at the size limit, so we left them alone',
+    'we could not write to this agent’s instructions':
+      'we could not write to their instructions',
+  };
+  for (const [singular, plural] of Object.entries(expectPlural)) {
+    assert.equal(projects.groupBecause(singular), plural,
+      'no or wrong plural sibling for: ' + singular);
+  }
+  // The one sentence with no singular referent maps to itself.
+  const neutral = 'we could not check which agents are running, so we did not write to anything';
+  assert.equal(projects.groupBecause(neutral), neutral);
+
+  // THE SOURCE PIN: every mapped singular must still exist verbatim in the
+  // modules that author these sentences. When this fails, someone edited a
+  // because at its author site without editing its map row -- the exact
+  // event the map's "edit the singular, edit its row" rule names.
+  //
+  // ⚠️ The GROUP_BECAUSE declaration is STRIPPED from the projects.js text
+  // first. The map's keys ARE the singulars, so scanning it would hand the
+  // pin a copy of everything it checks and it could never fail -- the
+  // exact class it exists to catch, one level down.
+  const projSrc = fs.readFileSync(path.join(__dirname, 'projects.js'), 'utf8');
+  const mapStart = projSrc.indexOf('const GROUP_BECAUSE = new Map([');
+  const mapEnd = projSrc.indexOf(']);', mapStart);
+  assert.ok(mapStart > -1 && mapEnd > mapStart,
+    'could not locate the GROUP_BECAUSE declaration to strip; re-point this pin');
+  const stripped = projSrc.slice(0, mapStart) + projSrc.slice(mapEnd);
+  // ⚠️ Each singular is pinned to the SPECIFIC module whose verdicts reach
+  // project.told: tellAgent (projects.js, stripped) authors seven; the
+  // folder sentence comes up through workerfile. you.js carries verbatim
+  // twins of these for the you-block, and scanning it here let an edit to
+  // the FEEDING copy pass while the twin kept the pin green (iteration 3).
+  const sources = {
+    'projects.js': stripped,
+    'workerfile.js': fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8'),
+  };
+  // CONTROL: the strip really removed the map keys' own copies -- a plural
+  // draft lives ONLY in the map, so it must be absent from the stripped
+  // text, or the pin is scanning the copy again. BOTH ends of the window:
+  // an early-truncated strip (a `]);` landing mid-map after a reformat)
+  // would still remove the first entry while later keys survive.
+  assert.ok(!stripped.includes('none of them has a folder on this computer yet'),
+    'CONTROL: the map\'s FIRST plural survived the strip; the pin is scanning its own copy');
+  assert.ok(!stripped.includes('we could not write to their instructions'),
+    'CONTROL: the map\'s LAST plural survived the strip; the window truncated early');
+  const authorOf = {
+    'this agent has no folder on this computer yet': 'workerfile.js',
+  };
+  for (const singular of [...Object.keys(expectPlural), neutral]) {
+    const file = authorOf[singular] || 'projects.js';
+    assert.ok(sources[file].includes(singular),
+      'a mapped singular no longer appears in its feeding author module ' + file
+      + ' (edited without its row?): ' + singular);
+  }
+});
+
+test('groupBecause NEVER invents: unmapped, null, and non-string yield null', () => {
+  assert.equal(projects.groupBecause('a sentence nobody wrote'), null);
+  assert.equal(projects.groupBecause(null), null);
+  assert.equal(projects.groupBecause(undefined), null);
+  assert.equal(projects.groupBecause(42), null);
+  // CONTROL: the mapper does answer for a known key, so the nulls above
+  // are refusals, not a broken lookup.
+  assert.ok(projects.groupBecause('this agent has no folder on this computer yet'),
+    'CONTROL: a known singular no longer maps; the null assertions prove nothing');
+});
+
+test('list() derives becauseGroup at read time, beside the stored verdict', () => {
+  const dir = path.join(SANDBOX, 'group-reasons-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  const made = projects.create({ name: 'Group Reasons', folder: dir, agents: ['mara'], roster: cards([fleet.agent('mara')]) });
+  // Store a could_not verdict whose because has a known plural sibling,
+  // shaped exactly as syncAgent stores one.
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'could_not', because: 'this agent has no folder on this computer yet', at: new Date().toISOString() } } }));
+  const row = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
+  assert.equal(row.agents[0].told.becauseGroup, 'none of them has a folder on this computer yet',
+    'the plural sibling was not derived at read time');
+  // An unmapped because yields null, and the stored record is untouched
+  // (derived, never written back).
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'could_not', because: 'a sentence nobody wrote', at: new Date().toISOString() } } }));
+  const row2 = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
+  assert.equal(row2.agents[0].told.becauseGroup, null);
+  // Write-back is the failure this guards: readAll re-parses from disk, so
+  // only a PERSISTED leak is visible here -- an unwritten in-place mutation
+  // dies with the parse and needs no guard.
+  const raw = projects.readAll().find((p) => p.name === 'Group Reasons');
+  assert.ok(!('becauseGroup' in raw.told.mara),
+    'the derived field leaked into the stored record');
+  // A told verdict (because: null) and a defaulted not_tried row both carry
+  // null, never a phantom reason.
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'told', because: null, at: new Date().toISOString() } } }));
+  assert.equal(projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons')
+    .agents[0].told.becauseGroup, null, 'a told verdict grew a group reason');
+  projects.mutate(made.id, (p) => ({ ...p, told: {} }));
+  const nt = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons').agents[0].told;
+  assert.equal(nt.state, 'not_tried');
+  assert.equal(nt.becauseGroup, null, 'a not_tried default grew a group reason');
+});

@@ -7217,7 +7217,17 @@ function pjSharedTold(roster) {
   for (const m of roster.slice(1)) {
     if (pjToldLine(m.told || {}) !== first) return '';
   }
-  return pjToldGroupLine(roster[0].told || {});
+  // ⚠️ A collapse may never LOSE a reason. Collapsing suppresses every
+  // per-member line, so it is only allowed when the group line carries
+  // everything those lines carried: the told sentence (constant), or a
+  // could_not whose because has a plural sibling. A could_not whose
+  // reason has NO plural form keeps its per-member rows -- three
+  // repeated sentences are weight, but a vanished reason is a lie of
+  // omission (iteration 3: the N-blocks because collapsed to a line
+  // that named no reason at all).
+  const t = roster[0].told || {};
+  if (t.state === 'could_not' && !t.becauseGroup) return '';
+  return pjToldGroupLine(t);
 }
 
 function pjToldGroupLine(told) {
@@ -7231,14 +7241,15 @@ function pjToldGroupLine(told) {
   // the honesty guarantee (no sentence for not_tried/empty) must hold here
   // too, not only in the current caller.
   if (told.state !== 'could_not') return '';
-  // The because is spliced VERBATIM and the engine writes it singular
-  // ("this agent has no folder…"), so the frame introduces it as the one
-  // shared reason rather than continuing the plural sentence into it --
-  // "any of them … this agent" read as a contradiction.
-  // The fallback is OUR text (not an engine verbatim), so it takes the
-  // plural the frame needs; a real because stays verbatim.
-  return 'We could not tell any of them where this folder is. Each for the same reason: '
-    + esc(told.because || 'we could not write to their instructions') + '.';
+  // The engine supplies the plural sibling (becauseGroup, derived at read
+  // time from the verbatim singular). Without one, the line carries NO
+  // reason: an incomplete true sentence beats a complete confusing one
+  // (her ruling), because the singular because is written for a one-agent
+  // context and does not survive being quoted inside a plural frame.
+  if (told.becauseGroup) {
+    return 'We could not tell any of them where this folder is — ' + esc(told.becauseGroup) + '.';
+  }
+  return 'We could not tell any of them where this folder is.';
 }
 
 /**
@@ -7262,8 +7273,16 @@ function pjMember(m, projectId, suppressTold) {
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
         + (m.state === 'unknown' && m.because ? ' — ' + esc(m.because) : '') + '</small>'
       : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
-    + (projectId ? '<button class="drop" type="button" aria-label="Take ' + esc(m.name)
-      + ' off this project" data-drop="' + esc(m.sessionName) + '">Take off</button>' : '')
+    /* "Remove from <scope>" is the pack's removal pattern (beside the
+       destructive "Remove from Kosmos"): the scope word is what tells the
+       person their agent survives this. "Take off" was vague about WHICH
+       removal it was (her ruling, 2026-08-18). */
+    /* The accessible name STARTS with the visible label, name after the
+       colon, so speech input saying the visible words matches the control
+       (WCAG 2.5.3 label-in-name; an interpolated name mid-string broke
+       the substring property). */
+    + (projectId ? '<button class="drop" type="button" aria-label="Remove from project: ' + esc(m.name)
+      + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }
@@ -7276,7 +7295,7 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance: the member list holds the Take-off buttons, so an unconditional
+ * performance: the member list holds the Remove-from-project buttons, so an unconditional
  * repaint threw keyboard focus back to the body every 5 seconds.
  *
  * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated
