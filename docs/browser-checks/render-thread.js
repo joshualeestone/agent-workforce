@@ -314,15 +314,16 @@ async function main() {
      goes unreported, on the renderer this branch wrote from scratch. */
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  /* One named exemption: opening an UNTIED agent's panel (the rook
-     check) fires the removal probe, whose refusal for untied agents is
-     a 400 by design and logs as a failed-resource console error --
-     pre-existing product behavior this drive newly exercises, recorded
-     rather than silenced wholesale. Everything else still fails the
-     run. */
+  /* One named exemption, SCOPED: opening an UNTIED agent's panel (the
+     rook check arms this flag around itself) fires the removal probe,
+     whose refusal for untied agents is a 400 by design and logs as a
+     failed-resource console error -- pre-existing product behavior this
+     drive newly exercises. Armed only around that block, so a tied
+     agent's probe 400ing anywhere else still fails the run. */
+  let expectRemoval400 = false;
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
-    if (/Failed to load resource.*400/.test(m.text()) && /removal/.test(m.location().url || '')) return;
+    if (expectRemoval400 && /Failed to load resource.*400/.test(m.text()) && /removal/.test(m.location().url || '')) return;
     pageErrors.push(m.text());
   });
 
@@ -430,6 +431,7 @@ async function main() {
     // deletable-green otherwise): opening the borrowed-name panel with
     // Engineering mode ON must hide the box, and never paint a refusal
     // sentence into it about an agent the person is looking at.
+    expectRemoval400 = true;
     await rookCard.click();
     await page.waitForSelector('#panel-detail:not([hidden])', { timeout: 10000 });
     await page.waitForTimeout(700);
@@ -441,6 +443,7 @@ async function main() {
       'an untied agent\u2019s panel hides the window box (nothing here is its window to show)', JSON.stringify(rookWindow));
     await page.click('#detail-back');
     await page.waitForTimeout(300);
+    expectRemoval400 = false;
 
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose
     // own handler opens the detail panel — so a wrongly-ordered listener would

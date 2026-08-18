@@ -3599,6 +3599,10 @@ async function tick() {
       if (freshCard && freshCard.isNamedOurs === true) {
         paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
       } else {
+        // The hide RETIRES any in-flight paint too: without the bump, a
+        // fetch launched a beat earlier could resolve after this and
+        // reveal the box over the very state this arm is hiding.
+        WINDOW_LOAD += 1;
         document.getElementById('d-window-box').hidden = true;
       }
     }
@@ -4144,8 +4148,9 @@ document.getElementById('lim-toggle').addEventListener('click', limToggleClick);
 document.getElementById('lim-tier').addEventListener('change', limTierChange);
 
 /* Engineering mode: the page-wide flag the raw-window surfaces key on.
-   Learned at boot, on entering a project, on opening an agent, and
-   after a save here; a preference is not polled every five seconds (a
+   Learned at boot, on entering a project, on a TIED agent open (the
+   untied arm never paints, so it has nothing to learn for), and after
+   a save here; a preference is not polled every five seconds (a
    mid-session change lands on the next navigation). */
 let ENG_ON = false;
 let ENG_EPOCH = 0;
@@ -4613,9 +4618,16 @@ async function paintAgentWindow(sessionName, opts) {
      quiet end of the affirmative-claim family. A tick repaint finds the
      box already visible and leaves it so. */
   try {
-    const r = await (await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/window')).json();
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/window');
+    const r = await res.json().catch(() => ({}));
     if (mine !== WINDOW_LOAD) return;
     if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    /* A 404 here is the tie dying mid-flight (the route's knownAgent
+       gate), not a window fact to display: the box HIDES, exactly as
+       the tick's tie-gone arm would a beat later -- painting the 404
+       body would put "no agent by that name" inside the open panel of
+       an agent the person is looking at. */
+    if (res.status === 404) { box.hidden = true; return; }
     if (r.text != null) {
       pre.textContent = r.text;
       pre.hidden = false;
@@ -4761,6 +4773,7 @@ function openDetail(sessionName) {
   if (tied) {
     paintAgentWindow(a.sessionName);
   } else {
+    WINDOW_LOAD += 1;
     document.getElementById('d-window-box').hidden = true;
   }
   // ⚠️ Asked EVERY time the panel opens, and asked of the engine. Whether an
