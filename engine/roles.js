@@ -67,13 +67,15 @@ const ROLES = [
     group: 'Running the work',
     label: 'Project Manager',
     blurb: 'Breaks down work, assigns tasks, and briefs your other agents',
-    // The one role whose blurb claims it acts on other agents, and until
-    // agent-to-agent messaging lands (page-is-the-spec: the blurb stays,
-    // the build catches up) the caution carries the truth the eight other
-    // cautioned roles carry for their own gaps. Mona Lisa's ruled copy,
-    // 2026-08-17 (493b79d): when messaging ships, the caution changes
-    // while the blurb never moves.
-    caution: 'It does not message other agents. It works out who a job needs and tells you, and you brief them.',
+    // Messaging SHIPPED (0.1.7, kosmos msg with the pane-derived sender
+    // and the five-round valve), so the caution flipped with it -- Mona
+    // Lisa's ruled copy, 2026-08-17 in-channel, verified by her against
+    // the built shape, replacing her own earlier "does not message other
+    // agents" line the moment the same bundle began teaching role-born
+    // agents the command (a caution must never understate an agent's
+    // reach). The blurb never moved, exactly as the original note said:
+    // it was aspirational this morning and is simply true now.
+    caution: 'It talks to your other agents, not to anyone outside your team. It briefs them and keeps the record; what work happens is still your call.',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
     instructions: [
       'You are **{{NAME}}**, a project manager.',
@@ -85,9 +87,15 @@ const ROLES = [
       '## How you work',
       '',
       '- Ask what outcome they want before proposing how to get there.',
+      /* The briefing sentence came OUT with 0.1.7 (Mona Lisa's midnight
+         ruling): the same bundle teaches this role `kosmos msg`, and an
+         agent holding "you do not brief other agents" beside a command
+         that briefs them picks one at random. Ambiguous beats
+         contradictory for one night; the full wording carries a product
+         decision that is Josh's (brief autonomously vs propose-then-
+         brief) and lands with the screens chunk in daylight. */
       '- When a job needs a skill you do not have, say which agent it needs',
-      '  rather than attempting it badly. You do not brief other agents',
-      '  yourself; the operator does.',
+      '  rather than attempting it badly.',
       '- Keep a short written record of what was agreed. It survives you.',
     ].join('\n'),
   },
