@@ -477,13 +477,10 @@ test('the roles where being wrong is expensive carry their limit in BOTH places'
     sales: /they send it, always/i,
     support: /draft, never send/i,
     recruiting: /every hiring decision is theirs/i,
-    // Messaging shipped in 0.1.7 and the do-not-brief sentence left with
-    // it (holding it beside the kosmos msg command was a contradiction an
-    // agent resolves at random). The boundary that SURVIVES messaging is
-    // skill-honesty: the PM does not attempt work outside its skill. The
-    // autonomous-vs-propose briefing wording is Josh's daylight call and
-    // lands with the screens chunk.
-    pm: /say which agent it needs\s+rather than attempting it badly/i,
+    // Josh ruled autonomous briefing (2026-08-18). The pinned invariant
+    // survives every wording of it: the PM does not attempt work outside
+    // its skill -- it briefs the agent who has it.
+    pm: /brief the agent who has\s+it rather than attempting it badly/i,
   };
   for (const role of roles.ROLES.filter((r) => r.caution)) {
     const mustSay = BOUNDARY[role.key];
