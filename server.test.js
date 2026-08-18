@@ -2337,7 +2337,7 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
 
   // The summary block, run against a fake element, for a counts object that
   // says one line was unreadable.
-  const summarise = (counts) => {
+  const summarise = (counts, onAgents = true) => {
     const el = { textContent: '' };
     const document = { getElementById: () => el };
     // ⚠️ The slice INCLUDES the line that writes the summary. The first version
@@ -2353,7 +2353,10 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
     const write = script.indexOf('sumEl.textContent = bits.join');
     const body = script.slice(from, script.indexOf('\n', script.indexOf('sumEl.hidden')) + 1);
     // eslint-disable-next-line no-new-func
-    new Function('document', 'c', body)(document, counts);
+    // onAgentsTab is injectable: the write is tab-gated (the residual
+    // notice must not float beside Settings on the poll), so the harness
+    // drives both sides of that gate.
+    new Function('document', 'c', 'onAgentsTab', body)(document, counts, () => onAgents);
     return el;
   };
 
@@ -2370,6 +2373,15 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   // The harness-proof (assert presence before absence) rides HERE now: a
   // rendered notice above proves the extracted block really ran.
   assert.equal(partial.hidden, false, 'a summary with residual notices must show itself');
+
+  // ⚠️ THE TAB GATE, both sides. The poll runs on every tab; without the
+  // gate a residual notice floats beside Settings within five seconds of
+  // leaving the board (found live on the stage-3 build). Same shape as
+  // paintRemoved's gate, and asserted with the same bits that just proved
+  // the notice renders -- so this cannot pass vacuously.
+  const elsewhere = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 }, false);
+  assert.equal(elsewhere.hidden, true,
+    'the residual summary leaks onto other tabs: the poll re-reveals it off the agents tab');
 
   /* ⚠️ THE CONTROL, updated with the stage-2 pack rebuild: the headline
      counts moved to the stats tiles, so #summary is RESIDUAL-ONLY -- on a
