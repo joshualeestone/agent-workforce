@@ -46,6 +46,7 @@ const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
 const chat = require('./engine/chat');
+const messages = require('./engine/messages');
 const os = require('node:os');
 
 /**
@@ -1408,6 +1409,55 @@ const server = http.createServer((req, res) => {
   // (saved / absent / unknown-with-reason): absent is the wizard's normal
   // starting state, not an error, so it is a 200 like its commitments
   // sibling, never a 404 the screen has to special-case.
+  /**
+   * --- agent-to-agent messages ---------------------------------------------
+   *
+   * POST body: { to, text, from_pane, in_reply_to? }. The sender is NOT in
+   * the body -- it is derived from the pane the caller's `kosmos msg` ran
+   * inside (engine/messages.resolveSender), which is what keeps the
+   * attribution a fact rather than a typed claim. The verdict passes
+   * through whole, three states and all, for the same reason the project
+   * chat's does: `unconfirmed` folded into failure invites the duplicate
+   * re-send.
+   */
+  if (pathname === '/api/msg' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch {
+          const bad = new Error('that request is not something we can read');
+          bad.status = 400;
+          throw bad;
+        }
+        const roster = safeRoster();
+        if (roster === null) {
+          sendJson(res, 200, { delivery: { state: 'could_not', because: 'we could not check which agents are running, so nothing was sent' } });
+          return;
+        }
+        const delivery = messages.send({
+          fromPane: body.from_pane,
+          to: body.to,
+          text: body.text,
+          inReplyTo: body.in_reply_to,
+        }, roster);
+        sendJson(res, 200, { delivery });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+  if (pathname === '/api/messages' && (req.method === 'GET' || req.method === 'HEAD')) {
+    // The record the screens draw conversations from; ?agent= filters to
+    // one agent's messages. Read-only, best-effort history.
+    try {
+      let who = null;
+      try { who = new URL(req.url, ROUTING_BASE).searchParams.get('agent') || null; } catch { who = null; }
+      sendJson(res, 200, { messages: messages.list(who) });
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we could not read the record') });
+    }
+    return;
+  }
   if (pathname === '/api/you' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, you.read()); }
     catch { sendJson(res, 500, { error: 'that record could not be read' }); }

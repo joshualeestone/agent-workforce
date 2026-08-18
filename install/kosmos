@@ -225,6 +225,52 @@ cmd_version() {
   fi
 }
 
+# ---- kosmos msg <agent> <text…> ---------------------------------------------
+# An agent messages a colleague. The SENDER IS NOT AN ARGUMENT: the server
+# derives it from the tmux pane this command runs inside ($TMUX_PANE), so an
+# agent cannot mistype itself into being someone else. Everything else about
+# delivery (exact name, live pane, the loop valve, the message record) is the
+# server's job; this command's job is to carry the words and REPORT THE
+# VERDICT, because a send that fires and assumes success silently loses
+# messages -- the transport lesson this port exists to keep.
+cmd_msg() {
+  local to text body verdict state because
+  to="${1:-}"
+  shift 2>/dev/null || true
+  text="$*"
+  if [ -z "$to" ] || [ -z "$text" ]; then
+    say "Usage: kosmos msg <agent> <what you want to tell them>"
+    exit 2
+  fi
+  if ! healthy; then
+    say "Kosmos is not running, so nothing can be delivered. Start it with: kosmos start"
+    exit 1
+  fi
+  # JSON-escaped by hand, because this must run on a clean Mac's bash 3.2
+  # with no python3 (see the header). Backslash first, then quotes; control
+  # characters are the server's to refuse, not ours to smuggle.
+  local esc_to esc_text esc_pane
+  esc_to=$(printf '%s' "$to" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_text=$(printf '%s' "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  body=$(curl -fsS -X POST "$URL/api/msg"     -H 'content-type: application/json'     --data "{\"to\":\"$esc_to\",\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
+    say "We could not reach Kosmos to send that. Is it running at $URL?"
+    exit 1
+  }
+  # The verdict, in the server's own words. Three states: placed is a
+  # delivery, unconfirmed means the text may already be in their composer
+  # (do NOT re-send), could_not names why.
+  case "$body" in
+    *'"state":"placed"'*)      say "Delivered to $to." ;;
+    *'"state":"unconfirmed"'*) say "The text reached $to's session but we could not confirm it was submitted. Do not re-send; check with them." ;;
+    *)
+      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
+      say "Not delivered: ${because:-we could not tell why}."
+      exit 1
+      ;;
+  esac
+}
+
 cmd_restart() {
   # The point is that start then runs the code that is on disk NOW, which
   # is what an update needs. The `|| true` tolerates "was not running";
@@ -243,8 +289,9 @@ case "${1:-}" in
   status)  cmd_status ;;
   open)    cmd_open ;;
   version) cmd_version ;;
+  msg)     shift; cmd_msg "$@" ;;
   *)
-    printf '\n  kosmos start | stop | restart | status | open | version\n\n'
+    printf '\n  kosmos start | stop | restart | status | open | version | msg\n\n'
     printf '  The dashboard lives at %s once started.\n\n' "$URL"
     exit 2
     ;;
