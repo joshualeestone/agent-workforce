@@ -640,6 +640,7 @@ async function main() {
       if (win.boxHidden) throw new Error('the switch is On and the agent page grew no window box');
       if (!win.preShown && !win.msgShown) throw new Error('the window box is an empty terminal: neither a capture nor a refusal in words');
       if (!win.preShown && win.hintText) throw new Error('an affirmative hint stands over a refused capture');
+      if (win.preShown && !win.hintText) throw new Error('a visible capture lost its as-it-looks-right-now framing');
       await page.click('#detail-back');
       await page.waitForTimeout(200);
       await page.click('.tab[data-tab="projects"]');

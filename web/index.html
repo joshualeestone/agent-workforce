@@ -3585,27 +3585,6 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     BOARD_SEEN = true;
-    if (CURRENT && ENG_ON && !WINDOW_OPENING
-      && !document.getElementById('panel-detail').hidden) {
-      // The panel-visibility term: CURRENT survives closing the detail,
-      // and a capture every five seconds for an invisible surface is a
-      // standing subprocess nobody is watching.
-      // ⚠️ The tie is re-checked on the FRESH card every poll, like the
-      // write controls beside it (setWritesOffered below): CURRENT's
-      // open-time flag froze, and a pane dying mid-open (a stranger
-      // taking the name) kept painting "no agent by that name" into the
-      // box -- the pass-5 sentence rebuilt through the tick.
-      const freshCard = data.agents.find((x) => x.sessionName === CURRENT.sessionName);
-      if (freshCard && freshCard.isNamedOurs === true) {
-        paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
-      } else {
-        // The hide RETIRES any in-flight paint too: without the bump, a
-        // fetch launched a beat earlier could resolve after this and
-        // reveal the box over the very state this arm is hiding.
-        WINDOW_LOAD += 1;
-        document.getElementById('d-window-box').hidden = true;
-      }
-    }
     updateRecPill();
     renderUpdateToast(data.update);
     LAST_VERSION = data.version || LAST_VERSION;
@@ -3634,6 +3613,26 @@ async function tick() {
     // one call. Same fact, one source: the shape this whole branch is about.
     if (CURRENT) {
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
+
+      /* The window box rides the SAME fresh-card lookup as the write
+         controls below (one fact, one derivation -- a second find() for
+         the same card was the new-sibling shape again). The tie
+         re-checks here every poll: a pane dying mid-open (a stranger
+         taking the name) otherwise kept painting "no agent by that
+         name" into the box, and the hide RETIRES any in-flight paint
+         (the epoch bump) so a fetch launched a beat earlier cannot
+         reveal the box over the very state this arm hides. The
+         panel-visibility term matters because CURRENT survives closing
+         the detail, and a capture every five seconds for an invisible
+         surface is a standing subprocess. */
+      if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
+        if (fresh && fresh.isNamedOurs === true) {
+          paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+        } else {
+          WINDOW_LOAD += 1;
+          document.getElementById('d-window-box').hidden = true;
+        }
+      }
 
       /* ⚠️ RE-APPLY the tie check on every poll, not only when the panel opens.
          The gate ran once at open and the poll never revisited it, so leaving
