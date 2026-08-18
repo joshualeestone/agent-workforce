@@ -2523,6 +2523,38 @@ test('the detail panel carries the explanation the card gave up', () => {
   assert.equal(healthy.hidden, true, 'an empty explanation must hide its line, not sit as a grey gap');
 });
 
+test('the detail meta line keeps the machine-name disclosure the card gave up', () => {
+  /* ⚠️ The SECOND instance of the removal pattern in one branch (Mona
+     Lisa's check, 2026-08-17): a removal is two changes, and only one of
+     them is visible where you made it. The machine-name chip left the
+     cards on Josh's audience ruling with the fact promised to the detail
+     meta line; the code kept that promise, but nothing held it -- a quiet
+     revert of the meta-line half would have passed the whole suite, which
+     is exactly how the because sentence vanished. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (card) => {
+    const el = { textContent: 'seeded' };
+    const from = script.indexOf("document.getElementById('d-meta').textContent =");
+    const write = script.indexOf(".filter(Boolean).join(' · ');", from);
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the meta-line write fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', script.slice(from, end))(
+      { getElementById: () => el }, card);
+    return el.textContent;
+  };
+  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
+  assert.match(surfaced, /shown by its machine name/,
+    'a display name that IS the machine name carries no disclosure on the panel');
+  assert.match(surfaced, /archive worker · Claude Opus 5 · /,
+    'CONTROL: the meta line lost its role and model, so the disclosure assertion floats free');
+  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
+  assert.doesNotMatch(named, /machine name/,
+    'an agent with a real display name is told it is shown by its machine name');
+});
+
 test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
   /* ⚠️ The menu precedes its trigger in the DOM (pack order, surfaced to the
      pack rather than reordered here), and it display:none's on close -- two

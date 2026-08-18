@@ -2514,10 +2514,11 @@ function taskLine(a) {
   return a.task || (a.state === 'rate_limited' ? 'Waiting out a usage limit' : 'no task showing');
 }
 function modelLine(a) {
-  /* Provider-first ("Claude Opus 5"): unambiguous the day a second provider
-     lands, and this is the screen where somebody checks what an agent runs
-     on. Guarded so a modelName that already carries the provider does not
-     become "Claude Claude...". */
+  /* Provider-first ("Claude Opus 5"), guarded so a modelName that already
+     carries the provider does not become "Claude Claude...". ⚠️ The prefix
+     ASSUMES every agent runs Claude, which is true of everything the
+     engine can create today -- the day a second provider lands, this line
+     would stamp "Claude" onto its names and MUST change with it. */
   if (!a.modelName) return 'Unknown Model';
   return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
 }
@@ -2696,7 +2697,7 @@ function card(a) {
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="agauge">${ring(a)}${pres}${badge}</div>
     <div class="aname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</div>
-    <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${copy.label}</b>${answer}</div>
+    <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${esc(copy.label)}</b>${answer}</div>
     <div class="atask">${esc(taskLine(a))}</div>
     ${unknownNote}
     <div class="acut"></div>
