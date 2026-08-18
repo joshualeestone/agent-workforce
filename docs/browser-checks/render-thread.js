@@ -317,6 +317,31 @@ async function main() {
   page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
 
   try {
+    /* ── 0. Engineering mode: Off hides the raw screen; this drive's
+       screen sections need it ON. Asserted in BOTH states rather than
+       just flipped: with the switch off (the shipped default) the
+       viewport container must be hidden and the send verdicts must not
+       point below -- the eng-mode chunk's whole claim on this page.
+       Flipped through the real route, not by poking state. ─────────── */
+    await page.goto(BASE + '?tab=projects', { waitUntil: 'networkidle' });
+    // Set Off through the real route first (a fixture server that
+    // outlives a previous run may hold a flipped switch), then assert
+    // the hiding -- the claim is Off-hides, however Off was reached.
+    await page.evaluate(async () => {
+      await fetch('/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+    });
+    await page.goto(BASE + '?tab=projects', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    const offState = await page.evaluate(() => ({
+      vpHidden: document.querySelector('.pj-viewport').hidden,
+    }));
+    check(offState.vpHidden === true, 'the raw screen is hidden while Engineering mode is off');
+    await page.evaluate(async () => {
+      await fetch('/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) });
+    });
+
     /* ── 1. the one click out of the stranded state ─────────────────────── */
     await page.goto(BASE, { waitUntil: 'networkidle' });
     await page.waitForSelector('.acard', { timeout: 10000 });

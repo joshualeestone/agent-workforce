@@ -1835,7 +1835,11 @@ svg { display: block; }
        viewport-not-transcript honesty as the project page's block. -->
   <section class="dbox" id="d-window-box" hidden>
     <h3 class="dlab" id="d-window-label">The window it is running in</h3>
-    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;">As it looks right now. It is not a transcript, and it is not what the agent said to you.</p>
+    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
+         sentence is the runtime paint's to make, only over a capture
+         that succeeded (the project viewport recorded this exact
+         reversal at its own block). -->
+    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
     <pre class="pj-screen" id="d-window" tabindex="0" hidden
          role="region" aria-labelledby="d-window-label"></pre>
     <p class="dhint" id="d-window-msg" hidden></p>
@@ -2547,10 +2551,14 @@ svg { display: block; }
         <!-- Mona Lisa's ruled line (2026-08-18): teach the MECHANISM (a
              number typed into the message box is how you answer); the
              quoted pane above says what the numbers mean. NOT gated on
-             Engineering mode: needed in Off, the default. Recorded for
-             her: a prompt with more than two options makes the trailing
-             numbers wrong; some day the range comes from the pane. -->
-        <p class="fhint" style="margin:8px 0 0;">Answer by sending the number: 1 or 2.</p>
+             Engineering mode: needed in Off, the default. SHIPS HIDDEN
+             and follows the question TEXT's own visibility (paintThread):
+             in the asking-but-no-capture state there is no quoted pane
+             defining the numbers, and the line alone would teach an
+             answer to a question nobody can see. Recorded for her: a
+             prompt with more than two options makes the trailing numbers
+             wrong; some day the range comes from the pane. -->
+        <p class="fhint" id="pj-answer-how" hidden style="margin:8px 0 0;">Answer by sending the number: 1 or 2.</p>
       </div>
 
       <!-- What we have sent, and how each one went. Ours to keep, because we
@@ -2575,7 +2583,7 @@ svg { display: block; }
            terminal into who-said-what: a parser that guesses wrong puts words in
            the agent's mouth, and Claude Code redraws, wraps and prints tool
            output that reads exactly like prose. -->
-      <div class="pj-viewport">
+      <div class="pj-viewport" hidden>
         <span class="flabel" id="pj-screen-label">Its screen</span>
         <!-- ⚠️ The hint ships EMPTY and the pre ships HIDDEN: the affirmative
              "as it looks right now" sentence used to be baked into the
@@ -3577,6 +3585,7 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     BOARD_SEEN = true;
+    if (CURRENT && ENG_ON) paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
     updateRecPill();
     renderUpdateToast(data.update);
     LAST_VERSION = data.version || LAST_VERSION;
@@ -4123,9 +4132,12 @@ document.getElementById('lim-tier').addEventListener('change', limTierChange);
    after a save here; a preference is not polled every five seconds (a
    mid-session change lands on the next navigation). */
 let ENG_ON = false;
+let ENG_EPOCH = 0;
 async function refreshEngMode() {
+  const mine = ++ENG_EPOCH;
   try {
     const r = await (await fetch('/api/engmode')).json();
+    if (mine !== ENG_EPOCH) return ENG_ON;
     ENG_ON = r.on === true;
     const tog = document.getElementById('eng-toggle');
     tog.classList.toggle('on', ENG_ON);
@@ -4140,6 +4152,7 @@ let ENG_SAVING = false;
 async function engToggleClick() {
   if (ENG_SAVING) return;
   ENG_SAVING = true;
+  const mine = ++ENG_EPOCH;
   const msg = document.getElementById('eng-msg');
   try {
     const on = document.getElementById('eng-toggle').getAttribute('aria-checked') !== 'true';
@@ -4149,6 +4162,7 @@ async function engToggleClick() {
       body: JSON.stringify({ on }),
     });
     const body = await res.json().catch(() => ({}));
+    if (mine !== ENG_EPOCH) return;
     if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
     ENG_ON = body.on === true;
     const tog = document.getElementById('eng-toggle');
@@ -4170,6 +4184,18 @@ document.getElementById('eng-toggle').addEventListener('click', engToggleClick);
 function pjApplyEngMode() {
   const vp = document.querySelector('.pj-viewport');
   if (vp) vp.hidden = !ENG_ON;
+}
+
+/* ⚠️ ONE derivation of "is the raw screen actually visible", for every
+   sentence that points at it. The visibility fact SPLIT when the mode
+   landed (the container hides wholesale while paintThread still flips
+   the inner pre), and two send-verdict pointers read the stale inner
+   half -- "Its screen is below" over no screen, in the exact error path
+   where the person most needs true instructions. */
+function pjScreenOnScreen() {
+  const vp = document.querySelector('.pj-viewport');
+  const pre = document.getElementById('pj-screen');
+  return ENG_ON && Boolean(vp) && !vp.hidden && Boolean(pre) && !pre.hidden;
 }
 refreshEngMode().then(pjApplyEngMode);
 document.getElementById('set-reveal').addEventListener('click', async () => {
@@ -4533,12 +4559,15 @@ let CONVO_LOAD = 0;
 /* The raw window, only when Engineering mode is on; a refusal is said
    in the engine's own sentence, never rendered as an empty terminal. */
 let WINDOW_LOAD = 0;
-async function paintAgentWindow(sessionName) {
+async function paintAgentWindow(sessionName, opts) {
   const box = document.getElementById('d-window-box');
   const pre = document.getElementById('d-window');
   const msg = document.getElementById('d-window-msg');
   const mine = ++WINDOW_LOAD;
-  const on = await refreshEngMode();
+  /* The 5s tick repaints with the CACHED flag ("right now" must not age
+     false while the panel sits open); a preference is still never
+     polled -- only the capture is. Opens re-learn the flag. */
+  const on = (opts && opts.cachedFlag) ? ENG_ON : await refreshEngMode();
   if (mine !== WINDOW_LOAD) return;
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
   box.hidden = !on;
@@ -4550,10 +4579,12 @@ async function paintAgentWindow(sessionName) {
     if (r.text != null) {
       pre.textContent = r.text;
       pre.hidden = false;
+      document.getElementById('d-window-hint').textContent = 'As it looks right now. It is not a transcript, and it is not what the agent said to you.';
       msg.hidden = true;
     } else {
       pre.hidden = true;
-      msg.textContent = r.because || 'We could not read its window just now.';
+      document.getElementById('d-window-hint').textContent = '';
+      msg.textContent = r.because || r.error || 'We could not read its window just now.';
       msg.hidden = false;
     }
   } catch {
@@ -4639,6 +4670,16 @@ function openDetail(sessionName) {
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
+  /* Cleared BEFORE the paint's awaits: opening B with A's captured pane
+     still in the box would show A's raw session under B's name for two
+     network round-trips -- cross-agent misattribution, the same class
+     the thread's switching clear closes. */
+  {
+    const wpre = document.getElementById('d-window');
+    wpre.textContent = ''; wpre.hidden = true;
+    document.getElementById('d-window-hint').textContent = '';
+    document.getElementById('d-window-msg').hidden = true;
+  }
   paintAgentWindow(a.sessionName);
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
@@ -8475,6 +8516,7 @@ function paintThread(body) {
   if (body.asking && body.question) {
     qLabel.textContent = name + ' is waiting on an answer. This is the part of its screen that asked:';
     pjSetScreen(qText, body.question.text);
+    document.getElementById('pj-answer-how').hidden = false;
     qWrap.hidden = false;
   } else if (body.asking) {
     /**
@@ -8499,7 +8541,13 @@ function paintThread(body) {
         || 'we cannot find the question on its screen right now')
       + '.'
       + (ENG_ON && body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
+    /* (Reads ENG_ON with the payload rather than pjScreenOnScreen():
+       this runs BEFORE the pre is painted below, so the one-derivation
+       helper would read last paint's state. Same fact, taken at the
+       moment each sentence is made.) */
     pjSetScreen(qText, '');
+    // No quoted pane, no teaching line: nothing above defines the numbers.
+    document.getElementById('pj-answer-how').hidden = true;
     /* ⚠️ Focus is RESCUED before either hide (round 31): round 30 moves
        focus INTO qText, and hiding a focused element drops focus to
        <body> with nothing announced -- the stranded-keyboard state,
@@ -8873,7 +8921,7 @@ async function pjSend() {
     if (!flightMoved()) {
       msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
         + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
-        + (document.getElementById('pj-screen').hidden
+        + (!pjScreenOnScreen()
           ? 'Before sending it again, check whether it already arrived. '
           : 'Its screen is below. Check there before sending it again. ')
         + 'Your message is still in the box below.';
@@ -8992,11 +9040,10 @@ async function pjSend() {
       // fact; this line says the one thing to do about it.
       render = (when) => 'Could not confirm this reached ' + name + '’s session' + when + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
-        // Gated like the question label's pointer (round 22): an
-        // unconfirmed send is a tmux that did not answer, and that is the
-        // same tmux whose capture just failed -- the screen block may be
-        // hidden behind "we cannot see its screen right now".
-        + (document.getElementById('pj-screen').hidden
+        // Gated like the question label's pointer (round 22), through the
+        // ONE visibility derivation (pjScreenOnScreen): the capture may
+        // have failed AND Engineering mode may have the whole block away.
+        + (!pjScreenOnScreen()
           ? ' Before sending it again, check whether it already arrived.'
           : ' Its screen is below. Check there before sending it again.')
         + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')

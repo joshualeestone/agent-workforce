@@ -1638,7 +1638,13 @@ const server = http.createServer((req, res) => {
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
       const roster = safeRoster();
-      sendJson(res, 200, chat.viewport(name, roster));
+      // Resolved to the card's OWN sessionName (the sessionOf lesson: a
+      // spelling that passes the gate via the safeKey fallback would
+      // exact-miss viewport's roster lookup and answer a refusal about
+      // an agent that is right there).
+      let exact = name;
+      try { const card = claimantFor(name); if (card && card.sessionName) exact = card.sessionName; } catch { /* the gate already passed */ }
+      sendJson(res, 200, chat.viewport(exact, roster));
     } catch {
       sendJson(res, 500, { error: 'we could not read its window just now' });
     }

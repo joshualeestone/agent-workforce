@@ -578,11 +578,13 @@ async function main() {
       await page.waitForTimeout(400);
       const dfl = await page.evaluate(() => ({
         viewportHidden: document.querySelector('.pj-viewport').hidden,
-        teach: [...document.querySelectorAll('#pj-question .fhint')]
-          .some((e) => /Answer by sending the number/.test(e.textContent)),
       }));
       if (!dfl.viewportHidden) throw new Error('the raw window is on screen in the default Off state');
-      if (!dfl.teach) throw new Error('the number-answer teaching line is missing in Off, where it is needed most');
+      // The teaching line's VISIBLE rendering (and the question panel's
+      // mode-independence) need a live asking agent, which this sandbox
+      // does not manufacture: render-thread.js owns those assertions
+      // against its scripted fixture.
+
 
       // The person's own switch, through the real card.
       await page.click('.tab[data-tab="settings"]');
@@ -598,10 +600,36 @@ async function main() {
       // open page, which is itself part of the claim.
       const revealed = await page.evaluate(() => ({
         viewportHidden: document.querySelector('.pj-viewport').hidden,
-        questionPanelUntouched: Boolean(document.getElementById('pj-question')),
       }));
       if (revealed.viewportHidden) throw new Error('the switch is On and the raw window stayed hidden');
-      if (!revealed.questionPanelUntouched) throw new Error('the question panel vanished with the mode change');
+      // The SECOND surface: the agent page's window box, on the same
+      // switch. The sandbox roster is the real board, so the capture
+      // either succeeds or refuses in words -- both are honest renders,
+      // and the claim here is the box is PRESENT and never an empty
+      // terminal under an affirmative hint.
+      await page.click('#klink');
+      await page.waitForTimeout(400);
+      await page.click('.acard');
+      await page.waitForTimeout(800);
+      const win = await page.evaluate(() => {
+        const box = document.getElementById('d-window-box');
+        const pre = document.getElementById('d-window');
+        const msg = document.getElementById('d-window-msg');
+        const hint = document.getElementById('d-window-hint');
+        return {
+          boxHidden: box.hidden,
+          preShown: !pre.hidden,
+          msgShown: !msg.hidden,
+          hintText: hint.textContent,
+        };
+      });
+      if (win.boxHidden) throw new Error('the switch is On and the agent page grew no window box');
+      if (!win.preShown && !win.msgShown) throw new Error('the window box is an empty terminal: neither a capture nor a refusal in words');
+      if (!win.preShown && win.hintText) throw new Error('an affirmative hint stands over a refused capture');
+      await page.click('#detail-back');
+      await page.waitForTimeout(200);
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(300);
       // Back Off through the same switch, so later states see the default.
       await page.click('.tab[data-tab="settings"]');
       await page.waitForTimeout(300);
