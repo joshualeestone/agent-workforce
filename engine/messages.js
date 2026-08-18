@@ -399,10 +399,10 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     const because = lim.on
       ? 'you two have exchanged ' + lim.pairPerWindow + ' messages in the last hour. '
         + 'Stop and surface where you are to your operator instead of another round.'
-      /* Told-only copy is an Angel draft attributed for Mona Lisa's
-         pass, aligned with her ruled Off sentence. */
+      /* Told-only copy is Mona Lisa's ruled shape (her pass, 2026-08-18):
+         what happened, and why, in one line. */
       : 'you two have exchanged ' + lim.pairPerWindow + ' messages in the last hour '
-        + 'without landing. Kosmos is letting it continue and telling your operator instead.';
+        + 'without landing. Kosmos did not step in, because the limit is turned off.';
     // The tell is logged once per pair per window, not once per retry:
     // a retry-looping agent must not grow the record without bound.
     // !m.project: a ROOM valve row carries to = its project id, and an
@@ -607,10 +607,9 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
     const because = lim.on
       ? 'This conversation went back and forth for a while without landing, '
         + 'so Kosmos stopped it and asked everyone to bring you in.'
-      /* Told-only draft attributed for Mona Lisa's pass, her Off-state
-         grammar. */
+      /* Her ruled shape: what happened, and why, in one line. */
       : 'This conversation has gone back and forth for a while without landing. '
-        + 'Kosmos is letting it continue and telling you instead.';
+        + 'Kosmos did not step in, because you have the limit turned off.';
     // Same latest-row rule as the pair dedup: the record's last word for
     // this room must match current behavior; within one state, once.
     const prior = log.filter((m) => m && m.kind === 'valve'

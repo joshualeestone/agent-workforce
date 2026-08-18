@@ -2862,10 +2862,10 @@ svg { display: block; }
            her split: the counter ALWAYS tells the person (that half is not
            configurable, same rule as "we could not look"); this switch
            decides only whether Kosmos also STOPS them. Ships On at the
-           default tier (Josh). Angel's attributed additions for her pass:
-           the dlab category word, and the high-tier cost line (her first
-           ruling placed a warning at the high end as well as Off). -->
-      <h3 class="dlab">Conversations</h3>
+           default tier (Josh). The category label, the high-tier cost
+           line, and the told-only record sentences are Mona Lisa's ruled
+           copy (her pass, 2026-08-18 ~1:42 PM). -->
+      <h3 class="dlab">Agent conversations</h3>
       <div class="setrow" id="lim-row">
         <div><b>Limit how much your agents talk to each other</b>
           <p class="dhint" style="margin:2px 0 0;">Every message between your agents uses your AI plan. If you run a model that does not charge you, turn this off.</p></div>
@@ -4386,7 +4386,7 @@ function convoRow(r, agentName) {
       return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
         + 'The conversation on ' + esc(r.project)
         + (told
-          ? ' has gone back and forth for a while without landing. Kosmos is letting it continue and telling you instead.'
+          ? ' has gone back and forth for a while without landing. Kosmos did not step in, because you have the limit turned off.'
           : ' went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
         + '</p></div>';
     }
@@ -4395,7 +4395,7 @@ function convoRow(r, agentName) {
     return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
       + esc(r.from) + ' and ' + esc(r.to)
       + (told
-        ? ' have been going back and forth without landing. Kosmos is letting them continue and telling you instead.'
+        ? ' have been going back and forth without landing. Kosmos did not step in, because you have the limit turned off.'
         : ' were going back and forth, so Kosmos stopped them and asked '
           + esc(r.from) + ' to bring you in.')
       + '</p></div>';
