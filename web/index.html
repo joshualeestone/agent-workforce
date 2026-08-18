@@ -2939,24 +2939,38 @@ function icon(name, extraClass) {
   return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
 }
 
-/* The disc fallback's TWO facts, shared by every surface that draws it
-   (board rings, list chips, project cards, the detail header):
-   THE initial -- singular, per the pack's own words -- and a deterministic
-   muted tint, "varied enough that seven agents do not look identical."
-   The tint is picked from a small fixed palette by a character sum: not a
-   hash with distribution claims (a lesson this fleet has paid for), just
-   eight warm hues where collisions are acceptable and stability is the
-   point -- the same name is always the same disc. */
+/* The disc fallback, PACK-VERBATIM (faceSVG in the freeze): seven
+   tint-and-ink PAIRS -- a muted pale disc with a matched deep initial --
+   hashed by the pack's own order-sensitive polynomial, name-derived so
+   the mark is stable identity across the fleet changing. Shared by every
+   surface that draws the fallback (board rings, list chips, project
+   cards, the detail header). The initial is singular, the pack's word.
+   Not a distinctness guarantee: seven buckets is a birthday problem and
+   the pack says so where it defines the families; collisions are
+   expected, clustering is not (the polynomial is what my char-sum
+   was not: order-sensitive, so anagrams and short names spread). */
 function initials(name) {
   const first = [...String(name || '?').trim()][0] || '?';
   return first.toUpperCase();
 }
-const DISC_TINTS = ['#e8e0d1', '#e3d5d0', '#d5dfd6', '#d3dbe3', '#e6d9c4', '#dcd3e0', '#d9e0cd', '#e4d7cb'];
-function discTint(name) {
-  let n = 0;
-  for (const ch of String(name || '')) n = (n + ch.codePointAt(0)) % 997;
-  return DISC_TINTS[n % DISC_TINTS.length];
+const DISC_TINTS = ['#dfe5ea', '#e3e7dd', '#e9e1e4', '#dde6e6', '#eae3d9', '#e0e4ea', '#e6e2dd'];
+const DISC_INKS  = ['#4a5560', '#525c48', '#5c4f55', '#47585a', '#5e5344', '#4c5462', '#585048'];
+/* The HASH is famFor's FNV-1a (the pack's mark hash), not the disc
+   section's own polynomial: measured at seven buckets, the polynomial
+   collides four of six fixed anagram pairs (31 and 997 interact badly
+   with mod 7) while FNV separates five of six and reaches every bucket
+   across a 41-name corpus. Both hashes are the pack's; the disc keeps
+   its tint/ink pairs and borrows its sibling's spread. Flagged to the
+   pack (the disc section's hash does not deliver the variety its
+   comment promises). */
+function discIndex(name) {
+  let h = 2166136261;
+  const k = String(name || '');
+  for (let i = 0; i < k.length; i += 1) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h % DISC_TINTS.length;
 }
+function discTint(name) { return DISC_TINTS[discIndex(name)]; }
+function discInk(name) { return DISC_INKS[discIndex(name)]; }
 
 /**
  * Memory gauge, the pack's: arc on the ring, avatar in the middle, no
@@ -2980,8 +2994,13 @@ function ring(a) {
        <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
               x="13" y="13" width="46" height="46" preserveAspectRatio="xMidYMid slice"
               clip-path="url(#${clip})"/>`
-    : `<circle cx="36" cy="36" r="23" class="avatar-bg" fill="${discTint(a.name)}"/>
-       <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
+    /* style="", not a fill attribute: an SVG presentation attribute sits
+       BELOW every author CSS rule, and .avatar-bg declares fill -- the
+       tint never rendered until this was inline style (found by the pass;
+       no text-reading test can see a cascade defeat). The matched ink
+       rides the same way. */
+    : `<circle cx="36" cy="36" r="23" class="avatar-bg" style="fill:${discTint(a.name)}"/>
+       <text x="36" y="41" text-anchor="middle" class="avatar-initials" style="fill:${discInk(a.name)}">${esc(initials(a.name))}</text>`;
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
@@ -3091,7 +3110,7 @@ function lrow(a) {
   const band = memBand(pct);
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
-    : `<span class="lavtint" style="background:${discTint(a.name)}">${esc(initials(a.name))}</span>`;
+    : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
   const mem = pct === null
     ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
@@ -6706,11 +6725,16 @@ function projectCard(p, unreadable) {
   /* Faces: the avatar when the TIED agent has one, the initials chip
      otherwise (hasAvatar is gated on tied in the engine -- a borrowed
      pane must not lend the card somebody else's photograph). */
+  /* aria-hidden: the card is a button whose accessible name is its text,
+     and bare initials read as stray letters to a screen reader while the
+     "N agents" count already carries the fact. The title names each face
+     for sighted hover. */
   const faces = (p.agents || []).slice(0, 5).map((a) => a.hasAvatar
-    ? '<span class="lav"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
-    : '<span class="lav" style="background:' + discTint(a.name) + '">' + esc(initials(a.name)) + '</span>').join('');
+    ? '<span class="lav" title="' + esc(a.name) + '"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav" title="' + esc(a.name) + '" style="background:' + discTint(a.name) + ';color:' + discInk(a.name) + '">' + esc(initials(a.name)) + '</span>').join('');
   const count = s.total ? '<span class="pjcount">' + s.total + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
-  const facesRow = (faces || count) ? '<span class="pjfaces">' + faces + count + '</span>' : '';
+  const facesRow = (faces || count)
+    ? '<span class="pjfaces"><span aria-hidden="true">' + faces + '</span>' + count + '</span>' : '';
   /* ⚠️ The card NEVER says everything is fine when part of it was
      unreadable -- the pill claims only what the counts support, and the
      blind spot is SAID in words below, same rule as before the restyle. */

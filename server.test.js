@@ -5276,6 +5276,69 @@ test('the project pill claims only what the counts support', () => {
     'an unseen member let the card claim nothing is running');
   assert.equal(pjPillOf({ summary: { total: 2, working: 1 } }, true).label, 'Can’t tell',
     'a blind roster let the card keep claiming Working');
+  assert.equal(pjPillOf({ summary: { total: 2, needsYou: 1 } }, true).label, 'Can’t tell',
+    'a blind roster let the card keep claiming Needs you, the strongest reassurance it could leak');
+});
+
+test('the projects tiles DRAW, not just compute: present at non-zero, hidden at zero and blind', () => {
+  /* Splinter's boundary: a count test answers does-the-number-come-out;
+     this drives the WRITE, so a tile that computes correctly and never
+     draws cannot pass. Slice includes the writes (the summary test's
+     lesson). */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (projects, unreadable) => {
+    const els = { 'st-pj': { textContent: '' }, 'st-pjattn': { textContent: '' }, 'st-pjattn-tile': { hidden: 'untouched' } };
+    const from = script.indexOf('const attnProjects = PJ_AGENTS_UNREADABLE');
+    const write = script.indexOf("document.getElementById('st-pjattn-tile').hidden = !attnProjects;");
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end, 'the tile writes fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'active', 'PJ_AGENTS_UNREADABLE', script.slice(from, end))(
+      { getElementById: (id) => els[id] }, projects, unreadable);
+    return els;
+  };
+  const hot = drive([{ summary: { needsYou: 2 } }, { summary: {} }], false);
+  assert.equal(hot['st-pjattn-tile'].hidden, false, 'a project needs you and the tile never drew');
+  assert.equal(hot['st-pjattn'].textContent, '1', 'the tile counts members, not projects (or nothing)');
+  assert.equal(hot['st-pj'].textContent, '2');
+  const calm = drive([{ summary: {} }], false);
+  assert.equal(calm['st-pjattn-tile'].hidden, true, 'the alert tile shows a zero');
+  const blind = drive([{ summary: { needsYou: 3 } }], true);
+  assert.equal(blind['st-pjattn-tile'].hidden, true,
+    'a blind roster drew a needs-you claim it cannot make');
+});
+
+test('the disc hash spreads: the pack seven-bucket system, order-sensitive, all buckets reachable', () => {
+  /* Distribution and structure, NOT distinctness (seven buckets is a
+     birthday problem and the pack says so where it defines the
+     families): a name corpus must reach every bucket without gross
+     clustering, and anagram pairs must be separable -- the property
+     char-sum failed structurally. */
+  const discIndex = pageFunction('discIndex',
+    "const DISC_TINTS = ['a','b','c','d','e','f','g'];");
+  const corpus = ['leo','mara','rook','nils','vex','angel','april','donnie','mikey','casey','raph','splinter','krang','jennika','shredder','tom','ana','ben','cleo','dora','eli','fern','gus','hana','ivan','june','kira','liam','nora','omar','pia','quinn','rosa','sam','tara','uma','vic','wren','xena','yuri','zed'];
+  const seen = new Map();
+  for (const n of corpus) seen.set(discIndex(n), (seen.get(discIndex(n)) || 0) + 1);
+  assert.equal(seen.size, 7, 'a 41-name corpus left buckets unreached: ' + [...seen.keys()].sort().join(','));
+  const max = Math.max(...seen.values());
+  assert.ok(max <= 12, 'gross clustering: one bucket took ' + max + ' of 41');
+  /* ⚠️ Order sensitivity as a STATISTICAL property, not a pair list: the
+     claim is "anagrams are no more likely to collide than any other
+     pair" -- an order-INDEPENDENT hash collides on every single pair
+     (char-sum: 40/40 by construction), a good hash collides at roughly
+     chance (~1/7). The bound sits far above chance and far below
+     catastrophe, so it cannot go red on a correct hash that got
+     ordinarily unlucky, and it survives a bucket-count change. A
+     fixed-small-list assertion here would be the seven-distinct-tints
+     mistake in another costume. */
+  const words = corpus.filter((w) => w.length >= 3 && w !== [...w].reverse().join(''));
+  const anagramPairs = words.map((w) => [w, [...w].reverse().join('')]);
+  const collisions = anagramPairs.filter(([a, b]) => discIndex(a) === discIndex(b)).length;
+  assert.ok(anagramPairs.length >= 30, 'the corpus shrank under the anagram test');
+  assert.ok(collisions <= Math.ceil(anagramPairs.length / 3),
+    'anagrams collide ' + collisions + '/' + anagramPairs.length
+    + ' -- far above chance, the hash is order-independent or near it');
 });
 
 test('a borrowed-name pane cannot lend a project card its photograph', () => {
