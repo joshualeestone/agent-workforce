@@ -174,6 +174,23 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .runnow { margin: 0 0 14px; font-size: .9375rem; color: var(--k-ink-2); }
 .runnow b { color: var(--k-ink); font-weight: 650; }
 .memrow { display: flex; align-items: center; gap: 12px; max-width: 22rem; }
+/* The conversation rows (messaging screens): fixed ink inside the
+   fixed-light dbox. A colleague's row reads differently from yours by
+   the who-line and the gold mark, per the spec's rule that a person must
+   see the distinction the product already teaches the agent. */
+.cvrow { padding: 10px 0; border-top: 1px solid var(--k-rule); }
+.cvrow:first-child { border-top: 0; padding-top: 0; }
+.cv-who { display: block; font-size: .6875rem; letter-spacing: .1em; text-transform: uppercase;
+          font-weight: 700; color: var(--k-ink-2); margin-bottom: 3px; }
+.cvrow.peer .cv-who::before { content: ''; display: inline-block; width: 7px; height: 7px;
+          border-radius: 50%; background: var(--gold-bright); margin-right: 6px; vertical-align: 1px; }
+.cvrow p { margin: 0; font-size: .9375rem; color: var(--k-ink); line-height: 1.5; }
+.cv-state { display: block; margin-top: 4px; font-size: .8125rem; color: var(--k-ink-2); }
+.cvrow.indent { margin-left: 22px; }
+/* The valve row: NOT an error and must not look like one -- plain ink,
+   the gold mark, the product doing its job. */
+.cvrow.valve p { color: var(--k-ink-2); font-style: normal; }
+.cv-none { font-size: .9375rem; color: var(--k-ink-2); margin: 0; }
 .detail .field { border-top: 0; padding-top: 0; margin-top: 0; }
 .detail .dbox .flabel, .detail .dbox .fhint, .detail .dbox .fmsg, .detail .dbox .fpath { color: var(--k-ink-2); }
 .detail .dbox .flabel { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase;
@@ -1600,6 +1617,28 @@ svg { display: block; }
     <h3 class="dlab">Runs on</h3>
     <p class="runnow" id="d-runson"></p>
     <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
+  </section>
+
+  <!-- ⚠️ THE CONVERSATION (Mona Lisa's messaging-screens spec, 2026-08-18):
+       everything said to this agent, in order, whoever said it -- the
+       operator's project-thread messages and colleagues' messages in ONE
+       list, because the person's question is "why did Leo do that?", not
+       "what are all my agents saying?". A colleague's row must read
+       differently from yours: the product already tells the agent to
+       weigh them differently, so the person has to see which is which.
+       Delivery states render, none as silence; the engine's because
+       sentences ship verbatim; the valve row is NOT an error, it is the
+       most reassuring line on the screen. Replies indent one level,
+       never a tree. -->
+  <section class="dbox">
+    <h3 class="dlab">Conversation</h3>
+    <div id="d-convo"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
+    <!-- The capability-gap sentence (her ruled cause-free wording): shown
+         when this agent's instructions lack the colleagues block, which
+         is TRUE for custom-born, pre-0.1.7 role-born, and adopted agents
+         alike -- any causal clause was false for at least one of them.
+         It earns a button when teach-existing lands, not before. -->
+    <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
   </section>
 
   <section class="dbox">
@@ -3931,6 +3970,87 @@ function memoryBox(a) {
         + ' is holding the whole session so far.</p>');
 }
 
+/* One conversation row (messaging screens, Mona Lisa's spec). Pure like
+   card()/lrow() so the grammar is drivable without a server. The engine's
+   because sentences ship VERBATIM -- they were written for a person, and
+   paraphrasing an engine sentence is how two surfaces drift. */
+function convoRow(r, agentName) {
+  if (r.kind === 'valve') {
+    // Her sentence, names substituted: proof a conversation cannot run
+    // on without you. Not an error, and not dressed as one.
+    return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
+      + esc(r.from) + ' and ' + esc(r.to)
+      + ' were going back and forth, so Kosmos stopped them and asked '
+      + esc(r.from) + ' to bring you in.</p></div>';
+  }
+  if (r.kind === 'refused') {
+    // Her copy, the because verbatim: a refusal their agent met is an
+    // event, and silence is the wrong way to learn your agent is
+    // confusing itself.
+    return '<div class="cvrow peer"><span class="cv-who">' + esc(r.from) + ' · to ' + esc(r.to) + '</span><p>'
+      + esc(r.from) + ' tried to message ' + esc(r.to) + '.</p>'
+      + '<span class="cv-state"><b>Not sent:</b>' + (r.because ? ' ' + esc(r.because) : '') + '</span></div>';
+  }
+  if (r.kind === 'unreadable') {
+    return '<div class="cvrow"><span class="cv-who">Kosmos</span><p>We could not read '
+      + esc(r.what) + ' just now, so part of this conversation may be missing.</p></div>';
+  }
+  let who; let cls;
+  if (r.kind === 'operator') {
+    who = 'You · on ' + r.project;
+    cls = 'cvrow you';
+  } else {
+    // From this agent or to it, both render; from and to ARE the
+    // direction, so one expression covers both ways. (Session names: the
+    // log holds what the wire holds; display-name resolution is the
+    // clean-chat naming pass, recorded.)
+    who = r.from + ' · to ' + r.to;
+    cls = 'cvrow peer' + (r.in_reply_to ? ' indent' : '');
+  }
+  let state = '';
+  if (r.state === 'unconfirmed') {
+    state = '<span class="cv-state">Sent to ' + esc(r.kind === 'operator' ? agentName : r.to)
+      + '. We could not confirm it arrived.</span>';
+  } else if (r.state === 'could_not') {
+    state = '<span class="cv-state"><b>Not sent.</b>' + (r.because ? ' ' + esc(r.because) : '') + '</span>';
+  }
+  return '<div class="' + cls + '"><span class="cv-who">' + esc(who) + '</span><p>'
+    + esc(r.text) + '</p>' + state + '</div>';
+}
+
+let CONVO_LOAD = 0;
+async function paintConversation(sessionName, agentName) {
+  const box = document.getElementById('d-convo');
+  // The INSTR_LOAD pattern: two fetches for the SAME agent (A, B, A
+  // quickly) pass the sessionName guard both times, and the older answer
+  // must not paint last.
+  const mine = ++CONVO_LOAD;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/conversation');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'we could not read the conversation');
+    if (mine !== CONVO_LOAD) return; // a newer conversation fetch is in flight
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return; // a newer agent is open
+    if (!data.rows.length) {
+      box.innerHTML = '<p class="cv-none">Nothing here yet.</p>';
+      return;
+    }
+    box.innerHTML = data.rows.map((r) => convoRow(r, agentName)).join('')
+      + (data.total > data.rows.length
+        ? '<p class="cv-none" style="margin-top:10px;">Showing the latest ' + data.rows.length + ' of ' + data.total + '.</p>'
+        : '');
+  } catch (err) {
+    // The same stale-fetch guards as the happy path: agent A's failure
+    // must not paint its could-not-look sentence over agent B's open
+    // conversation (a false statement about the wrong agent).
+    if (mine !== CONVO_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    // Could-not-look, never a blank box that reads as no-conversation.
+    box.innerHTML = '<p class="cv-none">We could not read this conversation just now. ('
+      + esc((err && err.message) || 'no detail') + ')</p>';
+  }
+}
+
 function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
@@ -3971,6 +4091,9 @@ function openDetail(sessionName) {
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
   drun.innerHTML = 'Right now: <b>' + esc(modelLine(a)) + '</b>';
+  document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
+  document.getElementById('d-convo-gap').hidden = true;
+  paintConversation(a.sessionName, a.name);
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
@@ -4238,7 +4361,14 @@ async function loadInstructions(sessionName) {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/instructions?t=' + Date.now(),
       { cache: 'no-store' });
     const data = await res.json();
+    // ⚠️ BOTH guards: the token catches a newer LOAD, and the CURRENT
+    // check catches the case no load bumps the token -- opening an
+    // UNTIED agent never calls this function, so agent A's late answer
+    // passed the token test and painted A's file (and A's gap sentence)
+    // on B's panel. A new sibling does not inherit the guard; this one
+    // now guards the whole family below it.
     if (mine !== INSTR_LOAD) return; // a newer agent is open; this answer is for the old one
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
     if (!res.ok) throw new Error(data.error || 'that did not work');
 
     box.value = data.text || '';
@@ -4266,6 +4396,26 @@ async function loadInstructions(sessionName) {
     // Any message left over from the in-flight window (a Save clicked before
     // this load landed) is about a state that no longer holds.
     msg.textContent = '';
+
+    /* The capability-gap sentence (messaging screens §5): shown only off a
+       SUCCESSFUL read whose text lacks the colleagues block -- the one
+       fact the sentence claims. An unreadable file keeps it hidden: we
+       will not assert what an agent does not know off a file we could not
+       look at. Cause-free wording on purpose (custom-born, pre-0.1.7, and
+       adopted agents all lack the block; any causal clause was false for
+       at least one of them). */
+    const gapEl = document.getElementById('d-convo-gap');
+    if (gapEl) {
+      /* ⚠️ Gated on the STRUCTURED fields, not the text alone: the route
+         answers an unreadable-but-existing file with 200 {exists:false,
+         editable:false, text:''}, and an empty text would read as
+         block-absent -- asserting what an agent does not know off a file
+         nobody could look at. A genuinely absent file (exists:false,
+         editable:true) truly lacks the block and stays shown. */
+      gapEl.hidden = data.exists
+        ? (data.text || '').includes('kosmos:colleagues:start')
+        : !data.editable;
+    }
 
     // ⚠️ `exists: false` does NOT mean there is no file. The read path also
     // refuses a file that IS there but cannot be shown: not UTF-8, over the

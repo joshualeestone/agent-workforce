@@ -1453,6 +1453,78 @@ const server = http.createServer((req, res) => {
         { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
+  /**
+   * --- one agent's conversation, merged ------------------------------------
+   *
+   * The messaging screens' read (Mona Lisa's spec, 2026-08-18 §1): a
+   * conversation lives in the agent's own chat, interleaved -- operator
+   * messages from every project thread the agent is on, colleague
+   * messages and valve closings from the a2a record, one list sorted by
+   * time. READ-ONLY COMPOSITION of records other routes already own; no
+   * new plumbing, exactly as the spec promised.
+   */
+  const convo = pathname.match(/^\/api\/agent\/([^/]+)\/conversation$/);
+  if (convo && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(convo[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    try {
+      const rows = [];
+      // "We could not look" rows are kept APART from the timeline: their
+      // whole purpose is to never be silent, and a time-sorted tail cap
+      // would drop null-dated rows first -- the exact missing-history
+      // state rendered as a complete-looking conversation. They are
+      // re-attached ahead of the served slice below, cap-proof.
+      const unreadable = [];
+      // One derivation of the reverse edge: projectsFor is the engine's
+      // own "which projects is this agent on", readable from both ends.
+      let mine = [];
+      try { mine = projects.projectsFor(name, null) || []; } catch { mine = null; }
+      if (mine === null) {
+        unreadable.push({ kind: 'unreadable', what: 'your projects', at: null });
+      } else {
+        for (const pr of mine) {
+          try {
+            for (const m of chat.readThread(pr.id, name, pr.createdAt).messages) {
+              rows.push({
+                kind: 'operator', at: m.at, text: m.text, project: pr.name,
+                state: (m.delivery && m.delivery.state) || null,
+                because: (m.delivery && m.delivery.because) || null,
+              });
+            }
+          } catch (err) {
+            if (err && err.code === 'OTHER_PROJECT') continue; // empty is TRUE for this project
+            unreadable.push({ kind: 'unreadable', what: 'the conversation on ' + pr.name, at: null });
+          }
+        }
+      }
+      // The a2a record's own unreadability is a row too, not silence: a
+      // permission error on messages.jsonl must not read as an agent no
+      // colleague ever wrote to (record() keeps ENOENT as the true empty).
+      const rec = messages.record();
+      if (!rec.ok) unreadable.push({ kind: 'unreadable', what: 'your agents\u2019 messages', at: null });
+      for (const m of rec.rows) {
+        if (m.from !== name && m.to !== name) continue;
+        if (m.kind === 'message') {
+          rows.push({ kind: 'colleague', id: m.id, from: m.from, to: m.to, text: m.text, in_reply_to: m.in_reply_to || null, at: m.at, state: m.state || null });
+        } else if (m.kind === 'valve') {
+          rows.push({ kind: 'valve', from: m.from, to: m.to, at: m.at });
+        } else if (m.kind === 'refused') {
+          rows.push({ kind: 'refused', from: m.from, to: m.to, because: m.because || null, at: m.at });
+        }
+      }
+      rows.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+      // The tail is what a conversation view shows; the cap is SAID (total
+      // rides the answer), and the could-not-look rows ride ahead of it.
+      const TAIL = 200;
+      sendJson(res, 200, {
+        total: unreadable.length + rows.length,
+        rows: unreadable.concat(rows.slice(-TAIL)),
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we could not read the conversation') });
+    }
+    return;
+  }
   if (pathname === '/api/messages' && (req.method === 'GET' || req.method === 'HEAD')) {
     // The record the screens draw conversations from; ?agent= filters to
     // one agent's messages. Read-only, best-effort history.

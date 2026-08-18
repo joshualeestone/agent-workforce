@@ -134,17 +134,34 @@ function resolveSender(fromPane, roster) {
   return { ok: true, card };
 }
 
-function readLog() {
+/**
+ * The record, with its own unreadability SURFACED: ENOENT is the true
+ * empty (no one has messaged yet), any other read failure is could-not-
+ * look -- a screen whose rule is no-state-as-silence needs the
+ * difference, and the old swallow-everything read predates that screen.
+ */
+function record() {
   let raw;
-  try { raw = fs.readFileSync(LOG, 'utf8'); } catch { return []; }
-  const out = [];
+  try { raw = fs.readFileSync(LOG, 'utf8'); } catch (err) {
+    if (err && err.code === 'ENOENT') return { ok: true, rows: [] };
+    return { ok: false, rows: [] };
+  }
+  const rows = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     // One bad line must not eat the record: skip it, keep reading. The
     // screens' list is best-effort history, not a ledger we halt on.
-    try { out.push(JSON.parse(line)); } catch { /* skipped */ }
+    try { rows.push(JSON.parse(line)); } catch { /* skipped */ }
   }
-  return out;
+  return { ok: true, rows };
+}
+
+/* The send path keeps the old contract on purpose: an unreadable log
+   fails OPEN there (the valve cannot count, ids restart) rather than
+   blocking every send on a read error -- a RECORDED trade, revisit when
+   retention lands. */
+function readLog() {
+  return record().rows;
 }
 
 function appendLog(entry) {
@@ -187,18 +204,49 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
   if (!sender.ok) return { state: chat.DELIVERY.COULD_NOT, because: sender.because, id: null, at };
 
   const from = sender.card.sessionName;
+
+  /* ⚠️ EVERY ATTRIBUTED REFUSAL IS AN EVENT (the clean-chat rule: chrome
+     may drop, events may not - and a refusal their agent just met is an
+     event, invisible in the raw pane too unless someone was watching).
+     Logged as its own kind so the record stays the event stream the
+     screens read; the because ships verbatim. Once per
+     sender-recipient-because per window: the row is the event, the
+     retries are chrome. The ONE unattributed exit above logs nothing --
+     an unresolved sender has no conversation to appear in, and logging
+     anonymous knocks would let any local process grow the record. */
+  const refuse = (toWho, because) => {
+    /* The logged `to` is capped: it is unvalidated caller input (a 1MB
+       recipient string is not a recipient), and each distinct value is a
+       fresh dedup key. The VERDICT always returns whatever happens to the
+       record -- chat.appendMessage's own never-throws-on-a-full-store
+       contract is the house standard, and the sharpest case is the spill
+       exit, whose refusal fires BECAUSE the store could not be written
+       and must not then throw writing to the same store. The dedup read
+       fails open like the rest of the read side (recorded trade): a
+       transient read error can cost one duplicate row, never a lost
+       verdict. */
+    const toLogged = String(toWho).slice(0, 120);
+    try {
+      const now2 = Date.parse(at);
+      const already = readLog().some((m) => m && m.kind === 'refused'
+        && m.from === from && m.to === toLogged && m.because === because
+        && Date.parse(m.at) >= now2 - PAIR_WINDOW_MS);
+      if (!already) appendLog({ kind: 'refused', from, to: toLogged, because, at });
+    } catch { /* the record is best-effort; the verdict is not */ }
+    return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
+  };
   /* ⚠️ The sender's NAME rides inside the envelope's bracket grammar, and
      a tmux session name can legally contain the characters that would
      close the bracket early (space is fine; ']' is not). An agent whose
      name breaks the envelope must be refused, not smuggled -- the born
      block teaches recipients to trust this marker. */
   if (!/^[A-Za-z0-9._ -]+$/.test(from) || from.includes(']')) {
-    return { state: chat.DELIVERY.COULD_NOT, because: 'this agent\u2019s own session name contains characters that would break the message envelope, so we will not send under it', id: null, at };
+    return refuse(String(to == null ? '' : to).trim() || '(nobody named)', 'this agent\u2019s own session name contains characters that would break the message envelope, so we will not send under it');
   }
   const toName = String(to == null ? '' : to).trim();
-  if (!toName) return { state: chat.DELIVERY.COULD_NOT, because: 'say which agent this is for', id: null, at };
+  if (!toName) return refuse('(nobody named)', 'say which agent this is for');
   if (toName === from) {
-    return { state: chat.DELIVERY.COULD_NOT, because: 'that is your own name; a note to yourself does not need the wire', id: null, at };
+    return refuse(toName, 'that is your own name; a note to yourself does not need the wire');
   }
 
   /* ⚠️ The BODY is validated as itself, not only as part of the envelope.
@@ -210,17 +258,17 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      deliberately relaxes length); everything else is chat's own verdict,
      never a second derivation. */
   if (text != null && typeof text !== 'string') {
-    return { state: chat.DELIVERY.COULD_NOT, because: 'that message is not text', id: null, at };
+    return refuse(toName, 'that message is not text');
   }
   const bodyProblem = chat.messageProblem(chat.cleanMessage(text).slice(0, chat.MAX_TEXT));
   if (bodyProblem) {
-    return { state: chat.DELIVERY.COULD_NOT, because: bodyProblem, id: null, at };
+    return refuse(toName, bodyProblem);
   }
   /* Spill relaxes chat's 2000-character cap, not the idea of a cap: past
      MAX_BODY this is a document, and documents have a home that is not a
      message log which every send re-reads whole. Refused in words. */
   if (chat.cleanMessage(text).length > MAX_BODY) {
-    return { state: chat.DELIVERY.COULD_NOT, because: 'that is a document, not a message; put it in the project folder and send your colleague the path', id: null, at };
+    return refuse(toName, 'that is a document, not a message; put it in the project folder and send your colleague the path');
   }
   /* ⚠️ THE MARKER IS OURS. A body carrying the envelope's own prefix would
      read, on the recipient's screen, as a second message attributing words
@@ -231,7 +279,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      start its own line -- it always arrives wrapped inside the genuine
      envelope, attributed to its real sender. */
   if (chat.cleanMessage(text).toLowerCase().includes('[message from your colleague')) {
-    return { state: chat.DELIVERY.COULD_NOT, because: 'that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line', id: null, at };
+    return refuse(toName, 'that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
   const log = readLog();
@@ -244,7 +292,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
   if (inReplyTo != null && inReplyTo !== '') {
     const wanted = String(inReplyTo).trim();
     if (!/^m[0-9]+$/.test(wanted)) {
-      return { state: chat.DELIVERY.COULD_NOT, because: 'in_reply_to must be a message id like m12', id: null, at };
+      return refuse(toName, 'in_reply_to must be a message id like m12');
     }
     // The SENDER must have been part of the cited message: citing a thread
     // you were never in asserts, in the recipient's pane, a membership that
@@ -252,7 +300,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     // the sender's conversation.
     const cited = log.find((m) => m && m.kind === 'message' && m.id === wanted);
     if (!cited || ![cited.from, cited.to].includes(from)) {
-      return { state: chat.DELIVERY.COULD_NOT, because: 'in_reply_to must name a message from your own conversation', id: null, at };
+      return refuse(toName, 'in_reply_to must name a message from your own conversation');
     }
     replyTo = wanted;
   }
@@ -286,7 +334,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
       fs.mkdirSync(SPILL_DIR, { recursive: true });
       fs.writeFileSync(spillFile, cleaned + '\n');
     } catch {
-      return { state: chat.DELIVERY.COULD_NOT, because: 'that message is long enough to need a file, and we could not write one', id: null, at };
+      return refuse(toName, 'that message is long enough to need a file, and we could not write one');
     }
     body = cleaned.slice(0, 200) + '… (long message; the full text is at ' + spillFile + ')';
   }
@@ -302,7 +350,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     if (cleaned.length > SPILL_AT) {
       try { fs.rmSync(path.join(SPILL_DIR, id + '.txt'), { force: true }); } catch { /* best effort */ }
     }
-    return { state: sent.state, because: sent.because, id: null, at };
+    return refuse(toName, sent.because);
   }
 
   /* Logged only when something was actually typed (placed or unconfirmed --
@@ -350,6 +398,6 @@ function blockBody() {
 module.exports = {
   START, END, blockBody,
   LOG, PAIR_CAP, PAIR_WINDOW_MS,
-  resolveSender, send, list, pairCount, readLog,
+  resolveSender, send, list, pairCount, readLog, record,
   setRunner, resetForTests,
 };
