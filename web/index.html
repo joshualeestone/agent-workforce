@@ -1063,12 +1063,15 @@ svg { display: block; }
 .avatar-bg       { fill: var(--bg-sunken); stroke: var(--separator); stroke-width: 0.5; }
 .avatar-initials { fill: var(--label-2); font: 600 var(--text-body) var(--font-ui); letter-spacing: .02em; }
 @media (prefers-color-scheme: dark) {
-  /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1 on
-     the dark elevated ground and fails AA as 13px text; #F0665A is the
-     app's established dark-mode red, predating the pack's 255,140,130
-     family; unifying the two dark reds is flagged for Mona Lisa. (The
-     pack gauge's dark track/dashes landed with dark-tokens below.) */
-  .utoast { --utone: #F0665A; }
+  /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1
+     on the dark elevated ground and fails AA as 13px text. ONE dark
+     attention red across the app: #ff8c82, the pack's own dark family,
+     ruled by Mona Lisa 2026-08-18 in-channel with the pack's one-red
+     argument ("two reds a few pixels apart meaning different things is
+     the drift that never gets cleaned up"); the pre-pack #F0665A
+     retired here -- it measured 4.48:1 on this ground, itself under the
+     4.5 floor for the 13px headline. #ff8c82 is 6.19:1. */
+  .utoast { --utone: #ff8c82; }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
          font: var(--text-callout) var(--font-ui); color: var(--label);
