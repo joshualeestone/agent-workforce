@@ -569,8 +569,17 @@ uninstall() {
   if [ -n "$_profile" ] && [ -f "$_profile" ] && grep -qxF "$_marker" "$_profile" 2>/dev/null; then
     info "removing the kosmos PATH line from ${_profile##*/}"
     _ptmp="$(mktemp "${TMPDIR:-/tmp}/kosmos-profile.XXXXXXXXXX" 2>/dev/null || true)"
+    # The export is matched by ADJACENCY to the marker as well as by exact
+    # text: an uninstall run with a different KOSMOS_BIN_DIR than the
+    # install would otherwise remove the marker and orphan the export it
+    # explained. Only an export-PATH-shaped line right after the marker
+    # qualifies; anything else the person wrote there is printed untouched.
     if [ -n "$_ptmp" ] \
-       && awk -v m="$_marker" -v p="$_pline" '$0 != m && $0 != p' "$_profile" > "$_ptmp" 2>/dev/null \
+       && awk -v m="$_marker" -v p="$_pline" '
+            skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
+            $0 == m { skip=1; next }
+            { print }
+          ' "$_profile" > "$_ptmp" 2>/dev/null \
        && cat "$_ptmp" > "$_profile" 2>/dev/null; then
       rm -f "$_ptmp"
     else
@@ -1054,12 +1063,31 @@ case ":$PATH:" in
   *)
     if [ -z "$PROFILE_FILE" ]; then
       : # sandboxed with no profile named: leave every real profile alone
-    elif [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null; then
-      info "the kosmos command is already wired into ${PROFILE_FILE##*/}; it works in new Terminal windows"
-    elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
-      info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
+    elif [ -n "${SHELL:-}" ] && [ "${SHELL##*/}" != "zsh" ]; then
+      # ⚠️ The claim must not outrun the file: ~/.zprofile is read by zsh
+      # only, and a bash/fish login shell would get "success" and a command
+      # that still fails -- the silent class this whole step exists to end.
+      # An empty $SHELL falls through to wiring: the macOS default is zsh.
+      info "note: typing 'kosmos' in Terminal will not work yet on this Mac (your login shell is ${SHELL##*/}, and this installer only knows how to wire zsh); the app icon step below and the closing lines cover how to open Kosmos"
     else
-      info "note: typing 'kosmos' in Terminal will not work yet on this Mac (could not write ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+      case "$BIN_DIR" in
+        *"
+"*|*'"'*|*'$'*|*'`'*|*'\'*)
+          # Same class as the KOSMOS_HOME guard above: these characters
+          # would corrupt (or execute inside) a file sourced at every
+          # login. Refuse the write, keep the honest note.
+          info "note: typing 'kosmos' in Terminal will not work yet on this Mac (the bin folder's name contains a character unsafe to write into ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+          ;;
+        *)
+          if [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null; then
+            info "the kosmos command is already wired into ${PROFILE_FILE##*/}; it works in new Terminal windows"
+          elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
+            info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
+          else
+            info "note: typing 'kosmos' in Terminal will not work yet on this Mac (could not write ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+          fi
+          ;;
+      esac
     fi
     ;;
 esac

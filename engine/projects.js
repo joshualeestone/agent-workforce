@@ -1418,6 +1418,14 @@ function oneLine(value) {
     // sibling's markers or it becomes the injection path into them.
     .split(YOU_START).join('(kosmos marker)')
     .split(YOU_END).join('(kosmos marker)')
+    // And the colleagues pair, the moment tellAgent became that block's
+    // healer: an inline pair smuggled through a project name would either
+    // ambiguate the real block (silently disabling the heal) or make the
+    // heal splice a colleagues body INTO the projects block of a file
+    // that never had one -- the exact growth the heal's marker gate
+    // refuses. Same lesson, third sibling.
+    .split(messagesBlock().START).join('(kosmos marker)')
+    .split(messagesBlock().END).join('(kosmos marker)')
     .trim();
 }
 

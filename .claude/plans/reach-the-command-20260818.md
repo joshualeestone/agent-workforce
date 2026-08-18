@@ -35,10 +35,11 @@ the engine, so no refusal row can exist).
   the GROUP_BECAUSE drafts themselves counted zero).
 - Map row 2 takes her blessed shorter draft: "...and we will not create
   them".
-- FOUND, not fixed, for her word: web/index.html:4725 joins an agent
-  card label to its task with an em dash ("Working — <task>"), a board
-  surface she has not ruled on; a semicolon reads wrong there, so it
-  waits for her copy rather than guessing.
+- web/index.html:4725 (the card label-to-task join) was initially held
+  back as unruled; her full eight-row table (5:37 PM) then ruled it
+  explicitly (colon, a separator whose second half explains the first),
+  and it is CHANGED in this branch with the rest of the table. The
+  earlier held-back note is superseded.
 
 ## Why the block re-teaches existing agents
 

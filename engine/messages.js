@@ -718,8 +718,11 @@ function list(agent) {
 
 /* Same managed-block machinery as About-you: dated markers, spliced at
    birth by create.js (non-gating there -- a block we could not add must
-   never cost the person their agent). Static on purpose: it teaches the
-   COMMAND, not the roster, so it can never go stale as the fleet changes. */
+   never cost the person their agent), and HEALED by projects.tellAgent
+   whenever it writes the same file (drift-gated, markers-present-only).
+   Roster-independent still -- it teaches the COMMAND, never the fleet --
+   but the command is machine-derived (clipath), so it CAN go stale when
+   the layout changes, which is exactly what the heal exists for. */
 const START = '<!-- kosmos:colleagues:start -->';
 const END = '<!-- kosmos:colleagues:end -->';
 

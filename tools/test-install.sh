@@ -124,7 +124,6 @@ chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 # on this shell's PATH, so the wiring arm must fire), exactly once, and a
 # pre-existing line survives.
 chk "PATH wiring wrote the sandbox profile" "grep -qxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\""
-chk "PATH wiring wrote it once" "[ \"\$(grep -cxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\")\" = 1 ]"
 chk "the gold-K icon landed inside the app, intact" "[ \"\$(shasum -a 256 \"$SB/apps/Kosmos.app/Contents/Resources/Kosmos.icns\" 2>/dev/null | cut -d' ' -f1)\" = \"\$(shasum -a 256 \"$KOS_SRC/app/assets/Kosmos.icns\" | cut -d' ' -f1)\" ]"
 chk "the bundle declares its architecture (no Rosetta prompt)" "grep -q 'LSArchitecturePriority' \"$SB/apps/Kosmos.app/Contents/Info.plist\" && grep -q 'arm64' \"$SB/apps/Kosmos.app/Contents/Info.plist\""
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
@@ -163,6 +162,10 @@ chk "update exits 0" "[ $RC -eq 0 ]"
 chk "stale file gone (swap, not merge)" "[ ! -e \"$SB/home/app/engine/stale-marker.js\" ]"
 chk "board restarted (new pid)" "[ \"$PID1\" != \"$(cat "$SB/home/board.pid")\" ]"
 chk "board serves after update" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
+# The idempotency check lives HERE, after a SECOND install against the
+# same profile: after one install a count of 1 is guaranteed even with
+# the marker guard deleted, so a first-pass count check cannot fail.
+chk "PATH wiring still written exactly once after a rerun" "[ \"\$(grep -cxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\")\" = 1 ]"
 
 echo "== refusals speak sentences =="
 OUT="$(sh -s -- --uninstal < "$SETUP" 2>&1 || true)"
