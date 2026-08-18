@@ -1844,7 +1844,7 @@ test('the roles route carries the copy the creation actually uses', async () => 
  * behaviour is to run its real source. `prelude` supplies whatever the extracted
  * function closes over.
  */
-function pageFunction(name, prelude = '') {
+function pageFnSource(name) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   let start = script.indexOf('function ' + name);
@@ -1858,8 +1858,12 @@ function pageFunction(name, prelude = '') {
     else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
   }
   assert.ok(end > -1, 'could not find the end of ' + name);
+  return script.slice(start, end);
+}
+
+function pageFunction(name, prelude = '') {
   // eslint-disable-next-line no-new-func
-  return new Function(`${prelude}\n${script.slice(start, end)}\nreturn ${name};`)();
+  return new Function(`${prelude}\n${pageFnSource(name)}\nreturn ${name};`)();
 }
 
 test('the creation screen only calls an agent made when the board can see it running', async () => {
@@ -5767,4 +5771,176 @@ test('a borrowed-name pane cannot lend a project card its photograph', () => {
   } finally {
     board.restore();
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * room-polish: one verdict for an identical roster + the receipt pill's
+ * dark borders. The told-line collapse is real page source via pageFunction;
+ * the CSS pin is text-level because 7b-theme-flip watches surfaces, not
+ * borders, and this exact trio already slipped past it once (#75 landed
+ * after the #71 dark pass and never met it).
+ * ------------------------------------------------------------------------ */
+
+// The prelude the told-line family closes over: the page's own esc, not a
+// hand copy of it (a copied producer drifts; the real one cannot -- the
+// first cut of this line copied esc and got the null-handling wrong).
+const TOLD_PRELUDE = pageFnSource('esc') + '\n';
+
+test('identical roster verdicts collapse to one group line, and only then', () => {
+  const shared = pageFunction('pjSharedTold',
+    TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'));
+
+  const cn = (because) => ({ told: { state: 'could_not', because } });
+  const told = () => ({ told: { state: 'told' } });
+
+  // Collapses: same state, same because, 2+ members. The because rides
+  // along VERBATIM (the plan's honesty constraint: the group claim carries
+  // exactly what each row it replaces carried).
+  const g = shared([cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet')]);
+  assert.ok(g.startsWith('We could not tell any of them where this folder is'),
+    'three identical could_not verdicts did not collapse: ' + g);
+  // The engine writes becauses SINGULAR ("this agent…"), so the frame must
+  // introduce the reason rather than splice it into the plural sentence --
+  // "any of them — this agent has…" read as a contradiction (iteration 3).
+  assert.ok(g.includes('Each for the same reason: this agent has no folder on this computer yet.'),
+    'the group sentence dropped or re-spliced the because: ' + g);
+
+  // A missing because collapses into the group's OWN fallback, which is
+  // plural (our text takes the plural the frame needs; engine text stays
+  // verbatim singular).
+  const gf = shared([{ told: { state: 'could_not' } }, { told: { state: 'could_not' } }]);
+  assert.ok(gf.includes('we could not write to their instructions'),
+    'the group fallback is not the plural form: ' + gf);
+
+  // The group line lands in the page as raw HTML (paintOneProject), so a
+  // markup-carrying because must arrive ESCAPED, not verbatim-dangerous.
+  const gx = shared([cn('a <b>note</b> & more'), cn('a <b>note</b> & more')]);
+  assert.ok(gx.includes('a &lt;b&gt;note&lt;/b&gt; &amp; more'),
+    'the group because was not escaped: ' + gx);
+  assert.ok(!gx.includes('<b>note</b>'),
+    'raw markup from a because survived into the group line');
+
+  // Collapses: the told state too, with the hedge intact (the group form
+  // must not promise more than the per-member form it replaces).
+  const gt = shared([told(), told()]);
+  assert.ok(gt.startsWith('Kosmos told each of them where this folder is'), gt);
+  assert.ok(gt.includes('unless their instructions have been changed since'),
+    'the group told sentence dropped the hedge');
+
+  // Does NOT collapse: mixed states.
+  assert.equal(shared([told(), cn('x')]), '', 'mixed states collapsed');
+  // Does NOT collapse: same state, different because (the string-equality
+  // key is what keeps the group claim exactly as true as the rows).
+  assert.equal(shared([cn('disk full'), cn('permission denied')]), '',
+    'different becauses collapsed into one sentence');
+  // Does NOT collapse: singleton (its line belongs on its row).
+  assert.equal(shared([cn('x')]), '', 'a singleton roster grew a group line');
+  // Does NOT collapse: nothing to say.
+  assert.equal(shared([{ told: {} }, { told: {} }]), '', 'empty verdicts collapsed');
+});
+
+test('pjMember suppressTold removes the per-member verdict span, and only with it', () => {
+  // STATE_COPY here is a DELIBERATELY partial stand-in (two of six keys):
+  // it only feeds the state caption, which no assertion below reads, and
+  // the real const is not a `function` pageFnSource can lift.
+  const prelude = TOLD_PRELUDE
+    + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + pageFnSource('pjToldLine') + '\n';
+  const member = pageFunction('pjMember', prelude);
+  const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
+
+  // The member is a REAL row from the producer (fleet board -> create ->
+  // list), not a hand-built stand-in, so it carries exactly the fields the
+  // screen actually receives -- fixture discipline, same as the face-gate
+  // test above.
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([
+    fleet.agent('leo', { state: 'idle' }),
+    fleet.agent('mikey', { state: 'idle' }),
+  ]);
+  const pdir = nodePath.join(SANDBOX, 'suppress-told-proj');
+  fs.mkdirSync(pdir, { recursive: true });
+  let m; let roster;
+  try {
+    projectsEngine.create({ name: 'Suppress Told', folder: pdir, agents: ['leo', 'mikey'], roster: board.agents });
+    // The verdict is written by the sync pass, not by create; without it
+    // every member sits at not_tried and there is nothing to suppress.
+    projectsEngine.syncAgent('leo', board.agents);
+    projectsEngine.syncAgent('mikey', board.agents);
+    roster = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents;
+    m = roster[0];
+  } finally {
+    board.restore();
+  }
+
+  // The positive collapse, on PRODUCED rows: two members synced the same
+  // way carry the identical verdict, so the real field shapes (not the
+  // hand-built negatives above) exercise the group line too.
+  const sharedOnProduced = pageFunction('pjSharedTold',
+    TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'))(roster);
+  assert.ok(sharedOnProduced,
+    'two identically-synced produced members did not collapse (told states: '
+    + roster.map((r) => (r.told || {}).state).join(', ') + ')');
+
+  // Pre-control: the real row must have a verdict to suppress, whichever
+  // state the sandbox create produced, or both assertions below are vacuous.
+  assert.ok(toldLine(m.told || {}),
+    'PRE-CONTROL: the produced member carries no told verdict at all (state: '
+    + ((m.told || {}).state || '<none>') + ')');
+
+  // CONTROL first: without the flag the span is there, so the absence
+  // below is the suppression and not a dropped field.
+  assert.ok(member(m, 'p1').includes('pj-told'),
+    'CONTROL: the per-member verdict span is gone even unsuppressed');
+  assert.ok(!member(m, 'p1', true).includes('pj-told'),
+    'suppressTold left the per-member verdict span in place');
+});
+
+test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // Presence control: the light rules this test claims get overridden.
+  const lightFailed = raw.indexOf('.delivery.failed { border-color: rgba(179,38,30,.5); }');
+  const lightPlaced = raw.indexOf('.delivery.placed { border-color: rgba(47,125,90,.5); }');
+  assert.ok(lightFailed > -1 && lightPlaced > -1,
+    'CONTROL: the light receipt borders moved; re-point this pin');
+  const darkFailed = raw.indexOf('.delivery.failed { border-color: rgba(255,140,130,.5); }');
+  const darkPlaced = raw.indexOf('.delivery.placed { border-color: rgba(121,197,157,.5); }');
+  assert.ok(darkFailed > -1, 'the failed receipt border has no dark twin');
+  assert.ok(darkPlaced > -1, 'the placed receipt border has no dark twin');
+  // Both dark rules sit INSIDE a dark block (a twin pasted into the light
+  // sheet passes a bare presence check and ships the wrong color in both
+  // schemes). "Inside" is measured, not inferred from marker order: the
+  // stylesheet has several dark blocks, so we brace-match the one whose
+  // opener precedes each rule and require the rule to land before it closes.
+  const insideDark = (at) => {
+    const marker = raw.lastIndexOf('@media (prefers-color-scheme: dark)', at);
+    if (marker === -1) return false;
+    const open = raw.indexOf('{', marker);
+    if (open === -1) return false;
+    let depth = 0;
+    for (let k = open; k < raw.length; k += 1) {
+      if (raw[k] === '{') depth += 1;
+      else if (raw[k] === '}') { depth -= 1; if (depth === 0) return at < k; }
+    }
+    return false;
+  };
+  assert.ok(insideDark(darkFailed), 'the dark failed rule is not inside a dark block');
+  assert.ok(insideDark(darkPlaced), 'the dark placed rule is not inside a dark block');
+  // Presence control for the measurer itself: a light rule must NOT read
+  // as inside a dark block, or insideDark answers yes to everything.
+  assert.ok(!insideDark(lightFailed),
+    'CONTROL: insideDark claims the light rule is in a dark block; the measurer is broken');
+});
+
+test('the group line is wired into paintOneProject, not just extractable', () => {
+  // The function-level tests stay green if the append is dropped, which
+  // would leave every verdict suppressed and stated NOWHERE -- the
+  // merge-only wiring class. Pin the wiring at source level, with a
+  // control that the CSS the literal targets still exists.
+  const src = pageFnSource('paintOneProject');
+  assert.ok(src.includes('pjSharedTold('), 'paintOneProject no longer consults pjSharedTold');
+  assert.ok(src.includes('pj-told-group'), 'paintOneProject no longer emits the pj-told-group line');
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.ok(raw.includes('.pj-members .pj-told-group {'),
+    'CONTROL: the .pj-told-group CSS rule is gone, so the emitted class styles nothing');
 });
