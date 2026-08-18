@@ -5252,9 +5252,9 @@ test('the limits routes round-trip the person\u2019s control, and the valve rows
     fs.rmSync(limitsEngine.FILE, { force: true });
   }
 
-  // The rows: a told-only valve renders the letting-it-continue truth on
-  // both arms, and rows that PREDATE the field render as the stops they
-  // were.
+  // The rows: a told-only valve names the reason on both arms (did not
+  // step in, because the limit is turned off), and rows that PREDATE the
+  // field render as the stops they were.
   const escSrc = (() => {
     const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
     const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
