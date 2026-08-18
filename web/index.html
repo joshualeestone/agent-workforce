@@ -4018,12 +4018,18 @@ function convoRow(r, agentName) {
     + esc(r.text) + '</p>' + state + '</div>';
 }
 
+let CONVO_LOAD = 0;
 async function paintConversation(sessionName, agentName) {
   const box = document.getElementById('d-convo');
+  // The INSTR_LOAD pattern: two fetches for the SAME agent (A, B, A
+  // quickly) pass the sessionName guard both times, and the older answer
+  // must not paint last.
+  const mine = ++CONVO_LOAD;
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/conversation');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'we could not read the conversation');
+    if (mine !== CONVO_LOAD) return; // a newer conversation fetch is in flight
     if (!CURRENT || CURRENT.sessionName !== sessionName) return; // a newer agent is open
     if (!data.rows.length) {
       box.innerHTML = '<p class="cv-none">Nothing here yet.</p>';
@@ -4034,9 +4040,10 @@ async function paintConversation(sessionName, agentName) {
         ? '<p class="cv-none" style="margin-top:10px;">Showing the latest ' + data.rows.length + ' of ' + data.total + '.</p>'
         : '');
   } catch (err) {
-    // The same stale-fetch guard as the happy path: agent A's failure
+    // The same stale-fetch guards as the happy path: agent A's failure
     // must not paint its could-not-look sentence over agent B's open
     // conversation (a false statement about the wrong agent).
+    if (mine !== CONVO_LOAD) return;
     if (!CURRENT || CURRENT.sessionName !== sessionName) return;
     // Could-not-look, never a blank box that reads as no-conversation.
     box.innerHTML = '<p class="cv-none">We could not read this conversation just now. ('
@@ -4354,7 +4361,14 @@ async function loadInstructions(sessionName) {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/instructions?t=' + Date.now(),
       { cache: 'no-store' });
     const data = await res.json();
+    // ⚠️ BOTH guards: the token catches a newer LOAD, and the CURRENT
+    // check catches the case no load bumps the token -- opening an
+    // UNTIED agent never calls this function, so agent A's late answer
+    // passed the token test and painted A's file (and A's gap sentence)
+    // on B's panel. A new sibling does not inherit the guard; this one
+    // now guards the whole family below it.
     if (mine !== INSTR_LOAD) return; // a newer agent is open; this answer is for the old one
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
     if (!res.ok) throw new Error(data.error || 'that did not work');
 
     box.value = data.text || '';

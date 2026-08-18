@@ -39,3 +39,22 @@ tree. The valve row is reassurance, not error.
   for removed agents is legitimate); revisit if the API grows callers.
 - The send path's valve fails open on an unreadable log (recorded trade
   in-module; revisit with retention).
+
+## Second pass (both passes blocker-free; converged per the standing
+## shape)
+
+- refuse()'s append is best-effort with the verdict returned regardless
+  (chat.appendMessage's never-throws contract is the house standard;
+  the spill exit's refusal fires BECAUSE the store could not be written
+  and must not then throw writing to it); the logged to is capped at
+  120 (unvalidated caller input, each distinct value a dedup key); the
+  dedup's fail-open noted as the read-side trade.
+- loadInstructions' post-await guard now checks the OPEN AGENT as well
+  as the load token (opening an untied agent never bumps the token, so
+  a late answer painted agent A's file and gap sentence on B's panel);
+  paintConversation gains the INSTR_LOAD-pattern monotonic token for
+  same-agent fetch races.
+- Recorded, untested by choice: the unreadable-projects and
+  unreadable-thread arms mirror the pinned unreadable-record arm
+  structurally; planting a directory at a thread file to drive them is
+  the next test-touch's cheap addition.

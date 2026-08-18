@@ -215,11 +215,24 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      an unresolved sender has no conversation to appear in, and logging
      anonymous knocks would let any local process grow the record. */
   const refuse = (toWho, because) => {
-    const now2 = Date.parse(at);
-    const already = readLog().some((m) => m && m.kind === 'refused'
-      && m.from === from && m.to === toWho && m.because === because
-      && Date.parse(m.at) >= now2 - PAIR_WINDOW_MS);
-    if (!already) appendLog({ kind: 'refused', from, to: toWho, because, at });
+    /* The logged `to` is capped: it is unvalidated caller input (a 1MB
+       recipient string is not a recipient), and each distinct value is a
+       fresh dedup key. The VERDICT always returns whatever happens to the
+       record -- chat.appendMessage's own never-throws-on-a-full-store
+       contract is the house standard, and the sharpest case is the spill
+       exit, whose refusal fires BECAUSE the store could not be written
+       and must not then throw writing to the same store. The dedup read
+       fails open like the rest of the read side (recorded trade): a
+       transient read error can cost one duplicate row, never a lost
+       verdict. */
+    const toLogged = String(toWho).slice(0, 120);
+    try {
+      const now2 = Date.parse(at);
+      const already = readLog().some((m) => m && m.kind === 'refused'
+        && m.from === from && m.to === toLogged && m.because === because
+        && Date.parse(m.at) >= now2 - PAIR_WINDOW_MS);
+      if (!already) appendLog({ kind: 'refused', from, to: toLogged, because, at });
+    } catch { /* the record is best-effort; the verdict is not */ }
     return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
   };
   /* ⚠️ The sender's NAME rides inside the envelope's bracket grammar, and
