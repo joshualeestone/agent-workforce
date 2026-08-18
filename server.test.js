@@ -5891,8 +5891,10 @@ test('the receipt pill borders have dark twins (the trio that missed the #71 pas
   const insideDark = (at) => {
     const marker = raw.lastIndexOf('@media (prefers-color-scheme: dark)', at);
     if (marker === -1) return false;
+    const open = raw.indexOf('{', marker);
+    if (open === -1) return false;
     let depth = 0;
-    for (let k = raw.indexOf('{', marker); k < raw.length; k += 1) {
+    for (let k = open; k < raw.length; k += 1) {
       if (raw[k] === '{') depth += 1;
       else if (raw[k] === '}') { depth -= 1; if (depth === 0) return at < k; }
     }

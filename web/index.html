@@ -7234,6 +7234,10 @@ function pjToldGroupLine(told) {
     return 'Kosmos told each of them where this folder is. They will see that the '
       + 'next time they start, unless their instructions have been changed since.';
   }
+  // Explicit, not an else: pjSharedTold pre-filters through pjToldLine, but
+  // the honesty guarantee (no sentence for not_tried/empty) must hold here
+  // too, not only in the current caller.
+  if (told.state !== 'could_not') return '';
   return 'We could not tell any of them where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
 }
 
