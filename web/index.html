@@ -191,8 +191,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .runnow { margin: 0 0 14px; font-size: .9375rem; color: var(--k-ink-2); }
 .runnow b { color: var(--k-ink); font-weight: 650; }
 .memrow { display: flex; align-items: center; gap: 12px; max-width: 22rem; }
-/* The conversation rows (messaging screens): fixed ink inside the
-   fixed-light dbox. A colleague's row reads differently from yours by
+/* The conversation rows (messaging screens): k-ink inside the k-surface
+   dbox, one token system so surface and ink flip together. A colleague's row reads differently from yours by
    the who-line and the gold mark, per the spec's rule that a person must
    see the distinction the product already teaches the agent. */
 .cvrow { padding: 10px 0; border-top: 1px solid var(--k-rule); }
@@ -735,7 +735,8 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    words were all present. Caught by looking at the dark screenshot. */
 /* ---- the pack's project cards (view C, pj-cards) ----
    .pj-row keeps its name (the click contract and the drives address it);
-   the LOOK is the pack's .pcard. Fixed-light k-surface cards, fixed ink. */
+   the LOOK is the pack's .pcard, on k-surface with k-ink: surface and
+   ink flip together since the dark-tokens set. */
 .pjcard-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); min-width: 0; overflow-wrap: anywhere; }
 .pjpill { display: inline-flex; align-items: center; gap: 6px; flex: none;
@@ -781,9 +782,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    distinction, so the pack's ink-2 stands. */
 p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   line-height: 1.45; color: var(--label-2); max-width: 62ch;
-  /* --label-2, not the pack's k-ink-2: the detail sits on the ADAPTIVE
-     panel, and the pack's fixed light-page ink measured 1.69:1 in dark
-     mode (the fixed inks belong to the fixed-light cards only). */
+  /* --label-2, not k-ink-2: the detail sits on the legacy-token panel,
+     and its ink stays in the same token system as that surface (the
+     1.69:1 dark measurement dates from when k-ink-2 did not flip; the
+     one-system-per-surface rule is what survives the flip). */
   overflow-wrap: anywhere; }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
@@ -1063,8 +1065,9 @@ svg { display: block; }
 @media (prefers-color-scheme: dark) {
   /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1 on
      the dark elevated ground and fails AA as 13px text; #F0665A is the
-     app's established dark-mode red. (The ring's own dark bands retired
-     with the old gauge; the pack gauge's dark values arrive with #40.) */
+     app's established dark-mode red, predating the pack's 255,140,130
+     family; unifying the two dark reds is flagged for Mona Lisa. (The
+     pack gauge's dark track/dashes landed with dark-tokens below.) */
   .utoast { --utone: #F0665A; }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
@@ -1269,10 +1272,13 @@ svg { display: block; }
      over the dark ground, and a vanished dashed border is the whole
      "add" affordance gone (its surface is re-joined to the sibling tiles
      further down, in the k-token dark block) */
-  .stat.action { background: var(--bg-elevated); border-color: var(--label-3); }
+  .stat.action { background: var(--k-surface); border-color: var(--label-3); }
   /* hover carries higher specificity (0,3,0) than the line above, so it
-     needs its own dark ground or the tile flickers transparent on hover */
-  .stat.action:hover { background: var(--bg-elevated); border-color: var(--gold-deep); }
+     needs its own dark ground or the tile flickers transparent on hover.
+     ONE surface declaration per rule (pass 2): a second .stat.action pair
+     later in this block resolved the duplicate by within-block order,
+     which a reorder would silently regress. */
+  .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
   .stat.action .slab, .stat.action .plus { color: var(--label); }
   .linkish { color: var(--label-2); }
   .linkish:hover { color: var(--label); }
@@ -1316,16 +1322,23 @@ svg { display: block; }
   .gu { stroke: rgba(245,245,244,.28); }
   .bar { background: rgba(245,245,244,.14); }
   .bar.unknown { background: repeating-linear-gradient(90deg, rgba(245,245,244,.24) 0 3px, transparent 3px 8px); }
+  /* The family's two instrument FILLS (pass 2): the high-severity arc and
+     bar segment kept the light red at ~1.8:1 against their own dark
+     tracks; and the hazard triangle, so an attn pill does not draw two
+     different reds side by side. Its glyph flips to the dark ink. */
+  .gf.high { stroke: #ff8c82; }
+  .bar i.high { background: #ff8c82; }
+  .haz { background: #ff8c82; color: #0c0d0f; }
+  /* Working's green border outranked BY the quiet states after their fix
+     (~1.9 vs ~2.7): the third channel's ordering held with a lighter
+     green from the same fill family. */
+  .astate.st-working { border-color: rgba(121,197,157,.62); }
   /* The state pill's third channel (border) for the three quiet states,
      and the hover/selected cues, all dark-ink literals gone flat. */
   .astate.st-paused, .astate.st-stopped { border-color: rgba(245,245,244,.32); }
   .astate.st-unknown { border-color: rgba(245,245,244,.24); }
   .lrow:hover { border-color: rgba(245,245,244,.30); }
   .pj-row:hover { border-color: rgba(245,245,244,.30); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
-  /* The add tile joins its sibling tiles' surface instead of the legacy
-     elevated grey, which read as a mismatched row after the flip. */
-  .stat.action { background: var(--k-surface); }
-  .stat.action:hover { background: var(--k-surface); }
 }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */

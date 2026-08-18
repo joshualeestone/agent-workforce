@@ -875,8 +875,8 @@ async function main() {
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
     surfacesByScheme[scheme] = await page.evaluate(() => {
-      const read = (sel, prop, root) => {
-        const el = (root || document).querySelector(sel);
+      const read = (sel, prop) => {
+        const el = document.querySelector(sel);
         if (!el) throw new Error('the flip probe found nothing at ' + sel + ' -- a surface that is not on screen cannot prove it flips');
         return getComputedStyle(el)[prop];
       };
@@ -901,8 +901,17 @@ async function main() {
       return {
         acard: read('.acard', 'backgroundColor'),
         gaugeTrack: read('.acard .gt', 'stroke'),
-        memBar: read('#alist .bar, .acard .bar, .bar', 'backgroundColor'),
       };
+    }));
+    // The memory .bar exists only in the LIST layout (the grid card draws
+    // the gauge instead), so the probe switches through the real toggle
+    // rather than reading a hidden renderer's computed style.
+    await page.click('.viewtoggle[data-scope="agents"] [data-layout="list"]');
+    await page.waitForTimeout(300);
+    Object.assign(surfacesByScheme[scheme], await page.evaluate(() => {
+      const el = document.querySelector('#alist .bar');
+      if (!el) throw new Error('the flip probe found nothing at #alist .bar -- a surface that is not on screen cannot prove it flips');
+      return { memBar: getComputedStyle(el).backgroundColor };
     }));
     await ctx.close();
   }
