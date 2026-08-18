@@ -78,6 +78,19 @@ screenshot (channel, 2026-08-18 ~3:54 PM).
   negative control) instead of inferring from marker order; STATE_COPY
   stand-in commented as deliberately partial.
 
+## Iteration 3 (2026-08-18 ~4:21 PM)
+
+- WARNING fixed: the group could_not frame spliced a singular engine
+  because ("this agent has no folder…") into a plural sentence, reading as
+  a contradiction. New frame introduces the reason instead: "We could not
+  tell any of them where this folder is. Each for the same reason:
+  <because>." Pinned by test and rendered (room-polish-couldnot.png).
+- NITs: pjMember's doc block (present:false rule) moved back onto pjMember
+  after the extraction had left it heading pjToldLine; the valve band only
+  emits the .msg-t span when there is a timestamp; the suppress test's
+  board widened to two agents so the positive collapse also runs on
+  PRODUCED rows (real field shapes), alongside the hand-built negatives.
+
 ## Out of scope
 
 - The pack's own rgba widening (Mona Lisa owns the pack and the

@@ -5799,8 +5799,11 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   const g = shared([cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet'), cn('this agent has no folder on this computer yet')]);
   assert.ok(g.startsWith('We could not tell any of them where this folder is'),
     'three identical could_not verdicts did not collapse: ' + g);
-  assert.ok(g.includes('this agent has no folder on this computer yet'),
-    'the group sentence dropped the because: ' + g);
+  // The engine writes becauses SINGULAR ("this agent…"), so the frame must
+  // introduce the reason rather than splice it into the plural sentence --
+  // "any of them — this agent has…" read as a contradiction (iteration 3).
+  assert.ok(g.includes('Each for the same reason: this agent has no folder on this computer yet.'),
+    'the group sentence dropped or re-spliced the because: ' + g);
 
   // The group line lands in the page as raw HTML (paintOneProject), so a
   // markup-carrying because must arrive ESCAPED, not verbatim-dangerous.
@@ -5844,19 +5847,33 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
   // screen actually receives -- fixture discipline, same as the face-gate
   // test above.
   const projectsEngine = require('./engine/projects');
-  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const board = fleet.install([
+    fleet.agent('leo', { state: 'idle' }),
+    fleet.agent('mikey', { state: 'idle' }),
+  ]);
   const pdir = nodePath.join(SANDBOX, 'suppress-told-proj');
   fs.mkdirSync(pdir, { recursive: true });
-  let m;
+  let m; let roster;
   try {
-    projectsEngine.create({ name: 'Suppress Told', folder: pdir, agents: ['leo'], roster: board.agents });
+    projectsEngine.create({ name: 'Suppress Told', folder: pdir, agents: ['leo', 'mikey'], roster: board.agents });
     // The verdict is written by the sync pass, not by create; without it
     // every member sits at not_tried and there is nothing to suppress.
     projectsEngine.syncAgent('leo', board.agents);
-    m = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents[0];
+    projectsEngine.syncAgent('mikey', board.agents);
+    roster = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents;
+    m = roster[0];
   } finally {
     board.restore();
   }
+
+  // The positive collapse, on PRODUCED rows: two members synced the same
+  // way carry the identical verdict, so the real field shapes (not the
+  // hand-built negatives above) exercise the group line too.
+  const sharedOnProduced = pageFunction('pjSharedTold',
+    TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'))(roster);
+  assert.ok(sharedOnProduced,
+    'two identically-synced produced members did not collapse (told states: '
+    + roster.map((r) => (r.told || {}).state).join(', ') + ')');
 
   // Pre-control: the real row must have a verdict to suppress, whichever
   // state the sandbox create produced, or both assertions below are vacuous.

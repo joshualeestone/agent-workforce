@@ -7181,13 +7181,6 @@ function pjView(which) {
   }
 }
 
-/**
- * How a member reads.
- *
- * ⚠️ `present: false` is NOT rendered as anything reassuring and NOT dropped.
- * The board's rule one level up: an agent we cannot read is shown as unknown,
- * never as something healthy, and never as nothing at all.
- */
 function pjToldLine(told) {
   if (told.state === 'told') {
     // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
@@ -7238,9 +7231,21 @@ function pjToldGroupLine(told) {
   // the honesty guarantee (no sentence for not_tried/empty) must hold here
   // too, not only in the current caller.
   if (told.state !== 'could_not') return '';
-  return 'We could not tell any of them where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+  // The because is spliced VERBATIM and the engine writes it singular
+  // ("this agent has no folder…"), so the frame introduces it as the one
+  // shared reason rather than continuing the plural sentence into it --
+  // "any of them … this agent" read as a contradiction.
+  return 'We could not tell any of them where this folder is. Each for the same reason: '
+    + esc(told.because || 'we could not write to its instructions') + '.';
 }
 
+/**
+ * How a member reads.
+ *
+ * ⚠️ `present: false` is NOT rendered as anything reassuring and NOT dropped.
+ * The board's rule one level up: an agent we cannot read is shown as unknown,
+ * never as something healthy, and never as nothing at all.
+ */
 function pjMember(m, projectId, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
@@ -8218,10 +8223,13 @@ function pjReceiptSentence(outcomes, p) {
 
 function pjRoomRow(m, p) {
   if (m.kind === 'valve') {
-    /* Reassurance, not an error: the valve is the product doing its job. */
+    /* Reassurance, not an error: the valve is the product doing its job.
+       The timestamp span only exists when there is a timestamp, so its
+       margin never hangs as a trailing gap on an empty inline. */
+    const when = pjWhen(m.at) || '';
     return '<div class="msg-valve">' + esc(m.because
       || 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
-      + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>';
+      + (when ? '<span class="msg-t">' + esc(when) + '</span>' : '') + '</div>';
   }
   const isOp = m.operator === true;
   const card = !isOp && (p.agents || []).find((a) => a.sessionName === m.from);
