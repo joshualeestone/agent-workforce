@@ -5028,3 +5028,46 @@ test('the reveal-app route keeps refusals and programming errors apart', async (
     machine.revealApp = real;
   }
 });
+
+test('the msg route derives the sender from the pane, ignores any typed claim, and the record answers on /api/messages', async () => {
+  /* The route's one job beyond the engine: sender identity NEVER comes
+     from the body. A body that claims from:'mara' still logs as leo,
+     because the pane is the fact and the claim is just typing. */
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })]);
+  try {
+    messagesEngine.setRunner(() => ({ ok: true, session: 'leo-discord' }));
+    const sends = [];
+    chatEngine.setRunner((args) => {
+      sends.push(args);
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    chatEngine.setDryRun(false);
+
+    const r = await req('/api/msg', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'mara', text: 'route test', from: 'mara', from_pane: '%3' }),
+    });
+    assert.equal(r.status, 200);
+    const verdict = JSON.parse(r.body).delivery;
+    assert.equal(verdict.state, 'placed', 'the route did not deliver: ' + (verdict.because || ''));
+    const typed = sends.filter((a) => a[0] === 'send-keys');
+    assert.match(typed[0][5], /^\[message from your colleague leo · m\d+\] route test$/,
+      'the envelope does not carry the derived sender');
+
+    const rec = await req('/api/messages?agent=mara');
+    assert.equal(rec.status, 200);
+    const listed = JSON.parse(rec.body).messages.filter((m) => m.kind === 'message');
+    const last = listed[listed.length - 1];
+    assert.equal(last.text, 'route test');
+    assert.equal(last.from, 'leo', "a typed from: claim outranked the pane-derived identity");
+    assert.equal(last.to, 'mara');
+  } finally {
+    messagesEngine.resetForTests();
+    chatEngine.resetForTests();
+    board.restore();
+  }
+});

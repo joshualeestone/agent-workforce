@@ -870,6 +870,22 @@ function createAgent(opts) {
         if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
       }
     } catch { /* the boot file simply ships without the block */ }
+    // The colleagues block rides from birth too, same machinery and the
+    // same non-gating posture: agent-to-agent messaging only works if the
+    // agents know the command exists, and the file is where agents learn
+    // things. Static content, so it cannot go stale as the fleet changes.
+    // ⚠️ ROLE TEMPLATES ONLY. Custom instructions are the person's own
+    // words written verbatim (the drift rule at birth, pinned by its own
+    // test), so nothing is appended to them uninvited -- a person who
+    // writes their agent's file can teach it the command themselves.
+    if (wantInstructions === undefined) {
+      try {
+        const messagesMod = require('./messages');
+        const spliced = require('./projects').spliceBlock(text, messagesMod.blockBody(), messagesMod.START, messagesMod.END);
+        const { MAX_BYTES } = require('./instructions');
+        if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
+      } catch { /* ships without the block */ }
+    }
     fs.writeFileSync(instructionFile(name), text, 'utf8');
   });
 
