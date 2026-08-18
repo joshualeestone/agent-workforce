@@ -653,8 +653,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   .lstate, .ltask, .lmem { grid-column: 2; }
 }
 /* Grid mode for the projects list: the same rows laid as cards. */
-.pj-list.asgrid { display: grid;
-                  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
+.pj-list.asgrid { display: grid; gap: 14px;
+                  /* 23rem min yields the pack's three-across at the 1320
+                     stage; 19rem was packing four narrower cards. */
+                  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
 .pj-list.asgrid .pj-row { height: 100%; }
 /* The empty state and the read-failure card span the grid: the failure
    message is the one that matters and it must not squeeze into one cell. */
@@ -671,9 +673,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .panel { max-width: 720px; margin: 0 auto; background: var(--bg-elevated);
          border: 0.5px solid var(--separator); border-radius: var(--radius-card);
          box-shadow: var(--shadow-card); padding: var(--space-8); }
-/* Settings sits on the pack's paper ground: its dboxes ARE the cards, so
-   the panel shell would be a white box behind white boxes. */
-#panel-settings { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* Settings and Projects sit on the pack's paper ground: their cards ARE
+   the surfaces, so the panel shell would be a white box behind white
+   boxes. */
+#panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -682,8 +685,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .panel-wide { max-width: 860px; }
 .pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
 .pj-headright { display: flex; align-items: center; gap: var(--space-4); }
-.pj-lede { font: var(--text-body) var(--font-ui); color: var(--label-2); margin: var(--space-4) 0 var(--space-6); }
-.pj-list { display: flex; flex-direction: column; gap: var(--space-4); }
+.pj-list { display: flex; flex-direction: column; gap: 14px; max-width: 1320px; margin: 0 auto; }
 .pj-arch-wrap { margin-top: var(--space-6); }
 /* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
    failure. A <button> does NOT inherit the page's colour -- it uses the UA's
@@ -691,12 +693,29 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    right, so the row passed by luck; in dark mode the project NAME rendered
    dark-grey on dark-grey. Every text test passed either way, because the
    words were all present. Caught by looking at the dark screenshot. */
+/* ---- the pack's project cards (view C, pj-cards) ----
+   .pj-row keeps its name (the click contract and the drives address it);
+   the LOOK is the pack's .pcard. Fixed-light k-surface cards, fixed ink. */
+.pjcard-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); }
+.pjpill { display: inline-flex; align-items: center; gap: 6px; flex: none;
+          font-size: .8125rem; font-weight: 600; color: var(--k-ink-2); }
+.pjpill.attn { color: #b3261e; }
+.pjpill .act, .pjpill .rest, .pjpill .haz { flex: none; }
+.pjslug { display: inline-block; font: 600 .75rem var(--k-mono); color: var(--k-ink-2);
+          background: rgba(20,22,26,.05); border-radius: 6px; padding: .18rem .5rem;
+          margin-top: 8px; }
+.pjfaces { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+.pjfaces .lav { width: 26px; height: 26px; font-size: .6875rem; border: 2px solid var(--k-surface); }
+.pjfaces .lav + .lav { margin-left: -8px; }
+.pjcount { font-size: .8125rem; color: var(--k-ink-2); margin-left: 8px; }
+.pjdesc { display: block; font-size: .9375rem; color: var(--k-ink-2); line-height: 1.5; margin-top: 10px; }
 .pj-row { display: block; width: 100%; text-align: left; cursor: pointer;
-  color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--separator); border-radius: var(--radius-card);
-  padding: var(--space-5); }
-.pj-row:hover { background: var(--attn-bg); }
-.pj-row b { font: 600 var(--text-body) var(--font-ui); display: block; }
+  color: var(--k-ink); font-family: inherit;
+  background: var(--k-surface); border: 1px solid var(--k-rule); border-radius: 16px;
+  padding: 18px 20px; }
+.pj-row:hover { border-color: rgba(20,22,26,.28); }
+.pj-row.attn { border-color: rgba(179,38,30,.42); }
 /* The description line, card and detail alike. On the ROW `--label-2`, not
    `--label-3` (the detail's p.pj-desc overrides to full --label below):
    this is a sentence someone reads, and label-3 measured under the 4.5:1 AA
@@ -2215,22 +2234,36 @@ svg { display: block; }
 
   <!-- The list, and the empty state, which is the screen first-run hands you. -->
   <div id="pj-list-view">
-    <div class="pj-head">
-      <h2>Projects</h2>
-      <div class="pj-headright">
-        <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
-          <button class="vt" type="button" data-layout="grid" aria-pressed="false" aria-label="Show projects as a grid" title="Show projects as a grid">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
-          </button>
-          <button class="vt on" type="button" data-layout="list" aria-pressed="true" aria-label="Show projects as a list" title="Show projects as a list">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
-          </button>
+    <!-- ⚠️ The pack's stats row (view C), the same grammar as the agents
+         board: the New-project action as a dashed tile locked left, the
+         two counts on the centre (the pack deliberately dropped the other
+         tiles: a number nobody can name is not information), the view
+         toggle pinned right. The alert tile hides at zero, same as the
+         board's. The old lede sentence moved out with the header (pack
+         draws none on the list); its definition of a project survives in
+         the empty state and the add flow. ids pj-new and the toggle's
+         data-scope keep the existing click contracts. -->
+    <div class="statsrow" style="max-width:1320px;margin-left:auto;margin-right:auto;">
+      <button class="stat action" id="pj-new" type="button">
+        <span class="plus" aria-hidden="true">+</span>
+        <span class="slab">New project</span>
+      </button>
+      <div class="stats">
+        <div class="stat"><b id="st-pj">0</b><span class="slab">Projects</span></div>
+        <div class="stat alert" id="st-pjattn-tile" hidden>
+          <span class="haz" aria-hidden="true">!</span>
+          <b id="st-pjattn">0</b><span class="slab">Needs you</span>
         </div>
-        <button class="btn" id="pj-new" type="button">Add a project</button>
+      </div>
+      <div class="viewtoggle" role="group" aria-label="How to show projects" data-scope="projects">
+        <button class="vt on" type="button" data-layout="grid" aria-pressed="true" aria-label="Show projects as a grid" title="Show projects as a grid">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>
+        </button>
+        <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show projects as a list" title="Show projects as a list">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
+        </button>
       </div>
     </div>
-    <p class="pj-lede">A project is a folder you already have on this computer,
-       and the agents you have put on it.</p>
     <p class="fmsg" id="pj-list-msg" aria-live="polite"></p>
     <div id="pj-list" class="pj-list"></div>
     <!-- ⚠️ Absent entirely when nothing is archived (hidden on the WRAP, same
@@ -3844,7 +3877,10 @@ const LAYOUTS = {
      [hidden]{display:none !important} making the flip stick against any
      author display rule. */
   agents:   { swap: true, flip: 'list', fallback: 'grid' },
-  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'list' },
+  // Grid is the pack's default for projects (view C); the stored choice
+  // still wins via the restore path. `flip` NAMES THE LAYOUT THAT GETS
+  // THE CLASS (asgrid == grid mode), the default rides `fallback`.
+  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'grid' },
 };
 
 function layoutApply(scope, want) {
@@ -6598,33 +6634,66 @@ function paintProjects() {
       + '</div>');
     return;
   }
-  setIfChanged(list, active.map((p) => {
-    const s = p.summary || {};
-    const folder = pjFolderLine(p);
-    // ⚠️ The row NEVER says everything is fine when part of it was unreadable.
-    // A summary that hides its own blind spot is the defect this codebase keeps
-    // finding, and a project row is exactly where it would hide.
-    let who;
-    if (!s.total) who = 'No agents on it yet.';
-    else if (PJ_AGENTS_UNREADABLE) who = s.total + (s.total === 1 ? ' agent' : ' agents') + ' — we cannot see how they are doing right now.';
-    else {
-      const bits = [];
-      if (s.needsYou) bits.push(s.needsYou + ' needs you');
-      if (s.working) bits.push(s.working + ' working');
-      if (s.unseen) bits.push(s.unseen + ' we cannot see');
-      who = (p.agents || []).map((a) => esc(a.name)).join(' · ') + (bits.length ? ' — ' + bits.join(', ') : '');
-    }
-    return '<button class="pj-row" type="button" data-project="' + esc(p.id) + '">'
-      + '<b>' + esc(p.name) + '</b>'
-      // The description is what makes a list of twelve projects readable
-      // (Josh's fixtures made the case); absent, the line is absent, per
-      // the same no-empty-grey-line rule as the detail.
-      + (p.description ? '<span class="pj-desc">' + esc(p.description) + '</span>' : '')
-      + '<span class="pj-path">' + esc(p.folder) + '</span>'
-      + '<span class="pj-who">' + who + '</span>'
-      + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
-      + '</button>';
-  }).join(''));
+  setIfChanged(list, active.map((p) => projectCard(p, PJ_AGENTS_UNREADABLE)).join(''));
+
+  /* The pack's two counts, derived from the same rows just painted so
+     the tiles can never disagree with the cards. The alert tile hides
+     at zero, the board's own rule (a red-bordered zero teaches people
+     to ignore red); under an unreadable roster the needs-you count is
+     a claim we cannot make, so the tile hides then too and the cards'
+     own cannot-see lines carry the blind spot. */
+  const attnTotal = PJ_AGENTS_UNREADABLE ? 0
+    : active.reduce((n, p) => n + (((p.summary || {}).needsYou) || 0), 0);
+  document.getElementById('st-pj').textContent = String(active.length);
+  document.getElementById('st-pjattn').textContent = String(attnTotal);
+  document.getElementById('st-pjattn-tile').hidden = !attnTotal;
+}
+
+/* The pack's state pill (view C): Needs you > Working > Can't tell >
+   Nothing running. "Nothing running" is a CLAIM -- it is only made when
+   every member was actually seen; a blind roster or unseen members get
+   the board's own unsure treatment instead of a reassurance. */
+function pjPillOf(p, unreadable) {
+  const s = p.summary || {};
+  if (!unreadable && s.needsYou) return { cls: 'attn', glyph: '<span class="haz" aria-hidden="true">!</span>', label: 'Needs you' };
+  if (!unreadable && s.working) return { cls: '', glyph: '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>', label: 'Working' };
+  if (!s.total) return { cls: 'q', glyph: '', label: 'No agents yet' };
+  if (unreadable || s.unseen) return { cls: 'q', glyph: '', label: 'Can\u2019t tell' };
+  return { cls: 'q', glyph: '<span class="rest" aria-hidden="true"></span>', label: 'Nothing running' };
+}
+
+function projectCard(p, unreadable) {
+  const s = p.summary || {};
+  const folder = pjFolderLine(p);
+  const pill = pjPillOf(p, unreadable);
+  /* Faces: the avatar when the TIED agent has one, the initials chip
+     otherwise (hasAvatar is gated on tied in the engine -- a borrowed
+     pane must not lend the card somebody else's photograph). */
+  const faces = (p.agents || []).slice(0, 5).map((a) => a.hasAvatar
+    ? '<span class="lav sm"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav sm">' + esc(initials(a.name)) + '</span>').join('');
+  const count = s.total ? '<span class="pjcount">' + s.total + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
+  /* ⚠️ The card NEVER says everything is fine when part of it was
+     unreadable -- the pill claims only what the counts support, and the
+     blind spot is SAID in words below, same rule as before the restyle. */
+  const bits = [];
+  if (!unreadable && s.unseen) bits.push(s.unseen + ' we cannot see');
+  if (unreadable && s.total) bits.push('we cannot see how they are doing right now');
+  return '<button class="pj-row' + (pill.cls === 'attn' ? ' attn' : '') + '" type="button" data-project="' + esc(p.id) + '">'
+    + '<span class="pjcard-h"><b>' + esc(p.name) + '</b>'
+    + '<span class="pjpill ' + pill.cls + '">' + pill.glyph + esc(pill.label) + '</span></span>'
+    /* The slug chip shows the FOLDER'S real basename (what sits on their
+       disk), not the engine's collapsed id -- the chip's job is naming
+       the thing the person can find in Finder. */
+    + '<span class="pjslug">' + esc(String(p.folder || '').split('/').pop() || p.id) + '</span>'
+    + '<span class="pjfaces">' + faces + count + '</span>'
+    // The description is what makes a list of twelve projects readable
+    // (Josh's fixtures made the case); absent, the line is absent, per
+    // the same no-empty-grey-line rule as the detail.
+    + (p.description ? '<span class="pjdesc">' + esc(p.description) + '</span>' : '')
+    + (bits.length ? '<span class="pj-who">' + esc(bits.join(', ')) + '</span>' : '')
+    + (folder.bad ? '<span class="pj-warn">' + esc(folder.text) + '</span>' : '')
+    + '</button>';
 }
 
 // ---------------------------------------------------------------------------

@@ -581,6 +581,11 @@ function describe(project, roster, all) {
       // to read its model or its transcript: whatever that pane is doing, we
       // have not established it is this agent doing it.
       state: (card && card.isNamedOurs) ? card.state : 'unknown',
+      // The face, gated on tied like every other card-read here: a
+      // stranger's pane borrowing the name must not lend the row a
+      // photograph of somebody it is not (the project cards draw member
+      // faces, and a face is the strongest identity claim on the screen).
+      hasAvatar: Boolean(card && card.isNamedOurs && card.hasAvatar),
       // ⚠️ "Never seen" is only said when we have never seen it. The flag is
       // written once at add time, and an agent added while the roster was
       // unreadable was stamped `false` forever -- so a real agent that stopped

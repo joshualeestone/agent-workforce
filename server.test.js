@@ -3592,7 +3592,9 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // project named by the person carries their words onto a card and a
     // heading, and either an unescaped render or a dropped arm would be
     // invisible to node tests (project-description branch).
-    [/p\.description \? '<span class="pj-desc">' \+ esc\(p\.description\)/,
+    // (class renamed pj-desc -> pjdesc with the pack-card restyle; the
+    // pin follows the arm it protects, not the spelling.)
+    [/p\.description \? '<span class="pjdesc">' \+ esc\(p\.description\)/,
      'the card row lost its escaped description arm'],
     [/desc\.textContent = p\.description \|\| '';/,
      'the detail description must be written through textContent -- innerHTML here is the injection the card arm escapes against, and no node test can see the swap'],
@@ -5258,4 +5260,20 @@ test('an attributed refusal is an event: logged once per window with its because
     chatEngine.resetForTests();
     board.restore();
   }
+});
+
+test('the project pill claims only what the counts support', () => {
+  /* Pack view C's state pill, driven at its honesty boundaries: "Nothing
+     running" is a CLAIM made only when every member was actually seen; a
+     blind roster or unseen members get the unsure treatment, never a
+     reassurance. */
+  const pjPillOf = pageFunction('pjPillOf');
+  assert.equal(pjPillOf({ summary: { total: 3, needsYou: 1, working: 1 } }, false).label, 'Needs you');
+  assert.equal(pjPillOf({ summary: { total: 3, working: 2 } }, false).label, 'Working');
+  assert.equal(pjPillOf({ summary: { total: 2 } }, false).label, 'Nothing running');
+  assert.equal(pjPillOf({ summary: { total: 0 } }, false).label, 'No agents yet');
+  assert.equal(pjPillOf({ summary: { total: 2, unseen: 1 } }, false).label, 'Can’t tell',
+    'an unseen member let the card claim nothing is running');
+  assert.equal(pjPillOf({ summary: { total: 2, working: 1 } }, true).label, 'Can’t tell',
+    'a blind roster let the card keep claiming Working');
 });
