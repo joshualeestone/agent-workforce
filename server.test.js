@@ -5130,6 +5130,16 @@ test('the post route resolves the project, derives the member list, and fans out
     const rec = messagesEngine.record().rows.filter((m) => m.kind === 'post');
     assert.equal(rec.length, 1);
     assert.equal(rec[0].project, 'routeroom');
+
+    // Ripple 5 at the wire: the post reaches each member's conversation
+    // feed AS a post, carrying its project and THAT member's outcome.
+    const feed = await req('/api/agent/mara/conversation');
+    assert.equal(feed.status, 200);
+    const post = JSON.parse(feed.body).rows.find((m) => m.kind === 'post');
+    assert.ok(post, 'the room post vanished from the member\u2019s feed');
+    assert.equal(post.project, 'routeroom');
+    assert.equal(post.state, 'placed');
+    assert.equal(post.operator, false);
   } finally {
     messagesEngine.resetForTests();
     chatEngine.resetForTests();
@@ -5137,6 +5147,57 @@ test('the post route resolves the project, derives the member list, and fans out
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
     void projectsEngine;
   }
+});
+
+test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {
+  /* View D ripple 5 on the agent page, and the receipt grammar on the
+     room itself, extracted from the page so a rename cannot leave these
+     asserting a copy. */
+  const escSrc = (() => {
+    const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const at = sc.indexOf('function esc(');
+    return sc.slice(at, sc.indexOf('\n}', at) + 2);
+  })();
+  const convoRow = pageFunction('convoRow', escSrc);
+
+  const agentPost = convoRow({ kind: 'post', from: 'mara', to: ['leo', 'april'], project: 'hendersonlease',
+    operator: false, text: 'the draft is up', at: new Date().toISOString(), state: 'placed' }, 'leo');
+  assert.match(agentPost, /mara · to everyone on hendersonlease/,
+    'a remark to a group reads as a message to one (ripple 5)');
+  assert.match(agentPost, /class="cvrow peer"/);
+
+  const opPost = convoRow({ kind: 'post', from: 'you', to: ['leo'], project: 'hendersonlease',
+    operator: true, text: 'status?', at: new Date().toISOString(), state: 'could_not' }, 'leo');
+  assert.match(opPost, /You · to everyone on hendersonlease/);
+  assert.match(opPost, /class="cvrow you"/, 'the person\u2019s room post did not get their own treatment');
+  assert.match(opPost, /Not delivered to leo/, 'a failed delivery to this agent rendered as silence');
+
+  // An agent literally named "you" must NOT be promoted to the person:
+  // the flag is the distinction, never the name.
+  const trickPost = convoRow({ kind: 'post', from: 'you', to: ['leo'], project: 'p',
+    operator: false, text: 'hi', at: new Date().toISOString(), state: 'placed' }, 'leo');
+  assert.match(trickPost, /class="cvrow peer"/,
+    'an agent named "you" was promoted to operator by a name match');
+
+  const roomValve = convoRow({ kind: 'valve', from: 'leo', to: 'hendersonlease', project: 'hendersonlease',
+    at: new Date().toISOString() }, 'leo');
+  assert.match(roomValve, /conversation on hendersonlease/,
+    'the room valve rendered with the pair sentence');
+  assert.match(roomValve, /asked everyone to bring you in/);
+  // The control: the PAIR valve keeps its named-sender sentence.
+  const pairValve = convoRow({ kind: 'valve', from: 'leo', to: 'mara', at: new Date().toISOString() }, 'mara');
+  assert.match(pairValve, /asked leo to bring you in/);
+
+  // The receipt grammar, one clause per real state.
+  const pjJoinNames = pageFunction('pjJoinNames');
+  const receipt = pageFunction('pjReceiptSentence',
+    'const pjNameOf = (p, n) => n;\nconst pjJoinNames = ' + pjJoinNames.toString() + ';');
+  assert.equal(receipt({ leo: 'placed', mara: 'placed' }, {}), 'Placed with leo and mara.');
+  assert.equal(receipt({ leo: 'placed', mara: 'unconfirmed', april: 'could_not' }, {}),
+    'Placed with leo. mara may have it; not confirmed, so it is not re-sent. april could not be reached.');
+  // An unknown state must land in the honest bucket, never vanish.
+  assert.match(receipt({ leo: 'something-new' }, {}), /leo could not be reached/);
 });
 
 test('the conversation rows hold the spec grammar: attributed peers, verbatim refusals, the valve as reassurance', () => {

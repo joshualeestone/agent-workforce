@@ -622,6 +622,16 @@ test('the block names each project and its folder', () => {
     'the managed block must not carry the description: it is display-side text, and the re-tell gate depends on this');
 });
 
+test('the block teaches the room command per project, with the id it actually takes', () => {
+  const body = projects.blockBody([{ id: 'hendersonlease', name: 'Henderson lease', folder: '/tmp/h' }]);
+  assert.match(body, /kosmos post hendersonlease "your message"/,
+    'an existing agent is never taught the room exists (this block is the surface that re-splices)');
+  // An id-less row (a caller predating ids, or a fixture) must not teach a
+  // broken command.
+  const noId = projects.blockBody([{ name: 'Old row', folder: '/tmp/o' }]);
+  assert.ok(!/kosmos post/.test(noId), 'a row without an id taught a command with a hole in it');
+});
+
 test('the block for an agent on nothing says so rather than being empty', () => {
   assert.match(projects.blockBody([]), /not put this agent on a project/);
 });

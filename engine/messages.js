@@ -85,12 +85,32 @@ const PAIR_WINDOW_MS = 30 * 60 * 1000;
    participants looping (A to B, B to C, C to A never trips a pair cap),
    so the project thread carries a cap ACROSS the whole thread regardless
    of sender. The two valves COMPOSE: the pair cap still governs direct
-   messages, and posts do not count toward it (see pairCount). 20 per
-   half hour is Angel's pick pending Mona Lisa: the pair cap is 10 for
-   two participants, and a room of several deserves the same order, not
-   an order more. */
-const ROOM_CAP = 20;
+   messages, and posts do not count toward it (see pairCount).
+
+   ⚠️ The unit is ARRIVALS, not posts (Mona Lisa, 2026-08-18): the valve
+   exists for COST, and one post into a five-member room is four agent
+   turns -- a post-count cap chosen to look "the same order" as the pair
+   cap would be eight times the spend. Counted in arrivals, a bigger
+   room tightens automatically because a post genuinely costs more
+   there. 40 per half hour is Angel's value: a five-member room gets
+   ten posts (the pair's own post count), and a cap that breaks a
+   productive conversation is worse than one that runs long. Operator
+   posts count nothing (see the valve). */
+const ROOM_ARRIVALS_CAP = 40;
 const ROOM_WINDOW_MS = PAIR_WINDOW_MS;
+
+/* Every envelope marker this module can mint, refused inside any BODY on
+   any path: a body carrying one would read, on a recipient's screen, as
+   a second message attributing words to someone who never sent them --
+   and the OPERATOR spellings are the sharp ones, because an agent
+   smuggling '[message from your operator' into a room forges the one
+   authority the colleague-vs-operator posture is built on. */
+const MARKERS = [
+  '[message from your colleague',
+  '[background from your colleague',
+  '[message from your operator',
+  '[from your operator',
+];
 
 /* Injectable for tests, mirroring chat.setRunner: one tmux question, "whose
    session is this pane in". */
@@ -341,7 +361,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      start its own line -- it always arrives wrapped inside the genuine
      envelope, attributed to its real sender. */
   const lowered = chat.cleanMessage(text).toLowerCase();
-  if (lowered.includes('[message from your colleague') || lowered.includes('[background from your colleague')) {
+  if (MARKERS.some((m) => lowered.includes(m))) {
     return refuse(toName, 'that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
@@ -459,17 +479,31 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
  * (the route reads it off the project record): this module stays the
  * mechanism and owns no membership model.
  */
-function sendPost({ fromPane, project, text }, roster, members) {
+function sendPost({ fromPane, project, text, operator }, roster, members) {
   const at = new Date().toISOString();
-  const sender = resolveSender(fromPane, roster);
-  if (!sender.ok) return { state: chat.DELIVERY.COULD_NOT, because: sender.because, id: null, at, outcomes: null };
-
-  const from = sender.card.sessionName;
+  /* The OPERATOR path: no pane to derive (the post comes off the room's
+     composer through the server, which is the operator's own surface),
+     from is 'you' for display, and the row carries an explicit
+     operator: true because a NAME alone cannot carry the distinction --
+     'you' is a legal tmux session name, and the one thing the screens
+     must never do is promote an agent to operator on a string match. */
+  let from;
+  if (operator === true) {
+    from = 'you';
+  } else {
+    const sender = resolveSender(fromPane, roster);
+    if (!sender.ok) return { state: chat.DELIVERY.COULD_NOT, because: sender.because, id: null, at, outcomes: null };
+    from = sender.card.sessionName;
+  }
 
   /* The same attributed-refusal contract as send(): every refusal their
      agent meets is an event, logged once per sender-target-because per
      window; the logged target is the PROJECT (capped like send's to). */
   const refuse = (because) => {
+    /* Operator refusals are NOT logged: the composer answers the person
+       directly, so the sentence has its surface -- the refused-row
+       contract exists for refusals an AGENT meets invisibly. */
+    if (operator === true) return { state: chat.DELIVERY.COULD_NOT, because, id: null, at, outcomes: null };
     const toLogged = String(project == null ? '' : project).slice(0, 120) || '(no project named)';
     try {
       const now2 = Date.parse(at);
@@ -494,15 +528,19 @@ function sendPost({ fromPane, project, text }, roster, members) {
   if (!Array.isArray(members) || !members.every((m) => typeof m === 'string' && m)) {
     return refuse('we could not read who is on that project, so nothing was posted');
   }
-  /* The room is its members: a sender who is not on the project is not
-     in the room, and speaking into a room you are not in is exactly the
-     unaddressed-steering hazard the room model exists to prevent. */
-  if (!members.includes(from)) {
+  /* The room is its members: an AGENT sender who is not on the project
+     is not in the room, and speaking into a room you are not in is
+     exactly the unaddressed-steering hazard the room model exists to
+     prevent. The operator is in every room they own -- membership lists
+     agents, not the person. */
+  if (operator !== true && !members.includes(from)) {
     return refuse('you are not on that project, so this room is not yours to post into');
   }
-  const recipients = members.filter((m) => m !== from);
+  const recipients = operator === true ? members.slice() : members.filter((m) => m !== from);
   if (!recipients.length) {
-    return refuse('nobody else is on that project yet, so there is no room to post to');
+    return refuse(operator === true
+      ? 'nobody is on that project yet, so there is no room to post to'
+      : 'nobody else is on that project yet, so there is no room to post to');
   }
 
   if (text != null && typeof text !== 'string') {
@@ -514,7 +552,7 @@ function sendPost({ fromPane, project, text }, roster, members) {
     return refuse('that is a document, not a message; put it in the project folder and post your colleagues the path');
   }
   const lowered = chat.cleanMessage(text).toLowerCase();
-  if (lowered.includes('[message from your colleague') || lowered.includes('[background from your colleague')) {
+  if (MARKERS.some((m) => lowered.includes(m))) {
     return refuse('that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
@@ -537,9 +575,15 @@ function sendPost({ fromPane, project, text }, roster, members) {
      valve's grammar with "everyone" on purpose: a room has no single
      sender whose turn it was, and naming one would be untrue. */
   const now = Date.parse(at);
-  const threadCount = log.filter((m) => m && m.kind === 'post'
-    && m.project === projectId && Date.parse(m.at) >= now - ROOM_WINDOW_MS).length;
-  if (threadCount >= ROOM_CAP) {
+  // !m.operator: operator posts do not count toward the cap, and the
+  // operator is never refused by it (the recorded decision above). The
+  // sum is ARRIVALS (each post costs its recipient count), and this
+  // post's own arrivals are charged up front: a nine-arrival post at
+  // thirty-nine is over the budget, not under it.
+  const arrivals = log.filter((m) => m && m.kind === 'post' && !m.operator
+    && m.project === projectId && Date.parse(m.at) >= now - ROOM_WINDOW_MS)
+    .reduce((n, m) => n + (Array.isArray(m.to) ? m.to.length : 0), 0);
+  if (operator !== true && arrivals + recipients.length > ROOM_ARRIVALS_CAP) {
     const because = 'This conversation went back and forth for a while without landing, '
       + 'so Kosmos stopped it and asked everyone to bring you in.';
     const already = log.some((m) => m && m.kind === 'valve'
@@ -586,9 +630,18 @@ function sendPost({ fromPane, project, text }, roster, members) {
   const outcomes = {};
   let reached = 0;
   for (const name of recipients) {
-    const envelope = (mentioned.has(name)
-      ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ']'
-      : '[background from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ' \u00b7 not addressed to you]')
+    /* The operator's arrivals carry their OWN markers: an @-mentioned
+       member reads a request from the person; everyone else reads the
+       room-wide form, which is the person speaking to the room rather
+       than to them -- weighed, not obeyed blindly, same posture with the
+       operator's weight behind it. */
+    const envelope = (operator === true
+      ? (mentioned.has(name)
+        ? '[message from your operator \u00b7 ' + id + ' \u00b7 project ' + projectId + ']'
+        : '[from your operator in project ' + projectId + ' \u00b7 ' + id + ' \u00b7 for the whole room]')
+      : (mentioned.has(name)
+        ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ']'
+        : '[background from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ' \u00b7 not addressed to you]'))
       + ' ' + body;
     const sent = chat.deliver(name, envelope, roster);
     outcomes[name] = sent.state;
@@ -607,7 +660,8 @@ function sendPost({ fromPane, project, text }, roster, members) {
     return failed;
   }
 
-  appendLog({ kind: 'post', id, project: projectId, from, to: recipients, text: cleaned, at, outcomes });
+  appendLog({ kind: 'post', id, project: projectId, from, to: recipients, text: cleaned, at, outcomes,
+    ...(operator === true ? { operator: true } : {}) });
   /* The aggregate state is a SUMMARY, not the receipt: the receipt
      sentence must be built from `outcomes` per recipient (a post to
      three that reaches two must never render as sent). */
@@ -663,7 +717,7 @@ function blockBody() {
 
 module.exports = {
   START, END, blockBody,
-  LOG, PAIR_CAP, PAIR_WINDOW_MS, ROOM_CAP, ROOM_WINDOW_MS,
+  LOG, PAIR_CAP, PAIR_WINDOW_MS, ROOM_ARRIVALS_CAP, ROOM_WINDOW_MS,
   resolveSender, send, sendPost, list, pairCount, readLog, record,
   setRunner, resetForTests,
 };

@@ -714,10 +714,14 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
-#pj-one-view, #pj-add-view, #pj-settings-view {
+#pj-add-view, #pj-settings-view {
   max-width: 860px; margin: 0 auto; background: var(--bg-elevated);
   border: 0.5px solid var(--separator); border-radius: var(--radius-card);
   box-shadow: var(--shadow-card); padding: var(--space-8); }
+/* The room page sits on the GROUND like the pack draws it: the three
+   pjcols are the cards, and a panel behind them was cards on a card. */
+#pj-one-view { max-width: 1320px; margin: 0 auto; background: none;
+  border: 0; box-shadow: none; padding: 0; }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -787,6 +791,61 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
      1.69:1 dark measurement dates from when k-ink-2 did not flip; the
      one-system-per-surface rule is what survives the flip). */
   overflow-wrap: anywhere; }
+
+/* ---- the project room (View D, pack FROZEN-2026-08-18 shell) ----
+   The pjhead pair, the pj3 three-column grid, and the thread/message
+   family, the pack's values verbatim; everything rides k-tokens so the
+   surfaces flip with the theme. The room lives in the centre column;
+   the per-agent thread keeps its battle-tested block beneath it until
+   the consolidation question is ruled (recorded in the plan). */
+.pjhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+          padding: 0 2px; margin-bottom: 16px; }
+.pjtitle { min-width: 0; }
+.pj3 { display: grid; grid-template-columns: minmax(0, 22%) minmax(0, 1fr) minmax(0, 22%); gap: 16px; align-items: start; }
+@media (max-width: 68rem) { .pj3 { grid-template-columns: minmax(0, 1fr); } }
+.pjcol { border: 1px solid var(--k-rule); border-radius: 12px; background: var(--k-surface); padding: 14px 16px 16px; }
+.pjcol > .flabel { display: block; margin-bottom: 10px; }
+/* Inside a pjcol the card IS the boundary: the .field separator rule
+   drew a stray line above Tasks. */
+.pjcol .field { border-top: 0; padding-top: 0; margin-top: 0; }
+.pjcol .field + .field { margin-top: var(--space-6); }
+.pjmid { display: flex; flex-direction: column; min-width: 0; }
+.pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.thread { padding: 14px 16px; display: flex; flex-direction: column; gap: 18px;
+          max-height: 26rem; overflow-y: auto;
+          border: 1px solid var(--k-rule); border-radius: 12px; }
+.msg { display: flex; gap: 14px; }
+.msg-av { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: grid;
+          place-items: center; background: rgba(20,22,26,.06); font-size: .875rem;
+          font-weight: 600; color: var(--k-ink-2); overflow: hidden; }
+.msg-av img { width: 100%; height: 100%; object-fit: cover; }
+.msg-av.mine { background: var(--k-ink); color: var(--k-bg); }
+.msg-b { flex: 1; min-width: 0; }
+.msg-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.msg-h b { font-size: .9375rem; }
+.msg-t { font-size: .75rem; color: var(--k-ink-2); }
+.msg p { margin: 0; font-size: .9375rem; line-height: 1.55; color: var(--k-ink); overflow-wrap: anywhere; }
+.msg.you p { color: var(--k-ink-2); }
+/* ⚠️ THREE DELIVERY STATES, NEVER TWO (the pack's own warning kept
+   verbatim): placed (it went in), could not (nothing was typed, re-send
+   freely), and could not confirm (it MAY have arrived -- check before
+   re-sending). They demand different actions, so they get different
+   words and different weight. Do not prune .unsure because a fixture
+   stops exercising it. */
+.delivery { display: inline-block; margin-top: 8px; font-size: .75rem; font-weight: 600;
+            padding: .18rem .6rem; border-radius: 100px; border: 1px solid var(--k-rule);
+            color: var(--k-ink-2); }
+.delivery.placed { border-color: rgba(47,125,90,.5); }
+.delivery.failed { border-color: rgba(179,38,30,.5); }
+.delivery.unsure { border-style: dashed; }
+/* The room valve's row: reassurance, not an error. */
+.msg-valve { font-size: .8125rem; color: var(--k-ink-2); border-left: 2px solid var(--k-rule);
+             padding-left: 10px; }
+.composer { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.composer input { flex: 1; min-width: 10rem; }
+@media (prefers-color-scheme: dark) {
+  .msg-av { background: rgba(245,245,244,.10); }
+}
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
    together into one unreadable string -- which every one of the 408 text tests
@@ -2392,16 +2451,23 @@ svg { display: block; }
   <!-- One project. -->
   <div id="pj-one-view" hidden>
     <button class="back" id="pj-back" type="button">← All projects</button>
-    <div class="pj-head">
-      <h2 id="pj-one-name"></h2>
+    <div class="pjhead">
+      <div class="pjtitle">
+        <h2 id="pj-one-name"></h2>
+        <!-- What this project IS, in the person's own words, directly under
+             the title per the design (PIN-2026-08-14-1913CDT): the pair is
+             one statement. Hidden entirely when there is none: an empty grey
+             line under every undescribed project would read as something
+             missing. -->
+        <p class="pj-desc" id="pj-one-desc" hidden></p>
+      </div>
+      <!-- The door to settings, in the pack's pjhead corner: what lives
+           there is what has nowhere else to live. -->
+      <button class="linkish" id="pj-settings-link" type="button">Project settings</button>
     </div>
-    <!-- What this project IS, in the person's own words, directly under the
-         title per the design (PIN-2026-08-14-1913CDT): the pair is one
-         statement. Hidden entirely when there is none: an empty grey line
-         under every undescribed project would read as something missing. -->
-    <p class="pj-desc" id="pj-one-desc" hidden></p>
 
-    <div class="field">
+    <div class="pj3">
+    <aside class="pjcol">
       <span class="flabel">Project members</span>
       <p class="fhint">Putting an agent here tells it where this project's folder
          is. It does not stop it reaching anything else, and it is not a
@@ -2416,7 +2482,26 @@ svg { display: block; }
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
-    </div>
+    </aside>
+
+    <section class="pjcol pjmid">
+      <div class="pjmidhead"><span class="flabel">Conversation</span></div>
+      <!-- THE ROOM (View D): this project's thread, drawn from the record
+           by project alone. Every post carries who said it; posts you make
+           here go to EVERYONE on the project, @-mentions arrive as
+           requests, everyone else receives the same words marked as
+           background. The receipt under your post names each recipient's
+           real delivery state -- a post to three that reaches two must
+           never render as sent. -->
+      <div class="thread" id="pj-room"></div>
+      <div class="composer">
+        <input type="text" id="pj-post" maxlength="2000"
+               placeholder="Post to everyone on this project (@name to address someone)"
+               aria-label="Post to everyone on this project">
+        <button class="btn" id="pj-post-go" type="button">Post</button>
+      </div>
+      <p class="fmsg" id="pj-room-msg"></p>
+      <p class="vh" id="pj-room-say" role="status" aria-live="polite"></p>
 
     <!-- ⚠️ TASKS, the pack's right column in this page's single-column shape.
          A task is "a thing that needs doing, which exists whether or not
@@ -2427,19 +2512,6 @@ svg { display: block; }
          assigned card is a claim about the agent that v1 cannot check.
          New task sits ABOVE the list (Josh 2026-08-15: at the bottom it was
          the one thing you had to scroll to find). -->
-    <div class="field" id="pj-tasks-field">
-      <span class="flabel">Tasks</span>
-      <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
-      <div class="tkcards" id="pj-tasklist"></div>
-      <!-- The door, pack rule: the column is a task with somebody on it that
-           is not finished; finished and unpicked are both real and both
-           behind this. v1's door reveals them in place (there is no
-           all-tasks screen yet); the reveal survives repaints and
-           same-project Back-and-return (the page's round-31 rule) and
-           resets on a project SWITCH. -->
-      <button class="linkish" id="pj-alltasks" type="button" hidden></button>
-    </div>
-
     <!-- ⚠️ THE RULE THIS BLOCK EXISTS UNDER, because the screen it replaced said
          the room was waiting on exactly this question: when five agents are on a
          project, who answers. The answer is ONE of them, chosen here. Everything
@@ -2508,10 +2580,23 @@ svg { display: block; }
       </div>
     </div>
 
-    <!-- The door to settings: the pack's hierarchy (project, then its
-         settings, then its tasks), and the pack's rule for what lives there:
-         what has nowhere else to live. -->
-    <button class="linkish" id="pj-settings-link" type="button">Project settings</button>
+    </section>
+
+    <aside class="pjcol">
+    <div class="field" id="pj-tasks-field" data-room-move="tasks">
+      <span class="flabel">Tasks</span>
+      <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
+      <div class="tkcards" id="pj-tasklist"></div>
+      <!-- The door, pack rule: the column is a task with somebody on it that
+           is not finished; finished and unpicked are both real and both
+           behind this. v1's door reveals them in place (there is no
+           all-tasks screen yet); the reveal survives repaints and
+           same-project Back-and-return (the page's round-31 rule) and
+           resets on a project SWITCH. -->
+      <button class="linkish" id="pj-alltasks" type="button" hidden></button>
+    </div>
+    </aside>
+    </div>
   </div>
 
   <!-- ============ PROJECT SETTINGS (pack FROZEN-2026-08-16, section 3099) ====
@@ -4181,12 +4266,36 @@ function memoryBox(a) {
    paraphrasing an engine sentence is how two surfaces drift. */
 function convoRow(r, agentName) {
   if (r.kind === 'valve') {
+    // The ROOM's closing first: its `to` is the project id, not an agent,
+    // and the pair sentence would put a project's name in an agent's
+    // mouth. The everyone-wording is the ruled copy: a room has no single
+    // sender whose turn it was.
+    if (r.project) {
+      return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
+        + 'The conversation on ' + esc(r.project)
+        + ' went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.</p></div>';
+    }
     // Her sentence, names substituted: proof a conversation cannot run
     // on without you. Not an error, and not dressed as one.
     return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
       + esc(r.from) + ' and ' + esc(r.to)
       + ' were going back and forth, so Kosmos stopped them and asked '
       + esc(r.from) + ' to bring you in.</p></div>';
+  }
+  if (r.kind === 'post') {
+    // Ripple 5: a room post renders AS a room post, naming its project --
+    // a remark to a group must never read as a message to one. The
+    // person's rows key on the flag, never on a name match.
+    const isOp = r.operator === true;
+    const who = (isOp ? 'You' : r.from) + ' · to everyone on ' + r.project;
+    let state = '';
+    if (r.state === 'unconfirmed') {
+      state = '<span class="cv-state">Sent to ' + esc(agentName) + '. We could not confirm it arrived.</span>';
+    } else if (r.state === 'could_not') {
+      state = '<span class="cv-state"><b>Not delivered to ' + esc(agentName) + '.</b></span>';
+    }
+    return '<div class="cvrow ' + (isOp ? 'you' : 'peer') + '"><span class="cv-who">' + esc(who) + '</span><p>'
+      + esc(r.text) + '</p>' + state + '</div>';
   }
   if (r.kind === 'refused') {
     // Her copy, the because verbatim: a refusal their agent met is an
@@ -7629,6 +7738,13 @@ function openProject(id) {
     PJ_SENT_LINE = null;
     document.getElementById('pj-thread-msg').textContent = '';
     document.getElementById('pj-say').value = PJ_DRAFTS[id] || '';
+    /* The room, same switching rules: this project's draft back, the
+       previous project's thread never painted under the new name. */
+    document.getElementById('pj-post').value = PJ_ROOM_DRAFTS[id] || '';
+    document.getElementById('pj-room-msg').textContent = '';
+    const roomBox = document.getElementById('pj-room');
+    roomBox.__lastRoom = undefined;
+    setLive(roomBox, '');
     /**
      * ⚠️ THE PAINT IS CLEARED WITH THE STATE. The heading repaints
      * synchronously below, but the thread body waits a full route round trip
@@ -7654,7 +7770,164 @@ function openProject(id) {
   paintOneProject();
   pjView('one');
   loadThread();
+  loadRoom();
 }
+
+/* --- the room (View D) ---------------------------------------------------
+   This project's thread, drawn from the record by PROJECT ALONE. Posts
+   from here go to everyone on the project through the operator route;
+   the receipt under a post names each recipient's real delivery state,
+   built from the outcomes the engine returns -- a post to three that
+   reaches two must never render as sent. */
+const PJ_ROOM_DRAFTS = {};
+let PJ_ROOM_GEN = 0;
+let PJ_POSTING = false;
+
+function pjJoinNames(list) {
+  if (list.length <= 1) return list.join('');
+  return list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+}
+
+/** The receipt, in the operator's words, one clause per real state. */
+function pjReceiptSentence(outcomes, p) {
+  const groups = { placed: [], unconfirmed: [], could_not: [] };
+  for (const [who, state] of Object.entries(outcomes || {})) {
+    (groups[state] || groups.could_not).push(pjNameOf(p, who));
+  }
+  const bits = [];
+  if (groups.placed.length) bits.push('Placed with ' + pjJoinNames(groups.placed) + '.');
+  if (groups.unconfirmed.length) {
+    bits.push(pjJoinNames(groups.unconfirmed) + ' may have it; not confirmed, so it is not re-sent.');
+  }
+  if (groups.could_not.length) bits.push(pjJoinNames(groups.could_not) + ' could not be reached.');
+  return bits.join(' ');
+}
+
+function pjRoomRow(m, p) {
+  if (m.kind === 'valve') {
+    /* Reassurance, not an error: the valve is the product doing its job. */
+    return '<div class="msg-valve">' + esc(m.because
+      || 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
+      + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>';
+  }
+  const isOp = m.operator === true;
+  const card = !isOp && (p.agents || []).find((a) => a.sessionName === m.from);
+  const name = isOp ? 'You' : pjNameOf(p, m.from);
+  /* The person's own chip is NEUTRAL, never drawn from the agent face set
+     (the pack's rule: "You" is not an agent). Agents get the shared disc,
+     or their photo when the tied card carries one. */
+  const av = isOp
+    ? '<div class="msg-av mine" aria-hidden="true"></div>'
+    : (card && card.hasAvatar
+      ? '<div class="msg-av" aria-hidden="true"><img src="/api/agent/' + encodeURIComponent(m.from) + '/avatar" alt=""></div>'
+      : '<div class="msg-av" aria-hidden="true" style="background:' + discTint(m.from) + ';color:' + discInk(m.from) + '">' + esc(initials(m.from)) + '</div>');
+  const states = Object.values(m.outcomes || {});
+  /* The receipt renders under the person's posts always, and under an
+     agent's post whenever any recipient did NOT simply receive it --
+     partial delivery in the room must never look like the full room heard. */
+  const showReceipt = isOp || states.some((v) => v !== 'placed');
+  const cls = states.length && states.every((v) => v === 'placed') ? 'placed'
+    : (states.some((v) => v === 'could_not') ? 'failed' : 'unsure');
+  const receipt = showReceipt && states.length
+    ? '<span class="delivery ' + cls + '">' + esc(pjReceiptSentence(m.outcomes, p)) + '</span>' : '';
+  return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
+    + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
+    + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
+    + '<p>' + esc(m.text || '') + '</p>' + receipt + '</div></div>';
+}
+
+function paintRoom(body) {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const box = document.getElementById('pj-room');
+  const rows = (body.rows || []).map((m) => pjRoomRow(m, p)).join('');
+  /* An unreadable record is SAID, ahead of whatever could be read --
+     no-state-as-silence, the same rule as every list on this app. */
+  const note = body.ok === false
+    ? '<div class="msg-valve">We could not read some of this room just now; what is below may be missing recent posts.</div>' : '';
+  const html = note + (rows
+    || '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>');
+  const changed = box.__lastRoom !== html;
+  if (changed) {
+    box.__lastRoom = html;
+    setLive(box, html);
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+async function loadRoom() {
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const mine = ++PJ_ROOM_GEN;
+  let body;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/room');
+    body = await res.json();
+    if (mine !== PJ_ROOM_GEN) return;
+    if (!res.ok) throw new Error(body.error || 'we could not read the room');
+  } catch {
+    if (mine !== PJ_ROOM_GEN) return;
+    /* The painted thread stays exactly as it was ("could not look" must
+       not repaint as "nothing here"); the failure is said beside it. */
+    const msg = document.getElementById('pj-room-msg');
+    if (!msg.textContent) msg.textContent = 'We cannot read this room right now. What is shown may be behind.';
+    return;
+  }
+  const msg = document.getElementById('pj-room-msg');
+  if (msg.textContent === 'We cannot read this room right now. What is shown may be behind.') msg.textContent = '';
+  paintRoom(body);
+}
+
+async function pjPostSend() {
+  if (PJ_POSTING) return;
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const input = document.getElementById('pj-post');
+  const msg = document.getElementById('pj-room-msg');
+  const said = document.getElementById('pj-room-say');
+  const text = input.value;
+  if (!text.trim()) { msg.textContent = 'Say something first.'; return; }
+  PJ_POSTING = true;
+  document.getElementById('pj-post-go').disabled = true;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/room', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const body = await res.json().catch(() => ({}));
+    const d = (body && body.delivery) || {};
+    if (!res.ok || !d.state) {
+      msg.textContent = (body && body.error) || 'We could not post that.';
+      return;
+    }
+    if (d.state === 'could_not') {
+      /* The engine's own sentence, verbatim -- including the room valve's. */
+      msg.textContent = d.because || 'We could not post that.';
+      return;
+    }
+    input.value = '';
+    PJ_ROOM_DRAFTS[PJ_CURRENT] = '';
+    msg.textContent = '';
+    said.textContent = 'Posted. ' + pjReceiptSentence(d.outcomes || {}, p);
+    await loadRoom();
+  } catch {
+    msg.textContent = 'We could not reach Kosmos to post that.';
+  } finally {
+    PJ_POSTING = false;
+    document.getElementById('pj-post-go').disabled = false;
+  }
+}
+
+document.getElementById('pj-post-go').addEventListener('click', pjPostSend);
+document.getElementById('pj-post').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); pjPostSend(); }
+});
+/* Parked as TYPED (the round-34 rule): a switch or repaint must not eat
+   the words. */
+document.getElementById('pj-post').addEventListener('input', (e) => {
+  if (PJ_CURRENT) PJ_ROOM_DRAFTS[PJ_CURRENT] = e.target.value;
+});
 
 /* --- the thread ---------------------------------------------------------- *
  *
@@ -9311,6 +9584,7 @@ setInterval(() => {
    * decision rather than an oversight.
    */
   if (!document.getElementById('pj-one-view').hidden && !PJ_SENDING) loadThread();
+  if (!document.getElementById('pj-one-view').hidden && !PJ_POSTING) loadRoom();
 }, 5000);
 
 /* ==========================================================================
