@@ -1597,8 +1597,26 @@ test('every singular could_not because the engine authors has a plural sibling',
   // modules that author these sentences. When this fails, someone edited a
   // because at its author site without editing its map row -- the exact
   // event the map's "edit the singular, edit its row" rule names.
-  const authors = ['projects.js', 'you.js', 'workerfile.js']
-    .map((f) => fs.readFileSync(path.join(__dirname, f), 'utf8')).join('\n');
+  //
+  // ⚠️ The GROUP_BECAUSE declaration is STRIPPED from the projects.js text
+  // first. The map's keys ARE the singulars, so scanning it would hand the
+  // pin a copy of everything it checks and it could never fail -- the
+  // exact class it exists to catch, one level down.
+  const projSrc = fs.readFileSync(path.join(__dirname, 'projects.js'), 'utf8');
+  const mapStart = projSrc.indexOf('const GROUP_BECAUSE = new Map([');
+  const mapEnd = projSrc.indexOf(']);', mapStart);
+  assert.ok(mapStart > -1 && mapEnd > mapStart,
+    'could not locate the GROUP_BECAUSE declaration to strip; re-point this pin');
+  const authors = [
+    projSrc.slice(0, mapStart) + projSrc.slice(mapEnd),
+    fs.readFileSync(path.join(__dirname, 'you.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8'),
+  ].join('\n');
+  // CONTROL: the strip really removed the map keys' own copies -- a plural
+  // draft lives ONLY in the map, so it must be absent from the stripped
+  // text, or the pin is scanning the copy again.
+  assert.ok(!authors.includes('none of them has a folder on this computer yet'),
+    'CONTROL: a map-only plural survived the strip; the pin is scanning its own copy');
   for (const singular of [...Object.keys(expectPlural), neutral]) {
     assert.ok(authors.includes(singular),
       'a mapped singular no longer appears in any author module (edited without its row?): ' + singular);
