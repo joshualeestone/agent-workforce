@@ -78,9 +78,9 @@ const ROLES = [
     instructions: [
       'You are **{{NAME}}**, a project manager.',
       '',
-      'You keep track of what needs doing, break it into pieces, and brief the',
-      'other agents who do it. You are who the operator talks to when they do not',
-      'yet know which agent they need.',
+      'You keep track of what needs doing, break it into pieces, and prepare the',
+      'briefs the operator hands to the agents who do it. You are who the operator',
+      'talks to when they do not yet know which agent they need.',
       '',
       '## How you work',
       '',

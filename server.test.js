@@ -2493,6 +2493,36 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
     'a blanked summary must also hide, not sit as an empty line under the tiles');
 });
 
+test('the detail panel carries the explanation the card gave up', () => {
+  /* ⚠️ The pack split moved the why-line off the card ("the card carries
+     signals, the panel carries explanation") -- so the panel MUST carry it,
+     or `because`, the board's stated reason for its belief about an agent,
+     appears nowhere in the UI at all while the server still ships it. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (because) => {
+    // Seeded shown-and-full (presence before absence): the empty case must
+    // demonstrably CLEAR and HIDE a line that was carrying a sentence.
+    const el = { textContent: 'seeded', hidden: false };
+    const from = script.indexOf("const why = document.getElementById('d-why');");
+    const write = script.indexOf('why.hidden = !why.textContent;');
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the why write fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', script.slice(from, end))(
+      { getElementById: () => el }, { because });
+    return el;
+  };
+  const told = drive('we could not read the pane');
+  assert.equal(told.textContent, 'we could not read the pane',
+    'the panel does not show the reason the board holds for its belief');
+  assert.equal(told.hidden, false, 'a present explanation must be visible');
+  const healthy = drive(undefined);
+  assert.equal(healthy.textContent, '', 'a missing because must clear the seeded text, not keep it');
+  assert.equal(healthy.hidden, true, 'an empty explanation must hide its line, not sit as a grey gap');
+});
+
 test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
   /* ⚠️ The menu precedes its trigger in the DOM (pack order, surfaced to the
      pack rather than reordered here), and it display:none's on close -- two
@@ -2630,6 +2660,16 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
       'the memory badge does not fire at its own threshold');
     assert.doesNotMatch(api.card(withPct(leo, 79)), /membadge/,
       'the memory badge fires below its threshold');
+    // The list bar reads the SAME band derivation (memBand), held here at its
+    // boundaries on the LIST side -- the four hand-written thresholds are one
+    // function now, and this is what keeps the views from drifting one number
+    // apart if that ever un-shares.
+    assert.match(api.lrow(withPct(leo, 80)), /<i class="high" style="width:80%"/,
+      'the list bar does not go high at the shared threshold');
+    assert.match(api.lrow(withPct(leo, 79)), /<i class="warn" style="width:79%"/,
+      'the list bar band disagrees with the card at 79');
+    assert.match(api.lrow(withPct(leo, 59)), /<i class="ok" style="width:59%"/,
+      'the list bar warms below the shared amber threshold');
     const attn88 = api.card(withPct(mara, 88));
     assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
     assert.doesNotMatch(attn88, /\bhot\b/,
@@ -3329,12 +3369,6 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
        actually enforces. Same rule as above: a pin is for a fix nothing
        else can catch. */
 
-    // The tie half of the "See the question" gate -- defence-in-depth, and
-    // this pin is its ONLY enforcement: the pipeline currently forces an
-    // untied pane's state to unknown upstream, so no fixture can produce the
-    // untied-needs_you shape and no render check can hold the gate. If the
-    // upstream refusal ever changes, this gate is what stops a borrowed-name
-    // pane offering a button into a thread that will refuse it silently.
     // The gold selected state on the view toggle is Josh's ruling twice
     // over (ink flips in dark and inverts the meaning); a quiet revert to
     // an ink fill would pass every behavioural check.
@@ -3345,6 +3379,13 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // generated html where no render drive currently reads it.
     [/Nothing was deleted\. Their folders and everything you wrote for them/,
      'the removed list lost the nothing-was-deleted reassurance that keeps Remove honest'],
+    // The tie half of the answer-button gate (the pack renamed its visible
+    // label from "See the question" to "Answer") -- defence-in-depth, and
+    // this pin is its ONLY enforcement: the pipeline currently forces an
+    // untied pane's state to unknown upstream, so no fixture can produce the
+    // untied-needs_you shape and no render check can hold the gate. If the
+    // upstream refusal ever changes, this gate is what stops a borrowed-name
+    // pane offering a button into a thread that will refuse it silently.
     [/a\.state === 'needs_you' && a\.isNamedOurs/,
      'the answer button lost its tie gate, so a borrowed-name pane promises a question '
      + 'the thread cannot show'],

@@ -163,6 +163,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-name { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-meta { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-top: 2px; }
 .detail-state { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); }
+/* The panel's half of the pack split ("the card carries signals, the panel
+   carries explanation"): the board's stated reason for its belief about
+   this agent. A sentence to read, so label-2 like the state line above. */
+.detail-why { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
 .flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
 .fhint { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
@@ -1055,7 +1059,10 @@ svg { display: block; }
    guard against someone "tidying" the block back up the file. The pack's
    real dark values replace all of this in #40. */
 @media (prefers-color-scheme: dark) {
-  .stat.action { background: var(--bg-elevated); }
+  /* border too: the light dashed value (rgba ink at .26) is near-invisible
+     over the dark elevated ground, and a vanished dashed border is the
+     whole "add" affordance gone until #40's real dark pass */
+  .stat.action { background: var(--bg-elevated); border-color: var(--label-3); }
   /* hover carries higher specificity (0,3,0) than the line above, so it
      needs its own dark ground or the tile flickers transparent on hover */
   .stat.action:hover { background: var(--bg-elevated); border-color: var(--gold-deep); }
@@ -1427,6 +1434,7 @@ svg { display: block; }
       <div class="detail-name" id="d-name"></div>
       <div class="detail-meta" id="d-meta"></div>
       <div class="detail-state" id="d-state"></div>
+      <div class="detail-why" id="d-why" hidden></div>
     </div>
   </div>
 
@@ -2516,6 +2524,16 @@ function modelLine(a) {
 function roleLine(a) {
   return (a.profile && a.profile.role) || a.role || '';
 }
+/* ⚠️ ONE encoding of the memory thresholds, because there were four: the
+   ring band, the list bar band, the membadge and the heat wash each wrote
+   80 (and 60) out by hand, and only the membadge boundary was pinned --
+   exactly the shape that lets the grid and the list drift one number
+   apart silently. NEARLY_FULL is the red line, WARM the amber. */
+const NEARLY_FULL = 80;
+const WARM = 60;
+function memBand(pct) {
+  return pct === null ? null : (pct >= NEARLY_FULL ? 'high' : (pct >= WARM ? 'warn' : 'ok'));
+}
 function boardMods(a, m) {
   const pct = a.context.percent;
   return [
@@ -2527,7 +2545,7 @@ function boardMods(a, m) {
        On .lrow the class is pack-parity with no rule of its own -- the
        pack's own list emits it unstyled and the bar band carries the heat
        there; a future pack rule lands here for free. */
-    (pct !== null && pct >= 80 && m.st !== 'attn') ? 'hot' : '',
+    (pct !== null && pct >= NEARLY_FULL && m.st !== 'attn') ? 'hot' : '',
   ].filter(Boolean).join(' ');
 }
 function answerBtn(a) {
@@ -2614,8 +2632,8 @@ function ring(a) {
   }
 
   const dash = (ctx.percent / 100) * C;
-  const near = ctx.percent >= 80;
-  const band = near ? 'high' : (ctx.percent >= 60 ? 'warn' : 'ok');
+  const band = memBand(ctx.percent);
+  const near = band === 'high';
   return `<svg viewBox="0 0 72 72" role="img"
        aria-label="${esc(a.name)}. Memory: ${ctx.percent} percent used${near ? ', nearly full' : ''}.">
     <circle class="gt" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
@@ -2672,7 +2690,7 @@ function card(a) {
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
     : '';
 
-  const badge = pct !== null && pct >= 80 ? `<span class="membadge">${pct}%</span>` : '';
+  const badge = pct !== null && pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '';
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
@@ -2698,7 +2716,7 @@ function lrow(a) {
   const m = cardStOf(a);
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   const pct = a.context.percent;
-  const band = pct === null ? null : (pct >= 80 ? 'high' : (pct >= 60 ? 'warn' : 'ok'));
+  const band = memBand(pct);
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
     : esc(initials(a.name));
@@ -3522,6 +3540,15 @@ function openDetail(sessionName) {
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   document.getElementById('d-state').textContent =
     copy.label + (a.task ? ' — ' + a.task : '');
+  /* The explanation's landing place after it left the card with the
+     why-line (the pack split: the card carries signals, the panel carries
+     explanation). `because` is the board's stated reason for its belief
+     about this agent -- why a pane reads unknown, what could not be read.
+     Empty hides: a healthy working agent has no reason sentence to show,
+     and an empty grey line would read as something failing to load. */
+  const why = document.getElementById('d-why');
+  why.textContent = String(a.because || '').trim();
+  why.hidden = !why.textContent;
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
