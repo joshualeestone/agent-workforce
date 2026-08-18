@@ -5152,3 +5152,63 @@ test('the conversation route merges the project threads and the a2a record into 
     board.restore();
   }
 });
+
+test('the gap sentence never speaks about a file nobody could read', () => {
+  /* The §5 gate, driven on the route's own answer shapes: an
+     unreadable-but-existing file (200, exists:false, editable:false)
+     must keep the sentence HIDDEN -- asserting what an agent does not
+     know off a file we could not look at is the claim the whole screen
+     refuses -- while a genuinely absent boot file (exists:false,
+     editable:true) truly lacks the block and shows it. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (data) => {
+    const el = { hidden: 'untouched' };
+    const from = script.indexOf("const gapEl = document.getElementById('d-convo-gap');");
+    const write = script.indexOf(': !data.editable;');
+    const end = script.indexOf('\n', script.indexOf('}', write)) + 1;
+    assert.ok(from > -1 && write > from && write < end, 'the gap gate fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'data', script.slice(from, end))({ getElementById: () => el }, data);
+    return el.hidden;
+  };
+  assert.equal(drive({ exists: true, editable: true, text: 'x <!-- kosmos:colleagues:start --> y' }), true,
+    'an agent that HOLDS the block is told it cannot message');
+  assert.equal(drive({ exists: true, editable: true, text: 'their own words, no block' }), false,
+    'an agent without the block gets no sentence, the gap invisible again');
+  assert.equal(drive({ exists: false, editable: false, text: '' }), true,
+    'the sentence spoke about a file nobody could read');
+  assert.equal(drive({ exists: false, editable: true, text: '' }), false,
+    'a genuinely absent boot file truly lacks the block and must say so');
+});
+
+test('the conversation tail cap is said, and an unreadable record rides ahead of it, never dropped', async () => {
+  const messagesEngine = require('./engine/messages');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  try {
+    // (a) past the cap: the tail serves, the total says what was dropped.
+    fs.mkdirSync(nodePath.dirname(messagesEngine.LOG), { recursive: true });
+    fs.rmSync(messagesEngine.LOG, { force: true });
+    const many = [];
+    for (let i = 0; i < 205; i += 1) {
+      many.push(JSON.stringify({ kind: 'message', id: 'm' + (i + 1), from: 'mara', to: 'leo', text: 'row ' + i, in_reply_to: null, at: new Date(1755500000000 + i * 1000).toISOString(), state: 'placed' }));
+    }
+    fs.writeFileSync(messagesEngine.LOG, many.join('\n') + '\n');
+    const capped = JSON.parse((await req('/api/agent/leo/conversation')).body);
+    assert.equal(capped.rows.length, 200, 'the tail cap moved');
+    assert.equal(capped.total, 205, 'the total stopped saying what the tail dropped');
+    assert.equal(capped.rows[199].text, 'row 204', 'the tail is not the LATEST rows');
+
+    // (b) the record unreadable (a directory where the log should be):
+    // could-not-look is a ROW, first in the served slice, never silence.
+    fs.rmSync(messagesEngine.LOG, { force: true });
+    fs.mkdirSync(messagesEngine.LOG);
+    const blind = JSON.parse((await req('/api/agent/leo/conversation')).body);
+    assert.ok(blind.rows.length >= 1 && blind.rows[0].kind === 'unreadable',
+      'an unreadable message record rendered as an agent no colleague ever wrote to');
+    assert.match(blind.rows[0].what, /messages/, 'the could-not-look row does not say what it could not read');
+  } finally {
+    try { fs.rmSync(messagesEngine.LOG, { recursive: true, force: true }); } catch { /* clean */ }
+    board.restore();
+  }
+});

@@ -134,17 +134,34 @@ function resolveSender(fromPane, roster) {
   return { ok: true, card };
 }
 
-function readLog() {
+/**
+ * The record, with its own unreadability SURFACED: ENOENT is the true
+ * empty (no one has messaged yet), any other read failure is could-not-
+ * look -- a screen whose rule is no-state-as-silence needs the
+ * difference, and the old swallow-everything read predates that screen.
+ */
+function record() {
   let raw;
-  try { raw = fs.readFileSync(LOG, 'utf8'); } catch { return []; }
-  const out = [];
+  try { raw = fs.readFileSync(LOG, 'utf8'); } catch (err) {
+    if (err && err.code === 'ENOENT') return { ok: true, rows: [] };
+    return { ok: false, rows: [] };
+  }
+  const rows = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     // One bad line must not eat the record: skip it, keep reading. The
     // screens' list is best-effort history, not a ledger we halt on.
-    try { out.push(JSON.parse(line)); } catch { /* skipped */ }
+    try { rows.push(JSON.parse(line)); } catch { /* skipped */ }
   }
-  return out;
+  return { ok: true, rows };
+}
+
+/* The send path keeps the old contract on purpose: an unreadable log
+   fails OPEN there (the valve cannot count, ids restart) rather than
+   blocking every send on a read error -- a RECORDED trade, revisit when
+   retention lands. */
+function readLog() {
+  return record().rows;
 }
 
 function appendLog(entry) {
@@ -350,6 +367,6 @@ function blockBody() {
 module.exports = {
   START, END, blockBody,
   LOG, PAIR_CAP, PAIR_WINDOW_MS,
-  resolveSender, send, list, pairCount, readLog,
+  resolveSender, send, list, pairCount, readLog, record,
   setRunner, resetForTests,
 };

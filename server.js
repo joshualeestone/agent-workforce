@@ -1469,16 +1469,20 @@ const server = http.createServer((req, res) => {
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
     try {
       const rows = [];
-      let listed = [];
-      try { listed = projects.list(null) || []; } catch { listed = null; }
-      if (listed === null) {
-        // "We could not look" is a row, never silence (the spec's states
-        // rule): a projects read that failed must not render as an agent
-        // nobody ever spoke to.
-        rows.push({ kind: 'unreadable', what: 'your projects', at: null });
+      // "We could not look" rows are kept APART from the timeline: their
+      // whole purpose is to never be silent, and a time-sorted tail cap
+      // would drop null-dated rows first -- the exact missing-history
+      // state rendered as a complete-looking conversation. They are
+      // re-attached ahead of the served slice below, cap-proof.
+      const unreadable = [];
+      // One derivation of the reverse edge: projectsFor is the engine's
+      // own "which projects is this agent on", readable from both ends.
+      let mine = [];
+      try { mine = projects.projectsFor(name, null) || []; } catch { mine = null; }
+      if (mine === null) {
+        unreadable.push({ kind: 'unreadable', what: 'your projects', at: null });
       } else {
-        for (const pr of listed) {
-          if (!(pr.agents || []).some((m) => m && m.sessionName === name)) continue;
+        for (const pr of mine) {
           try {
             for (const m of chat.readThread(pr.id, name, pr.createdAt).messages) {
               rows.push({
@@ -1489,11 +1493,17 @@ const server = http.createServer((req, res) => {
             }
           } catch (err) {
             if (err && err.code === 'OTHER_PROJECT') continue; // empty is TRUE for this project
-            rows.push({ kind: 'unreadable', what: 'the conversation on ' + pr.name, at: null });
+            unreadable.push({ kind: 'unreadable', what: 'the conversation on ' + pr.name, at: null });
           }
         }
       }
-      for (const m of messages.list(name)) {
+      // The a2a record's own unreadability is a row too, not silence: a
+      // permission error on messages.jsonl must not read as an agent no
+      // colleague ever wrote to (record() keeps ENOENT as the true empty).
+      const rec = messages.record();
+      if (!rec.ok) unreadable.push({ kind: 'unreadable', what: 'your agents\u2019 messages', at: null });
+      for (const m of rec.rows) {
+        if (m.from !== name && m.to !== name) continue;
         if (m.kind === 'message') {
           rows.push({ kind: 'colleague', id: m.id, from: m.from, to: m.to, text: m.text, in_reply_to: m.in_reply_to || null, at: m.at, state: m.state || null });
         } else if (m.kind === 'valve') {
@@ -1502,9 +1512,12 @@ const server = http.createServer((req, res) => {
       }
       rows.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
       // The tail is what a conversation view shows; the cap is SAID (total
-      // rides the answer) rather than silently truncating history.
+      // rides the answer), and the could-not-look rows ride ahead of it.
       const TAIL = 200;
-      sendJson(res, 200, { total: rows.length, rows: rows.slice(-TAIL) });
+      sendJson(res, 200, {
+        total: unreadable.length + rows.length,
+        rows: unreadable.concat(rows.slice(-TAIL)),
+      });
     } catch (err) {
       sendJson(res, 500, { error: String((err && err.message) || 'we could not read the conversation') });
     }

@@ -3992,8 +3992,11 @@ function convoRow(r, agentName) {
     who = 'You · on ' + r.project;
     cls = 'cvrow you';
   } else {
-    // From this agent or to it, both render; the who-line says which way.
-    who = r.from === agentName ? r.from + ' · to ' + r.to : r.from + ' · to ' + r.to;
+    // From this agent or to it, both render; from and to ARE the
+    // direction, so one expression covers both ways. (Session names: the
+    // log holds what the wire holds; display-name resolution is the
+    // clean-chat naming pass, recorded.)
+    who = r.from + ' · to ' + r.to;
     cls = 'cvrow peer' + (r.in_reply_to ? ' indent' : '');
   }
   let state = '';
@@ -4023,6 +4026,10 @@ async function paintConversation(sessionName, agentName) {
         ? '<p class="cv-none" style="margin-top:10px;">Showing the latest ' + data.rows.length + ' of ' + data.total + '.</p>'
         : '');
   } catch (err) {
+    // The same stale-fetch guard as the happy path: agent A's failure
+    // must not paint its could-not-look sentence over agent B's open
+    // conversation (a false statement about the wrong agent).
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
     // Could-not-look, never a blank box that reads as no-conversation.
     box.innerHTML = '<p class="cv-none">We could not read this conversation just now. ('
       + esc((err && err.message) || 'no detail') + ')</p>';
@@ -4376,7 +4383,17 @@ async function loadInstructions(sessionName) {
        adopted agents all lack the block; any causal clause was false for
        at least one of them). */
     const gapEl = document.getElementById('d-convo-gap');
-    if (gapEl) gapEl.hidden = (data.text || '').includes('kosmos:colleagues:start');
+    if (gapEl) {
+      /* ⚠️ Gated on the STRUCTURED fields, not the text alone: the route
+         answers an unreadable-but-existing file with 200 {exists:false,
+         editable:false, text:''}, and an empty text would read as
+         block-absent -- asserting what an agent does not know off a file
+         nobody could look at. A genuinely absent file (exists:false,
+         editable:true) truly lacks the block and stays shown. */
+      gapEl.hidden = data.exists
+        ? (data.text || '').includes('kosmos:colleagues:start')
+        : !data.editable;
+    }
 
     // ⚠️ `exists: false` does NOT mean there is no file. The read path also
     // refuses a file that IS there but cannot be shown: not UTF-8, over the
