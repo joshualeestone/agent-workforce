@@ -314,9 +314,87 @@ async function main() {
      goes unreported, on the renderer this branch wrote from scratch. */
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
+  /* One named exemption, SCOPED: opening an UNTIED agent's panel (the
+     rook check arms this flag around itself) fires the removal probe,
+     whose refusal for untied agents is a 400 by design and logs as a
+     failed-resource console error -- pre-existing product behavior this
+     drive newly exercises. Armed only around that block, so a tied
+     agent's probe 400ing anywhere else still fails the run. */
+  let expectRemoval400 = false;
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    if (expectRemoval400 && /Failed to load resource.*400/.test(m.text()) && /removal/.test(m.location().url || '')) return;
+    pageErrors.push(m.text());
+  });
 
   try {
+    /* ── 0. Engineering mode: Off hides the raw screen; this drive's
+       screen sections need it ON. Asserted in BOTH states rather than
+       just flipped: with the switch off (the shipped default) the
+       viewport container is hidden, the question panel and teaching
+       line still render (safety, not chrome), and an UNCONFIRMED send's
+       verdict points at checking with the agent, never "below" at a
+       screen the mode has hidden -- the eng-mode chunk's whole claim on
+       this page, each half driven rather than narrated. Flipped through
+       the real route, not by poking state. ─────────────────────────── */
+    await page.goto(BASE + '?tab=projects', { waitUntil: 'networkidle' });
+    // Set Off through the real route first (a fixture server that
+    // outlives a previous run may hold a flipped switch), then assert
+    // the hiding -- the claim is Off-hides, however Off was reached.
+    await page.evaluate(async () => {
+      await fetch('/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+    });
+    await page.goto(BASE + '?tab=projects', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    const offState = await page.evaluate(() => ({
+      vpHidden: document.querySelector('.pj-viewport').hidden,
+    }));
+    check(offState.vpHidden === true, 'the raw screen is hidden while Engineering mode is off');
+    // The mode-independence half, IN Off where it matters: the question
+    // panel and the number-answer teaching line are safety, not chrome,
+    // and must render with the raw screen away.
+    await page.goto(BASE, { waitUntil: 'networkidle' });
+    await page.waitForSelector('.acard[data-agent="mara"] .ansgo', { timeout: 10000 });
+    await page.click('.acard[data-agent="mara"] .ansgo');
+    await page.waitForFunction(() => {
+      const q = document.getElementById('pj-question');
+      return q && !q.hidden && (document.getElementById('pj-question-text').textContent || '').length > 0;
+    }, null, { timeout: 10000 });
+    const offQuestion = await page.evaluate(() => ({
+      vpHidden: document.querySelector('.pj-viewport').hidden,
+      teachShown: !document.getElementById('pj-answer-how').hidden,
+      teachText: document.getElementById('pj-answer-how').textContent,
+    }));
+    check(offQuestion.vpHidden === true, 'the raw screen stays hidden while a question is open in Off');
+    check(offQuestion.teachShown === true, 'the number-answer teaching line renders in Off, where it is needed most');
+    check(/Answer by sending the number/.test(offQuestion.teachText),
+      'and it carries the ruled wording', offQuestion.teachText);
+    // The Off arm of the verdict pointer, DRIVEN: the ambiguous-send
+    // fixture produces the unconfirmed verdict, and in Off it must send
+    // the person to the agent, not "below" to a hidden screen.
+    await page.selectOption('#pj-thread-who', 'casey');
+    // In Off the screen label rightly claims nothing (the served window
+    // is gated), so there is no label to wait on: the settle is a plain
+    // beat for the thread refetch, the one timing-shaped wait in this
+    // file and named as such.
+    await page.waitForTimeout(600);
+    await page.fill('#pj-say', 'ambiguous while off');
+    await page.click('#pj-send');
+    await page.waitForFunction(() => /Could not confirm/i.test(
+      document.getElementById('pj-thread-msg').textContent || ''), null, { timeout: 10000 });
+    const offUnsure = await page.locator('#pj-thread-msg').textContent();
+    check(/check whether it already arrived/i.test(offUnsure),
+      'the Off verdict tells the person to check with the agent', offUnsure);
+    check(!/screen is below/i.test(offUnsure),
+      'and never points below at a screen the mode has hidden', offUnsure);
+    const flipped = await page.evaluate(async () => {
+      const r = await fetch('/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) });
+      return r.ok;
+    });
+    check(flipped === true, 'the switch actually flipped On before the screen sections (a silent failure here reds them with wrong-cause messages)');
+
     /* ── 1. the one click out of the stranded state ─────────────────────── */
     await page.goto(BASE, { waitUntil: 'networkidle' });
     await page.waitForSelector('.acard', { timeout: 10000 });
@@ -349,6 +427,23 @@ async function main() {
       JSON.stringify(rookState));
     check(await rookCard.locator('.ansgo').count() === 0,
       'a borrowed-name card gets NO "See the question" button');
+    // The window box's untied arm, driven (the pass-5 gate would be
+    // deletable-green otherwise): opening the borrowed-name panel with
+    // Engineering mode ON must hide the box, and never paint a refusal
+    // sentence into it about an agent the person is looking at.
+    expectRemoval400 = true;
+    await rookCard.click();
+    await page.waitForSelector('#panel-detail:not([hidden])', { timeout: 10000 });
+    await page.waitForTimeout(700);
+    const rookWindow = await page.evaluate(() => ({
+      boxHidden: document.getElementById('d-window-box').hidden,
+      msgText: document.getElementById('d-window-msg').textContent,
+    }));
+    check(rookWindow.boxHidden === true,
+      'an untied agent\u2019s panel hides the window box (nothing here is its window to show)', JSON.stringify(rookWindow));
+    await page.click('#detail-back');
+    await page.waitForTimeout(300);
+    expectRemoval400 = false;
 
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose
     // own handler opens the detail panel — so a wrongly-ordered listener would
@@ -364,6 +459,8 @@ async function main() {
 
     const question = await page.locator('#pj-question-text').textContent();
     check(/Do you want to proceed\?/.test(question), 'one click lands on the question itself, not on a panel about it');
+    check(await page.evaluate(() => !document.getElementById('pj-answer-how').hidden),
+      'the teaching line renders in On too: mode-independent, like the panel it serves');
     // ⚠️ And FOCUS lands there too (round 30, measured): the card that
     // carried the button is torn down on the tab switch, so activation
     // used to leave activeElement on <body> -- a keyboard user had to
@@ -918,12 +1015,18 @@ async function main() {
       `label reads: ${failedState.label}`);
     await page.screenshot({ path: path.join(OUT, 'thread-9-screen-unread.png'), fullPage: true });
   } finally {
+    // The switch goes back Off IN the finally: a thrown section must not
+    // hand a long-lived fixture server a flipped mode (section 0 defends
+    // inward; this defends whoever comes after, on every exit).
+    try {
+      await fetch(BASE + '/api/engmode', { method: 'PUT',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+    } catch { /* best effort */ }
     await browser.close();
   }
 
   check(pageErrors.length === 0,
     'no console errors or page exceptions on any driven state', pageErrors.join(' | '));
-
   process.stdout.write(failures.length
     ? `\n${failures.length} failed:\n  ${failures.join('\n  ')}\n`
     : `\nall checks passed; shots in ${OUT}\n`);

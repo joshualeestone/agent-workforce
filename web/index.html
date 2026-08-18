@@ -1830,6 +1830,21 @@ svg { display: block; }
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
   </section>
 
+  <!-- Engineering mode's surface on this page (eng-mode): the raw
+       session, shown only when the person turned the switch on. Same
+       viewport-not-transcript honesty as the project page's block. -->
+  <section class="dbox" id="d-window-box" hidden>
+    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
+    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
+         sentence is the runtime paint's to make, only over a capture
+         that succeeded (the project viewport recorded this exact
+         reversal at its own block). -->
+    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
+    <pre class="pj-screen" id="d-window" tabindex="0" hidden
+         role="region" aria-labelledby="d-window-label"></pre>
+    <p class="dhint" id="d-window-msg" hidden></p>
+  </section>
+
   <section class="dbox">
   <div class="field">
     <label class="flabel" for="d-file">Picture</label>
@@ -2533,6 +2548,17 @@ svg { display: block; }
              floor, so this is in scope rather than a later pass. -->
         <pre class="pj-screen" id="pj-question-text" tabindex="0"
              role="region" aria-labelledby="pj-question-label"></pre>
+        <!-- Mona Lisa's ruled line (2026-08-18): teach the MECHANISM (a
+             number typed into the message box is how you answer); the
+             quoted pane above says what the numbers mean. NOT gated on
+             Engineering mode: needed in Off, the default. SHIPS HIDDEN
+             and follows the question TEXT's own visibility (paintThread):
+             in the asking-but-no-capture state there is no quoted pane
+             defining the numbers, and the line alone would teach an
+             answer to a question nobody can see. Recorded for her: a
+             prompt with more than two options makes the trailing numbers
+             wrong; some day the range comes from the pane. -->
+        <p class="fhint" id="pj-answer-how" hidden style="margin:8px 0 0;">Answer by sending the number: 1 or 2.</p>
       </div>
 
       <!-- What we have sent, and how each one went. Ours to keep, because we
@@ -2557,7 +2583,7 @@ svg { display: block; }
            terminal into who-said-what: a parser that guesses wrong puts words in
            the agent's mouth, and Claude Code redraws, wraps and prints tool
            output that reads exactly like prose. -->
-      <div class="pj-viewport">
+      <div class="pj-viewport" hidden>
         <span class="flabel" id="pj-screen-label">Its screen</span>
         <!-- ⚠️ The hint ships EMPTY and the pre ships HIDDEN: the affirmative
              "as it looks right now" sentence used to be baked into the
@@ -2892,13 +2918,18 @@ svg { display: block; }
     </section>
 
     <section class="dbox">
+      <!-- LIVE now (eng-mode): On reveals the raw session on the project
+           page and the agent page; Off hides them, and hiding is the
+           point (the raw pane is what Josh called garbage nonsense to a
+           business person). The waiting-on-an-answer panel is safety,
+           not chrome, and ignores this switch. -->
       <h3 class="dlab">Engineering mode</h3>
-      <div class="setrow off">
+      <div class="setrow" id="eng-row">
         <div><b>Show the window each agent is running in</b>
           <p class="dhint" style="margin:2px 0 0;">Off by default. Your chat shows what an agent says to you. Turn this on to watch the session underneath it.</p></div>
-        <span class="toggle" aria-hidden="true"><i></i></span>
+        <button class="toggle" id="eng-toggle" role="switch" aria-checked="false" aria-label="Show the window each agent is running in"><i></i></button>
       </div>
-      <p class="dhint" style="margin:8px 0 0;"><b>Not built yet.</b> The switch arrives with the clean-chat work.</p>
+      <p class="dhint" id="eng-msg" role="status" style="margin:8px 0 0;"></p>
     </section>
   </div>
 
@@ -3583,6 +3614,26 @@ async function tick() {
     if (CURRENT) {
       const fresh = data.agents.find((a) => a.sessionName === CURRENT.sessionName);
 
+      /* The window box rides the SAME fresh-card lookup as the write
+         controls below (one fact, one derivation -- a second find() for
+         the same card was the new-sibling shape again). The tie
+         re-checks here every poll: a pane dying mid-open (a stranger
+         taking the name) otherwise kept painting "no agent by that
+         name" into the box, and the hide RETIRES any in-flight paint
+         (the epoch bump) so a fetch launched a beat earlier cannot
+         reveal the box over the very state this arm hides. The
+         panel-visibility term matters because CURRENT survives closing
+         the detail, and a capture every five seconds for an invisible
+         surface is a standing subprocess. */
+      if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
+        if (fresh && fresh.isNamedOurs === true) {
+          paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+        } else {
+          WINDOW_LOAD += 1;
+          document.getElementById('d-window-box').hidden = true;
+        }
+      }
+
       /* ⚠️ RE-APPLY the tie check on every poll, not only when the panel opens.
          The gate ran once at open and the poll never revisited it, so leaving
          the panel open while `angel-discord` died and a stranger took the name
@@ -4012,6 +4063,7 @@ async function paintSettings() {
     ver.textContent = 'We could not read the version just now.';
   }
   await paintLimits();
+  await refreshEngMode();
 }
 
 /* The conversation limit card: painted from the engine's read, and the
@@ -4093,6 +4145,89 @@ function limTierChange() {
 }
 document.getElementById('lim-toggle').addEventListener('click', limToggleClick);
 document.getElementById('lim-tier').addEventListener('change', limTierChange);
+
+/* Engineering mode: the page-wide flag the raw-window surfaces key on.
+   Learned at boot, on entering a project, on a TIED agent open (the
+   untied arm never paints, so it has nothing to learn for), and after
+   a save here; a preference is not polled every five seconds (a
+   mid-session change lands on the next navigation). */
+let ENG_ON = false;
+let ENG_EPOCH = 0;
+async function refreshEngMode() {
+  const mine = ++ENG_EPOCH;
+  try {
+    const r = await (await fetch('/api/engmode')).json();
+    if (mine !== ENG_EPOCH) return ENG_ON;
+    ENG_ON = r.on === true;
+    /* Applied HERE, not by each caller's memory: a refresh that learns
+       the flag without moving the viewport leaves the two divergent
+       until the next navigation, and the thread poll then appends "Its
+       whole screen is below." over a still-hidden container. */
+    pjApplyEngMode();
+    const tog = document.getElementById('eng-toggle');
+    tog.classList.toggle('on', ENG_ON);
+    tog.setAttribute('aria-checked', ENG_ON ? 'true' : 'false');
+    const msg = document.getElementById('eng-msg');
+    msg.textContent = r.ok === false
+      ? 'We could not read this setting, so the windows stay hidden (the default).' : '';
+  } catch { /* the flag keeps its last honest value */ }
+  return ENG_ON;
+}
+let ENG_SAVING = false;
+async function engToggleClick() {
+  if (ENG_SAVING) return;
+  ENG_SAVING = true;
+  const mine = ++ENG_EPOCH;
+  const msg = document.getElementById('eng-msg');
+  try {
+    const on = document.getElementById('eng-toggle').getAttribute('aria-checked') !== 'true';
+    const res = await fetch('/api/engmode', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on }),
+    });
+    const body = await res.json().catch(() => ({}));
+    // A newer refresh can retire a successful PUT's paint (a navigation
+    // right after the click): the On direction fails toward hidden, the
+    // Off direction can leave the container visible over the server's
+    // honest Off sentence until the next refresh -- a beat of stale
+    // chrome either way, never a lie, and the server gate backstops it.
+    if (mine !== ENG_EPOCH) return;
+    if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
+    ENG_ON = body.on === true;
+    const tog = document.getElementById('eng-toggle');
+    tog.classList.toggle('on', ENG_ON);
+    tog.setAttribute('aria-checked', ENG_ON ? 'true' : 'false');
+    msg.textContent = '';
+    pjApplyEngMode();
+  } catch {
+    if (mine === ENG_EPOCH) msg.textContent = 'We could not save that setting.';
+  } finally {
+    ENG_SAVING = false;
+  }
+}
+document.getElementById('eng-toggle').addEventListener('click', engToggleClick);
+
+/* The one place the project page's viewport visibility is decided: the
+   block hides whole unless Engineering mode is on. The question panel
+   is NOT here on purpose -- safety, not chrome. */
+function pjApplyEngMode() {
+  const vp = document.querySelector('.pj-viewport');
+  if (vp) vp.hidden = !ENG_ON;
+}
+
+/* ⚠️ ONE derivation of "is the raw screen actually visible", for every
+   sentence that points at it. The visibility fact SPLIT when the mode
+   landed (the container hides wholesale while paintThread still flips
+   the inner pre), and two send-verdict pointers read the stale inner
+   half -- "Its screen is below" over no screen, in the exact error path
+   where the person most needs true instructions. */
+function pjScreenOnScreen() {
+  const vp = document.querySelector('.pj-viewport');
+  const pre = document.getElementById('pj-screen');
+  return ENG_ON && Boolean(vp) && !vp.hidden && Boolean(pre) && !pre.hidden;
+}
+refreshEngMode();
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {
@@ -4451,6 +4586,76 @@ function convoRow(r, agentName) {
 }
 
 let CONVO_LOAD = 0;
+/* The raw window, only when Engineering mode is on; a refusal is said
+   in the engine's own sentence, never rendered as an empty terminal. */
+let WINDOW_LOAD = 0;
+let WINDOW_OPENING = 0; // a COUNTER: two rapid opens overlap their refreshes
+async function paintAgentWindow(sessionName, opts) {
+  const box = document.getElementById('d-window-box');
+  const pre = document.getElementById('d-window');
+  const msg = document.getElementById('d-window-msg');
+  const mine = ++WINDOW_LOAD;
+  /* The 5s tick repaints with the CACHED flag ("right now" must not age
+     false while the panel sits open); a preference is still never
+     polled -- only the capture is. Opens re-learn the flag. */
+  let on;
+  if (opts && opts.cachedFlag) {
+    on = ENG_ON;
+  } else {
+    /* The tick holds off while an OPEN's refresh is in flight: a tick
+       bumping the epoch mid-open discarded the freshly learned flag and
+       painted from the stale cached one -- a raw pane plus an
+       affirmative hint that nothing would ever repaint. */
+    WINDOW_OPENING += 1;
+    try { on = await refreshEngMode(); } finally { WINDOW_OPENING -= 1; }
+  }
+  if (mine !== WINDOW_LOAD) return;
+  if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+  if (!on) { box.hidden = true; return; }
+  /* The box reveals with CONTENT (a capture or a refusal in words), not
+     before it: a bare heading over an empty pre for a round-trip is the
+     quiet end of the affirmative-claim family. A tick repaint finds the
+     box already visible and leaves it so. */
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/window');
+    const r = await res.json().catch(() => ({}));
+    if (mine !== WINDOW_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    /* A 404 here is the tie dying mid-flight (the route's knownAgent
+       gate), not a window fact to display: the box HIDES, exactly as
+       the tick's tie-gone arm would a beat later -- painting the 404
+       body would put "no agent by that name" inside the open panel of
+       an agent the person is looking at. */
+    if (res.status === 404) { box.hidden = true; return; }
+    if (r.text != null) {
+      pre.textContent = r.text;
+      pre.hidden = false;
+      document.getElementById('d-window-hint').textContent = 'As it looks right now. It is not a transcript, and it is not what the agent said to you.';
+      msg.hidden = true;
+      box.hidden = false;
+    } else {
+      pre.hidden = true;
+      document.getElementById('d-window-hint').textContent = '';
+      msg.textContent = r.because || r.error || 'We could not read its window just now.';
+      msg.hidden = false;
+      box.hidden = false;
+    }
+  } catch {
+    if (mine !== WINDOW_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    pre.hidden = true;
+    /* Mirrors the refusal branch WHOLE: a tick whose fetch throws after
+       a successful paint would otherwise leave "As it looks right now"
+       standing over a hidden pre and a could-not-read sentence -- the
+       affirmative-hint-over-absent-screen class again, through the one
+       branch that forgot. */
+    document.getElementById('d-window-hint').textContent = '';
+    msg.textContent = 'We could not read its window just now.';
+    msg.hidden = false;
+    box.hidden = false;
+  }
+}
+
 async function paintConversation(sessionName, agentName) {
   const box = document.getElementById('d-convo');
   // The INSTR_LOAD pattern: two fetches for the SAME agent (A, B, A
@@ -4526,6 +4731,20 @@ function openDetail(sessionName) {
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
+  /* Cleared BEFORE the paint's awaits: opening B with A's captured pane
+     still in the box would show A's raw session under B's name for two
+     network round-trips -- cross-agent misattribution, the same class
+     the thread's switching clear closes. (The paint itself runs below,
+     behind the tied gate.) */
+  {
+    const wpre = document.getElementById('d-window');
+    wpre.textContent = ''; wpre.hidden = true;
+    document.getElementById('d-window-hint').textContent = '';
+    document.getElementById('d-window-msg').hidden = true;
+    // The box itself too: a bare heading standing over nothing for two
+    // round-trips is the same misattribution family, one notch quieter.
+    document.getElementById('d-window-box').hidden = true;
+  }
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
@@ -4546,6 +4765,16 @@ function openDetail(sessionName) {
   const tied = a.isNamedOurs === true;
   setWritesOffered(a, tied);
   if (tied) loadInstructions(a.sessionName);
+  /* The window box inherits the SAME gate (the recorded loadInstructions
+     lesson: a new sibling that skips it paints "no agent by that name"
+     inside a box on the panel of an agent the person is looking at). An
+     untied pane's window is not this agent's to show; the box hides. */
+  if (tied) {
+    paintAgentWindow(a.sessionName);
+  } else {
+    WINDOW_LOAD += 1;
+    document.getElementById('d-window-box').hidden = true;
+  }
   // ⚠️ Asked EVERY time the panel opens, and asked of the engine. Whether an
   // agent can be removed here is a fact about what created it, and this screen
   // must not carry its own opinion about that.
@@ -7891,6 +8120,7 @@ function openProject(id) {
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
+  refreshEngMode();
   loadThread();
   loadRoom();
 }
@@ -8360,6 +8590,7 @@ function paintThread(body) {
   if (body.asking && body.question) {
     qLabel.textContent = name + ' is waiting on an answer. This is the part of its screen that asked:';
     pjSetScreen(qText, body.question.text);
+    document.getElementById('pj-answer-how').hidden = false;
     qWrap.hidden = false;
   } else if (body.asking) {
     /**
@@ -8383,8 +8614,14 @@ function paintThread(body) {
       + (body.questionBecause
         || 'we cannot find the question on its screen right now')
       + '.'
-      + (body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
+      + (ENG_ON && body.viewport && body.viewport.text != null ? ' Its whole screen is below.' : '');
+    /* (Reads ENG_ON with the payload rather than pjScreenOnScreen():
+       this runs BEFORE the pre is painted below, so the one-derivation
+       helper would read last paint's state. Same fact, taken at the
+       moment each sentence is made.) */
     pjSetScreen(qText, '');
+    // No quoted pane, no teaching line: nothing above defines the numbers.
+    document.getElementById('pj-answer-how').hidden = true;
     /* ⚠️ Focus is RESCUED before either hide (round 31): round 30 moves
        focus INTO qText, and hiding a focused element drops focus to
        <body> with nothing announced -- the stranded-keyboard state,
@@ -8758,7 +8995,7 @@ async function pjSend() {
     if (!flightMoved()) {
       msg.textContent = 'We could not tell whether that reached ' + name + '’s session: '
         + 'we lost contact with Kosmos while sending, so it may or may not have arrived. '
-        + (document.getElementById('pj-screen').hidden
+        + (!pjScreenOnScreen()
           ? 'Before sending it again, check whether it already arrived. '
           : 'Its screen is below. Check there before sending it again. ')
         + 'Your message is still in the box below.';
@@ -8877,11 +9114,10 @@ async function pjSend() {
       // fact; this line says the one thing to do about it.
       render = (when) => 'Could not confirm this reached ' + name + '’s session' + when + note + '. '
         + pjSentence((body.delivery && body.delivery.because) || 'we typed it and could not tell whether it arrived')
-        // Gated like the question label's pointer (round 22): an
-        // unconfirmed send is a tmux that did not answer, and that is the
-        // same tmux whose capture just failed -- the screen block may be
-        // hidden behind "we cannot see its screen right now".
-        + (document.getElementById('pj-screen').hidden
+        // Gated like the question label's pointer (round 22), through the
+        // ONE visibility derivation (pjScreenOnScreen): the capture may
+        // have failed AND Engineering mode may have the whole block away.
+        + (!pjScreenOnScreen()
           ? ' Before sending it again, check whether it already arrived.'
           : ' Its screen is below. Check there before sending it again.')
         + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.')

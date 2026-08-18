@@ -210,6 +210,11 @@ async function main() {
   // `chromium.launch()` meant a run that was going to be refused spawned a
   // browser first and took a minute to say no.
   await assertSandboxed();
+  // A killed prior run can leave Engineering mode ON in the sandbox;
+  // removed HERE so every state (not only 3c) renders the shipped
+  // default -- states 1-3b screenshot the viewport-adjacent surfaces a
+  // human reviews.
+  fs.rmSync(path.join(SANDBOX, 'data', 'engmode.json'), { force: true });
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: !HEADED });
   BROWSER = browser;
@@ -554,6 +559,103 @@ async function main() {
     // Removed so every later state (could-not-tell, contrast, archive)
     // sees the record it expects.
     fs.writeFileSync(logFile, '');
+  }
+
+  /* 3c. ENGINEERING MODE. The raw window is HIDDEN by default -- hiding
+     is the point (the block Josh called garbage nonsense to a business
+     person) -- and revealed by the person's own switch, driven through
+     the real settings toggle. The question panel ignores the switch
+     (safety, not chrome), and the number-answer teaching line ships in
+     both modes. */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    // Hermetic: a KILLED earlier run can leave the switch on in the
+    // sandbox (the flip-back lives at the end of this state), and the
+    // default-Off assertion below would then red against its own
+    // leftovers rather than the product.
+    const engFile = path.join(SANDBOX, 'data', 'engmode.json');
+    try {
+      const page = await ctx.newPage();
+      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(400);
+      const dfl = await page.evaluate(() => ({
+        viewportHidden: document.querySelector('.pj-viewport').hidden,
+      }));
+      if (!dfl.viewportHidden) throw new Error('the raw window is on screen in the default Off state');
+      // The teaching line's VISIBLE rendering (and the question panel's
+      // mode-independence) need a live asking agent, which this sandbox
+      // does not manufacture: render-thread.js CARRIES those assertions
+      // against its scripted fixture (section 0 drives the question open
+      // in Off and pins the line's wording; the On section pins it
+      // again).
+
+
+      // The person's own switch, through the real card.
+      await page.click('.tab[data-tab="settings"]');
+      await page.waitForTimeout(300);
+      await page.click('#eng-toggle');
+      await page.waitForTimeout(400);
+      const tog = await page.evaluate(() => document.getElementById('eng-toggle').getAttribute('aria-checked'));
+      if (tog !== 'true') throw new Error('the engineering toggle did not flip on');
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(500);
+      // The tab returns to the DETAIL we left open (the card list is
+      // hidden beneath it); the save already re-applied the mode to the
+      // open page, which is itself part of the claim.
+      const revealed = await page.evaluate(() => ({
+        viewportHidden: document.querySelector('.pj-viewport').hidden,
+      }));
+      if (revealed.viewportHidden) throw new Error('the switch is On and the raw window stayed hidden');
+      // The SECOND surface: the agent page's window box, on the same
+      // switch, opened on a card PROVEN TIED (an untied card correctly
+      // hides the box since the tied gate, so clicking blind would red
+      // with a wrong-cause message against correct behavior). For a
+      // tied agent the capture either succeeds or refuses in words --
+      // both honest renders -- and the claim is the box is PRESENT and
+      // never an empty terminal under an affirmative hint.
+      const tiedName = await page.evaluate(async () => {
+        const b2 = await (await fetch('/api/status')).json();
+        const t = (b2.agents || []).find((x) => x.isNamedOurs === true);
+        return t ? t.sessionName : null;
+      });
+      if (!tiedName) throw new Error('no tied agent on the board, so the second surface cannot be proven');
+      await page.click('#klink');
+      await page.waitForTimeout(400);
+      await page.click('.acard[data-agent=' + JSON.stringify(tiedName) + ']');
+      await page.waitForTimeout(800);
+      const win = await page.evaluate(() => {
+        const box = document.getElementById('d-window-box');
+        const pre = document.getElementById('d-window');
+        const msg = document.getElementById('d-window-msg');
+        const hint = document.getElementById('d-window-hint');
+        return {
+          boxHidden: box.hidden,
+          preShown: !pre.hidden,
+          msgShown: !msg.hidden,
+          hintText: hint.textContent,
+        };
+      });
+      if (win.boxHidden) throw new Error('the switch is On and the agent page grew no window box');
+      if (!win.preShown && !win.msgShown) throw new Error('the window box is an empty terminal: neither a capture nor a refusal in words');
+      if (!win.preShown && win.hintText) throw new Error('an affirmative hint stands over a refused capture');
+      if (win.preShown && !win.hintText) throw new Error('a visible capture lost its as-it-looks-right-now framing');
+      await page.click('#detail-back');
+      await page.waitForTimeout(200);
+      await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(300);
+      // Back Off through the same switch, so later states see the default.
+      await page.click('.tab[data-tab="settings"]');
+      await page.waitForTimeout(300);
+      await page.click('#eng-toggle');
+      await page.waitForTimeout(400);
+      const back = await page.evaluate(() => document.getElementById('eng-toggle').getAttribute('aria-checked'));
+      if (back !== 'false') throw new Error('the engineering toggle did not flip back off');
+    } finally {
+      fs.rmSync(engFile, { force: true });
+      await ctx.close();
+    }
   }
 
   // 4. The project whose members we could NOT tell.

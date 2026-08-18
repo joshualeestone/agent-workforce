@@ -43,6 +43,7 @@ const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const you = require('./engine/you');
 const limits = require('./engine/limits');
+const engmode = require('./engine/engmode');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
@@ -1607,6 +1608,57 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
+  /* --- engineering mode (whether the raw session is shown) ---------------- */
+  if (pathname === '/api/engmode' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, engmode.read()); }
+    catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/engmode' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = engmode.write({ on: body.on });
+        if (!saved.ok) { sendJson(res, 400, { error: saved.because }); return; }
+        sendJson(res, 200, engmode.read());
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not save that setting' }));
+    return;
+  }
+  /* The agent page's raw window: the SAME derivation as the project
+     viewport (chat.viewport, refusals and all), behind the same
+     knownAgent gate as the instructions read, for the same reason: a
+     name-shaped probe must not become a which-panes-exist oracle. */
+  const agentWindow = pathname.match(/^\/api\/agent\/([^/]+)\/window$/);
+  if (agentWindow && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(agentWindow[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    try {
+      if (!engmode.read().on) {
+        // The same gate as the thread's viewport, hoisted above the
+        // roster snapshot it would never use: Off stops the capture, and
+        // a stale client that asks anyway gets the truth in words rather
+        // than a window the person turned off.
+        sendJson(res, 200, { text: null, because: 'engineering mode is off, so the window is not read' });
+        return;
+      }
+      const roster = safeRoster();
+      // Resolved to the card's OWN sessionName (the sessionOf lesson: a
+      // spelling that passes the gate via the safeKey fallback would
+      // exact-miss viewport's roster lookup and answer a refusal about
+      // an agent that is right there).
+      let exact = name;
+      try { const card = claimantFor(name); if (card && card.sessionName) exact = card.sessionName; } catch { /* the gate already passed */ }
+      sendJson(res, 200, chat.viewport(exact, roster));
+    } catch {
+      sendJson(res, 500, { error: 'we could not read its window just now' });
+    }
+    return;
+  }
+
   /* --- the conversation limit (the person's control) ---------------------- */
   if (pathname === '/api/limits' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, { ...limits.read(), tiers: limits.TIERS }); }
@@ -2425,6 +2477,12 @@ const server = http.createServer((req, res) => {
         historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
       }
     }
+    /* ⚠️ The capture ALWAYS runs: the question region derives from this
+       same read (chat.questionIn(view.text) below), and the question is
+       safety, not chrome -- a first cut gated the capture itself and
+       silently blinded the needs-you flow in Off, which is the one
+       thing the spec says the mode must never touch. What Engineering
+       mode gates is what is SERVED as the raw window, further down. */
     const view = chat.viewport(name, roster);
     /**
      * ⚠️ The question region is offered only when the BOARD says this agent is
@@ -2485,7 +2543,12 @@ const server = http.createServer((req, res) => {
       // (An `agents` copy of the membership used to ride here; nothing read
       // it -- the picker builds from the projects poll -- so it was dropped
       // rather than left as surface with no consumer. Round 19.)
-      viewport: view,
+      /* Engineering mode gates the SERVED window, not the capture (the
+         capture feeds the question above): Off answers the truth in
+         words so a stale client cannot render a window the person
+         turned off. */
+      viewport: engmode.read().on ? view
+        : { text: null, because: 'engineering mode is off, so the window is not shown' },
       asking,
       question,
       questionBecause,
