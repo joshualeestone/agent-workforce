@@ -44,3 +44,27 @@ special-purpose, sleep-button, update-toast) render no dark contexts at
 all, so their surfaces are eyeball-verified only (board and agent page
 shot dark and reviewed). Adding dark contexts to those drives is
 follow-up work, not claimed here.
+
+## Pass 1 (blind) and its fixes
+
+Two blockers, one class: alpha literals mixed light ink or the light
+attn red onto surfaces that now flip (board attn borders ~1.35:1, gauge
+track / unknown dashes / memory bar ~invisible, the unknown dashes the
+SOLE carrier of memory-unknown). Fixed by mirroring the full families in
+the dark block; the flip probe now covers the board's acard, gauge
+track and memory bar so this class stays instrumented. Also fixed: the
+three quiet state-pill borders, hover cues, the narrow-width tab tint
+(scoped in its own breakpoint), the add tile joining k-surface, every
+stale does-not-flip comment, the firstrun track/knob pin, and named
+missing-surface errors in the probe.
+
+Recorded, deliberately not changed here:
+- Two dark attention reds now exist: .utoast's #F0665A (pre-pack,
+  recorded as "the app's established dark-mode red") and the pack's
+  255,140,130 family this branch adopts. Unification is a Mona Lisa
+  wording-class call; flagged in the PR.
+- The minor tint chips (pjslug, lav, qmark, chk.unk, avatar-bg wash)
+  flatten in dark: their rgba(20,22,26,.04-.06) washes read as part of
+  the card. Text and rings on them ride flipping tokens, nothing is
+  unreadable; the pack's own dark treatment is token-only, so the
+  flattening matches the pack until it rules otherwise.
