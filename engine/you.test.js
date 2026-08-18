@@ -167,3 +167,26 @@ test('syncEveryone tells the tied and skips the strangers', () => {
   assert.equal(blind.length, 1);
   assert.equal(blind[0].state, projects.TOLD.COULD_NOT);
 });
+
+test('a projectless agent heals its stale colleagues block on an About-you write', () => {
+  // The heal used to ride only projects.tellAgent, and an agent on no
+  // project never passes through it -- its stale bare-kosmos teaching
+  // would have outlived every About-you rewrite of the same file.
+  const messages = require('./messages');
+  you.save(GOOD);
+  const stale = messages.START + '\nold body teaching bare kosmos\n' + messages.END;
+  plantAgent('drift', BOOT + '\n' + stale + '\n');
+  const roster = fleet.install([fleet.agent('drift', { state: 'idle' })]).agents;
+  try {
+    const v = you.tellAgent('drift', roster);
+    assert.equal(v.state, projects.TOLD.TOLD, 'heal-path verdict: ' + v.because);
+    const text = fs.readFileSync(bootFile('drift'), 'utf8');
+    assert.ok(!text.includes('old body teaching bare kosmos'),
+      'the stale colleagues body survived an About-you write');
+    assert.ok(text.includes(' msg <their-name>'),
+      'the healed block does not teach the msg command');
+    assert.ok(text.includes('Do the work well'), 'the agent\'s own words survive');
+  } finally {
+    fleet.restore();
+  }
+});

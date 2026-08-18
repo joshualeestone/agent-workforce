@@ -182,9 +182,14 @@ function tellAgent(sessionName, roster) {
     if (record.state === 'unknown') {
       return { state: projects.TOLD.COULD_NOT, because: record.because };
     }
-    const next = record.state === 'saved'
+    let next = record.state === 'saved'
       ? projects.spliceBlock(current.text || '', blockBody(record.you), START, END)
       : projects.removeBlock(current.text || '', START, END);
+    // A projectless agent never passes through projects.tellAgent, so the
+    // colleagues block heals on THIS writer too: same shared, marker-gated
+    // heal, and the equality short-circuit below still protects the
+    // one-deep .previous undo on a no-drift file.
+    next = projects.healColleagues(next);
     if (next === current.text) return { state: projects.TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
     return { state: projects.TOLD.TOLD, because: null };

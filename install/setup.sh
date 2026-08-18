@@ -577,7 +577,14 @@ uninstall() {
     # The single blank line the install printed before the marker is
     # swallowed with it (held one line, flushed unless the marker follows),
     # so install/uninstall cycles do not accumulate blank lines.
+    # ⚠️ `cat > profile` TRUNCATES before it writes, so a failure mid-write
+    # (disk full, permissions changed under us) would leave the person's
+    # shell profile half-gone. A sibling backup is taken first and restored
+    # on any failure; restore uses cat too, preserving a symlinked
+    # profile's inode. mv is deliberately not used for the same reason.
+    _pbak="$_profile.kosmos-uninstall-backup"
     if [ -n "$_ptmp" ] \
+       && cp "$_profile" "$_pbak" 2>/dev/null \
        && awk -v m="$_marker" -v p="$_pline" '
             skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
             $0 == m { skip=1; blank=0; next }
@@ -587,10 +594,21 @@ uninstall() {
             END { if (blank) print "" }
           ' "$_profile" > "$_ptmp" 2>/dev/null \
        && cat "$_ptmp" > "$_profile" 2>/dev/null; then
-      rm -f "$_ptmp"
+      rm -f "$_ptmp" "$_pbak"
     else
+      # Whatever failed, put the original back if the backup exists; a
+      # restore that itself fails leaves the backup in place and NAMES it.
+      if [ -f "$_pbak" ]; then
+        if cat "$_pbak" > "$_profile" 2>/dev/null; then
+          rm -f "$_pbak"
+          info "note: could not edit ${_profile##*/} (restored unchanged); the kosmos PATH line is harmless and safe to delete by hand"
+        else
+          info "note: could not edit ${_profile##*/}; an untouched copy is at ${_pbak##*/} in the same folder"
+        fi
+      else
+        info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
+      fi
       rm -f "$_ptmp" 2>/dev/null || true
-      info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
     fi
   fi
   # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
@@ -1087,7 +1105,12 @@ case ":$PATH:" in
           info "note: typing 'kosmos' in Terminal will not work yet on this Mac (the bin folder's name contains a character unsafe to write into ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
           ;;
         *)
-          if [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null; then
+          # "Already wired" requires BOTH halves: a profile carrying the
+          # marker but not an export-shaped line (a hand edit, a partial
+          # append) must fall through and repair the functional half,
+          # not report wired forever -- the silent class this step ends.
+          if [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null \
+             && grep -q 'export PATH=".*:\$PATH"' "$PROFILE_FILE" 2>/dev/null; then
             # No works-claim here: the wired export names whatever bin dir
             # the EARLIER install used, which this run cannot vouch for.
             info "the kosmos command is already wired into ${PROFILE_FILE##*/}"

@@ -190,6 +190,15 @@ chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\
 chk "user data untouched" "[ -d \"$SB/data\" ]"
 chk "PATH wiring removed from the sandbox profile" "! grep -q kosmos \"$SB/zprofile\""
 chk "the export line came out too (adjacency arm has a check that can fail)" "! grep -qF \"$SB/bin\" \"$SB/zprofile\""
+# The ADJACENCY arm specifically: install and uninstall above shared one
+# BIN_DIR, so the exact-text match alone would have passed. Plant a
+# marker + export naming a DIFFERENT bin dir (the changed-KOSMOS_BIN_DIR
+# case the regex exists for) and run the uninstall again.
+printf '%s\nexport PATH="/different/bin:$PATH"\n' '# kosmos: PATH for the kosmos command (removed by --uninstall)' >> "$SB/zprofile"
+RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall2.log" 2>&1 || RC=$?
+chk "second uninstall exits 0" "[ $RC -eq 0 ]"
+chk "adjacency arm removed an export from a DIFFERENT bin dir" "! grep -q '/different/bin' \"$SB/zprofile\""
+chk "the operator's line still survives the second sweep" "grep -q 'own line' \"$SB/zprofile\""
 chk "the operator's own profile line survives" "grep -q 'own line' \"$SB/zprofile\""
 chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
 

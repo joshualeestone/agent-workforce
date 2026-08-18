@@ -1706,7 +1706,11 @@ test('the taught kosmos command resolves to a real file on this machine, never a
   fs.mkdirSync(path.join(spaced, 'install'), { recursive: true });
   fs.writeFileSync(path.join(spaced, 'install', 'kosmos'), '#!/bin/sh\n');
   assert.equal(kosmosCliShown(spaced), '"' + path.join(spaced, 'install', 'kosmos') + '"');
-  assert.ok(!/^"/.test(kosmosCliShown()), 'an unspaced path grew quotes it does not need');
+  // Guarded: on a checkout whose own path carries a space, the quoting
+  // arm is CORRECT and this assertion would fail environmentally.
+  if (!/\s/.test(kosmosCli())) {
+    assert.ok(!/^"/.test(kosmosCliShown()), 'an unspaced path grew quotes it does not need');
+  }
   // A character double quotes cannot neutralize degrades to the bare
   // word: never teach a line that expands inside the agent's shell.
   const hostile = fs.mkdtempSync(path.join(os.tmpdir(), 'cli$evil-'));

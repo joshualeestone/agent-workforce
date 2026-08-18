@@ -1441,6 +1441,9 @@ function blockBody(projects, sessionName) {
   // its open tasks, in that spelling, in the file it boots from. Without
   // this the join would be a convention nobody was told about.
   let any = false;
+  // One resolution per block build, not one per project line (two to
+  // three existsSync probes each).
+  const cliShown = kosmosCliShown();
   const lines = projects.map((p) => {
     // The room command rides each project line (View D): this block
     // re-splices on every membership change, so it is the one surface
@@ -1451,7 +1454,7 @@ function blockBody(projects, sessionName) {
     // failure draws nothing anywhere. Re-spliced on every membership
     // change, so existing agents get the corrected form, not only new.
     const head = `- **${oneLine(p.name)}**: \`${oneLine(p.folder)}\`` + (p.id
-      ? `\n  - Post to everyone on it: \`${kosmosCliShown()} post ${oneLine(String(p.id))} "your message"\``
+      ? `\n  - Post to everyone on it: \`${cliShown} post ${oneLine(String(p.id))} "your message"\``
       : '');
     const mine = (sessionName && Array.isArray(p.tasks))
       ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
@@ -1559,19 +1562,13 @@ function tellAgent(sessionName, projects, roster) {
     let next = projects.length
       ? spliceBlock(current.text || '', blockBody(projects, sessionName))
       : removeBlock(current.text || '');
-    // The colleagues block heals HERE, piggybacked on the one event that
-    // already writes this file. It is spliced at birth and nothing ever
-    // refreshed it, so a corrected command (the PATH fix) would otherwise
-    // reach only newborn agents. Heal, never introduce: only a file that
-    // already carries the markers is touched (spliceBlock APPENDS when
-    // they are absent, which would write our block into an adopted
-    // agent's file nobody asked us to grow), and the exact-equality
-    // short-circuit below keeps a no-drift file unwritten.
-    const mm = messagesBlock();
-    const colleagues = findBlock(next, mm.START, mm.END);
-    if (colleagues && !colleagues.ambiguous) {
-      next = spliceBlock(next, mm.blockBody(), mm.START, mm.END);
-    }
+    // The colleagues block heals on EVERY event that writes this file
+    // (here, and you.js's tellAgent -- an agent on no project still gets
+    // About-you writes, and "piggyback on the one write" undercounted the
+    // writers). It is spliced at birth and nothing else refreshed it, so
+    // a corrected command (the PATH fix) would otherwise reach only
+    // newborn agents. The heal itself is in healColleagues below.
+    next = healColleagues(next);
     if (next === current.text) return { state: TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
     return { state: TOLD.TOLD, because: null };
@@ -1593,6 +1590,25 @@ function tellAgent(sessionName, projects, roster) {
           : (raw || 'we could not write to this agent’s instructions')),
     };
   }
+}
+
+/**
+ * Heal a drifted colleagues block in place; NEVER introduce one.
+ *
+ * Shared by every writer into an agent's instruction file (this module's
+ * tellAgent and you.js's), so a projectless agent still heals on an
+ * About-you write. Heal-only: spliceBlock APPENDS when the markers are
+ * absent, which would grow an adopted agent's file nobody asked us to
+ * grow, so a file without the markers (or with an ambiguous pair) comes
+ * back byte-identical. Callers keep their own equality short-circuit, so
+ * a no-drift file is never rewritten (protecting the one-deep .previous
+ * undo).
+ */
+function healColleagues(text) {
+  const mm = messagesBlock();
+  const at = findBlock(String(text == null ? '' : text), mm.START, mm.END);
+  if (!at || at.ambiguous) return text;
+  return spliceBlock(text, mm.blockBody(), mm.START, mm.END);
 }
 
 /**
@@ -1620,7 +1636,7 @@ module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END,
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
-  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause,
+  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause, healColleagues,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder, revealFolder, setRevealRunner,
 };

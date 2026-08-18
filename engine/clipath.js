@@ -45,7 +45,7 @@ function kosmosCli(probeRoot) {
     surface has no one to refuse to. */
 function kosmosCliShown(probeRoot) {
   const cli = kosmosCli(probeRoot);
-  if (/["$`\\]/.test(cli)) return 'kosmos';
+  if (/["$`\\]/.test(cli) || cli.includes('<!--') || cli.includes('-->')) return 'kosmos';
   return /\s/.test(cli) ? '"' + cli + '"' : cli;
 }
 
