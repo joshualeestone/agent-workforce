@@ -7235,8 +7235,10 @@ function pjToldGroupLine(told) {
   // ("this agent has no folder…"), so the frame introduces it as the one
   // shared reason rather than continuing the plural sentence into it --
   // "any of them … this agent" read as a contradiction.
+  // The fallback is OUR text (not an engine verbatim), so it takes the
+  // plural the frame needs; a real because stays verbatim.
   return 'We could not tell any of them where this folder is. Each for the same reason: '
-    + esc(told.because || 'we could not write to its instructions') + '.';
+    + esc(told.because || 'we could not write to their instructions') + '.';
 }
 
 /**

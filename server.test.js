@@ -5805,6 +5805,13 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   assert.ok(g.includes('Each for the same reason: this agent has no folder on this computer yet.'),
     'the group sentence dropped or re-spliced the because: ' + g);
 
+  // A missing because collapses into the group's OWN fallback, which is
+  // plural (our text takes the plural the frame needs; engine text stays
+  // verbatim singular).
+  const gf = shared([{ told: { state: 'could_not' } }, { told: { state: 'could_not' } }]);
+  assert.ok(gf.includes('we could not write to their instructions'),
+    'the group fallback is not the plural form: ' + gf);
+
   // The group line lands in the page as raw HTML (paintOneProject), so a
   // markup-carrying because must arrive ESCAPED, not verbatim-dangerous.
   const gx = shared([cn('a <b>note</b> & more'), cn('a <b>note</b> & more')]);
