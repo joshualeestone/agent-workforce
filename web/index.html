@@ -3585,7 +3585,7 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     BOARD_SEEN = true;
-    if (CURRENT && ENG_ON && !WINDOW_OPENING
+    if (CURRENT && CURRENT.isNamedOurs === true && ENG_ON && !WINDOW_OPENING
       && !document.getElementById('panel-detail').hidden) {
       // The panel-visibility term: CURRENT survives closing the detail,
       // and a capture every five seconds for an invisible surface is a
@@ -4186,7 +4186,7 @@ async function engToggleClick() {
     msg.textContent = '';
     pjApplyEngMode();
   } catch {
-    msg.textContent = 'We could not save that setting.';
+    if (mine === ENG_EPOCH) msg.textContent = 'We could not save that setting.';
   } finally {
     ENG_SAVING = false;
   }
@@ -4712,7 +4712,8 @@ function openDetail(sessionName) {
   /* Cleared BEFORE the paint's awaits: opening B with A's captured pane
      still in the box would show A's raw session under B's name for two
      network round-trips -- cross-agent misattribution, the same class
-     the thread's switching clear closes. */
+     the thread's switching clear closes. (The paint itself runs below,
+     behind the tied gate.) */
   {
     const wpre = document.getElementById('d-window');
     wpre.textContent = ''; wpre.hidden = true;
@@ -4722,7 +4723,6 @@ function openDetail(sessionName) {
     // round-trips is the same misattribution family, one notch quieter.
     document.getElementById('d-window-box').hidden = true;
   }
-  paintAgentWindow(a.sessionName);
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
@@ -4743,6 +4743,15 @@ function openDetail(sessionName) {
   const tied = a.isNamedOurs === true;
   setWritesOffered(a, tied);
   if (tied) loadInstructions(a.sessionName);
+  /* The window box inherits the SAME gate (the recorded loadInstructions
+     lesson: a new sibling that skips it paints "no agent by that name"
+     inside a box on the panel of an agent the person is looking at). An
+     untied pane's window is not this agent's to show; the box hides. */
+  if (tied) {
+    paintAgentWindow(a.sessionName);
+  } else {
+    document.getElementById('d-window-box').hidden = true;
+  }
   // ⚠️ Asked EVERY time the panel opens, and asked of the engine. Whether an
   // agent can be removed here is a fact about what created it, and this screen
   // must not carry its own opinion about that.

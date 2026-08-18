@@ -210,6 +210,11 @@ async function main() {
   // `chromium.launch()` meant a run that was going to be refused spawned a
   // browser first and took a minute to say no.
   await assertSandboxed();
+  // A killed prior run can leave Engineering mode ON in the sandbox;
+  // removed HERE so every state (not only 3c) renders the shipped
+  // default -- states 1-3b screenshot the viewport-adjacent surfaces a
+  // human reviews.
+  fs.rmSync(path.join(SANDBOX, 'data', 'engmode.json'), { force: true });
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: !HEADED });
   BROWSER = browser;
@@ -569,7 +574,6 @@ async function main() {
     // default-Off assertion below would then red against its own
     // leftovers rather than the product.
     const engFile = path.join(SANDBOX, 'data', 'engmode.json');
-    fs.rmSync(engFile, { force: true });
     try {
       const page = await ctx.newPage();
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });

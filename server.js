@@ -1637,18 +1637,19 @@ const server = http.createServer((req, res) => {
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
     if (!knownAgent(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     try {
+      if (!engmode.read().on) {
+        // The same gate as the thread's viewport, hoisted above the
+        // roster snapshot it would never use: Off stops the capture, and
+        // a stale client that asks anyway gets the truth in words rather
+        // than a window the person turned off.
+        sendJson(res, 200, { text: null, because: 'engineering mode is off, so the window is not read' });
+        return;
+      }
       const roster = safeRoster();
       // Resolved to the card's OWN sessionName (the sessionOf lesson: a
       // spelling that passes the gate via the safeKey fallback would
       // exact-miss viewport's roster lookup and answer a refusal about
       // an agent that is right there).
-      if (!engmode.read().on) {
-        // The same gate as the thread's viewport: Off stops the capture
-        // itself, and a stale client that asks anyway gets the truth in
-        // words rather than a window the person turned off.
-        sendJson(res, 200, { text: null, because: 'engineering mode is off, so the window is not read' });
-        return;
-      }
       let exact = name;
       try { const card = claimantFor(name); if (card && card.sessionName) exact = card.sessionName; } catch { /* the gate already passed */ }
       sendJson(res, 200, chat.viewport(exact, roster));
