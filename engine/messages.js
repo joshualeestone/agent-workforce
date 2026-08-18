@@ -148,16 +148,18 @@ function resolveSender(fromPane, roster) {
 function record() {
   let raw;
   try { raw = fs.readFileSync(LOG, 'utf8'); } catch (err) {
-    if (err && err.code === 'ENOENT') return { ok: true, rows: [] };
-    return { ok: false, rows: [] };
+    if (err && err.code === 'ENOENT') return { ok: true, rows: [], parsed: [] };
+    return { ok: false, rows: [], parsed: [] };
   }
   const rows = [];
+  const parsed = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     // One bad line must not eat the record: skip it, keep reading. The
     // screens' list is best-effort history, not a ledger we halt on.
     let row;
     try { row = JSON.parse(line); } catch { continue; }
+    parsed.push(row);
     // Parsing is not shape: the log is the engine's record, not a
     // boundary, so a row only counts when it carries the fields its kind
     // demands and an `at` that parses. NO roster filter here, on purpose:
@@ -165,7 +167,11 @@ function record() {
     // the record lying by subtraction.
     if (rowShaped(row)) rows.push(row);
   }
-  return { ok: true, rows };
+  // `parsed` (shape-agnostic) exists for ID RESERVATION alone: a foreign
+  // append that fails shape must still burn the id it names, or the next
+  // send re-mints an id a recipient may already have seen -- and would
+  // silently overwrite that id's spill file.
+  return { ok: true, rows, parsed };
 }
 
 /** The fields each kind demands. An unknown kind is KEPT -- dropping what
@@ -173,7 +179,10 @@ function record() {
 function rowShaped(m) {
   const str = (v) => typeof v === 'string' && v.length > 0;
   if (!m || typeof m !== 'object' || Array.isArray(m)) return false;
-  if (!Number.isFinite(Date.parse(m.at))) return false;
+  // A STRING that parses, matching what every writer emits: Date.parse
+  // coerces, so a bare number 2026 would ride through to a screen sort
+  // that localeCompares ISO strings.
+  if (typeof m.at !== 'string' || !Number.isFinite(Date.parse(m.at))) return false;
   if (m.kind === 'message') {
     return str(m.id) && str(m.from) && str(m.to) && typeof m.text === 'string';
   }
@@ -207,7 +216,9 @@ function pairKey(a, b) {
 /** How many delivered messages this pair exchanged inside the window.
     An unparseable `at` fails OPEN (NaN >= floor is false, the row does
     not count) -- deliberate: a corrupt line must not close the valve on
-    a healthy pair. */
+    a healthy pair. (On the main path record()'s shape filter drops such
+    rows before this runs; the defense stays because pairCount is
+    exported and takes any array.) */
 function pairCount(log, a, b, now) {
   const key = pairKey(a, b);
   const floor = now - PAIR_WINDOW_MS;
@@ -309,7 +320,8 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     return refuse(toName, 'that message contains the colleague marker itself, which would let it impersonate another sender; say it without the bracket line');
   }
 
-  const log = readLog();
+  const rec = record();
+  const log = rec.rows;
 
   // The reply pointer has to name a REAL message in a conversation the
   // sender or recipient was part of -- an arbitrary id would let a sender
@@ -348,7 +360,10 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
   }
 
-  const id = 'm' + (log.reduce((n, m) => Math.max(n, m && m.id ? Number(String(m.id).slice(1)) || 0 : 0), 0) + 1);
+  // Over the PARSE-ONLY rows: a foreign append that fails shape must
+  // still burn the id it names, or this re-mints an id a recipient may
+  // already have seen and overwrites its spill file.
+  const id = 'm' + (rec.parsed.reduce((n, m) => Math.max(n, m && m.id ? Number(String(m.id).slice(1)) || 0 : 0), 0) + 1);
 
   /* The envelope: one line (a newline in the pane is a submit), sender and
      reply pointer first so the recipient reads WHO before WHAT. Past

@@ -367,3 +367,25 @@ test('record() keeps only rows carrying the fields their kind demands, keeps unk
   assert.equal(got.rows[0].id, 'm1');
   assert.equal(got.rows[2].from, 'gone-agent', 'a sender who left the fleet was filtered out of history');
 });
+
+test('a shape-failing foreign append still burns its id, and non-object lines drop', () => {
+  withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
+    wipeLog();
+    fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+    // A foreign append naming m99 with garbage `at`: fails shape (so the
+    // screens never draw it) but MUST reserve its id, or the next send
+    // re-mints an id a recipient may already have seen.
+    fs.appendFileSync(messages.LOG, JSON.stringify({
+      kind: 'message', id: 'm99', from: 'leo', to: 'mara', text: 'foreign', in_reply_to: null, at: 'garbage',
+    }) + '\n');
+    // Non-object JSON lines: the validator's first guard, each dropped.
+    for (const line of ['42', '"str"', '[1,2]', 'null']) fs.appendFileSync(messages.LOG, line + '\n');
+    assert.equal(messages.record().rows.length, 0, 'a shape-failing or non-object row reached the record');
+
+    armSender('leo-discord');
+    arm([ok(), ok()]);
+    const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'after the foreign row' }, board.agents);
+    assert.equal(sent.state, chat.DELIVERY.PLACED, sent.because || '');
+    assert.equal(sent.id, 'm100', 'the shape-failing row did not reserve its id (got ' + sent.id + ')');
+  });
+});
