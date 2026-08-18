@@ -1602,6 +1602,28 @@ svg { display: block; }
     <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
   </section>
 
+  <!-- ⚠️ THE CONVERSATION (Mona Lisa's messaging-screens spec, 2026-08-18):
+       everything said to this agent, in order, whoever said it -- the
+       operator's project-thread messages and colleagues' messages in ONE
+       list, because the person's question is "why did Leo do that?", not
+       "what are all my agents saying?". A colleague's row must read
+       differently from yours: the product already tells the agent to
+       weigh them differently, so the person has to see which is which.
+       Delivery states render, none as silence; the engine's because
+       sentences ship verbatim; the valve row is NOT an error, it is the
+       most reassuring line on the screen. Replies indent one level,
+       never a tree. -->
+  <section class="dbox">
+    <h3 class="dlab">Conversation</h3>
+    <div id="d-convo"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
+    <!-- The capability-gap sentence (her ruled cause-free wording): shown
+         when this agent's instructions lack the colleagues block, which
+         is TRUE for custom-born, pre-0.1.7 role-born, and adopted agents
+         alike -- any causal clause was false for at least one of them.
+         It earns a button when teach-existing lands, not before. -->
+    <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
+  </section>
+
   <section class="dbox">
   <div class="field">
     <label class="flabel" for="d-file">Picture</label>
