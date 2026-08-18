@@ -28,8 +28,10 @@
      and the three golds are the values the wizard pinned under #firstrun;
      surface and the mono stack are net-new here, promoted as each view
      rebuilds to the pack. Track/knob arrived with the settings toggles
-     (the control that consumes them); dark inverses with the theme pass
-     (#40), not before. */
+     (the control that consumes them); the dark inverses live in the
+     prefers-color-scheme block below (the pack's own set, added when
+     Mona Lisa measured literal-white cards on the dark ground); the
+     manual data-theme toggle remains #40's. */
   --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-surface: #ffffff; --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
@@ -85,6 +87,20 @@
     --warn-bg:       rgba(255,190,60,0.12);
     --warn-border:   rgba(255,190,60,0.32);
     --warn-ink:      #ffca55;
+    /* The pack's own dark set for the k-tokens, verbatim (17c line 49).
+       Until this block existed the k-tokens held their light values in
+       both schemes, so every card riding --k-surface sat literal-white
+       on the flipped page ground -- measured by Mona Lisa 2026-08-18
+       (card interior 255,255,255 in dark). This was the deferred half
+       of the theme pass (#40); the card-surface flip ships here, the
+       manual data-theme toggle stays with #40. */
+    --k-bg:      #0c0d0f;
+    --k-surface: #17191c;
+    --k-ink:     #f5f5f4;
+    --k-ink-2:   #a9adb3;
+    --k-rule:    #2a2d31;
+    --k-track:   rgba(245,245,244,.22);
+    --k-knob:    #e8e9eb;
   }
 }
 @media (prefers-contrast: more) {
@@ -774,9 +790,9 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    from one we can, or the row quietly reports a project that is fine. */
 .pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink);
   margin-top: var(--space-3); padding-left: var(--space-4);
-  /* the light warn literal, not the theme token: the card is fixed-light,
-     and dark's #ffca55 border is faint on white */
-  border-left: 2px solid #7a5200; }
+  /* back on the theme token: the card surface flips with the pack's dark
+     set now, so the warn ink flips with it (#7a5200 light, #ffca55 dark) */
+  border-left: 2px solid var(--warn-ink); }
 .pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
   padding: var(--space-7); text-align: center; }
 .pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
@@ -1115,13 +1131,12 @@ svg { display: block; }
   background: var(--warn-bg); color: var(--label);
   font: var(--text-callout) var(--font-ui); line-height: 1.45;
 }
-/* ⚠️ FIXED ink: this badge sits inside .acard/.lrow, fixed-light surfaces
-   that do not flip until #40, so a theme-following --warn-ink turned it
-   ~1.5:1 invisible in dark (round 2 measured rgb(255,202,85) on white).
-   #7a5200 is the light warn ink, correct on white in both themes. */
+/* Theme ink again: .acard/.lrow flip with the pack's dark k-token set,
+   so --warn-ink is correct on each surface. (Round 2's fixed #7a5200 was
+   the compensation for the pre-flip literal-white card.) */
 .card-stale {
   display: inline-flex; align-items: center; gap: 4px;
-  margin-left: 6px; vertical-align: middle; color: #7a5200;
+  margin-left: 6px; vertical-align: middle; color: var(--warn-ink);
 }
 .card-stale svg { width: 13px; height: 13px; }
 
@@ -1268,6 +1283,12 @@ svg { display: block; }
   .dremove .dhint, .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--label-2); }
   .dremove .btn-quiet { color: var(--label); }
   .dprojlab { color: var(--label-2); }
+  /* The pack's dark set leaves its attn red at #b3261e, which measures
+     2.69:1 on the dark card (a pack defect, recorded in the plan; its own
+     dark .pending already uses the 255,140,130 family, which is the red
+     it chose for dark grounds -- 8.0:1 here). */
+  .pjpill.attn { color: #ff8c82; }
+  .pj-row.attn { border-color: rgba(255,140,130,.55); }
 }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */

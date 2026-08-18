@@ -655,6 +655,7 @@ async function main() {
 
   // 7. Contrast, on the list where every text token on this screen appears.
   let contrastFails = 0;
+  const surfacesByScheme = {};
   for (const scheme of ['light', 'dark']) {
     const ctx = await browser.newContext({ colorScheme: scheme });
     const page = await ctx.newPage();
@@ -868,9 +869,39 @@ async function main() {
         console.log(`  ⚠️ contrast ${cr.toFixed(2)} (needs ${need}) — ${e.sel} @${e.size}px, ${scheme}`);
       }
     }
+    // The surfaces this scheme actually painted, for the flip check below.
+    // Read from the LIST view: the sweep leaves the page on the settings
+    // view, so navigate back rather than assume.
+    await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+    surfacesByScheme[scheme] = await page.evaluate(() => ({
+      ground: getComputedStyle(document.body).backgroundColor,
+      card: getComputedStyle(document.querySelector('#pj-list .pj-row')).backgroundColor,
+      band: getComputedStyle(document.querySelector('.apphead')).backgroundColor,
+      tile: getComputedStyle(document.querySelector('#panel-projects .stat:not(.action)')).backgroundColor,
+    }));
     await ctx.close();
   }
   console.log(contrastFails ? `✖ ${contrastFails} contrast failures` : '✔ 7-contrast (WCAG AA, light and dark)');
+
+  // 7b. THE FLIP ITSELF, which no contrast assertion can see: dark ink on a
+  // literal-white card passes AA in both themes, and that is exactly how a
+  // grid whose k-tokens never flipped survived six review passes and this
+  // sweep (Mona Lisa measured card interior 255,255,255 in dark,
+  // 2026-08-18). The failing property is "does the surface token CHANGE
+  // between schemes", so that is the property asserted.
+  {
+    const light = surfacesByScheme.light; const dark = surfacesByScheme.dark;
+    for (const key of ['ground', 'card', 'band', 'tile']) {
+      if (!light[key] || light[key] === 'rgba(0, 0, 0, 0)' || !dark[key] || dark[key] === 'rgba(0, 0, 0, 0)') {
+        throw new Error(`the ${key} surface was not painted to measure (light ${light[key]}, dark ${dark[key]}) -- a transparent surface cannot prove it flips`);
+      }
+      if (light[key] === dark[key]) {
+        throw new Error(`the ${key} surface does not flip between schemes (${light[key]} in both) -- literal-white-in-dark is the defect this check exists for`);
+      }
+    }
+    console.log('✔ 7b-theme-flip (ground, card, band, tile all change between schemes)');
+  }
 
   // 8. The app shell: sticky bar, the K mark, the member wording, the two
   //    scoped view toggles, and the archived disclosure. Behaviour in one
