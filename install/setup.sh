@@ -589,11 +589,24 @@ uninstall() {
     # is the first write) would otherwise "restore" a partial copy over
     # the still-intact profile -- a shrinking write that succeeds on a
     # full disk -- and then claim nothing changed.
+    # ⚠️ A pre-existing backup HALTS this block. It is a previous failed
+    # run's preserved copy, which the person was told about by name;
+    # overwriting it with the current (possibly damaged) profile, or
+    # rm'ing it on this run's own failure path, would destroy exactly
+    # what that run preserved. A run may only remove a backup it created.
+    if [ -e "$_pbak" ]; then
+      info "note: ${_pbak##*/} already exists from an earlier run; leaving it and the kosmos PATH line alone (the line is harmless and safe to delete by hand)"
+      rm -f "$_ptmp" 2>/dev/null || true
+      _bak_ok=halt
+    else
     _bak_ok=no
     if [ -n "$_ptmp" ] && cp "$_profile" "$_pbak" 2>/dev/null && cmp -s "$_profile" "$_pbak" 2>/dev/null; then
       _bak_ok=yes
     fi
-    if [ "$_bak_ok" = yes ] \
+    fi
+    if [ "$_bak_ok" = halt ]; then
+      : # said above; nothing touched
+    elif [ "$_bak_ok" = yes ] \
        && awk -v m="$_marker" -v p="$_pline" '
             skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
             $0 == m { skip=1; blank=0; next }

@@ -1700,6 +1700,15 @@ test('the taught kosmos command resolves to a real file on this machine, never a
   // word (the installer's PATH wiring is that case's fix, not a guess).
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'clipath-'));
   assert.equal(kosmosCli(empty), 'kosmos');
+  // The INSTALLED layout, the production path of the motivating incident:
+  // bin/kosmos + app/server.js at the root resolves to bin/kosmos.
+  const inst = fs.mkdtempSync(path.join(os.tmpdir(), 'clipath-inst-'));
+  fs.mkdirSync(path.join(inst, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(inst, 'bin', 'kosmos'), '#!/bin/sh\n');
+  fs.mkdirSync(path.join(inst, 'app'), { recursive: true });
+  fs.writeFileSync(path.join(inst, 'app', 'server.js'), '');
+  assert.equal(kosmosCli(inst), path.join(inst, 'bin', 'kosmos'),
+    'the installed layout did not resolve to its own bin/kosmos');
   // The taught form quotes exactly when the path carries whitespace: an
   // unquoted spaced path pastes as two shell words.
   const spaced = fs.mkdtempSync(path.join(os.tmpdir(), 'cli path-'));

@@ -96,6 +96,27 @@ only newborns. No migration needed.
   single-write idempotency, uninstall removal, survivor lines, AND the
   gate's skip arm. 178/178.
 
+## Recorded limits (review deferrals with reasoning)
+
+- The heal can grow a file: on an agent already at the instructions size
+  limit, the joint write (projects block + heal in one write) is refused
+  and REPORTED as the size-limit could_not; the projects update that
+  would have fit alone waits until a human shrinks the file. Reported,
+  not silent; rare; accepted.
+- The installer's non-zsh hedge arm has no harness check: exercising it
+  requires a run that is neither sandbox-keyed (the gate fires first)
+  nor profile-overridden (the hedge yields to an explicit ask), and such
+  a run writes real machine surfaces (Applications icon). Three-line
+  case arm, syntax-checked; accepted untested with this reasoning.
+- An ambiguous colleagues pair disables the heal with no surface saying
+  so (tested as the refusal it is): refuse-don't-guess on a non-verdict
+  surface; the agent keeps its stale command until a human resolves the
+  duplicate markers.
+- The sandbox profile gate keys on app-dir overrides only, matching the
+  established lsregister keying; a hypothetical harness overriding only
+  HOME/BIN_DIR could still reach a real profile. Consistency kept over
+  broadening.
+
 ## Out of scope
 
 - The update-control chunk (Mona Lisa's spec: four states, Check now,

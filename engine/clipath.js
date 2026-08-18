@@ -24,6 +24,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function kosmosCli(probeRoot) {
+  // On a source checkout this resolves to the repo's PARENT, so the
+  // installed probe can only false-positive if that parent coincidentally
+  // holds BOTH bin/kosmos and app/server.js -- accepted: the conjunction
+  // is the guard, and the source arm below wins on every real checkout
+  // only because this arm correctly fails first.
   const installedHome = probeRoot || path.resolve(__dirname, '..', '..');
   if (fs.existsSync(path.join(installedHome, 'bin', 'kosmos'))
    && fs.existsSync(path.join(installedHome, 'app', 'server.js'))) {

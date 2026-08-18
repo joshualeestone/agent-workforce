@@ -747,7 +747,7 @@ function blockBody() {
     '',
     'If one of these commands fails in your shell, say what happened in',
     'your own words rather than staying silent: the message never arrived,',
-    'and nobody else can see that it failed.',
+    'and a command that never ran draws nothing anywhere.',
     '',
     'Mention @<their-name> to address someone directly; everyone else on',
     'the project receives it marked as background.',
