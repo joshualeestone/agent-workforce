@@ -385,7 +385,12 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    renderers reading the same CARD_ST/GLYPH/labels and the same task/model
    derivations -- the words cannot diverge because they are computed once. */
 /* ---- the agents board: the pack's card grammar (stage 3) ---- */
-.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); }
+/* One stage width: the pack draws the cards and the stats row on a shared
+   column, and the header/statsrow/summary here carry the app's 1320px cap.
+   Without the same cap the grid runs past the board chrome on wide
+   monitors (round 5 measured ~276px overhang per side at 1920). */
+.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+         max-width: 1320px; margin-left: auto; margin-right: auto; }
 /* the read-failure message spans the grid: squeezed into one 15.5rem track
    it is the least readable thing on screen at exactly the moment it is the
    only thing that matters (same rule the projects grid records) */
@@ -467,7 +472,8 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .ansgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 .acard:hover .ansgo, .lrow:hover .ansgo { color: var(--k-ink); }
 /* ---- the agents list: the pack's .lrow (stage 4) ---- */
-.alist { display: flex; flex-direction: column; gap: 8px; }
+.alist { display: flex; flex-direction: column; gap: 8px;
+         max-width: 1320px; margin-left: auto; margin-right: auto; }
 .lrow { display: grid; align-items: center; gap: 16px;
         grid-template-columns: 34px minmax(9rem, 1.2fr) minmax(7rem, .7fr) minmax(8rem, 1.4fr) 8.5rem;
         background: var(--k-surface); color: var(--k-ink);
@@ -844,23 +850,6 @@ svg { display: block; }
      app's established dark-mode red. (The ring's own dark bands retired
      with the old gauge; the pack gauge's dark values arrive with #40.) */
   .utoast { --utone: #F0665A; }
-  /* ⚠️ HOLD-THE-LINE until #40 (round 1: the old board was legible in dark
-     and the rebuild must not regress it). The rule of thumb: fixed-light
-     surfaces (--k-surface cards, tiles, pills) carry fixed ink and are
-     already right in both themes; elements sitting on the BODY ground get
-     theme-following tokens here, because the body flips and their k-ink
-     text does not. The pack's real dark values replace this block in #40. */
-  .stat.action { background: var(--bg-elevated); }
-  .stat.action .slab, .stat.action .plus { color: var(--label); }
-  .linkish { color: var(--label-2); }
-  .linkish:hover { color: var(--label); }
-  .removed-wrap { border-top-color: var(--separator); }
-  .removed-row + .removed-row { border-top-color: var(--separator); }
-  .removed-row .who { color: var(--label); }
-  .removed-row .when, .removed-hint { color: var(--label-2); }
-  /* focus rings drawn ON the body ground flip with it, or a keyboard
-     user's ring vanishes exactly where the text colors above were fixed */
-  .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
          font: var(--text-callout) var(--font-ui); color: var(--label);
@@ -1025,7 +1014,8 @@ svg { display: block; }
    the right, hairlines BETWEEN rows only. The old grid-alignment tricks
    died with the old card grid; the .cards grid is full-width, so this is
    an ordinary block under it. */
-.removed-wrap { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-rule); }
+.removed-wrap { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-rule);
+                max-width: 1320px; margin-left: auto; margin-right: auto; }
 .linkish { background: none; border: 0; padding: 0;
            font: inherit; font-size: .875rem; font-weight: 600;
            color: var(--k-ink-2); text-decoration: underline; cursor: pointer; }
@@ -1041,6 +1031,34 @@ svg { display: block; }
    and hides, it never deletes the folder */
 .removed-hint { margin: 10px 0 0; font-size: .8125rem; line-height: 1.5;
                 color: var(--k-ink-2); }
+/* ⚠️ HOLD-THE-LINE until #40 (round 1: the old board was legible in dark and
+   the rebuild must not regress it). Fixed-light surfaces (--k-surface
+   cards, tiles, pills) carry fixed ink and are right in both themes;
+   elements on the BODY ground get theme-following tokens here.
+   ⚠️ DECLARED AFTER every rule it overrides, deliberately: the first cut of
+   this block sat 170 lines EARLIER than the pack's .linkish/.removed rules
+   at equal specificity, so the later light rules won in dark too -- the
+   removed section unreadable, and the shared .linkish regressing the
+   PROJECTS tab (round 5 measured who at ~1.0:1 on the dark body). A
+   cascade defeat is silent; position is the fix, and this comment is the
+   guard against someone "tidying" the block back up the file. The pack's
+   real dark values replace all of this in #40. */
+@media (prefers-color-scheme: dark) {
+  .stat.action { background: var(--bg-elevated); }
+  /* hover carries higher specificity (0,3,0) than the line above, so it
+     needs its own dark ground or the tile flickers transparent on hover */
+  .stat.action:hover { background: var(--bg-elevated); border-color: var(--gold-deep); }
+  .stat.action .slab, .stat.action .plus { color: var(--label); }
+  .linkish { color: var(--label-2); }
+  .linkish:hover { color: var(--label); }
+  .removed-wrap { border-top-color: var(--separator); }
+  .removed-row + .removed-row { border-top-color: var(--separator); }
+  .removed-row .who { color: var(--label); }
+  .removed-row .when, .removed-hint { color: var(--label-2); }
+  /* focus rings drawn ON the body ground flip with it; being AFTER the
+     outline shorthand declarations is what makes these effective */
+  .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
+}
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
 .removed-msg { margin-top: var(--space-4); font: var(--text-callout) var(--font-ui);

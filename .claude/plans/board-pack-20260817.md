@@ -141,3 +141,15 @@ re-anchored where markup moved. Pair shot posted in channel.
 - Deferred to the next drive touch (recorded NIT): render-update-toast's
   no-re-spacing pin still measures #new-agent, which left the header with
   the statsrow; that half is vacuous and #checked is the real witness.
+
+## Round 5 record
+
+- The dark hold-the-line block was CASCADE-DEAD for the removed section and
+  the shared .linkish (declared earlier than the pack rules it overrode at
+  equal specificity), which also regressed the projects tab in dark. Fixed
+  by POSITION: the block now sits after every rule it overrides, with the
+  defeat recorded in its comment as the guard against re-tidying; hover's
+  higher specificity got its own dark ground; measured back to
+  theme-following values on the live sandbox.
+- The one-stage-width cap (1320px) restored to .cards/.alist/.removed-wrap;
+  measured exact left/right alignment with the statsrow at 1920.
