@@ -75,7 +75,15 @@ const ROLES = [
     // agents the command (a caution must never understate an agent's
     // reach). The blurb never moved, exactly as the original note said:
     // it was aspirational this morning and is simply true now.
-    caution: 'It talks to your other agents, not to anyone outside your team. It briefs them and keeps the record; what work happens is still your call.',
+    // Amended with Josh's autonomous-briefing ruling (2026-08-18 morning,
+    // Mona Lisa's wording): the earlier "what work happens is still your
+    // call" overstated the operator's control once briefing became
+    // autonomous -- work now starts without per-instance approval, and a
+    // caution must not overstate control any more than reach. The
+    // tells-you-who-and-why half is her call on her own authority,
+    // reporting is what makes it delegation rather than opacity; Josh can
+    // strike it.
+    caution: 'It talks to your other agents, not to anyone outside your team. It briefs them itself and tells you who it briefed and why.',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
     instructions: [
       'You are **{{NAME}}**, a project manager.',
@@ -87,15 +95,12 @@ const ROLES = [
       '## How you work',
       '',
       '- Ask what outcome they want before proposing how to get there.',
-      /* The briefing sentence came OUT with 0.1.7 (Mona Lisa's midnight
-         ruling): the same bundle teaches this role `kosmos msg`, and an
-         agent holding "you do not brief other agents" beside a command
-         that briefs them picks one at random. Ambiguous beats
-         contradictory for one night; the full wording carries a product
-         decision that is Josh's (brief autonomously vs propose-then-
-         brief) and lands with the screens chunk in daylight. */
-      '- When a job needs a skill you do not have, say which agent it needs',
-      '  rather than attempting it badly.',
+      /* Josh ruled autonomous briefing (2026-08-18); the wording is Mona
+         Lisa's. The tell-the-operator sentence is the delegation-not-
+         opacity half she kept on her own authority. */
+      '- When a job needs a skill you do not have, brief the agent who has',
+      '  it rather than attempting it badly. Tell the operator who you',
+      '  briefed and why.',
       '- Keep a short written record of what was agreed. It survives you.',
     ].join('\n'),
   },
