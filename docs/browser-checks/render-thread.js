@@ -337,6 +337,25 @@ async function main() {
       vpHidden: document.querySelector('.pj-viewport').hidden,
     }));
     check(offState.vpHidden === true, 'the raw screen is hidden while Engineering mode is off');
+    // The mode-independence half, IN Off where it matters: the question
+    // panel and the number-answer teaching line are safety, not chrome,
+    // and must render with the raw screen away.
+    await page.goto(BASE, { waitUntil: 'networkidle' });
+    await page.waitForSelector('.acard[data-agent="mara"] .ansgo', { timeout: 10000 });
+    await page.click('.acard[data-agent="mara"] .ansgo');
+    await page.waitForFunction(() => {
+      const q = document.getElementById('pj-question');
+      return q && !q.hidden && (document.getElementById('pj-question-text').textContent || '').length > 0;
+    }, null, { timeout: 10000 });
+    const offQuestion = await page.evaluate(() => ({
+      vpHidden: document.querySelector('.pj-viewport').hidden,
+      teachShown: !document.getElementById('pj-answer-how').hidden,
+      teachText: document.getElementById('pj-answer-how').textContent,
+    }));
+    check(offQuestion.vpHidden === true, 'the raw screen stays hidden while a question is open in Off');
+    check(offQuestion.teachShown === true, 'the number-answer teaching line renders in Off, where it is needed most');
+    check(/Answer by sending the number/.test(offQuestion.teachText),
+      'and it carries the ruled wording', offQuestion.teachText);
     await page.evaluate(async () => {
       await fetch('/api/engmode', { method: 'PUT',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) });
@@ -389,6 +408,8 @@ async function main() {
 
     const question = await page.locator('#pj-question-text').textContent();
     check(/Do you want to proceed\?/.test(question), 'one click lands on the question itself, not on a panel about it');
+    check(await page.evaluate(() => !document.getElementById('pj-answer-how').hidden),
+      'the teaching line renders in On too: mode-independent, like the panel it serves');
     // ⚠️ And FOCUS lands there too (round 30, measured): the card that
     // carried the button is torn down on the tab switch, so activation
     // used to leave activeElement on <body> -- a keyboard user had to

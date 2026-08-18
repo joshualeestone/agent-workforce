@@ -5382,6 +5382,11 @@ test('engineering mode round-trips, and the agent window route sits behind the k
     // a real one carries the engine's own answer through.
     const ghost = await req('/api/agent/ghost/window');
     assert.equal(ghost.status, 404);
+    // The malformed leg, per the sibling routes' convention (a stray %
+    // once took the process down): decodeSegment null answers 404, never
+    // a throw.
+    const malformed = await req('/api/agent/%/window');
+    assert.equal(malformed.status, 404);
     chatEngine.setRunner((args) => {
       if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
       if (args[0] === 'capture-pane') return { ran: true, spawnFailed: false, status: 0, out: 'the raw pane text\n\n', err: '' };

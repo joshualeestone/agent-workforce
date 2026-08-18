@@ -582,8 +582,10 @@ async function main() {
       if (!dfl.viewportHidden) throw new Error('the raw window is on screen in the default Off state');
       // The teaching line's VISIBLE rendering (and the question panel's
       // mode-independence) need a live asking agent, which this sandbox
-      // does not manufacture: render-thread.js owns those assertions
-      // against its scripted fixture.
+      // does not manufacture: render-thread.js CARRIES those assertions
+      // against its scripted fixture (section 0 drives the question open
+      // in Off and pins the line's wording; the On section pins it
+      // again).
 
 
       // The person's own switch, through the real card.

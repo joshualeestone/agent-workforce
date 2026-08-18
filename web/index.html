@@ -3585,7 +3585,13 @@ async function tick() {
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
     BOARD_SEEN = true;
-    if (CURRENT && ENG_ON) paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+    if (CURRENT && ENG_ON && !WINDOW_OPENING
+      && !document.getElementById('panel-detail').hidden) {
+      // The panel-visibility term: CURRENT survives closing the detail,
+      // and a capture every five seconds for an invisible surface is a
+      // standing subprocess nobody is watching.
+      paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
+    }
     updateRecPill();
     renderUpdateToast(data.update);
     LAST_VERSION = data.version || LAST_VERSION;
@@ -4139,6 +4145,11 @@ async function refreshEngMode() {
     const r = await (await fetch('/api/engmode')).json();
     if (mine !== ENG_EPOCH) return ENG_ON;
     ENG_ON = r.on === true;
+    /* Applied HERE, not by each caller's memory: a refresh that learns
+       the flag without moving the viewport leaves the two divergent
+       until the next navigation, and the thread poll then appends "Its
+       whole screen is below." over a still-hidden container. */
+    pjApplyEngMode();
     const tog = document.getElementById('eng-toggle');
     tog.classList.toggle('on', ENG_ON);
     tog.setAttribute('aria-checked', ENG_ON ? 'true' : 'false');
@@ -4162,6 +4173,10 @@ async function engToggleClick() {
       body: JSON.stringify({ on }),
     });
     const body = await res.json().catch(() => ({}));
+    // A newer refresh can retire a successful PUT's paint (a navigation
+    // right after the click): it fails toward hidden and the next
+    // refresh reads the saved truth, so the race costs a beat, never a
+    // lie.
     if (mine !== ENG_EPOCH) return;
     if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
     ENG_ON = body.on === true;
@@ -4197,7 +4212,7 @@ function pjScreenOnScreen() {
   const pre = document.getElementById('pj-screen');
   return ENG_ON && Boolean(vp) && !vp.hidden && Boolean(pre) && !pre.hidden;
 }
-refreshEngMode().then(pjApplyEngMode);
+refreshEngMode();
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {
@@ -4559,6 +4574,7 @@ let CONVO_LOAD = 0;
 /* The raw window, only when Engineering mode is on; a refusal is said
    in the engine's own sentence, never rendered as an empty terminal. */
 let WINDOW_LOAD = 0;
+let WINDOW_OPENING = false;
 async function paintAgentWindow(sessionName, opts) {
   const box = document.getElementById('d-window-box');
   const pre = document.getElementById('d-window');
@@ -4567,7 +4583,17 @@ async function paintAgentWindow(sessionName, opts) {
   /* The 5s tick repaints with the CACHED flag ("right now" must not age
      false while the panel sits open); a preference is still never
      polled -- only the capture is. Opens re-learn the flag. */
-  const on = (opts && opts.cachedFlag) ? ENG_ON : await refreshEngMode();
+  let on;
+  if (opts && opts.cachedFlag) {
+    on = ENG_ON;
+  } else {
+    /* The tick holds off while an OPEN's refresh is in flight: a tick
+       bumping the epoch mid-open discarded the freshly learned flag and
+       painted from the stale cached one -- a raw pane plus an
+       affirmative hint that nothing would ever repaint. */
+    WINDOW_OPENING = true;
+    try { on = await refreshEngMode(); } finally { WINDOW_OPENING = false; }
+  }
   if (mine !== WINDOW_LOAD) return;
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
   box.hidden = !on;
@@ -4679,6 +4705,9 @@ function openDetail(sessionName) {
     wpre.textContent = ''; wpre.hidden = true;
     document.getElementById('d-window-hint').textContent = '';
     document.getElementById('d-window-msg').hidden = true;
+    // The box itself too: a bare heading standing over nothing for two
+    // round-trips is the same misattribution family, one notch quieter.
+    document.getElementById('d-window-box').hidden = true;
   }
   paintAgentWindow(a.sessionName);
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
@@ -8046,7 +8075,7 @@ function openProject(id) {
   pjCloseConfirm();
   paintOneProject();
   pjView('one');
-  refreshEngMode().then(pjApplyEngMode);
+  refreshEngMode();
   loadThread();
   loadRoom();
 }
