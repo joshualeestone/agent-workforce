@@ -364,10 +364,9 @@ async function main() {
     // the person to the agent, not "below" to a hidden screen.
     await page.selectOption('#pj-thread-who', 'casey');
     // In Off the screen label rightly claims nothing (the served window
-    // is gated), so the settle signal is the picker itself, not a label
-    // that must never name a screen nobody can see.
-    await page.waitForFunction(() => document.getElementById('pj-thread-who').value === 'casey',
-      null, { timeout: 10000 });
+    // is gated), so there is no label to wait on: the settle is a plain
+    // beat for the thread refetch, the one timing-shaped wait in this
+    // file and named as such.
     await page.waitForTimeout(600);
     await page.fill('#pj-say', 'ambiguous while off');
     await page.click('#pj-send');
@@ -378,10 +377,12 @@ async function main() {
       'the Off verdict tells the person to check with the agent', offUnsure);
     check(!/screen is below/i.test(offUnsure),
       'and never points below at a screen the mode has hidden', offUnsure);
-    await page.evaluate(async () => {
-      await fetch('/api/engmode', { method: 'PUT',
+    const flipped = await page.evaluate(async () => {
+      const r = await fetch('/api/engmode', { method: 'PUT',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }) });
+      return r.ok;
     });
+    check(flipped === true, 'the switch actually flipped On before the screen sections (a silent failure here reds them with wrong-cause messages)');
 
     /* ── 1. the one click out of the stranded state ─────────────────────── */
     await page.goto(BASE, { waitUntil: 'networkidle' });

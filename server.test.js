@@ -5365,6 +5365,14 @@ test('engineering mode round-trips, and the agent window route sits behind the k
     const got = JSON.parse((await req('/api/engmode')).body);
     assert.equal(got.on, false, 'engineering mode does not default Off');
 
+    // The Off serving, pinned BEFORE the mode is turned on below: a
+    // known agent's window answers the truth in words and never the
+    // capture -- the stale-client path, deletable-green without this.
+    const offWin = await req('/api/agent/leo/window');
+    assert.equal(offWin.status, 200);
+    assert.equal(JSON.parse(offWin.body).text, null);
+    assert.match(JSON.parse(offWin.body).because, /engineering mode is off/);
+
     const bad = await req('/api/engmode', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

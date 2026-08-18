@@ -993,6 +993,7 @@ function withEngMode(on) {
 test('the thread shows what the agent’s screen shows, labelled as the screen and not as speech', async () => {
   const restoreEng = withEngMode(true);
   reset();
+  try {
   await withThread(fleet.agent('zeta', { state: 'working' }), [said('Reading the lease\n· Working\n')],
     async ({ project, calls }) => {
       const res = await req(`/api/project/${project.id}/thread/zeta`);
@@ -1009,7 +1010,7 @@ test('the thread shows what the agent’s screen shows, labelled as the screen a
       assert.ok(calls[0].includes('-J'));
       assert.ok(calls[0].some((a) => typeof a === 'string' && a.startsWith('=zeta-discord:')));
     });
-  restoreEng();
+  } finally { restoreEng(); }
 });
 
 test('an agent the board calls "Needs you" hands the thread the question region', async () => {
@@ -1032,6 +1033,7 @@ test('an agent the board calls "Needs you" hands the thread the question region'
 test('with Engineering mode off the served window is the truth in words, and the QUESTION still flows', async () => {
   const restoreEng = withEngMode(false);
   reset();
+  try {
   await withThread(fleet.agent('zeta', { state: 'needs_you' }),
     [said('Do you want to proceed?\n \u276f 1. Yes\n 2. No\n')],
     async ({ project }) => {
@@ -1047,7 +1049,7 @@ test('with Engineering mode off the served window is the truth in words, and the
       assert.ok(body.question && /Do you want to proceed/.test(body.question.text),
         'Off blinded the needs-you question (safety gated as chrome)');
     });
-  restoreEng();
+  } finally { restoreEng(); }
 });
 
 test('a card that says "Needs you" over a screen we cannot read SAYS so, rather than showing nothing', async () => {
@@ -1056,6 +1058,7 @@ test('a card that says "Needs you" over a screen we cannot read SAYS so, rather 
   // The two reads are milliseconds apart and the pane redraws between them. A
   // silent empty question box under a "Needs you" card is the stranded state
   // rebuilt one step further in.
+  try {
   await withThread(fleet.agent('zeta', { state: 'needs_you' }),
     [{ ran: true, status: 1, out: '', err: 'no server running' }],
     async ({ project }) => {
@@ -1071,7 +1074,7 @@ test('a card that says "Needs you" over a screen we cannot read SAYS so, rather 
       assert.equal(body.viewport.text, null);
       assert.match(body.viewport.because, /could not read its window/);
     });
-  restoreEng();
+  } finally { restoreEng(); }
 });
 
 test('a "Needs you" card over a READABLE screen missing the markers says that, not could-not-read', async () => {
@@ -1079,6 +1082,7 @@ test('a "Needs you" card over a READABLE screen missing the markers says that, n
   reset();
   // The other half of the split: the capture SUCCEEDED and the question
   // markers are not in it (the pane redrew between the two reads).
+  try {
   await withThread(fleet.agent('zeta', { state: 'needs_you' }),
     [said('an ordinary screen with no prompt on it')],
     async ({ project }) => {
@@ -1089,7 +1093,7 @@ test('a "Needs you" card over a READABLE screen missing the markers says that, n
       assert.doesNotMatch(body.questionBecause, /could not read its screen/);
       assert.ok(body.viewport.text != null, 'control: the screen really was read');
     });
-  restoreEng();
+  } finally { restoreEng(); }
 });
 
 test('a POST to a project that is not there is the 404 sentence, not a raw throw', async () => {

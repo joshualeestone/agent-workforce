@@ -4574,7 +4574,7 @@ let CONVO_LOAD = 0;
 /* The raw window, only when Engineering mode is on; a refusal is said
    in the engine's own sentence, never rendered as an empty terminal. */
 let WINDOW_LOAD = 0;
-let WINDOW_OPENING = false;
+let WINDOW_OPENING = 0; // a COUNTER: two rapid opens overlap their refreshes
 async function paintAgentWindow(sessionName, opts) {
   const box = document.getElementById('d-window-box');
   const pre = document.getElementById('d-window');
@@ -4591,8 +4591,8 @@ async function paintAgentWindow(sessionName, opts) {
        bumping the epoch mid-open discarded the freshly learned flag and
        painted from the stale cached one -- a raw pane plus an
        affirmative hint that nothing would ever repaint. */
-    WINDOW_OPENING = true;
-    try { on = await refreshEngMode(); } finally { WINDOW_OPENING = false; }
+    WINDOW_OPENING += 1;
+    try { on = await refreshEngMode(); } finally { WINDOW_OPENING -= 1; }
   }
   if (mine !== WINDOW_LOAD) return;
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
