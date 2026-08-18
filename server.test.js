@@ -5184,17 +5184,20 @@ test('the gap sentence never speaks about a file nobody could read', () => {
 
 test('the conversation tail cap is said, and an unreadable record rides ahead of it, never dropped', async () => {
   const messagesEngine = require('./engine/messages');
-  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  // ⚠️ An agent name NOTHING ELSE in this suite uses: the sandbox's project
+  // threads persist across tests, and a shared name (leo) merged another
+  // test's operator rows into this one's carefully counted tail.
+  const board = fleet.install([fleet.agent('convocap', { state: 'idle' })]);
   try {
     // (a) past the cap: the tail serves, the total says what was dropped.
     fs.mkdirSync(nodePath.dirname(messagesEngine.LOG), { recursive: true });
     fs.rmSync(messagesEngine.LOG, { force: true });
     const many = [];
     for (let i = 0; i < 205; i += 1) {
-      many.push(JSON.stringify({ kind: 'message', id: 'm' + (i + 1), from: 'mara', to: 'leo', text: 'row ' + i, in_reply_to: null, at: new Date(1755500000000 + i * 1000).toISOString(), state: 'placed' }));
+      many.push(JSON.stringify({ kind: 'message', id: 'm' + (i + 1), from: 'mara', to: 'convocap', text: 'row ' + i, in_reply_to: null, at: new Date(1755500000000 + i * 1000).toISOString(), state: 'placed' }));
     }
     fs.writeFileSync(messagesEngine.LOG, many.join('\n') + '\n');
-    const capped = JSON.parse((await req('/api/agent/leo/conversation')).body);
+    const capped = JSON.parse((await req('/api/agent/convocap/conversation')).body);
     assert.equal(capped.rows.length, 200, 'the tail cap moved');
     assert.equal(capped.total, 205, 'the total stopped saying what the tail dropped');
     assert.equal(capped.rows[199].text, 'row 204', 'the tail is not the LATEST rows');
@@ -5203,7 +5206,7 @@ test('the conversation tail cap is said, and an unreadable record rides ahead of
     // could-not-look is a ROW, first in the served slice, never silence.
     fs.rmSync(messagesEngine.LOG, { force: true });
     fs.mkdirSync(messagesEngine.LOG);
-    const blind = JSON.parse((await req('/api/agent/leo/conversation')).body);
+    const blind = JSON.parse((await req('/api/agent/convocap/conversation')).body);
     assert.ok(blind.rows.length >= 1 && blind.rows[0].kind === 'unreadable',
       'an unreadable message record rendered as an agent no colleague ever wrote to');
     assert.match(blind.rows[0].what, /messages/, 'the could-not-look row does not say what it could not read');
