@@ -1619,9 +1619,13 @@ test('every singular could_not because the engine authors has a plural sibling',
   };
   // CONTROL: the strip really removed the map keys' own copies -- a plural
   // draft lives ONLY in the map, so it must be absent from the stripped
-  // text, or the pin is scanning the copy again.
+  // text, or the pin is scanning the copy again. BOTH ends of the window:
+  // an early-truncated strip (a `]);` landing mid-map after a reformat)
+  // would still remove the first entry while later keys survive.
   assert.ok(!stripped.includes('none of them has a folder on this computer yet'),
-    'CONTROL: a map-only plural survived the strip; the pin is scanning its own copy');
+    'CONTROL: the map\'s FIRST plural survived the strip; the pin is scanning its own copy');
+  assert.ok(!stripped.includes('we could not write to their instructions'),
+    'CONTROL: the map\'s LAST plural survived the strip; the window truncated early');
   const authorOf = {
     'this agent has no folder on this computer yet': 'workerfile.js',
   };
