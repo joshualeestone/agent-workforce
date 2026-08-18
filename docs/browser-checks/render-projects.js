@@ -660,23 +660,15 @@ async function main() {
     const page = await ctx.newPage();
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.waitForTimeout(600);
-    // ⚠️ MEASURED FROM THE ONE-PROJECT VIEW, not the list. On a freshly loaded
-    // list view `#pj-one-agents` is empty and `#pj-one-view` is hidden, so four
-    // of the nine selectors -- including the told-line and the folder warning,
-    // the copy carrying this feature's honesty claims -- never matched, were
-    // silently skipped, and the run printed a pass anyway. Another measurement
-    // that could not fail, in the very check written because the last one
-    // could not fail.
-    // The list carries `.pj-warn` (the missing folder, left missing above); the
-    // one-project view carries the member and told copy. Both are needed, so
-    // the members are read first and the list rules are read before the click.
-    const listEls = await page.evaluate(() => {
-      const bgOf = (el) => {
-        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
-        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
-        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
-        // -- a translucent layer must be folded over what is beneath it
-        // before it can be a background.
+    // ⚠️ ONE definition of the background walk, shared by every measuring
+    // block on this page as `window.__kbg` -- four verbatim copies is how
+    // helpers silently diverge. COMPOSITED, not the first painted color:
+    // the slug chip's rgba(20,22,26,.05) wash read as near-opaque BLACK and
+    // produced a 2.20:1 "failure" in both schemes for text that actually
+    // clears 7:1 -- a translucent layer must be folded over what is beneath
+    // it before it can be a background.
+    await page.evaluate(() => {
+      window.__kbg = (el) => {
         const layers = [];
         let n = el;
         while (n) {
@@ -696,6 +688,19 @@ async function main() {
         }
         return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
       };
+    });
+    // ⚠️ MEASURED FROM THE ONE-PROJECT VIEW, not the list. On a freshly loaded
+    // list view `#pj-one-agents` is empty and `#pj-one-view` is hidden, so four
+    // of the nine selectors -- including the told-line and the folder warning,
+    // the copy carrying this feature's honesty claims -- never matched, were
+    // silently skipped, and the run printed a pass anyway. Another measurement
+    // that could not fail, in the very check written because the last one
+    // could not fail.
+    // The list carries `.pj-warn` (the missing folder, left missing above); the
+    // one-project view carries the member and told copy. Both are needed, so
+    // the members are read first and the list rules are read before the click.
+    const listEls = await page.evaluate(() => {
+      const bgOf = window.__kbg;
       const out = [];
       // Every text token the pack card carries, not only the honesty lines:
       // the plan's hand-checked ratios were a one-time verification, and a
@@ -725,6 +730,25 @@ async function main() {
           pill.classList.remove('attn');
         }
       }
+      // The blind-spot sentence (.pj-who), same synthetic treatment: every
+      // member in this sandbox is seen, so the sentence is not on screen to
+      // measure -- and it is the one line this branch pinned to a FIXED ink
+      // for dark-mode survival, so leaving it unmeasured is the exact
+      // narration-outruns-the-check gap. Real card, real class, removed
+      // after the read.
+      {
+        const row = document.querySelector('#pj-list .pj-row');
+        if (!row) { out.push({ sel: '#pj-list .pj-who (injected)', missing: true }); }
+        else {
+          const who = document.createElement('span');
+          who.className = 'pj-who';
+          who.textContent = '1 we cannot see';
+          row.appendChild(who);
+          const cs = getComputedStyle(who);
+          out.push({ sel: '#pj-list .pj-who (injected)', fg: cs.color, bg: bgOf(who), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+          who.remove();
+        }
+      }
       return out;
     });
     await page.click('[data-project="reedhandover"]');
@@ -742,31 +766,7 @@ async function main() {
     await page.click('#pj-settings-link');
     await page.waitForTimeout(200);
     const badFolderEls = await page.evaluate(() => {
-      const bgOf = (el) => {
-        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
-        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
-        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
-        // -- a translucent layer must be folded over what is beneath it
-        // before it can be a background.
-        const layers = [];
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') {
-            layers.push(c);
-            const m = String(c).match(/[\d.]+/g).map(Number);
-            if (m.length < 4 || m[3] >= 1) break;
-          }
-          n = n.parentElement;
-        }
-        let acc = { r: 255, g: 255, b: 255 };
-        for (let i = layers.length - 1; i >= 0; i--) {
-          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
-          const a = p.length > 3 ? p[3] : 1;
-          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
-        }
-        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
-      };
+      const bgOf = window.__kbg;
       const out = [];
       for (const sel of ['#pj-settings-view .pj-folder-state.bad']) {
         const el = document.querySelector(sel);
@@ -812,31 +812,7 @@ async function main() {
     await page.click('[data-project="hendersonlease"]');
     await page.waitForTimeout(400);
     const els = await page.evaluate(() => {
-      const bgOf = (el) => {
-        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
-        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
-        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
-        // -- a translucent layer must be folded over what is beneath it
-        // before it can be a background.
-        const layers = [];
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') {
-            layers.push(c);
-            const m = String(c).match(/[\d.]+/g).map(Number);
-            if (m.length < 4 || m[3] >= 1) break;
-          }
-          n = n.parentElement;
-        }
-        let acc = { r: 255, g: 255, b: 255 };
-        for (let i = layers.length - 1; i >= 0; i--) {
-          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
-          const a = p.length > 3 ? p[3] : 1;
-          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
-        }
-        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
-      };
+      const bgOf = window.__kbg;
       const out = [];
       // ⚠️ SCOPED to the projects panel. Unscoped, `.fhint` and `.flabel`
       // matched the FIRST one in the document -- inside a hidden panel -- and
@@ -868,31 +844,7 @@ async function main() {
     await page.click('#pj-settings-link');
     await page.waitForTimeout(200);
     const settingsEls = await page.evaluate(() => {
-      const bgOf = (el) => {
-        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
-        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
-        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
-        // -- a translucent layer must be folded over what is beneath it
-        // before it can be a background.
-        const layers = [];
-        let n = el;
-        while (n) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') {
-            layers.push(c);
-            const m = String(c).match(/[\d.]+/g).map(Number);
-            if (m.length < 4 || m[3] >= 1) break;
-          }
-          n = n.parentElement;
-        }
-        let acc = { r: 255, g: 255, b: 255 };
-        for (let i = layers.length - 1; i >= 0; i--) {
-          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
-          const a = p.length > 3 ? p[3] : 1;
-          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
-        }
-        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
-      };
+      const bgOf = window.__kbg;
       const out = [];
       for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where']) {
         const el = document.querySelector(sel);
@@ -937,24 +889,29 @@ async function main() {
       // through the real create route (default folder, inside the sandboxed
       // AGENT_WORKFORCE_PROJECTS) and are deleted before the next check.
       const fillers = [];
-      for (let i = 0; i < 12; i++) {
-        // `id` is the field the route guarantees; `project` is null when the
-        // post-write re-read throws, and a filler must not die on that.
-        const made = await post('/api/projects', { name: 'Scroll filler ' + i });
-        fillers.push(made.id);
+      try {
+        for (let i = 0; i < 12; i++) {
+          // `id` is the field the route guarantees; `project` is null when the
+          // post-write re-read throws, and a filler must not die on that.
+          const made = await post('/api/projects', { name: 'Scroll filler ' + i });
+          fillers.push(made.id);
+        }
+        await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
+        const stick = await page.evaluate(() => {
+          window.scrollTo(0, 400);
+          const bar = document.querySelector('.apphead');
+          const r = bar.getBoundingClientRect();
+          return { scrolled: window.scrollY, top: r.top, visible: r.height > 0 };
+        });
+        if (stick.scrolled < 100) throw new Error('the page did not scroll, so stickiness was never exercised (scrollY ' + stick.scrolled + ')');
+        if (!stick.visible || stick.top < -1 || stick.top > 1) {
+          throw new Error('after scrolling ' + stick.scrolled + 'px the bar is not at the top of the screen (top ' + stick.top + ') -- the nav is not sticking');
+        }
+      } finally {
+        // Unconditional, like the outer fixture-tree teardown: a thrown
+        // assertion must not leave twelve fillers in the store.
+        for (const id of fillers) await api('/api/project/' + encodeURIComponent(id), { method: 'DELETE' });
       }
-      await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
-      const stick = await page.evaluate(() => {
-        window.scrollTo(0, 400);
-        const bar = document.querySelector('.apphead');
-        const r = bar.getBoundingClientRect();
-        return { scrolled: window.scrollY, top: r.top, visible: r.height > 0 };
-      });
-      if (stick.scrolled < 100) throw new Error('the page did not scroll, so stickiness was never exercised (scrollY ' + stick.scrolled + ')');
-      if (!stick.visible || stick.top < -1 || stick.top > 1) {
-        throw new Error('after scrolling ' + stick.scrolled + 'px the bar is not at the top of the screen (top ' + stick.top + ') -- the nav is not sticking');
-      }
-      for (const id of fillers) await api('/api/project/' + encodeURIComponent(id), { method: 'DELETE' });
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
       await page.evaluate(() => window.scrollTo(0, 0));
 

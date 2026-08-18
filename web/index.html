@@ -694,7 +694,6 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* --- projects ---------------------------------------------------------- */
 .panel-wide { max-width: 860px; }
 .pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
-.pj-headright { display: flex; align-items: center; gap: var(--space-4); }
 .pj-list { display: flex; flex-direction: column; gap: 14px; max-width: 1320px; margin: 0 auto; }
 .pj-arch-wrap { margin-top: var(--space-6); }
 /* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
@@ -4040,6 +4039,12 @@ function renderAvatar(a) {
       ini.style.background = discTint(a.name);
       ini.style.color = discInk(a.name);
       ini.parentElement.style.background = discTint(a.name);
+    } else {
+      // Same clearing as the photo branch: without it a falsy `a` shows
+      // the PREVIOUS agent's identity colors on the blank disc.
+      ini.style.background = '';
+      ini.style.color = '';
+      ini.parentElement.style.background = '';
     }
   }
 }
@@ -6757,7 +6762,7 @@ function projectCard(p, unreadable) {
   const faces = (p.agents || []).slice(0, 5).map((a) => a.hasAvatar
     ? '<span class="lav" title="' + esc(a.name) + '"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
     : '<span class="lav" title="' + esc(a.name) + '" style="background:' + discTint(a.name) + ';color:' + discInk(a.name) + '">' + esc(initials(a.name)) + '</span>').join('');
-  const count = s.total ? '<span class="pjcount">' + s.total + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
+  const count = s.total ? '<span class="pjcount">' + Number(s.total) + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
   const facesRow = (faces || count)
     ? '<span class="pjfaces"><span aria-hidden="true">' + faces + '</span>' + count + '</span>' : '';
   /* ⚠️ The card NEVER says everything is fine when part of it was
