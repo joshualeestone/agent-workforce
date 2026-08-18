@@ -724,16 +724,27 @@ const START = '<!-- kosmos:colleagues:start -->';
 const END = '<!-- kosmos:colleagues:end -->';
 
 function blockBody() {
+  // ⚠️ The command is taught as THIS machine can run it (clipath): bare
+  // `kosmos` is not on a stock install's PATH, and an agent whose shell
+  // says "command not found" never reaches the engine, so its failure
+  // draws nothing anywhere. Existing agents' copies heal through
+  // tellAgent's piggyback splice, so this body must stay derivable from
+  // the machine alone (no per-agent state).
+  const cli = require('./clipath').kosmosCliShown();
   return [
     '## Talking to your colleagues',
     '',
     'You can message another agent on this computer directly:',
     '',
-    '    kosmos msg <their-name> "what you want to tell them"',
+    '    ' + cli + ' msg <their-name> "what you want to tell them"',
     '',
     'You can post to a whole project room:',
     '',
-    '    kosmos post <project-id> "what you want to tell the room"',
+    '    ' + cli + ' post <project-id> "what you want to tell the room"',
+    '',
+    'If one of these commands fails in your shell, say what happened in',
+    'your own words rather than staying silent: the message never arrived,',
+    'and nobody else can see that it failed.',
     '',
     'Mention @<their-name> to address someone directly; everyone else on',
     'the project receives it marked as background.',

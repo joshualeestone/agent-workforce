@@ -4722,7 +4722,7 @@ function openDetail(sessionName) {
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   document.getElementById('d-state').textContent =
-    copy.label + (a.task ? ' — ' + a.task : '');
+    copy.label + (a.task ? ': ' + a.task : '');
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
@@ -5949,7 +5949,7 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
       // ⚠️ Says so ON THE ROW rather than silently re-rendering. A restore that
       // failed and a restore that worked must not look the same.
       btn.disabled = false;
-      btn.textContent = 'Restore failed — try again';
+      btn.textContent = 'Restore failed. Try again.';
       return;
     }
     /**
@@ -6033,7 +6033,7 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
     await paintRemoved();
   } catch {
     btn.disabled = false;
-    btn.textContent = 'Restore failed — try again';
+    btn.textContent = 'Restore failed. Try again.';
   }
 });
 
@@ -7197,7 +7197,7 @@ function pjToldLine(told) {
       + 'starts, unless its instructions have been changed since.';
   }
   if (told.state === 'could_not') {
-    return 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+    return 'We could not tell it where this folder is; ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
   return '';
 }
@@ -7247,7 +7247,7 @@ function pjToldGroupLine(told) {
   // (her ruling), because the singular because is written for a one-agent
   // context and does not survive being quoted inside a plural frame.
   if (told.becauseGroup) {
-    return 'We could not tell any of them where this folder is — ' + esc(told.becauseGroup) + '.';
+    return 'We could not tell any of them where this folder is; ' + esc(told.becauseGroup) + '.';
   }
   return 'We could not tell any of them where this folder is.';
 }
@@ -7271,7 +7271,7 @@ function pjMember(m, projectId, suppressTold) {
     // as a shipped defect. Everywhere else in this app an unknown says why.
     + (m.present
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
-        + (m.state === 'unknown' && m.because ? ' — ' + esc(m.because) : '') + '</small>'
+        + (m.state === 'unknown' && m.because ? ': ' + esc(m.because) : '') + '</small>'
       : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
     /* "Remove from <scope>" is the pack's removal pattern (beside the
        destructive "Remove from Kosmos"): the scope word is what tells the
@@ -9451,7 +9451,7 @@ async function pjBrowse(at) {
     // same claim in words, one layer up from the `total: null` that removed it.
     // What we actually know is where we stopped.
     rows.push('<p class="pj-note">We stopped after the first ' + body.showing
-      + '. There may be more — type the path below to reach the rest.</p>');
+      + '. There may be more. Type the path below to reach the rest.</p>');
   }
   box.innerHTML = rows.join('');
   // ⚠️ FOCUS GOES BACK INTO THE LIST, because this wholesale innerHTML replace
@@ -9527,7 +9527,7 @@ function paintAddAgents() {
   // for the first is the one thing this product refuses to do.
   if (BOARD_LOOK_FAILED) {
     setLive(box, '<p class="fhint">We cannot read the agents on this computer right now. '
-      + 'This is not saying you have none — it is saying we cannot see them. You can still '
+      + 'This is not saying you have none; it is saying we cannot see them. You can still '
       + 'add the project and put agents on it later.</p>');
     return;
   }

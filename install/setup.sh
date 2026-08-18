@@ -553,6 +553,31 @@ uninstall() {
     info "removing $BIN_DIR/kosmos"
     rm -f "$BIN_DIR/kosmos"
   fi
+  # The PATH lines the installer wrote come out with the command they
+  # served: exactly the marker and its export, by whole-line match, and
+  # nothing else in the person's profile. awk (not grep -v) because an
+  # empty result is a legitimate outcome (a profile that held only our
+  # block), not a pipeline error to branch on.
+  _profile="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+  # Same sandbox gate as the install side: a harness run touches only a
+  # profile it names explicitly, never the operator's real one.
+  if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
+    _profile=""
+  fi
+  _marker="# kosmos: PATH for the kosmos command (removed by --uninstall)"
+  _pline="export PATH=\"$BIN_DIR:\$PATH\""
+  if [ -n "$_profile" ] && [ -f "$_profile" ] && grep -qxF "$_marker" "$_profile" 2>/dev/null; then
+    info "removing the kosmos PATH line from ${_profile##*/}"
+    _ptmp="$(mktemp "${TMPDIR:-/tmp}/kosmos-profile.XXXXXXXXXX" 2>/dev/null || true)"
+    if [ -n "$_ptmp" ] \
+       && awk -v m="$_marker" -v p="$_pline" '$0 != m && $0 != p' "$_profile" > "$_ptmp" 2>/dev/null \
+       && cat "$_ptmp" > "$_profile" 2>/dev/null; then
+      rm -f "$_ptmp"
+    else
+      rm -f "$_ptmp" 2>/dev/null || true
+      info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
+    fi
+  fi
   # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
   # one launchd job per agent (com.kosmos.agent.*), set to start at every
   # login. With Kosmos gone there is no UI left to manage them, and "left
@@ -1004,11 +1029,39 @@ ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos" || die "Could not place the 
 info "installed to $KOSMOS_HOME"
 ok
 
-# ⚠️ Say it, do not assume it. A binary in ~/.local/bin is useless to somebody
-# whose shell does not look there, and silently not working is the worst outcome.
+# ⚠️ WIRED, not narrated. A binary in ~/.local/bin is useless to somebody
+# whose shell does not look there, and the note this used to print reached
+# nobody: measured 2026-08-18, the person AND every agent on the machine got
+# "command not found" from the taught command, the agents silently (their
+# failure happens before the engine, so nothing draws it anywhere). zsh is
+# the macOS default login shell, so the line lands in ~/.zprofile (created
+# if absent), marker-guarded so reruns never duplicate it; --uninstall
+# removes exactly the two lines this writes and nothing else. A profile we
+# cannot write degrades to the old honest note, never to silence.
+PROFILE_FILE="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+# ⚠️ A SANDBOXED RUN NEVER TOUCHES THE REAL PROFILE. Same keying as the
+# lsregister gate: any app-dir override means a test harness, and the only
+# profile such a run may write is one it names explicitly. The first
+# harness run after this feature leaked a sandbox bin path into the
+# operator's real ~/.zprofile; this gate is that measurement.
+if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
+  PROFILE_FILE=""
+fi
+PATH_MARKER="# kosmos: PATH for the kosmos command (removed by --uninstall)"
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; the app icon step below and the closing lines cover how to open Kosmos" ;;
+  *)
+    if [ -z "$PROFILE_FILE" ]; then
+      : # sandboxed with no profile named: leave every real profile alone
+    elif [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null; then
+      info "the kosmos command is already wired into ${PROFILE_FILE##*/}; it works in new Terminal windows"
+    elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
+      info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
+    else
+      info "note: typing 'kosmos' in Terminal will not work yet on this Mac (could not write ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+    fi
+    ;;
 esac
 
 # ---- the front door -----------------------------------------------------------
