@@ -129,3 +129,15 @@ re-anchored where markup moved. Pair shot posted in channel.
 - Surfaced for the pack (Mona Lisa), not fixed here: burger DOM order
   (menu precedes trigger, pack-verbatim), the unknown note's dark island,
   the gold tab underline contrast.
+
+## Round 4 record
+
+- The 8d cleanup ordering broke by my own round-3 insertion (reset clicked
+  the hidden projects toggle from the agents tab); reordered to follow
+  visibility and noted in the drive. The lesson the round named: the
+  assertions were probed, the cleanup path after them was not.
+- focusBoardHome grew the visible middle rung: agents tab when rendered,
+  else the burger (visible exactly where the tabs are not), else the vh h1.
+- Deferred to the next drive touch (recorded NIT): render-update-toast's
+  no-re-spacing pin still measures #new-agent, which left the header with
+  the statsrow; that half is vacuous and #checked is the real witness.

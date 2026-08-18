@@ -3258,14 +3258,17 @@ function burgerClose() {
    always present, visible, and the board's natural home; the h1 stays as
    the last resort (it still holds tabindex for the a11y name). */
 function focusBoardHome() {
+  /* ⚠️ Focusable AND visible, rung by rung: the agents tab when it is
+     rendered; below 56rem the tabs sit display:none behind the burger,
+     and the BURGER is the visible control that opens them, so it takes
+     the fallback there (round 4: the vh h1 was a focus point nobody can
+     see at exactly the width it fired). The h1 stays as the true last
+     resort; it still holds tabindex for the a11y name. */
   const tab = document.querySelector('.tab[data-tab="agents"]');
-  /* ⚠️ Focusable, not merely present: below 56rem the tabs sit
-     display:none behind the burger, where focus() is a silent no-op and
-     the keyboard user lands on body -- the exact loss this function
-     exists to prevent (round 2 measured it at 780px). No client rects
-     means not rendered; the h1 keeps tabindex for exactly this. */
-  if (tab && tab.getClientRects().length) tab.focus();
-  else document.querySelector('h1').focus();
+  if (tab && tab.getClientRects().length) { tab.focus(); return; }
+  const burger = document.getElementById('burger');
+  if (burger && burger.getClientRects().length) { burger.focus(); return; }
+  document.querySelector('h1').focus();
 }
 document.getElementById('burger').addEventListener('click', () => {
   const b = document.getElementById('burger');

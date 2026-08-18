@@ -859,14 +859,17 @@ async function main() {
       if (!keptVisible.ag) {
         throw new Error('the surviving agents choice did not drive the board on return: ' + JSON.stringify(keptVisible));
       }
-      // Back to the defaults so the shots below show the shipped resting state.
-      await page.click('.viewtoggle[data-scope="projects"] [data-layout="list"]');
-      await page.evaluate(() => {
-        document.querySelector('.tab[data-tab="agents"]').click();
-      });
-      await page.waitForTimeout(200);
+      // Back to the defaults so the shots below show the shipped resting
+      // state. ⚠️ ORDER FOLLOWS VISIBILITY: we are on the AGENTS tab here
+      // (the persistence assertion above ends there), so the agents toggle
+      // resets first; the projects toggle lives inside the hidden projects
+      // panel and is clickable only after switching back. The first
+      // re-anchor reset projects-first from the agents tab and timed out
+      // on a zero-rect control (round 4).
       await page.click('.viewtoggle[data-scope="agents"] [data-layout="grid"]');
       await page.click('.tab[data-tab="projects"]');
+      await page.waitForTimeout(200);
+      await page.click('.viewtoggle[data-scope="projects"] [data-layout="list"]');
       await page.waitForTimeout(300);
 
       // 8e. The member wording and the resting picker. The heading is the
