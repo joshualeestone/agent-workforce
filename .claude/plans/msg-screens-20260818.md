@@ -19,10 +19,10 @@ tree. The valve row is reassurance, not error.
   rows (You · on <project>), attributed peer rows (gold mark), the
   unconfirmed line, Not-sent with the verbatim because, the valve
   sentence under Kosmos's own name, one-level indents.
-- §5 gap sentence (her ruled cause-free wording, in-channel 2026-08-18
-  ~7:23 AM, superseding the spec file's causal draft -- flagged to her
-  to amend the spec): gated on the structured instructions fields so it
-  never speaks about a file nobody could read.
+- §5 gap sentence (her ruled cause-free wording; the spec records the
+  supersession and all three causes of block-absence as of 9da8cda):
+  gated on the structured instructions fields so it never speaks about
+  a file nobody could read.
 - ATTRIBUTED REFUSALS ARE EVENTS (the settled three-way ruling with
   Splinter's fork check): eleven post-resolution exits log kind
   'refused' with the because verbatim, once per sender-recipient-because
