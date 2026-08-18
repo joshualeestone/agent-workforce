@@ -24,12 +24,13 @@
    copying a contrast failure faithfully would be a stupid way to fail.
 --------------------------------------------------------------------------- */
 :root {
-  /* The pack's board palette (board-pack, view 1 of 13). Same values the
-     wizard pinned under #firstrun; promoted here as the app's ground as
-     each view rebuilds to the pack. Dark inverses arrive with the theme
-     pass (#40), not before. */
+  /* The pack's board palette (board-pack, view 1 of 13). bg/ink/ink-2/rule
+     and the three golds are the values the wizard pinned under #firstrun;
+     surface and the mono stack are net-new here, promoted as each view
+     rebuilds to the pack. Track/knob tokens arrive with the control that
+     consumes them, and dark inverses with the theme pass (#40), not before. */
   --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
-  --k-surface: #ffffff; --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
+  --k-surface: #ffffff;
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
   --k-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -2583,7 +2584,12 @@ function initials(name) {
 function ring(a) {
   const ctx = a.context;
   const R = 30, C = 2 * Math.PI * R;
-  const clip = 'clip-' + a.sessionName;
+  /* The clip id lands in id="…" AND url(#…) -- an attribute and a CSS
+     reference -- so esc() is the wrong tool (entities decode in one context
+     and not the other). A slug restricted to id-safe characters is correct
+     in both; a collision between two slugged names is harmless because
+     every clipPath here is the same circle. */
+  const clip = 'clip-' + a.sessionName.replace(/[^A-Za-z0-9_-]/g, '_');
   const av = a.hasAvatar
     ? `<defs><clipPath id="${clip}"><circle cx="36" cy="36" r="23"/></clipPath></defs>
        <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
@@ -3149,6 +3155,8 @@ async function tick() {
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
     // stamp goes stale visibly rather than the board freezing on a happy picture.
+    // `stamp` is styleless pack-parity (like `hot` on .lrow): a future pack
+    // rule lands here for free, and the failed-poll test anchors on it.
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
     checked.className = 'checked stamp' + (age > 30 ? ' stale' : '');
     checked.innerHTML = '<span>Agent status</span><b>' + (age < 5 ? 'Refreshed just now' : 'Refreshed ' + age + ' seconds ago') + '</b>';
@@ -3206,6 +3214,13 @@ async function tick() {
     document.getElementById('st-idle').textContent = '?';
     document.getElementById('st-attn').textContent = '?';
     document.getElementById('st-attn-tile').hidden = true;
+    /* The residual summary is a claim from the last successful tick (or the
+       boot "Loading…"): "N we could not read" beside the failure card is a
+       count this poll cannot stand behind -- the same rule as the tiles
+       above. The failure card already says the whole board is blind. */
+    const sumFail = document.getElementById('summary');
+    sumFail.textContent = '';
+    sumFail.hidden = true;
   }
 }
 

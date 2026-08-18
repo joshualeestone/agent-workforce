@@ -2462,9 +2462,12 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
     grid: el(''), alist: el(''),
     'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
     'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
+    // The residual summary is seeded with a last-tick claim too: it sits
+    // directly under the tiles and carries the same kind of number.
+    summary: { textContent: '2 we could not read at all, so some agents may be missing', hidden: false },
   };
   const from = script.indexOf("checked.className = 'checked stamp stale';");
-  const write = script.indexOf("document.getElementById('st-attn-tile').hidden = true;");
+  const write = script.indexOf('sumFail.hidden = true;');
   const end = script.indexOf('\n', write) + 1;
   assert.ok(from > -1 && write > from && write < end,
     'the failure-path tile blanking fell outside the extracted slice');
@@ -2484,6 +2487,10 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
   }
   assert.equal(els['st-attn-tile'].hidden, true,
     'the alert tile must hide on a blind poll: red is reserved for a known alarm');
+  assert.equal(els.summary.textContent, '',
+    'the residual summary still asserts last-tick counts beside the failure card');
+  assert.equal(els.summary.hidden, true,
+    'a blanked summary must also hide, not sit as an empty line under the tiles');
 });
 
 test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
@@ -2587,12 +2594,20 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
      memory percent, a stale instruction finding, and the untied-needs_you
      shape the pipeline itself refuses -- are SPREAD onto a real card, so
      every other field keeps the producer's shape. */
+  // The hostile-named agent's avatar, seeded BEFORE install so the clip
+  // branch below is real: safeKey() strips the hostile characters, so an
+  // avatar stored under the stripped key is reachable from the hostile
+  // name (the collision path -- another agent whose name strips the same).
+  const avatarsDir = nodePath.join(SANDBOX, 'AgentWorkforce', 'avatars');
+  fs.mkdirSync(avatarsDir, { recursive: true });
+  fs.writeFileSync(nodePath.join(avatarsDir, 'xonloadalert1.png'), 'not-a-real-png', 'utf8');
   const board = fleet.install([
     fleet.agent('leo', { state: 'working', role: 'Project Manager' }),
     fleet.agent('mara', { state: 'needs_you' }),
     fleet.agent('rook', { state: 'rate_limited' }),
     fleet.agent('nils', { state: 'stopped' }),
     fleet.agent('vex', { state: 'unknown' }),
+    fleet.agent('x" onload="alert(1)', { state: 'idle' }),
   ]);
   try {
     const cards = JSON.parse((await req('/api/status')).body).agents;
@@ -2669,6 +2684,23 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
       assert.match(html, /&lt;img/, 'CONTROL: the escaped name is absent, so the tag assertions prove nothing');
       assert.doesNotMatch(html, /aria-label="Open <img/, 'a hostile name terminated the aria-label attribute');
     }
+
+    // The clip id is a THIRD context (an id attribute plus a url()
+    // reference), and the slug is its guard: a quote in a SESSION name must
+    // not terminate the attribute the way the aria-label control above
+    // proves for display names. esc() would be wrong here -- entities
+    // decode in the attribute but not in the CSS reference. The agent is a
+    // REAL card (hostile session name through the real producer) and its
+    // seeded avatar is what makes the clip branch render at all.
+    const spiky = by('x" onload="alert(1)');
+    assert.ok(spiky, 'the fixture board is missing the hostile-named agent');
+    assert.equal(spiky.hasAvatar, true,
+      'CONTROL: the seeded avatar was not found, so the clip branch never renders');
+    const spikyCard = api.card(spiky);
+    assert.match(spikyCard, /id="clip-x__onload__alert_1_"/,
+      'CONTROL: the slugged clip id is absent, so the attribute assertion proves nothing');
+    assert.doesNotMatch(spikyCard, /id="clip-x" /,
+      'a hostile session name terminated the clipPath id attribute');
   } finally {
     board.restore();
   }
