@@ -34,3 +34,21 @@ Decisions:
   line are Angel drafts attributed for her pass, per the fleet
   precedent.
 - GET/PUT /api/limits; the card paints from the engine's read.
+
+The blind pass (one blocker, all findings landed):
+- the once-per-window valve dedup ignored stopped-ness, so a mid-window
+  dial flip left the record lying for up to an hour (refusals rendered
+  as silence one way, a standing stop claim over a flowing conversation
+  the other). The dedup now keys on the LATEST row's stopped-ness: the
+  record's last word matches current behavior, one row per state
+  change, still once within a state. Tested with the full
+  Off-On-Off-flip sequence.
+- the feed route's pre-field default (a stopped-less row is the stop it
+  was) has its own route-level test; the renderer's default alone let
+  the mapping regress silently.
+- the tier handler reads the toggle's state instead of hardcoding On.
+- recorded ride-alongs: the refused-row dedup window widened to an hour
+  with the budget windows (fewer duplicate refusal rows, the safe
+  direction for record growth); the pair valve row's because is the
+  record's agent-facing sentence while the person-facing rendering
+  composes from stopped, a pairing now stated at the log site.

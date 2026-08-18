@@ -870,3 +870,54 @@ test('with the limit Off the room tells and continues, in the told-only grammar'
     }
   });
 });
+
+test('a mid-window dial flip logs one fresh truthful row each way: refusals are never rendered as silence', () => {
+  withFleet(room3(), (board) => {
+    try {
+      assert.equal(limits.write({ on: false, perHour: 10 }).ok, true);
+      const now = Date.now();
+      fs.mkdirSync(path.dirname(messages.LOG), { recursive: true });
+      for (let i = 0; i < 10; i += 1) {
+        fs.appendFileSync(messages.LOG, JSON.stringify({
+          kind: 'message', id: 'm' + (i + 1), from: 'leo', to: 'mara',
+          text: 'round ' + i, in_reply_to: null, at: new Date(now - 60000).toISOString(), state: 'placed',
+        }) + '\n');
+      }
+      armSender('leo-discord');
+      arm([]);
+      assert.equal(messages.send({ fromPane: '%7', to: 'mara', text: 'over, told' }, board.agents).state, chat.DELIVERY.PLACED);
+      let valves = messages.record().rows.filter((m) => m.kind === 'valve' && !m.project);
+      assert.deepEqual(valves.map((v) => v.stopped), [false]);
+
+      // The person reads the tell and flips the switch On: the next
+      // refusal must log its OWN stopped:true row, not hide behind the
+      // told-only one for the rest of the window.
+      assert.equal(limits.write({ on: true, perHour: 10 }).ok, true);
+      chat.resetForTests();
+      armSender('leo-discord');
+      arm([]);
+      assert.equal(messages.send({ fromPane: '%7', to: 'mara', text: 'over, stopped' }, board.agents).state, chat.DELIVERY.COULD_NOT);
+      valves = messages.record().rows.filter((m) => m.kind === 'valve' && !m.project);
+      assert.deepEqual(valves.map((v) => v.stopped), [false, true],
+        'the refusal hid behind the told-only row (rendered as silence for the rest of the window)');
+
+      // And back Off: the release logs its own told row too.
+      assert.equal(limits.write({ on: false, perHour: 10 }).ok, true);
+      chat.resetForTests();
+      armSender('leo-discord');
+      arm([]);
+      assert.equal(messages.send({ fromPane: '%7', to: 'mara', text: 'over, told again' }, board.agents).state, chat.DELIVERY.PLACED);
+      valves = messages.record().rows.filter((m) => m.kind === 'valve' && !m.project);
+      assert.deepEqual(valves.map((v) => v.stopped), [false, true, false]);
+      // The dedup still holds WITHIN a state: another over-budget send
+      // adds nothing.
+      chat.resetForTests();
+      armSender('leo-discord');
+      arm([]);
+      messages.send({ fromPane: '%7', to: 'mara', text: 'over, still told' }, board.agents);
+      assert.equal(messages.record().rows.filter((m) => m.kind === 'valve' && !m.project).length, 3);
+    } finally {
+      fs.rmSync(limits.FILE, { force: true });
+    }
+  });
+});

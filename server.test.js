@@ -5269,6 +5269,19 @@ test('the limits routes round-trip the person\u2019s control, and the valve rows
   assert.match(toldRoom, /letting it continue and telling you instead/);
   const legacyPair = convoRow({ kind: 'valve', from: 'leo', to: 'mara', at: 'x' }, 'mara');
   assert.match(legacyPair, /stopped them and asked leo/, 'a pre-field row lost its refusal history');
+  // The ROUTE's own pre-field default, not only the renderer's: a
+  // stopped-less row in the record must reach the feed as the stop it
+  // was. The renderer and the mapping happen to default the same
+  // direction, and only asserting one lets the other regress silently.
+  const messagesEngine2 = require('./engine/messages');
+  fs.mkdirSync(nodePath.dirname(messagesEngine2.LOG), { recursive: true });
+  fs.appendFileSync(messagesEngine2.LOG, JSON.stringify({
+    kind: 'valve', from: 'routeleo', to: 'routemara', because: 'old stop', at: new Date().toISOString(),
+  }) + '\n');
+  const feed = await req('/api/agent/routemara/conversation');
+  const row = JSON.parse(feed.body).rows.find((m) => m.kind === 'valve' && m.from === 'routeleo');
+  assert.ok(row, 'the legacy valve row vanished from the feed');
+  assert.equal(row.stopped, true, 'the route mapped a pre-field refusal as told-only (history rewritten)');
   const stoppedRoom = convoRow({ kind: 'valve', from: 'leo', to: 'p1', project: 'p1', stopped: true, at: 'x' }, 'mara');
   assert.match(stoppedRoom, /stopped it and asked everyone/);
 });

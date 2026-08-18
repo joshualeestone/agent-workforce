@@ -409,10 +409,26 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     // agent named like a project would otherwise satisfy this pairKey and
     // suppress the pair closing's row -- a refusal the screens then
     // render as silence, the exact thing the header forbids.
-    const already = log.some((m) => m && m.kind === 'valve' && !m.project
+    // ⚠️ The dedup keys on the LATEST row's stopped-ness, not any row's:
+    // a person who reads the told-only row and flips the switch would
+    // otherwise be shown the old state for up to an hour while Kosmos
+    // does the opposite -- refusals rendered as silence one way, a
+    // standing stop claim over a flowing conversation the other. The
+    // record's last word must match current behavior; within one state
+    // it still logs once. A pre-field row (no stopped) normalizes to
+    // true, the stop it was.
+    const prior = log.filter((m) => m && m.kind === 'valve' && !m.project
       && pairKey(m.from, m.to) === pairKey(from, toName)
       && Date.parse(m.at) >= now - lim.windowMs);
-    if (!already) appendLog({ kind: 'valve', from, to: toName, at, because, stopped: lim.on });
+    const latest = prior[prior.length - 1];
+    if (!latest || (latest.stopped !== false) !== lim.on) {
+      appendLog({ kind: 'valve', from, to: toName, at, because, stopped: lim.on });
+    }
+    /* The row's because is the RECORD's sentence (agent-facing grammar,
+       returned verbatim on a refusal); the person-facing rendering
+       composes its own words from `stopped` (convoRow). The two may
+       differ in wording but agree in stopped-ness by the dedup above --
+       a RECORDED pairing, not an accident. */
     if (lim.on) return { state: chat.DELIVERY.COULD_NOT, because, id: null, at };
   }
 
@@ -593,9 +609,14 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
          grammar. */
       : 'This conversation has gone back and forth for a while without landing. '
         + 'Kosmos is letting it continue and telling you instead.';
-    const already = log.some((m) => m && m.kind === 'valve'
+    // Same latest-row rule as the pair dedup: the record's last word for
+    // this room must match current behavior; within one state, once.
+    const prior = log.filter((m) => m && m.kind === 'valve'
       && m.project === projectId && Date.parse(m.at) >= now - lim.windowMs);
-    if (!already) appendLog({ kind: 'valve', from, to: projectId, project: projectId, at, because, stopped: lim.on });
+    const latest = prior[prior.length - 1];
+    if (!latest || (latest.stopped !== false) !== lim.on) {
+      appendLog({ kind: 'valve', from, to: projectId, project: projectId, at, because, stopped: lim.on });
+    }
     if (lim.on) return { state: chat.DELIVERY.COULD_NOT, because, id: null, at, outcomes: null };
   }
 

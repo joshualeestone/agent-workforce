@@ -4067,7 +4067,11 @@ document.getElementById('lim-toggle').addEventListener('click', () => {
   saveLimits({ on, perHour: Number(document.getElementById('lim-tier').value) || 20 });
 });
 document.getElementById('lim-tier').addEventListener('change', () => {
-  saveLimits({ on: true, perHour: Number(document.getElementById('lim-tier').value) });
+  // The toggle's own state, not a hardcoded On: the row is hidden while
+  // Off today, but this handler must not be silently coupled to that
+  // visibility rule.
+  const on = document.getElementById('lim-toggle').getAttribute('aria-checked') === 'true';
+  saveLimits({ on, perHour: Number(document.getElementById('lim-tier').value) });
 });
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
