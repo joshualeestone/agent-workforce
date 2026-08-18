@@ -1551,11 +1551,28 @@ const server = http.createServer((req, res) => {
       const rec = messages.record();
       if (!rec.ok) unreadable.push({ kind: 'unreadable', what: 'your agents\u2019 messages', at: null });
       for (const m of rec.rows) {
-        if (m.from !== name && m.to !== name) continue;
+        // A post's `to` is an array (View D ripple 4): membership, not
+        // equality, or every room post vanishes from this feed. And a
+        // PROJECT-typed `to` (a room valve or a room refusal logs the
+        // project id there) is never matched against an agent NAME: an
+        // agent named like a project would inherit that room's
+        // bookkeeping rows onto its own page.
+        const toIsAgent = typeof m.to === 'string' && !m.project;
+        const involved = m.from === name || (toIsAgent && m.to === name)
+          || (Array.isArray(m.to) && m.to.includes(name));
+        if (!involved) continue;
         if (m.kind === 'message') {
           rows.push({ kind: 'colleague', id: m.id, from: m.from, to: m.to, text: m.text, in_reply_to: m.in_reply_to || null, at: m.at, state: m.state || null });
+        } else if (m.kind === 'post') {
+          // Ripple 5: a room post on an agent's page renders AS a room
+          // post, naming its project -- a remark to a group must never
+          // read as a message to one. `operator` rides so the screen can
+          // key the person's rows on the flag, never on a name match.
+          rows.push({ kind: 'post', id: m.id, from: m.from, to: m.to, project: m.project,
+            operator: m.operator === true, text: m.text, at: m.at,
+            state: (m.outcomes && m.outcomes[name]) || null });
         } else if (m.kind === 'valve') {
-          rows.push({ kind: 'valve', from: m.from, to: m.to, at: m.at });
+          rows.push({ kind: 'valve', from: m.from, to: m.to, project: m.project || null, at: m.at });
         } else if (m.kind === 'refused') {
           rows.push({ kind: 'refused', from: m.from, to: m.to, because: m.because || null, at: m.at });
         }
@@ -2067,6 +2084,71 @@ const server = http.createServer((req, res) => {
    * open-arbitrary-path primitive. Refused with the state's own sentence
    * when the folder is not there to show.
    */
+  /* --- the project room ----------------------------------------------------
+     The thread is the record filtered by PROJECT ALONE (the spec's
+     falsifiable claim: no reference to the member list), posts plus the
+     room's own valve closings. Read-only, best-effort history. */
+  const roomThread = pathname.match(/^\/api\/project\/([^/]+)\/room$/);
+  if (roomThread && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(roomThread[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    try {
+      const rec = messages.record();
+      const rows = rec.rows
+        .filter((m) => m && (m.kind === 'post' || m.kind === 'valve') && m.project === id)
+        .map((m) => (m.kind === 'post'
+          ? { kind: 'post', id: m.id, from: m.from, to: m.to, operator: m.operator === true,
+              text: m.text, at: m.at, outcomes: m.outcomes || {} }
+          : { kind: 'valve', project: m.project, because: m.because || null, at: m.at }));
+      rows.sort((a2, b2) => String(a2.at || '').localeCompare(String(b2.at || '')));
+      sendJson(res, 200, { ok: rec.ok, rows });
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we could not read the room') });
+    }
+    return;
+  }
+  /* The operator's post into the room. Its OWN route, never /api/post:
+     that route carries a pane and must stay unable to mint operator
+     authority -- the flag is set here, by the surface that IS the
+     operator's, and nowhere reachable from a pane. (Local processes can
+     reach this too; the pane derivation guards mistakes, not malice, and
+     the module says so.) */
+  if (roomThread && req.method === 'POST') {
+    const id = decodeSegment(roomThread[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch {
+          const bad = new Error('that request is not something we can read');
+          bad.status = 400;
+          throw bad;
+        }
+        if (!body || typeof body !== 'object') {
+          const bad = new Error('that request is not the shape we expect');
+          bad.status = 400;
+          throw bad;
+        }
+        const roster = safeRoster();
+        if (roster === null) {
+          sendJson(res, 200, { delivery: { state: 'could_not', because: 'we could not check which agents are running, so nothing was posted' } });
+          return;
+        }
+        let found = null;
+        try { found = projects.get(id, roster); } catch { found = null; }
+        if (!found) {
+          sendJson(res, 200, { delivery: { state: 'could_not', because: 'there is no project by that name, so there is no room to post into' } });
+          return;
+        }
+        const members = (found.agents || []).map((a) => a.sessionName);
+        const delivery = messages.sendPost({ operator: true, project: found.id, text: body.text }, roster, members);
+        sendJson(res, 200, { delivery });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
   const reveal = pathname.match(/^\/api\/project\/([^/]+)\/reveal-folder$/);
   if (reveal && req.method === 'POST') {
     const id = decodeSegment(reveal[1]);

@@ -5130,6 +5130,16 @@ test('the post route resolves the project, derives the member list, and fans out
     const rec = messagesEngine.record().rows.filter((m) => m.kind === 'post');
     assert.equal(rec.length, 1);
     assert.equal(rec[0].project, 'routeroom');
+
+    // Ripple 5 at the wire: the post reaches each member's conversation
+    // feed AS a post, carrying its project and THAT member's outcome.
+    const feed = await req('/api/agent/mara/conversation');
+    assert.equal(feed.status, 200);
+    const post = JSON.parse(feed.body).rows.find((m) => m.kind === 'post');
+    assert.ok(post, 'the room post vanished from the member\u2019s feed');
+    assert.equal(post.project, 'routeroom');
+    assert.equal(post.state, 'placed');
+    assert.equal(post.operator, false);
   } finally {
     messagesEngine.resetForTests();
     chatEngine.resetForTests();
@@ -5137,6 +5147,133 @@ test('the post route resolves the project, derives the member list, and fans out
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
     void projectsEngine;
   }
+});
+
+test('the room routes: the operator flag is minted only here, and the thread filters by project alone', async () => {
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })]);
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-room-route-'));
+  try {
+    const sends = [];
+    chatEngine.setRunner((args) => {
+      sends.push(args);
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    chatEngine.setDryRun(false);
+
+    const missing = await req('/api/project/no-such-room/room', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello' }),
+    });
+    assert.match(JSON.parse(missing.body).delivery.because, /no project by that name/);
+
+    await req('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Ops room', folder: dir, agents: ['leo', 'mara'] }),
+    });
+    sends.length = 0;
+
+    // The MINT: no pane in the body, and the row carries the flag. A
+    // body claiming operator-adjacent fields changes nothing because the
+    // route forwards only text.
+    const posted = await req('/api/project/opsroom/room', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '@leo take the runway', operator: false, from_pane: '%9' }),
+    });
+    const verdict = JSON.parse(posted.body).delivery;
+    assert.equal(verdict.state, 'placed', verdict.because || '');
+    // Scoped to THIS room: the suite's sandbox record is shared across
+    // route tests, and an earlier test's agent post would be found first.
+    const row = messagesEngine.record().rows.find((m) => m.kind === 'post' && m.project === 'opsroom');
+    assert.ok(row, 'the operator post never reached the record');
+    assert.equal(row.operator, true, 'the operator route did not mint the flag');
+    assert.equal(row.from, 'you');
+    const typed = sends.filter((a) => a[0] === 'send-keys' && typeof a[5] === 'string' && a[5].startsWith('['));
+    assert.match(typed.map((a) => a[5]).find((t) => t.includes('· project opsroom')) || '', /from your operator/,
+      'an operator arrival did not carry the operator marker');
+
+    // The THREAD, filtered by project alone: a foreign project's post and
+    // a room valve row seeded straight into the record.
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({
+      kind: 'post', id: 'm900', project: 'otherroom', from: 'leo', to: ['mara'],
+      text: 'foreign', at: new Date().toISOString(), outcomes: { mara: 'placed' },
+    }) + '\n');
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({
+      kind: 'valve', from: 'leo', to: 'opsroom', project: 'opsroom',
+      because: 'stopped', at: new Date().toISOString(),
+    }) + '\n');
+    const thread = await req('/api/project/opsroom/room');
+    assert.equal(thread.status, 200);
+    const bodyT = JSON.parse(thread.body);
+    assert.equal(bodyT.ok, true);
+    const kinds = bodyT.rows.map((m) => m.kind);
+    assert.deepEqual(kinds.sort(), ['post', 'valve'], 'the thread is not the record filtered by project alone: ' + JSON.stringify(kinds));
+    assert.ok(!bodyT.rows.some((m) => m.text === 'foreign'), 'another project\u2019s post leaked into this room');
+  } finally {
+    messagesEngine.resetForTests();
+    chatEngine.resetForTests();
+    board.restore();
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
+test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {
+  /* View D ripple 5 on the agent page, and the receipt grammar on the
+     room itself, extracted from the page so a rename cannot leave these
+     asserting a copy. */
+  const escSrc = (() => {
+    const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const at = sc.indexOf('function esc(');
+    return sc.slice(at, sc.indexOf('\n}', at) + 2);
+  })();
+  const convoRow = pageFunction('convoRow', escSrc);
+
+  const agentPost = convoRow({ kind: 'post', from: 'mara', to: ['leo', 'april'], project: 'hendersonlease',
+    operator: false, text: 'the draft is up', at: new Date().toISOString(), state: 'placed' }, 'leo');
+  assert.match(agentPost, /mara · to everyone on hendersonlease/,
+    'a remark to a group reads as a message to one (ripple 5)');
+  assert.match(agentPost, /class="cvrow peer"/);
+
+  const opPost = convoRow({ kind: 'post', from: 'you', to: ['leo'], project: 'hendersonlease',
+    operator: true, text: 'status?', at: new Date().toISOString(), state: 'could_not' }, 'leo');
+  assert.match(opPost, /You · to everyone on hendersonlease/);
+  assert.match(opPost, /class="cvrow you"/, 'the person\u2019s room post did not get their own treatment');
+  assert.match(opPost, /Not delivered to leo/, 'a failed delivery to this agent rendered as silence');
+
+  // An agent literally named "you" must NOT be promoted to the person:
+  // the flag is the distinction, never the name.
+  const trickPost = convoRow({ kind: 'post', from: 'you', to: ['leo'], project: 'p',
+    operator: false, text: 'hi', at: new Date().toISOString(), state: 'placed' }, 'leo');
+  assert.match(trickPost, /class="cvrow peer"/,
+    'an agent named "you" was promoted to operator by a name match');
+
+  const roomValve = convoRow({ kind: 'valve', from: 'leo', to: 'hendersonlease', project: 'hendersonlease',
+    at: new Date().toISOString() }, 'leo');
+  assert.match(roomValve, /conversation on hendersonlease/,
+    'the room valve rendered with the pair sentence');
+  assert.match(roomValve, /asked everyone to bring you in/);
+  // The control: the PAIR valve keeps its named-sender sentence.
+  const pairValve = convoRow({ kind: 'valve', from: 'leo', to: 'mara', at: new Date().toISOString() }, 'mara');
+  assert.match(pairValve, /asked leo to bring you in/);
+
+  // The receipt grammar, one clause per real state.
+  const pjJoinNames = pageFunction('pjJoinNames');
+  const receipt = pageFunction('pjReceiptSentence',
+    'const pjNameOf = (p, n) => n;\nconst pjJoinNames = ' + pjJoinNames.toString() + ';');
+  assert.equal(receipt({ leo: 'placed', mara: 'placed' }, {}), 'Placed with leo and mara.');
+  assert.equal(receipt({ leo: 'placed', mara: 'unconfirmed', april: 'could_not' }, {}),
+    'Placed with leo. mara may have it; not confirmed, so it is not re-sent. april could not be reached.');
+  // An unknown state lands in the NOT-CONFIRMED clause, never vanishes
+  // and never claims a definite failure: "could not be reached" licenses
+  // a free re-send an unknown state does not, and the pill weighs the
+  // same post as unsure -- one send must not carry two verdicts.
+  assert.match(receipt({ leo: 'something-new' }, {}), /leo may have it; not confirmed/);
 });
 
 test('the conversation rows hold the spec grammar: attributed peers, verbatim refusals, the valve as reassurance', () => {

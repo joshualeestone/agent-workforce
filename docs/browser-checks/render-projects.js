@@ -484,6 +484,78 @@ async function main() {
     await page.waitForTimeout(300);
   });
 
+  /* 3b. THE ROOM (View D). Seeded by APPENDING SHAPED ROWS to the
+     sandbox's own record file, never by posting through the route: the
+     sandbox roster is the REAL board, so a route post would fan out into
+     live agents' panes. The composer's send path is held by the engine
+     and route tests (scripted tmux); what only a browser can prove is
+     the RENDERING: attribution, the operator's own treatment, the
+     receipt naming each recipient's real state, escaping, and the valve
+     as reassurance. (The room's text tokens -- msg-t, delivery, the
+     valve row -- ride the same k-ink-2-on-k-surface pair the sweep
+     already measures on the cards; the log is wiped before the sweep so
+     they are not measured HERE, a recorded acceptance, not an
+     oversight.) */
+  {
+    const logFile = path.join(SANDBOX, 'data', 'AgentWorkforce', 'messages.jsonl');
+    const at = new Date().toISOString();
+    const seeded = [
+      { kind: 'post', id: 'm9001', project: 'hendersonlease', from: agents[0],
+        to: [agents[1]], text: 'went through the lease <b>end to end</b>', at, outcomes: { [agents[1]]: 'placed' } },
+      { kind: 'post', id: 'm9002', project: 'hendersonlease', from: 'you', operator: true,
+        to: [agents[0], agents[1]], text: '@' + agents[0] + ' take the renewal terms', at,
+        outcomes: { [agents[0]]: 'placed', [agents[1]]: 'could_not' } },
+      { kind: 'valve', from: agents[0], to: 'hendersonlease', project: 'hendersonlease',
+        because: 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.', at },
+    ];
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    for (const row of seeded) fs.appendFileSync(logFile, JSON.stringify(row) + '\n');
+    await shot('3b-room', async (page) => {
+      await page.click('[data-project="hendersonlease"]');
+      await page.waitForTimeout(800);
+      const seen = await page.evaluate(() => {
+        const box = document.getElementById('pj-room');
+        const msgs = [...box.querySelectorAll('.msg')];
+        const you = box.querySelector('.msg.you');
+        const agentChip = box.querySelector('.msg:not(.you) .msg-av');
+        const receipt = you && you.querySelector('.delivery');
+        return {
+          rows: msgs.length,
+          youNamed: you ? you.querySelector('.msg-h b').textContent : null,
+          /* The PRESENCE control for the absence claim below: the agent
+             chip carries the disc's inline tint, so "the You chip has no
+             inline style" is measured against a mechanism proven live,
+             not against a refactor that moved tints to classes. */
+          agentChipFromFaceSet: agentChip ? Boolean(agentChip.getAttribute('style')) : null,
+          youChipFromFaceSet: you ? Boolean(you.querySelector('.msg-av').getAttribute('style')) : null,
+          receipt: receipt ? receipt.textContent : null,
+          receiptCls: receipt ? receipt.className : null,
+          escaped: msgs[0] ? msgs[0].querySelector('p').textContent : null,
+          bold: Boolean(box.querySelector('.msg p b')),
+          valve: (box.querySelector('.msg-valve') || {}).textContent || null,
+          visible: box.getBoundingClientRect().height > 0,
+        };
+      });
+      if (!seen.visible || seen.rows !== 2) throw new Error('the room did not render its two posts: ' + JSON.stringify(seen));
+      if (seen.youNamed !== 'You') throw new Error('the operator post is not attributed as You');
+      if (seen.agentChipFromFaceSet !== true) throw new Error('the disc mechanism moved (no inline tint on an agent chip), so the You-chip check below cannot mean anything');
+      if (seen.youChipFromFaceSet) throw new Error('the person\u2019s chip was drawn from the agent face set (an inline disc style)');
+      if (!seen.receipt || !/could not be reached/.test(seen.receipt) || !/Placed with /.test(seen.receipt)) {
+        throw new Error('a post that reached one of two does not say so per recipient: ' + JSON.stringify(seen.receipt));
+      }
+      if (!/failed/.test(seen.receiptCls || '')) throw new Error('a partial post did not carry the failed weight: ' + seen.receiptCls);
+      if (seen.bold || !/<b>end to end<\/b>/.test(seen.escaped || '')) {
+        throw new Error('post markup PARSED on the room thread: injection, not text');
+      }
+      if (!seen.valve || !/asked everyone to bring you in/.test(seen.valve)) {
+        throw new Error('the room valve row is missing or lost the ruled sentence: ' + JSON.stringify(seen.valve));
+      }
+    });
+    // Removed so every later state (could-not-tell, contrast, archive)
+    // sees the record it expects.
+    fs.writeFileSync(logFile, '');
+  }
+
   // 4. The project whose members we could NOT tell.
   await shot('4-could-not-tell', async (page) => {
     await page.click('[data-project="quarterclose"]');

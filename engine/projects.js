@@ -1382,7 +1382,12 @@ function blockBody(projects, sessionName) {
   // this the join would be a convention nobody was told about.
   let any = false;
   const lines = projects.map((p) => {
-    const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\``;
+    // The room command rides each project line (View D): this block
+    // re-splices on every membership change, so it is the one surface
+    // that teaches EXISTING agents the room exists, not only newborns.
+    const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\`` + (p.id
+      ? `\n  - Post to everyone on it: \`kosmos post ${oneLine(String(p.id))} "your message"\``
+      : '');
     const mine = (sessionName && Array.isArray(p.tasks))
       ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
       : [];
