@@ -874,11 +874,35 @@ async function main() {
     // view, so navigate back rather than assume.
     await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
-    surfacesByScheme[scheme] = await page.evaluate(() => ({
-      ground: getComputedStyle(document.body).backgroundColor,
-      card: getComputedStyle(document.querySelector('#pj-list .pj-row')).backgroundColor,
-      band: getComputedStyle(document.querySelector('.apphead')).backgroundColor,
-      tile: getComputedStyle(document.querySelector('#panel-projects .stat:not(.action)')).backgroundColor,
+    surfacesByScheme[scheme] = await page.evaluate(() => {
+      const read = (sel, prop, root) => {
+        const el = (root || document).querySelector(sel);
+        if (!el) throw new Error('the flip probe found nothing at ' + sel + ' -- a surface that is not on screen cannot prove it flips');
+        return getComputedStyle(el)[prop];
+      };
+      return {
+        ground: getComputedStyle(document.body).backgroundColor,
+        card: read('#pj-list .pj-row', 'backgroundColor'),
+        band: read('.apphead', 'backgroundColor'),
+        tile: read('#panel-projects .stat:not(.action)', 'backgroundColor'),
+      };
+    });
+    // The AGENTS board's surfaces too -- the dark-tokens review found the
+    // needs-you borders and gauge geometry invisible in dark precisely
+    // because no instrument looked at that tab in both schemes.
+    await page.click('#klink');
+    await page.waitForTimeout(400);
+    Object.assign(surfacesByScheme[scheme], await page.evaluate(() => {
+      const read = (sel, prop) => {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error('the flip probe found nothing at ' + sel + ' -- a surface that is not on screen cannot prove it flips');
+        return getComputedStyle(el)[prop];
+      };
+      return {
+        acard: read('.acard', 'backgroundColor'),
+        gaugeTrack: read('.acard .gt', 'stroke'),
+        memBar: read('#alist .bar, .acard .bar, .bar', 'backgroundColor'),
+      };
     }));
     await ctx.close();
   }
@@ -892,7 +916,7 @@ async function main() {
   // between schemes", so that is the property asserted.
   {
     const light = surfacesByScheme.light; const dark = surfacesByScheme.dark;
-    for (const key of ['ground', 'card', 'band', 'tile']) {
+    for (const key of ['ground', 'card', 'band', 'tile', 'acard', 'gaugeTrack', 'memBar']) {
       if (!light[key] || light[key] === 'rgba(0, 0, 0, 0)' || !dark[key] || dark[key] === 'rgba(0, 0, 0, 0)') {
         throw new Error(`the ${key} surface was not painted to measure (light ${light[key]}, dark ${dark[key]}) -- a transparent surface cannot prove it flips`);
       }
@@ -900,7 +924,7 @@ async function main() {
         throw new Error(`the ${key} surface does not flip between schemes (${light[key]} in both) -- literal-white-in-dark is the defect this check exists for`);
       }
     }
-    console.log('✔ 7b-theme-flip (ground, card, band, tile all change between schemes)');
+    console.log('✔ 7b-theme-flip (ground, card, band, tile, acard, gauge track, memory bar all change between schemes)');
   }
 
   // 8. The app shell: sticky bar, the K mark, the member wording, the two
