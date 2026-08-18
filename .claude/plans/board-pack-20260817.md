@@ -166,3 +166,97 @@ re-anchored where markup moved. Pair shot posted in channel.
   drop the target floor.
 - The pack's burger open-state X ported onto the app's aria-expanded
   carrier (was an unrecorded fidelity delta).
+
+## Round 7 record (post-restart; the confirmation round in flight at the
+## account move was lost and respawned blind)
+
+- The burger's choose path (the common one) display:none'd the menu with
+  focus inside it, dropping the keyboard to <body>; it now carries the
+  Escape path's guard (back to the burger), gated on the menu being open
+  so wide-screen clicks keep natural focus.
+- The menu precedes its trigger in the DOM (pack order, ruling stays
+  surfaced to the pack): opening now focuses the first tab, giving the
+  keyboard its forward path without touching the pack's DOM.
+- A failed poll blanked nothing: the four stat tiles kept last-success
+  counts beside "we cannot see them". They now blank to "?" and the alert
+  tile hides (red reserved for known alarms).
+- All three behaviors driven by new slice-and-drive tests, each
+  mutation-proven (fix reverted, its test failed, restored).
+
+## Round 8 record
+
+- The failed-poll honesty rule stopped short of #summary: last-tick
+  residual claims sat beside the blanked tiles. The catch now clears and
+  hides it, seeded-then-blanked in the test.
+- The SVG clip id slugs the session name (id attribute + url() reference:
+  esc() decodes in one context and not the other, so a slug is correct in
+  both; collisions harmless, every clipPath is the same circle). Driven
+  through the real producer with a seeded collision avatar after the
+  fixture lint rightly rejected a hand-built card.
+- Two dead tokens (--k-track/--k-knob) out; their comment claimed the
+  wizard pinned them and it had not.
+- Deferred on recorded rulings: gold-underline contrast (pack-verbatim,
+  with Mona Lisa), roles.js rider (rider of record), Escape-over-modal
+  edge (marginal reachability).
+
+## Round 9 record
+
+- THE CATCH OF THE LOOP: decision #4 promised the because sentence to the
+  detail panel when the why-line left the cards, and it had landed
+  nowhere. The panel now carries it (d-why, empty hides), slice-driven
+  both sides. Second instance of the removal pattern (machine-name chip
+  was the first): a removal is two changes and only one is visible where
+  you made it.
+- The pm intro contradicted its own ruled bullet ("brief the other
+  agents" vs "you do not brief other agents yourself"); intro reconciled,
+  ruled bullet and caution untouched.
+- Four hand-written 80/60 thresholds became one memBand; the list bar's
+  boundaries pinned at 79/80/59 so the views cannot drift one number
+  apart.
+- Dark dashed add-border made visible (light rgba ink was near-invisible
+  on the dark elevated ground).
+
+## Round 10 record
+
+- Zero blockers/warnings. The machine-name disclosure (promise kept in
+  code, unprotected in tests) got its both-sides pin at Mona Lisa's
+  prompt: a quiet revert of the meta line would have passed the suite.
+- modelLine's comment claimed the provider prefix helps "the day a second
+  provider lands"; it does the opposite (would stamp Claude onto foreign
+  names) and the comment now says so as a must-change marker.
+- Refuted NIT, recorded: .boardbar class is NOT dead;
+  docs/browser-checks/render-projects.js selects it.
+
+## Round 11 record
+
+- The Answer control (.ansgo) had lost the 24px SC 2.5.8 floor its
+  predecessor .card-answer carried: it is the ONE card control whose
+  function nothing else duplicates (the card body opens detail, not the
+  thread), so the undersized-target exceptions do not apply. Floor
+  restored (underline moved to an inner span) and pinned in source next
+  to the gold pin.
+- The detail meta line now reads modelLine (the shared derivation), so no
+  surface can disagree on a model; the panel gains the honest "Unknown
+  Model" over a silent omission.
+- Hot-on-stopped recorded as a DECISION: a tied stopped pane still reads
+  its own transcript, the figure is real (the memory the session would
+  resume into), heat rides the figure, not the process.
+
+## Round 12 record
+
+- Defence-in-depth: context.percent lands in markup (membadge text, bar
+  width style, ring aria-label) and was interpolated raw. One pctOf
+  coercion (Number.isFinite, else the honest unknown) now feeds boardMods,
+  card, lrow and ring; a spoofed string percent renders as unknown,
+  pinned.
+- The unknown note gates on the TREATMENT (m.st), not the state spelling,
+  so an unrecognised future server state carries the whole honesty
+  payload; pinned with a perturbed 'martian' state.
+- Rounds 7-11 appended to this record (the plan is the decision record;
+  they lived only in commits).
+- Deferred with reasons: tiles' working/idle client-side second
+  derivation (agrees today, both read the same array, filters pinned);
+  d-why staleness while the panel sits open (consistent with the
+  pre-existing d-state model, a panel-refresh rework is its own task);
+  burger focusout-close (focusout/relatedTarget subtleties are not
+  midnight work; outside-click already covers the pointer case).

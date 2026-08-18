@@ -2713,6 +2713,24 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
       'the list bar band disagrees with the card at 79');
     assert.match(api.lrow(withPct(leo, 59)), /<i class="ok" style="width:59%"/,
       'the list bar warms below the shared amber threshold');
+
+    // A NON-NUMERIC percent (for the day upstream changes) degrades to the
+    // honest unknown through the one pctOf coercion, and never lands raw in
+    // the membadge text, the bar's width style, or the ring's aria-label.
+    const spoofed = withPct(leo, '88" onmouseover="x');
+    for (const html of [api.card(spoofed), api.lrow(spoofed)]) {
+      assert.doesNotMatch(html, /onmouseover/, 'a non-numeric percent reached the DOM raw');
+    }
+    assert.match(api.card(spoofed), /Memory unknown/,
+      'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
+    assert.match(api.lrow(spoofed), /bar unknown/,
+      'CONTROL: the spoofed percent did not degrade to the unknown bar');
+
+    // An UNRECOGNISED server state gets the unknown treatment's WHOLE
+    // honesty payload, note included: the gate reads the treatment
+    // (cardStOf's fallback), not the state's spelling.
+    assert.match(api.card({ ...vex, state: 'martian' }), /not telling you it is fine/,
+      'a future server state renders as Can’t-tell without the note that makes it honest');
     const attn88 = api.card(withPct(mara, 88));
     assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
     assert.doesNotMatch(attn88, /\bhot\b/,

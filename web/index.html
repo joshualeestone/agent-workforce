@@ -2393,6 +2393,9 @@ svg { display: block; }
     <span class="slab">New agent</span>
   </button>
   <div class="stats">
+    <!-- data-count: pack-verbatim hooks, like .stamp and .lrow's hot --
+         written by nothing here yet; a future pack rule or drive lands on
+         them for free -->
     <div class="stat"><b id="st-agents" data-count="agents">0</b><span class="slab">Agents</span></div>
     <div class="stat"><span class="act" aria-hidden="true"><i></i><i></i><i></i></span><b id="st-working" data-count="working">0</b><span class="slab">Working</span></div>
     <div class="stat"><span class="rest" aria-hidden="true"></span><b id="st-idle" data-count="idle">0</b><span class="slab">Idle</span></div>
@@ -2544,8 +2547,16 @@ const WARM = 60;
 function memBand(pct) {
   return pct === null ? null : (pct >= NEARLY_FULL ? 'high' : (pct >= WARM ? 'warn' : 'ok'));
 }
+/* ⚠️ The percent is read through ONE coercion because it lands in markup
+   (the membadge text, the bar's width style, the ring's aria-label). It is
+   server-computed and numeric today; the day that changes, a non-number
+   must degrade to the honest unknown, never reach innerHTML raw. Same
+   for-the-day-upstream-changes posture as the answer button's tie gate. */
+function pctOf(ctx) {
+  return Number.isFinite(ctx.percent) ? ctx.percent : null;
+}
 function boardMods(a, m) {
-  const pct = a.context.percent;
+  const pct = pctOf(a.context);
   return [
     m.st === 'attn' ? 'attn' : '',
     m.st === 'stopped' ? 'off' : '',
@@ -2638,7 +2649,8 @@ function ring(a) {
      for sighted readers, by the dashed shape the pack pairs with the
      unknown card. The avatar stays inside the ring (this app's real data;
      the pack draws faces in the same slot). */
-  if (ctx.percent === null) {
+  const pct = pctOf(ctx);
+  if (pct === null) {
     return `<svg viewBox="0 0 72 72" role="img"
          aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
       <circle class="gu" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
@@ -2646,11 +2658,11 @@ function ring(a) {
     </svg>`;
   }
 
-  const dash = (ctx.percent / 100) * C;
-  const band = memBand(ctx.percent);
+  const dash = (pct / 100) * C;
+  const band = memBand(pct);
   const near = band === 'high';
   return `<svg viewBox="0 0 72 72" role="img"
-       aria-label="${esc(a.name)}. Memory: ${ctx.percent} percent used${near ? ', nearly full' : ''}.">
+       aria-label="${esc(a.name)}. Memory: ${pct} percent used${near ? ', nearly full' : ''}.">
     <circle class="gt" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
     <circle class="gf ${band}" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"
             stroke-dasharray="${dash} ${C - dash}" transform="rotate(-90 36 36)"/>
@@ -2698,10 +2710,14 @@ function card(a) {
      requires the reason to ride with any card that shows an unknown. */
   const m = cardStOf(a);
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  const pct = a.context.percent;
+  const pct = pctOf(a.context);
   const answer = answerBtn(a);
 
-  const unknownNote = a.state === 'unknown'
+  /* Gated on the TREATMENT (m.st), not the literal state: cardStOf maps
+     any unrecognised server state to the unknown treatment, and a card
+     drawn as "Can't tell" must carry the whole honesty payload, note
+     included, whichever spelling put it there. */
+  const unknownNote = m.st === 'unknown'
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
     : '';
 
@@ -2730,7 +2746,7 @@ function card(a) {
 function lrow(a) {
   const m = cardStOf(a);
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  const pct = a.context.percent;
+  const pct = pctOf(a.context);
   const band = memBand(pct);
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
@@ -3143,7 +3159,7 @@ async function tick() {
 
     const c = data.counts;
     // The pack's tiles carry the headline counts, computed from the FULL
-    // fleet (data.agents). Under the ?lim= debug parameter the grid shows a
+    // fleet (data.agents). Under the ?limit= debug parameter the grid shows a
     // slice while the tiles keep counting everything -- deliberate: the
     // tiles answer "how is the fleet", not "how many cards are drawn".
     document.getElementById('st-agents').textContent = String(c.total);
@@ -3429,10 +3445,11 @@ function onAgentsTab() { return !document.getElementById('boardbar').hidden; }
 const LAYOUTS = {
   /* agents: two real layouts, two containers (the pack's .cards grid and its
      .lrow list) -- the old one-renderer .aslist squeeze retired with the
-     stage 3/4 rebuild. `swap` names both elements; hidden flips between
-     them, and the blanket [hidden]{display:none !important} makes the flip
-     stick against any author display rule. */
-  agents:   { swap: { grid: 'grid', list: 'alist' }, flip: 'list', fallback: 'grid' },
+     stage 3/4 rebuild. `swap` is a FLAG, not a map: boardApplyVisibility
+     owns both element ids, and hidden flips between them with the blanket
+     [hidden]{display:none !important} making the flip stick against any
+     author display rule. */
+  agents:   { swap: true, flip: 'list', fallback: 'grid' },
   projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'list' },
 };
 
