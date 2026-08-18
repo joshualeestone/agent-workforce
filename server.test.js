@@ -5277,3 +5277,29 @@ test('the project pill claims only what the counts support', () => {
   assert.equal(pjPillOf({ summary: { total: 2, working: 1 } }, true).label, 'Can’t tell',
     'a blind roster let the card keep claiming Working');
 });
+
+test('a borrowed-name pane cannot lend a project card its photograph', () => {
+  /* The hasAvatar tied-gate is defence-in-depth (snapshot already zeroes
+     hasAvatar on untied cards), so this test holds it LIVE the way the
+     role gate's own flipped-card test does: a produced card with the tie
+     flag deliberately flipped and an avatar claimed. */
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const pdir = nodePath.join(SANDBOX, 'face-gate-proj');
+  fs.mkdirSync(pdir, { recursive: true });
+  try {
+    projectsEngine.create({ name: 'Face Gate', folder: pdir, agents: ['leo'], roster: board.agents });
+    const real = board.agents.find((a) => a.sessionName === 'leo');
+    const flipped = [{ ...real, isNamedOurs: false, hasAvatar: true }];
+    const row = projectsEngine.list(flipped).find((x) => x.name === 'Face Gate');
+    assert.equal(row.agents[0].hasAvatar, false,
+      'a pane we cannot tie to the name lent the card a photograph');
+    // CONTROL: the tied card with an avatar passes the face through, so
+    // the refusal above is the gate and not a dropped field.
+    const tied = [{ ...real, hasAvatar: true }];
+    assert.equal(projectsEngine.list(tied).find((x) => x.name === 'Face Gate').agents[0].hasAvatar, true,
+      'CONTROL: a tied avatar did not reach the row, so the gate assertion proves nothing');
+  } finally {
+    board.restore();
+  }
+});

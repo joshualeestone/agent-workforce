@@ -630,6 +630,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
        background: rgba(20,22,26,.06); font-size: .875rem; font-weight: 600;
        color: var(--k-ink-2); overflow: hidden; }
 .lav img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The tinted disc fallback fills its chip (the tint rides the inner span
+   because the row builds the chip's INSIDE, not the chip). */
+.lavtint { width: 100%; height: 100%; display: grid; place-items: center; border-radius: 50%; }
 .lname b { display: block; font-size: 1rem; }
 .lname small { color: var(--k-ink-2); font-size: .8125rem; }
 .lname em { display: block; font-style: normal; font-size: .75rem; color: var(--k-ink-2); }
@@ -677,6 +680,13 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    the surfaces, so the panel shell would be a white box behind white
    boxes. */
 #panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* The paper ground belongs to the LIST view only; the one-project, add,
+   and project-settings views (view D territory, not this chunk) keep the
+   shell the panel used to give them. */
+#pj-one-view, #pj-add-view, #pj-settings-view {
+  max-width: 860px; margin: 0 auto; background: var(--bg-elevated);
+  border: 0.5px solid var(--separator); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card); padding: var(--space-8); }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -697,12 +707,13 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    .pj-row keeps its name (the click contract and the drives address it);
    the LOOK is the pack's .pcard. Fixed-light k-surface cards, fixed ink. */
 .pjcard-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); }
+.pjcard-h b { font-size: 1.0625rem; font-weight: 700; color: var(--k-ink); min-width: 0; overflow-wrap: anywhere; }
 .pjpill { display: inline-flex; align-items: center; gap: 6px; flex: none;
           font-size: .8125rem; font-weight: 600; color: var(--k-ink-2); }
 .pjpill.attn { color: #b3261e; }
 .pjpill .act, .pjpill .rest, .pjpill .haz { flex: none; }
 .pjslug { display: inline-block; font: 600 .75rem var(--k-mono); color: var(--k-ink-2);
+          max-width: 100%; overflow-wrap: anywhere;
           background: rgba(20,22,26,.05); border-radius: 6px; padding: .18rem .5rem;
           margin-top: 8px; }
 .pjfaces { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
@@ -727,9 +738,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    bare `.pj-desc` (0,1,0) loses font and line-height to `.panel p` (0,1,1),
    so the detail paragraph silently rendered at body size under a comment
    claiming callout. */
-span.pj-desc, p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
+/* span.pj-desc retired with the pack cards (the list uses .pjdesc); the
+   p form remains the one-project view's description. */
+p.pj-desc { display: block; font: var(--text-callout) var(--font-ui);
   color: var(--label-2); }
-span.pj-desc { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 p.pj-desc { margin-top: 2px; margin-bottom: 2px;
   /* The person's sentence in full ink; the machine path below it stays
      --label-2 -- the two rendered byte-identical and read as one grey
@@ -741,14 +753,16 @@ p.pj-desc { margin-top: 2px; margin-bottom: 2px;
    together into one unreadable string -- which every one of the 408 text tests
    passed, because the words were all present and in order. This is the whole
    reason a screenshot is part of the work. */
-.pj-row .pj-path { display: block; font: var(--text-subhead) var(--font-ui); color: var(--label-2);
-  margin-top: 2px; word-break: break-all; }
-.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-3); }
+/* Fixed ink: these sit on the fixed-light card now (the hold-the-line
+   doctrine) -- the blind-spot sentence must survive dark mode. */
+.pj-row .pj-who { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink-2); margin-top: var(--space-3); }
 /* ⚠️ A state, not a decoration. A folder we cannot read has to look different
    from one we can, or the row quietly reports a project that is fine. */
-.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--label);
+.pj-warn { display: block; font: var(--text-callout) var(--font-ui); color: var(--k-ink);
   margin-top: var(--space-3); padding-left: var(--space-4);
-  border-left: 2px solid var(--warn-ink); }
+  /* the light warn literal, not the theme token: the card is fixed-light,
+     and dark's #ffca55 border is faint on white */
+  border-left: 2px solid #7a5200; }
 .pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
   padding: var(--space-7); text-align: center; }
 .pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
@@ -2243,7 +2257,7 @@ svg { display: block; }
          draws none on the list); its definition of a project survives in
          the empty state and the add flow. ids pj-new and the toggle's
          data-scope keep the existing click contracts. -->
-    <div class="statsrow" style="max-width:1320px;margin-left:auto;margin-right:auto;">
+    <div class="statsrow">
       <button class="stat action" id="pj-new" type="button">
         <span class="plus" aria-hidden="true">+</span>
         <span class="slab">New project</span>
@@ -2925,9 +2939,23 @@ function icon(name, extraClass) {
   return `<svg class="icon ${extraClass || ''}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${body}</svg>`;
 }
 
+/* The disc fallback's TWO facts, shared by every surface that draws it
+   (board rings, list chips, project cards, the detail header):
+   THE initial -- singular, per the pack's own words -- and a deterministic
+   muted tint, "varied enough that seven agents do not look identical."
+   The tint is picked from a small fixed palette by a character sum: not a
+   hash with distribution claims (a lesson this fleet has paid for), just
+   eight warm hues where collisions are acceptable and stability is the
+   point -- the same name is always the same disc. */
 function initials(name) {
-  const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
-  return parts.map((w) => w[0]).join('').toUpperCase() || '?';
+  const first = [...String(name || '?').trim()][0] || '?';
+  return first.toUpperCase();
+}
+const DISC_TINTS = ['#e8e0d1', '#e3d5d0', '#d5dfd6', '#d3dbe3', '#e6d9c4', '#dcd3e0', '#d9e0cd', '#e4d7cb'];
+function discTint(name) {
+  let n = 0;
+  for (const ch of String(name || '')) n = (n + ch.codePointAt(0)) % 997;
+  return DISC_TINTS[n % DISC_TINTS.length];
 }
 
 /**
@@ -2952,7 +2980,7 @@ function ring(a) {
        <image href="/api/agent/${encodeURIComponent(a.sessionName)}/avatar"
               x="13" y="13" width="46" height="46" preserveAspectRatio="xMidYMid slice"
               clip-path="url(#${clip})"/>`
-    : `<circle cx="36" cy="36" r="23" class="avatar-bg"/>
+    : `<circle cx="36" cy="36" r="23" class="avatar-bg" fill="${discTint(a.name)}"/>
        <text x="36" y="41" text-anchor="middle" class="avatar-initials">${esc(initials(a.name))}</text>`;
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
@@ -3063,7 +3091,7 @@ function lrow(a) {
   const band = memBand(pct);
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
-    : esc(initials(a.name));
+    : `<span class="lavtint" style="background:${discTint(a.name)}">${esc(initials(a.name))}</span>`;
   const mem = pct === null
     ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
@@ -6617,6 +6645,18 @@ function paintProjects() {
   const active = PROJECTS.filter((p) => !p.archived);
   const archived = PROJECTS.filter((p) => p.archived);
   paintArchived(archived);
+  /* ⚠️ The tiles write BEFORE any return: the empty-state branches used to
+     leave "3 Projects" (and a red Needs-you) sitting above "No projects
+     yet", the exact stale juxtaposition this list hides the archived
+     disclosure to avoid. Counted as PROJECTS NEEDING YOU, matching the
+     red cards below one-for-one, so this tile and the agents tab's twin
+     count different things and say so by their labels; the alert hides at
+     zero and under a blind roster (a claim we cannot make). */
+  const attnProjects = PJ_AGENTS_UNREADABLE ? 0
+    : active.filter((p) => (((p.summary || {}).needsYou) || 0) > 0).length;
+  document.getElementById('st-pj').textContent = String(active.length);
+  document.getElementById('st-pjattn').textContent = String(attnProjects);
+  document.getElementById('st-pjattn-tile').hidden = !attnProjects;
   if (!PROJECTS.length) {
     setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
@@ -6635,18 +6675,15 @@ function paintProjects() {
     return;
   }
   setIfChanged(list, active.map((p) => projectCard(p, PJ_AGENTS_UNREADABLE)).join(''));
+}
 
-  /* The pack's two counts, derived from the same rows just painted so
-     the tiles can never disagree with the cards. The alert tile hides
-     at zero, the board's own rule (a red-bordered zero teaches people
-     to ignore red); under an unreadable roster the needs-you count is
-     a claim we cannot make, so the tile hides then too and the cards'
-     own cannot-see lines carry the blind spot. */
-  const attnTotal = PJ_AGENTS_UNREADABLE ? 0
-    : active.reduce((n, p) => n + (((p.summary || {}).needsYou) || 0), 0);
-  document.getElementById('st-pj').textContent = String(active.length);
-  document.getElementById('st-pjattn').textContent = String(attnTotal);
-  document.getElementById('st-pjattn-tile').hidden = !attnTotal;
+/* The failure treatment for the tiles, called by loadProjects' catch:
+   confident counts above "we cannot read your projects" are claims the
+   failed read cannot back (the board's tiles blank the same way). */
+function pjTilesUnknown() {
+  document.getElementById('st-pj').textContent = '?';
+  document.getElementById('st-pjattn').textContent = '?';
+  document.getElementById('st-pjattn-tile').hidden = true;
 }
 
 /* The pack's state pill (view C): Needs you > Working > Can't tell >
@@ -6657,9 +6694,9 @@ function pjPillOf(p, unreadable) {
   const s = p.summary || {};
   if (!unreadable && s.needsYou) return { cls: 'attn', glyph: '<span class="haz" aria-hidden="true">!</span>', label: 'Needs you' };
   if (!unreadable && s.working) return { cls: '', glyph: '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>', label: 'Working' };
-  if (!s.total) return { cls: 'q', glyph: '', label: 'No agents yet' };
-  if (unreadable || s.unseen) return { cls: 'q', glyph: '', label: 'Can\u2019t tell' };
-  return { cls: 'q', glyph: '<span class="rest" aria-hidden="true"></span>', label: 'Nothing running' };
+  if (!s.total) return { cls: '', glyph: '', label: 'No agents yet' };
+  if (unreadable || s.unseen) return { cls: '', glyph: '', label: 'Can\u2019t tell' };
+  return { cls: '', glyph: '<span class="rest" aria-hidden="true"></span>', label: 'Nothing running' };
 }
 
 function projectCard(p, unreadable) {
@@ -6670,9 +6707,10 @@ function projectCard(p, unreadable) {
      otherwise (hasAvatar is gated on tied in the engine -- a borrowed
      pane must not lend the card somebody else's photograph). */
   const faces = (p.agents || []).slice(0, 5).map((a) => a.hasAvatar
-    ? '<span class="lav sm"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
-    : '<span class="lav sm">' + esc(initials(a.name)) + '</span>').join('');
+    ? '<span class="lav"><img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav" style="background:' + discTint(a.name) + '">' + esc(initials(a.name)) + '</span>').join('');
   const count = s.total ? '<span class="pjcount">' + s.total + (s.total === 1 ? ' agent' : ' agents') + '</span>' : '';
+  const facesRow = (faces || count) ? '<span class="pjfaces">' + faces + count + '</span>' : '';
   /* ⚠️ The card NEVER says everything is fine when part of it was
      unreadable -- the pill claims only what the counts support, and the
      blind spot is SAID in words below, same rule as before the restyle. */
@@ -6686,7 +6724,7 @@ function projectCard(p, unreadable) {
        disk), not the engine's collapsed id -- the chip's job is naming
        the thing the person can find in Finder. */
     + '<span class="pjslug">' + esc(String(p.folder || '').split('/').pop() || p.id) + '</span>'
-    + '<span class="pjfaces">' + faces + count + '</span>'
+    + facesRow
     // The description is what makes a list of twelve projects readable
     // (Josh's fixtures made the case); absent, the line is absent, per
     // the same no-empty-grey-line rule as the detail.
@@ -6878,6 +6916,10 @@ async function loadProjects() {
     setIfChanged(document.getElementById('pj-list'),
       '<div class="err"><b>We cannot read your projects right now.</b><br>'
       + 'This is not saying you have none, it is saying we cannot see them.</div>');
+    // The tiles are claims too: confident counts one element above the
+    // could-not-look sentence are the same stale juxtaposition the
+    // archived disclosure below is hidden to avoid.
+    pjTilesUnknown();
     // The archived disclosure goes with the list: its count and Restore
     // buttons derive from a read that did not happen, and "Show archived
     // projects (3)" is a confident sentence one element below the one saying
