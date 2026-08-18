@@ -7267,8 +7267,11 @@ function pjMember(m, projectId, suppressTold) {
        destructive "Remove from Kosmos"): the scope word is what tells the
        person their agent survives this. "Take off" was vague about WHICH
        removal it was (her ruling, 2026-08-18). */
+    /* aria-label keeps the visible label as a substring ("… from project",
+       not "… from this project") so speech input saying the visible words
+       matches the control (WCAG 2.5.3). */
     + (projectId ? '<button class="drop" type="button" aria-label="Remove ' + esc(m.name)
-      + ' from this project" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
+      + ' from project" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }

@@ -1563,9 +1563,12 @@ test('revealFolder: the PRODUCTION path runs, with no injected runner standing i
  * ------------------------------------------------------------------------ */
 
 test('every singular could_not because the engine authors has a plural sibling', () => {
-  // The keys are the engine's own sentences, verbatim. If one of these
-  // fails, a singular was edited without its group row (the map's own
-  // rule: edit the singular, edit its row).
+  // ⚠️ Two assertions per row, because they catch DIFFERENT events. The
+  // mapping assertion catches the map changing. The SOURCE assertion below
+  // catches the drift this table most fears: a singular edited at its
+  // author site without its row -- the map key then matches nothing, every
+  // affected group line silently degrades to the reasonless sentence, and
+  // a copy-only test stays green (a check containing a copy cannot fail).
   const expectPlural = {
     'this agent has no folder on this computer yet':
       'none of them has a folder on this computer yet',
@@ -1589,6 +1592,17 @@ test('every singular could_not because the engine authors has a plural sibling',
   // The one sentence with no singular referent maps to itself.
   const neutral = 'we could not check which agents are running, so we did not write to anything';
   assert.equal(projects.groupBecause(neutral), neutral);
+
+  // THE SOURCE PIN: every mapped singular must still exist verbatim in the
+  // modules that author these sentences. When this fails, someone edited a
+  // because at its author site without editing its map row -- the exact
+  // event the map's "edit the singular, edit its row" rule names.
+  const authors = ['projects.js', 'you.js', 'workerfile.js']
+    .map((f) => fs.readFileSync(path.join(__dirname, f), 'utf8')).join('\n');
+  for (const singular of [...Object.keys(expectPlural), neutral]) {
+    assert.ok(authors.includes(singular),
+      'a mapped singular no longer appears in any author module (edited without its row?): ' + singular);
+  }
 });
 
 test('groupBecause NEVER invents: unmapped, null, and non-string yield null', () => {
@@ -1622,4 +1636,14 @@ test('list() derives becauseGroup at read time, beside the stored verdict', () =
   const raw = projects.readAll().find((p) => p.name === 'Group Reasons');
   assert.ok(!('becauseGroup' in raw.told.mara),
     'the derived field leaked into the stored record');
+  // A told verdict (because: null) and a defaulted not_tried row both carry
+  // null, never a phantom reason.
+  projects.mutate(made.id, (p) => (
+    { ...p, told: { mara: { state: 'told', because: null, at: new Date().toISOString() } } }));
+  assert.equal(projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons')
+    .agents[0].told.becauseGroup, null, 'a told verdict grew a group reason');
+  projects.mutate(made.id, (p) => ({ ...p, told: {} }));
+  const nt = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons').agents[0].told;
+  assert.equal(nt.state, 'not_tried');
+  assert.equal(nt.becauseGroup, null, 'a not_tried default grew a group reason');
 });

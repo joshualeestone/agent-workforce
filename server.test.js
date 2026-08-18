@@ -5893,6 +5893,16 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
 
   // CONTROL first: without the flag the span is there, so the absence
   // below is the suppression and not a dropped field.
+  // The removal action reads "Remove from <scope>" (the pack's pattern,
+  // her ruling 2026-08-18): the scope word is what tells the person their
+  // agent survives this. The aria-label keeps the visible label as a
+  // substring (WCAG 2.5.3).
+  const rendered = member(m, 'p1');
+  assert.ok(rendered.includes('>Remove from project</button>'),
+    'the removal button no longer reads "Remove from project"');
+  assert.ok(rendered.includes('aria-label="Remove ' + m.name + ' from project"'),
+    'the removal aria-label no longer contains the visible label');
+
   assert.ok(member(m, 'p1').includes('pj-told'),
     'CONTROL: the per-member verdict span is gone even unsuppressed');
   assert.ok(!member(m, 'p1', true).includes('pj-told'),
