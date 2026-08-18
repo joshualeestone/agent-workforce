@@ -5222,6 +5222,141 @@ test('the room routes: the operator flag is minted only here, and the thread fil
   }
 });
 
+test('the limits routes round-trip the person\u2019s control, and the valve rows render the Off truth', async () => {
+  const limitsEngine = require('./engine/limits');
+  try {
+    const got = await req('/api/limits');
+    assert.equal(got.status, 200);
+    const r = JSON.parse(got.body);
+    assert.equal(r.on, true);
+    assert.equal(r.perHour, 20);
+    assert.deepEqual(r.tiers, [10, 20, 40, 100]);
+
+    const bad = await req('/api/limits', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on: true, perHour: 33 }),
+    });
+    assert.equal(bad.status, 400);
+    assert.match(JSON.parse(bad.body).error, /listed amounts/);
+
+    const put = await req('/api/limits', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on: false, perHour: 40 }),
+    });
+    assert.equal(put.status, 200);
+    assert.deepEqual(JSON.parse(put.body).on, false);
+    assert.equal(JSON.parse((await req('/api/limits')).body).perHour, 40);
+  } finally {
+    fs.rmSync(limitsEngine.FILE, { force: true });
+  }
+
+  // The rows: a told-only valve renders the letting-it-continue truth on
+  // both arms, and rows that PREDATE the field render as the stops they
+  // were.
+  const escSrc = (() => {
+    const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const at = sc.indexOf('function esc(');
+    return sc.slice(at, sc.indexOf('\n}', at) + 2);
+  })();
+  const convoRow = pageFunction('convoRow', escSrc);
+  const toldPair = convoRow({ kind: 'valve', from: 'leo', to: 'mara', stopped: false, at: 'x' }, 'mara');
+  assert.match(toldPair, /letting them continue and telling you instead/);
+  assert.doesNotMatch(toldPair, /stopped them/, 'a told-only pair row claims Kosmos stopped them');
+  const toldRoom = convoRow({ kind: 'valve', from: 'leo', to: 'p1', project: 'p1', stopped: false, at: 'x' }, 'mara');
+  assert.match(toldRoom, /letting it continue and telling you instead/);
+  const legacyPair = convoRow({ kind: 'valve', from: 'leo', to: 'mara', at: 'x' }, 'mara');
+  assert.match(legacyPair, /stopped them and asked leo/, 'a pre-field row lost its refusal history');
+  // The ROUTE's own pre-field default, not only the renderer's: a
+  // stopped-less row in the record must reach the feed as the stop it
+  // was. The renderer and the mapping happen to default the same
+  // direction, and only asserting one lets the other regress silently.
+  const messagesEngine2 = require('./engine/messages');
+  fs.mkdirSync(nodePath.dirname(messagesEngine2.LOG), { recursive: true });
+  fs.appendFileSync(messagesEngine2.LOG, JSON.stringify({
+    kind: 'valve', from: 'routeleo', to: 'routemara', because: 'old stop', at: new Date().toISOString(),
+  }) + '\n');
+  const feed = await req('/api/agent/routemara/conversation');
+  const row = JSON.parse(feed.body).rows.find((m) => m.kind === 'valve' && m.from === 'routeleo');
+  assert.ok(row, 'the legacy valve row vanished from the feed');
+  assert.equal(row.stopped, true, 'the route mapped a pre-field refusal as told-only (history rewritten)');
+  const stoppedRoom = convoRow({ kind: 'valve', from: 'leo', to: 'p1', project: 'p1', stopped: true, at: 'x' }, 'mara');
+  assert.match(stoppedRoom, /stopped it and asked everyone/);
+});
+
+test('the limit card shows each caution only when it matters (her always-on-screen rule, driven)', () => {
+  /* paintLimitsFrom drives real element state; a DOM stub records it, so
+     the claim is about the WRITES, not the arithmetic. */
+  const els = {};
+  const el = (id) => els[id] || (els[id] = {
+    id, hidden: undefined, value: '', innerHTML: '', attrs: {}, classes: new Set(),
+    classList: { toggle(c, v) { if (v) { this._s.add(c); } else { this._s.delete(c); } }, _s: null },
+    setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k]; },
+  });
+  for (const id of ['lim-toggle', 'lim-tier', 'lim-tier-row', 'lim-off-note', 'lim-high-note']) {
+    const e = el(id); e.classList._s = e.classes;
+  }
+  const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = sc.indexOf('function paintLimitsFrom');
+  let depth = 0; let end = -1;
+  for (let k = sc.indexOf('{', at); k < sc.length; k += 1) {
+    if (sc[k] === '{') depth += 1;
+    else if (sc[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  // eslint-disable-next-line no-new-func
+  const painter = new Function('document', sc.slice(at, end) + '\nreturn paintLimitsFrom;')({ getElementById: el });
+
+  painter({ on: true, perHour: 20, tiers: [10, 20, 40, 100] });
+  assert.equal(el('lim-tier-row').hidden, false);
+  assert.equal(el('lim-off-note').hidden, true, 'the Off sentence is on screen while On');
+  assert.equal(el('lim-high-note').hidden, true, 'the cost line is on screen at a middle tier');
+  painter({ on: true, perHour: 100, tiers: [10, 20, 40, 100] });
+  assert.equal(el('lim-high-note').hidden, false, 'the top tier does not carry its cost line');
+  painter({ on: false, perHour: 100, tiers: [10, 20, 40, 100] });
+  assert.equal(el('lim-off-note').hidden, false, 'Off does not say what Off means');
+  assert.equal(el('lim-tier-row').hidden, true, 'the tier dropdown is offered while Off');
+  assert.equal(el('lim-high-note').hidden, true);
+  assert.equal(el('lim-toggle').attrs['aria-checked'], 'false');
+
+  // The HANDLERS, against the same stub: a click before the first paint
+  // (empty tier list) must never save -- Number('') would rewrite a
+  // stored 40 or 100 to a fallback -- and the tier handler reads the
+  // toggle's state rather than hardcoding On.
+  const saves = [];
+  const handlerSrc = (name) => {
+    const at2 = sc.indexOf('function ' + name);
+    let d = 0; let e = -1;
+    for (let k = sc.indexOf('{', at2); k < sc.length; k += 1) {
+      if (sc[k] === '{') d += 1;
+      else if (sc[k] === '}') { d -= 1; if (d === 0) { e = k + 1; break; } }
+    }
+    return sc.slice(at2, e);
+  };
+  // eslint-disable-next-line no-new-func
+  const handlers = new Function('document', 'saveLimits', 'paintLimits',
+    handlerSrc('limToggleClick') + '\n' + handlerSrc('limTierChange')
+    + '\nreturn { limToggleClick, limTierChange };')(
+    { getElementById: el }, (next) => saves.push(next), () => saves.push('repaint'));
+
+  el('lim-tier').options = [];
+  handlers.limToggleClick();
+  assert.deepEqual(saves, ['repaint'], 'a pre-paint click saved (or did nothing at all)');
+  saves.length = 0;
+  el('lim-tier').options = [1, 2, 3, 4];
+  el('lim-tier').value = '40';
+  el('lim-toggle').attrs['aria-checked'] = 'false';
+  handlers.limToggleClick();
+  assert.deepEqual(saves, [{ on: true, perHour: 40 }], 'the toggle did not negate aria-checked at the stored tier');
+  saves.length = 0;
+  handlers.limTierChange();
+  assert.deepEqual(saves, [{ on: false, perHour: 40 }],
+    'the tier handler hardcoded On instead of reading the toggle');
+});
+
 test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {
   /* View D ripple 5 on the agent page, and the receipt grammar on the
      room itself, extracted from the page so a rename cannot leave these

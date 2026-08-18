@@ -2856,6 +2856,32 @@ svg { display: block; }
     </section>
 
     <section class="dbox">
+      <!-- ⚠️ THE CONVERSATION LIMIT (2026-08-18 in-channel). Copy is Mona
+           Lisa's VERBATIM: the heading line, the hint, "Stop them after
+           ... exchanges an hour", and the Off-state sentence. The model is
+           her split: the counter ALWAYS tells the person (that half is not
+           configurable, same rule as "we could not look"); this switch
+           decides only whether Kosmos also STOPS them. Ships On at the
+           default tier (Josh). Angel's attributed additions for her pass:
+           the dlab category word, and the high-tier cost line (her first
+           ruling placed a warning at the high end as well as Off). -->
+      <h3 class="dlab">Conversations</h3>
+      <div class="setrow" id="lim-row">
+        <div><b>Limit how much your agents talk to each other</b>
+          <p class="dhint" style="margin:2px 0 0;">Every message between your agents uses your AI plan. If you run a model that does not charge you, turn this off.</p></div>
+        <button class="toggle" id="lim-toggle" role="switch" aria-checked="true" aria-label="Limit how much your agents talk to each other"><i></i></button>
+      </div>
+      <div class="frow" id="lim-tier-row" hidden style="margin-top:12px; align-items:center; gap:8px;">
+        <label class="dhint" for="lim-tier" style="margin:0;">Stop them after</label>
+        <select id="lim-tier" aria-label="How many exchanges an hour"></select>
+        <span class="dhint" style="margin:0;">exchanges an hour</span>
+      </div>
+      <p class="dhint" id="lim-high-note" hidden style="margin:12px 0 0;">A hundred exchanges an hour can add up if your provider charges per use.</p>
+      <p class="dhint" id="lim-off-note" hidden style="margin:12px 0 0;">Your agents will keep talking as long as they have something to say. Kosmos will still tell you when a conversation stops going anywhere, but it will not step in.</p>
+      <p class="dhint" id="lim-msg" role="status" style="margin:8px 0 0;"></p>
+    </section>
+
+    <section class="dbox">
       <h3 class="dlab">Updates</h3>
       <div class="setrow off">
         <div><b>Tell me when there is a new version</b>
@@ -3985,7 +4011,88 @@ async function paintSettings() {
     acct.innerHTML = accountRow(null);
     ver.textContent = 'We could not read the version just now.';
   }
+  await paintLimits();
 }
+
+/* The conversation limit card: painted from the engine's read, and the
+   read carries its own honesty (ok:false means the file could not be
+   read and these are the values Kosmos is USING -- the safe default --
+   not the values the person chose). */
+async function paintLimits() {
+  const msg = document.getElementById('lim-msg');
+  const mine = ++LIM_EPOCH;
+  try {
+    const r = await (await fetch('/api/limits')).json();
+    if (mine !== LIM_EPOCH) return;
+    paintLimitsFrom(r);
+    msg.textContent = r.ok === false
+      ? 'We could not read this setting, so Kosmos is using the default shown here.' : '';
+  } catch {
+    msg.textContent = 'We could not read this setting just now.';
+  }
+}
+
+function paintLimitsFrom(r) {
+  const tog = document.getElementById('lim-toggle');
+  tog.classList.toggle('on', r.on === true);
+  tog.setAttribute('aria-checked', r.on === true ? 'true' : 'false');
+  const sel = document.getElementById('lim-tier');
+  const options = (r.tiers || []).map((t) => '<option value="' + t + '"' + (t === r.perHour ? ' selected' : '') + '>' + t + '</option>').join('');
+  if (sel.__lastTiers !== options) { sel.__lastTiers = options; sel.innerHTML = options; }
+  if (String(sel.value) !== String(r.perHour)) sel.value = String(r.perHour);
+  document.getElementById('lim-tier-row').hidden = r.on !== true;
+  /* Her rule: a caution that is always on screen stops being read. The
+     Off sentence appears only Off; the cost line only at the top tier. */
+  document.getElementById('lim-off-note').hidden = r.on === true;
+  document.getElementById('lim-high-note').hidden = !(r.on === true && r.perHour === 100);
+}
+
+let LIM_SAVING = false;
+let LIM_EPOCH = 0;
+async function saveLimits(next) {
+  if (LIM_SAVING) return;
+  LIM_SAVING = true;
+  const mine = ++LIM_EPOCH;
+  const msg = document.getElementById('lim-msg');
+  try {
+    const res = await fetch('/api/limits', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (mine !== LIM_EPOCH) return;
+    if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
+    paintLimitsFrom(body);
+    msg.textContent = '';
+  } catch {
+    if (mine === LIM_EPOCH) msg.textContent = 'We could not save that setting.';
+  } finally {
+    LIM_SAVING = false;
+  }
+}
+
+/* Named so the suite can drive them against a DOM stub. Both refuse to
+   save while the tier list has not painted: before the first read lands
+   (or forever, on a failed read) the select is empty and Number('')
+   would silently rewrite a stored 40 or 100 to a fallback. */
+function limToggleClick() {
+  const sel = document.getElementById('lim-tier');
+  if (!sel.options || !sel.options.length) { paintLimits(); return; }
+  const on = document.getElementById('lim-toggle').getAttribute('aria-checked') !== 'true';
+  saveLimits({ on, perHour: Number(sel.value) });
+}
+function limTierChange() {
+  const sel = document.getElementById('lim-tier');
+  if (!sel.options || !sel.options.length) return;
+  // The toggle's own state, not a hardcoded On: the row is hidden while
+  // Off today, but this handler must not be silently coupled to that
+  // visibility rule.
+  const on = document.getElementById('lim-toggle').getAttribute('aria-checked') === 'true';
+  saveLimits({ on, perHour: Number(sel.value) });
+}
+document.getElementById('lim-toggle').addEventListener('click', limToggleClick);
+document.getElementById('lim-tier').addEventListener('change', limTierChange);
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {
@@ -4270,17 +4377,28 @@ function convoRow(r, agentName) {
     // and the pair sentence would put a project's name in an agent's
     // mouth. The everyone-wording is the ruled copy: a room has no single
     // sender whose turn it was.
+    // stopped === false is the person's Off choice: the counter told,
+    // Kosmos did not step in, and a row claiming it stopped a
+    // conversation it let continue would be the product lying about
+    // itself.
+    const told = r.stopped === false;
     if (r.project) {
       return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
         + 'The conversation on ' + esc(r.project)
-        + ' went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.</p></div>';
+        + (told
+          ? ' has gone back and forth for a while without landing. Kosmos is letting it continue and telling you instead.'
+          : ' went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
+        + '</p></div>';
     }
     // Her sentence, names substituted: proof a conversation cannot run
     // on without you. Not an error, and not dressed as one.
     return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
       + esc(r.from) + ' and ' + esc(r.to)
-      + ' were going back and forth, so Kosmos stopped them and asked '
-      + esc(r.from) + ' to bring you in.</p></div>';
+      + (told
+        ? ' have been going back and forth without landing. Kosmos is letting them continue and telling you instead.'
+        : ' were going back and forth, so Kosmos stopped them and asked '
+          + esc(r.from) + ' to bring you in.')
+      + '</p></div>';
   }
   if (r.kind === 'post') {
     // Ripple 5: a room post renders AS a room post, naming its project --
