@@ -153,3 +153,16 @@ re-anchored where markup moved. Pair shot posted in channel.
   theme-following values on the live sandbox.
 - The one-stage-width cap (1320px) restored to .cards/.alist/.removed-wrap;
   measured exact left/right alignment with the statsrow at 1920.
+
+## Round 6 record
+
+- The shared .removed-row restyle had a second consumer: paintArchived on
+  My Projects still emitted the old flat markup, floating the date mid-row
+  under space-between. Both surfaces now emit one inner-div grammar,
+  updated together (the same shared-class hazard round 5 caught on
+  .linkish, this one in layout).
+- The .linkish 24px SC 2.5.8 floor is now duplicated into the pack rule
+  with the coupling named, so tidying the earlier rule cannot silently
+  drop the target floor.
+- The pack's burger open-state X ported onto the app's aria-expanded
+  carrier (was an unrecorded fidelity delta).

@@ -282,6 +282,11 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .burger:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 .burger[aria-expanded="true"] { background: var(--k-ink); border-color: var(--k-ink); }
 .burger[aria-expanded="true"] span { background: var(--k-surface); }
+/* the pack's open-state X (its .burger.open, on this app's aria-expanded
+   state carrier); aria-expanded remains the state of record */
+.burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+.burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 @media (max-width: 56rem) {
   .apphead header { grid-template-columns: auto 1fr; position: relative; }
   .burger { display: flex; }
@@ -1018,7 +1023,12 @@ svg { display: block; }
                 max-width: 1320px; margin-left: auto; margin-right: auto; }
 .linkish { background: none; border: 0; padding: 0;
            font: inherit; font-size: .875rem; font-weight: 600;
-           color: var(--k-ink-2); text-decoration: underline; cursor: pointer; }
+           color: var(--k-ink-2); text-decoration: underline; cursor: pointer;
+           /* duplicated from the earlier .linkish rule ON PURPOSE: the
+              24px floor is WCAG 2.2 SC 2.5.8, and leaning on a rule 330
+              lines up at equal specificity is the silent-coupling shape
+              round 5 caught in dark mode (round 6 named this one) */
+           min-height: 24px; }
 .linkish:hover { color: var(--k-ink); }
 .linkish:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 .removed-list { margin-top: 14px; max-width: 34rem; }
@@ -5999,9 +6009,13 @@ function paintArchived(archived) {
   const toggle = document.getElementById('pj-arch-toggle');
   const listEl = document.getElementById('pj-arch-list');
   const rows = (archived || []).map((p) =>
+    /* Same inner-div grammar as the agents removed list (round 6: the
+       shared .removed-row rules restyled this surface too, and the old
+       flat markup floated the date mid-row under space-between). One
+       grammar, two surfaces, updated together. */
     '<div class="removed-row">'
-    + '<span class="who">' + esc(p.name) + '</span>'
-    + '<span class="when">' + esc(pjArchWhen(p)) + '</span>'
+    + '<div><span class="who">' + esc(p.name) + '</span>'
+    + '<span class="when">' + esc(pjArchWhen(p)) + '</span></div>'
     + '<button class="btn" type="button" data-restore="' + esc(p.id) + '">Restore</button>'
     + '</div>');
   wrap.hidden = rows.length === 0;
