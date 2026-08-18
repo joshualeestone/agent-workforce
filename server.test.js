@@ -5076,6 +5076,69 @@ test('the msg route derives the sender from the pane, ignores any typed claim, a
   }
 });
 
+test('the post route resolves the project, derives the member list, and fans out with the marking', async () => {
+  /* The route's own derivations, none of them the engine's: project
+     resolution (with the no-project sentence), the member list read off
+     the project record, and judgment handed to the engine whole. */
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' }),
+    fleet.agent('april', { state: 'idle' })]);
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-post-route-'));
+  try {
+    messagesEngine.setRunner(() => ({ ok: true, session: 'leo-discord' }));
+    const sends = [];
+    chatEngine.setRunner((args) => {
+      sends.push(args);
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    chatEngine.setDryRun(false);
+
+    const missing = await req('/api/post', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: 'no-such-room', text: 'hello', from_pane: '%3' }),
+    });
+    assert.equal(missing.status, 200);
+    assert.match(JSON.parse(missing.body).delivery.because, /no project by that name/,
+      'an unknown project did not get the route\u2019s own sentence');
+
+    const made = await req('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Route room', folder: dir, agents: ['leo', 'mara', 'april'] }),
+    });
+    assert.equal(made.status, 200);
+    sends.length = 0;
+
+    const r = await req('/api/post', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: 'routeroom', text: 'room route test @mara', from_pane: '%3' }),
+    });
+    assert.equal(r.status, 200);
+    const verdict = JSON.parse(r.body).delivery;
+    assert.equal(verdict.state, 'placed', 'the route did not deliver: ' + (verdict.because || ''));
+    assert.deepEqual(verdict.outcomes, { mara: 'placed', april: 'placed' },
+      'the member list was not derived off the project record');
+    const typed = sends.filter((a) => a[0] === 'send-keys' && typeof a[5] === 'string' && a[5].startsWith('['));
+    assert.equal(typed.length, 2);
+    assert.match(typed.map((a) => a[5]).find((t) => t.startsWith('[message')), /project routeroom\]/,
+      'the addressed envelope lost its project');
+    const rec = messagesEngine.record().rows.filter((m) => m.kind === 'post');
+    assert.equal(rec.length, 1);
+    assert.equal(rec[0].project, 'routeroom');
+  } finally {
+    messagesEngine.resetForTests();
+    chatEngine.resetForTests();
+    board.restore();
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    void projectsEngine;
+  }
+});
+
 test('the conversation rows hold the spec grammar: attributed peers, verbatim refusals, the valve as reassurance', () => {
   /* Mona Lisa's messaging-screens spec, driven: a colleague's row reads
      differently from yours, no delivery state renders as silence, the

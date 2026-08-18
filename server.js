@@ -1453,6 +1453,54 @@ const server = http.createServer((req, res) => {
         { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
+
+  /* --- a post into a project room (View D) --------------------------------
+     The same shape as /api/msg: the CLI's pane rides in, the engine does
+     the judging. The route's one derivation is the member list, read off
+     the project record so the engine owns no membership model. */
+  if (pathname === '/api/post' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch {
+          const bad = new Error('that request is not something we can read');
+          bad.status = 400;
+          throw bad;
+        }
+        if (!body || typeof body !== 'object') {
+          const bad = new Error('that request is not the shape we expect');
+          bad.status = 400;
+          throw bad;
+        }
+        const roster = safeRoster();
+        if (roster === null) {
+          sendJson(res, 200, { delivery: { state: 'could_not', because: 'we could not check which agents are running, so nothing was posted' } });
+          return;
+        }
+        let found = null;
+        try { found = projects.get(String(body.project == null ? '' : body.project).trim(), roster); } catch { found = null; }
+        if (!found) {
+          sendJson(res, 200, { delivery: { state: 'could_not', because: 'there is no project by that name, so there is no room to post into' } });
+          return;
+        }
+        // An archived project still accepts posts, a RECORDED trade: the
+        // archive hides a project from the list and stops it counting,
+        // and nothing else in the app gates behavior on it (an archived
+        // project's detail is still reachable and its members are still
+        // its members). If archive ever comes to mean "closed", this is
+        // the line that changes.
+        const members = (found.agents || []).map((a) => a.sessionName);
+        const delivery = messages.sendPost({
+          fromPane: body.from_pane,
+          project: found.id,
+          text: body.text,
+        }, roster, members);
+        sendJson(res, 200, { delivery });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
   /**
    * --- one agent's conversation, merged ------------------------------------
    *
