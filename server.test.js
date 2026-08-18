@@ -1844,7 +1844,7 @@ test('the roles route carries the copy the creation actually uses', async () => 
  * behaviour is to run its real source. `prelude` supplies whatever the extracted
  * function closes over.
  */
-function pageFunction(name, prelude = '') {
+function pageFnSource(name) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   let start = script.indexOf('function ' + name);
@@ -1858,8 +1858,12 @@ function pageFunction(name, prelude = '') {
     else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
   }
   assert.ok(end > -1, 'could not find the end of ' + name);
+  return script.slice(start, end);
+}
+
+function pageFunction(name, prelude = '') {
   // eslint-disable-next-line no-new-func
-  return new Function(`${prelude}\n${script.slice(start, end)}\nreturn ${name};`)();
+  return new Function(`${prelude}\n${pageFnSource(name)}\nreturn ${name};`)();
 }
 
 test('the creation screen only calls an agent made when the board can see it running', async () => {
@@ -5767,4 +5771,82 @@ test('a borrowed-name pane cannot lend a project card its photograph', () => {
   } finally {
     board.restore();
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * room-polish: one verdict for an identical roster + the receipt pill's
+ * dark borders. The told-line collapse is real page source via pageFunction;
+ * the CSS pin is text-level because 7b-theme-flip watches surfaces, not
+ * borders, and this exact trio already slipped past it once (#75 landed
+ * after the #71 dark pass and never met it).
+ * ------------------------------------------------------------------------ */
+
+// The prelude the told-line family closes over: esc (real page shape).
+const TOLD_PRELUDE = "const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n";
+
+test('identical roster verdicts collapse to one group line, and only then', () => {
+  const shared = pageFunction('pjSharedTold',
+    TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'));
+
+  const cn = (because) => ({ told: { state: 'could_not', because } });
+  const told = () => ({ told: { state: 'told' } });
+
+  // Collapses: same state, same because, 2+ members.
+  const g = shared([cn('we could not write to its instructions'), cn('we could not write to its instructions'), cn('we could not write to its instructions')]);
+  assert.ok(g.startsWith('We could not tell any of them where this folder is'),
+    'three identical could_not verdicts did not collapse: ' + g);
+
+  // Collapses: the told state too, with the hedge intact (the group form
+  // must not promise more than the per-member form it replaces).
+  const gt = shared([told(), told()]);
+  assert.ok(gt.startsWith('Kosmos told each of them where this folder is'), gt);
+  assert.ok(gt.includes('unless their instructions have been changed since'),
+    'the group told sentence dropped the hedge');
+
+  // Does NOT collapse: mixed states.
+  assert.equal(shared([told(), cn('x')]), '', 'mixed states collapsed');
+  // Does NOT collapse: same state, different because (the string-equality
+  // key is what keeps the group claim exactly as true as the rows).
+  assert.equal(shared([cn('disk full'), cn('permission denied')]), '',
+    'different becauses collapsed into one sentence');
+  // Does NOT collapse: singleton (its line belongs on its row).
+  assert.equal(shared([cn('x')]), '', 'a singleton roster grew a group line');
+  // Does NOT collapse: nothing to say.
+  assert.equal(shared([{ told: {} }, { told: {} }]), '', 'empty verdicts collapsed');
+});
+
+test('pjMember suppressTold removes the per-member verdict span, and only with it', () => {
+  const prelude = TOLD_PRELUDE
+    + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + pageFnSource('pjToldLine') + '\n';
+  const member = pageFunction('pjMember', prelude);
+  const m = { name: 'leo', sessionName: 'leo', present: true, state: 'idle', told: { state: 'could_not', because: 'x' } };
+
+  // CONTROL first: without the flag the span is there, so the absence
+  // below is the suppression and not a dropped field.
+  assert.ok(member(m, 'p1').includes('pj-told'),
+    'CONTROL: the per-member verdict span is gone even unsuppressed');
+  assert.ok(!member(m, 'p1', true).includes('pj-told'),
+    'suppressTold left the per-member verdict span in place');
+});
+
+test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // Presence control: the light rules this test claims get overridden.
+  const lightFailed = raw.indexOf('.delivery.failed { border-color: rgba(179,38,30,.5); }');
+  const lightPlaced = raw.indexOf('.delivery.placed { border-color: rgba(47,125,90,.5); }');
+  assert.ok(lightFailed > -1 && lightPlaced > -1,
+    'CONTROL: the light receipt borders moved; re-point this pin');
+  const darkFailed = raw.indexOf('.delivery.failed { border-color: rgba(255,140,130,.5); }');
+  const darkPlaced = raw.indexOf('.delivery.placed { border-color: rgba(121,197,157,.5); }');
+  assert.ok(darkFailed > -1, 'the failed receipt border has no dark twin');
+  assert.ok(darkPlaced > -1, 'the placed receipt border has no dark twin');
+  // Both dark rules sit under a dark marker that OPENS after the light
+  // rules: a dark twin pasted into the light sheet would pass a bare
+  // presence check and still ship the wrong color in both schemes.
+  const marker = raw.lastIndexOf('@media (prefers-color-scheme: dark)', darkFailed);
+  assert.ok(marker > lightFailed && marker > lightPlaced,
+    'the dark receipt rules are not inside a dark block after the light rules');
+  assert.ok(raw.lastIndexOf('@media (prefers-color-scheme: dark)', darkPlaced) > lightPlaced,
+    'the dark placed rule is not inside a dark block after the light rules');
 });

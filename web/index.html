@@ -880,6 +880,9 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    was the recorded defence, and the floor does not have a caption exemption. */
 .pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
+/* The one-verdict-for-the-roster line: same voice as .pj-told, but it sits
+   as its own flex child below the member cards, not inside one of them. */
+.pj-members .pj-told-group { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); margin: 0; }
 .pj-member.unseen { border-style: dashed; }
 /* ⚠️ 24px minimum, because this is the only destructive control on the row and
    WCAG 2.2 SC 2.5.8 (Target Size Minimum) is a Level AA criterion — and AA is
@@ -1376,6 +1379,12 @@ svg { display: block; }
   .astate.st-attn { border-color: rgba(255,140,130,.62); }
   .stat.alert { border-color: rgba(255,140,130,.55); }
   .acard.hot { background: linear-gradient(180deg, rgba(255,140,130,.15) 0%, rgba(255,140,130,0) 42%), var(--k-surface); }
+  /* The receipt pill landed (#75) AFTER this dark pass (#71), so its
+     borders never met it: failed carried the light red and placed the
+     light green into dark. Same families as their siblings here and
+     .astate.st-working; .delivery.unsure is dashed geometry, no color. */
+  .delivery.placed { border-color: rgba(121,197,157,.5); }
+  .delivery.failed { border-color: rgba(255,140,130,.5); }
   /* Instrument geometry drawn in light-ink alphas: the gauge track, the
      unknown dashes, and the list memory bar were ~invisible over the
      dark card, and the dashes are the SOLE carrier of memory-unknown
@@ -7175,9 +7184,7 @@ function pjView(which) {
  * The board's rule one level up: an agent we cannot read is shown as unknown,
  * never as something healthy, and never as nothing at all.
  */
-function pjMember(m, projectId) {
-  const told = m.told || {};
-  let toldLine = '';
+function pjToldLine(told) {
   if (told.state === 'told') {
     // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
     // inform a running agent, and saying we did would be the one claim on this
@@ -7189,11 +7196,47 @@ function pjMember(m, projectId) {
     // the flat form went on promising a future read of something that is no
     // longer in the file. The past-tense half is evidence; the future half is
     // an expectation, and now reads as one.
-    toldLine = 'Kosmos told it where this folder is. It will see that the next time it '
+    return 'Kosmos told it where this folder is. It will see that the next time it '
       + 'starts, unless its instructions have been changed since.';
-  } else if (told.state === 'could_not') {
-    toldLine = 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
+  if (told.state === 'could_not') {
+    return 'We could not tell it where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+  }
+  return '';
+}
+
+/**
+ * The roster's verdicts collapsed to one sentence, when that is honest.
+ *
+ * The key is RENDERED-LINE equality, not state equality: two could_not
+ * members with different becauses render different lines and keep their own
+ * rows, so the group claim is exactly as true as each per-member claim it
+ * replaces. Two or more members only; a singleton's line stays on its row.
+ */
+function pjSharedTold(roster) {
+  if (roster.length < 2) return '';
+  const first = pjToldLine(roster[0].told || {});
+  if (!first) return '';
+  for (const m of roster.slice(1)) {
+    if (pjToldLine(m.told || {}) !== first) return '';
+  }
+  return pjToldGroupLine(roster[0].told || {});
+}
+
+function pjToldGroupLine(told) {
+  if (told.state === 'told') {
+    // Plural of pjToldLine's told sentence, hedge and all: the group form
+    // must not promise more than the per-member form it replaces.
+    return 'Kosmos told each of them where this folder is. They will see that the '
+      + 'next time they start, unless their instructions have been changed since.';
+  }
+  return 'We could not tell any of them where this folder is — ' + esc(told.because || 'we could not write to its instructions') + '.';
+}
+
+function pjMember(m, projectId, suppressTold) {
+  // suppressTold: the roster's identical verdicts are being said ONCE below
+  // the list (pjSharedTold), so the per-member span would triple-state it.
+  const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
     + '<b>' + esc(m.name) + '</b>'
     // ⚠️ An `unknown` state carries its REASON here. A bare "Can't tell" sat
@@ -7986,8 +8029,14 @@ function paintOneProject() {
   // agent's only project even when archived -- is stated THERE now; the
   // pack's pjone rebuild decides whether the detail itself says it too.
 
-  setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
-    ? p.agents.map((m) => pjMember(m, p.id)).join('')
+  // Identical verdicts across a 2+ roster are said once, below the list,
+  // instead of once per member (the three-identical-sentences weight the
+  // pack comparison surfaced). Mixed or singleton rosters keep per-member.
+  const roster = p.agents || [];
+  const sharedTold = pjSharedTold(roster);
+  setIfChanged(document.getElementById('pj-one-agents'), roster.length
+    ? roster.map((m) => pjMember(m, p.id, !!sharedTold)).join('')
+      + (sharedTold ? '<p class="pj-told-group">' + sharedTold + '</p>' : '')
     : '<p class="fhint">No agents on this project yet.</p>');
 
   // Only agents that are NOT already on it, and only ones we can actually see.
