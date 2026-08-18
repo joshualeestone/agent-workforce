@@ -583,8 +583,17 @@ uninstall() {
     # on any failure; restore uses cat too, preserving a symlinked
     # profile's inode. mv is deliberately not used for the same reason.
     _pbak="$_profile.kosmos-uninstall-backup"
-    if [ -n "$_ptmp" ] \
-       && cp "$_profile" "$_pbak" 2>/dev/null \
+    # ⚠️ The backup is VERIFIED (cmp) before anything mutates the profile,
+    # and it is only ever a restore SOURCE when verified: a cp that died
+    # partway (disk full is this block's own named threat, and the backup
+    # is the first write) would otherwise "restore" a partial copy over
+    # the still-intact profile -- a shrinking write that succeeds on a
+    # full disk -- and then claim nothing changed.
+    _bak_ok=no
+    if [ -n "$_ptmp" ] && cp "$_profile" "$_pbak" 2>/dev/null && cmp -s "$_profile" "$_pbak" 2>/dev/null; then
+      _bak_ok=yes
+    fi
+    if [ "$_bak_ok" = yes ] \
        && awk -v m="$_marker" -v p="$_pline" '
             skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
             $0 == m { skip=1; blank=0; next }
@@ -595,20 +604,23 @@ uninstall() {
           ' "$_profile" > "$_ptmp" 2>/dev/null \
        && cat "$_ptmp" > "$_profile" 2>/dev/null; then
       rm -f "$_ptmp" "$_pbak"
-    else
-      # Whatever failed, put the original back if the backup exists; a
-      # restore that itself fails leaves the backup in place and NAMES it.
-      if [ -f "$_pbak" ]; then
-        if cat "$_pbak" > "$_profile" 2>/dev/null; then
-          rm -f "$_pbak"
-          info "note: could not edit ${_profile##*/} (restored unchanged); the kosmos PATH line is harmless and safe to delete by hand"
-        else
-          info "note: could not edit ${_profile##*/}; an untouched copy is at ${_pbak##*/} in the same folder"
-        fi
+    elif [ "$_bak_ok" = yes ]; then
+      # Something after the verified backup failed; put the original back,
+      # and verify the restore too. A failed restore keeps the backup and
+      # NAMES it -- a backup is never deleted on a failure path unless the
+      # restore it fed verified byte-for-byte.
+      if cat "$_pbak" > "$_profile" 2>/dev/null && cmp -s "$_pbak" "$_profile" 2>/dev/null; then
+        rm -f "$_pbak"
+        info "note: could not edit ${_profile##*/} (restored unchanged); the kosmos PATH line is harmless and safe to delete by hand"
       else
-        info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
+        info "note: could not edit ${_profile##*/}; an untouched copy is at ${_pbak##*/} in the same folder"
       fi
       rm -f "$_ptmp" 2>/dev/null || true
+    else
+      # The backup never verified, so the profile was never touched; the
+      # partial backup is our own junk and comes off.
+      rm -f "$_pbak" "$_ptmp" 2>/dev/null || true
+      info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
     fi
   fi
   # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
@@ -1105,17 +1117,27 @@ case ":$PATH:" in
           info "note: typing 'kosmos' in Terminal will not work yet on this Mac (the bin folder's name contains a character unsafe to write into ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
           ;;
         *)
-          # "Already wired" requires BOTH halves: a profile carrying the
-          # marker but not an export-shaped line (a hand edit, a partial
-          # append) must fall through and repair the functional half,
-          # not report wired forever -- the silent class this step ends.
-          if [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null \
-             && grep -q 'export PATH=".*:\$PATH"' "$PROFILE_FILE" 2>/dev/null; then
+          # "Already wired" requires BOTH halves AND their adjacency: the
+          # export-shaped line directly after the marker, anchored. A
+          # profile carrying the marker with the export hand-deleted or
+          # commented out must fall through and repair the functional
+          # half, not report wired forever -- the silent class this step
+          # ends. (An unanchored grep matched '# export ...' and any
+          # person-owned export of that shape anywhere in the file.)
+          if [ -f "$PROFILE_FILE" ] \
+             && awk -v m="$PATH_MARKER" '
+                  f == 1 { ok = ($0 ~ /^export PATH=".*:\$PATH"$/) ? 1 : 0; f = 2; next }
+                  f == 0 && $0 == m { f = 1 }
+                  END { exit (f >= 1 && ok == 1) ? 0 : 1 }
+                ' "$PROFILE_FILE" 2>/dev/null; then
             # No works-claim here: the wired export names whatever bin dir
             # the EARLIER install used, which this run cannot vouch for.
             info "the kosmos command is already wired into ${PROFILE_FILE##*/}"
           elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
             info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
+            if [ -n "${KOSMOS_PROFILE_FILE:-}" ]; then
+              info "note: run --uninstall with the same KOSMOS_PROFILE_FILE so the line comes off with it"
+            fi
           else
             info "note: typing 'kosmos' in Terminal will not work yet on this Mac (could not write ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
           fi

@@ -45,7 +45,10 @@ function kosmosCli(probeRoot) {
     surface has no one to refuse to. */
 function kosmosCliShown(probeRoot) {
   const cli = kosmosCli(probeRoot);
-  if (/["$`\\]/.test(cli) || cli.includes('<!--') || cli.includes('-->')) return 'kosmos';
+  // Newlines are in the class too: a quoted path with a linebreak would
+  // put a literal newline (and whatever follows it) inside the managed
+  // block, which no other sanitizer ever sees. Marker strings likewise.
+  if (/["$`\\\n\r]/.test(cli) || cli.includes('<!--') || cli.includes('-->')) return 'kosmos';
   return /\s/.test(cli) ? '"' + cli + '"' : cli;
 }
 

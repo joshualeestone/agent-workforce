@@ -1777,3 +1777,23 @@ test('a colleagues marker pair cannot ride a project field into the block', () =
   assert.ok(body.includes('(kosmos marker)'),
     'CONTROL: neutralization left no trace, so the absence above proves nothing');
 });
+
+test('an ambiguous colleagues pair declines the heal rather than guessing', () => {
+  reset();
+  const messages = require('./messages');
+  const pair = (body) => messages.START + '\n' + body + '\n' + messages.END;
+  agent('twin', '# Twin\n\nOwn words here.\n\n' + pair('stale one') + '\n\n' + pair('stale two') + '\n');
+  projects.create({ name: 'Twins', folder: folder('twins'), agents: ['twin'] });
+  const R = cards([fleet.agent('twin', { state: 'idle' })]);
+  assert.equal(projects.syncAgent('twin', R).state, projects.TOLD.TOLD);
+  const text = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'twin', 'CLAUDE.md'), 'utf8');
+  // Both stale bodies survive: with two well-formed pairs we cannot tell
+  // which is ours, and overwriting a span on a guess is the one failure
+  // worse than a stale command. (Recorded limit: nothing surfaces that
+  // this agent is still taught the stale form; refuse-don't-guess on a
+  // non-verdict surface.)
+  assert.ok(text.includes('stale one') && text.includes('stale two'),
+    'an ambiguous pair was overwritten on a guess');
+  assert.ok(!text.includes(' msg <their-name>'),
+    'CONTROL inverse: the heal ran despite ambiguity');
+});
