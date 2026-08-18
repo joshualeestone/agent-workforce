@@ -2337,7 +2337,7 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
 
   // The summary block, run against a fake element, for a counts object that
   // says one line was unreadable.
-  const summarise = (counts) => {
+  const summarise = (counts, onAgents = true) => {
     const el = { textContent: '' };
     const document = { getElementById: () => el };
     // ⚠️ The slice INCLUDES the line that writes the summary. The first version
@@ -2347,11 +2347,22 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
     // reconstructs the behaviour it is testing is the same defect as a
     // source-shape assertion, one level in.
     const from = script.indexOf('const bits = [');
-    const write = script.indexOf("document.getElementById('summary').textContent");
-    const body = script.slice(from, script.indexOf('\n', write) + 1);
+    /* stage 2 of the pack rebuild routed the write through `sumEl` (the
+       residual summary hides itself when empty), so the end anchor follows:
+       the slice still INCLUDES the write and the join, per the lesson above. */
+    const write = script.indexOf('sumEl.textContent = bits.join');
+    const end = script.indexOf('\n', script.indexOf('sumEl.hidden')) + 1;
+    // The write must sit INSIDE the slice: this is the guard the old end
+    // anchor gave for free, and without it a slice that stops short would
+    // re-create the reconstructed-join defect the comment above records.
+    assert.ok(write > from && write < end, 'the summary write fell outside the extracted slice');
+    const body = script.slice(from, end);
     // eslint-disable-next-line no-new-func
-    new Function('document', 'c', body)(document, counts);
-    return el.textContent;
+    // onAgentsTab is injectable: the write is tab-gated (the residual
+    // notice must not float beside Settings on the poll), so the harness
+    // drives both sides of that gate.
+    new Function('document', 'c', 'onAgentsTab', body)(document, counts, () => onAgents);
+    return el;
   };
 
   // ⚠️ Every other count is non-zero on purpose. With them at zero the notice is
@@ -2360,18 +2371,440 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   // notice has to be pinned where it actually sits: LAST, after everything else
   // the line can carry.
   const partial = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 });
-  assert.match(partial, /could not read/,
+  assert.match(partial.textContent, /could not read/,
     'the board shows what it managed to parse as the whole machine, with nothing '
     + 'on screen saying agents are missing from it');
-  assert.match(partial, /1 /, 'the notice does not say how many lines were lost');
+  assert.match(partial.textContent, /1 /, 'the notice does not say how many lines were lost');
+  // The harness-proof (assert presence before absence) rides HERE now: a
+  // rendered notice above proves the extracted block really ran.
+  assert.equal(partial.hidden, false, 'a summary with residual notices must show itself');
 
-  // ⚠️ THE CONTROL. A clean answer must carry NO such notice: a warning that is
-  // always on screen is one nobody reads, which is how the other counts on this
-  // line are written.
+  // ⚠️ THE TAB GATE, both sides. The poll runs on every tab; without the
+  // gate a residual notice floats beside Settings within five seconds of
+  // leaving the board (found live on the stage-3 build). Same shape as
+  // paintRemoved's gate, and asserted with the same bits that just proved
+  // the notice renders -- so this cannot pass vacuously.
+  const elsewhere = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 }, false);
+  assert.equal(elsewhere.hidden, true,
+    'the residual summary leaks onto other tabs: the poll re-reveals it off the agents tab');
+
+  /* ⚠️ THE CONTROL, updated with the stage-2 pack rebuild: the headline
+     counts moved to the stats tiles, so #summary is RESIDUAL-ONLY -- on a
+     clean board its correct output is EMPTY and it hides itself. The old
+     control asserted "12 agents" appears, which pinned the retired
+     sentence; the positive claim now is emptiness PLUS the self-hide, so a
+     mutation that leaves a permanent warning (or a permanently visible
+     empty box) still fails. */
   const clean = summarise({ total: 12, needsYou: 0, unknown: 0, unknownFullness: 0, unreadableLines: 0 });
-  assert.doesNotMatch(clean, /could not read/,
+  assert.doesNotMatch(clean.textContent, /could not read/,
     'a healthy board carries a permanent warning about unreadable lines');
-  assert.match(clean, /12 agents/, 'the summary does not render at all, so this proves nothing');
+  assert.equal(clean.textContent, '', 'the residual-only summary invented copy on a clean board');
+  assert.equal(clean.hidden, true, 'an empty summary must hide itself, not sit as a blank line');
+});
+
+test('the stats tiles count the real fleet, and the alert tile hides at zero', () => {
+  /* ⚠️ BEHAVIOURAL, same harness discipline as the summary test above: the
+     tile writes are tick-level wiring no other test reads -- the
+     working/idle filters and the alert tile's hide-at-zero were computed in
+     code nothing drove, which is the exact condition the renderer test
+     names as the reason it exists. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  const drive = (agents, counts) => {
+    const el = () => ({ textContent: '', hidden: undefined });
+    const els = {
+      'st-agents': el(), 'st-working': el(), 'st-idle': el(),
+      'st-attn': el(), 'st-attn-tile': el(),
+    };
+    // The slice INCLUDES every tile write (the summary test's lesson: a
+    // harness that stops short of the write reconstructs the behaviour).
+    const from = script.indexOf('const c = data.counts;');
+    const write = script.indexOf("document.getElementById('st-attn-tile').hidden = !c.needsYou;");
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the tile writes fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'data', script.slice(from, end))(
+      { getElementById: (id) => els[id] }, { agents, counts });
+    return els;
+  };
+
+  // ⚠️ Mixed states on purpose: needs_you and unknown agents sit in the
+  // fleet so a filter that counts "not working" as idle (or vice versa)
+  // cannot agree with these pins by accident.
+  const fleet = [
+    { state: 'working' }, { state: 'working' }, { state: 'working' },
+    { state: 'idle' }, { state: 'idle' },
+    { state: 'needs_you' }, { state: 'unknown' },
+  ];
+  const live = drive(fleet, { total: 7, needsYou: 1 });
+  assert.equal(live['st-agents'].textContent, '7', 'the agents tile stopped carrying the full-fleet total');
+  assert.equal(live['st-working'].textContent, '3', 'the working tile does not count exactly the working agents');
+  assert.equal(live['st-idle'].textContent, '2', 'the idle tile does not count exactly the idle agents');
+  assert.equal(live['st-attn'].textContent, '1', 'the needs-you tile lost its count');
+  assert.equal(live['st-attn-tile'].hidden, false, 'a nonzero needs-you must show the alert tile');
+
+  const calm = drive(fleet.filter((a) => a.state !== 'needs_you'), { total: 6, needsYou: 0 });
+  assert.equal(calm['st-attn-tile'].hidden, true,
+    'the alert tile must hide at zero: a red-bordered zero teaches people to ignore red');
+});
+
+test('a failed poll blanks the stats tiles instead of asserting the last fleet it saw', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  // ⚠️ Seeded with a LAST-SUCCESS picture first (presence before absence):
+  // the defect this pins is precisely stale numbers surviving the failure,
+  // so the tiles must demonstrably hold numbers before the catch runs.
+  const el = (t) => ({ textContent: t, hidden: undefined, innerHTML: '' });
+  const els = {
+    grid: el(''), alist: el(''),
+    'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
+    'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
+    // The residual summary is seeded with a last-tick claim too: it sits
+    // directly under the tiles and carries the same kind of number.
+    summary: { textContent: '2 we could not read at all, so some agents may be missing', hidden: false },
+  };
+  const from = script.indexOf("checked.className = 'checked stamp stale';");
+  const write = script.indexOf('sumFail.hidden = true;');
+  const end = script.indexOf('\n', write) + 1;
+  assert.ok(from > -1 && write > from && write < end,
+    'the failure-path tile blanking fell outside the extracted slice');
+  const checked = { className: '', innerHTML: '' };
+  // eslint-disable-next-line no-new-func
+  new Function('document', 'checked', 'esc', 'err', script.slice(from, end))(
+    { getElementById: (id) => els[id] }, checked, (s) => String(s), { message: 'boom' });
+
+  // The rendered failure card proves the extracted block really ran.
+  assert.match(els.grid.innerHTML, /cannot read the agents/,
+    'the failure card never painted, so nothing below can mean anything');
+  assert.match(els.alist.innerHTML, /cannot read the agents/,
+    'the failure card must reach both containers, whichever layout is up');
+  for (const id of ['st-agents', 'st-working', 'st-idle', 'st-attn']) {
+    assert.equal(els[id].textContent, '?',
+      `${id} still asserts a count beside "we cannot see them" -- a headline number the failed poll cannot stand behind`);
+  }
+  assert.equal(els['st-attn-tile'].hidden, true,
+    'the alert tile must hide on a blind poll: red is reserved for a known alarm');
+  assert.equal(els.summary.textContent, '',
+    'the residual summary still asserts last-tick counts beside the failure card');
+  assert.equal(els.summary.hidden, true,
+    'a blanked summary must also hide, not sit as an empty line under the tiles');
+});
+
+test('the detail panel carries the explanation the card gave up', () => {
+  /* ⚠️ The pack split moved the why-line off the card ("the card carries
+     signals, the panel carries explanation") -- so the panel MUST carry it,
+     or `because`, the board's stated reason for its belief about an agent,
+     appears nowhere in the UI at all while the server still ships it. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const drive = (because) => {
+    // Seeded shown-and-full (presence before absence): the empty case must
+    // demonstrably CLEAR and HIDE a line that was carrying a sentence.
+    const el = { textContent: 'seeded', hidden: false };
+    const from = script.indexOf("const why = document.getElementById('d-why');");
+    const write = script.indexOf('why.hidden = !why.textContent;');
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the why write fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', script.slice(from, end))(
+      { getElementById: () => el }, { because });
+    return el;
+  };
+  const told = drive('we could not read the pane');
+  assert.equal(told.textContent, 'we could not read the pane',
+    'the panel does not show the reason the board holds for its belief');
+  assert.equal(told.hidden, false, 'a present explanation must be visible');
+  const healthy = drive(undefined);
+  assert.equal(healthy.textContent, '', 'a missing because must clear the seeded text, not keep it');
+  assert.equal(healthy.hidden, true, 'an empty explanation must hide its line, not sit as a grey gap');
+});
+
+test('the detail meta line keeps the machine-name disclosure the card gave up', () => {
+  /* ⚠️ The SECOND instance of the removal pattern in one branch (Mona
+     Lisa's check, 2026-08-17): a removal is two changes, and only one of
+     them is visible where you made it. The machine-name chip left the
+     cards on Josh's audience ruling with the fact promised to the detail
+     meta line; the code kept that promise, but nothing held it -- a quiet
+     revert of the meta-line half would have passed the whole suite, which
+     is exactly how the because sentence vanished. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // The REAL modelLine, because the meta line routes through it: a stub
+  // here would reconstruct the derivation this line exists to share.
+  const modelLine = pageFunction('modelLine');
+  const drive = (card) => {
+    const el = { textContent: 'seeded' };
+    const from = script.indexOf("document.getElementById('d-meta').textContent =");
+    const write = script.indexOf(".filter(Boolean).join(' · ');", from);
+    const end = script.indexOf('\n', write) + 1;
+    assert.ok(from > -1 && write > from && write < end,
+      'the meta-line write fell outside the extracted slice');
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', 'modelLine', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine);
+    return el.textContent;
+  };
+  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
+  assert.match(surfaced, /shown by its machine name/,
+    'a display name that IS the machine name carries no disclosure on the panel');
+  assert.match(surfaced, /archive worker · Claude Opus 5 · /,
+    'CONTROL: the meta line lost its role and model, so the disclosure assertion floats free');
+  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
+  assert.doesNotMatch(named, /machine name/,
+    'an agent with a real display name is told it is shown by its machine name');
+  // The panel reads the SAME model derivation as both board renderers: a
+  // provider-less name gets the same provider-first treatment everywhere,
+  // and a missing name is the card's honest "Unknown Model", not an
+  // omission.
+  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /r · Claude Fable 5/,
+    'the panel model line diverged from the card on a provider-less name');
+  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /r · Unknown Model/,
+    'a missing model is silently omitted on the panel while the card says Unknown Model');
+});
+
+test('the narrow-screen menu keeps the keyboard: forward in on open, back to the burger on choose and Escape', () => {
+  /* ⚠️ The menu precedes its trigger in the DOM (pack order, surfaced to the
+     pack rather than reordered here), and it display:none's on close -- two
+     shapes that each strand a keyboard. These are DRIVEN, not shape-asserted:
+     the listeners run against a stub DOM and the assertions read where focus
+     actually landed. */
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const from = script.indexOf("document.getElementById('tabs').addEventListener('click'");
+  const chooseGuard = script.indexOf('if (wasOpen) b.focus();');
+  const escGuard = script.indexOf('b.focus();', script.indexOf('drops to <body>'));
+  const end = script.indexOf('});', escGuard) + 3;
+  assert.ok(from > -1 && chooseGuard > from && escGuard > chooseGuard && end > escGuard,
+    'the burger listener block was not found where expected');
+
+  const mkBtn = (dataset = {}) => {
+    const n = {
+      attrs: {}, focused: 0, dataset, listeners: {},
+      addEventListener(t, fn) { n.listeners[t] = fn; },
+      setAttribute(k, v) { n.attrs[k] = v; },
+      getAttribute(k) { return k in n.attrs ? n.attrs[k] : null; },
+      focus() { n.focused += 1; },
+      getClientRects: () => [{}],
+    };
+    return n;
+  };
+  const classes = new Set(['closed']);
+  const tabs = {
+    listeners: {},
+    addEventListener(t, fn) { tabs.listeners[t] = fn; },
+    classList: {
+      add: (c) => classes.add(c),
+      toggle: (c, force) => { if (force) classes.add(c); else classes.delete(c); },
+    },
+  };
+  const burger = mkBtn();
+  burger.attrs['aria-expanded'] = 'false';
+  const firstTab = mkBtn({ tab: 'agents' });
+  const docListeners = {};
+  const doc = {
+    getElementById: (id) => ({ tabs, burger }[id]),
+    querySelector: (sel) => (sel === '#tabs .tab' ? firstTab : null),
+    addEventListener: (t, fn) => { (docListeners[t] = docListeners[t] || []).push(fn); },
+  };
+  // eslint-disable-next-line no-new-func
+  const api = new Function('document',
+    'let WATCH = 0; const SHOWN = [];\nconst showTab = (t) => SHOWN.push(t);\n'
+    + script.slice(from, end)
+    + '\n; return { SHOWN };')(doc);
+  const chooseTab = () => tabs.listeners.click({ target: { closest: (s) => (s === '.tab' ? firstTab : null) } });
+
+  // ⚠️ THE CONTROL: on a wide screen the menu is closed and the tabs are
+  // plainly visible, so a tab click must keep its natural focus -- a guard
+  // that fires unconditionally would steal focus on every desktop click.
+  chooseTab();
+  assert.equal(api.SHOWN[0], 'agents', 'the tab click never reached showTab, so nothing below means anything');
+  assert.equal(burger.focused, 0, 'a wide-screen tab click had its focus stolen by the burger guard');
+
+  // Open: aria flips, the class comes off, and focus moves INTO the menu --
+  // the forward path the inverted DOM order otherwise denies.
+  burger.listeners.click();
+  assert.equal(burger.attrs['aria-expanded'], 'true');
+  assert.ok(!classes.has('closed'), 'opening the burger did not reveal the menu');
+  assert.equal(firstTab.focused, 1,
+    'opening the burger leaves the menu reachable only backwards: the menu precedes its trigger in the DOM');
+
+  // Choose from the OPEN menu: the common path. The menu display:none's
+  // under the focused element, so focus must land back on the burger.
+  chooseTab();
+  assert.ok(classes.has('closed'), 'choosing a tab did not close the menu');
+  assert.equal(burger.attrs['aria-expanded'], 'false');
+  assert.equal(burger.focused, 1,
+    'choosing from the open menu display:none\'d the element under focus and dropped the keyboard to <body>');
+
+  // Escape closes and refocuses the burger; a non-Escape key does nothing.
+  burger.listeners.click();
+  for (const fn of docListeners.keydown) fn({ key: 'a' });
+  assert.ok(!classes.has('closed'), 'a non-Escape key must not close the menu');
+  for (const fn of docListeners.keydown) fn({ key: 'Escape' });
+  assert.ok(classes.has('closed'), 'Escape did not close the menu');
+  assert.equal(burger.focused, 2, 'Escape must hand focus back to the burger');
+
+  // A click landing outside both the menu and the burger closes it.
+  burger.listeners.click();
+  for (const fn of docListeners.click) fn({ target: { closest: () => null } });
+  assert.ok(classes.has('closed'), 'an outside click did not close the menu');
+  assert.equal(burger.attrs['aria-expanded'], 'false');
+});
+
+test('the board renderers hold the pack grammar: thresholds, states, parity, escaping', async () => {
+  /* ⚠️ BEHAVIOURAL, like the summary test above: the renderer block is
+     extracted from the page and DRIVEN, because the pack rebuild moved the
+     board's whole state grammar into card()/lrow() and no render drive
+     reads most of it -- flipping the membadge threshold, scrambling the
+     state map, or dropping the presence dot would otherwise go green.
+     ⚠️ The cards come from the REAL producers via test-support/fleet (the
+     fixture-discipline rule: a hand-built card is free to carry fields the
+     producer does not emit). The axes fleet cannot arrange -- an exact
+     memory percent, a stale instruction finding, and the untied-needs_you
+     shape the pipeline itself refuses -- are SPREAD onto a real card, so
+     every other field keeps the producer's shape. */
+  // The hostile-named agent's avatar, seeded BEFORE install so the clip
+  // branch below is real: safeKey() strips the hostile characters, so an
+  // avatar stored under the stripped key is reachable from the hostile
+  // name (the collision path -- another agent whose name strips the same).
+  const avatarsDir = nodePath.join(SANDBOX, 'AgentWorkforce', 'avatars');
+  fs.mkdirSync(avatarsDir, { recursive: true });
+  fs.writeFileSync(nodePath.join(avatarsDir, 'xonloadalert1.png'), 'not-a-real-png', 'utf8');
+  const board = fleet.install([
+    fleet.agent('leo', { state: 'working', role: 'Project Manager' }),
+    fleet.agent('mara', { state: 'needs_you' }),
+    fleet.agent('rook', { state: 'rate_limited' }),
+    fleet.agent('nils', { state: 'stopped' }),
+    fleet.agent('vex', { state: 'unknown' }),
+    fleet.agent('x" onload="alert(1)', { state: 'idle' }),
+  ]);
+  try {
+    const cards = JSON.parse((await req('/api/status')).body).agents;
+    const by = (n) => cards.find((a) => a.name === n);
+    const leo = by('leo'), mara = by('mara'), rook = by('rook'), nils = by('nils'), vex = by('vex');
+    assert.ok(leo && mara && rook && nils && vex, 'the fixture board is missing an agent');
+
+    const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const from = script.indexOf('const STATE_COPY = {');
+    const lrowAt = script.indexOf('function lrow(a)');
+    const end = script.indexOf('\n}', script.indexOf('</div>`;', lrowAt)) + 2;
+    assert.ok(from > -1 && lrowAt > from && end > lrowAt, 'renderer block not found');
+    // eslint-disable-next-line no-new-func
+    const api = new Function(script.slice(from, end) + '\n; return { card, lrow };')();
+    const withPct = (a, pct) => ({ ...a, context: { ...a.context, percent: pct, tokens: 1 } });
+
+    // The membadge fires AT 80, not around it, and the heat wash yields to red.
+    assert.match(api.card(withPct(leo, 80)), /membadge/,
+      'the memory badge does not fire at its own threshold');
+    assert.doesNotMatch(api.card(withPct(leo, 79)), /membadge/,
+      'the memory badge fires below its threshold');
+    // The list bar reads the SAME band derivation (memBand), held here at its
+    // boundaries on the LIST side -- the four hand-written thresholds are one
+    // function now, and this is what keeps the views from drifting one number
+    // apart if that ever un-shares.
+    assert.match(api.lrow(withPct(leo, 80)), /<i class="high" style="width:80%"/,
+      'the list bar does not go high at the shared threshold');
+    assert.match(api.lrow(withPct(leo, 79)), /<i class="warn" style="width:79%"/,
+      'the list bar band disagrees with the card at 79');
+    assert.match(api.lrow(withPct(leo, 59)), /<i class="ok" style="width:59%"/,
+      'the list bar warms below the shared amber threshold');
+
+    // A NON-NUMERIC percent (for the day upstream changes) degrades to the
+    // honest unknown through the one pctOf coercion, and never lands raw in
+    // the membadge text, the bar's width style, or the ring's aria-label.
+    const spoofed = withPct(leo, '88" onmouseover="x');
+    for (const html of [api.card(spoofed), api.lrow(spoofed)]) {
+      assert.doesNotMatch(html, /onmouseover/, 'a non-numeric percent reached the DOM raw');
+    }
+    assert.match(api.card(spoofed), /Memory unknown/,
+      'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
+    assert.match(api.lrow(spoofed), /bar unknown/,
+      'CONTROL: the spoofed percent did not degrade to the unknown bar');
+
+    // An UNRECOGNISED server state gets the unknown treatment's WHOLE
+    // honesty payload, note included: the gate reads the treatment
+    // (cardStOf's fallback), not the state's spelling.
+    assert.match(api.card({ ...vex, state: 'martian' }), /not telling you it is fine/,
+      'a future server state renders as Can’t-tell without the note that makes it honest');
+    const attn88 = api.card(withPct(mara, 88));
+    assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
+    assert.doesNotMatch(attn88, /\bhot\b/,
+      'the heat wash stacked onto an attn card (the pack renders 88%-attn without hot)');
+    assert.match(api.card(withPct(leo, 94)), /acard hot/,
+      'a nearly-full working card lost the heat wash');
+
+    // The state grammar: presence is not status, unknown is not idle.
+    const unk = api.card(vex);
+    assert.match(unk, /acard unk/, 'unknown lost its dashed card');
+    assert.match(unk, /pres unsure/, 'unknown presence collapsed into on/off');
+    assert.match(unk, /st-unknown/, 'unknown lost its own pill');
+    assert.match(unk, /could not check/, 'the unknown pill lost its screen-reader words');
+    assert.match(unk, /not telling you it is fine/, 'the unknown card lost its note');
+    const off = api.card(nils);
+    assert.match(off, /acard off/, 'stopped lost its off treatment');
+    assert.match(off, /pres off/, 'a stopped agent shows a live presence dot');
+    assert.match(api.card(leo), /pres on/, 'a working agent lost its presence dot');
+    assert.match(api.card({ ...rook, task: null }), /Waiting out a usage limit/,
+      'the paused card lost its reason line');
+    assert.match(api.card({ ...rook, task: 'Drafting' }), /Drafting/,
+      'a paused agent with a real task shows the canned line instead');
+
+    // Grid/list parity on the shared facts, including the stale badge.
+    const staleLeo = { ...leo, instructions: { state: 'stale' } };
+    assert.match(api.card(staleLeo), /card-stale/, 'the stale badge left the card');
+    assert.match(api.lrow(staleLeo), /card-stale/, 'the stale badge is missing from the list view');
+    assert.match(api.lrow(vex), /bar unknown/, 'unknown memory in the list invented a bar value');
+    for (const piece of ['lav', 'lname', 'lstate', 'ltask', 'lmem']) {
+      assert.match(api.lrow(leo), new RegExp(piece), 'the list row lost its ' + piece + ' column');
+    }
+
+    // The answer route: gated on the tie, labelled with its visible word.
+    const ask = api.card(mara);
+    assert.match(ask, /ansgo/, 'the needs_you card lost its answer route');
+    assert.match(ask, /aria-label="Answer /, 'the answer button accessible name lost its visible word');
+    // The untied-needs_you shape cannot come through real routes (the
+    // pipeline forces untied panes to unknown; that refusal is its own
+    // tested fact elsewhere) -- so the gate's negative is driven by
+    // perturbing the one field the gate reads, on an otherwise-real card.
+    assert.doesNotMatch(api.card({ ...mara, isNamedOurs: false }), /ansgo/,
+      'a borrowed-name card offers a button into a thread that will refuse it');
+
+    // Hostile names render inert in both views. The controls aim at the two
+    // real failure modes: a live tag in text position, and a quote breaking
+    // out of an attribute value. (The inert ESCAPED text still contains the
+    // attack's letters; asserting their absence fails a correct renderer,
+    // which the first cut of this control did.)
+    const hostile = { ...leo, name: '<img src=x onerror=alert(1)>"' };
+    for (const html of [api.card(hostile), api.lrow(hostile)]) {
+      assert.doesNotMatch(html, /<img src=x/, 'an agent name reached the DOM as a live tag');
+      assert.match(html, /&lt;img/, 'CONTROL: the escaped name is absent, so the tag assertions prove nothing');
+      assert.doesNotMatch(html, /aria-label="Open <img/, 'a hostile name terminated the aria-label attribute');
+    }
+
+    // The clip id is a THIRD context (an id attribute plus a url()
+    // reference), and the slug is its guard: a quote in a SESSION name must
+    // not terminate the attribute the way the aria-label control above
+    // proves for display names. esc() would be wrong here -- entities
+    // decode in the attribute but not in the CSS reference. The agent is a
+    // REAL card (hostile session name through the real producer) and its
+    // seeded avatar is what makes the clip branch render at all.
+    const spiky = by('x" onload="alert(1)');
+    assert.ok(spiky, 'the fixture board is missing the hostile-named agent');
+    assert.equal(spiky.hasAvatar, true,
+      'CONTROL: the seeded avatar was not found, so the clip branch never renders');
+    const spikyCard = api.card(spiky);
+    assert.match(spikyCard, /id="clip-x__onload__alert_1_"/,
+      'CONTROL: the slugged clip id is absent, so the attribute assertion proves nothing');
+    assert.doesNotMatch(spikyCard, /id="clip-x" /,
+      'a hostile session name terminated the clipPath id attribute');
+  } finally {
+    board.restore();
+  }
 });
 
 test('update awareness: the status tick carries the verdict, and the install route refuses honestly', async () => {
@@ -2987,7 +3420,7 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // leaked one keystroke onto the board behind the backdrop.
     [/document\.activeElement === order\[order\.length - 1\]/, 'the focus trap wraps at the wrong end and leaks a keystroke behind the modal'],
     // The removed list is part of the board, so it refreshes with it.
-    [/if \(!document\.getElementById\('grid'\)\.hidden\) paintRemoved\(\)/,
+    [/if \(onAgentsTab\(\)\) paintRemoved\(\)/,
      'the removed list no longer refreshes on the poll, so its count goes stale'],
 
     /* ---- project chat, this branch ---------------------------------------
@@ -2997,7 +3430,24 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
        actually enforces. Same rule as above: a pin is for a fix nothing
        else can catch. */
 
-    // The tie half of the "See the question" gate -- defence-in-depth, and
+    // The gold selected state on the view toggle is Josh's ruling twice
+    // over (ink flips in dark and inverts the meaning); a quiet revert to
+    // an ink fill would pass every behavioural check.
+    [/\.vt\.on \{ background: var\(--gold-bright\); color: #14161a; \}/,
+     'the selected view-toggle state lost its gold (an ink fill inverts meaning in dark)'],
+    // The Answer control is the ONE card control whose function nothing
+    // else on the card duplicates (the card body opens detail, not the
+    // thread), so the undersized-target exceptions do not apply to it and
+    // it carries the retired .card-answer's SC 2.5.8 floor itself.
+    [/\.ansgo \{[^}]*min-height: 24px/,
+     'the Answer control lost its 24px minimum target (SC 2.5.8), shrinking back to a text-height target'],
+    // The removed list's reassurance line is the sentence that makes the
+    // light Remove confirmation honest; it rides inside paintRemoved's
+    // generated html where no render drive currently reads it.
+    [/Nothing was deleted\. Their folders and everything you wrote for them/,
+     'the removed list lost the nothing-was-deleted reassurance that keeps Remove honest'],
+    // The tie half of the answer-button gate (the pack renamed its visible
+    // label from "See the question" to "Answer") -- defence-in-depth, and
     // this pin is its ONLY enforcement: the pipeline currently forces an
     // untied pane's state to unknown upstream, so no fixture can produce the
     // untied-needs_you shape and no render check can hold the gate. If the
