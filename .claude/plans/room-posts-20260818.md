@@ -56,3 +56,14 @@ Decisions:
   the /api/msg + cmd_msg pattern (bash-3.2 JSON escaping and the
   three-state verdict included), so the falsifiable claims are checkable
   end to end from a pane.
+
+Splinter's review-time catch (HEADS-UP, 11:34 AM), decided now rather
+than inherited by the screen chunk: the room valve neither counts
+operator posts nor refuses the operator. The valve's remedy is "bring
+the person in", and a person driving the room is that remedy already in
+progress; firing the everyone-sentence at them reads as broken. Vacuous
+today (all posts are pane-derived agents), binding on the operator path
+when the screen chunk builds it. Also acknowledged from the same note:
+a fixed per-project cap means bigger rooms are tighter per head (five
+members get four posts each where two get ten). Accepted for now as the
+cost bound; flagged alongside the ROOM_CAP number for Mona Lisa.

@@ -518,7 +518,15 @@ function sendPost({ fromPane, project, text }, roster, members) {
   const log = rec.rows;
 
   /* THE ROOM VALVE, before the fan-out: counted across the WHOLE thread
-     regardless of sender. The valve row keeps kind 'valve' with `to` as
+     regardless of which AGENT sent each post. ⚠️ A decision made now for
+     the operator path (screen chunk), not discovered then: operator
+     posts neither count toward this cap nor meet this refusal. The
+     valve's remedy is "bring the person in", and a person actively
+     driving the room is that remedy already happening -- a valve that
+     fires AT them, in those words, reads as broken and fires at the one
+     participant it exists to protect (Splinter's catch, 2026-08-18).
+     Today every post is pane-derived so the exemption is vacuous; the
+     operator path must implement it when it mints its sender marker. The valve row keeps kind 'valve' with `to` as
      the project id (a string, per the record's shape rule) and a
      `project` field, which is what marks it as the room's rather than a
      pair's; logged once per project per window. The copy is the pair
