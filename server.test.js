@@ -5321,6 +5321,40 @@ test('the limit card shows each caution only when it matters (her always-on-scre
   assert.equal(el('lim-tier-row').hidden, true, 'the tier dropdown is offered while Off');
   assert.equal(el('lim-high-note').hidden, true);
   assert.equal(el('lim-toggle').attrs['aria-checked'], 'false');
+
+  // The HANDLERS, against the same stub: a click before the first paint
+  // (empty tier list) must never save -- Number('') would rewrite a
+  // stored 40 or 100 to a fallback -- and the tier handler reads the
+  // toggle's state rather than hardcoding On.
+  const saves = [];
+  const handlerSrc = (name) => {
+    const at2 = sc.indexOf('function ' + name);
+    let d = 0; let e = -1;
+    for (let k = sc.indexOf('{', at2); k < sc.length; k += 1) {
+      if (sc[k] === '{') d += 1;
+      else if (sc[k] === '}') { d -= 1; if (d === 0) { e = k + 1; break; } }
+    }
+    return sc.slice(at2, e);
+  };
+  // eslint-disable-next-line no-new-func
+  const handlers = new Function('document', 'saveLimits', 'paintLimits',
+    handlerSrc('limToggleClick') + '\n' + handlerSrc('limTierChange')
+    + '\nreturn { limToggleClick, limTierChange };')(
+    { getElementById: el }, (next) => saves.push(next), () => saves.push('repaint'));
+
+  el('lim-tier').options = [];
+  handlers.limToggleClick();
+  assert.deepEqual(saves, ['repaint'], 'a pre-paint click saved (or did nothing at all)');
+  saves.length = 0;
+  el('lim-tier').options = [1, 2, 3, 4];
+  el('lim-tier').value = '40';
+  el('lim-toggle').attrs['aria-checked'] = 'false';
+  handlers.limToggleClick();
+  assert.deepEqual(saves, [{ on: true, perHour: 40 }], 'the toggle did not negate aria-checked at the stored tier');
+  saves.length = 0;
+  handlers.limTierChange();
+  assert.deepEqual(saves, [{ on: false, perHour: 40 }],
+    'the tier handler hardcoded On instead of reading the toggle');
 });
 
 test('a room post renders as a room post everywhere: the agent page names the project, the room draws the receipt', () => {

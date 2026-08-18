@@ -414,9 +414,11 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
     // otherwise be shown the old state for up to an hour while Kosmos
     // does the opposite -- refusals rendered as silence one way, a
     // standing stop claim over a flowing conversation the other. The
-    // record's last word must match current behavior; within one state
-    // it still logs once. A pre-field row (no stopped) normalizes to
-    // true, the stop it was.
+    // record's last word matches current behavior at each STATE CHANGE;
+    // within one state it logs once per window (a re-closing after
+    // traffic ages out stays silent inside its hour, the pre-existing
+    // once-per-window semantics). A pre-field row (no stopped)
+    // normalizes to true, the stop it was.
     const prior = log.filter((m) => m && m.kind === 'valve' && !m.project
       && pairKey(m.from, m.to) === pairKey(from, toName)
       && Date.parse(m.at) >= now - lim.windowMs);

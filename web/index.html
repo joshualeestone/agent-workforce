@@ -2871,7 +2871,7 @@ svg { display: block; }
           <p class="dhint" style="margin:2px 0 0;">Every message between your agents uses your AI plan. If you run a model that does not charge you, turn this off.</p></div>
         <button class="toggle" id="lim-toggle" role="switch" aria-checked="true" aria-label="Limit how much your agents talk to each other"><i></i></button>
       </div>
-      <div class="frow" id="lim-tier-row" style="margin-top:12px; align-items:center; gap:8px;">
+      <div class="frow" id="lim-tier-row" hidden style="margin-top:12px; align-items:center; gap:8px;">
         <label class="dhint" for="lim-tier" style="margin:0;">Stop them after</label>
         <select id="lim-tier" aria-label="How many exchanges an hour"></select>
         <span class="dhint" style="margin:0;">exchanges an hour</span>
@@ -4020,8 +4020,10 @@ async function paintSettings() {
    not the values the person chose). */
 async function paintLimits() {
   const msg = document.getElementById('lim-msg');
+  const mine = ++LIM_EPOCH;
   try {
     const r = await (await fetch('/api/limits')).json();
+    if (mine !== LIM_EPOCH) return;
     paintLimitsFrom(r);
     msg.textContent = r.ok === false
       ? 'We could not read this setting, so Kosmos is using the default shown here.' : '';
@@ -4045,7 +4047,12 @@ function paintLimitsFrom(r) {
   document.getElementById('lim-high-note').hidden = !(r.on === true && r.perHour === 100);
 }
 
+let LIM_SAVING = false;
+let LIM_EPOCH = 0;
 async function saveLimits(next) {
+  if (LIM_SAVING) return;
+  LIM_SAVING = true;
+  const mine = ++LIM_EPOCH;
   const msg = document.getElementById('lim-msg');
   try {
     const res = await fetch('/api/limits', {
@@ -4054,25 +4061,38 @@ async function saveLimits(next) {
       body: JSON.stringify(next),
     });
     const body = await res.json().catch(() => ({}));
+    if (mine !== LIM_EPOCH) return;
     if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
     paintLimitsFrom(body);
     msg.textContent = '';
   } catch {
-    msg.textContent = 'We could not save that setting.';
+    if (mine === LIM_EPOCH) msg.textContent = 'We could not save that setting.';
+  } finally {
+    LIM_SAVING = false;
   }
 }
 
-document.getElementById('lim-toggle').addEventListener('click', () => {
+/* Named so the suite can drive them against a DOM stub. Both refuse to
+   save while the tier list has not painted: before the first read lands
+   (or forever, on a failed read) the select is empty and Number('')
+   would silently rewrite a stored 40 or 100 to a fallback. */
+function limToggleClick() {
+  const sel = document.getElementById('lim-tier');
+  if (!sel.options || !sel.options.length) { paintLimits(); return; }
   const on = document.getElementById('lim-toggle').getAttribute('aria-checked') !== 'true';
-  saveLimits({ on, perHour: Number(document.getElementById('lim-tier').value) || 20 });
-});
-document.getElementById('lim-tier').addEventListener('change', () => {
+  saveLimits({ on, perHour: Number(sel.value) });
+}
+function limTierChange() {
+  const sel = document.getElementById('lim-tier');
+  if (!sel.options || !sel.options.length) return;
   // The toggle's own state, not a hardcoded On: the row is hidden while
   // Off today, but this handler must not be silently coupled to that
   // visibility rule.
   const on = document.getElementById('lim-toggle').getAttribute('aria-checked') === 'true';
-  saveLimits({ on, perHour: Number(document.getElementById('lim-tier').value) });
-});
+  saveLimits({ on, perHour: Number(sel.value) });
+}
+document.getElementById('lim-toggle').addEventListener('click', limToggleClick);
+document.getElementById('lim-tier').addEventListener('change', limTierChange);
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {

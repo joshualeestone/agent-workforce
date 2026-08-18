@@ -52,3 +52,17 @@ The blind pass (one blocker, all findings landed):
   direction for record growth); the pair valve row's because is the
   record's agent-facing sentence while the person-facing rendering
   composes from stopped, a pairing now stated at the log site.
+
+Pass 2 (blind, blocker-free: converged):
+- a toggle click before the first paint could save Number('') as a
+  fallback tier and silently rewrite a stored 40 or 100: both handlers
+  now refuse to save while the tier list is unpainted (the click
+  re-requests the read instead), the tier row ships hidden until
+  painted, saves are single-flight with an epoch guard (the INSTR_EPOCH
+  house pattern), and the handlers are named and driven against the DOM
+  stub (pre-paint click, aria negation at the stored tier, the tier
+  handler reading the toggle).
+- the dedup comment softened to what the mechanism delivers (state
+  changes get a fresh row; a re-closing within one state stays
+  once-per-window, the pre-existing semantics); the fixed tmp path's
+  single-process scope stated at the write.
