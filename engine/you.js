@@ -57,8 +57,14 @@ const KNOW_MAX = 2000;
 function clean(value, { multiline } = {}) {
   let s = String(value == null ? '' : value);
   s = multiline ? s.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n') : s.replace(/\s+/g, ' ');
-  // Both our marker pairs: a name containing either would end a block early.
-  for (const m of [START, END, projects.BLOCK_START, projects.BLOCK_END]) {
+  // Every sibling's marker pair, not only ours: a pair smuggled through a
+  // typed answer would end a block early, ambiguate a real sibling block
+  // (silently disabling its heal), or hand the colleagues heal a span to
+  // replace inside somebody's own words. The colleagues pair joined this
+  // list when tellAgent became that block's healer (same lesson, fourth
+  // writer). Lazy require: you.js must not gain a cycle.
+  const mm = require('./messages');
+  for (const m of [START, END, projects.BLOCK_START, projects.BLOCK_END, mm.START, mm.END]) {
     s = s.split(m).join('(kosmos marker)');
   }
   return s.trim();

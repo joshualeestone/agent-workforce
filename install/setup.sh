@@ -574,11 +574,17 @@ uninstall() {
     # install would otherwise remove the marker and orphan the export it
     # explained. Only an export-PATH-shaped line right after the marker
     # qualifies; anything else the person wrote there is printed untouched.
+    # The single blank line the install printed before the marker is
+    # swallowed with it (held one line, flushed unless the marker follows),
+    # so install/uninstall cycles do not accumulate blank lines.
     if [ -n "$_ptmp" ] \
        && awk -v m="$_marker" -v p="$_pline" '
             skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
-            $0 == m { skip=1; next }
+            $0 == m { skip=1; blank=0; next }
+            { if (blank) print ""; blank=0 }
+            $0 == "" { blank=1; next }
             { print }
+            END { if (blank) print "" }
           ' "$_profile" > "$_ptmp" 2>/dev/null \
        && cat "$_ptmp" > "$_profile" 2>/dev/null; then
       rm -f "$_ptmp"
@@ -1062,8 +1068,10 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
     if [ -z "$PROFILE_FILE" ]; then
-      : # sandboxed with no profile named: leave every real profile alone
-    elif [ -n "${SHELL:-}" ] && [ "${SHELL##*/}" != "zsh" ]; then
+      info "skipping the shell profile (sandboxed run, no profile named)"
+    elif [ -z "${KOSMOS_PROFILE_FILE:-}" ] && [ -n "${SHELL:-}" ] && [ "${SHELL##*/}" != "zsh" ]; then
+      # An EXPLICIT KOSMOS_PROFILE_FILE outranks this hedge: a bash user
+      # pointing at their own ~/.bash_profile asked for exactly this write.
       # ⚠️ The claim must not outrun the file: ~/.zprofile is read by zsh
       # only, and a bash/fish login shell would get "success" and a command
       # that still fails -- the silent class this whole step exists to end.
@@ -1080,7 +1088,9 @@ case ":$PATH:" in
           ;;
         *)
           if [ -f "$PROFILE_FILE" ] && grep -qxF "$PATH_MARKER" "$PROFILE_FILE" 2>/dev/null; then
-            info "the kosmos command is already wired into ${PROFILE_FILE##*/}; it works in new Terminal windows"
+            # No works-claim here: the wired export names whatever bin dir
+            # the EARLIER install used, which this run cannot vouch for.
+            info "the kosmos command is already wired into ${PROFILE_FILE##*/}"
           elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
             info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
           else

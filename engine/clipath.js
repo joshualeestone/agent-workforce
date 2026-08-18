@@ -36,9 +36,16 @@ function kosmosCli(probeRoot) {
 }
 
 /** The taught form: double-quoted only when the path carries whitespace,
-    because the agent pastes this line into a shell. */
+    because the agent pastes this line into a shell. A path carrying a
+    character that double quotes cannot neutralize (quote, dollar,
+    backtick, backslash) falls back to the bare word: a command that may
+    not resolve beats teaching a line that expands or executes inside the
+    agent's shell. Same character class the installer refuses for
+    KOSMOS_HOME, degraded here instead of refused because a teaching
+    surface has no one to refuse to. */
 function kosmosCliShown(probeRoot) {
   const cli = kosmosCli(probeRoot);
+  if (/["$`\\]/.test(cli)) return 'kosmos';
   return /\s/.test(cli) ? '"' + cli + '"' : cli;
 }
 

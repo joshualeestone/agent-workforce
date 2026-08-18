@@ -77,6 +77,20 @@ test('the block speaks the answers and neutralises the markers', () => {
   assert.ok(!body.includes(you.START), 'a marker in an answer would end the block early');
   assert.ok(!body.slice(body.indexOf('Josh')).includes(projects.BLOCK_END), 'the projects marker is neutralised too');
   assert.match(body, /Builds things/, 'one-line answers collapse their newlines');
+
+  // The colleagues pair as well, since tellAgent heals that block on every
+  // membership sync: a smuggled pair would ambiguate the real block (heal
+  // silently off) or hand the heal a span INSIDE the person's own words.
+  const messages = require('./messages');
+  const smuggled = you.blockBody({
+    name: 'Josh',
+    does: 'Builds things',
+    know: 'A ' + messages.START + ' pair ' + messages.END + ' typed by hand',
+  });
+  assert.ok(!smuggled.includes(messages.START) && !smuggled.includes(messages.END),
+    'a colleagues marker survived through a typed answer');
+  assert.ok(smuggled.includes('(kosmos marker)'),
+    'CONTROL: neutralization left no trace, so the absence above proves nothing');
 });
 
 test('tellAgent writes the block for a tied agent, and an absent record removes it', () => {

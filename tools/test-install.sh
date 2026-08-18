@@ -57,6 +57,10 @@ done
 
 export KOSMOS_HOME="$SB/home" KOSMOS_BIN_DIR="$SB/bin" KOSMOS_APP_DIR="$SB/apps"
 export KOSMOS_PROFILE_FILE="$SB/zprofile"
+# SHELL pinned: setup.sh's non-zsh arm refuses to wire and prints the note,
+# so on a bash/fish operator's machine every profile assertion below would
+# fail for an environmental reason that looks like a code regression.
+export SHELL=/bin/zsh
 printf '# the operator\047s own line\n' > "$SB/zprofile"
 export KOSMOS_TMUX_SRC="$TMUX_SRC" KOSMOS_SRC="$KOS_SRC" KOSMOS_PORT="$PORT"
 export AGENT_WORKFORCE_DATA="$SB/data" AGENT_WORKFORCE_LAUNCH="$SB/launch"
@@ -124,6 +128,7 @@ chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 # on this shell's PATH, so the wiring arm must fire), exactly once, and a
 # pre-existing line survives.
 chk "PATH wiring wrote the sandbox profile" "grep -qxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\""
+chk "PATH wiring wrote the export line (the functional half)" "grep -qF \"$SB/bin\" \"$SB/zprofile\""
 chk "the gold-K icon landed inside the app, intact" "[ \"\$(shasum -a 256 \"$SB/apps/Kosmos.app/Contents/Resources/Kosmos.icns\" 2>/dev/null | cut -d' ' -f1)\" = \"\$(shasum -a 256 \"$KOS_SRC/app/assets/Kosmos.icns\" | cut -d' ' -f1)\" ]"
 chk "the bundle declares its architecture (no Rosetta prompt)" "grep -q 'LSArchitecturePriority' \"$SB/apps/Kosmos.app/Contents/Info.plist\" && grep -q 'arm64' \"$SB/apps/Kosmos.app/Contents/Info.plist\""
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
@@ -184,6 +189,7 @@ chk "override-branch stage and aside residue swept" "[ ! -e \"$SB/apps/.Kosmos.a
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
 chk "user data untouched" "[ -d \"$SB/data\" ]"
 chk "PATH wiring removed from the sandbox profile" "! grep -q kosmos \"$SB/zprofile\""
+chk "the export line came out too (adjacency arm has a check that can fail)" "! grep -qF \"$SB/bin\" \"$SB/zprofile\""
 chk "the operator's own profile line survives" "grep -q 'own line' \"$SB/zprofile\""
 chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
 

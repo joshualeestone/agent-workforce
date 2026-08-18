@@ -1707,6 +1707,13 @@ test('the taught kosmos command resolves to a real file on this machine, never a
   fs.writeFileSync(path.join(spaced, 'install', 'kosmos'), '#!/bin/sh\n');
   assert.equal(kosmosCliShown(spaced), '"' + path.join(spaced, 'install', 'kosmos') + '"');
   assert.ok(!/^"/.test(kosmosCliShown()), 'an unspaced path grew quotes it does not need');
+  // A character double quotes cannot neutralize degrades to the bare
+  // word: never teach a line that expands inside the agent's shell.
+  const hostile = fs.mkdtempSync(path.join(os.tmpdir(), 'cli$evil-'));
+  fs.mkdirSync(path.join(hostile, 'install'), { recursive: true });
+  fs.writeFileSync(path.join(hostile, 'install', 'kosmos'), '#!/bin/sh\n');
+  assert.equal(kosmosCliShown(hostile), 'kosmos',
+    'a dollar-carrying path was taught inside double quotes');
 });
 
 test('the project block and the colleagues block both teach the resolved command', () => {
@@ -1753,4 +1760,16 @@ test('a stale colleagues block heals on syncAgent; a file without one is not gro
   const rook = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'rook', 'CLAUDE.md'), 'utf8');
   assert.ok(!rook.includes(messages.START),
     'a file with no colleagues block was grown one by a projects write');
+});
+
+test('a colleagues marker pair cannot ride a project field into the block', () => {
+  // tellAgent heals the colleagues block now, so a smuggled pair is an
+  // injection path into the heal (ambiguate it off, or hand it a span
+  // inside the projects block). oneLine neutralizes it like its siblings.
+  const messages = require('./messages');
+  const body = projects.blockBody([{ id: 'x', name: 'Evil ' + messages.START + ' name', folder: '/tmp/' + messages.END }]);
+  assert.ok(!body.includes(messages.START) && !body.includes(messages.END),
+    'a colleagues marker survived oneLine through a project field');
+  assert.ok(body.includes('(kosmos marker)'),
+    'CONTROL: neutralization left no trace, so the absence above proves nothing');
 });
