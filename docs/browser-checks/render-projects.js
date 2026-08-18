@@ -672,21 +672,58 @@ async function main() {
     // the members are read first and the list rules are read before the click.
     const listEls = await page.evaluate(() => {
       const bgOf = (el) => {
+        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
+        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
+        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
+        // -- a translucent layer must be folded over what is beneath it
+        // before it can be a background.
+        const layers = [];
         let n = el;
         while (n) {
           const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          if (c && c !== 'rgba(0, 0, 0, 0)') {
+            layers.push(c);
+            const m = String(c).match(/[\d.]+/g).map(Number);
+            if (m.length < 4 || m[3] >= 1) break;
+          }
           n = n.parentElement;
         }
-        return 'rgb(255, 255, 255)';
+        let acc = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
+          const a = p.length > 3 ? p[3] : 1;
+          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
+        }
+        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
       };
       const out = [];
+      // Every text token the pack card carries, not only the honesty lines:
+      // the plan's hand-checked ratios were a one-time verification, and a
+      // palette edit after it would regress silently. The disc initials
+      // (.pjfaces .lav) measure the inline TINT/INK pair the renderer chose.
       for (const sel of ['#panel-projects .pj-warn', '#panel-projects .pj-row .pc-t',
+                         '#pj-list .pjcard-h b', '#pj-list .pjpill', '#pj-list .pjslug',
+                         '#pj-list .pjcount', '#pj-list .pjfaces .lav',
                          '#pj-list-view .viewtoggle .vt', '#pj-list-view .viewtoggle .vt.on']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
         out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      }
+      // The needs-you pill variant, measured as a STYLE on real markup: the
+      // sandbox roster cannot manufacture a live needs-you pane, so the
+      // class is toggled onto an existing pill for the read and toggled
+      // straight back off. A state claim it is not; the red-on-card ratio
+      // is what it pins.
+      {
+        const pill = document.querySelector('#pj-list .pjpill');
+        if (!pill) { out.push({ sel: '#pj-list .pjpill.attn (toggled)', missing: true }); }
+        else {
+          pill.classList.add('attn');
+          const cs = getComputedStyle(pill);
+          out.push({ sel: '#pj-list .pjpill.attn (toggled)', fg: cs.color, bg: bgOf(pill), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+          pill.classList.remove('attn');
+        }
       }
       return out;
     });
@@ -706,13 +743,29 @@ async function main() {
     await page.waitForTimeout(200);
     const badFolderEls = await page.evaluate(() => {
       const bgOf = (el) => {
+        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
+        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
+        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
+        // -- a translucent layer must be folded over what is beneath it
+        // before it can be a background.
+        const layers = [];
         let n = el;
         while (n) {
           const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          if (c && c !== 'rgba(0, 0, 0, 0)') {
+            layers.push(c);
+            const m = String(c).match(/[\d.]+/g).map(Number);
+            if (m.length < 4 || m[3] >= 1) break;
+          }
           n = n.parentElement;
         }
-        return 'rgb(255, 255, 255)';
+        let acc = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
+          const a = p.length > 3 ? p[3] : 1;
+          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
+        }
+        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
       };
       const out = [];
       for (const sel of ['#pj-settings-view .pj-folder-state.bad']) {
@@ -760,13 +813,29 @@ async function main() {
     await page.waitForTimeout(400);
     const els = await page.evaluate(() => {
       const bgOf = (el) => {
+        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
+        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
+        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
+        // -- a translucent layer must be folded over what is beneath it
+        // before it can be a background.
+        const layers = [];
         let n = el;
         while (n) {
           const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          if (c && c !== 'rgba(0, 0, 0, 0)') {
+            layers.push(c);
+            const m = String(c).match(/[\d.]+/g).map(Number);
+            if (m.length < 4 || m[3] >= 1) break;
+          }
           n = n.parentElement;
         }
-        return 'rgb(255, 255, 255)';
+        let acc = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
+          const a = p.length > 3 ? p[3] : 1;
+          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
+        }
+        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
       };
       const out = [];
       // ⚠️ SCOPED to the projects panel. Unscoped, `.fhint` and `.flabel`
@@ -800,13 +869,29 @@ async function main() {
     await page.waitForTimeout(200);
     const settingsEls = await page.evaluate(() => {
       const bgOf = (el) => {
+        // ⚠️ COMPOSITED, not the first painted color: the slug chip's
+        // rgba(20,22,26,.05) wash read as near-opaque BLACK and produced a
+        // 2.20:1 "failure" in both schemes for text that actually clears 7:1
+        // -- a translucent layer must be folded over what is beneath it
+        // before it can be a background.
+        const layers = [];
         let n = el;
         while (n) {
           const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)') return c;
+          if (c && c !== 'rgba(0, 0, 0, 0)') {
+            layers.push(c);
+            const m = String(c).match(/[\d.]+/g).map(Number);
+            if (m.length < 4 || m[3] >= 1) break;
+          }
           n = n.parentElement;
         }
-        return 'rgb(255, 255, 255)';
+        let acc = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const p = String(layers[i]).match(/[\d.]+/g).map(Number);
+          const a = p.length > 3 ? p[3] : 1;
+          acc = { r: p[0] * a + acc.r * (1 - a), g: p[1] * a + acc.g * (1 - a), b: p[2] * a + acc.b * (1 - a) };
+        }
+        return 'rgb(' + Math.round(acc.r) + ', ' + Math.round(acc.g) + ', ' + Math.round(acc.b) + ')';
       };
       const out = [];
       for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where']) {
@@ -853,8 +938,10 @@ async function main() {
       // AGENT_WORKFORCE_PROJECTS) and are deleted before the next check.
       const fillers = [];
       for (let i = 0; i < 12; i++) {
+        // `id` is the field the route guarantees; `project` is null when the
+        // post-write re-read throws, and a filler must not die on that.
         const made = await post('/api/projects', { name: 'Scroll filler ' + i });
-        fillers.push(made.project.id);
+        fillers.push(made.id);
       }
       await page.goto(BASE + '/?tab=projects', { waitUntil: 'networkidle' });
       const stick = await page.evaluate(() => {

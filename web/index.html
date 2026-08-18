@@ -2436,6 +2436,11 @@ svg { display: block; }
     <button class="back" id="pj-settings-back" type="button">&larr; <span id="pj-settings-backname"></span></button>
     <h2>Project settings</h2>
     <p class="fhint">Changes here apply to this project only.</p>
+    <!-- The read-failure note, on THIS view: the folder facts and archive
+         control below repaint from every poll, so when the poll stops
+         landing the person sitting here has to be told the page went
+         stale, same as the detail and add views. -->
+    <p class="fmsg" id="pjs-read-msg" aria-live="polite"></p>
 
     <div class="field">
       <label class="flabel" for="pjs-name">Name</label>
@@ -6767,7 +6772,7 @@ function projectCard(p, unreadable) {
     /* The slug chip shows the FOLDER'S real basename (what sits on their
        disk), not the engine's collapsed id -- the chip's job is naming
        the thing the person can find in Finder. */
-    + '<span class="pjslug">' + esc(String(p.folder || '').split('/').pop() || p.id) + '</span>'
+    + '<span class="pjslug">' + esc(String(p.folder || '').split('/').filter(Boolean).pop() || p.id) + '</span>'
     + facesRow
     // The description is what makes a list of twelve projects readable
     // (Josh's fixtures made the case); absent, the line is absent, per
@@ -6973,6 +6978,11 @@ async function loadProjects() {
     const add = document.getElementById('pj-add-msg');
     if (!document.getElementById('pj-one-view').hidden && one.textContent !== note) one.textContent = note;
     if (!document.getElementById('pj-add-view').hidden && add.textContent !== note) add.textContent = note;
+    // Settings holds poll-repainted facts (folder, archive state), so the
+    // person dwelling there is told too -- the branch that added the
+    // success-path repaint owed the failure path the same symmetry.
+    const set = document.getElementById('pjs-read-msg');
+    if (!document.getElementById('pj-settings-view').hidden && set.textContent !== note) set.textContent = note;
     // ⚠️ PROJECTS is deliberately NOT emptied. Blanking it would repaint the
     // open project as "there is no project by that name" on a transient
     // network failure -- turning "we could not look" into "it is gone".
@@ -6995,6 +7005,10 @@ async function loadProjects() {
   const oneMsg = document.getElementById('pj-one-msg');
   if (oneMsg && oneMsg.textContent.startsWith('We cannot read your projects right now')) {
     oneMsg.textContent = '';
+  }
+  const setMsg = document.getElementById('pjs-read-msg');
+  if (setMsg && setMsg.textContent.startsWith('We cannot read your projects right now')) {
+    setMsg.textContent = '';
   }
   return true;
 }
@@ -7359,12 +7373,15 @@ document.getElementById('pjs-save').addEventListener('click', async () => {
     });
     const got = await res.json().catch(() => ({}));
     if (!res.ok) { msg.textContent = got.error || 'we could not save that'; return; }
-    // The archive sibling's retry shape; and on a still-failed read, NO
-    // repaint: the typed values are exactly what was saved, and repainting
-    // stale PROJECTS under "Saved." would put the old name back beneath a
-    // sentence claiming the new one landed.
-    const read = (await loadProjects()) || (await loadProjects());
-    if (read) {
+    // The archive sibling's retry shape (retry only when a NEWER read
+    // retired ours -- loadProjects answers true on a recorded failure, so
+    // `||` never retried and a truthy answer was read as a good read); and
+    // on a still-failed read, NO repaint: the typed values are exactly what
+    // was saved, and repainting stale PROJECTS under "Saved." would put the
+    // old name back beneath a sentence claiming the new one landed. The
+    // read-failure note itself lands in #pjs-read-msg via the poll path.
+    if (!(await loadProjects())) await loadProjects();
+    if (!PJ_READ_FAILED) {
       const fresh = pjById(PJ_CURRENT);
       if (fresh) { paintProjectSettings(fresh); paintOneProject(); pjView('settings'); }
     }
@@ -7410,11 +7427,11 @@ function paintOneProject() {
   /* The raw-path element retired with the pack cut ("~/" is a squiggle to
      this reader): the folder facts live on #pjs-folder-name and
      #pjs-folder-where in Project settings. */
-  // ⚠️ The detail STATES the archived fact and flips the control. Without
-  // this, an archived project's page was indistinguishable from an active
-  // one, still offering "Archive it" -- a 200 no-op answered with "It is in
-  // the archived list below" for a change that did not occur. (Reachable:
-  // pjAnswerFrom opens an agent's only project even when archived.)
+  // The archived statement and its control moved to Project settings
+  // (paintSettingsFacts flips them from the truth on paint and on every
+  // poll). The reachable archived-detail case -- pjAnswerFrom opens an
+  // agent's only project even when archived -- is stated THERE now; the
+  // pack's pjone rebuild decides whether the detail itself says it too.
 
   setIfChanged(document.getElementById('pj-one-agents'), (p.agents || []).length
     ? p.agents.map((m) => pjMember(m, p.id)).join('')
