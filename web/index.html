@@ -2270,10 +2270,8 @@ svg { display: block; }
   <button class="back" id="create-back">&#8592; All agents</button>
 
   <div class="cstep" id="cstep-role">
-    <p class="crumb">Step 1 of 2</p>
     <h2>What should this agent do?</h2>
-    <p>Most people start with a project manager. You can change any of this
-       afterwards, and nothing here is permanent.</p>
+
     <!-- ⚠️ THREE CHOICES IN THE PACK, TWO SHIPPED HERE. The pack's rule
          (2026-08-15): a radio for the recommended role and a radio that
          opens the rest as a grouped menu -- twenty-six cards is a wall, and
@@ -2336,7 +2334,6 @@ svg { display: block; }
   </div>
 
   <div class="cstep" id="cstep-name" hidden>
-    <p class="crumb">Step 2 of 2</p>
     <h2 id="create-meet">Set up your agent</h2>
     <p id="create-blurb"></p>
 
@@ -2361,7 +2358,12 @@ svg { display: block; }
         <button class="btn sav-btn" type="button" id="create-avatar-btn">Change picture</button>
         <input type="file" id="create-avatar" accept="image/png,image/jpeg,image/webp" hidden>
       </div>
-      <p class="fhint" id="genav-hint">A unique mark will be created from the name unless you add a picture.</p>
+      <!-- ⚠️ SHIPS EMPTY. This line used to explain that a mark is generated
+           from the name; Josh cut it ("people know how to make an avatar").
+           The ELEMENT stays because it does a second job: when somebody picks a
+           file it confirms which one. Deleting it would have taken the
+           confirmation with the explanation. -->
+      <p class="fhint" id="genav-hint"></p>
     </section>
 
     <div class="field">
@@ -2377,9 +2379,6 @@ svg { display: block; }
            agent's name the way they would write a colleague's. Capitals are
            kept for what you see; the machine quietly uses the lower-case form
            for its folder and its window. -->
-      <div class="fhint">Letters, numbers, hyphens and underscores. Capitals are
-        fine: you will see it written the way you type it, and the folder it
-        gets on this computer uses the lower-case form.</div>
       <div class="frow">
         <input type="text" id="create-name" autocomplete="off" spellcheck="false"
                placeholder="Casey">
@@ -2388,7 +2387,6 @@ svg { display: block; }
 
     <div class="field">
       <label class="flabel" for="create-label">Role label</label>
-      <div class="fhint">A short label shown below the agent&rsquo;s name.</div>
       <div class="frow">
         <input type="text" id="create-label" autocomplete="off" maxlength="80"
                placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
@@ -2413,7 +2411,6 @@ svg { display: block; }
          section explaining a thing they have none of. -->
     <div class="field" id="create-projects-wrap" hidden>
       <span class="flabel" id="create-projects-lab">Project <span class="flabel-soft">(optional)</span></span>
-      <div class="fhint">Gives the agent context about where its work belongs. This does not change permissions.</div>
       <div class="projpick" id="create-projects" role="group" aria-labelledby="create-projects-lab"></div>
     </div>
 
@@ -4038,7 +4035,20 @@ async function tick() {
     document.getElementById('st-attn-tile').hidden = !c.needsYou;
     const bits = [];
     if (c.unknown) bits.push(`${c.unknown} we cannot read`);
-    if (c.unknownFullness) bits.push(`${c.unknownFullness} with unknown memory limits`);
+    /* ⚠️ THE UNKNOWN-MEMORY COUNT IS NOT SUMMARISED HERE (Josh, 2026-08-19),
+       and this removes the only VISIBLE statement of that fact on the screen.
+       Said plainly rather than justified away: the dashed ring distinguishes
+       those cards, and the words "memory unknown" exist only in the ring's
+       `aria-label` and a `.vh` span (lines 3338 and 3438). So a screen-reader
+       user keeps the information and a sighted person is left with dashed rings
+       and nothing naming what dashed means.
+       ⚠️ THE SECOND HALF IS OWED: a visible caption on the card itself, which
+       the pack's own section 10 already requires ("shape distinguishes, words
+       identify") and does not currently draw either. Mona Lisa has it. The
+       tally was doing that job by accident, for the whole fleet at once, which
+       is why removing it looks free and is not.
+       The line above it, "N we cannot read", STAYS: that one is about agents
+       missing from this board entirely, which is a different and louder fact. */
     // ⚠️ Part of the fleet is MISSING FROM THIS BOARD. tmux said something we
     // could not read, and the agents behind those lines are not below — so this
     // has to be on screen, or the board is presenting what it managed to parse
@@ -6515,8 +6525,8 @@ function openCreate() {
   document.getElementById('create-msg').textContent = '';
   AVATAR_FILE = null;
   document.getElementById('create-avatar').value = '';
-  document.getElementById('genav-hint').textContent =
-    'A unique mark will be created from the name unless you add a picture.';
+  // Back to empty, not back to the explanation.
+  document.getElementById('genav-hint').textContent = '';
   INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
   FILLED_ROLE = null; LAST_MARK_SEED = null; PENDING_AVATAR = null;
   LAST_TYPED_NAME = 'your agent';
@@ -6855,7 +6865,7 @@ document.getElementById('create-avatar').addEventListener('change', (e) => {
   AVATAR_FILE = (e.target.files && e.target.files[0]) || null;
   document.getElementById('genav-hint').textContent = AVATAR_FILE
     ? AVATAR_FILE.name + ' will be its picture.'
-    : 'A unique mark will be created from the name unless you add a picture.';
+    : '';
   // Show the picture that will actually be used: leaving the generated mark
   // frozen at however much of the name existed at pick time made the canvas
   // disagree with the hint beside it.
