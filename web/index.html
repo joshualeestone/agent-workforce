@@ -1882,15 +1882,23 @@ svg { display: block; }
   --label: #14161a; --label-3: rgba(20,22,26,0.48);
   --border-strong: rgba(20,22,26,0.26);
   --field-fill: #faf9f7;   /* paper, so a field is never the card's own white */
+  background: var(--k-bg);
 }
 /* ⚠️ `--label-2` AND `--separator` ARE PINNED IN DARK ONLY, because the root
    `prefers-contrast: more` block enhances exactly those two. Pinning them
    unconditionally made the wizard decline the person's stated contrast
    preference in BOTH schemes -- on the first screen anyone meets. The
-   single-look ruling needs the dark half; the light half was collateral. */
+   single-look ruling needs the dark half; the light half was collateral.
+   ⚠️ WHEN THIS BLOCK WAS ADDED IT WAS INSERTED BEFORE `background`, leaving
+   that declaration ORPHANED at the media block's top level -- a parse error,
+   discarded, so `#firstrun` lost its background and fell through to
+   `.fr-back`'s `--bg-sunken`: the PAGE SURROUND colour, on the first screen
+   anyone sees. That is the exact defect the `body` fix at the top of this file
+   exists to correct, reintroduced by an unrelated fix. A stray declaration is
+   silent in every text search and in the diff; only a brace-aware scan or the
+   render shows it, which is why `no-stray-declarations` now guards it. */
 @media (prefers-color-scheme: dark) {
   #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
-  background: var(--k-bg);
 }
 #firstrun .fr-box {
   width: min(660px, 100%); background: #fff; border-radius: 24px; border: 0;

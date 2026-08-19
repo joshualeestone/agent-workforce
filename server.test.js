@@ -7020,3 +7020,68 @@ test('a removed-agents section that could not be read says so, and only before i
   assert.equal(make(false, 'Kosmos could not stop it.'), 'Kosmos could not stop it.',
     'the could-not-check line overwrote a more specific message about a removal');
 });
+
+/**
+ * No declaration sits outside a selector.
+ *
+ * ⚠️ A REAL BLOCKER THIS BRANCH SHIPPED AND ALMOST MERGED. Inserting an
+ * `@media` block into the middle of `#firstrun {}` left `background:
+ * var(--k-bg)` at the media block's TOP LEVEL — a parse error, silently
+ * discarded, so the first screen anyone sees lost its background and fell
+ * through to the page-surround colour.
+ *
+ * ⚠️ IT IS INVISIBLE TO EVERY OTHER INSTRUMENT HERE. The declaration is still
+ * present in the file, so a text search finds it; the diff shows a plausible
+ * brace move; the render check walks up from a field and stops at the first
+ * opaque ancestor, never reaching the element that lost its paint. Only a
+ * brace-aware scan sees it, and it is nine lines.
+ */
+test('every CSS declaration in the page sits inside a selector', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const style = raw.slice(raw.indexOf('<style>') + 7, raw.indexOf('</style>'));
+  // Comment-stripped, newline-preserving: prose about a rule is not a rule, and
+  // the line numbers have to stay true to be worth reporting.
+  const src = style.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''));
+
+  let depth = 0;            // 0 = top level, 1 = inside @media, 2+ = inside a rule
+  let atRuleDepth = -1;
+  const stray = [];
+  src.split('\n').forEach((line, i) => {
+    const t = line.trim();
+    if (!t) return;
+    if (/^@media[^{]*\{/.test(t)) { atRuleDepth = depth; depth += 1; return; }
+    const opens = (t.match(/\{/g) || []).length;
+    const closes = (t.match(/\}/g) || []).length;
+    // A declaration is `prop: value` with no brace on the line.
+    if (!opens && !closes && /^[-a-z]+\s*:/i.test(t)) {
+      // Legal only when we are inside a RULE, i.e. deeper than any @media.
+      if (depth <= Math.max(atRuleDepth + 1, 0) && depth <= 1) {
+        stray.push(`${i + 1}: ${t.slice(0, 60)}`);
+      }
+    }
+    depth += opens - closes;
+    if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
+  });
+
+  assert.deepEqual(stray, [],
+    'declaration(s) outside any selector — the browser discards these silently, '
+    + 'so the rule they belonged to lost that property:\n  ' + stray.join('\n  '));
+
+  // ⚠️ THE CONTROL. Without it a scanner that never flags anything passes, and
+  // this whole test becomes a comment. Feeds the exact shape of the real defect.
+  const broken = '#x {\n  color: red;\n}\n@media (prefers-color-scheme: dark) {\n  #x { --a: 1; }\n  background: var(--k-bg);\n}\n';
+  let d = 0; let ad = -1; const found = [];
+  broken.split('\n').forEach((line) => {
+    const t = line.trim();
+    if (!t) return;
+    if (/^@media[^{]*\{/.test(t)) { ad = d; d += 1; return; }
+    const o = (t.match(/\{/g) || []).length;
+    const c = (t.match(/\}/g) || []).length;
+    if (!o && !c && /^[-a-z]+\s*:/i.test(t) && d <= Math.max(ad + 1, 0) && d <= 1) found.push(t);
+    d += o - c;
+    if (ad >= 0 && d <= ad) ad = -1;
+  });
+  assert.deepEqual(found, ['background: var(--k-bg);'],
+    'the scanner cannot see the defect it exists for, so its silence above '
+    + 'proves nothing');
+});
