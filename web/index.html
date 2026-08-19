@@ -7442,10 +7442,10 @@ function pjMember(m, suppressTold) {
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
     + '<b>' + esc(m.name) + '</b>'
-    // ⚠️ An `unknown` state carries its REASON here. A bare "Can't tell" sat
-    // directly above "Kosmos told it where this folder is", and the two read as
-    // a contradiction on one row -- the same juxtaposition the engine calls out
-    // as a shipped defect. Everywhere else in this app an unknown says why.
+    // ⚠️ An `unknown` state carries its REASON here (historical origin: a
+    // bare "Can't tell" once sat beside the now-retired told sentence and
+    // read as a contradiction; the sentence is gone, the rule stands).
+    // Everywhere else in this app an unknown says why.
     + (m.present
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
         + (m.state === 'unknown' && m.because ? ': ' + esc(m.because) : '') + '</small>'

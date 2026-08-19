@@ -5987,8 +5987,11 @@ test('the settings members wiring is real, not just extractable', () => {
     'the in-flight cross-project guard lost its capture');
   assert.ok(handler.includes('if (PJ_CURRENT !== sentProject) return;'),
     'the in-flight cross-project guard lost its check');
-  assert.ok(handler.includes("document.getElementById('pj-settings-view').hidden"),
-    'the verdict no longer follows the person to the visible view');
+  // BOTH arms: the success path and the catch path each carry the
+  // visible-view targeting; a first-occurrence pin let either one revert
+  // alone.
+  assert.ok(handler.split("document.getElementById('pj-settings-view').hidden").length >= 3,
+    'an arm of the handler lost its visible-view targeting');
   assert.ok(pageFnSource('paintProjectSettings').includes("getElementById('pjs-members-msg').textContent = ''"),
     'the entry-clear for the members verdict is gone (the persisted-half misattribution returns)');
 
