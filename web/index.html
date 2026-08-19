@@ -3311,13 +3311,6 @@ svg { display: block; }
           aria-expanded="false" aria-controls="removed-list"></button>
   <div class="removed-list" id="removed-list" hidden></div>
 </div>
-<!-- ⚠️ THE FOOT, not the top (Josh, 2026-08-19). This line sat above the cards,
-     under the New agent button, where the first thing a person met on their
-     board was its version number. It belongs where a version belongs: at the
-     bottom, after the removed-agents area, which is also where the pack draws
-     it. Kept OUTSIDE `#removed-wrap` for the reason the note below gives about
-     its neighbour: that wrap hides itself entirely when nothing is removed. -->
-<div class="build" id="build"></div>
 <!-- ⚠️ OUTSIDE `#removed-wrap`, NOT MERELY OUTSIDE `#removed-list`, and the
      difference is the whole fix.
      
@@ -3338,6 +3331,18 @@ svg { display: block; }
      `role="alert"` also announces nothing from inside a hidden subtree, so the
      screen-reader half was silently gone too. -->
 <p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
+<!-- ⚠️ THE FOOT, not the top (Josh, 2026-08-19). This line sat above the cards,
+     under the New agent button, where the first thing a person met on their
+     board was its version number. It belongs where a version belongs: at the
+     bottom, which is also where the pack draws it.
+     ⚠️ AFTER `#removed-msg`, not between it and `#removed-wrap`. It was moved
+     into that gap, which put a removal alert -- "what the removal could not
+     reach" -- BELOW the version footer at the very bottom of the page, split
+     from the section it is about. The long note above `#removed-msg` exists to
+     protect exactly that adjacency, and the move stepped through it.
+     Kept OUTSIDE `#removed-wrap` for the reason that note gives: the wrap hides
+     itself entirely when nothing is removed. -->
+<div class="build" id="build"></div>
 
 <script>
 'use strict';
@@ -3454,35 +3459,35 @@ function modelLine(a) {
  * only looks up the second when the first is absent.
  */
 function runsOnLine(a) {
-  /* ⚠️ THE NAME COMES FROM `modelLine`, ALWAYS. This function used to restate
-     both of its derivations — the `Claude ` prefix guard and the literal
-     "Unknown Model" — which is the second definition of one fact that the
-     comment in `modelLine` argues against, reintroduced by the change that
-     quotes it. `modelLine` already falls back to the planned name, so this only
-     has to decide the LEAD. */
   const name = modelLine(a);
-  /* ⚠️ `state` GATES THIS BRANCH TOO, and leaving it off made this the THIRD
-     false tense in one day. `readModel` reads a TRANSCRIPT, not a process: a
-     STOPPED agent that has ever run still has one, so `modelName` is present
-     and this said "Right now: Claude Opus 5" beside a badge reading "Not
-     running". The third branch below already argues the point — "nothing is
-     running in that case either" — and this branch ignored the same evidence. */
-  if (a.modelName && a.state !== 'stopped') return { lead: 'Right now: ', name };
-  /* Stopped, but we did read what it ran as. That is what it WILL start on
-     again: the job is unchanged, and it is the more precise of the two facts. */
-  if (a.modelName) return { lead: 'Will start on ', name };
-  /* ⚠️ "NOT RUNNING" IS `state`, NOT "we could not read a model", and getting
-     that wrong made this the mirror of the bug it was written to remove.
-     `readModel` returns null whenever there is no transcript — and an agent in
-     its FIRST, CURRENTLY-ACTIVE session has no transcript yet, which is exactly
-     the state `create.js` relies on. Gated on `!modelName`, a `working` agent
-     was told "Will start on Claude Opus 5" while it was running on it.
-     Only `stopped` means no Claude process in that pane. */
-  if (a.plannedModelName && a.state === 'stopped') return { lead: 'Will start on ', name };
-  /* Running (or unreadable) with no live model: we know what the job is
-     configured with and we could NOT read what it is actually on. Neither tense
-     is true, so neither is claimed — the name alone, which is how every compact
-     surface already states it. */
+  /* ⚠️ THE TENSE COMES FROM `pres`, THE SAME DERIVATION THE PRESENCE DOT DRAWS,
+     and that is the fix for a bug this function got wrong three times in one
+     afternoon. Every version derived the lead from whether a MODEL could be
+     read, and that is not what a tense is about:
+
+       "Right now: Unknown Model"   present tense, agent may never have started
+       "Will start on X"            future tense, agent running on X right now
+       "Right now: X"               present tense, agent stopped
+
+     Each time the VALUE was right and the LEAD was the lie. The panel ended up
+     saying "Right now:" beside a badge reading "Not running" — two elements,
+     one fact, two answers. ⚠️ THEY CANNOT DISAGREE IF ONLY ONE OF THEM DECIDES
+     (Mona Lisa, 2026-08-19), so the lead now reads `cardStOf(a).pres`, which is
+     what the dot beside it already uses. A new state adds one CARD_ST entry and
+     the dot, the badge and the tense all move together.
+
+       on      a Claude process is there  -> present tense, if we could read it
+       off     no process                 -> future tense; the job is unchanged
+       unsure  we could not classify      -> NO tense. We cannot tell.
+
+     ⚠️ The card's own model line has no lead and has never been wrong today: an
+     attribute under a role has no tense to get wrong. The panel needs one only
+     because it is where the model gets changed. */
+  const pres = cardStOf(a).pres;
+  const known = Boolean(a.modelName || a.plannedModelName);
+  if (!known) return { lead: '', name };
+  if (pres === 'on') return { lead: a.modelName ? 'Right now: ' : '', name };
+  if (pres === 'off') return { lead: 'Will start on ', name };
   return { lead: '', name };
 }
 function roleLine(a) {

@@ -1938,6 +1938,28 @@ function pageFnSource(name) {
   return script.slice(start, end);
 }
 
+/**
+ * The source of a top-level `const NAME = { … };` table on the page.
+ *
+ * ⚠️ A sibling to `pageFnSource` rather than a second copy of the brace-matching
+ * idea: the page's shared derivations live in const OBJECTS (`CARD_ST`,
+ * `STATE_COPY`, `GLYPH`) as well as in functions, and a test that restated one
+ * of those tables would be asserting its own copy rather than the product's.
+ */
+function pageConstSource(name) {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('const ' + name + ' = {');
+  assert.ok(start > -1, name + ' vanished from the page');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of ' + name);
+  return script.slice(start, end) + ';';
+}
+
 function pageFunction(name, prelude = '') {
   // eslint-disable-next-line no-new-func
   return new Function(`${prelude}\n${pageFnSource(name)}\nreturn ${name};`)();
@@ -6632,7 +6654,11 @@ test('a parsed role is sentence-cased and an acronym survives it', () => {
  * function returns.
  */
 test('the Runs on line says which tense it is in, and a live model always wins', () => {
-  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine'));
+  const tables = pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const runsOnLine = pageFunction('runsOnLine', tables);
+  // The REAL cardStOf, so the coherence check below compares the product's two
+  // answers rather than one product answer and one restatement.
+  const cardStOf = pageFunction('cardStOf', pageConstSource('CARD_ST'));
 
   assert.deepEqual(runsOnLine({ modelName: 'Claude Sonnet 5', state: 'working' }),
     { lead: 'Right now: ', name: 'Claude Sonnet 5' },
@@ -6649,12 +6675,30 @@ test('the Runs on line says which tense it is in, and a live model always wins',
     'a stopped agent was described in the present tense, on the strength of a '
     + 'transcript from a session that has ended');
 
-  // ⚠️ CONTROL: every state that is NOT stopped keeps the present tense when a
-  // live model was read. Without this, gating on `state === 'stopped'` could be
-  // inverted and the assertion above would still pass.
-  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'unknown']) {
+  // ⚠️ THE TENSE FOLLOWS `pres`, WHICH HAS THREE VALUES, NOT TWO. Every state
+  // whose presence reads `on` keeps the present tense when a live model was
+  // read; `unknown` reads `unsure` and gets NO tense, because a panel saying
+  // "Right now: Claude Opus 5" beside a badge reading "Can't tell" is the same
+  // contradiction as the three this function already produced.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited']) {
     assert.equal(runsOnLine({ modelName: 'Claude Opus 5', state }).lead, 'Right now: ',
       `a ${state} agent with a readable model stopped saying it is running`);
+  }
+  assert.equal(runsOnLine({ modelName: 'Claude Opus 5', state: 'unknown' }).lead, '',
+    'a pane we could not classify was described in the present tense anyway, '
+    + 'contradicting the badge beside it');
+
+  // ⚠️ COHERENCE: the lead and the badge must never disagree, because they are
+  // one fact. Driven across EVERY state the engine can emit plus an
+  // unrecognised one, asserting the pairing rather than each half. This is the
+  // check that would have caught all three of this function's false tenses.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'stopped', 'unknown', 'martian']) {
+    const lead = runsOnLine({ modelName: 'Claude Opus 5', state }).lead;
+    const pres = cardStOf({ state }).pres;
+    const want = pres === 'on' ? 'Right now: ' : pres === 'off' ? 'Will start on ' : '';
+    assert.equal(lead, want,
+      `the Runs on lead and the presence dot disagree for state "${state}": the `
+      + `dot says ${pres} and the line says ${JSON.stringify(lead)}`);
   }
 
   assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
@@ -6678,7 +6722,7 @@ test('the Runs on line says which tense it is in, and a live model always wins',
 
   // ⚠️ NO LEAD, not "Right now". Nothing is running in this case either, so a
   // present tense is exactly as false here as it was on a planned model.
-  assert.deepEqual(runsOnLine({}), { lead: '', name: 'Unknown Model' },
+  assert.deepEqual(runsOnLine({ state: 'unknown' }), { lead: '', name: 'Unknown Model' },
     'an unknowable model asserted a present tense about an agent that may '
     + 'never have started');
 
@@ -6686,7 +6730,10 @@ test('the Runs on line says which tense it is in, and a live model always wins',
   // after an agent starts, so the two sources can disagree; the live reading is
   // what the agent IS running and must win. Both wrong answers are named, so
   // this cannot pass by returning the right string for the wrong reason.
-  const both = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5' });
+  // ⚠️ `state` ON EVERY FIXTURE from here down. A card carrying a model with no
+  // state is a shape the product never emits, and fixtures that cannot occur
+  // are how all three of this function's false tenses stayed invisible.
+  const both = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5', state: 'working' });
   assert.equal(both.name, 'Claude Opus 5',
     'the job file overruled the model the agent is demonstrably running');
   assert.equal(both.lead, 'Right now: ',
@@ -6694,8 +6741,8 @@ test('the Runs on line says which tense it is in, and a live model always wins',
 
   // The provider prefix reaches the planned name too, or the same model reads
   // two different ways depending on which source answered.
-  assert.equal(runsOnLine({ plannedModelName: 'Opus 5' }).name, 'Claude Opus 5');
-  assert.equal(runsOnLine({ plannedModelName: 'Claude Opus 5' }).name, 'Claude Opus 5',
+  assert.equal(runsOnLine({ plannedModelName: 'Opus 5', state: 'stopped' }).name, 'Claude Opus 5');
+  assert.equal(runsOnLine({ plannedModelName: 'Claude Opus 5', state: 'stopped' }).name, 'Claude Opus 5',
     'the guard against "Claude Claude" did not reach the planned branch');
 });
 
@@ -6772,7 +6819,8 @@ test('the tab click handler actually calls the top-level reset, before showTab',
  */
 test('a card names a planned model plainly, while the detail panel keeps its tense', () => {
   const modelLine = pageFunction('modelLine');
-  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine'));
+  const runsOnLine = pageFunction('runsOnLine',
+    pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
 
   assert.equal(modelLine({ plannedModelName: 'Claude Sonnet 5' }), 'Claude Sonnet 5',
     'a card said "Unknown Model" about an agent whose model is in its own job file');
