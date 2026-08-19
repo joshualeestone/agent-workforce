@@ -129,6 +129,12 @@ test('a reachable host with an unusable answer is readable:false, never up-to-da
   const look = update.lastLook();
   assert.equal(look.reached, true, 'a host that answered read as unreached');
   assert.equal(look.readable, false, 'an unusable answer read as usable');
+  // And a non-ok answer (CDN 404/500): the host WAS reached; blaming the
+  // network would name the wrong leg.
+  update.setFetcher(async () => ({ ok: false, json: async () => ({}) }));
+  await update.refresh();
+  assert.equal(update.lastLook().reached, true, 'an errored answer read as could-not-reach');
+  assert.equal(update.lastLook().readable, false, 'an errored answer read as usable');
   assert.equal(update.available(), null, 'CONTROL: no offer, the exact case the card maps');
   // And a good answer flips readable back.
   update.setFetcher(async () => ({ ok: true, json: async () => ({ version: RUNNING }) }));

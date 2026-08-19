@@ -89,6 +89,22 @@ The sentence is true and ships now.
   server's answer.", "Could not check just now.", the card joining the
   Updates card, and the runs-in-background sentence placement.
 
+## Iterations 3-4 (review)
+
+- Stale six-hour comments corrected (engine header, server poke note).
+- The role=status line gains an identical-write guard (a 5s poll
+  rewriting equal text made screen readers re-announce; toast's own
+  dataset.v rule, applied).
+- Leg attribution completed: ANY response object is reached (a CDN
+  404/500 is a reached host that could not be read, never
+  "could not reach"); silence alone is unreached. res.ok gate on the
+  client fetch so a board-side non-200 never blames the release host.
+- The miss stamp's offer-withdrawal recorded in code: an offer we could
+  not re-confirm is withdrawn rather than served stale for a window.
+- Accepted, pattern-consistent: dismissing the "Updated." note returns
+  focus to body (matches the toast's Later); the deadline-elapsed
+  silent-finish hole stands recorded.
+
 ## Out of scope
 
 - Stop-the-fleet button (above).

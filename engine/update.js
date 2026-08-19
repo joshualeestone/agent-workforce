@@ -78,16 +78,16 @@ async function refresh() {
   let landed = false;
   try {
     const res = await doFetch(`${base}/latest.json`, { signal: ctl.signal, cache: 'no-store' });
-    if (res && res.ok) {
-      const body = await res.json().catch(() => null);
+    if (res) {
+      // ANY response object means the host was reached; reached false is
+      // reserved for silence (throws, timeouts, DNS). readable means the
+      // answer carried a usable version: a captive portal's 200 splash
+      // page, a CDN 404, and a parse failure are all "reached, could not
+      // read the answer" -- never "could not reach" (wrong leg), and
+      // never "up to date" (the false sentence this module exists to
+      // prevent).
+      const body = res.ok ? await res.json().catch(() => null) : null;
       const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
-      // reached true means the host answered with an ok response;
-      // readable true means the answer carried a usable version. The
-      // split exists because a captive portal answers EVERYTHING with a
-      // 200 splash page, and "reached, unreadable, no offer" must not
-      // render as "Up to date" -- the exact false sentence this module
-      // exists to prevent. Silence, errors, and non-ok statuses land
-      // reached false (could-not-reach).
       cache = { at: Date.now(), latest: v, reached: true, readable: v !== null };
       landed = true;
     }
@@ -100,6 +100,11 @@ async function refresh() {
     // refreshes inside one millisecond made `cache.at < started` skip the
     // stamp, and checkNow (TTL-bypassing) makes back-to-back refreshes a
     // real path, not a test artifact.
+    // The miss stamp WITHDRAWS a previously known offer (latest: null):
+    // an offer we could not re-confirm is not served stale for up to a
+    // TTL window; the next successful look restores it. Deliberate, and
+    // 24x more visible now that the TTL is 15 minutes and checkNow can
+    // hit this stamp from a button press while offline.
     if (!landed) cache = { at: started, latest: null, reached: false, readable: false };
   }
 }

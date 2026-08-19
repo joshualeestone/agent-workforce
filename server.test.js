@@ -6159,3 +6159,43 @@ test('the check route is POST-only, and Check now clears the Later note before a
     'a board-side failure cleared the toast (could eat a valid offer)');
   assert.ok(calls2.includes('focus'), 'the keyboard was not returned after the failed check');
 });
+
+test('the card standoff, the confirm focus fallback, and the identical-write guard hold', () => {
+  // (a) UPD_CHECKING owns the card: a poll paint during a check changes nothing.
+  const paintBusy = pageFunction('paintUpdateCard', 'let UPD_CHECKING = true;\n');
+  const busy = { 'upd-line': { textContent: 'held' }, 'upd-btn': { textContent: 'held', hidden: true, disabled: true, dataset: {} } };
+  global.document = { getElementById: (id) => busy[id] };
+  paintBusy('9.9.9', { version: '9.9.9' }, { reached: true, readable: true });
+  assert.equal(busy['upd-line'].textContent, 'held', 'a poll repainted the card mid-check');
+  assert.equal(busy['upd-btn'].hidden, true, 'a poll unhid the button mid-check');
+
+  // (b) closeUpdConfirm falls back to a live control when the opener is gone.
+  const focused = [];
+  const els = {
+    updconfirm: { hidden: false },
+    'ut-install': null,
+    'upd-btn': { focus: () => focused.push('upd-btn') },
+  };
+  global.document = { getElementById: (id) => els[id], contains: () => false };
+  const close = new Function('document',
+    "let UPD_CONFIRM_OPENER = { focus: () => { throw new Error('focused a removed node'); } };\n"
+    + pageFnSource('closeUpdConfirm') + '\ncloseUpdConfirm();\nreturn UPD_CONFIRM_OPENER;');
+  const cleared = close(global.document);
+  assert.deepEqual(focused, ['upd-btn'], 'focus did not fall back to a live control');
+  assert.equal(cleared, null, 'the stale opener was kept for the next close');
+  assert.equal(els.updconfirm.hidden, true);
+
+  // (c) put() suppression: an identical repaint writes NOTHING to the
+  // role="status" region (screen readers re-announce on any mutation).
+  let writes = 0;
+  const line = { _t: '', get textContent() { return this._t; }, set textContent(v) { this._t = v; writes += 1; } };
+  const quiet = { 'upd-line': line, 'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: {} } };
+  global.document = { getElementById: (id) => quiet[id] };
+  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\n');
+  paint('0.1.9', null, { reached: true, readable: true });
+  const after = writes;
+  paint('0.1.9', null, { reached: true, readable: true });
+  assert.equal(writes, after, 'an identical repaint rewrote the live region');
+  assert.ok(after > 0, 'CONTROL: the first paint never wrote, so the suppression assert proves nothing');
+  delete global.document;
+});
