@@ -80,3 +80,17 @@ drawn (morning); their exit dependency is on Splinter's board.
   user-initiated action feedback is a copy ruling; a short "Taken off."
   in the aria-live element would not contradict the ruled column copy,
   but the sentence is hers to give.
+
+## Iteration 4 (review)
+
+- The guard trio pinned at source level (the say-box precedent): the
+  sentProject capture and check, the visible-view targeting, and the
+  entry-clear. The first slice cut at the fetch options' own `});` and
+  the pins never saw the guard -- the terminator is the listener's close
+  at column 0, and the failure taught the pin its own lesson.
+- The unseen pin tightened to the ENGINE's specific reason; the generic
+  fallback alternative made a lost engine because invisible.
+- Back-to-LIST mid-flight still drops a could_not verdict silently
+  (PJ_CURRENT nulled): recorded for the morning project-notice chunk,
+  which owns persistent-failure surfacing; the PJ_DRAFTS parking idiom
+  is the named candidate.

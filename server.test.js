@@ -5956,8 +5956,11 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     paintMembers({ agents: ghost });
     assert.ok(box.innerHTML.includes('unseen'),
       'a never-seen member did not wear the unseen treatment');
-    assert.ok(/never seen an agent by this name|cannot see this agent/.test(box.innerHTML),
-      'a never-seen member rendered without its reason');
+    // The ENGINE's specific reason, not the painter's generic fallback:
+    // the fallback alternative made this pin unable to catch a lost
+    // engine because (the row would degrade generic and still pass).
+    assert.ok(box.innerHTML.includes('never seen an agent by this name'),
+      'a never-seen member lost the engine\'s specific reason');
   } finally {
     delete global.document;
   }
@@ -5972,6 +5975,23 @@ test('the settings members wiring is real, not just extractable', () => {
     'the relocated removal handler no longer listens on the settings rows');
   assert.ok(raw.includes('id="pjs-members"'),
     'CONTROL: the settings rows element is gone, so the listener pin above is vacuous');
+  // The guard trio, pinned at source level (the say-box precedent):
+  // these were fixes to fixes, the least-proven lines on the branch,
+  // and the stubbed unit test cannot see any of them.
+  const handlerSrc = raw.slice(raw.indexOf("document.getElementById('pjs-members').addEventListener"));
+  // The terminator is the listener's own close at column 0: an inner
+  // `});` (the fetch options literal) cut the first version of this
+  // slice short and the pins below never saw the guard.
+  const handler = handlerSrc.slice(0, handlerSrc.indexOf('\n});') + 4);
+  assert.ok(handler.includes('const sentProject = PJ_CURRENT;'),
+    'the in-flight cross-project guard lost its capture');
+  assert.ok(handler.includes('if (PJ_CURRENT !== sentProject) return;'),
+    'the in-flight cross-project guard lost its check');
+  assert.ok(handler.includes("document.getElementById('pj-settings-view').hidden"),
+    'the verdict no longer follows the person to the visible view');
+  assert.ok(pageFnSource('paintProjectSettings').includes("getElementById('pjs-members-msg').textContent = ''"),
+    'the entry-clear for the members verdict is gone (the persisted-half misattribution returns)');
+
   // Her ruled copy, the WHOLE sentence (whitespace-normalized past the
   // source line wrap; a half-pinned sentence lets the second half drift).
   const flat = raw.replace(/\s+/g, ' ');
