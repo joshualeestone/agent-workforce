@@ -7622,7 +7622,7 @@ async function loadProjects() {
   if (PJ_CURRENT) paintOneProject();
   // The settings view holds the archive control now, so a poll that lands
   // while it is open must repaint IT from the truth too -- without this,
-  // "Restore failed. Try again" outlives a restore whose write landed and
+  // "Restore failed. Try again." outlives a restore whose write landed and
   // whose re-read has since succeeded (the drive's 8h recovery arm).
   if (PJ_CURRENT && !document.getElementById('pj-settings-view').hidden) {
     const cur = pjById(PJ_CURRENT);

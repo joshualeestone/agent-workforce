@@ -29,10 +29,12 @@ the engine, so no refusal row can exist).
 
 ## Added scope (Mona Lisa's rulings, 5:35 PM)
 
-- The verdict-family em dashes are semicolons now: the singular told
-  line, the group line, and the unknown-state join in pjMember (her
-  ruling on the group sentence, extended over the family she shaped;
-  the GROUP_BECAUSE drafts themselves counted zero).
+- The verdict-family em dashes are gone: the singular told line and the
+  group line take semicolons; the unknown-state join in pjMember takes a
+  COLON per her full table's separator rule (state: because, the second
+  half explaining the first; the 5:37 PM table supersedes the earlier
+  family-wide semicolon note). The GROUP_BECAUSE drafts themselves
+  counted zero.
 - Map row 2 takes her blessed shorter draft: "...and we will not create
   them".
 - web/index.html:4725 (the card label-to-task join) was initially held
