@@ -2749,6 +2749,13 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   // read "archive worker". A stub here would let that divergence back in
   // silently, which is precisely what a shared derivation is for.
   const roleLine = pageFunction('roleLine');
+  // ⚠️ And the REAL runsOnLine, for the strongest reason of the three: the meta
+  // line and the Runs on box below it must name the SAME model. This line used
+  // to call `modelLine` directly, which prefers the transcript reading, while
+  // the box prefers the job's — so a stopped agent whose two readings disagreed
+  // had two elements naming one fact differently, six lines apart.
+  const runsOnLine = pageFunction('runsOnLine',
+    pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
   const drive = (card) => {
     const el = { textContent: 'seeded' };
     const from = script.indexOf("document.getElementById('d-meta').textContent =");
@@ -2757,11 +2764,11 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
     assert.ok(from > -1 && write > from && write < end,
       'the meta-line write fell outside the extracted slice');
     // eslint-disable-next-line no-new-func
-    new Function('document', 'a', 'modelLine', 'roleLine', script.slice(from, end))(
-      { getElementById: () => el }, card, modelLine, roleLine);
+    new Function('document', 'a', 'modelLine', 'roleLine', 'runsOnLine', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine, roleLine, runsOnLine);
     return el.textContent;
   };
-  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
+  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false, state: 'working' });
   assert.match(surfaced, /shown by its machine name/,
     'a display name that IS the machine name carries no disclosure on the panel');
   assert.match(surfaced, /Archive worker · Claude Opus 5 · /,
@@ -2774,7 +2781,7 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   assert.match(surfaced, /^Archive worker/,
     'the panel rendered a parsed role in different capitals from the card that '
     + 'links to it, which is the second-definition drift roleLine exists to end');
-  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
+  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true, state: 'working' });
   assert.doesNotMatch(named, /machine name/,
     'an agent with a real display name is told it is shown by its machine name');
   // The panel reads the SAME model derivation as both board renderers: a
@@ -2784,9 +2791,9 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   // `R`, not `r`: a one-character parsed role is sentence-cased like any other,
   // which is the boundary case for a `charAt(0).toUpperCase()` on a length-1
   // string and is worth having land here rather than nowhere.
-  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /R · Claude Fable 5/,
+  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true, state: 'working' }), /R · Claude Fable 5/,
     'the panel model line diverged from the card on a provider-less name');
-  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /R · Unknown Model/,
+  assert.match(drive({ role: 'r', modelName: null, nameDerived: true, state: 'unknown' }), /R · Unknown Model/,
     'a missing model is silently omitted on the panel while the card says Unknown Model');
 });
 
@@ -6968,4 +6975,48 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
   const martian = drive({ state: 'martian' });
   assert.match(martian.state.className, /\bst-unknown\b/,
     'an unrecognised state drew no badge treatment at all');
+});
+
+/**
+ * "No agents have been removed" and "we could not ask" are different screens.
+ *
+ * ⚠️ Every failure arm of `paintRemoved` returns without touching the section,
+ * which is correct on a POLL — emptying a drawn list because one request failed
+ * would tell somebody their removed agents are gone. But `#removed-wrap` starts
+ * `hidden` in the markup, so on the FIRST load "leave what is on screen alone"
+ * leaves nothing on screen, and the honest fix for the poll was the same
+ * inversion one moment earlier.
+ *
+ * ⚠️ This section is the way back from a removal, and the Remove confirmation is
+ * deliberately light BECAUSE removal is recoverable. A way back that can be
+ * invisible for a reason other than "there is nothing to go back to" turns that
+ * confirmation into a trapdoor.
+ */
+test('a removed-agents section that could not be read says so, and only before it has ever been read', () => {
+  const src = pageFnSource('removedUnreadable');
+  const make = (everRead, existing) => {
+    const msg = { textContent: existing || '' };
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('document', 'REMOVED_EVER_READ',
+      src + '\nreturn removedUnreadable;')({ getElementById: () => msg }, everRead);
+    fn();
+    return msg.textContent;
+  };
+
+  assert.match(make(false, ''), /could not check/,
+    'a first load that could not reach /api/removed showed the same empty screen '
+    + 'as a machine with nothing removed');
+  assert.match(make(false, ''), /not the same as none having been/,
+    'the sentence states the absence without distinguishing the two causes');
+
+  // ⚠️ CONTROL ONE: once an answer has arrived, absence is measured, not
+  // unknown — and a later failed poll must not overwrite a correct list.
+  assert.equal(make(true, ''), '',
+    'a failed poll spoke over a section that had already been read successfully');
+
+  // ⚠️ CONTROL TWO: it must not clobber a message already on that surface.
+  // `#removed-msg` is where a partial removal reports what it could not reach,
+  // and that is the more specific fact.
+  assert.equal(make(false, 'Kosmos could not stop it.'), 'Kosmos could not stop it.',
+    'the could-not-check line overwrote a more specific message about a removal');
 });

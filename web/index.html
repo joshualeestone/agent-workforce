@@ -60,7 +60,14 @@
      stable, and each entry is a place a designer already thinks about — and a
      container that is forgotten inherits the page default instead of silently
      matching its own box. That is a better failure, not the absence of one. */
-  --field-fill: var(--bg-elevated);   /* on the page ground: white, per Josh */
+  /* ⚠️ `--k-bg`'s partner, NOT `--bg-elevated`, because `body` is now painted
+     with `--k-bg`. Leaving this on the label system made a field on the page
+     ground fill `--bg-elevated` while a `.ppick` chip beside it filled
+     `--k-surface`: identical `#ffffff` in light, `#2c2c2e` against `#17191c` in
+     dark. The ground moved to the k- system and its default field colour did
+     not follow it -- the same "equal in light, divergent in dark" pairing this
+     file warns about, reintroduced at the root by the fix for it. */
+  --field-fill: var(--k-surface);   /* on the page ground: white, per Josh */
 
   /* Light -- REPOINTED AT THE PACK (pack-pass, scrappy): every surface
      still on these older tokens (projects, create, the modals) adopts the
@@ -1872,9 +1879,17 @@ svg { display: block; }
      with a stated single-look ruling — so the whole subtree is pinned, not the
      half of it somebody happened to think of. */
   --bg: #faf9f7; --bg-elevated: #ffffff; --bg-sunken: #f4f2ee;
-  --label: #14161a; --label-2: #4a4f57; --label-3: rgba(20,22,26,0.48);
-  --separator: #e3e1dc; --border-strong: rgba(20,22,26,0.26);
+  --label: #14161a; --label-3: rgba(20,22,26,0.48);
+  --border-strong: rgba(20,22,26,0.26);
   --field-fill: #faf9f7;   /* paper, so a field is never the card's own white */
+}
+/* ⚠️ `--label-2` AND `--separator` ARE PINNED IN DARK ONLY, because the root
+   `prefers-contrast: more` block enhances exactly those two. Pinning them
+   unconditionally made the wizard decline the person's stated contrast
+   preference in BOTH schemes -- on the first screen anyone meets. The
+   single-look ruling needs the dark half; the light half was collateral. */
+@media (prefers-color-scheme: dark) {
+  #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
   background: var(--k-bg);
 }
 #firstrun .fr-box {
@@ -3897,8 +3912,21 @@ function lrow(a) {
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
     : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
+  /* ⚠️ A VISIBLE `?`, NOT AN EMPTY SLOT. This rendered a dashed track beside a
+     BLANK percent, which reads as "0% used, room to spare" -- the inverse of
+     the truth. The words existed only in the `.vh` span, so a screen-reader
+     user had the fact and a sighted person had a bar that looked reassuring.
+     ⚠️ AND THE LIST IS HALF THE BOARD: the layout is user-selectable, so paying
+     this debt on `card()` alone left the other half without it. The unknown
+     caption went onto the card and its neighbour was left holding the defect,
+     which is the shape this branch has repeated all day.
+     ⚠️ THE WORD, NOT A GLYPH, and never blank (Mona Lisa's ruling): the column
+     already sizes for "100%", so "Unknown" fits, and the two channels then match
+     the card's -- dashed bar for shape, word for identity. The pack does not
+     draw this row at all, which is why nobody checked it: it depicts this state
+     only on a card. */
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct">Unknown<span class="vh"> memory</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
@@ -4502,13 +4530,19 @@ async function tick() {
        and this removes the only VISIBLE statement of that fact on the screen.
        Said plainly rather than justified away: the dashed ring distinguishes
        those cards, and the words "memory unknown" exist only in the ring's
-       `aria-label` and a `.vh` span (in `ring()` and `card()`; line numbers deliberately not cited, they go stale on the commit that writes them). So a screen-reader
+       `aria-label` (in `ring()`) and a `.vh` span (in `lrow()`). So a screen-reader
        user keeps the information and a sighted person is left with dashed rings
        and nothing naming what dashed means.
-       ✅ THE SECOND HALF IS PAID, in this same change: `.membadge unk` on the
-       card carries "Memory unknown" as visible words, per the pack's own
-       section 10 ("shape distinguishes, words identify"), ported from
-       FROZEN-2026-08-19. The tally was doing that job by accident, for the
+       ✅ THE SECOND HALF IS PAID ON BOTH LAYOUTS: `.membadge unk` carries
+       "Memory unknown" as visible words on the card, and the list row's percent
+       slot carries a visible `?` instead of a blank. Per the pack's own section
+       10 ("shape distinguishes, words identify"), ported from
+       FROZEN-2026-08-19.
+       ⚠️ An earlier version of this note said the debt was paid and named
+       `ring()` and `card()` as carrying the words. `card()` had no such span and
+       the LIST had no visible statement at all -- a comment asserting a debt is
+       settled when it was settled for one of two renderers, which is how the
+       gap stayed invisible. The tally was doing that job by accident, for the
        whole fleet at once, which is why removing it looked free and was not.
        ⚠️ This comment previously said the caption was still owed, while the
        code three hundred lines up already drew it. Two comments in one change
@@ -5460,8 +5494,16 @@ function openDetail(sessionName) {
      "web-properties worker", for the same agent, on the same click. Exactly the
      second-definition trap the comment directly above argues against for the
      model, one line away. */
+  /* ⚠️ THE SAME MODEL THE BOX BELOW NAMES. `modelLine` prefers `modelName`
+     (what a transcript says it RAN as) while `runsOnLine`'s stopped arm prefers
+     `plannedModelName` (what the job will START it on) -- so for a stopped agent
+     whose two readings disagree, this line said "Claude Haiku 4.5" and the Runs
+     on box six lines below said "Will start on Claude Opus 5". This line carries
+     no tense, so it reads as THE model, and two elements naming one fact
+     differently is precisely what this branch exists to stop. It takes the name
+     the box resolved rather than deriving a second one. */
   document.getElementById('d-meta').textContent =
-    [roleLine(a), modelLine(a),
+    [roleLine(a), runsOnLine(a).name,
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
@@ -6540,6 +6582,41 @@ let REMOVED_OPEN = false;
  * for exactly this.
  */
 let REMOVED_TOKEN = 0;
+/**
+ * Has `/api/removed` EVER answered on this page load?
+ *
+ * ⚠️ WITHOUT THIS, "no removed agents" AND "we could not ask" ARE THE SAME
+ * SCREEN. Every failure arm below returns without touching the section, which
+ * is right on a poll -- emptying a drawn list because one request failed would
+ * tell somebody their removed agents are gone. But `#removed-wrap` starts
+ * `hidden` in the markup, so on the FIRST load "leave what is on screen alone"
+ * leaves nothing on screen, and the honest fix for the poll became the same
+ * inversion one moment earlier.
+ *
+ * ⚠️ IT MATTERS MORE HERE THAN IT LOOKS. The Remove confirmation is
+ * deliberately LIGHT because removal is recoverable, and this section is the
+ * way back. If the way back can be invisible for a reason that is not
+ * "there is nothing to go back to", that confirmation is a trapdoor.
+ */
+let REMOVED_EVER_READ = false;
+
+/**
+ * We could not ask, and we have never had an answer. Says so on `#removed-msg`,
+ * which lives OUTSIDE `#removed-wrap` precisely so a repaint cannot erase it
+ * and `showTab` clears it on leaving the board.
+ *
+ * ⚠️ SILENT ONCE A READ HAS SUCCEEDED. After that, absence is a fact we
+ * measured rather than one we could not check, and a later failed poll must
+ * not overwrite a list that is on screen and correct.
+ */
+function removedUnreadable() {
+  if (REMOVED_EVER_READ) return;
+  const msg = document.getElementById('removed-msg');
+  if (msg && !msg.textContent) {
+    msg.textContent = 'We could not check whether any agents have been removed. '
+      + 'That is not the same as none having been.';
+  }
+}
 
 async function paintRemoved() {
   const wrap = document.getElementById('removed-wrap');
@@ -6559,15 +6636,18 @@ async function paintRemoved() {
      * the same inversion `loadRemoval` fixes twenty lines up, and the `catch`
      * immediately below states the rule this broke.
      */
-    if (!res.ok) return;
+    if (!res.ok) return removedUnreadable();
     const body = await res.json().catch(() => null);
-    if (!body || !Array.isArray(body.agents)) return;
+    if (!body || !Array.isArray(body.agents)) return removedUnreadable();
     gone = body.agents;
+    REMOVED_EVER_READ = true;
   } catch {
     // ⚠️ Leave whatever is on screen alone. Emptying the list because one poll
     // failed would tell somebody their removed agents are gone, which is the
-    // opposite of what this section exists to promise.
-    return;
+    // opposite of what this section exists to promise. On the FIRST load there
+    // is nothing on screen to leave alone, and silence there says the same
+    // wrong thing -- so `removedUnreadable` speaks, once, only in that case.
+    return removedUnreadable();
   }
   // ⚠️ A newer paint has started since this one asked. Its answer is the
   // current one; ours is not, and painting it would also cache it.
