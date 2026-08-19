@@ -730,8 +730,8 @@ function blockBody() {
   // ⚠️ The command is taught as THIS machine can run it (clipath): bare
   // `kosmos` is not on a stock install's PATH, and an agent whose shell
   // says "command not found" never reaches the engine, so its failure
-  // leaves no trace for anyone to find. Existing agents' copies heal through
-  // tellAgent's piggyback splice, so this body must stay derivable from
+  // leaves no trace for anyone to find. Existing agents' copies heal
+  // through tellAgent's piggyback splice, so this body must stay derivable from
   // the machine alone (no per-agent state).
   const cli = require('./clipath').kosmosCliShown();
   return [
