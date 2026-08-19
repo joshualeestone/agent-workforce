@@ -868,6 +868,58 @@ function questionIn(text) {
   return { text: lines.slice(from).join('\n').replace(/\s+$/, '') };
 }
 
+/**
+ * The numbered choices inside a question, when we can be sure of them.
+ *
+ * ⚠️ THIS IS THE ONE PLACE IN THE PRODUCT THAT READS A PANE AS STRUCTURE, so
+ * it refuses far more than it accepts. `questionIn` above deliberately does not
+ * parse — it scrolls the terminal to the right place and lets the person read
+ * it. This goes one step further because the pack draws BUTTONS, and a button
+ * carrying the wrong option's words sends an answer the person did not give.
+ * When anything is off, it returns null and the screen falls back to the
+ * question as it stands today. NEVER GUESS: an unparsed menu costs a person one
+ * line of typing; a mis-parsed one answers for them.
+ *
+ * Confident means ALL of: the numbers run 1..n with no gap and no repeat, there
+ * are between 2 and 9 of them, and every label has words in it.
+ *
+ * ⚠️ THE REPEAT RULE IS DOING REAL WORK. A pane accumulates, so an ALREADY
+ * ANSWERED menu can still be on screen above the live one — `questionIn` takes
+ * the last marker but its run-up slice can reach back over the earlier one.
+ * That reads as 1,2,1,2, which fails contiguity, which lands on state 5. The
+ * screen showing no buttons over a real menu is a small loss; buttons built
+ * from a menu that was answered ten minutes ago is a wrong answer sent
+ * confidently.
+ *
+ * The frame is stripped from BOTH ends before matching. Claude draws its
+ * prompts inside a box on some versions and bare on others (the captures in
+ * `engine/connect.test.js` are bare, taken from a real v2.1.229), and a leading
+ * `│` would make every option line invisible to a pattern anchored at the
+ * number.
+ *
+ * Labels ride VERBATIM, which is the pack's rule: a button carries the option's
+ * own words, not our summary of them.
+ */
+const OPTION_LINE = /^(?:❯\s*)?(\d+)[.)]\s+(\S.*)$/;
+
+function optionsIn(questionText) {
+  const whole = String(questionText == null ? '' : questionText);
+  if (!whole.trim()) return null;
+  const found = [];
+  for (const raw of whole.split('\n')) {
+    const line = raw.replace(/^[\s│|]+/, '').replace(/[\s│|]+$/, '');
+    const m = OPTION_LINE.exec(line);
+    if (!m) continue;
+    found.push({ n: Number(m[1]), label: m[2] });
+  }
+  if (found.length < 2 || found.length > 9) return null;
+  for (let i = 0; i < found.length; i += 1) {
+    if (found[i].n !== i + 1) return null;
+    if (!found[i].label.trim()) return null;
+  }
+  return found;
+}
+
 /* ── what is ours to keep ────────────────────────────────────────────────── */
 
 /**
@@ -895,6 +947,15 @@ function questionIn(text) {
 const PROJECT_ID = /^[a-z0-9_-]{1,128}$/;
 
 /**
+ * The scope token for the thread between the person and ONE agent, which
+ * belongs to no project. It is deliberately a value PROJECT_ID refuses (`@` is
+ * outside the charset), so a project route can never reach the direct arm by
+ * accident: those resolve an id through `projects.get` and 404 before this
+ * module is asked anything.
+ */
+const DIRECT = '@you';
+
+/**
  * ⚠️ The agent name must ALREADY be its own key. `store.safeKey` strips, so
  * `worker.2` and `worker2` collapse to one file — `engine/commitments.js`
  * guards the identical hazard the identical way, and for a thread a collision
@@ -903,10 +964,25 @@ const PROJECT_ID = /^[a-z0-9_-]{1,128}$/;
 function threadFile(projectId, agent) {
   const id = String(projectId == null ? '' : projectId);
   const name = String(agent == null ? '' : agent);
-  if (!PROJECT_ID.test(id)) throw badRequest('that is not a project we can read');
+  const direct = id === DIRECT;
+  if (!direct && !PROJECT_ID.test(id)) throw badRequest('that is not a project we can read');
   let key;
   try { key = store.safeKey(name); } catch { key = null; }
   if (!key || key !== name) throw badRequest('that is not an agent name we can keep a thread under');
+  /**
+   * ⚠️ TWO DOTS, AND THE SECOND ONE IS THE GUARD. A project id never contains
+   * a dot (PROJECT_ID forbids it), so no project thread can ever produce or
+   * collide with `direct..<key>.json` — including a real project literally
+   * named "Direct", whose file is `direct.<key>.json` with one dot. Reserving
+   * the id `direct` in projects.idFor instead would have left every
+   * already-existing project of that name colliding on disk; the filename
+   * makes the collision impossible rather than merely unlikely.
+   *
+   * The token itself (`@you`) fails PROJECT_ID, so a project route can never
+   * reach this arm by accident: those resolve the id through projects.get
+   * first and 404 before chat is asked anything.
+   */
+  if (direct) return path.join(DIR(), `direct..${key}.json`);
   return path.join(DIR(), `${id}.${key}.json`);
 }
 
@@ -1307,6 +1383,14 @@ function appendLocked(projectId, agent, entry, bornAt) {
     messages: [...existing.messages, {
       at: (entry && entry.at) || new Date().toISOString(),
       text: cleanMessage(entry && entry.text),
+      /**
+       * ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered
+       * answer sends the digit the agent's prompt is waiting for and shows the
+       * option's own words, so `text` alone would either read as a bare "1" a
+       * week later or misdescribe the mechanism. Null on every ordinary
+       * message, which is every message today: the two are the same thing.
+       */
+      wire: (entry && typeof entry.wire === 'string' && entry.wire) ? entry.wire : null,
       delivery: {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
@@ -1468,9 +1552,9 @@ function looksLikeManager(role) {
 }
 
 module.exports = {
-  DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
+  DELIVERY, DIRECT, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget, wireText,
-  deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend,
+  deliver, viewport, questionIn, optionsIn, waitingNote, spawnFailure, verifyAtSend,
   threadFile, readThread, appendMessage, supersede, withThreadLock,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,

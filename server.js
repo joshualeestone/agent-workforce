@@ -1611,6 +1611,199 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
+  /**
+   * --- the thread between the person and ONE agent -------------------------
+   *
+   * The project thread's sibling, and the difference is what it is FOR: that
+   * one belongs to a project and an agent on it, this one belongs to nobody
+   * else. The pack puts the private exchange, and the answer to a question the
+   * agent is asking, on the agent's own page — so the record has to outlive
+   * every project the agent is or was on, which is why it is filed under
+   * `chat.DIRECT` and carries no project stamp.
+   *
+   * ⚠️ THE GATE IS `borrowedName`, NOT `knownAgent`, and the commitments route
+   * learned this first: a record whose purpose is to outlive the conversation
+   * must stay readable when the agent is STOPPED. The danger is narrower than
+   * "is it running" — it is a pane sitting on the board under this name that is
+   * not tied to it, which would serve the real agent's private thread beside a
+   * stranger's card. If no pane claims the name, there is nobody to confuse it
+   * with. (The PLAN for this branch said 404-unknown; that would have hidden a
+   * stopped agent's own conversation, which is the thing the file exists for.)
+   */
+  const dm = pathname.match(/^\/api\/agent\/([^/]+)\/thread$/);
+  if (dm && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(dm[1]);
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    // ⚠️ ONE roster read for the whole request, like every sibling: two
+    // `tmux list-panes` calls can disagree, and a question reported from one
+    // look beside a presence described from another is the same
+    // one-fact-two-derivations sentence this app exists not to say.
+    const roster = safeRoster();
+    const card = Array.isArray(roster)
+      ? (roster.find((a) => a && a.sessionName === name && a.isNamedOurs === true) || null)
+      : null;
+
+    /**
+     * ⚠️ TWO HISTORY CHANNELS, NOT THREE. `historyOther` has no meaning here:
+     * it says "an EARLIER project of this name has messages kept aside", and
+     * this thread has no project to have been born with. Carrying the field
+     * anyway would be a surface that can never be true.
+     */
+    let messages = null;
+    let historyBecause = null;
+    let historyUnfilable = false;
+    try {
+      // No `bornAt`: a direct thread outlives every project, so there is no
+      // birth date for it to be refused against.
+      messages = chat.readThread(chat.DIRECT, name).messages;
+    } catch (err) {
+      if (err && err.code === 'BAD_THREAD') {
+        // There is no file and there never will be one — the agent's name
+        // cannot be filed under. Sending still works; nothing is kept.
+        messages = [];
+        historyUnfilable = true;
+        historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
+      } else {
+        historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+      }
+    }
+
+    /* The capture ALWAYS runs, for the reason the project thread states: the
+       question region derives from it, and the question is safety rather than
+       chrome. Engineering mode gates what is SERVED as the window, below. */
+    const view = chat.viewport(name, roster);
+    // The board's word, through the engine's own constant. `tied` is implied
+    // by the card lookup above (isNamedOurs), which is the same conjunct the
+    // project route spells out.
+    const asking = Boolean(card) && card.state === STATE.NEEDS_YOU;
+    const question = asking && view.text ? chat.questionIn(view.text) : null;
+    // The same two sentences as the project route, and they stay two: "we read
+    // its screen and the question is not in the capture" is not "we could not
+    // read its screen at all".
+    const questionBecause = (asking && !question)
+      ? (view.text == null
+        ? 'we could not read its screen just now to show the question'
+        : 'we cannot find the question on its screen right now')
+      : null;
+    /**
+     * ⚠️ THE BUTTONS ARE OFFERED ONLY WHEN THE MENU IS CERTAIN. `optionsIn`
+     * returns null for anything it cannot be sure of, and null here is not a
+     * degraded state — it is the screen this page shows today, the question as
+     * the terminal draws it, which the person can answer by typing.
+     */
+    const options = (asking && question) ? chat.optionsIn(question.text) : null;
+    /**
+     * ⚠️ PRESENCE IS THE SEND GATE'S OWN ANSWER, not a second derivation of it.
+     * The first version of this route asked whether a tied card existed, which
+     * is a WEAKER question than "can we type into it" and got a measurable case
+     * wrong: a STOPPED agent has a card (its pane is alive, its name is ours)
+     * and no Claude in the window, so the composer invited a message that
+     * `chat.deliver` would then refuse. Two derivations of one fact, disagreeing
+     * on screen, is this codebase's worst habit and it had crept back in.
+     *
+     * `addressable` also carries the SENTENCE, which is better copy than
+     * anything this route could compose: it tells apart a window with no Claude
+     * in it (what we typed would be run as a command) from one scrolled back in
+     * copy-mode (what we typed would go to the scrollback). The composer says
+     * whichever is true.
+     *
+     * ⚠️ THREE-VALUED, because "there is nobody there" and "we could not look"
+     * are different facts. The `unsure` arm is NOT reachable through today's
+     * producers — a roster read that fails also fails `borrowedName` above,
+     * which fails closed at the 404 — so no test here holds it. It stays,
+     * recorded rather than quietly kept, because the two reads are separate
+     * calls (`snapshot` here, `listPanes` there) and the day they can disagree
+     * is the day this arm is the difference between "your agent is off" and the
+     * truth. Same posture as the thread route's `member.tied` conjunct.
+     */
+    const reach = chat.addressable(name, roster);
+    const presence = reach.ok ? 'on' : (!Array.isArray(roster) ? 'unsure' : 'off');
+    const presenceBecause = reach.ok ? null : reach.because;
+    const TAIL = 200;
+    const olderCount = Array.isArray(messages) && messages.length > TAIL
+      ? messages.length - TAIL : 0;
+    if (olderCount) messages = messages.slice(-TAIL);
+    sendJson(res, 200, {
+      agent: { sessionName: name, name: (card && card.name) || name },
+      messages,
+      olderCount,
+      historyBecause,
+      historyUnfilable,
+      presence,
+      presenceBecause,
+      viewport: engmode.read().on ? view
+        : { text: null, because: 'engineering mode is off, so the window is not shown' },
+      asking,
+      question,
+      questionBecause,
+      options,
+      agentsUnreadable: roster === null,
+    });
+    return;
+  }
+
+  if (dm && req.method === 'POST') {
+    const name = decodeSegment(dm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        // Refused before anything is looked up, so a message we would never
+        // send does not cost a tmux fan-out.
+        const problem = chat.messageProblem(body.text);
+        if (problem) throw new Error(problem);
+        /**
+         * ⚠️ `chose` IS THE OPTION'S OWN WORDS, and it is bounded like any
+         * other text off the wire. It rides only on a button send: the bubble
+         * shows what the person CHOSE ("Yes, and don't ask again"), while the
+         * wire text — the digit the agent's prompt is waiting for — is kept
+         * beside it. A thread that recorded only the digit would show "1" for
+         * an answer nobody would recognise a week later; one that recorded
+         * only the words would misdescribe the mechanism. Both, or the record
+         * lies one way or the other.
+         */
+        const chose = (typeof body.chose === 'string' && body.chose.trim()
+          && body.chose.length <= chat.MAX_TEXT) ? body.chose : null;
+
+        const roster = safeRoster();
+        // The write gate. `chat.deliver` refuses on its own too (addressable:
+        // exact match to permit, tied, and a pane with Claude in it) — this
+        // one is about the NAME, so a spelling nobody is running is refused
+        // before we type anything anywhere.
+        if (!knownAgent(name)) {
+          const missing = new Error('no agent by that name');
+          missing.status = 404;
+          throw missing;
+        }
+        // Deliver first, then record the verdict with it — and record even a
+        // failure, exactly as the project thread does.
+        const delivery = chat.deliver(name, body.text, roster);
+        const kept = chat.appendMessage(chat.DIRECT, name, {
+          text: chose || body.text,
+          // What was actually typed into the pane, when it is not what the
+          // bubble shows.
+          wire: chose ? body.text : null,
+          at: delivery.at,
+          delivery,
+        });
+        sendJson(res, 200, {
+          delivery,
+          recorded: kept.recorded === true,
+          recordedBecause: kept.because || null,
+          agentsUnreadable: roster === null,
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
   if (pathname === '/api/messages' && (req.method === 'GET' || req.method === 'HEAD')) {
     // The record the screens draw conversations from; ?agent= filters to
     // one agent's messages. Read-only, best-effort history.

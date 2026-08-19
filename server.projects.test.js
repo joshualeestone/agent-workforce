@@ -1728,3 +1728,183 @@ test('the reveal-folder route: guard inherited, server-derived path, honest refu
     projects.setRevealRunner(null);
   }
 });
+
+/* ── the thread between the person and ONE agent ─────────────────────────── */
+
+/**
+ * The agent's own thread needs no project, which is the point of it. The chats
+ * store is cleared for the same reason `withThread` clears it: the direct
+ * thread's filename is derived from the NAME alone, so every test here would
+ * otherwise inherit the previous one's messages and measure a world it did not
+ * arrange.
+ */
+async function withAgent(spec, answers, fn) {
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  const calls = armChat(answers);
+  try {
+    return await fn({ board, calls });
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
+}
+
+test('the agent’s own thread hands back the question AND its options, when the menu is certain', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('I want to delete the old build folder.\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the panel must not be empty under a card that says it is asking');
+      assert.deepEqual(body.options, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+      assert.equal(body.questionBecause, null);
+      assert.equal(body.presence, 'on');
+    });
+});
+
+test('a question with no menu we can be sure of serves NO options, which is today’s screen', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('Do you want to proceed? Tell me in your own words what I should do.\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the question still shows');
+      assert.equal(body.options, null, 'no buttons is the honest answer; a guessed button answers for the person');
+    });
+});
+
+test('an agent that is not asking anything is offered no options at all', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }),
+    [said('❯ 1. Yes\n  2. No\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      // ⚠️ The menu IS on the screen and is still not offered: the board's
+      // word decides whether a question is live, so the panel cannot
+      // contradict the card that sent the person here.
+      assert.equal(body.asking, false);
+      assert.equal(body.options, null);
+      assert.equal(body.question, null);
+    });
+});
+
+test('a STOPPED agent keeps its thread, and the composer is told what is wrong with the window', async () => {
+  reset();
+  // ⚠️ THE RECORD OUTLIVES THE CONVERSATION. Gating this route on
+  // `knownAgent` (which the branch plan asked for) would hide a stopped
+  // agent's own thread -- the commitments route learned this first.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    const sent = json(await post('/api/agent/zeta/thread', { text: 'before you stopped' }));
+    assert.equal(sent.recorded, true);
+    // The SAME agent, its Claude now gone from the pane. The thread store is
+    // untouched; only the board changes.
+    const stopped = fleet.install([fleet.agent('zeta', { state: 'stopped' })]);
+    try {
+      const res = await req('/api/agent/zeta/thread');
+      assert.equal(res.status, 200, 'a stopped agent’s conversation is still the person’s to read');
+      const body = json(res);
+      assert.equal(body.presence, 'off');
+      // ⚠️ The SEND GATE's own sentence, not a second derivation of it: a
+      // stopped agent's pane is alive and its name is ours, so a
+      // card-exists check answered 'on' and the composer invited a message
+      // deliver would refuse. And the sentence tells apart the two ways a
+      // pane can be unreachable, which "the agent is off" cannot.
+      assert.match(body.presenceBecause, /no Claude running in its window/);
+      assert.equal(body.messages.length, 1, 'and the message is still in it');
+      assert.equal(body.messages[0].text, 'before you stopped');
+    } finally {
+      stopped.restore();
+    }
+  });
+});
+
+test('a pane holding the name untied is refused, on the read as well as the write', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { ours: false, state: 'idle' }), [said()], async () => {
+    const res = await req('/api/agent/zeta/thread');
+    assert.equal(res.status, 404, 'a stranger’s pane must not serve this agent’s private thread');
+    assert.match(json(res).error, /no agent by that name/);
+    const sent = await post('/api/agent/zeta/thread', { text: 'are you there' });
+    assert.equal(sent.status, 404);
+  });
+});
+
+test('a numbered answer records the WORDS and keeps what was typed beside them', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(), said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes, and don’t ask again' });
+    assert.equal(res.status, 200);
+    assert.equal(json(res).recorded, true);
+    // The DIGIT is what reached the pane: the prompt is waiting for it.
+    const typed = calls.sends().map((args) => args.join(' ')).join('\n');
+    assert.match(typed, /(^|\s)1(\s|$)/, 'the agent’s prompt is answered with the number it asked for');
+
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    // ⚠️ BOTH, or the record lies one way or the other: the words alone
+    // misdescribe the mechanism, the digit alone is unrecognisable a week
+    // later.
+    assert.equal(row.text, 'Yes, and don’t ask again', 'the bubble shows what the person chose');
+    assert.equal(row.wire, '1', 'and the record keeps what was actually sent');
+  });
+});
+
+test('an ordinary message carries no wire text, because the two are the same thing', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: 'have a look at the lease' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    assert.equal(body.messages[0].text, 'have a look at the lease');
+    assert.equal(body.messages[0].wire, null);
+  });
+});
+
+test('a message we could not send is still written down, with the verdict on it', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }),
+    [{ ran: true, spawnFailed: false, status: 1, out: '', err: 'no such pane' }],
+    async () => {
+      const body = json(await post('/api/agent/zeta/thread', { text: 'did this land' }));
+      assert.notEqual(body.delivery.state, 'placed');
+      assert.equal(body.recorded, true, 'a thread that remembers only the successes rewrites its own history');
+      const back = json(await req('/api/agent/zeta/thread'));
+      assert.equal(back.messages[0].delivery.state, body.delivery.state);
+    });
+});
+
+test('a message we would never send is refused before anything is typed', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '   ' });
+    assert.equal(res.status, 400);
+    assert.equal(calls.sends().length, 0, 'nothing reached a pane');
+  });
+});
+
+test('a roster we could not read closes this route rather than serving a private thread', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: 'just between us' });
+    let blind = null;
+    try {
+      blind = fleet.blind();
+      const res = await req('/api/agent/zeta/thread');
+      // ⚠️ FAILS CLOSED, and this is the arm that decided the route's shape.
+      // `borrowedName` cannot rule out a stranger's pane holding this name
+      // when it cannot look at all, and what is behind this route is the
+      // person's private conversation with one agent. The sibling
+      // commitments route made the same call for the same reason.
+      //
+      // ⚠️ This is also why the payload's `presence: 'unsure'` arm has no
+      // test: the roster read that would produce it fails this gate first.
+      // It is recorded in the route rather than removed.
+      assert.equal(res.status, 404, 'a thread must not be served off a roster we could not read');
+    } finally {
+      if (blind) blind.restore();
+    }
+  });
+});

@@ -1887,3 +1887,76 @@ test('an unwritable chats directory is a reported keeping-failure, never a throw
     fs.chmodSync(root, 0o755);
   }
 });
+
+/* ── the direct thread, and the options inside a question ────────────────── */
+
+test('the direct thread is its own file, and a project literally named "Direct" cannot collide with it', () => {
+  // ⚠️ PRESENCE BEFORE ABSENCE: both files are written and both are read
+  // back, so "they are distinct" is a comparison of two things that exist
+  // rather than a pair of ENOENTs agreeing with each other.
+  const direct = chat.threadFile(chat.DIRECT, 'casey');
+  const project = chat.threadFile('direct', 'casey');
+  assert.equal(path.basename(direct), 'direct..casey.json', 'the reserved name is the two-dot one');
+  assert.equal(path.basename(project), 'direct.casey.json');
+  assert.notEqual(direct, project);
+
+  chat.appendMessage(chat.DIRECT, 'casey', { text: 'just between us', delivery: { state: chat.DELIVERY.PLACED } });
+  chat.appendMessage('direct', 'casey', { text: 'about the Direct project', delivery: { state: chat.DELIVERY.PLACED } });
+
+  const mine = chat.readThread(chat.DIRECT, 'casey');
+  const theirs = chat.readThread('direct', 'casey');
+  assert.equal(mine.messages.length, 1);
+  assert.equal(theirs.messages.length, 1);
+  assert.equal(mine.messages[0].text, 'just between us');
+  assert.equal(theirs.messages[0].text, 'about the Direct project', 'a real project of that name keeps its own thread');
+});
+
+test('the direct token can never arrive through a project route, because the id rules refuse it', () => {
+  // The token is only reachable as the module's own constant. Anything
+  // shaped like it, arriving as an id from a URL, is refused by the charset
+  // check exactly as `..` is.
+  assert.throws(() => chat.threadFile('@you-as-typed', 'casey'), /not a project we can read/);
+  assert.throws(() => chat.threadFile('..', 'casey'), /not a project we can read/);
+  assert.equal(chat.DIRECT, '@you');
+});
+
+test('a direct thread carries a time on every message and no project stamp', () => {
+  chat.appendMessage(chat.DIRECT, 'mara', { text: 'are you there', delivery: { state: chat.DELIVERY.PLACED } });
+  const got = chat.readThread(chat.DIRECT, 'mara');
+  assert.equal(got.projectBornAt, null, 'a thread that outlives every project has no project to be born with');
+  assert.match(got.messages[0].at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('optionsIn reads a real menu, both the two-option prompt and a long one', () => {
+  // The shapes are the captures this repo already holds: engine/chat.test.js's
+  // own permission prompt above, and connect.test.js's theme screen, taken
+  // from a real claude v2.1.229.
+  const yesNo = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No');
+  assert.deepEqual(yesNo, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+
+  const theme = chat.optionsIn([' Choose the text style that looks best with your terminal',
+    '   1. Auto (match terminal)', ' ❯ 2. Dark mode ✔', '   3. Light mode'].join('\n'));
+  assert.equal(theme.length, 3);
+  assert.equal(theme[1].label, 'Dark mode ✔', 'the label is the option’s own words, marker and all');
+});
+
+test('optionsIn sees through the pane frame, on either side of the line', () => {
+  const boxed = chat.optionsIn('│ ❯ 1. Yes                 │\n│   2. No, tell me more    │');
+  assert.deepEqual(boxed, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No, tell me more' }]);
+});
+
+test('optionsIn refuses everything it cannot be sure of, and a refusal is the ordinary screen', () => {
+  // ⚠️ THE FIRST CASE IS THE ONE THAT MATTERS. A pane accumulates, so an
+  // already-answered menu can sit above the live one; 1,2,1,2 must not
+  // become a two-button panel wired to the older question.
+  assert.equal(chat.optionsIn('❯ 1. Yes\n  2. No\nthen later\n❯ 1. Yes\n  2. No'), null, 'a repeated menu is not a menu');
+  assert.equal(chat.optionsIn('1. Yes\n3. No'), null, 'a gap in the numbering');
+  assert.equal(chat.optionsIn('2. Yes\n3. No'), null, 'a run that does not start at 1');
+  assert.equal(chat.optionsIn('1. Yes'), null, 'one option is not a choice');
+  assert.equal(chat.optionsIn(Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n')), null, 'past nine');
+  assert.equal(chat.optionsIn('1. \n2. '), null, 'a button with no words on it');
+  assert.equal(chat.optionsIn('I tried 1. and it did not work'), null, 'prose that mentions a number');
+  assert.equal(chat.optionsIn('Do you want to proceed?'), null, 'a question with no menu at all');
+  assert.equal(chat.optionsIn(''), null);
+  assert.equal(chat.optionsIn(null), null);
+});
