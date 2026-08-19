@@ -1137,11 +1137,14 @@ case ":$PATH:" in
           # half, not report wired forever -- the silent class this step
           # ends. (An unanchored grep matched '# export ...' and any
           # person-owned export of that shape anywhere in the file.)
+          # STICKY across every marker occurrence: a scan that latched on
+          # the first marker never recognized the repaired pair below an
+          # orphan, so each rerun appended another pair, unbounded.
           if [ -f "$PROFILE_FILE" ] \
              && awk -v m="$PATH_MARKER" '
-                  f == 1 { ok = ($0 ~ /^export PATH=".*:\$PATH"$/) ? 1 : 0; f = 2; next }
-                  f == 0 && $0 == m { f = 1 }
-                  END { exit (f >= 1 && ok == 1) ? 0 : 1 }
+                  $0 == m { f = 1; next }
+                  f == 1 { if ($0 ~ /^export PATH=".*:\$PATH"$/) ok = 1; f = 0 }
+                  END { exit (ok == 1) ? 0 : 1 }
                 ' "$PROFILE_FILE" 2>/dev/null; then
             # No works-claim here: the wired export names whatever bin dir
             # the EARLIER install used, which this run cannot vouch for.

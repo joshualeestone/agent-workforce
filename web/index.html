@@ -5891,7 +5891,7 @@ async function paintRemoved() {
    * optimisation. This runs on the five-second poll, and an unconditional
    * `innerHTML =` breaks three things it has no business touching:
    *
-   *   1. A row reading "Restore failed — try again" is replaced by a fresh
+   *   1. A row reading "Restore failed. Try again." is replaced by a fresh
    *      "Restore" within five seconds, so a restore that FAILED and one that
    *      WORKED become indistinguishable — which is exactly what the comment on
    *      that handler says must never happen.
@@ -7538,7 +7538,7 @@ document.getElementById('pj-arch-list').addEventListener('click', async (e) => {
     // above it (measured: 411px off-viewport with eleven projects). A
     // restore that failed and a restore that worked must not look the same,
     // which is the removal path's own stated rule.
-    btn.textContent = 'Restore failed. Try again';
+    btn.textContent = 'Restore failed. Try again.';
     btn.disabled = false;
     document.getElementById('pj-list-msg').textContent = String((err && err.message) || 'we could not restore it');
     // Disabling on entry blurred the button; on a failed PUT it is still on
@@ -10009,7 +10009,7 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
     // and an untouched button must not look the same. (The 5s poll may
     // repaint this label from state truth; the message above persists,
     // which is the removal path's accepted shape.)
-    archBtn.textContent = want ? 'Archive failed. Try again' : 'Restore failed. Try again';
+    archBtn.textContent = want ? 'Archive failed. Try again' : 'Restore failed. Try again.';
   } finally {
     // Held while the PUT flies, like the disclosure sibling: two fast
     // clicks fired two PUTs (idempotent today only by the carry-forward).
