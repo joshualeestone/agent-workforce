@@ -1118,13 +1118,19 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   padding: 10px 12px; resize: vertical; box-sizing: border-box; }
 #create-instr:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 .flabel-soft { font-weight: 400; color: var(--label-2); }
-.projpick { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
-.ppick { display: flex; gap: var(--space-4); align-items: baseline; width: 100%;
-  text-align: left; font: inherit; color: var(--label); cursor: pointer;
-  background: var(--bg-elevated); border: 1px solid var(--separator);
-  border-radius: var(--radius-control); padding: 8px 12px; }
+/* ⚠️ CHIPS THAT WRAP, which is the pack's own rule and which the build had
+   replaced with a single-column grid of full-width rows. That is why Josh
+   asked whether it was "a dropdown list" and whether he could add more than
+   one: MULTI-SELECT ALREADY WORKED (each of these is a real checkbox), and
+   full-width rows say pick one while pills say pick several. The width WAS the
+   behaviour question. */
+.projpick { display: flex; gap: 6px; flex-wrap: wrap; }
+.ppick { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font: inherit; font-size: .875rem; color: var(--k-ink); background: var(--k-surface);
+  border: 1px solid var(--k-rule); border-radius: 100px; padding: .38rem .85rem; }
+.ppick:hover { border-color: var(--gold-deep); }
 .ppick .pickmark { color: transparent; font-weight: 700; font-size: .75rem; }
-.ppick[aria-checked="true"] { border-color: var(--label); }
+.ppick[aria-checked="true"] { border-color: var(--k-ink); box-shadow: inset 0 0 0 1px var(--k-ink); }
 .ppick[aria-checked="true"] .pickmark { color: var(--label); }
 .ppick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
 #create-model { font: inherit; color: var(--label); background: var(--bg-elevated);
@@ -2410,7 +2416,13 @@ svg { display: block; }
          the archived list): a brand-new person should not meet an empty
          section explaining a thing they have none of. -->
     <div class="field" id="create-projects-wrap" hidden>
-      <span class="flabel" id="create-projects-lab">Project <span class="flabel-soft">(optional)</span></span>
+      <span class="flabel" id="create-projects-lab">Add this agent to any projects <span class="flabel-soft">(optional)</span></span>
+      <!-- ⚠️ ONE LINE, AND IT IS LOAD-BEARING AT COUNT ONE. Plurality and pill
+           shape are what make a multi-select obvious, and somebody with a
+           single project has neither: one chip on its own reads as a label.
+           The pack uses this sentence on the members surface for the same
+           reason. It is true at any count. -->
+      <div class="fhint">Pick as many as you like.</div>
       <div class="projpick" id="create-projects" role="group" aria-labelledby="create-projects-lab"></div>
     </div>
 
