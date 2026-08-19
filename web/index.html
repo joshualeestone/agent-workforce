@@ -1914,13 +1914,13 @@ svg { display: block; }
 
   <div class="dgrid">
   <section class="dbox">
-    <h3 class="dlab">Memory</h3>
-    <div id="d-memory"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
-  </section>
-  <section class="dbox">
     <h3 class="dlab">Runs on</h3>
     <p class="runnow" id="d-runson"></p>
     <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
+  </section>
+  <section class="dbox">
+    <h3 class="dlab">Memory</h3>
+    <div id="d-memory"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
   </section>
 
   <!-- ⚠️ THE CONVERSATION (Mona Lisa's messaging-screens spec, 2026-08-18):
@@ -1943,42 +1943,6 @@ svg { display: block; }
          alike -- any causal clause was false for at least one of them.
          It earns a button when teach-existing lands, not before. -->
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
-  </section>
-
-  <!-- Engineering mode's surface on this page (eng-mode): the raw
-       session, shown only when the person turned the switch on. Same
-       viewport-not-transcript honesty as the project page's block. -->
-  <section class="dbox" id="d-window-box" hidden>
-    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
-    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
-         sentence is the runtime paint's to make, only over a capture
-         that succeeded (the project viewport recorded this exact
-         reversal at its own block). -->
-    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
-    <pre class="pj-screen" id="d-window" tabindex="0" hidden
-         role="region" aria-labelledby="d-window-label"></pre>
-    <p class="dhint" id="d-window-msg" hidden></p>
-  </section>
-
-  <section class="dbox">
-  <div class="field">
-    <label class="flabel" for="d-file">Picture</label>
-    <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
-    <div class="frow">
-      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
-      <button class="btn" id="d-remove" type="button">Remove</button>
-    </div>
-    <div class="fmsg" id="d-msg"></div>
-  </div>
-  <div class="field" style="margin-top:18px;">
-    <label class="flabel" for="d-role">What they do</label>
-    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
-    <div class="frow">
-      <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
-      <button class="btn" id="d-save" type="button">Save</button>
-    </div>
-    <div class="fmsg" id="d-role-msg"></div>
-  </div>
   </section>
 
   <section class="dbox">
@@ -2031,6 +1995,42 @@ svg { display: block; }
          still exists, not what it is called. -->
     <div class="fpath" id="d-instr-prev" hidden>The previous version is kept alongside it, so nothing you replace is lost.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
+  </div>
+  </section>
+
+  <!-- Engineering mode's surface on this page (eng-mode): the raw
+       session, shown only when the person turned the switch on. Same
+       viewport-not-transcript honesty as the project page's block. -->
+  <section class="dbox" id="d-window-box" hidden>
+    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
+    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
+         sentence is the runtime paint's to make, only over a capture
+         that succeeded (the project viewport recorded this exact
+         reversal at its own block). -->
+    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
+    <pre class="pj-screen" id="d-window" tabindex="0" hidden
+         role="region" aria-labelledby="d-window-label"></pre>
+    <p class="dhint" id="d-window-msg" hidden></p>
+  </section>
+
+  <section class="dbox">
+  <div class="field">
+    <label class="flabel" for="d-file">Picture</label>
+    <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
+    <div class="frow">
+      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <button class="btn" id="d-remove" type="button">Remove</button>
+    </div>
+    <div class="fmsg" id="d-msg"></div>
+  </div>
+  <div class="field" style="margin-top:18px;">
+    <label class="flabel" for="d-role">What they do</label>
+    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
+    <div class="frow">
+      <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
+      <button class="btn" id="d-save" type="button">Save</button>
+    </div>
+    <div class="fmsg" id="d-role-msg"></div>
   </div>
   </section>
   </div>
