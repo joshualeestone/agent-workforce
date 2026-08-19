@@ -86,10 +86,20 @@ async function measure(engine, scheme) {
   page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
   await page.goto(BASE, { waitUntil: 'networkidle' });
   const out = await page.evaluate((sel) => {
+    /* The wizard covers the board, so it stays hidden -- and is EXCLUDED from
+       the unhide sweep below, which previously put it straight back. A line
+       stating an intent the next line reverses is worse than no line. */
+    document.querySelectorAll('[hidden]').forEach((el) => {
+      if (el.id !== 'firstrun') el.hidden = false;
+    });
     const fr = document.getElementById('firstrun');
     if (fr) fr.hidden = true;
-    document.querySelectorAll('[hidden]').forEach((el) => { el.hidden = false; });
-    document.querySelectorAll('*').forEach((el) => {
+    /* ⚠️ `body *`, not `*`: the latter also forced `head`, `style`, `script` and
+       `title` visible, rendering the whole stylesheet and page script as text.
+       The badge-vs-dot result survived that (both rects shift together), but any
+       absolute-position or viewport assertion added later would have been
+       measuring a page the product never draws. */
+    document.querySelectorAll('body *').forEach((el) => {
       if (getComputedStyle(el).display === 'none') el.style.display = 'block';
     });
     // A card in the unknown-memory state, which only exists once painted.
@@ -191,16 +201,22 @@ async function measure(engine, scheme) {
       }
       console.log(`  fields level with their container: ${level}`);
 
-      if (r.badgeHit) {
-        console.log(`  unknown caption vs presence dot: ${r.badgeHit.overlaps ? r.badgeHit.x + 'x' + r.badgeHit.y : 'clear'}`);
-        if (r.badgeHit.overlaps) fail(`${engine}/${scheme} the unknown-memory caption paints over the presence dot`);
-      }
-      if (r.listCell !== null) {
-        console.log(`  list row unknown cell: ${JSON.stringify(r.listCell)}`);
-        // ⚠️ A BLANK CELL READS AS 0%, and for memory 0% means "loads of room" --
-        // the inverse of the truth, which is the worst direction to fail in.
-        if (!r.listCell) fail(`${engine}/${scheme} the list row's unknown memory cell is blank, which reads as 0%`);
-      }
+      /* ⚠️ BOTH REPORT UNCONDITIONALLY, AND A MISSING FIXTURE IS A FAILURE. These
+         two used to be wrapped in `if (r.badgeHit)` / `if (r.listCell !== null)`,
+         so a renamed class, a `card` that stopped being global, or a missing
+         `#grid` would have made them print nothing and the run still say OK --
+         contradicting this file's own header rule that a checker saying only OK
+         cannot be caught doing nothing. The absence of a probe is not the
+         absence of a defect. */
+      console.log(`  unknown caption vs presence dot: ${r.badgeHit === null ? 'FIXTURE MISSING' : (r.badgeHit.overlaps ? r.badgeHit.x + 'x' + r.badgeHit.y : 'clear')}`);
+      if (r.badgeHit === null) fail(`${engine}/${scheme} could not build the unknown-memory card, so nothing checked the caption against the presence dot`);
+      else if (r.badgeHit.overlaps) fail(`${engine}/${scheme} the unknown-memory caption paints over the presence dot`);
+
+      console.log(`  list row unknown cell: ${r.listCell === null ? 'FIXTURE MISSING' : JSON.stringify(r.listCell)}`);
+      // ⚠️ A BLANK CELL READS AS 0%, and for memory 0% means "loads of room" --
+      // the inverse of the truth, which is the worst direction to fail in.
+      if (r.listCell === null) fail(`${engine}/${scheme} could not render a list row, so nothing checked its unknown cell`);
+      else if (!r.listCell) fail(`${engine}/${scheme} the list row's unknown memory cell is blank, which reads as 0%`);
     }
 
     // ⚠️ SAME DIRECTION IN BOTH SCHEMES. A field lighter than its container in
@@ -212,7 +228,11 @@ async function measure(engine, scheme) {
       const d = L(a) - L(b);
       return Math.abs(d) < 0.002 ? 'level' : (d > 0 ? 'raised' : 'recessed');
     };
-    const byId = (list) => Object.fromEntries(list.map((f) => [f.id, f]));
+    /* ⚠️ INDEX-QUALIFIED. Keying on `id || tagName` collapsed every field without
+       an id onto one key per tag and silently dropped all but the last from the
+       comparison -- coverage shrinking with no printed sign, which is the same
+       cannot-be-caught-doing-nothing hazard this file's header names. */
+    const byId = (list) => Object.fromEntries(list.map((f, i) => [f.id ? '#' + f.id : `${f.tag}[${i}]`, f]));
     const lightById = byId(seen.light.fields), darkById = byId(seen.dark.fields);
     let flipped = 0;
     for (const id of Object.keys(lightById)) {

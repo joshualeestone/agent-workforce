@@ -7085,3 +7085,48 @@ test('every CSS declaration in the page sits inside a selector', () => {
     'the scanner cannot see the defect it exists for, so its silence above '
     + 'proves nothing');
 });
+
+/**
+ * Every surface names the SAME model for one agent.
+ *
+ * ⚠️ THIS DISAGREEMENT HAS NOW BEEN OPENED TWICE BY CLOSING IT ONCE. The detail
+ * meta line and the Runs on box disagreed; routing the meta line through
+ * `runsOnLine` fixed that and opened a CARD-versus-meta gap instead, because
+ * `card()` and `lrow()` still preferred the transcript while the panel preferred
+ * the job. The card said one model and the page you reached by clicking it said
+ * another.
+ *
+ * ⚠️ The fixture carries BOTH readings, disagreeing, for a STOPPED agent —
+ * exactly the state the server now populates on purpose. Every earlier test of
+ * these functions passed one reading or the other, so no fixture could ever
+ * expose a preference difference between them.
+ */
+test('the card, the list row and the detail meta line never name two different models', () => {
+  const tables = pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const modelLine = pageFunction('modelLine');
+  const runsOnLine = pageFunction('runsOnLine', tables);
+
+  // A stopped agent whose transcript and job disagree: it RAN as Haiku, its job
+  // will START it on Opus.
+  const stopped = { state: 'stopped', modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+  assert.equal(modelLine(stopped), 'Claude Opus 5',
+    'the card and list row name the model a stopped agent last RAN as, while the '
+    + 'detail page names the one its job will start it on');
+  assert.equal(runsOnLine(stopped).name, 'Claude Opus 5');
+  assert.equal(modelLine(stopped), runsOnLine(stopped).name,
+    'two surfaces name one agent’s model differently');
+
+  // ⚠️ CONTROL: a RUNNING agent still prefers the live reading everywhere. If
+  // the job simply won always, the assertions above would pass and the product
+  // would report a stale job value over a measured one.
+  const running = { state: 'working', modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+  assert.equal(modelLine(running), 'Claude Haiku 4.5',
+    'a running agent was described by its job file instead of what it is running');
+  assert.equal(runsOnLine(running).name, 'Claude Haiku 4.5');
+
+  // ⚠️ CONTROL: a stopped agent whose job says nothing keeps the transcript
+  // reading rather than falling to "Unknown Model".
+  const noJob = { state: 'stopped', modelName: 'Claude Haiku 4.5' };
+  assert.equal(modelLine(noJob), 'Claude Haiku 4.5');
+  assert.equal(runsOnLine(noJob).name, 'Claude Haiku 4.5');
+});

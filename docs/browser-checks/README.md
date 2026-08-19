@@ -37,7 +37,7 @@ PORT=4399 \
 
 # 2. playwright, installed OUTSIDE this repo
 PW=$(mktemp -d)
-cd "$PW" && npm init -y && npm i playwright && npx playwright install chromium
+cd "$PW" && npm init -y && npm i playwright && npx playwright install chromium webkit   # webkit is REQUIRED by render-fields.js
 
 # 3. the checks
 #    ⚠️ NODE_PATH is not optional. `require` resolves from the SCRIPT's
@@ -94,6 +94,12 @@ sentence.
 ```sh
 NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/render-fields.js
 ```
+
+⚠️ **This one is headless-only and does not read `HEADED`**, unlike the scripts
+described further down. Everything it asserts is computed style plus the relative
+geometry of two elements inside one card, both of which are layout rather than
+paint — so SwiftShader's software rendering does not weaken them. It would matter
+for a screenshot or a compositor result, and this script takes neither.
 
 **`render-first-run.js`** opens all fifteen first-run states in light and dark,
 screenshots them into the output directory you pass it (copy them to `docs/screenshots/firstrun-*.png` when they are what you want in the PR), and measures the
