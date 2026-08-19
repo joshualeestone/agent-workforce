@@ -6471,3 +6471,86 @@ test("the removal announcement is her sentence, on both verdict arms", () => {
   assert.ok(handler.indexOf('const who =') < handler.indexOf('await fetch'),
     'the display name is read after the repaint could detach it');
 });
+
+/* ---------------------------------------------------------------------------
+ * answer-panel: the agent page's own thread, its composer, and the buttons
+ * above it. Text pins only -- these catch a DELETION, not a rendering. The
+ * render itself is checked by drawing all eight states in both themes and
+ * measuring in the page (scrollWidth/clientWidth for overflow, computed
+ * background for the transparent-panel class, elementFromPoint for what is
+ * actually on top). Checks were green through three broken layouts on 18e;
+ * text cannot see that class of defect and these do not claim to.
+ * ------------------------------------------------------------------------ */
+
+test('the option button carries BOTH the digit and the words, and sends both', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // The button holds the two facts apart...
+  assert.match(raw, /data-n="' \+ esc\(String\(o\.n\)\)/,
+    'the option button lost the digit the agent’s prompt is waiting for');
+  assert.match(raw, /data-label="' \+ esc\(o\.label\)/,
+    'the option button lost the option’s own words');
+  // ...and the send passes both, in that order: text=digit, chose=words.
+  assert.match(raw, /sendTalk\(btn\.dataset\.n, btn\.dataset\.label\)/,
+    'the option send stopped carrying one of the two, so the record misdescribes '
+    + 'either the mechanism or the answer');
+});
+
+test('the option listener is DELEGATED, because the buttons are rebuilt by every poll', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const at = raw.indexOf("getElementById('d-qopts').addEventListener('click'");
+  assert.ok(at > -1, 'the option buttons lost their listener, or it moved onto the buttons '
+    + 'themselves -- where it is attached to elements the next poll destroys');
+  assert.ok(raw.slice(at, at + 300).includes("closest('.qopt')"),
+    'the delegated listener stopped matching the button it is delegating for');
+});
+
+test('--k-sunk is DEFINED, in both themes, not merely defended with a fallback', () => {
+  // ⚠️ THE DEFECT THIS PINS was found in Mona Lisa's drawings on 2026-08-19:
+  // the pack writes `var(--k-sunk, rgba(20,22,26,.05))` everywhere and defines
+  // the token NOWHERE. On a background that fails INVISIBLY (transparent); on
+  // an SVG fill it fails LOUDLY (undefined resolves to black). The invisible
+  // instances are what let three drawings pass while the token was dead.
+  //
+  // Here it decides the question box and every message bubble, and the light
+  // fallback on the dark ground is a 5%-black wash on #17191c -- which is not
+  // a sunk panel, it is a missing one. So the token is defined per theme.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const decls = raw.match(/--k-sunk:\s*[^;]+;/g) || [];
+  assert.ok(decls.length >= 2,
+    `--k-sunk is defined ${decls.length} time(s); it needs one per theme or the `
+    + 'question box goes transparent in the one it lost');
+  assert.notEqual(decls[0], decls[1],
+    'both --k-sunk definitions are the same value, so one theme is wearing the other’s wash');
+});
+
+test('a composer that cannot send looks like it cannot send', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const at = raw.indexOf('.dmbar .btn[disabled]');
+  assert.ok(at > -1, 'the disabled composer lost its dimming, so a Send that cannot send '
+    + 'renders identically to one that can -- under a sentence saying the agent cannot '
+    + 'be handed a message');
+  const rule = raw.slice(at, raw.indexOf('}', at));
+  assert.ok(/opacity:\s*\.5/.test(rule), 'the dimming is no longer dimming anything');
+});
+
+test('the buttons die with the composer: an option is never offered over a closed box', () => {
+  // Mona Lisa's state 6. A live option above a box that cannot send promises a
+  // route that is shut, which is the same lie as a composer that swallows text.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  assert.match(raw, /const opts = \(body\.asking && live && Array\.isArray\(body\.options\)\)/,
+    'the options stopped being gated on the agent being reachable');
+  assert.match(raw, /const live = body\.presence === 'on';/,
+    'the reachability the options are gated on stopped being the route’s own answer');
+});
+
+test('the agent page composer holds the room’s IME rule, because Enter sends', () => {
+  // Without it the Enter that CONFIRMS a Japanese, Chinese or Korean candidate
+  // sends the first word half-composed, every time.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const at = raw.indexOf("getElementById('d-say').addEventListener('keydown'");
+  assert.ok(at > -1, 'the agent page composer lost its keydown handler');
+  const body = raw.slice(at, at + 700);
+  assert.ok(body.includes('e.isComposing') && body.includes('229'),
+    'the IME guard is gone from the agent page’s composer (the room still has it, '
+    + 'so the two boxes now behave differently for the same keystroke)');
+});

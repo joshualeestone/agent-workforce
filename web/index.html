@@ -34,6 +34,16 @@
      manual data-theme toggle remains #40's. */
   --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-surface: #ffffff; --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
+  /* ⚠️ DEFINED HERE, not inherited from a fallback. The pack writes this token
+     as `var(--k-sunk, rgba(20,22,26,.05))` everywhere and defines it nowhere,
+     which works in light and is nearly invisible in dark: a 5%-black wash on a
+     #17191c surface is not a sunk panel, it is a missing one. Mona Lisa found
+     the same undefined token failing two opposite ways in her drawings on
+     2026-08-19 -- silently on a background, loudly on an SVG fill -- and the
+     lesson she drew is the one applied here: a borrowed token needs its
+     definition, not just the defence its source happened to carry. The
+     fallbacks stay at the usage sites anyway, verbatim from the pack. */
+  --k-sunk: rgba(20,22,26,.05);
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
   --k-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -102,6 +112,9 @@
     --k-rule:    #2a2d31;
     --k-track:   rgba(245,245,244,.22);
     --k-knob:    #e8e9eb;
+    /* The inverse: a raised-looking wash on the dark ground, because a
+       darker-than-black panel is not a thing anybody can see. */
+    --k-sunk:    rgba(245,245,244,.06);
   }
 }
 @media (prefers-contrast: more) {
@@ -849,6 +862,70 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .delivery.placed { border-color: rgba(47,125,90,.5); }
 .delivery.failed { border-color: rgba(179,38,30,.5); }
 .delivery.unsure { border-style: dashed; }
+
+/* ---- the person's own thread with one agent (pack FROZEN-2026-08-18e) ----
+   Ported from the freeze's `.dbox` chat, values verbatim. The composer is the
+   BUILD's control pair (`.frow` + `<input>` + `.btn`), NOT the pack's
+   `.inp`/`.btn-gold`: neither of those classes exists in this app, and
+   introducing a gold button for one control would make this page's Send the
+   only gilded commit in the product. Recorded as an alignment item rather than
+   silently resolved either way. */
+.dmthread { display: flex; flex-direction: column; gap: 12px; min-height: 7rem;
+  max-height: 15rem; overflow-y: auto; padding-right: 4px; }
+.dm { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.dm.mine { align-items: flex-end; }
+.dm-b { max-width: 92%; padding: 9px 13px; border-radius: 12px; font-size: .9375rem;
+  line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
+  overflow-wrap: anywhere; }
+.dm.mine .dm-b { background: rgba(214,166,46,.14); }
+.dm-w { font-size: .75rem; color: var(--k-ink-2); }
+.dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
+.dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
+  border-left: 3px solid var(--k-rule); padding-left: 12px; }
+/* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
+   gone wrong, and the product already spends red on genuine attention. Making
+   an ordinary question look like a fault is how people start ignoring red.
+   (The pack's sentence, carried with the rule it explains.) */
+.qask { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 14px;
+  padding: 12px 14px; border-radius: 10px; background: var(--k-sunk, rgba(20,22,26,.05)); }
+.qask b { font-size: .9375rem; }
+.qask p { margin: 4px 0 0; font-size: .9375rem; line-height: 1.45; color: var(--k-ink-2); }
+/* ⚠️ THE QUESTION IS THE AGENT'S SCREEN, not our prose. The drawing renders it
+   as a sentence because a drawing can; what we actually hold is a slice of the
+   pane, and `questionIn` is documented as NOT a parser. So it keeps the
+   screen treatment this app already uses for it in the room, inside the pack's
+   box. Rewording a terminal into prose would be a claim about what was asked. */
+.qask .pj-screen { margin-top: 6px; max-height: 200px; }
+.qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* An option. Deliberately NOT the page's commit styling: a question with two
+   equal answers has no primary, and emphasising one would recommend it.
+   ⚠️ ONE VALUE DROPPED FROM THE DRAWING: `white-space: nowrap`. The labels are
+   the agent's own words, unbounded in length ("Yes, and don't ask again for
+   this project"), and a nowrap button inside a wrapping row cannot shrink --
+   it stretches the page sideways, which is the exact failure round 21 measured
+   at 1262px on this app's message rows. The drawing's labels are short; real
+   ones are not. */
+.qopt { font: inherit; font-size: .9375rem; font-weight: 600;
+  color: var(--k-ink); background: var(--k-surface);
+  border: 1px solid var(--k-rule); border-radius: 10px;
+  padding: .5em 1.05em; cursor: pointer; }
+.qopt:hover { border-color: var(--k-ink-2); }
+.qopt:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.qopt[disabled] { opacity: .5; cursor: not-allowed; }
+/* The out. One line, and it points DOWN at the composer this page already has
+   rather than away to another screen. */
+.qout { margin: 10px 0 0; font-size: .8125rem; color: var(--k-ink-2); }
+.dmbar { margin-top: 14px; }
+#d-say { flex: 1 1 auto; }
+/* ⚠️ A CLOSED BOX HAS TO LOOK CLOSED. The pack dims its disabled composer
+   (`.dmbar .btn-gold[disabled], .dmbar .inp[disabled] { opacity: .5 }`) and the
+   build has no `.btn[disabled]` rule at all -- so a Send that cannot send was
+   rendered identically to one that can, under a sentence saying the agent
+   cannot be handed a message. Scoped to this bar rather than to `.btn`: the
+   room's own Send has the same gap and widening the fix is a change to every
+   button in the app, which belongs in its own diff (flagged, not silently
+   taken). */
+.dmbar .btn[disabled], .dmbar input[disabled] { opacity: .5; cursor: not-allowed; }
 /* The room valve's row: reassurance, not an error. */
 .msg-valve { font-size: .8125rem; color: var(--k-ink-2); border-left: 2px solid var(--k-rule);
              padding-left: 10px; }
@@ -1853,6 +1930,44 @@ svg { display: block; }
          alike -- any causal clause was false for at least one of them.
          It earns a button when teach-existing lands, not before. -->
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
+  </section>
+
+  <!-- ⚠️ THE PERSON'S OWN THREAD WITH THIS AGENT, and the question they are
+       being asked, above the box they answer in. The pack's note is the whole
+       design and it predates the panel: "the question is at the top of the
+       thread rather than on a page of its own, because the box you answer in
+       is the thing you need next to it."
+
+       Everything here is empty in the markup and filled by paintTalk(): a
+       shipped sentence naming an agent would be a claim about whichever agent
+       happens to be open. -->
+  <section class="dbox" id="d-talk-box">
+    <h3 class="dlab" id="d-talk-label"></h3>
+    <p class="dhint" id="d-talk-hint" style="margin:0 0 12px;"></p>
+    <div class="qask" id="d-qask" hidden>
+      <span class="haz" aria-hidden="true">!</span>
+      <div style="min-width:0;flex:1 1 auto;">
+        <b id="d-qask-lab"></b>
+        <!-- The agent's screen, in the treatment this app already uses for a
+             question in the room. Not prose: we did not write it. -->
+        <pre class="pj-screen" id="d-qask-text" tabindex="0" hidden
+             role="region" aria-labelledby="d-qask-lab"></pre>
+        <div class="qopts" id="d-qopts" hidden></div>
+        <p class="qout" id="d-qout" hidden>Or write your own answer below.</p>
+        <span class="delivery failed" id="d-qask-fail" hidden></span>
+      </div>
+    </div>
+    <div class="dmthread" id="d-dmthread"></div>
+    <p class="dhint" id="d-talk-older" style="margin:10px 0 0;" hidden></p>
+    <div class="dmoff" id="d-dmoff" hidden></div>
+    <div class="frow dmbar">
+      <input type="text" id="d-say" maxlength="2000">
+      <button class="btn" id="d-send" type="button">Send</button>
+    </div>
+    <p class="fmsg" id="d-say-msg" role="alert" aria-live="assertive"></p>
+    <!-- ⚠️ THE THREAD PERSISTS, THE AGENT'S RECOLLECTION DOES NOT, and a chat
+         window normally conflates the two. The pack's sentence, verbatim. -->
+    <p class="dhint" id="d-persist" style="margin:12px 0 0;"></p>
   </section>
 
   <!-- Engineering mode's surface on this page (eng-mode): the raw
@@ -3845,6 +3960,16 @@ async function tick() {
          panel-visibility term matters because CURRENT survives closing
          the detail, and a capture every five seconds for an invisible
          surface is a standing subprocess. */
+      /* ⚠️ The agent's own thread rides the SAME cadence, not a second timer.
+         Its live values are the agent's screen and whether it is asking
+         something, and both change on their own -- a question painted once
+         goes on asserting a screen that stopped being true. Not while a send
+         is in flight: that would repaint the box from underneath the send's
+         own refresh, and not for an invisible panel (a capture every five
+         seconds for a surface nobody is looking at is a standing subprocess). */
+      if (!TALK_SENDING && !document.getElementById('panel-detail').hidden) {
+        paintTalk(CURRENT.sessionName, CURRENT.name);
+      }
       if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
         if (fresh && fresh.isNamedOurs === true) {
           paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
@@ -4904,6 +5029,237 @@ async function paintConversation(sessionName, agentName) {
   }
 }
 
+/* ── the person's own thread with this agent ─────────────────────────────── */
+/**
+ * ⚠️ THIS IS THE ONE PLACE ON THIS PAGE THAT TYPES INTO A RUNNING AGENT, and
+ * the one place a question can be answered without meeting a number. The pack's
+ * note is the design and it predates the panel: the question sits at the top of
+ * the thread rather than on a page of its own, because the box you answer in is
+ * the thing you need next to it.
+ */
+let TALK_LOAD = 0;
+let TALK_SENDING = false;
+
+/**
+ * One message the person sent, in the pack's bubble.
+ *
+ * The VERDICT comes from `pjVerdict`, which the room's rows use too: the three
+ * delivery states and their sentences are decided once, or the same send would
+ * be described two ways on two screens.
+ */
+function dmRow(m, name) {
+  const v = pjVerdict(m, name);
+  /* ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered answer
+     sends the digit the agent's prompt is waiting for and shows the option's
+     own words; the record keeps both, so the screen says both. Without this the
+     thread would describe a mechanism that did not happen. (Copy is provisional
+     -- flagged to Mona Lisa; the FACT is not optional, the wording is hers.) */
+  const wire = m.wire ? ' &middot; sent as ' + esc(m.wire) : '';
+  return '<div class="dm mine"><div class="dm-b">' + esc(m.text) + '</div>'
+    + '<span class="dm-w">You' + wire + ' &middot; '
+    + '<span class="delivery' + (v.mark || ' placed') + '">' + v.said + '</span></span></div>';
+}
+
+async function paintTalk(sessionName, agentName) {
+  const box = document.getElementById('d-talk-box');
+  if (!box) return;
+  // The INSTR_LOAD/CONVO_LOAD pattern: two fetches for the SAME agent (A, B, A
+  // quickly) pass the sessionName guard both times, and the older answer must
+  // not paint last.
+  const mine = ++TALK_LOAD;
+  let body;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', { cache: 'no-store' });
+    body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not read this conversation');
+  } catch (err) {
+    if (mine !== TALK_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    /* ⚠️ COULD-NOT-LOOK, never a blank box that reads as no-conversation --
+       and never an empty composer either: a box that accepts text over a
+       thread we could not read is the two-state lie the pack's own rule is
+       about. */
+    document.getElementById('d-dmthread').innerHTML =
+      '<p class="dmnone">We could not read this conversation just now. ('
+      + esc((err && err.message) || 'no detail') + ')</p>';
+    document.getElementById('d-qask').hidden = true;
+    document.getElementById('d-say').disabled = true;
+    document.getElementById('d-send').disabled = true;
+    return;
+  }
+  if (mine !== TALK_LOAD) return;
+  if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+
+  const name = agentName || sessionName;
+  document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
+  document.getElementById('d-talk-hint').textContent =
+    'Just between you and ' + name + '. Nothing here belongs to a project.';
+  document.getElementById('d-persist').textContent =
+    'This stays here after a restart. ' + name + ' will not remember it. '
+    + 'Anything that needs to last belongs in their instructions.';
+  const say = document.getElementById('d-say');
+  say.setAttribute('aria-label', 'A message for ' + name);
+  say.placeholder = 'Message ' + name + '…';
+
+  /* --- the question, and the answers to it --- */
+  const qask = document.getElementById('d-qask');
+  const qlab = document.getElementById('d-qask-lab');
+  const qtext = document.getElementById('d-qask-text');
+  const qopts = document.getElementById('d-qopts');
+  const qout = document.getElementById('d-qout');
+  const live = body.presence === 'on';
+  if (body.asking && body.question) {
+    qlab.textContent = name + ' is waiting on an answer.';
+    // The agent's SCREEN, in the treatment the room already uses for it.
+    pjSetScreen(qtext, body.question.text);
+    qtext.hidden = false;
+  } else if (body.asking) {
+    /* ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is
+       the stranded state this feature exists to remove. The ROUTE's own
+       sentence is used, for the reason the room records: a second wording
+       here drifts from that one the first time either is edited. */
+    qlab.textContent = name + ' is waiting on an answer, and '
+      + (body.questionBecause || 'we cannot find the question on its screen right now') + '.';
+    pjSetScreen(qtext, '');
+    qtext.hidden = true;
+  }
+  qask.hidden = !body.asking;
+  /**
+   * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
+   * above a closed box promises a route that is shut, which is the same lie as
+   * a composer that swallows text: it looks like an answer and it is nowhere.
+   * So they are offered only when the menu is certain AND the agent can
+   * actually be typed into.
+   */
+  const opts = (body.asking && live && Array.isArray(body.options)) ? body.options : null;
+  qopts.innerHTML = opts
+    ? opts.map((o) => '<button class="qopt" type="button" data-n="' + esc(String(o.n))
+        + '" data-label="' + esc(o.label) + '">' + esc(o.label) + '</button>').join('')
+    : '';
+  qopts.hidden = !opts;
+  qout.hidden = !opts;
+
+  /* --- the thread --- */
+  const rows = Array.isArray(body.messages) ? body.messages : [];
+  const thread = document.getElementById('d-dmthread');
+  if (body.historyBecause && !rows.length) {
+    // Unreadable and unfilable are different facts and the route sends them
+    // apart; both are said rather than rendered as an empty conversation.
+    thread.innerHTML = '<p class="dmnone">' + esc(pjSentence(body.historyBecause)) + '</p>';
+  } else if (!rows.length) {
+    thread.innerHTML = '<p class="dmnone">Nothing here yet.</p>';
+  } else {
+    thread.innerHTML = rows.map((m) => dmRow(m, name)).join('');
+    thread.scrollTop = thread.scrollHeight;
+  }
+  /**
+   * ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state 4).
+   * After a send that failed, the question stays and the buttons stay live --
+   * and this says so, because a person who has just been told their answer did
+   * not get through has every reason to assume the buttons are now spent.
+   *
+   * It carries the INSTRUCTION only, never the reason: the row in the thread
+   * above is the history and already states what happened. That split is the
+   * room's own (`pjMsg`: "a row is history, so it states what happened and
+   * stops; the instruction about what to do lives in the live line, once"),
+   * and saying the failure twice on one screen is the noise this codebase
+   * keeps removing.
+   */
+  const lastRow = rows.length ? rows[rows.length - 1] : null;
+  const lastFailed = !!(lastRow && lastRow.delivery && lastRow.delivery.state === 'could_not');
+  const qfail = document.getElementById('d-qask-fail');
+  qfail.textContent = (opts && lastFailed) ? 'The buttons still work.' : '';
+  qfail.hidden = !qfail.textContent;
+
+  const older = document.getElementById('d-talk-older');
+  older.textContent = body.olderCount
+    ? 'Showing the latest ' + rows.length + '. ' + body.olderCount + ' older '
+      + (body.olderCount === 1 ? 'message is' : 'messages are') + ' still kept.'
+    : '';
+  older.hidden = !body.olderCount;
+
+  /* --- whether it can be handed a message at all --- */
+  const off = document.getElementById('d-dmoff');
+  if (body.presence === 'off') {
+    /* ⚠️ AN AGENT THAT CANNOT BE HANDED A MESSAGE gets a closed box rather
+       than one that swallows text. The pack's sentence, plus the ENGINE's
+       reason -- which tells apart a window with no Claude in it (what we typed
+       would be run as a command) from one scrolled back (it would go to the
+       scrollback). Both mean not delivered; only one of them could execute
+       something. */
+    off.textContent = name + ' cannot be handed a message right now: '
+      + pjSentence(body.presenceBecause || 'we cannot reach its window');
+    off.hidden = false;
+  } else if (body.presence === 'unsure') {
+    off.textContent = 'We could not check whether ' + name + ' is running. '
+      + 'You can still send this, and we will tell you if it did not land.';
+    off.hidden = false;
+  } else {
+    off.textContent = '';
+    off.hidden = true;
+  }
+  say.disabled = body.presence === 'off' || TALK_SENDING;
+  document.getElementById('d-send').disabled = body.presence === 'off' || TALK_SENDING;
+}
+
+/**
+ * Send one message to this agent, and say what became of it.
+ *
+ * `chose` is the option's own words on a button send. The DIGIT goes on the
+ * wire because that is what the agent's prompt is waiting for; the words go in
+ * the bubble because that is what the person answered.
+ */
+async function sendTalk(text, chose) {
+  if (TALK_SENDING || !CURRENT) return;
+  const sessionName = CURRENT.sessionName;
+  const name = CURRENT.name || sessionName;
+  const msg = document.getElementById('d-say-msg');
+  const say = document.getElementById('d-say');
+  const send = document.getElementById('d-send');
+  TALK_SENDING = true;
+  say.disabled = true; send.disabled = true;
+  // ⚠️ The buttons go dead for the round trip too: a second press on a
+  // numbered prompt answers it twice.
+  document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
+  msg.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(chose ? { text, chose } : { text }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not send that');
+    const d = body.delivery || {};
+    const note = d.paneNote ? ' (' + d.paneNote + ')' : '';
+    if (d.state === 'placed') {
+      msg.textContent = 'Placed into ' + name + '’s session' + note + '.';
+      say.value = '';
+    } else if (d.state === 'unconfirmed') {
+      msg.textContent = 'We could not confirm that reached ' + name + '’s session' + note
+        + '. ' + pjSentence(d.because || 'we typed it and could not tell whether it arrived');
+      say.value = '';
+    } else {
+      /* ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state
+         4). The failure is stated where the person clicked, the question stays,
+         and the buttons come back live on the repaint below. The typed text is
+         NOT cleared: it is the only copy of what they wrote. */
+      msg.textContent = 'We could not get that to ' + name + ': '
+        + pjSentence(d.because || 'we could not put it into its session');
+    }
+    if (body.recorded === false && body.recordedBecause) {
+      // Delivering and keeping are two acts and two sentences: a message that
+      // went through and could not be written down must not read as unsent.
+      msg.textContent += ' ' + pjSentence(body.recordedBecause);
+    }
+  } catch (err) {
+    msg.textContent = pjSentence((err && err.message) || 'we could not send that');
+  } finally {
+    TALK_SENDING = false;
+    await paintTalk(sessionName, name);
+  }
+}
+
 function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
@@ -4947,6 +5303,22 @@ function openDetail(sessionName) {
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
+  /* ⚠️ CLEARED BEFORE the paint's awaits, like the window box below: agent A's
+     question and A's messages standing under B's name for two round-trips is
+     cross-agent misattribution, and this box holds the strongest version of it
+     -- a private conversation and a live question with buttons that send. */
+  {
+    document.getElementById('d-qask').hidden = true;
+    document.getElementById('d-qopts').innerHTML = '';
+    document.getElementById('d-qopts').hidden = true;
+    document.getElementById('d-qout').hidden = true;
+    document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">Opening&hellip;</p>';
+    document.getElementById('d-talk-older').hidden = true;
+    document.getElementById('d-dmoff').hidden = true;
+    document.getElementById('d-say-msg').textContent = '';
+    document.getElementById('d-say').value = '';
+  }
+  paintTalk(a.sessionName, a.name);
   /* Cleared BEFORE the paint's awaits: opening B with A's captured pane
      still in the box would show A's raw session under B's name for two
      network round-trips -- cross-agent misattribution, the same class
@@ -8838,7 +9210,14 @@ function pjWhen(at) {
  * as "it arrived and was understood", and all we know is that tmux took the
  * keystroke.
  */
-function pjMsg(m, name) {
+/**
+ * ⚠️ THE VERDICT IS DECIDED ONCE. Split out of `pjMsg` when the agent page's
+ * own thread arrived: the room draws a row and the agent page draws a bubble,
+ * and the SAME send described two ways on two screens is exactly the
+ * one-fact-two-derivations failure this codebase keeps paying for. The markup
+ * differs; the sentence does not.
+ */
+function pjVerdict(m, name) {
   const d = (m && m.delivery) || {};
   // The pane's state when we typed. "Placed into casey's session" is exactly
   // true and invites the wrong inference — that casey is reading it — so a
@@ -8882,6 +9261,11 @@ function pjMsg(m, name) {
     said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
       + esc(pjSentence(d.because || 'we could not put it into its session'));
   }
+  return { mark, said };
+}
+
+function pjMsg(m, name) {
+  const { mark, said } = pjVerdict(m, name);
   return '<div class="pj-msg' + mark + '">'
     + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
     + '<span class="pj-msg-said">' + said + '</span>'
@@ -9582,6 +9966,40 @@ async function pjSend() {
   }
 }
 
+/* --- the agent page's own composer, and the answers above it -------------- */
+document.getElementById('d-send').addEventListener('click', () => {
+  const say = document.getElementById('d-say');
+  if (say.value.trim()) sendTalk(say.value);
+});
+document.getElementById('d-say').addEventListener('keydown', (e) => {
+  // Enter sends, and the SAME IME rule as the room's box: the Enter that
+  // confirms a Japanese, Chinese or Korean candidate arrives here as an
+  // ordinary Enter, so without this the first word somebody types is sent
+  // half-composed. `isComposing` is the standard spelling; keyCode 229 is what
+  // older WebKit reports for the same keystroke.
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  const say = document.getElementById('d-say');
+  if (say.value.trim()) sendTalk(say.value);
+});
+/**
+ * An option button.
+ *
+ * ⚠️ DELEGATED, because the buttons are rebuilt by every poll -- a listener
+ * bound to the element would be attached to a button that no longer exists five
+ * seconds later, which is the class of bug where the first click works and none
+ * of the rest do.
+ *
+ * The DIGIT goes on the wire (it is what the agent's prompt is waiting for) and
+ * the option's own WORDS go in the bubble. Both, or the record misdescribes one
+ * or the other.
+ */
+document.getElementById('d-qopts').addEventListener('click', (e) => {
+  const btn = e.target.closest('.qopt');
+  if (!btn || btn.disabled) return;
+  sendTalk(btn.dataset.n, btn.dataset.label);
+});
 document.getElementById('pj-send').addEventListener('click', pjSend);
 // The park itself (round 34): every keystroke files the draft under the
 // open project, so no navigation order can lose it.
