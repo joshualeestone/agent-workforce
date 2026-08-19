@@ -6348,20 +6348,26 @@ test('the conversation filter matches what a row shows, and only that', () => {
   const fbAt = rawPage.indexOf('const PJ_VALVE_FALLBACK');
   assert.ok(fbAt > -1, 'the shared valve fallback constant vanished');
   const fallbackDecl = rawPage.slice(fbAt, rawPage.indexOf(';', fbAt) + 1);
+  // The stub keeps the PAGE's data shape (agents[] keyed on sessionName)
+  // so the fixture cannot teach a future reader a schema that does not
+  // exist in the product.
   const filter = pageFunction('pjRoomFilterRows',
-    'const pjNameOf = (p, from) => (p.names && p.names[from]) || from;\n' + fallbackDecl + '\n');
+    'const pjNameOf = (p, from) => { const a = (p.agents || []).find((x) => x.sessionName === from); return (a && a.name) || from; };\n'
+    + fallbackDecl + '\n');
   // Discriminating probes (review): the display name DIVERGES from the
   // session key and the operator row's from is NOT 'you', so an
   // implementation matching raw m.from cannot pass these.
-  const p = { names: { leo: 'Leonardo' } };
+  const p = { agents: [{ sessionName: 'leo', name: 'Leonardo' }] };
   const rows = [
     { id: 'm1', from: 'leo', text: 'The link is stable now.' },
     { id: 'm2', operator: true, from: 'op-key', text: 'Cut it to four emails.' },
     { kind: 'valve', because: 'mikey has been going back and forth without landing.' },
   ];
-  // Empty query: passthrough, byte-identical list.
-  assert.deepEqual(filter(rows, p, ''), rows);
-  assert.deepEqual(filter(rows, p, '   '), rows);
+  // Empty query: the SAME array back (identity, not a copy -- this is
+  // the per-keystroke hot path, and deepEqual could not tell a slice()
+  // regression from the fast path).
+  assert.equal(filter(rows, p, ''), rows);
+  assert.equal(filter(rows, p, '   '), rows);
   // Text match, case-folded.
   assert.deepEqual(filter(rows, p, 'STABLE').map((r) => r.id), ['m1']);
   // Sender display-name match: the RESOLVED name, provably (only the
