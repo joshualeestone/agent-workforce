@@ -3066,7 +3066,6 @@ svg { display: block; }
      what stays here is what has no tile home -- unknowns, unknown memory
      limits, and the part-of-the-fleet-is-missing clause. Empty hides. -->
 <div class="summary" id="summary">Loading…</div>
-<div class="build" id="build"></div>
 <div class="cards" id="grid"></div>
 <div class="alist" id="alist" hidden></div>
 
@@ -3083,6 +3082,13 @@ svg { display: block; }
           aria-expanded="false" aria-controls="removed-list"></button>
   <div class="removed-list" id="removed-list" hidden></div>
 </div>
+<!-- ⚠️ THE FOOT, not the top (Josh, 2026-08-19). This line sat above the cards,
+     under the New agent button, where the first thing a person met on their
+     board was its version number. It belongs where a version belongs: at the
+     bottom, after the removed-agents area, which is also where the pack draws
+     it. Kept OUTSIDE `#removed-wrap` for the reason the note below gives about
+     its neighbour: that wrap hides itself entirely when nothing is removed. -->
+<div class="build" id="build"></div>
 <!-- ⚠️ OUTSIDE `#removed-wrap`, NOT MERELY OUTSIDE `#removed-list`, and the
      difference is the whole fix.
      
@@ -4074,9 +4080,13 @@ async function tick() {
     // agent boots from. A banner asserting something false about safety is the
     // worst possible instance of the trap this whole codebase is written
     // against, so it now says which way the writing goes.
+    /* ⚠️ THE CLAUSE ABOUT EDITING IS CUT (Josh, 2026-08-19), and the history
+       above it explains what must NOT come back with it: this line once said
+       "read-only, nothing here can change your agents", which stopped being
+       true the moment the screen could edit an instruction file. Saying nothing
+       is honest. Saying that again would not be. */
     document.getElementById('build').innerHTML =
-      '<b>BETA</b> · version ' + esc(data.version || 'unknown')
-      + ' · editing an agent here changes the real file it starts from';
+      '<b>BETA</b> · version ' + esc(data.version || 'unknown');
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
