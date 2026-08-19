@@ -57,8 +57,14 @@ const KNOW_MAX = 2000;
 function clean(value, { multiline } = {}) {
   let s = String(value == null ? '' : value);
   s = multiline ? s.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n') : s.replace(/\s+/g, ' ');
-  // Both our marker pairs: a name containing either would end a block early.
-  for (const m of [START, END, projects.BLOCK_START, projects.BLOCK_END]) {
+  // Every sibling's marker pair, not only ours: a pair smuggled through a
+  // typed answer would end a block early, ambiguate a real sibling block
+  // (silently disabling its heal), or hand the colleagues heal a span to
+  // replace inside somebody's own words. The colleagues pair joined this
+  // list when tellAgent became that block's healer (same lesson, fourth
+  // writer). Lazy require: you.js must not gain a cycle.
+  const mm = require('./messages');
+  for (const m of [START, END, projects.BLOCK_START, projects.BLOCK_END, mm.START, mm.END]) {
     s = s.split(m).join('(kosmos marker)');
   }
   return s.trim();
@@ -176,9 +182,14 @@ function tellAgent(sessionName, roster) {
     if (record.state === 'unknown') {
       return { state: projects.TOLD.COULD_NOT, because: record.because };
     }
-    const next = record.state === 'saved'
+    let next = record.state === 'saved'
       ? projects.spliceBlock(current.text || '', blockBody(record.you), START, END)
       : projects.removeBlock(current.text || '', START, END);
+    // A projectless agent never passes through projects.tellAgent, so the
+    // colleagues block heals on THIS writer too: same shared, marker-gated
+    // heal, and the equality short-circuit below still protects the
+    // one-deep .previous undo on a no-drift file.
+    next = projects.healColleagues(next);
     if (next === current.text) return { state: projects.TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
     return { state: projects.TOLD.TOLD, because: null };

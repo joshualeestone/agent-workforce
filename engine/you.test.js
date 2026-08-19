@@ -77,6 +77,20 @@ test('the block speaks the answers and neutralises the markers', () => {
   assert.ok(!body.includes(you.START), 'a marker in an answer would end the block early');
   assert.ok(!body.slice(body.indexOf('Josh')).includes(projects.BLOCK_END), 'the projects marker is neutralised too');
   assert.match(body, /Builds things/, 'one-line answers collapse their newlines');
+
+  // The colleagues pair as well, since tellAgent heals that block on every
+  // membership sync: a smuggled pair would ambiguate the real block (heal
+  // silently off) or hand the heal a span INSIDE the person's own words.
+  const messages = require('./messages');
+  const smuggled = you.blockBody({
+    name: 'Josh',
+    does: 'Builds things',
+    know: 'A ' + messages.START + ' pair ' + messages.END + ' typed by hand',
+  });
+  assert.ok(!smuggled.includes(messages.START) && !smuggled.includes(messages.END),
+    'a colleagues marker survived through a typed answer');
+  assert.ok(smuggled.includes('(kosmos marker)'),
+    'CONTROL: neutralization left no trace, so the absence above proves nothing');
 });
 
 test('tellAgent writes the block for a tied agent, and an absent record removes it', () => {
@@ -152,4 +166,27 @@ test('syncEveryone tells the tied and skips the strangers', () => {
   const blind = you.syncEveryone(null);
   assert.equal(blind.length, 1);
   assert.equal(blind[0].state, projects.TOLD.COULD_NOT);
+});
+
+test('a projectless agent heals its stale colleagues block on an About-you write', () => {
+  // The heal used to ride only projects.tellAgent, and an agent on no
+  // project never passes through it -- its stale bare-kosmos teaching
+  // would have outlived every About-you rewrite of the same file.
+  const messages = require('./messages');
+  you.save(GOOD);
+  const stale = messages.START + '\nold body teaching bare kosmos\n' + messages.END;
+  plantAgent('drift', BOOT + '\n' + stale + '\n');
+  const roster = fleet.install([fleet.agent('drift', { state: 'idle' })]).agents;
+  try {
+    const v = you.tellAgent('drift', roster);
+    assert.equal(v.state, projects.TOLD.TOLD, 'heal-path verdict: ' + v.because);
+    const text = fs.readFileSync(bootFile('drift'), 'utf8');
+    assert.ok(!text.includes('old body teaching bare kosmos'),
+      'the stale colleagues body survived an About-you write');
+    assert.ok(text.includes(' msg <their-name>'),
+      'the healed block does not teach the msg command');
+    assert.ok(text.includes('Do the work well'), 'the agent\'s own words survive');
+  } finally {
+    fleet.restore();
+  }
 });

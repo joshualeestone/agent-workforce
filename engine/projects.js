@@ -49,6 +49,10 @@ const instructions = require('./instructions');
 // the exact question the screen this replaced said it was waiting on. So the
 // project publishes the answer and the page renders it.
 const chat = require('./chat');
+const { kosmosCliShown } = require('./clipath');
+// One direction only: messages requires chat/store/limits, never projects,
+// so this edge (for the colleagues-block heal in tellAgent) cannot cycle.
+const messagesBlock = () => require('./messages');
 
 const FILE = 'projects.json';
 
@@ -103,9 +107,9 @@ const GROUP_BECAUSE = new Map([
   ['this agent has no folder on this computer yet',
     'none of them has a folder on this computer yet'],
   ['this agent has no instructions file yet, and we will not create one for it',
-    'none of them has an instructions file yet, and we will not create one for them'],
+    'none of them has an instructions file yet, and we will not create them'],
   ['we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything',
-    'we cannot tie any of them by exactly their names to sessions on this computer, so we did not write to anything'],
+    'we cannot match any of their names exactly to a session on this computer, so we did not write to anything'],
   ['we could not check which agents are running, so we did not write to anything',
     'we could not check which agents are running, so we did not write to anything'],
   ['this agent keeps its instructions somewhere we cannot safely change',
@@ -1414,6 +1418,14 @@ function oneLine(value) {
     // sibling's markers or it becomes the injection path into them.
     .split(YOU_START).join('(kosmos marker)')
     .split(YOU_END).join('(kosmos marker)')
+    // And the colleagues pair, the moment tellAgent became that block's
+    // healer: an inline pair smuggled through a project name would either
+    // ambiguate the real block (silently disabling the heal) or make the
+    // heal splice a colleagues body INTO the projects block of a file
+    // that never had one -- the exact growth the heal's marker gate
+    // refuses. Same lesson, third sibling.
+    .split(messagesBlock().START).join('(kosmos marker)')
+    .split(messagesBlock().END).join('(kosmos marker)')
     .trim();
 }
 
@@ -1429,12 +1441,20 @@ function blockBody(projects, sessionName) {
   // its open tasks, in that spelling, in the file it boots from. Without
   // this the join would be a convention nobody was told about.
   let any = false;
+  // One resolution per block build, not one per project line (two to
+  // three existsSync probes each).
+  const cliShown = kosmosCliShown();
   const lines = projects.map((p) => {
     // The room command rides each project line (View D): this block
     // re-splices on every membership change, so it is the one surface
     // that teaches EXISTING agents the room exists, not only newborns.
-    const head = `- **${oneLine(p.name)}** — \`${oneLine(p.folder)}\`` + (p.id
-      ? `\n  - Post to everyone on it: \`kosmos post ${oneLine(String(p.id))} "your message"\``
+    // ⚠️ The command is taught as THIS machine can run it (kosmosCli):
+    // bare `kosmos` is not on a stock install's PATH, and an agent whose
+    // shell says "command not found" never reaches the engine, so its
+    // failure draws nothing anywhere. Re-spliced on every membership
+    // change, so existing agents get the corrected form, not only new.
+    const head = `- **${oneLine(p.name)}**: \`${oneLine(p.folder)}\`` + (p.id
+      ? `\n  - Post to everyone on it: \`${cliShown} post ${oneLine(String(p.id))} "your message"\``
       : '');
     const mine = (sessionName && Array.isArray(p.tasks))
       ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
@@ -1539,9 +1559,16 @@ function tellAgent(sessionName, projects, roster) {
     // note saying it is on none. Removing a project must not leave residue in
     // somebody's instruction file, and "Kosmos has not put this agent on a
     // project yet" sitting in a boot file forever is residue.
-    const next = projects.length
+    let next = projects.length
       ? spliceBlock(current.text || '', blockBody(projects, sessionName))
       : removeBlock(current.text || '');
+    // The colleagues block heals on EVERY event that writes this file
+    // (here, and you.js's tellAgent -- an agent on no project still gets
+    // About-you writes, and "piggyback on the one write" undercounted the
+    // writers). It is spliced at birth and nothing else refreshed it, so
+    // a corrected command (the PATH fix) would otherwise reach only
+    // newborn agents. The heal itself is in healColleagues below.
+    next = healColleagues(next);
     if (next === current.text) return { state: TOLD.TOLD, because: null };
     instructions.write(sessionName, next, current.version);
     return { state: TOLD.TOLD, because: null };
@@ -1563,6 +1590,26 @@ function tellAgent(sessionName, projects, roster) {
           : (raw || 'we could not write to this agent’s instructions')),
     };
   }
+}
+
+/**
+ * Heal a drifted colleagues block in place; NEVER introduce one.
+ *
+ * Shared by every ENGINE writer into an agent's instruction file (this
+ * module's tellAgent and you.js's), so a projectless agent still heals on
+ * an About-you write. The person's own instructions PUT deliberately does
+ * NOT heal: their text is verbatim by design. Heal-only: spliceBlock APPENDS when the markers are
+ * absent, which would grow an adopted agent's file nobody asked us to
+ * grow, so a file without the markers (or with an ambiguous pair) comes
+ * back byte-identical. Callers keep their own equality short-circuit, so
+ * a no-drift file is never rewritten (protecting the one-deep .previous
+ * undo).
+ */
+function healColleagues(text) {
+  const mm = messagesBlock();
+  const at = findBlock(String(text == null ? '' : text), mm.START, mm.END);
+  if (!at || at.ambiguous) return text;
+  return spliceBlock(text, mm.blockBody(), mm.START, mm.END);
 }
 
 /**
@@ -1590,7 +1637,7 @@ module.exports = {
   FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END,
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
-  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause,
+  findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause, healColleagues,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
   folderPathPreview, makeFolder, revealFolder, setRevealRunner,
 };

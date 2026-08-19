@@ -125,6 +125,11 @@ case "$KOSMOS_HOME" in
     ;;
 esac
 BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
+# ONE definition for the profile-wiring literals, used by the install
+# wiring AND the uninstall sweep: two derivations of these strings is how
+# the sweep silently stops matching what install wrote.
+PATH_MARKER="# kosmos: PATH for the kosmos command (removed by --uninstall)"
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 # ⚠️ Overridable for the same reason the sources are: the sandboxed test of
 # this installer must not write an app icon into the real Applications
 # folders of the machine it runs on. Everything this script writes goes
@@ -552,6 +557,98 @@ uninstall() {
   if [ -e "$BIN_DIR/kosmos" ] || [ -L "$BIN_DIR/kosmos" ]; then
     info "removing $BIN_DIR/kosmos"
     rm -f "$BIN_DIR/kosmos"
+  fi
+  # The PATH lines the installer wrote come out with the command they
+  # served: exactly the marker and its export, by whole-line match, and
+  # nothing else in the person's profile. awk (not grep -v) because an
+  # empty result is a legitimate outcome (a profile that held only our
+  # block), not a pipeline error to branch on.
+  _profile="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+  case "$_profile" in
+    /*) ;;
+    *) _profile="" ;;
+  esac
+  # Same sandbox gate as the install side: a harness run touches only a
+  # profile it names explicitly, never the operator's real one.
+  if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
+    _profile=""
+  fi
+  _marker="$PATH_MARKER"
+  _pline="$PATH_LINE"
+  if [ -n "$_profile" ] && [ -f "$_profile" ] && grep -qxF "$_marker" "$_profile" 2>/dev/null; then
+    _ptmp="$(mktemp "${TMPDIR:-/tmp}/kosmos-profile.XXXXXXXXXX" 2>/dev/null || true)"
+    # The export is matched by ADJACENCY to the marker as well as by exact
+    # text: an uninstall run with a different KOSMOS_BIN_DIR than the
+    # install would otherwise remove the marker and orphan the export it
+    # explained. Only an export-PATH-shaped line right after the marker
+    # qualifies; anything else the person wrote there is printed untouched.
+    # The single blank line the install printed before the marker is
+    # swallowed with it (held one line, flushed unless the marker follows),
+    # so install/uninstall cycles do not accumulate blank lines.
+    # ⚠️ `cat > profile` TRUNCATES before it writes, so a failure mid-write
+    # (disk full, permissions changed under us) would leave the person's
+    # shell profile half-gone. A sibling backup is taken first and restored
+    # on any failure; restore uses cat too, preserving a symlinked
+    # profile's inode. mv is deliberately not used for the same reason.
+    _pbak="$_profile.kosmos-uninstall-backup"
+    # ⚠️ The backup is VERIFIED (cmp) before anything mutates the profile,
+    # and it is only ever a restore SOURCE when verified: a cp that died
+    # partway (disk full is this block's own named threat, and the backup
+    # is the first write) would otherwise "restore" a partial copy over
+    # the still-intact profile -- a shrinking write that succeeds on a
+    # full disk -- and then claim nothing changed.
+    # ⚠️ A pre-existing backup HALTS this block. It is a previous failed
+    # run's preserved copy, which the person was told about by name;
+    # overwriting it with the current (possibly damaged) profile, or
+    # rm'ing it on this run's own failure path, would destroy exactly
+    # what that run preserved. A run may only remove a backup it created.
+    if [ -e "$_pbak" ]; then
+      info "note: ${_pbak##*/} already exists from an earlier run; leaving it and the kosmos PATH line alone (the line is harmless and safe to delete by hand)"
+      rm -f "$_ptmp" 2>/dev/null || true
+      _bak_ok=halt
+    else
+    _bak_ok=no
+    if [ -n "$_ptmp" ] && cp "$_profile" "$_pbak" 2>/dev/null && cmp -s "$_profile" "$_pbak" 2>/dev/null; then
+      _bak_ok=yes
+    fi
+    fi
+    # Announced unless HALTED (a halted run must not say "removing" and
+    # then retract it). A failed-backup run still announces the attempt
+    # and then reports the failure, which is the honest transcript.
+    if [ "$_bak_ok" != halt ]; then
+      info "removing the kosmos PATH line from ${_profile##*/}"
+    fi
+    if [ "$_bak_ok" = halt ]; then
+      : # said above; nothing touched, and nothing was announced
+    elif [ "$_bak_ok" = yes ] \
+       && awk -v m="$_marker" -v p="$_pline" '
+            skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }
+            $0 == m { skip=1; blank=0; next }
+            { if (blank) print ""; blank=0 }
+            $0 == "" { blank=1; next }
+            { print }
+            END { if (blank) print "" }
+          ' "$_profile" > "$_ptmp" 2>/dev/null \
+       && cat "$_ptmp" > "$_profile" 2>/dev/null; then
+      rm -f "$_ptmp" "$_pbak" 2>/dev/null || true
+    elif [ "$_bak_ok" = yes ]; then
+      # Something after the verified backup failed; put the original back,
+      # and verify the restore too. A failed restore keeps the backup and
+      # NAMES it -- a backup is never deleted on a failure path unless the
+      # restore it fed verified byte-for-byte.
+      if cat "$_pbak" > "$_profile" 2>/dev/null && cmp -s "$_pbak" "$_profile" 2>/dev/null; then
+        rm -f "$_pbak" 2>/dev/null || true
+        info "note: could not edit ${_profile##*/} (restored unchanged); the kosmos PATH line is harmless and safe to delete by hand"
+      else
+        info "note: could not edit ${_profile##*/}; an untouched copy is at ${_pbak##*/} in the same folder"
+      fi
+      rm -f "$_ptmp" 2>/dev/null || true
+    else
+      # The backup never verified, so the profile was never touched; the
+      # partial backup is our own junk and comes off.
+      rm -f "$_pbak" "$_ptmp" 2>/dev/null || true
+      info "note: could not edit ${_profile##*/}; the leftover kosmos PATH line is harmless and safe to delete by hand"
+    fi
   fi
   # ⚠️ THE AGENTS' BACKGROUND JOBS ARE STOPPED AND REMOVED. The app installs
   # one launchd job per agent (com.kosmos.agent.*), set to start at every
@@ -1004,11 +1101,86 @@ ln -sfn "$KOSMOS_HOME/bin/kosmos" "$BIN_DIR/kosmos" || die "Could not place the 
 info "installed to $KOSMOS_HOME"
 ok
 
-# ⚠️ Say it, do not assume it. A binary in ~/.local/bin is useless to somebody
-# whose shell does not look there, and silently not working is the worst outcome.
+# ⚠️ WIRED, not narrated. A binary in ~/.local/bin is useless to somebody
+# whose shell does not look there, and the note this used to print reached
+# nobody: measured 2026-08-18, the person AND every agent on the machine got
+# "command not found" from the taught command, the agents silently (their
+# failure happens before the engine, so nothing draws it anywhere). zsh is
+# the macOS default login shell, so the line lands in ~/.zprofile (created
+# if absent), marker-guarded so reruns never duplicate it; --uninstall
+# removes exactly the two lines this writes and nothing else. A profile we
+# cannot write degrades to the old honest note, never to silence.
+PROFILE_FILE="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+# A relative profile path would resolve against whatever directory each
+# run happens to start from, so install and uninstall could edit two
+# different files (the same reason KOSMOS_HOME refuses relative paths).
+case "$PROFILE_FILE" in
+  /*) ;;
+  *) info "note: KOSMOS_PROFILE_FILE must be an absolute path; skipping the shell profile"
+     PROFILE_FILE="" ;;
+esac
+# ⚠️ A SANDBOXED RUN NEVER TOUCHES THE REAL PROFILE. Same keying as the
+# lsregister gate: any app-dir override means a test harness, and the only
+# profile such a run may write is one it names explicitly. The first
+# harness run after this feature leaked a sandbox bin path into the
+# operator's real ~/.zprofile; this gate is that measurement.
+if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
+  PROFILE_FILE=""
+fi
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) info "note: typing 'kosmos' in Terminal will not work yet on this Mac; the app icon step below and the closing lines cover how to open Kosmos" ;;
+  *)
+    if [ -z "$PROFILE_FILE" ]; then
+      info "skipping the shell profile (sandboxed run, no profile named)"
+    elif [ -z "${KOSMOS_PROFILE_FILE:-}" ] && [ -n "${SHELL:-}" ] && [ "${SHELL##*/}" != "zsh" ]; then
+      # An EXPLICIT KOSMOS_PROFILE_FILE outranks this hedge: a bash user
+      # pointing at their own ~/.bash_profile asked for exactly this write.
+      # ⚠️ The claim must not outrun the file: ~/.zprofile is read by zsh
+      # only, and a bash/fish login shell would get "success" and a command
+      # that still fails -- the silent class this whole step exists to end.
+      # An empty $SHELL falls through to wiring: the macOS default is zsh.
+      info "note: typing 'kosmos' in Terminal will not work yet on this Mac (your login shell is ${SHELL##*/}, and this installer only knows how to wire zsh); the app icon step below and the closing lines cover how to open Kosmos"
+    else
+      case "$BIN_DIR" in
+        *"
+"*|*'"'*|*'$'*|*'`'*|*'\'*|*':'*)
+          # Same class as the KOSMOS_HOME guard above: these characters
+          # would corrupt (or execute inside) a file sourced at every
+          # login. Refuse the write, keep the honest note.
+          info "note: typing 'kosmos' in Terminal will not work yet on this Mac (the bin folder's name contains a character unsafe to write into ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+          ;;
+        *)
+          # "Already wired" requires BOTH halves AND their adjacency: the
+          # export-shaped line directly after the marker, anchored. A
+          # profile carrying the marker with the export hand-deleted or
+          # commented out must fall through and repair the functional
+          # half, not report wired forever -- the silent class this step
+          # ends. (An unanchored grep matched '# export ...' and any
+          # person-owned export of that shape anywhere in the file.)
+          # STICKY across every marker occurrence: a scan that latched on
+          # the first marker never recognized the repaired pair below an
+          # orphan, so each rerun appended another pair, unbounded.
+          if [ -f "$PROFILE_FILE" ] \
+             && awk -v m="$PATH_MARKER" '
+                  $0 == m { f = 1; next }
+                  f == 1 { if ($0 ~ /^export PATH=".*:\$PATH"$/) ok = 1; f = 0 }
+                  END { exit (ok == 1) ? 0 : 1 }
+                ' "$PROFILE_FILE" 2>/dev/null; then
+            # No works-claim here: the wired export names whatever bin dir
+            # the EARLIER install used, which this run cannot vouch for.
+            info "the kosmos command is already wired into ${PROFILE_FILE##*/}"
+          elif { printf '\n%s\n%s\n' "$PATH_MARKER" "$PATH_LINE" >> "$PROFILE_FILE"; } 2>/dev/null; then
+            info "wired ${PROFILE_FILE##*/} so typing 'kosmos' works in NEW Terminal windows (windows already open keep their old PATH)"
+            if [ -n "${KOSMOS_PROFILE_FILE:-}" ]; then
+              info "note: run --uninstall with the same KOSMOS_PROFILE_FILE so the line comes off with it"
+            fi
+          else
+            info "note: typing 'kosmos' in Terminal will not work yet on this Mac (could not write ${PROFILE_FILE##*/}); the app icon step below and the closing lines cover how to open Kosmos"
+          fi
+          ;;
+      esac
+    fi
+    ;;
 esac
 
 # ---- the front door -----------------------------------------------------------

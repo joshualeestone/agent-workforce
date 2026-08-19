@@ -56,6 +56,13 @@ while curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; do
 done
 
 export KOSMOS_HOME="$SB/home" KOSMOS_BIN_DIR="$SB/bin" KOSMOS_APP_DIR="$SB/apps"
+export KOSMOS_PROFILE_FILE="$SB/zprofile"
+# SHELL pinned for determinism only (belt and suspenders): with
+# KOSMOS_PROFILE_FILE exported above, setup.sh's non-zsh hedge is
+# unreachable in this run regardless of SHELL; the pin keeps that true
+# even if the hedge's precedence ever changes.
+export SHELL=/bin/zsh
+printf '# the operator\047s own line\n' > "$SB/zprofile"
 export KOSMOS_TMUX_SRC="$TMUX_SRC" KOSMOS_SRC="$KOS_SRC" KOSMOS_PORT="$PORT"
 export AGENT_WORKFORCE_DATA="$SB/data" AGENT_WORKFORCE_LAUNCH="$SB/launch"
 # A test that steals the operator's browser is a test nobody runs twice:
@@ -118,6 +125,11 @@ chk "install exits 0" "[ $RC -eq 0 ]"
 chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
+# The PATH wiring lands in the SANDBOX profile (the sandbox bin dir is not
+# on this shell's PATH, so the wiring arm must fire), exactly once, and a
+# pre-existing line survives.
+chk "PATH wiring wrote the sandbox profile" "grep -qxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\""
+chk "PATH wiring wrote the export line (the functional half)" "grep -qF \"$SB/bin\" \"$SB/zprofile\""
 chk "the gold-K icon landed inside the app, intact" "[ \"\$(shasum -a 256 \"$SB/apps/Kosmos.app/Contents/Resources/Kosmos.icns\" 2>/dev/null | cut -d' ' -f1)\" = \"\$(shasum -a 256 \"$KOS_SRC/app/assets/Kosmos.icns\" | cut -d' ' -f1)\" ]"
 chk "the bundle declares its architecture (no Rosetta prompt)" "grep -q 'LSArchitecturePriority' \"$SB/apps/Kosmos.app/Contents/Info.plist\" && grep -q 'arm64' \"$SB/apps/Kosmos.app/Contents/Info.plist\""
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
@@ -156,6 +168,10 @@ chk "update exits 0" "[ $RC -eq 0 ]"
 chk "stale file gone (swap, not merge)" "[ ! -e \"$SB/home/app/engine/stale-marker.js\" ]"
 chk "board restarted (new pid)" "[ \"$PID1\" != \"$(cat "$SB/home/board.pid")\" ]"
 chk "board serves after update" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
+# The idempotency check lives HERE, after a SECOND install against the
+# same profile: after one install a count of 1 is guaranteed even with
+# the marker guard deleted, so a first-pass count check cannot fail.
+chk "PATH wiring still written exactly once after a rerun" "[ \"\$(grep -cxF '# kosmos: PATH for the kosmos command (removed by --uninstall)' \"$SB/zprofile\")\" = 1 ]"
 
 echo "== refusals speak sentences =="
 OUT="$(sh -s -- --uninstal < "$SETUP" 2>&1 || true)"
@@ -173,6 +189,31 @@ chk "app gone" "[ ! -d \"$SB/apps/Kosmos.app\" ]"
 chk "override-branch stage and aside residue swept" "[ ! -e \"$SB/apps/.Kosmos.app.stage.333\" ] && [ ! -e \"$SB/apps/.Kosmos.app.old.444\" ]"
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
 chk "user data untouched" "[ -d \"$SB/data\" ]"
+chk "PATH wiring removed from the sandbox profile" "! grep -q kosmos \"$SB/zprofile\""
+chk "the export line came out too (adjacency arm has a check that can fail)" "! grep -qF \"$SB/bin\" \"$SB/zprofile\""
+chk "the operator's own profile line survives" "grep -q 'own line' \"$SB/zprofile\""
+# The ADJACENCY arm specifically: install and uninstall above shared one
+# BIN_DIR, so the exact-text match alone would have passed. Plant a
+# marker + export naming a DIFFERENT bin dir (the changed-KOSMOS_BIN_DIR
+# case the regex exists for) and run the uninstall again.
+printf '%s\nexport PATH="/different/bin:$PATH"\n' '# kosmos: PATH for the kosmos command (removed by --uninstall)' >> "$SB/zprofile"
+RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall2.log" 2>&1 || RC=$?
+chk "second uninstall exits 0" "[ $RC -eq 0 ]"
+chk "adjacency arm removed an export from a DIFFERENT bin dir" "! grep -q '/different/bin' \"$SB/zprofile\""
+chk "the operator's line still survives the second sweep" "grep -q 'own line' \"$SB/zprofile\""
+# The pre-existing-backup HALT arm: a prior failed run's preserved copy
+# must never be overwritten or removed by a later run, and the profile
+# must not be edited while it stands (new safety code gets its own
+# check that can fail, or it is the least trustworthy code in the file).
+printf '%s\nexport PATH="/halt/bin:$PATH"\n' '# kosmos: PATH for the kosmos command (removed by --uninstall)' >> "$SB/zprofile"
+printf 'PRESERVED FROM AN EARLIER RUN\n' > "$SB/zprofile.kosmos-uninstall-backup"
+cp "$SB/zprofile" "$SB/zprofile.before-halt"
+RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall3.log" 2>&1 || RC=$?
+chk "halt-arm uninstall exits 0" "[ $RC -eq 0 ]"
+chk "a pre-existing backup halts the edit (profile untouched)" "cmp -s \"$SB/zprofile\" \"$SB/zprofile.before-halt\""
+chk "the preserved backup survives byte-identical" "[ \"\$(cat \"$SB/zprofile.kosmos-uninstall-backup\")\" = 'PRESERVED FROM AN EARLIER RUN' ]"
+chk "the halt names the backup in its note" "grep -q 'already exists from an earlier run' \"$SB/uninstall3.log\""
+rm -f "$SB/zprofile.kosmos-uninstall-backup" "$SB/zprofile.before-halt"
 chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
 
 echo "== the download path (file:// origin, no local-copy shortcut) =="
@@ -226,7 +267,12 @@ export KOSMOS_HOME="$SB/home2" KOSMOS_BIN_DIR="$SB/bin2"
 # KOSMOS_NO_OPEN is cleared and the open command is the recording stub, so
 # this pass also pins the one behavior a hardcoded /usr/bin/open hid from
 # the suite: a fresh install invokes the open, an update does not.
-RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe1.log" 2>&1 || RC=$?
+# KOSMOS_PROFILE_FILE is emptied HERE, deliberately: with a sandbox
+# override present (SYS_APP_DIR) and no profile named, the profile gate
+# must SKIP -- this is the arm that stops a harness run writing the
+# operator's real ~/.zprofile (leaked once, 2026-08-18, before the gate).
+RC=0; cat "$SETUP" | HOME="$SBH" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS_OK" KOSMOS_PROFILE_FILE= KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/probe1.log" 2>&1 || RC=$?
+chk "the profile gate skipped: no zprofile written under the sandbox HOME" "[ ! -e \"$SBH/.zprofile\" ]"
 chk "probe install exits 0" "[ $RC -eq 0 ]"
 chk "app landed in the system folder" "[ -x \"$SYS_OK/Kosmos.app/Contents/MacOS/Kosmos\" ]"
 chk "transcript names Applications" "grep -q 'you will find it in Applications, as Kosmos' \"$SB/probe1.log\""

@@ -873,7 +873,9 @@ function createAgent(opts) {
     // The colleagues block rides from birth too, same machinery and the
     // same non-gating posture: agent-to-agent messaging only works if the
     // agents know the command exists, and the file is where agents learn
-    // things. Static content, so it cannot go stale as the fleet changes.
+    // things. Roster-independent content; the taught command is
+    // machine-derived and heals via projects.healColleagues when it
+    // drifts.
     // ⚠️ ROLE TEMPLATES ONLY. Custom instructions are the person's own
     // words written verbatim (the drift rule at birth, pinned by its own
     // test), so nothing is appended to them uninvited -- a person who

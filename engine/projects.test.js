@@ -1573,9 +1573,9 @@ test('every singular could_not because the engine authors has a plural sibling',
     'this agent has no folder on this computer yet':
       'none of them has a folder on this computer yet',
     'this agent has no instructions file yet, and we will not create one for it':
-      'none of them has an instructions file yet, and we will not create one for them',
+      'none of them has an instructions file yet, and we will not create them',
     'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything':
-      'we cannot tie any of them by exactly their names to sessions on this computer, so we did not write to anything',
+      'we cannot match any of their names exactly to a session on this computer, so we did not write to anything',
     'this agent keeps its instructions somewhere we cannot safely change':
       'they keep their instructions somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':
@@ -1681,4 +1681,128 @@ test('list() derives becauseGroup at read time, beside the stored verdict', () =
   const nt = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons').agents[0].told;
   assert.equal(nt.state, 'not_tried');
   assert.equal(nt.becauseGroup, null, 'a not_tried default grew a group reason');
+});
+
+/* ---------------------------------------------------------------------------
+ * reach-the-command: the taught command is one this machine can run, and
+ * stale colleagues blocks heal on the write that already happens.
+ * ------------------------------------------------------------------------ */
+
+test('the taught kosmos command resolves to a real file on this machine, never a bare word here', () => {
+  const { kosmosCli, kosmosCliShown } = require('./clipath');
+  const cli = kosmosCli();
+  // On this source checkout the CLI is provably install/kosmos; a bare
+  // `kosmos` here would mean the probes failed on a layout they must
+  // recognize (the exact silent-failure this exists to end).
+  assert.equal(cli, path.resolve(__dirname, '..', 'install', 'kosmos'));
+  assert.ok(fs.existsSync(cli), 'the resolved CLI does not exist');
+  // Fallback NEVER invents: a root proving neither layout yields the bare
+  // word (the installer's PATH wiring is that case's fix, not a guess).
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'clipath-'));
+  assert.equal(kosmosCli(empty), 'kosmos');
+  // The INSTALLED layout, the production path of the motivating incident:
+  // bin/kosmos + app/server.js at the root resolves to bin/kosmos.
+  const inst = fs.mkdtempSync(path.join(os.tmpdir(), 'clipath-inst-'));
+  fs.mkdirSync(path.join(inst, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(inst, 'bin', 'kosmos'), '#!/bin/sh\n');
+  fs.mkdirSync(path.join(inst, 'app'), { recursive: true });
+  fs.writeFileSync(path.join(inst, 'app', 'server.js'), '');
+  assert.equal(kosmosCli(inst), path.join(inst, 'bin', 'kosmos'),
+    'the installed layout did not resolve to its own bin/kosmos');
+  // The taught form quotes exactly when the path carries whitespace: an
+  // unquoted spaced path pastes as two shell words.
+  const spaced = fs.mkdtempSync(path.join(os.tmpdir(), 'cli path-'));
+  fs.mkdirSync(path.join(spaced, 'install'), { recursive: true });
+  fs.writeFileSync(path.join(spaced, 'install', 'kosmos'), '#!/bin/sh\n');
+  assert.equal(kosmosCliShown(spaced), '"' + path.join(spaced, 'install', 'kosmos') + '"');
+  // Guarded: on a checkout whose own path carries a space, the quoting
+  // arm is CORRECT and this assertion would fail environmentally.
+  if (!/\s/.test(kosmosCli())) {
+    assert.ok(!/^"/.test(kosmosCliShown()), 'an unspaced path grew quotes it does not need');
+  }
+  // A character double quotes cannot neutralize degrades to the bare
+  // word: never teach a line that expands inside the agent's shell.
+  const hostile = fs.mkdtempSync(path.join(os.tmpdir(), 'cli$evil-'));
+  fs.mkdirSync(path.join(hostile, 'install'), { recursive: true });
+  fs.writeFileSync(path.join(hostile, 'install', 'kosmos'), '#!/bin/sh\n');
+  assert.equal(kosmosCliShown(hostile), 'kosmos',
+    'a dollar-carrying path was taught inside double quotes');
+});
+
+test('the project block and the colleagues block both teach the resolved command', () => {
+  const { kosmosCliShown } = require('./clipath');
+  const messages = require('./messages');
+  const body = projects.blockBody([{ id: 'hendersonlease', name: 'Henderson lease', folder: '/tmp/h' }]);
+  assert.ok(body.includes(kosmosCliShown() + ' post hendersonlease'),
+    'the project block still teaches a command this machine cannot run');
+  const colleagues = messages.blockBody();
+  assert.ok(colleagues.includes(kosmosCliShown() + ' msg <their-name>'),
+    'the colleagues block still teaches a bare msg command');
+  assert.ok(colleagues.includes(kosmosCliShown() + ' post <project-id>'),
+    'the colleagues block still teaches a bare post command');
+  assert.ok(colleagues.includes('say what happened in'),
+    'the failure line is gone: a pre-engine failure is silent everywhere else');
+});
+
+test('a stale colleagues block heals on syncAgent; a file without one is not grown', () => {
+  reset();
+  const messages = require('./messages');
+  const stale = messages.START + '\nold body teaching bare kosmos\n' + messages.END;
+  agent('mara', '# Mara\n\nHer own words.\n\n' + stale + '\n');
+  agent('rook', '# Rook\n\nNo colleagues block here.\n');
+  const dir = folder('heal-colleagues');
+  projects.create({ name: 'Heal', folder: dir, agents: ['mara', 'rook'] });
+  // rook rides a widened roster: the no-introduce arm below must reach the
+  // WRITE path and be refused by the marker gate, not by the roster gate
+  // (a roster refusal would pass the assert while proving nothing).
+  const R = cards([fleet.agent('mara', { state: 'working' }), fleet.agent('rook', { state: 'idle' })]);
+
+  const vm = projects.syncAgent('mara', R);
+  assert.equal(vm.state, projects.TOLD.TOLD, 'mara heal verdict: ' + vm.because);
+  const healed = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'mara', 'CLAUDE.md'), 'utf8');
+  assert.ok(!healed.includes('old body teaching bare kosmos'),
+    'the stale colleagues body survived the write that should heal it');
+  assert.ok(healed.includes(' msg <their-name>'),
+    'the healed block does not teach the msg command');
+  assert.ok(healed.includes('Her own words.'), 'her own instructions survive the heal');
+
+  // Heal, never introduce: rook never had the block and must not gain it
+  // from a projects write (growing an adopted agent's file is not ours).
+  const vr = projects.syncAgent('rook', R);
+  assert.equal(vr.state, projects.TOLD.TOLD, 'rook heal-arm verdict: ' + vr.because);
+  const rook = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'rook', 'CLAUDE.md'), 'utf8');
+  assert.ok(!rook.includes(messages.START),
+    'a file with no colleagues block was grown one by a projects write');
+});
+
+test('a colleagues marker pair cannot ride a project field into the block', () => {
+  // tellAgent heals the colleagues block now, so a smuggled pair is an
+  // injection path into the heal (ambiguate it off, or hand it a span
+  // inside the projects block). oneLine neutralizes it like its siblings.
+  const messages = require('./messages');
+  const body = projects.blockBody([{ id: 'x', name: 'Evil ' + messages.START + ' name', folder: '/tmp/' + messages.END }]);
+  assert.ok(!body.includes(messages.START) && !body.includes(messages.END),
+    'a colleagues marker survived oneLine through a project field');
+  assert.ok(body.includes('(kosmos marker)'),
+    'CONTROL: neutralization left no trace, so the absence above proves nothing');
+});
+
+test('an ambiguous colleagues pair declines the heal rather than guessing', () => {
+  reset();
+  const messages = require('./messages');
+  const pair = (body) => messages.START + '\n' + body + '\n' + messages.END;
+  agent('twin', '# Twin\n\nOwn words here.\n\n' + pair('stale one') + '\n\n' + pair('stale two') + '\n');
+  projects.create({ name: 'Twins', folder: folder('twins'), agents: ['twin'] });
+  const R = cards([fleet.agent('twin', { state: 'idle' })]);
+  assert.equal(projects.syncAgent('twin', R).state, projects.TOLD.TOLD);
+  const text = fs.readFileSync(path.join(process.env.AGENT_WORKFORCE_WORKERS, 'twin', 'CLAUDE.md'), 'utf8');
+  // Both stale bodies survive: with two well-formed pairs we cannot tell
+  // which is ours, and overwriting a span on a guess is the one failure
+  // worse than a stale command. (Recorded limit: nothing surfaces that
+  // this agent is still taught the stale form; refuse-don't-guess on a
+  // non-verdict surface.)
+  assert.ok(text.includes('stale one') && text.includes('stale two'),
+    'an ambiguous pair was overwritten on a guess');
+  assert.ok(!text.includes(' msg <their-name>'),
+    'CONTROL inverse: the heal ran despite ambiguity');
 });
