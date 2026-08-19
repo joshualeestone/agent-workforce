@@ -2081,3 +2081,32 @@ test('a menu with a NEWER question below it is not that question’s menu', () =
   const withMarker = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No, and ask permission to continue');
   assert.equal(withMarker.length, 2, 'a marker inside a label is the label’s, not a newer question');
 });
+
+test('the LAST option gets the same over-wrap test as every other one', () => {
+  // ⚠️ THE ASYMMETRY THIS CLOSES. The fold caps at two lines. A middle option
+  // that needs a third breaks contiguity and the menu is refused whole, which
+  // is the designed behaviour: a menu we cannot read whole is not truncated.
+  // The last option had no option after it to break against, so its third line
+  // was silently DROPPED -- and a half-sentence label is what the button
+  // carries, what the record stores, and what the server compares against
+  // (both sides truncating identically, so the check cannot see it).
+  const lastOverWraps = ['Do you want to proceed?', '❯ 1. Yes',
+    '  2. No, and tell Claude what', '     to do differently, then',
+    '     stop and wait for me to', '     look at the file myself'].join('\n');
+  assert.equal(chat.optionsIn(lastOverWraps), null, 'refused rather than truncated');
+
+  // The control that makes it a symmetry rather than a coincidence: the SAME
+  // over-wrap in the middle was already refused.
+  const middleOverWraps = ['Do you want to proceed?', '❯ 1. No, and tell Claude what',
+    '     to do differently, then', '     stop and wait for me to',
+    '     look at the file myself', '  2. Yes'].join('\n');
+  assert.equal(chat.optionsIn(middleOverWraps), null);
+
+  // And the control on the other side: a label that fits inside the cap is
+  // still read, whole and verbatim.
+  const fits = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
+    '  2. No, and tell Claude what', '     to do differently, then',
+    '     stop and wait'].join('\n'));
+  assert.equal(fits.length, 2);
+  assert.equal(fits[1].label, 'No, and tell Claude what to do differently, then stop and wait');
+});

@@ -5353,6 +5353,7 @@ async function paintTalk(sessionName, agentName) {
      * no file, and "this is not saying you have sent nothing" over a store that
      * will never hold anything), which is why the route sends the two apart.
      */
+    thread.__lastThread = null; thread.__lastCount = null;
     thread.innerHTML = '<p class="dmnone"><b>Nothing said here is kept for ' + esc(name) + '.</b> '
       + esc(pjSentence(body.historyBecause || 'we cannot keep a conversation under this agent’s name'))
       + ' You can still send, and it still arrives.</p>';
@@ -5361,13 +5362,37 @@ async function paintTalk(sessionName, agentName) {
     // second sentence rides along: an unreadable file is not evidence that
     // nothing was said, and silence here would render "we could not look" as
     // "there is nothing".
+    thread.__lastThread = null; thread.__lastCount = null;
     thread.innerHTML = '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
       + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>';
   } else if (!rows.length) {
+    thread.__lastThread = null; thread.__lastCount = null;
     thread.innerHTML = '<p class="dmnone">Nothing here yet.</p>';
   } else {
-    thread.innerHTML = rows.map((m) => dmRow(m, name)).join('');
-    thread.scrollTop = thread.scrollHeight;
+    /**
+     * ⚠️ NOT REWRITTEN, AND NOT SCROLLED, WHEN NOTHING CHANGED. This box is
+     * `max-height: 15rem; overflow-y: auto` -- built to be scrolled -- and the
+     * first version rebuilt it and yanked it to the bottom on every 5s tick.
+     * Measured: a reader sitting at the top of a 30-message thread with a
+     * sentence selected was thrown 2343px down and lost the selection, every
+     * five seconds, for reading their own history.
+     *
+     * The room states the rule at its own thread: "yanking a person who
+     * scrolled up to read history to the bottom on a poll tick is the poll
+     * fighting the reader." It guards on two keys, and so does this: the
+     * MARKUP decides whether to rewrite, the message COUNT decides whether to
+     * scroll -- a new message should land in view, an unchanged list should
+     * not move.
+     */
+    const html = rows.map((m) => dmRow(m, name)).join('');
+    if (thread.__lastThread !== html) {
+      thread.__lastThread = html;
+      thread.innerHTML = html;
+    }
+    if (thread.__lastCount !== rows.length) {
+      thread.__lastCount = rows.length;
+      thread.scrollTop = thread.scrollHeight;
+    }
   }
   /**
    * ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state 4).
@@ -5387,7 +5412,12 @@ async function paintTalk(sessionName, agentName) {
      "The buttons still work." standing under every later menu, on a page that
      polls every five seconds and stays open for days. */
   const failed = TALK_FAILED[sessionName];
-  if (failed && (!body.question || failed.question !== body.question.text)) {
+  /* ⚠️ SPENT BY A DIFFERENT QUESTION, NOT BY AN ABSENT ONE -- the same rule as
+     the hold above, which was decided this way three lines up while this was
+     decided the other way. One poll that could not read the screen would
+     otherwise drop the state-4 sentence for a question still standing. It
+     costs a reassurance rather than an answer, and it is the same split. */
+  if (failed && body.question && failed.question !== body.question.text) {
     delete TALK_FAILED[sessionName];
   }
   const qfail = document.getElementById('d-qask-fail');
@@ -5519,9 +5549,28 @@ async function sendTalk(text, chose) {
     // stays enabled through the flight, and it is where the answer they may
     // want to type instead goes.
     if (sendHadFocus || optHadFocus) say.focus();
-    // ⚠️ The buttons go dead for the round trip too: a second press on a
-    // numbered prompt answers it twice.
-    document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
+    /**
+     * ⚠️ THE BUTTONS GO DEAD FOR THE ROUND TRIP, and the paint is told so.
+     *
+     * A second press on a numbered prompt answers it twice, so they are
+     * disabled here. But writing `disabled` straight onto the elements put the
+     * DOM and the paint's cache into disagreement: the repaint afterwards
+     * builds the same markup string, matches `__lastOpts`, skips the rebuild,
+     * and the disable is never taken back.
+     *
+     * Measured, and it lands on the one state that must not have it: after a
+     * send that FAILED, both buttons stayed grey and inert FOREVER, under this
+     * panel's own sentence "The buttons still work." It did not self-heal on
+     * any later poll, because the cache key is the option markup and the
+     * options had not changed. State 4 exists to say the answer can still be
+     * given; it was the only state where it could not.
+     *
+     * Invalidating the cache is what keeps the paint the owner: whatever this
+     * writes by hand, the next paint is now guaranteed to write over.
+     */
+    const qoptsEl = document.getElementById('d-qopts');
+    qoptsEl.querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
+    qoptsEl.__lastOpts = null;
     msg.textContent = 'Sending…';
     const res = await fetch('/api/agent/' + encodeURIComponent(sentName) + '/thread', {
       method: 'POST',

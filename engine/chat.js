@@ -1034,6 +1034,31 @@ function optionsIn(questionText) {
    */
   const lastRun = found[found.length - 1];
   const after = lines[lastRun.at + lastRun.wrapped + 1];
+  /**
+   * WARNING: THE LAST OPTION GETS THE SAME TEST AS THE OTHERS, and it did not.
+   *
+   * `CONTINUATIONS` caps a fold at two lines. For a MIDDLE option a third
+   * wrapped line breaks the contiguity check and the whole menu is refused,
+   * which is the designed behaviour: a menu we cannot read whole is refused
+   * rather than truncated. The last option has no option after it to break
+   * contiguity against, so its third line was simply dropped -- and a
+   * TRUNCATED label is exactly what the docblock above forbids: it is what the
+   * button carries, what the record stores, and what the server compares
+   * against (both sides truncating identically, so the check cannot see it).
+   *
+   * Measured on a boxed prompt at plausible widths: "No, and tell Claude what
+   * to do differently, then stop and wait for me to" -- a half sentence,
+   * stored as the option the person chose.
+   *
+   * So: if the line after its folds is still hanging text of its own, this
+   * menu is longer than we can read, and it is refused whole.
+   */
+  if (after !== undefined) {
+    const afterBody = after.replace(/^\s*[│|]\s?/, '').replace(/[\s│]+$/, '');
+    const afterBare = afterBody.replace(/^\s+/, '');
+    const afterIndent = afterBody.length - afterBare.length;
+    if (afterBare && afterIndent >= lastRun.indent + lastRun.prefix) return null;
+  }
   if (after !== undefined
       && /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(after)) return null;
   for (let i = 0; i < found.length; i += 1) {
@@ -1070,11 +1095,15 @@ function optionsIn(questionText) {
    * excluded, because an option's own label can legitimately contain one
    * ("2. No, and ask permission to continue").
    */
-  /* ⚠️ SCANNED FROM THE LAST OPTION'S OWN LINE, folds included. Starting after
-     the folded lines let an indented question hide inside a label and then be
-     invisible to the guard written to catch it -- the fix and the thing it
-     defends against passing each other in the same loop. A marker inside a
-     wrapped label refuses too, which is the safe direction. */
+  /* ⚠️ SCANNED FROM JUST AFTER THE LAST OPTION'S OWN LINE, folds INCLUDED.
+     Both halves matter and the header used to state the first one wrongly.
+     Starting after the FOLDS let an indented question hide inside a label and
+     be invisible to the guard written to catch it -- the fix and the thing it
+     defends against passing each other in the same loop. Starting ON the
+     option's own line would be worse the other way: an option may legitimately
+     say "No, and ask permission to continue", and that is the label's own
+     words rather than a newer question (there is a test for exactly it). A
+     marker inside a wrapped label still refuses, which is the safe side. */
   for (let i = lastRun.at + 1; i < lines.length; i += 1) {
     if (status.NEEDS_YOU_MARKERS.some((re) => re.test(lines[i]))) return null;
   }

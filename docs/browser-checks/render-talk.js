@@ -431,7 +431,7 @@ const STATES = {
       // 2. A press sends the digit AND the words, and does not strand focus.
       await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt')[0].focus());
       await page.click('#d-qopts .qopt');
-      await page.waitForFunction(() => window.__posted.length > 0, null, { timeout: 4000 });
+      await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
       const sent = await page.evaluate(() => window.__posted[0]);
       if (sent.text !== '1' || sent.chose !== '14 days') {
         problems.push(`[${theme}] press: the option sent ${JSON.stringify(sent)}, not the digit plus the words`);
@@ -440,6 +440,53 @@ const STATES = {
       if (landed === 'BODY') {
         problems.push(`[${theme}] press: focus was stranded on the document after answering`);
       }
+
+      /* 2b. A FAILED press must leave the buttons pressable.
+       *
+       * ⚠️ THE ONE STATE THIS FILE USED TO FABRICATE. State 4 was reached by
+       * setting a flag and hand-writing TALK_FAILED, never by pressing a button
+       * and getting a failure back -- and no assertion anywhere read `disabled`
+       * on an option. So the harness AND the committed screenshot were green
+       * against a screen where both buttons were permanently dead under the
+       * sentence "The buttons still work." A state reached by a shortcut is a
+       * state nobody has tested. */
+      await page.evaluate((f) => {
+        window.__posted = [];
+        window.__postAnswer = {
+          delivery: { state: 'could_not', because: 'it stopped responding while we were sending', at: '2026-08-19T12:00:00.000Z', paneNote: null },
+          recorded: true, recordedBecause: null,
+        };
+        window.__fx = f;
+        delete TALK_ANSWERED.april; delete TALK_FAILED.april;
+      }, menu);
+      await page.evaluate(() => paintTalk('april', 'April'));
+      const preFail = await page.evaluate(() => ({
+        n: document.querySelectorAll('#d-qopts .qopt').length,
+        qaskHidden: document.getElementById('d-qask').hidden,
+        answered: !!TALK_ANSWERED.april,
+        sending: TALK_SENDING,
+      }));
+      if (preFail.n === 0) {
+        problems.push(`[${theme}] press: could not set up the failed-send case (${JSON.stringify(preFail)})`);
+      } else {
+      await page.click('#d-qopts .qopt');
+      await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
+      // The paint in sendTalk's finally has to have run; give the poll nothing
+      // to do and read the buttons.
+      await page.evaluate(() => paintTalk('april', 'April'));
+      const afterFail = await page.evaluate(() => ({
+        dis: Array.from(document.querySelectorAll('#d-qopts .qopt')).map((b) => b.disabled),
+        said: document.getElementById('d-qask-fail').textContent,
+      }));
+      if (afterFail.dis.some(Boolean)) {
+        problems.push(`[${theme}] press: the buttons are dead after a failed send (${JSON.stringify(afterFail.dis)})`
+          + (afterFail.said ? ` while saying ${JSON.stringify(afterFail.said)}` : ''));
+      }
+      if (!/buttons still work/.test(afterFail.said)) {
+        problems.push(`[${theme}] press: a failed send left no state-4 sentence`);
+      }
+      }
+      await page.evaluate(() => { window.__postAnswer = null; delete TALK_FAILED.april; });
 
       // 3. Send with the keyboard: the same rescue, from the other control.
       await page.evaluate(() => {
@@ -450,7 +497,7 @@ const STATES = {
       await page.evaluate(() => paintTalk('april', 'April'));
       await page.evaluate(() => document.getElementById('d-send').focus());
       await page.click('#d-send');
-      await page.waitForFunction(() => window.__posted.length > 0, null, { timeout: 4000 });
+      await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
       const landed2 = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
       if (landed2 === 'BODY') {
         problems.push(`[${theme}] press: focus was stranded on the document after Send`);
