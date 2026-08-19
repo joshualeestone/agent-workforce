@@ -5995,11 +5995,15 @@ test('the settings members wiring is real, not just extractable', () => {
   assert.ok(pageFnSource('paintProjectSettings').includes("getElementById('pjs-members-msg').textContent = ''"),
     'the entry-clear for the members verdict is gone (the persisted-half misattribution returns)');
 
-  // Her ruled copy, the WHOLE sentence (whitespace-normalized past the
-  // source line wrap; a half-pinned sentence lets the second half drift).
+  // The explanatory sentence is CUT (Josh, 2026-08-18 10:07 PM): the
+  // survival reassurance lives in the removal announcement at act time.
   const flat = raw.replace(/\s+/g, ' ');
-  assert.ok(flat.includes('Who is on this project. Removing an agent takes it off this project only: it stays on your computer, and you can add it back whenever.'),
-    "the members section lost Mona Lisa's ruled sentence");
+  // Presence control first: the section this absence speaks about must
+  // exist, or a typo in the needle passes vacuously forever.
+  assert.ok(flat.includes('Project members'),
+    'CONTROL: the members section is gone; the absence below proves nothing');
+  assert.ok(!flat.includes('Who is on this project. Removing an agent takes it off'),
+    'the cut members hint came back');
   // The painter must repaint through setIfChanged: the unit test stubs
   // it, so only a source pin catches a regression to bare innerHTML
   // (which would steal keyboard focus from the rows every five seconds).
@@ -6330,4 +6334,140 @@ test('the centred quiet button is the pack rule, pinned', () => {
   const rule = raw.slice(at, raw.indexOf('}', at));
   assert.ok(rule.includes('justify-content: center'),
     'btn-quiet lost its centring; labels left-pack at full width again');
+});
+
+/* ---------------------------------------------------------------------------
+ * room-search: the conversation filter, its wiring, and the removal
+ * announcement.
+ * ------------------------------------------------------------------------ */
+
+test('the conversation filter matches what a row shows, and only that', () => {
+  // The prelude carries the REAL shared fallback constant, lifted from
+  // the page (a copy here would be the check-containing-a-copy class).
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const fbAt = rawPage.indexOf('const PJ_VALVE_FALLBACK');
+  assert.ok(fbAt > -1, 'the shared valve fallback constant vanished');
+  const fallbackDecl = rawPage.slice(fbAt, rawPage.indexOf(';', fbAt) + 1);
+  // The stub keeps the PAGE's data shape (agents[] keyed on sessionName)
+  // so the fixture cannot teach a future reader a schema that does not
+  // exist in the product.
+  const filter = pageFunction('pjRoomFilterRows',
+    'const pjNameOf = (p, from) => { const a = (p.agents || []).find((x) => x.sessionName === from); return (a && a.name) || from; };\n'
+    + fallbackDecl + '\n');
+  // Discriminating probes (review): the display name DIVERGES from the
+  // session key and the operator row's from is NOT 'you', so an
+  // implementation matching raw m.from cannot pass these. The project
+  // row comes from the REAL producer (fleet identity -> create -> list),
+  // never a hand-built roster shape (fixture discipline).
+  const projectsEngine3 = require('./engine/projects');
+  const board3 = fleet.install([fleet.agent('leo', { state: 'idle', displayName: 'Leonardo' })]);
+  const fdir = nodePath.join(SANDBOX, 'filter-names-proj');
+  fs.mkdirSync(fdir, { recursive: true });
+  let p;
+  try {
+    projectsEngine3.create({ name: 'Filter Names', folder: fdir, agents: ['leo'], roster: board3.agents });
+    p = projectsEngine3.list(board3.agents).find((x) => x.name === 'Filter Names');
+    assert.equal((p.agents[0] || {}).name, 'Leonardo',
+      'PRE-CONTROL: the producer did not resolve the divergent display name');
+  } finally {
+    board3.restore();
+  }
+  const rows = [
+    { id: 'm1', from: 'leo', text: 'The link is stable now.' },
+    { id: 'm2', operator: true, from: 'op-key', text: 'Cut it to four emails.' },
+    { kind: 'valve', because: 'mikey has been going back and forth without landing.' },
+  ];
+  // Empty query: the SAME array back (identity, not a copy -- this is
+  // the per-keystroke hot path, and deepEqual could not tell a slice()
+  // regression from the fast path).
+  assert.strictEqual(filter(rows, p, ''), rows);
+  assert.strictEqual(filter(rows, p, '   '), rows);
+  // Text match, case-folded.
+  assert.deepEqual(filter(rows, p, 'STABLE').map((r) => r.id), ['m1']);
+  // Sender display-name match: the RESOLVED name, provably (only the
+  // display form contains 'nardo'; the key does not).
+  assert.deepEqual(filter(rows, p, 'nardo').map((r) => r.id), ['m1']);
+  // And the raw key must NOT match once a display name exists, or the
+  // filter is matching what the row does not show.
+  assert.deepEqual(filter(rows, p, 'op-key'), [],
+    'the filter matched a session key the row never displays');
+  // The operator's rows answer to "you".
+  assert.deepEqual(filter(rows, p, 'you').map((r) => r.id), ['m2']);
+  // Valve bands match on their sentence.
+  assert.equal(filter(rows, p, 'without landing').length, 1);
+  // A valve carrying a stray from (the a2a record shape) is still never
+  // matched by it: the band displays no sender, and the guarantee is
+  // local, not the route's row shape.
+  assert.deepEqual(filter([{ kind: 'valve', from: 'leo', because: 'quiet words' }], p, 'leonardo'), [],
+    'a valve band was found by a sender it does not display');
+  // A valve with NO because displays the shared fallback and must be
+  // findable by its words (the filter matches what a row SHOWS).
+  const bare = [{ kind: 'valve' }];
+  assert.equal(filter(bare, p, 'bring you in').length, 1,
+    'the fallback valve sentence is displayed but unsearchable');
+  // No match: empty, never a throw.
+  assert.deepEqual(filter(rows, p, 'zzz-not-here'), []);
+});
+
+test('the search is wired: pack markup verbatim, instant repaint, reset on switch, no scroll while filtering', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // The pack's control (18e), placeholder and aria pair verbatim.
+  assert.ok(raw.includes('placeholder="Search this conversation" aria-label="Search this conversation"'),
+    "the search input lost the pack's words");
+  assert.ok(raw.includes('.tsearch { display: flex; align-items: center; gap: 6px; flex: 0 1 15rem; min-width: 0;'),
+    "the tsearch rule drifted from the pack's values");
+  // The wiring: input handler repaints from the cached body; the query
+  // resets on project open; a filtered paint never scrolls.
+  assert.ok(raw.includes("document.getElementById('pj-room-search').addEventListener('input'"),
+    'the search input drives nothing');
+  // The LISTENER BODY, not just its existence: an emptied listener passes
+  // an attachment pin while typing does nothing. Sliced at the column-0
+  // close (the members-handler technique).
+  const lsrc = raw.slice(raw.indexOf("document.getElementById('pj-room-search').addEventListener"));
+  const listener = lsrc.slice(0, lsrc.indexOf('\n});') + 4);
+  assert.ok(listener.includes('PJ_ROOM_QUERY = document'), 'the listener no longer reads the query');
+  assert.ok(listener.includes('paintRoom(box.__lastBody)'), 'the listener no longer repaints from the cached body');
+  assert.ok(listener.includes('pjRoomAnnounce(pjNoMatchSentence('),
+    'the spoken no-match copy no longer shares the shown sentence');
+  assert.ok(listener.includes('__lastBody.ok !== false'),
+    'the announcer claims nothing-matches against a partially unreadable record');
+  // The cache lifecycle: loadRoom stores the body; openProject invalidates
+  // it AND resets the query (both lines pinned INSIDE their functions --
+  // a whole-file pin matched the variable declaration and could not fail).
+  assert.ok(pageFnSource('loadRoom').includes('__lastBody = body'),
+    'loadRoom no longer caches the body the listener repaints from');
+  const open_ = pageFnSource('openProject');
+  assert.ok(open_.includes("PJ_ROOM_QUERY = '';"), 'the query does not reset on project switch');
+  assert.ok(open_.includes("getElementById('pj-room-search').value = ''"),
+    'stale query text survives in the box across a project switch');
+  assert.ok(open_.includes('__lastBody = undefined'),
+    'a stale body survives a project switch (the filter would search another room)');
+  assert.ok(open_.includes('PJ_SEARCH_WAS_EMPTY = false;'),
+    "project B's first no-match announce would be skipped against A's stale flag");
+  const paint = pageFnSource('paintRoom');
+  assert.ok(paint.includes('pjRoomFilterRows('), 'paintRoom no longer filters');
+  assert.ok(paint.includes('if (!filtering) box.scrollTop'), 'a filtered paint scrolls the reader to the tail');
+  // The no-match state is HER sentence (ruled 10:16 PM): names the
+  // query, says the way out.
+  assert.ok(paint.includes('esc(pjNoMatchSentence(PJ_ROOM_QUERY))'),
+    'the shown no-match state stopped using the shared, escaped sentence');
+  const sentence = pageFunction('pjNoMatchSentence');
+  assert.equal(sentence('trial length'),
+    'Nothing here matches "trial length". Clearing the search brings the conversation back.',
+    'her ruled sentence drifted');
+});
+
+test("the removal announcement is her sentence, on both verdict arms", () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const handlerSrc = raw.slice(raw.indexOf("document.getElementById('pjs-members').addEventListener"));
+  const handler = handlerSrc.slice(0, handlerSrc.indexOf('\n});') + 4);
+  // Success speaks her sentence; could_not opens with it then warns.
+  assert.ok(handler.split("is off this project and still on your computer.").length >= 3,
+    "an arm of the handler lost her ruled sentence");
+  assert.ok(!handler.includes('Taken off'),
+    'the struck phrase returned to the announcement');
+  // The name is captured BEFORE the awaits (the success repaint removes
+  // the row; reading it later reads a detached node).
+  assert.ok(handler.indexOf('const who =') < handler.indexOf('await fetch'),
+    'the display name is read after the repaint could detach it');
 });
