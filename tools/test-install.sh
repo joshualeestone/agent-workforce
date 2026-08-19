@@ -201,6 +201,19 @@ RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall2.log" 2>&1 || RC=$?
 chk "second uninstall exits 0" "[ $RC -eq 0 ]"
 chk "adjacency arm removed an export from a DIFFERENT bin dir" "! grep -q '/different/bin' \"$SB/zprofile\""
 chk "the operator's line still survives the second sweep" "grep -q 'own line' \"$SB/zprofile\""
+# The pre-existing-backup HALT arm: a prior failed run's preserved copy
+# must never be overwritten or removed by a later run, and the profile
+# must not be edited while it stands (new safety code gets its own
+# check that can fail, or it is the least trustworthy code in the file).
+printf '%s\nexport PATH="/halt/bin:$PATH"\n' '# kosmos: PATH for the kosmos command (removed by --uninstall)' >> "$SB/zprofile"
+printf 'PRESERVED FROM AN EARLIER RUN\n' > "$SB/zprofile.kosmos-uninstall-backup"
+cp "$SB/zprofile" "$SB/zprofile.before-halt"
+RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall3.log" 2>&1 || RC=$?
+chk "halt-arm uninstall exits 0" "[ $RC -eq 0 ]"
+chk "a pre-existing backup halts the edit (profile untouched)" "cmp -s \"$SB/zprofile\" \"$SB/zprofile.before-halt\""
+chk "the preserved backup survives byte-identical" "[ \"\$(cat \"$SB/zprofile.kosmos-uninstall-backup\")\" = 'PRESERVED FROM AN EARLIER RUN' ]"
+chk "the halt names the backup in its note" "grep -q 'already exists from an earlier run' \"$SB/uninstall3.log\""
+rm -f "$SB/zprofile.kosmos-uninstall-backup" "$SB/zprofile.before-halt"
 chk "port released (uninstall stopped the board itself)" "! curl -s -m 1 -o /dev/null http://127.0.0.1:$PORT/"
 
 echo "== the download path (file:// origin, no local-copy shortcut) =="

@@ -114,6 +114,10 @@ only newborns. No migration needed.
   so (tested as the refusal it is): refuse-don't-guess on a non-verdict
   surface; the agent keeps its stale command until a human resolves the
   duplicate markers.
+- A reinstall with a CHANGED KOSMOS_BIN_DIR reads "already wired" from
+  the earlier dir's pair and does not re-point the export; the gap needs
+  the old symlink independently gone to bite, and the message makes no
+  works-claim. Accepted over growing a rewrite arm.
 - The BIN_DIR unsafe-character case matches the existing KOSMOS_HOME
   guard's class (no carriage return); a CR-bearing bin dir writes a
   broken PATH entry, not code. Consistency with the sibling guard kept.

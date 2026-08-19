@@ -559,6 +559,10 @@ uninstall() {
   # empty result is a legitimate outcome (a profile that held only our
   # block), not a pipeline error to branch on.
   _profile="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+  case "$_profile" in
+    /*) ;;
+    *) _profile="" ;;
+  esac
   # Same sandbox gate as the install side: a harness run touches only a
   # profile it names explicitly, never the operator's real one.
   if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
@@ -620,14 +624,14 @@ uninstall() {
             END { if (blank) print "" }
           ' "$_profile" > "$_ptmp" 2>/dev/null \
        && cat "$_ptmp" > "$_profile" 2>/dev/null; then
-      rm -f "$_ptmp" "$_pbak"
+      rm -f "$_ptmp" "$_pbak" 2>/dev/null || true
     elif [ "$_bak_ok" = yes ]; then
       # Something after the verified backup failed; put the original back,
       # and verify the restore too. A failed restore keeps the backup and
       # NAMES it -- a backup is never deleted on a failure path unless the
       # restore it fed verified byte-for-byte.
       if cat "$_pbak" > "$_profile" 2>/dev/null && cmp -s "$_pbak" "$_profile" 2>/dev/null; then
-        rm -f "$_pbak"
+        rm -f "$_pbak" 2>/dev/null || true
         info "note: could not edit ${_profile##*/} (restored unchanged); the kosmos PATH line is harmless and safe to delete by hand"
       else
         info "note: could not edit ${_profile##*/}; an untouched copy is at ${_pbak##*/} in the same folder"
@@ -1101,6 +1105,14 @@ ok
 # removes exactly the two lines this writes and nothing else. A profile we
 # cannot write degrades to the old honest note, never to silence.
 PROFILE_FILE="${KOSMOS_PROFILE_FILE:-$HOME/.zprofile}"
+# A relative profile path would resolve against whatever directory each
+# run happens to start from, so install and uninstall could edit two
+# different files (the same reason KOSMOS_HOME refuses relative paths).
+case "$PROFILE_FILE" in
+  /*) ;;
+  *) info "note: KOSMOS_PROFILE_FILE must be an absolute path; skipping the shell profile"
+     PROFILE_FILE="" ;;
+esac
 # ⚠️ A SANDBOXED RUN NEVER TOUCHES THE REAL PROFILE. Same keying as the
 # lsregister gate: any app-dir override means a test harness, and the only
 # profile such a run may write is one it names explicitly. The first

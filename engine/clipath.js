@@ -45,8 +45,9 @@ function kosmosCli(probeRoot) {
     character that double quotes cannot neutralize (quote, dollar,
     backtick, backslash) falls back to the bare word: a command that may
     not resolve beats teaching a line that expands or executes inside the
-    agent's shell. Same character class the installer refuses for
-    KOSMOS_HOME, degraded here instead of refused because a teaching
+    agent's shell. Modeled on the class the installer refuses for
+    KOSMOS_HOME, widened for an interactive teaching surface (!, CR, the
+    marker strings), and degraded instead of refused because a teaching
     surface has no one to refuse to. */
 function kosmosCliShown(probeRoot) {
   const cli = kosmosCli(probeRoot);
