@@ -6376,8 +6376,13 @@ test('the search is wired: pack markup verbatim, instant repaint, reset on switc
   assert.ok(paint.includes('pjRoomFilterRows('), 'paintRoom no longer filters');
   assert.ok(paint.includes('if (!filtering) box.scrollTop'), 'a filtered paint scrolls the reader to the tail');
   assert.ok(raw.includes("PJ_ROOM_QUERY = '';"), 'the query does not reset on project switch');
-  // The no-match state is its own sentence, never the empty-room copy.
-  assert.ok(paint.includes('No posts match.'), 'the no-match state lost its sentence');
+  // The no-match state is HER sentence (ruled 10:16 PM): names the
+  // query, says the way out.
+  assert.ok(paint.includes('Nothing here matches'), 'the no-match state lost her sentence');
+  assert.ok(paint.includes('Clearing the search brings the conversation back.'),
+    'the no-match state lost the way out');
+  assert.ok(paint.includes('esc(PJ_ROOM_QUERY.trim())'),
+    'the no-match sentence stopped naming (or escaping) the query');
 });
 
 test("the removal announcement is her sentence, on both verdict arms", () => {

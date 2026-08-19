@@ -8535,11 +8535,12 @@ function paintRoom(body) {
      claim would be the unreadable-as-empty defect. */
   // A no-match FILTER state is its own sentence, never the room's
   // nothing-here copy: an empty search result must not read as an empty
-  // room (the room may hold plenty). Draft copy MINE, flagged for Mona
-  // Lisa's pass.
+  // room. HER copy (ruled 10:16 PM): names what was searched so the
+  // person sees their own typo, and says the way out, because an empty
+  // screen with a search box is somewhere people get stuck.
   const empty = body.ok === false ? ''
     : (filtering && allRows.length
-      ? '<p class="fhint" style="margin:0;">No posts match.</p>'
+      ? '<p class="fhint" style="margin:0;">Nothing here matches &quot;' + esc(PJ_ROOM_QUERY.trim()) + '&quot;. Clearing the search brings the conversation back.</p>'
       : ((p.agents || []).length
         ? '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>'
         : '<p class="fhint" style="margin:0;">Put an agent on this project and the room opens.</p>'));
