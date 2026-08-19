@@ -2780,9 +2780,15 @@ test('the narrow-screen menu keeps the keyboard: forward in on open, back to the
   };
   // eslint-disable-next-line no-new-func
   const api = new Function('document',
-    'let WATCH = 0; const SHOWN = [];\nconst showTab = (t) => SHOWN.push(t);\n'
+    // ⚠️ `topLevelReset` is stubbed for the same reason `showTab` is: this test
+    // is about the FOCUS behaviour of the menu, and the real one reaches
+    // projects state that has nothing to do with it. It is recorded rather than
+    // ignored so a handler that stopped calling it would still be visible here.
+    'let WATCH = 0; const SHOWN = []; const RESET = [];\n'
+    + 'const showTab = (t) => SHOWN.push(t);\n'
+    + 'const topLevelReset = (t) => RESET.push(t);\n'
     + script.slice(from, end)
-    + '\n; return { SHOWN };')(doc);
+    + '\n; return { SHOWN, RESET };')(doc);
   const chooseTab = () => tabs.listeners.click({ target: { closest: (s) => (s === '.tab' ? firstTab : null) } });
 
   // ⚠️ THE CONTROL: on a wide screen the menu is closed and the tabs are
@@ -2790,6 +2796,9 @@ test('the narrow-screen menu keeps the keyboard: forward in on open, back to the
   // that fires unconditionally would steal focus on every desktop click.
   chooseTab();
   assert.equal(api.SHOWN[0], 'agents', 'the tab click never reached showTab, so nothing below means anything');
+  assert.deepEqual(api.RESET, ['agents'],
+    'the tab click never reached topLevelReset, so a person clicking a tab '
+    + 'would land back inside whatever they had open in that section');
   assert.equal(burger.focused, 0, 'a wide-screen tab click had its focus stolen by the burger guard');
 
   // Open: aria flips, the class comes off, and focus moves INTO the menu --
@@ -6609,4 +6618,95 @@ test('the Runs on line says which tense it is in, and a live model always wins',
   assert.equal(runsOnLine({ plannedModelName: 'Opus 5' }).name, 'Claude Opus 5');
   assert.equal(runsOnLine({ plannedModelName: 'Claude Opus 5' }).name, 'Claude Opus 5',
     'the guard against "Claude Claude" did not reach the planned branch');
+});
+
+/**
+ * A top-level tab click lands at the top of that section.
+ *
+ * Josh: "if I'm somewhere on some other page and I hit a top-level page (like
+ * Projects), it'll jump me back inside of whatever project I was previously in
+ * … If I click Agents it should take me back to the main Agents top-level
+ * page. Same with Projects."
+ *
+ * ⚠️ THE CONTROL IS THE OTHER HALF OF THE FEATURE, not decoration. `showTab`
+ * restores `PJ_CURRENT` on purpose, because the "which projects is this agent
+ * on" flow calls `showTab('projects')` in order to land INSIDE one. A reset
+ * that fired on every arrival would break that flow while every assertion about
+ * the tab click still passed.
+ */
+test('a Projects tab click forgets the project you were in, and nothing else does', () => {
+  const make = (current) => new Function(
+    `let PJ_CURRENT = ${JSON.stringify(current)}; let closed = 0;\n`
+    + 'function pjCloseConfirm() { closed += 1; }\n'
+    + pageFnSource('topLevelReset')
+    + '\nreturn { topLevelReset, get current() { return PJ_CURRENT; },'
+    + ' get closed() { return closed; } };')();
+
+  const proj = make('proj-7');
+  proj.topLevelReset('projects');
+  assert.equal(proj.current, null,
+    'clicking Projects left you inside the project you last opened');
+  assert.equal(proj.closed, 1,
+    'arriving by the tab left a confirmation open that arriving by Back closes');
+
+  // ⚠️ EVERY OTHER TAB LEAVES IT ALONE. Without this, `topLevelReset` could
+  // clear unconditionally and the test above would still pass, taking the
+  // agent-to-project flow with it.
+  for (const tab of ['agents', 'settings', 'detail', 'create']) {
+    const other = make('proj-7');
+    other.topLevelReset(tab);
+    assert.equal(other.current, 'proj-7',
+      `the ${tab} tab cleared the project the agent-to-project flow needs kept`);
+    assert.equal(other.closed, 0, `the ${tab} tab closed a projects confirmation`);
+  }
+});
+
+/**
+ * ⚠️ AND THE WIRING, because the function above is inert if nothing calls it.
+ * A passing unit test on a function no handler invokes is the shape that let a
+ * removed Back button take every listener after it down with it earlier today.
+ */
+test('the tab click handler actually calls the top-level reset, before showTab', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script.indexOf("getElementById('tabs').addEventListener");
+  assert.ok(at > -1, 'the tab click handler vanished from the page');
+  const body = script.slice(at, at + 1600);
+  const reset = body.indexOf('topLevelReset(btn.dataset.tab)');
+  const show = body.indexOf('showTab(btn.dataset.tab)');
+  assert.ok(reset > -1, 'the tab handler no longer resets to the top of the section');
+  assert.ok(show > -1, 'the tab handler no longer changes tab');
+  assert.ok(reset < show,
+    'the reset runs AFTER showTab, so showTab still painted the old project '
+    + 'before it was forgotten');
+});
+
+/**
+ * The compact surfaces name the model with no tense attached.
+ *
+ * ⚠️ THE PAIR THAT MATTERS: `modelLine` must accept a planned model, and
+ * `runsOnLine` must still put the right LEAD on it. Testing either alone lets
+ * the other regress — a modelLine that ignored the planned name would leave
+ * three cards saying "Unknown Model" about an agent whose model we hold, and a
+ * runsOnLine reading modelLine's fallback directly would print "Right now"
+ * about an agent that has never started.
+ */
+test('a card names a planned model plainly, while the detail panel keeps its tense', () => {
+  const modelLine = pageFunction('modelLine');
+  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine'));
+
+  assert.equal(modelLine({ plannedModelName: 'Claude Sonnet 5' }), 'Claude Sonnet 5',
+    'a card said "Unknown Model" about an agent whose model is in its own job file');
+  assert.equal(modelLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5' }),
+    'Claude Opus 5', 'a job file overruled the model the agent is running');
+  assert.equal(modelLine({}), 'Unknown Model',
+    'a genuinely unknown model stopped saying so');
+  assert.equal(modelLine({ plannedModelName: 'Opus 5' }), 'Claude Opus 5',
+    'the provider prefix did not reach the planned name');
+
+  // ⚠️ The detail panel must NOT inherit the flattening: same card, and it
+  // still has to say which tense it is in.
+  assert.deepEqual(runsOnLine({ plannedModelName: 'Claude Sonnet 5' }),
+    { lead: 'Will start on ', name: 'Claude Sonnet 5' },
+    'the detail panel lost its tense when modelLine gained the fallback');
 });

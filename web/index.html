@@ -3265,8 +3265,21 @@ function modelLine(a) {
      ASSUMES every agent runs Claude, which is true of everything the
      engine can create today -- the day a second provider lands, this line
      would stamp "Claude" onto its names and MUST change with it. */
-  if (!a.modelName) return 'Unknown Model';
-  return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
+  /* ⚠️ THE PLANNED MODEL COUNTS HERE, with no tense and no marker, and that is
+     Mona Lisa's ruling (2026-08-19) rather than a shortcut. A TENSE IS ASSERTED
+     BY WORDS, NOT BY A VALUE: "Right now:" appears exactly once in this page,
+     on the detail panel, which is why that one surface needed `runsOnLine`.
+     The card's `.amodel`, the list row and the detail meta line emit this with
+     no surrounding claim at all — they sit in the identity block under the
+     role, and read as an attribute of the agent the same way "Researcher"
+     does. Neither dates.
+     ⚠️ So "Unknown Model" was wrong on those three in a DIFFERENT way than on
+     the detail panel. There it contradicted a fact we held. Here it answered a
+     question nobody asked: the card never claimed to know what was running, so
+     it never needed to confess that it did not. */
+  const name = a.modelName || a.plannedModelName;
+  if (!name) return 'Unknown Model';
+  return /^claude/i.test(name) ? name : 'Claude ' + name;
 }
 /**
  * The Runs on line, in the tense that is true of it.
@@ -4300,6 +4313,20 @@ const PANELS = ['projects', 'settings', 'detail', 'create'];
 // LIST rather than one hardcoded name, because the second buttonless panel was
 // always going to arrive.
 const BUTTONLESS = ['detail', 'create'];
+/**
+ * What a top-level tab click has to forget before `showTab` runs.
+ *
+ * ⚠️ Named and separate so the tab handler stays one readable line and so this
+ * is testable without a DOM. Only Projects holds within-section state today;
+ * the shape is here so the next section that gains some has somewhere obvious
+ * to declare it, rather than growing a second `if` inside the click handler.
+ */
+function topLevelReset(tab) {
+  if (tab !== 'projects') return;
+  pjCloseConfirm();
+  PJ_CURRENT = null;
+}
+
 function showTab(tab) {
   const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
   document.querySelectorAll('.tab').forEach((t) => {
@@ -4637,7 +4664,23 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   // Same reason as the back button: a tab click is also walking away from a
   // creation in flight.
   if (btn) {
-    WATCH += 1; showTab(btn.dataset.tab);
+    WATCH += 1;
+    /* ⚠️ A TAB CLICK MEANS THE TOP OF THAT SECTION, and this is the only place
+       that can know it was a click. Josh: "if I'm somewhere on some other page
+       and I hit a top-level page (like Projects), it'll jump me back inside of
+       whatever project I was previously in."
+
+       `showTab` ends with `pjView(PJ_CURRENT ? 'one' : 'list')`, which is RIGHT
+       for the programmatic callers -- the "which projects is this agent on"
+       flow calls `showTab('projects')` precisely in order to land inside one --
+       and WRONG for a person pressing the tab. So the reset lives on the click
+       rather than in `showTab`, where it would break the callers that depend on
+       the restore.
+
+       Same three steps the project Back button does, so arriving by the tab and
+       arriving by Back leave the screen in one state rather than two. */
+    topLevelReset(btn.dataset.tab);
+    showTab(btn.dataset.tab);
     /* Choosing from the OPEN menu display:none's the element focus is on --
        the same hazard the Escape path below guards -- and this is the common
        path, so it carries the same guard: back to the burger, the visible
