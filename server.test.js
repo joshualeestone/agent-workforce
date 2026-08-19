@@ -5970,3 +5970,264 @@ test('the group line is wired into paintOneProject, not just extractable', () =>
   assert.ok(raw.includes('.pj-members .pj-told-group {'),
     'CONTROL: the .pj-told-group CSS rule is gone, so the emitted class styles nothing');
 });
+
+/* ---------------------------------------------------------------------------
+ * update-control: Check now, reachability on the wire, the card's four
+ * states, and the finish line that names what landed.
+ * ------------------------------------------------------------------------ */
+
+test('the check route asks fresh, carries reachability, and rides the cross-site guard', async () => {
+  const updates = require('./engine/update');
+  try {
+    updates.resetCache();
+    // Prime a fresh look so the TTL would normally sit on it...
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: updates.RUNNING }) }));
+    await updates.refresh();
+    // ...then publish something newer behind the TTL's back.
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+    const out = await req('/api/update/check', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(out.status, 200);
+    const body = JSON.parse(out.body);
+    assert.equal(body.latest, '99.0.0', 'the check served the TTL cache instead of asking fresh');
+    assert.equal(body.reached, true);
+    assert.deepEqual(body.offer, { version: '99.0.0' }, 'the check does not carry the ready-to-install offer');
+
+    // Unreachable says so, and the status payload agrees (could-not-reach
+    // must never render as up-to-date anywhere).
+    updates.setFetcher(async () => { throw new Error('offline'); });
+    const down = JSON.parse((await req('/api/update/check', { method: 'POST', headers: { 'content-type': 'application/json' } })).body);
+    assert.equal(down.reached, false);
+    const st = JSON.parse((await req('/api/status', {})).body);
+    assert.equal(st.updateLook.reached, false, 'the status payload does not carry reachability');
+
+    // The guard, asserted rather than assumed (a new sibling does not
+    // inherit one by adjacency).
+    const cross = await req('/api/update/check', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site origin reached the check route');
+  } finally {
+    updates.resetCache();
+    updates.setFetcher(null);
+  }
+});
+
+test("the update card's states are mutually exclusive and the line is never blank", () => {
+  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\n');
+  const mk = () => {
+    const els = {
+      'upd-line': { textContent: '' },
+      'upd-btn': { textContent: '', hidden: true, disabled: false, dataset: {} },
+    };
+    global.document = { getElementById: (id) => els[id] };
+    return els;
+  };
+  try {
+    // Newer exists.
+    let els = mk();
+    paint('0.1.8', { version: '0.1.9' }, { reached: true, readable: true });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.8. Version 0.1.9 is ready.');
+    assert.equal(els['upd-btn'].textContent, 'Update');
+    // Current: up-to-date needs BOTH reached and readable.
+    els = mk();
+    paint('0.1.9', null, { reached: true, readable: true });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.');
+    assert.equal(els['upd-btn'].textContent, 'Check now');
+    // Reached but unreadable (the captive-portal shape): NEVER up-to-date.
+    els = mk();
+    paint('0.1.9', null, { reached: true, readable: false, looked: true });
+    assert.equal(els['upd-line'].textContent, "Kosmos 0.1.9. Could not read the update server's answer.");
+    assert.equal(els['upd-btn'].textContent, 'Try again');
+    // Could not look: NEVER "up to date".
+    els = mk();
+    paint('0.1.9', null, { reached: false });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Could not reach the update server.');
+    assert.equal(els['upd-btn'].textContent, 'Try again');
+    // The first look still in flight: Checking, never a failure that has
+    // not happened (boot rendered "could not reach" before the first
+    // answer landed; measured on the render sandbox).
+    els = mk();
+    paint('0.1.9', null, { reached: false, looked: false });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Checking.');
+    assert.equal(els['upd-btn'].disabled, true, 'the button was pressable mid-first-look');
+    // The line is never blank, even before the first status.
+    els = mk();
+    paint(null, null, null);
+    assert.ok(els['upd-line'].textContent.length > 0, 'the line rendered blank');
+    assert.ok(!els['upd-line'].textContent.includes('Up to date'),
+      'an unknown look claimed up-to-date');
+  } finally {
+    delete global.document;
+  }
+});
+
+test('the finish line names what actually landed, and only when something did', () => {
+  const src = pageFnSource('updatedNoteOnce');
+  const run = (stored, nowVersion) => {
+    const slot = { innerHTML: '' };
+    const store = { v: stored };
+    const clicks = {};
+    const sandbox = {
+      sessionStorage: {
+        getItem: () => store.v,
+        removeItem: () => { store.v = null; },
+      },
+      document: {
+        getElementById: (id) => (id === 'unote-slot' ? slot
+          : { addEventListener: (ev, fn) => { clicks[id] = fn; } }),
+      },
+      esc: (x) => String(x),
+    };
+    // eslint-disable-next-line no-new-func
+    new Function('sessionStorage', 'document', 'esc',
+      'let UPDATED_NOTE_DONE = false;\n' + src + '\nupdatedNoteOnce(arguments[3]);')(
+      sandbox.sessionStorage, sandbox.document, sandbox.esc, nowVersion);
+    return { slot, store };
+  };
+  // Version changed: the note names the version now installed.
+  const changed = run('0.1.8', '0.1.9');
+  assert.ok(changed.slot.innerHTML.includes('You are on Kosmos 0.1.9.'),
+    'the finish line does not name the landed version');
+  assert.ok(changed.slot.innerHTML.includes('Updated.'));
+  // No change: an installer that found nothing to do did not update
+  // anything, and saying so would be the stale label at the finish line.
+  const same = run('0.1.9', '0.1.9');
+  assert.equal(same.slot.innerHTML, '', 'an unchanged version still claimed Updated');
+  // No note stored: nothing renders.
+  const none = run(null, '0.1.9');
+  assert.equal(none.slot.innerHTML, '', 'a reload with no install note grew a toast');
+  // The note is consumed either way (no repeat on the next reload).
+  assert.equal(changed.store.v, null, 'the note survived its own rendering');
+});
+
+test('the check route is POST-only, and Check now clears the Later note before asking', async () => {
+  // POST-only, asserted rather than assumed: a GET must fall through.
+  const got = await req('/api/update/check', {});
+  assert.notEqual(got.status, 200, 'a GET reached the check route');
+
+  // The named handler, driven with stubs: the Later note is cleared
+  // BEFORE the host is asked (the spec's order), and the card leaves the
+  // Checking state with the answer painted.
+  const src = pageFnSource('updCheckNowClick');
+  const calls = [];
+  const els = {
+    'upd-line': { textContent: '' },
+    'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: { act: 'check' }, focus: () => { calls.push('focus'); } },
+  };
+  const sandbox = {
+    localStorage: { removeItem: (k) => { calls.push('clear:' + k); } },
+    fetch: async () => { calls.push('fetch'); return { ok: true, json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, readable: true, offer: null }) }; },
+    document: { getElementById: (id) => els[id] },
+    renderUpdateToast: () => { calls.push('toast'); },
+  };
+  // eslint-disable-next-line no-new-func
+  const run = new Function('localStorage', 'fetch', 'document', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + src + '\nreturn updCheckNowClick();');
+  await run(sandbox.localStorage, sandbox.fetch, sandbox.document, sandbox.renderUpdateToast, '0.1.9');
+  assert.ok(calls.indexOf('clear:kosmos-update-later') > -1, 'Check now never cleared the Later note');
+  assert.ok(calls.indexOf('clear:kosmos-update-later') < calls.indexOf('fetch'),
+    'the Later note was cleared AFTER the ask, not before (the spec\'s order)');
+  assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.',
+    'the answer did not land on the line');
+  assert.ok(calls.includes('focus'), 'the keyboard was not returned to the button');
+
+  // The client-failure arm: the BOARD did not answer. The sentence names
+  // the check (not the release host), and the toast is NEVER touched --
+  // clearing it on our own failure could eat a valid offer. The arm's
+  // whole value is what it does NOT do, which is exactly what a refactor
+  // silently breaks.
+  const calls2 = [];
+  const els2 = {
+    'upd-line': { textContent: '' },
+    'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: { act: 'check' }, focus: () => { calls2.push('focus'); } },
+  };
+  const run2 = new Function('localStorage', 'fetch', 'document', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + pageFnSource('updCheckNowClick') + '\nreturn updCheckNowClick();');
+  await run2(
+    { removeItem: () => { calls2.push('clear'); } },
+    async () => { throw new Error('board down'); },
+    { getElementById: (id) => els2[id] },
+    () => { calls2.push('toast'); },
+    '0.1.9');
+  assert.equal(els2['upd-line'].textContent, 'Kosmos 0.1.9. Could not check just now.',
+    'a board-side failure blamed the wrong leg');
+  assert.equal(els2['upd-btn'].textContent, 'Try again');
+  assert.ok(!calls2.includes('toast'),
+    'a board-side failure cleared the toast (could eat a valid offer)');
+  assert.ok(calls2.includes('focus'), 'the keyboard was not returned after the failed check');
+});
+
+test('the card standoff, the confirm focus fallback, and the identical-write guard hold', () => {
+  try {
+  // (a) UPD_CHECKING owns the card: a poll paint during a check changes nothing.
+  const paintBusy = pageFunction('paintUpdateCard', 'let UPD_CHECKING = true;\n');
+  const busy = { 'upd-line': { textContent: 'held' }, 'upd-btn': { textContent: 'held', hidden: true, disabled: true, dataset: {} } };
+  global.document = { getElementById: (id) => busy[id] };
+  paintBusy('9.9.9', { version: '9.9.9' }, { reached: true, readable: true });
+  assert.equal(busy['upd-line'].textContent, 'held', 'a poll repainted the card mid-check');
+  assert.equal(busy['upd-btn'].hidden, true, 'a poll unhid the button mid-check');
+
+  // (b) closeUpdConfirm falls back to a live control when the opener is gone.
+  const focused = [];
+  const els = {
+    updconfirm: { hidden: false },
+    'ut-install': null,
+    'upd-btn': { focus: () => focused.push('upd-btn') },
+  };
+  global.document = { getElementById: (id) => els[id], contains: () => false };
+  const close = new Function('document',
+    "let UPD_CONFIRM_OPENER = { focus: () => { throw new Error('focused a removed node'); } };\n"
+    + pageFnSource('closeUpdConfirm') + '\ncloseUpdConfirm();\nreturn UPD_CONFIRM_OPENER;');
+  const cleared = close(global.document);
+  assert.deepEqual(focused, ['upd-btn'], 'focus did not fall back to a live control');
+  assert.equal(cleared, null, 'the stale opener was kept for the next close');
+  assert.equal(els.updconfirm.hidden, true);
+
+  // (c) put() suppression: an identical repaint writes NOTHING to the
+  // role="status" region (screen readers re-announce on any mutation).
+  let writes = 0;
+  const line = { _t: '', get textContent() { return this._t; }, set textContent(v) { this._t = v; writes += 1; } };
+  const quiet = { 'upd-line': line, 'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: {} } };
+  global.document = { getElementById: (id) => quiet[id] };
+  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\n');
+  paint('0.1.9', null, { reached: true, readable: true });
+  const after = writes;
+  paint('0.1.9', null, { reached: true, readable: true });
+  assert.equal(writes, after, 'an identical repaint rewrote the live region');
+  assert.ok(after > 0, 'CONTROL: the first paint never wrote, so the suppression assert proves nothing');
+  } finally {
+    // The stub must not outlive a FAILED assertion either, or it leaks
+    // into every later test in the file (the sibling test's pattern).
+    delete global.document;
+  }
+});
+
+test("the card's Update arm opens the one shared confirm and records itself as opener", async () => {
+  const calls = [];
+  const els = {
+    'upd-btn': { textContent: 'Update', hidden: false, disabled: false, dataset: { act: 'update' }, focus: () => calls.push('btn-focus') },
+    'upd-line': { textContent: '' },
+    'uc-err': { hidden: false },
+    updconfirm: { hidden: true },
+    'uc-no': { focus: () => calls.push('uc-no-focus') },
+  };
+  const doc = { getElementById: (id) => els[id] };
+  // eslint-disable-next-line no-new-func
+  const opener = await new Function('document', 'localStorage', 'fetch', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + pageFnSource('updCheckNowClick')
+    + '\nreturn updCheckNowClick().then(() => UPD_CONFIRM_OPENER);')(
+    doc,
+    { removeItem: () => calls.push('clear') },
+    async () => { calls.push('fetch'); throw new Error('must not be called'); },
+    () => calls.push('toast'),
+    '0.1.9');
+  assert.equal(els.updconfirm.hidden, false, 'the shared confirm did not open');
+  assert.equal(els['uc-err'].hidden, true, 'a stale error survived into the confirm');
+  assert.deepEqual(calls, ['uc-no-focus'],
+    'the Update arm did something besides opening the confirm on the safe answer: ' + JSON.stringify(calls));
+  assert.equal(opener, els['upd-btn'], 'the card button was not recorded as the opener');
+});

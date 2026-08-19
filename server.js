@@ -689,11 +689,11 @@ const server = http.createServer((req, res) => {
       // is ~95KB. See the cache's own comment for why its key is paranoid.
       const connection = subscription.checkCached();
       // Update awareness rides the status tick the screen already polls:
-      // poke() returns immediately (six-hour cache, background refresh) and
+      // poke() returns immediately (once per TTL window, background refresh) and
       // available() is the cached verdict -- the request path never waits on
       // the release host, and a down host just means no toast.
       updates.poke();
-      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available() });
+      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available(), updateLook: updates.lastLook() });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
@@ -1185,6 +1185,19 @@ const server = http.createServer((req, res) => {
       };
     }
     sendJson(res, 200, st);
+    return;
+  }
+
+  /* Ask the release host RIGHT NOW (Check now): bypasses the TTL, and
+     the answer carries reachability so the screen can say "could not
+     reach" instead of a false "up to date". POST because it makes a
+     network request on the person's behalf (cross-site guard). */
+  if (pathname === '/api/update/check' && req.method === 'POST') {
+    updates.checkNow()
+      // offer is the newer()-gated verdict (same gate the toast rides), so
+      // the card never has to re-derive version ordering client-side.
+      .then((out) => sendJson(res, 200, { ...out, offer: updates.available() }))
+      .catch(() => sendJson(res, 200, { running: updates.RUNNING, latest: null, reached: false, readable: false, offer: null }));
     return;
   }
 
