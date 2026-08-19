@@ -1232,6 +1232,17 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   //
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
+  const create = require('./engine/create');
+  // ⚠️ A REAL JOB FILE FOR THE REAL `angel`, so the planned-model assertion
+  // below is testing the GATE and not an empty sandbox. Written with the
+  // product's own writer rather than typed out here: a hand-built plist would
+  // be a second definition of a format whose reader takes an argument by
+  // position, and the two would drift apart the first time an argument moved.
+  fs.writeFileSync(create.plistPath('angel'),
+    create.plistFor('angel', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  assert.equal(create.plannedModelArg('angel'), 'claude-opus-5',
+    'the fixture job does not carry a model, so the gate assertion below would '
+    + 'pass whether or not the gate exists');
   status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
@@ -1253,9 +1264,65 @@ test('an untied card carries no commitments and no boot-file hash of the name it
     assert.equal(card.instructions.editable, false,
       'the untied card offered an Edit that knownAgent 404s, which is worse than '
       + 'refusing plainly');
+
+    // ⚠️ THE FOURTH NAME-KEYED FIELD, added long after this gate was written.
+    // `plannedModelName` reads the launchd job filed under the NAME, so without
+    // the same `isNamedOurs` gate a stranger's pane reports the REAL agent's
+    // model — the identical leak the three assertions above already close. A
+    // new field does not inherit a guard by being written beside the ones that
+    // have it, and this suite has been caught by that exact shape before.
+    //
+    // The positive control is its own test below: without one, this assertion
+    // passes for an agent that simply has no job file, which is the state every
+    // agent in a fresh sandbox is in.
+    assert.equal(card.plannedModelName, null,
+      'the untied card carried the real agent’s planned model, read out of a '
+      + 'launchd job filed under the name it merely borrowed');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
+    // The sandbox is shared across this file, so the fixture job must not
+    // outlive the test that needed it.
+    fs.rmSync(create.plistPath('angel'), { force: true });
+  }
+});
+
+/**
+ * ⚠️ THE POSITIVE CONTROL for the planned-model gate above, and it is not
+ * optional. Every agent in a fresh sandbox has no job file, so `null` is what
+ * the gate assertion would see whether the gate existed or not. This proves the
+ * value is reachable at all — that a card entitled to it gets it.
+ *
+ * It also pins the FALLBACK ORDER, which is the behaviour Josh actually asked
+ * about: a live model always wins, and the job is consulted only when there is
+ * no live reading. The other way round would let a job file edited by hand
+ * contradict the model an agent is demonstrably running.
+ */
+test('a tied card reports the model its job will start it on, and only when no live model was read', async () => {
+  const status = require('./engine/status');
+  const create = require('./engine/create');
+  fs.writeFileSync(create.plistPath('angel'),
+    create.plistFor('angel', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  // `-discord` is what ties a pane to the name: the same suffix `isNamedOurs`
+  // requires before this server will read anything filed under it.
+  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'angel' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not exercising the tied case');
+    // No transcript in the sandbox, so there is no live model: exactly Josh's
+    // freshly created agent, which reported "Unknown Model" while its own job
+    // file said otherwise.
+    assert.ok(!card.modelName, 'the fixture unexpectedly produced a live model');
+    assert.equal(card.plannedModelName, 'Claude Opus 5',
+      'a tied card did not report the model written into its own launchd job, '
+      + 'which is the whole defect this field exists to close');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    fs.rmSync(create.plistPath('angel'), { force: true });
   }
 });
 

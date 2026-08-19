@@ -3268,6 +3268,36 @@ function modelLine(a) {
   if (!a.modelName) return 'Unknown Model';
   return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
 }
+/**
+ * The Runs on line, in the tense that is true of it.
+ *
+ * ⚠️ THREE STATES, AND THE LEAD IS THE HONEST PART. Ruled by Mona Lisa
+ * 2026-08-19 after Josh asked why an agent he had just created showed
+ * "Unknown Model": say what WILL be true and when, never claim it already is.
+ *
+ *   running          Right now: Claude Sonnet 5   (read from a live transcript)
+ *   never run        Will start on Claude Sonnet 5 (read from its launchd job)
+ *   neither known    Unknown Model                 (no lead at all)
+ *
+ * ⚠️ THE THIRD STATE DROPS THE LEAD RATHER THAN KEEPING "Right now", by the
+ * same rule that produced the second: nothing is running in that case either,
+ * so "Right now" is exactly as false there as it would be on a planned model.
+ * It previously read "Right now: Unknown Model", which asserted a present tense
+ * about an agent that may never have started.
+ *
+ * ⚠️ A PLANNED MODEL NEVER OUTRANKS A LIVE ONE. `modelName` is what the agent
+ * IS running; the job file is what it will be started with, and the two can
+ * disagree (a job edited by hand, a session started some other way). The server
+ * only looks up the second when the first is absent.
+ */
+function runsOnLine(a) {
+  if (a.modelName) return { lead: 'Right now: ', name: modelLine(a) };
+  if (a.plannedModelName) {
+    const n = a.plannedModelName;
+    return { lead: 'Will start on ', name: /^claude/i.test(n) ? n : 'Claude ' + n };
+  }
+  return { lead: '', name: 'Unknown Model' };
+}
 function roleLine(a) {
   /**
    * ⚠️ TWO KINDS OF VALUE SHARE THIS SLOT, and only one of them was ever
@@ -5087,7 +5117,8 @@ function openDetail(sessionName) {
   dbadge.hidden = !(dpct !== null && dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
-  drun.innerHTML = 'Right now: <b>' + esc(modelLine(a)) + '</b>';
+  const runs = runsOnLine(a);
+  drun.innerHTML = esc(runs.lead) + '<b>' + esc(runs.name) + '</b>';
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);

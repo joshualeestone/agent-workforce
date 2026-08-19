@@ -24,7 +24,7 @@ const path = require('node:path');
 // `STATE` travels with them: the thread route compares a member's state, and a
 // literal there is a comparison that silently stops matching the day the engine
 // renames one.
-const { snapshot, paneRoster, countAgents, STATE } = require('./engine/status');
+const { snapshot, paneRoster, countAgents, STATE, modelDisplayName } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -645,8 +645,34 @@ const server = http.createServer((req, res) => {
       // every five-second poll. `stopped !== false` is `isHidden`'s own test;
       // if the two ever diverge this is the copy that is wrong.
       const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
+      /**
+       * What an agent's job will START it on, for the agents whose live model
+       * we could not read.
+       *
+       * ⚠️ ONLY WHEN `modelName` IS ABSENT, and that is both correctness and
+       * cost. A live transcript reading is what the agent IS running and must
+       * never be second-guessed by a job file that may have been edited since;
+       * and this route polls every five seconds for every agent, so a disk read
+       * per agent per poll to answer a question already answered would be the
+       * same waste the instruction-text note above refuses.
+       *
+       * ⚠️ GATED ON `isNamedOurs` LIKE EVERY OTHER NAME-KEYED READ IN THIS
+       * BLOCK. The plist is keyed on the NAME, so without the gate an untied
+       * stranger's pane reports the REAL agent's planned model — the precise
+       * leak this block's other three fields already close, and a new field
+       * does not inherit that guard by being written next to them.
+       */
+      const plannedFor = (a) => {
+        if (!a.isNamedOurs || a.modelName) return null;
+        const arg = create.plannedModelArg(a.sessionName);
+        return arg ? modelDisplayName(arg) : null;
+      };
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
+        // The name only. `plannedModelArg` returns null for "we do not know",
+        // and null travels as null: the screen must not be able to tell a
+        // missing job from a default.
+        plannedModelName: plannedFor(a),
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
           : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
