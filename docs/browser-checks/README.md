@@ -1,6 +1,6 @@
 # Browser checks
 
-`node --test` cannot see the page. These two scripts can.
+`node --test` cannot see the page. These scripts can.
 
 They are **not part of the test suite** and are not run by `npm test`. They need
 a browser, and this repo has no dependencies and is not about to grow one for a
@@ -20,8 +20,21 @@ Everything in this directory is here because of defects that the 389 tests in
 - The contrast failure hiding underneath that one: 3.04:1 on a 10px caption,
   invisible for as long as the rule was inert. This project's floor is WCAG AA.
 
+- A variable read one line before it was declared, in the agent page's own
+  thread paint. It threw a `ReferenceError` on **every** paint, so the box never
+  rendered at all — and **all 931 tests passed**, because the suite reads text
+  and nothing in it had ever put that page on a screen.
+
 The rule they encode: **a test that reads source is testing source.** For
 anything about how a screen looks or behaves under a click, render it.
+
+⚠️ **And rendering is not enough on its own.** `render-talk.js` screenshotted
+the first-run overlay with the real page correct underneath it, every
+measurement green; then, with the overlay hidden, it measured a page the overlay
+had left `inert` — every hit test answering BODY and a click timing out, on a
+page that screenshots perfectly. **A picture cannot show you that nothing on it
+can be clicked.** Ask what happens when you touch the thing, not only what it
+looks like.
 
 ## Running them
 

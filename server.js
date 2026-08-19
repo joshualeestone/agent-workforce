@@ -1633,7 +1633,21 @@ const server = http.createServer((req, res) => {
   const dm = pathname.match(/^\/api\/agent\/([^/]+)\/thread$/);
   if (dm && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(dm[1]);
+    // 404 on the read and 400 on the write for the same unreadable segment,
+    // which looks inconsistent and is the commitments route's own split: a
+    // read of a name we cannot even decode is "no such agent", a write is a
+    // malformed request. Matched to the sibling that shares this gate rather
+    // than to the project-thread route, which shares neither.
     if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    /**
+     * ⚠️ A NAME NO PANE RUNS AT ALL passes this and gets a 200 with an empty
+     * thread, while the POST 404s. That asymmetry is deliberate and it is the
+     * commitments route's: a record stays READABLE for an agent that is not
+     * running (that is what a record is for), and is not WRITABLE, because
+     * there is nothing to type into. It also means this route cannot be used
+     * as a which-names-exist oracle in the other direction: an unknown name
+     * and a stopped agent answer identically, which is the honest pair.
+     */
     if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     // ⚠️ ONE roster read for the whole request, like every sibling: two
     // `tmux list-panes` calls can disagree, and a question reported from one
@@ -1669,20 +1683,38 @@ const server = http.createServer((req, res) => {
       }
     }
 
-    /* The capture ALWAYS runs, for the reason the project thread states: the
-       question region derives from it, and the question is safety rather than
-       chrome. Engineering mode gates what is SERVED as the window, below. */
-    const view = chat.viewport(name, roster);
     // The board's word, through the engine's own constant. `tied` is implied
     // by the card lookup above (isNamedOurs), which is the same conjunct the
     // project route spells out.
     const asking = Boolean(card) && card.state === STATE.NEEDS_YOU;
-    const question = asking && view.text ? chat.questionIn(view.text) : null;
+    /**
+     * ⚠️ THE CAPTURE RUNS ONLY WHEN THE QUESTION NEEDS IT, and that is a
+     * DIFFERENT gate from the one the project thread refused.
+     *
+     * That route captures unconditionally, and its comment says why: an early
+     * version gated on ENGINEERING MODE and silently blinded the needs-you flow
+     * with the switch off. That was gating on a setting unrelated to the
+     * question. This gates on `asking` — the board's own word for whether there
+     * is a question at all — so the question path is untouched by construction:
+     * when `asking` is false there is nothing for `questionIn` to find.
+     *
+     * It matters because this route rides the 5s tick on the app's most-visited
+     * screen. `safeRoster()` is already one `list-panes` plus a `capture-pane`
+     * PER AGENT; an unconditional second capture here added another one every
+     * tick, for an idle agent, to feed nothing.
+     *
+     * ⚠️ AND THE RAW WINDOW IS NOT SERVED FROM HERE AT ALL. This page already
+     * has `/api/agent/:name/window` for that, behind Engineering mode, with its
+     * own box. A second copy on this payload was an unread surface on a poll —
+     * the thing rounds 19, 22 and 38 deleted three times.
+     */
+    const view = asking ? chat.viewport(name, roster) : null;
+    const question = (asking && view && view.text) ? chat.questionIn(view.text) : null;
     // The same two sentences as the project route, and they stay two: "we read
     // its screen and the question is not in the capture" is not "we could not
     // read its screen at all".
     const questionBecause = (asking && !question)
-      ? (view.text == null
+      ? ((!view || view.text == null)
         ? 'we could not read its screen just now to show the question'
         : 'we cannot find the question on its screen right now')
       : null;
@@ -1724,21 +1756,30 @@ const server = http.createServer((req, res) => {
     const olderCount = Array.isArray(messages) && messages.length > TAIL
       ? messages.length - TAIL : 0;
     if (olderCount) messages = messages.slice(-TAIL);
+    /**
+     * ⚠️ EVERY FIELD HERE HAS A READER ON THE PAGE. The first version also
+     * carried `agent`, `viewport` and `agentsUnreadable` "for parity with the
+     * sibling route", and nothing on this screen read any of them — on a
+     * 5-second poll. This repo has deleted exactly that three times (the
+     * payload's agents copy in round 19, readIdentity's source in round 22, the
+     * POST's thread in round 38), and parity with a route that draws a
+     * different screen is not a reader.
+     *
+     * `presence` already carries what `agentsUnreadable` would have said, in
+     * the vocabulary the composer uses ('unsure'), so a second spelling of it
+     * would be two derivations of one fact again.
+     */
     sendJson(res, 200, {
-      agent: { sessionName: name, name: (card && card.name) || name },
       messages,
       olderCount,
       historyBecause,
       historyUnfilable,
       presence,
       presenceBecause,
-      viewport: engmode.read().on ? view
-        : { text: null, because: 'engineering mode is off, so the window is not shown' },
       asking,
       question,
       questionBecause,
       options,
-      agentsUnreadable: roster === null,
     });
     return;
   }
@@ -1768,8 +1809,21 @@ const server = http.createServer((req, res) => {
          * only the words would misdescribe the mechanism. Both, or the record
          * lies one way or the other.
          */
-        const chose = (typeof body.chose === 'string' && body.chose.trim()
-          && body.chose.length <= chat.MAX_TEXT) ? body.chose : null;
+        /**
+         * ⚠️ CHECKED BY THE SAME GATE AS THE TEXT, not by a hand-rolled pair of
+         * conditions. `chose` is never typed into a pane, so the first version
+         * only bounded its length — but this module's contract is that what was
+         * CHECKED is what gets KEPT, and `cleanMessage` does not strip control
+         * characters. An ESC or a C1 byte in an option label would have gone
+         * into the stored thread and back out to the screen, refused everywhere
+         * else in the product and admitted here.
+         *
+         * A bad `chose` is not a bad send: the digit is still what the agent is
+         * waiting for. So it is dropped rather than refused, and the bubble
+         * falls back to showing what was actually sent.
+         */
+        const chose = (typeof body.chose === 'string' && !chat.messageProblem(body.chose))
+          ? body.chose : null;
 
         const roster = safeRoster();
         // The write gate. `chat.deliver` refuses on its own too (addressable:

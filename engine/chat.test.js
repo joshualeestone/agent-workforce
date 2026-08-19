@@ -1940,9 +1940,15 @@ test('optionsIn reads a real menu, both the two-option prompt and a long one', (
   assert.equal(theme[1].label, 'Dark mode ✔', 'the label is the option’s own words, marker and all');
 });
 
-test('optionsIn sees through the pane frame, on either side of the line', () => {
+test('optionsIn sees through the pane frame, and does not eat a label that ends in one', () => {
   const boxed = chat.optionsIn('│ ❯ 1. Yes                 │\n│   2. No, tell me more    │');
   assert.deepEqual(boxed, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No, tell me more' }]);
+  // ⚠️ THE TWO ENDS STRIP DIFFERENT SETS. Everything left of the number is
+  // frame by definition; the last character of a label is the label's. A
+  // symmetric strip took the pipe off this option's own words, silently,
+  // against the verbatim rule.
+  const piped = chat.optionsIn('1. use a pipe |\n2. do not');
+  assert.deepEqual(piped, [{ n: 1, label: 'use a pipe |' }, { n: 2, label: 'do not' }]);
 });
 
 test('optionsIn refuses everything it cannot be sure of, and a refusal is the ordinary screen', () => {
@@ -1954,7 +1960,13 @@ test('optionsIn refuses everything it cannot be sure of, and a refusal is the or
   assert.equal(chat.optionsIn('2. Yes\n3. No'), null, 'a run that does not start at 1');
   assert.equal(chat.optionsIn('1. Yes'), null, 'one option is not a choice');
   assert.equal(chat.optionsIn(Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n')), null, 'past nine');
-  assert.equal(chat.optionsIn('1. \n2. '), null, 'a button with no words on it');
+  // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This reads like an empty-label
+  // guard and there is no empty-label guard: `1. ` does not match at all
+  // (the pattern's capture needs a non-space first character), so the two
+  // lines produce ZERO options and the length test refuses them. The
+  // assertion is right; the name it used to carry pointed at code that
+  // could not run.
+  assert.equal(chat.optionsIn('1. \n2. '), null, 'a numbered line with no words is not an option at all');
   assert.equal(chat.optionsIn('I tried 1. and it did not work'), null, 'prose that mentions a number');
   assert.equal(chat.optionsIn('Do you want to proceed?'), null, 'a question with no menu at all');
   assert.equal(chat.optionsIn(''), null);

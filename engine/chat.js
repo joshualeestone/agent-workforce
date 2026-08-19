@@ -897,6 +897,13 @@ function questionIn(text) {
  * `│` would make every option line invisible to a pattern anchored at the
  * number.
  *
+ * ⚠️ THE TWO ENDS STRIP DIFFERENT SETS, and the asymmetry is the point. On the
+ * LEFT, everything before the number is frame by definition, so an ASCII `|`
+ * goes too. On the RIGHT, the characters are the label's own last characters —
+ * and `2. use a pipe |` is a legitimate option whose final `|` a symmetric
+ * strip would silently eat, against the verbatim rule two lines down. A box
+ * drawn with `│` still strips; a label ending in `|` survives.
+ *
  * Labels ride VERBATIM, which is the pack's rule: a button carries the option's
  * own words, not our summary of them.
  */
@@ -907,7 +914,7 @@ function optionsIn(questionText) {
   if (!whole.trim()) return null;
   const found = [];
   for (const raw of whole.split('\n')) {
-    const line = raw.replace(/^[\s│|]+/, '').replace(/[\s│|]+$/, '');
+    const line = raw.replace(/^[\s│|]+/, '').replace(/[\s│]+$/, '');
     const m = OPTION_LINE.exec(line);
     if (!m) continue;
     found.push({ n: Number(m[1]), label: m[2] });
@@ -915,8 +922,20 @@ function optionsIn(questionText) {
   if (found.length < 2 || found.length > 9) return null;
   for (let i = 0; i < found.length; i += 1) {
     if (found[i].n !== i + 1) return null;
-    if (!found[i].label.trim()) return null;
   }
+  /**
+   * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
+   * than an oversight. One was written, and it could not fail: the pattern's
+   * capture is `(\S.*)`, so a matched line always has a non-space first
+   * character. `1. ` does not produce an empty label, it produces NO MATCH, and
+   * a menu of two such lines lands on the length test above.
+   *
+   * It was removed rather than left, for the reason 18e removed the dead
+   * `.pjthread` declarations: a guard that reads as protection and cannot fire
+   * teaches the next reader that the case is handled here. The refusal is real
+   * and it is one line up — the test that names it now says which test catches
+   * it.
+   */
   return found;
 }
 

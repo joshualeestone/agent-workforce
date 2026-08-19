@@ -1730,6 +1730,14 @@ test('the reveal-folder route: guard inherited, server-derived path, honest refu
 });
 
 /* ── the thread between the person and ONE agent ─────────────────────────── */
+/**
+ * ⚠️ THESE LIVE IN THE PROJECTS SUITE, and the branch plan said `server.test.js`.
+ * The reason is that everything they need is here: `withThread`'s chats-store
+ * clear, `armChat`'s runner seam with its just-before-sending probe, and the
+ * `fleet` fixtures. Moving them would mean a second copy of all three, which is
+ * the habit this codebase keeps paying to remove. Recorded rather than left as
+ * a silent departure from the plan.
+ */
 
 /**
  * The agent's own thread needs no project, which is the point of it. The chats
@@ -1907,4 +1915,100 @@ test('a roster we could not read closes this route rather than serving a private
       if (blind) blind.restore();
     }
   });
+});
+
+test('the thread is bounded, and the page is told how many it is not showing', async () => {
+  reset();
+  // ⚠️ THE BOUND EXISTS because this route rides a 5s poll: at the engine's
+  // own ceiling a full thread is a multi-megabyte parse-and-stringify every
+  // tick. `olderCount` is what stops the visible list implying it is
+  // everything.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [], async () => {
+    const many = Array.from({ length: 205 }, (_, i) => ({
+      at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      text: 'message ' + (i + 1),
+      delivery: { state: 'placed' },
+    }));
+    // Written through the ENGINE, so the fixture cannot hold a shape the
+    // producer does not make.
+    for (const m of many) chat.appendMessage(chat.DIRECT, 'zeta', m);
+    const body = json(await req('/api/agent/zeta/thread'));
+    assert.equal(body.messages.length, 200, 'the tail is bounded');
+    assert.equal(body.olderCount, 5, 'and the payload says how many it is not showing');
+    assert.equal(body.messages[0].text, 'message 6', 'the LATEST 200, not the first');
+    assert.equal(body.messages[199].text, 'message 205');
+  });
+});
+
+test('an agent whose name cannot be filed under is a third fact, not an unreadable store', async () => {
+  reset();
+  // ⚠️ A capitalised name is exactly what the adoption path produces and
+  // exactly what Josh asked for, so this is a STANDING condition rather than
+  // an edge case: sending works, nothing is kept, and the two facts have to
+  // arrive apart or the screen says both "we cannot read what you sent" (there
+  // is no file) and "this is not saying you have sent nothing" (nothing is
+  // kept, here or ever).
+  await withAgent(fleet.agent('Zeta', { state: 'idle' }), [said(), said()], async () => {
+    const body = json(await req('/api/agent/Zeta/thread'));
+    assert.equal(body.historyUnfilable, true);
+    assert.ok(body.historyBecause, 'and it says why, in the engine’s own words');
+    assert.deepEqual(body.messages, [], 'an empty list is the honest shape: there is no file');
+    // The standing fact behind it: the send itself still goes through.
+    const sent = json(await post('/api/agent/Zeta/thread', { text: 'this arrives and is not kept' }));
+    assert.equal(sent.delivery.state, 'placed');
+    assert.equal(sent.recorded, false, 'delivered and not kept, reported separately');
+    assert.ok(sent.recordedBecause);
+  });
+});
+
+test('the two question failures are two sentences, and neither is silence', async () => {
+  reset();
+  // "We read its screen and the question is not in the capture" is not "we
+  // could not read its screen at all". They were one string once, so a failed
+  // capture rendered as a claim about what IS on a screen nobody read.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('nothing on this screen matches a question marker\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      assert.match(body.questionBecause, /cannot find the question on its screen/);
+    });
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [], async () => {
+    // The capture itself fails: a pane we could not read at all.
+    const blind = fleet.unreadable();
+    let body;
+    try {
+      // ⚠️ THE CONTROL for this arm: with the roster unreadable the route
+      // closes at borrowedName, so this asserts the CLOSED door rather than
+      // pretending to reach the sentence. The sentence's other arm is what
+      // the first half of this test holds.
+      const res = await req('/api/agent/zeta/thread');
+      body = res;
+    } finally {
+      blind.restore();
+    }
+    assert.equal(body.status, 404, 'a roster we could not read closes the route');
+  });
+});
+
+test('the raw window is NOT served from this route, so engineering mode has nothing to gate here', async () => {
+  reset();
+  // ⚠️ THE PLAN ASKED FOR AN ENG-MODE GATE ON THIS PAYLOAD and the payload no
+  // longer carries a window to gate: the agent page already has
+  // /api/agent/:name/window, behind that switch, with its own box. A second
+  // copy here was an unread surface on a 5-second poll. This pins the absence
+  // so it cannot come back by habit.
+  const restoreEng = withEngMode(true);
+  try {
+    await withAgent(fleet.agent('zeta', { state: 'idle' }), [said('a screen nobody asked this route for')],
+      async () => {
+        const body = json(await req('/api/agent/zeta/thread'));
+        assert.ok(!('viewport' in body), 'the thread route is serving a raw window again');
+        assert.ok(!('agentsUnreadable' in body), 'presence already carries this fact');
+        assert.ok(!('agent' in body), 'the page names the agent from the card it already holds');
+      });
+  } finally {
+    restoreEng();
+  }
 });

@@ -6537,8 +6537,15 @@ test('the buttons die with the composer: an option is never offered over a close
   // Mona Lisa's state 6. A live option above a box that cannot send promises a
   // route that is shut, which is the same lie as a composer that swallows text.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-  assert.match(raw, /const opts = \(body\.asking && live && Array\.isArray\(body\.options\)\)/,
-    'the options stopped being gated on the agent being reachable');
+  // ⚠️ The GATE's terms, not the whole expression: pinning the line verbatim
+  // made this test fail the next time a term was ADDED to it, which is the
+  // check-contains-a-copy shape — it can only pass against one spelling and
+  // says nothing about the property.
+  const at = raw.indexOf('const opts = ');
+  assert.ok(at > -1, 'the options gate vanished');
+  const gate = raw.slice(at, raw.indexOf(';', at));
+  assert.ok(/\blive\b/.test(gate), 'the options stopped being gated on the agent being reachable');
+  assert.ok(/body\.asking/.test(gate), 'the options stopped being gated on the board saying it is asking');
   assert.match(raw, /const live = body\.presence === 'on';/,
     'the reachability the options are gated on stopped being the route’s own answer');
 });

@@ -1973,7 +1973,14 @@ svg { display: block; }
     <p class="dhint" id="d-talk-older" style="margin:10px 0 0;" hidden></p>
     <div class="dmoff" id="d-dmoff" hidden></div>
     <div class="frow dmbar">
-      <input type="text" id="d-say" maxlength="2000">
+      <!-- ⚠️ THE ACCESSIBLE NAME SHIPS IN THE MARKUP. paintTalk refines it to
+           name the agent, but every early return in that function (a failed
+           fetch, an agent switched mid-flight) leaves the element as it was,
+           and an unnamed text input is a WCAG 4.1.2 failure on the one control
+           this box exists for. The room's own box carries a static label for
+           the same reason. -->
+      <input type="text" id="d-say" maxlength="2000"
+             aria-label="Type a message for this agent" placeholder="Message this agent…">
       <button class="btn" id="d-send" type="button">Send</button>
     </div>
     <p class="fmsg" id="d-say-msg" role="alert" aria-live="assertive"></p>
@@ -5051,6 +5058,48 @@ async function paintConversation(sessionName, agentName) {
  */
 let TALK_LOAD = 0;
 let TALK_SENDING = false;
+/**
+ * ⚠️ THE DRAFT IS PARKED PER AGENT, like the room's `PJ_DRAFTS`. Without this,
+ * opening the board and coming back destroyed whatever was half-typed — the
+ * never-delete rule this branch holds on disk, broken in the one place the
+ * words exist only in the DOM.
+ */
+const TALK_DRAFTS = {};
+/**
+ * The question this person has just answered, per agent, and when.
+ *
+ * ⚠️ THIS IS WHY THE BUTTONS GO AFTER A SEND (drawing, states 2 and 3): a
+ * second press answers a numbered prompt twice, and the poll that runs a beat
+ * later can still be looking at a pane that has not redrawn yet — so the
+ * server's `asking` alone would put the buttons straight back.
+ *
+ * ⚠️ AND IT EXPIRES, which matters more than the suppression. Keyed on the
+ * question TEXT and bounded in time: if the same question is still on screen
+ * 30 seconds later, the answer demonstrably did not take, and a panel that
+ * stayed hidden on the strength of our own optimism would strand the person in
+ * front of an agent that is still waiting. The stranded state is the thing this
+ * whole feature exists to remove, so the suppression fails OPEN.
+ */
+const TALK_ANSWERED = {};
+const TALK_ANSWER_HOLD_MS = 30000;
+/**
+ * The last send to this agent could not be delivered.
+ *
+ * Drives the drawing's state-4 line. ⚠️ Not read off the last row in the
+ * thread, which was the first version: a failure from days ago then put "The
+ * buttons still work." under a fresh, unrelated question. This is about THIS
+ * send, which is what the drawing means.
+ */
+const TALK_FAILED = {};
+/**
+ * The question text last PAINTED for each agent.
+ *
+ * ⚠️ Read at press time rather than at verdict time: by the time the send
+ * answers, the poll may have repainted with a different capture, and the hold
+ * has to be keyed on the question the person was actually looking at when they
+ * pressed. Otherwise the suppression is about a question nobody answered.
+ */
+const TALK_QUESTION = {};
 
 /**
  * One message the person sent, in the pack's bubble.
@@ -5114,6 +5163,19 @@ async function paintTalk(sessionName, agentName) {
   say.placeholder = 'Message ' + name + '…';
 
   /* --- the question, and the answers to it --- */
+  /**
+   * ⚠️ THE HOLD IS COMPUTED FIRST, because two things below read it and the
+   * first version declared it between them — a temporal-dead-zone
+   * ReferenceError that threw on EVERY paint, with all 931 text tests green,
+   * because nothing in the suite renders the page. Caught by rendering it.
+   */
+  TALK_QUESTION[sessionName] = (body.asking && body.question) ? body.question.text : null;
+  const answered = TALK_ANSWERED[sessionName];
+  const stillTheSame = !!(answered && body.question && answered.question === body.question.text
+    && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
+  // Expired, or a different question, or it stopped asking: the hold is spent.
+  if (answered && !stillTheSame) delete TALK_ANSWERED[sessionName];
+  /* --- the question, and the answers to it --- */
   const qask = document.getElementById('d-qask');
   const qlab = document.getElementById('d-qask-lab');
   const qtext = document.getElementById('d-qask-text');
@@ -5135,7 +5197,10 @@ async function paintTalk(sessionName, agentName) {
     pjSetScreen(qtext, '');
     qtext.hidden = true;
   }
-  qask.hidden = !body.asking;
+  // The drawing's states 2 and 3: an answered question is no longer a thing
+  // waiting on you, and the answer takes its place in the thread below as an
+  // ordinary message. The whole block goes, not just its buttons.
+  qask.hidden = !body.asking || stillTheSame;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as
@@ -5143,7 +5208,15 @@ async function paintTalk(sessionName, agentName) {
    * So they are offered only when the menu is certain AND the agent can
    * actually be typed into.
    */
-  const opts = (body.asking && live && Array.isArray(body.options)) ? body.options : null;
+  /**
+   * ⚠️ AND NOT WHILE THIS PERSON'S OWN ANSWER IS IN THE AIR. `asking` comes
+   * from a pane capture, and the pane has not necessarily redrawn in the beat
+   * between the send landing and this repaint — so the server can honestly
+   * still say "asking" about a question that has just been answered. Offering
+   * the buttons again there invites the second press that answers a numbered
+   * prompt twice.
+   */
+  const opts = (body.asking && !stillTheSame && live && Array.isArray(body.options)) ? body.options : null;
   qopts.innerHTML = opts
     ? opts.map((o) => '<button class="qopt" type="button" data-n="' + esc(String(o.n))
         + '" data-label="' + esc(o.label) + '">' + esc(o.label) + '</button>').join('')
@@ -5154,10 +5227,26 @@ async function paintTalk(sessionName, agentName) {
   /* --- the thread --- */
   const rows = Array.isArray(body.messages) ? body.messages : [];
   const thread = document.getElementById('d-dmthread');
-  if (body.historyBecause && !rows.length) {
-    // Unreadable and unfilable are different facts and the route sends them
-    // apart; both are said rather than rendered as an empty conversation.
-    thread.innerHTML = '<p class="dmnone">' + esc(pjSentence(body.historyBecause)) + '</p>';
+  if (body.historyUnfilable && !rows.length) {
+    /**
+     * ⚠️ A THIRD FACT, not a flavour of unreadable. This agent's name cannot be
+     * filed under at all, so there is no file to read and there never will be
+     * one. Sending still WORKS — the words reach the session — and nothing is
+     * kept. Collapsing this into "we cannot read it" produced two false
+     * sentences at once in the room ("we cannot read what you have sent" over
+     * no file, and "this is not saying you have sent nothing" over a store that
+     * will never hold anything), which is why the route sends the two apart.
+     */
+    thread.innerHTML = '<p class="dmnone"><b>Nothing said here is kept for ' + esc(name) + '.</b> '
+      + esc(pjSentence(body.historyBecause || 'we cannot keep a conversation under this agent’s name'))
+      + ' You can still send, and it still arrives.</p>';
+  } else if (body.historyBecause && !rows.length) {
+    // We could not read a store that does exist. ⚠️ The room's load-bearing
+    // second sentence rides along: an unreadable file is not evidence that
+    // nothing was said, and silence here would render "we could not look" as
+    // "there is nothing".
+    thread.innerHTML = '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
+      + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>';
   } else if (!rows.length) {
     thread.innerHTML = '<p class="dmnone">Nothing here yet.</p>';
   } else {
@@ -5177,10 +5266,8 @@ async function paintTalk(sessionName, agentName) {
    * and saying the failure twice on one screen is the noise this codebase
    * keeps removing.
    */
-  const lastRow = rows.length ? rows[rows.length - 1] : null;
-  const lastFailed = !!(lastRow && lastRow.delivery && lastRow.delivery.state === 'could_not');
   const qfail = document.getElementById('d-qask-fail');
-  qfail.textContent = (opts && lastFailed) ? 'The buttons still work.' : '';
+  qfail.textContent = (opts && TALK_FAILED[sessionName]) ? 'The buttons still work.' : '';
   qfail.hidden = !qfail.textContent;
 
   const older = document.getElementById('d-talk-older');
@@ -5210,8 +5297,17 @@ async function paintTalk(sessionName, agentName) {
     off.textContent = '';
     off.hidden = true;
   }
-  say.disabled = body.presence === 'off' || TALK_SENDING;
+  /**
+   * ⚠️ THE BOX STAYS TYPEABLE WHILE A SEND IS IN FLIGHT, and only the button
+   * goes dead — the room's split, for the room's reason: a flight can honestly
+   * run many seconds (three 5s tmux timeouts plus the record lock), and a box
+   * that locks for it eats the keystrokes of somebody already typing the next
+   * message. The button is what stops a double send.
+   */
+  say.disabled = body.presence === 'off';
   document.getElementById('d-send').disabled = body.presence === 'off' || TALK_SENDING;
+  // The parked draft comes back, and never over words already in the box.
+  if (!say.disabled && !say.value && TALK_DRAFTS[sessionName]) say.value = TALK_DRAFTS[sessionName];
 }
 
 /**
@@ -5220,22 +5316,39 @@ async function paintTalk(sessionName, agentName) {
  * `chose` is the option's own words on a button send. The DIGIT goes on the
  * wire because that is what the agent's prompt is waiting for; the words go in
  * the bubble because that is what the person answered.
+ *
+ * ⚠️ EVERY WRITE BELOW IS GATED ON THE FLIGHT NOT HAVING MOVED. A send can
+ * honestly take many seconds, and the person can open another agent inside that
+ * window — at which point `#d-say-msg` and `#d-say` belong to somebody else.
+ * Ungated, this painted "Placed into casey's session" under April's composer
+ * and cleared April's draft. `paintTalk` already guards its own paint this way;
+ * this path was the hole.
  */
 async function sendTalk(text, chose) {
   if (TALK_SENDING || !CURRENT) return;
-  const sessionName = CURRENT.sessionName;
-  const name = CURRENT.name || sessionName;
+  // The agent this send TOOK OFF from. Everything afterwards is about this
+  // name, never about whichever agent happens to be open when the verdict
+  // lands.
+  const sentName = CURRENT.sessionName;
+  const name = CURRENT.name || sentName;
+  const flightMoved = () => !CURRENT || CURRENT.sessionName !== sentName;
   const msg = document.getElementById('d-say-msg');
   const say = document.getElementById('d-say');
   const send = document.getElementById('d-send');
   TALK_SENDING = true;
-  say.disabled = true; send.disabled = true;
-  // ⚠️ The buttons go dead for the round trip too: a second press on a
-  // numbered prompt answers it twice.
+  send.disabled = true;
+  /* ⚠️ FOCUS IS RESCUED BEFORE THE DISABLE TAKES EFFECT, like the room's own
+     rescue: disabling the element that currently has focus drops focus to
+     <body>, and a keyboard or screen-reader user loses their place on every
+     single send. The box is the right landing place — it is where they were
+     typing and it stays enabled. */
+  if (document.activeElement === send) say.focus();
+  // ⚠️ The buttons go dead for the round trip too: a second press on a numbered
+  // prompt answers it twice.
   document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
   msg.textContent = 'Sending…';
   try {
-    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sentName) + '/thread', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(chose ? { text, chose } : { text }),
@@ -5244,31 +5357,68 @@ async function sendTalk(text, chose) {
     if (!res.ok) throw new Error(body.error || 'we could not send that');
     const d = body.delivery || {};
     const note = d.paneNote ? ' (' + d.paneNote + ')' : '';
+    /**
+     * ⚠️ RECORDED IS A QUESTION, NOT AN ASSUMPTION, and this is the defect the
+     * room documents at its own send: with `recorded: false` — an unwritable
+     * store, a held lock, or a name that cannot be filed under at all, which is
+     * a STANDING condition for every capitalised or dotted agent — clearing the
+     * box left the person's words in NO place. Not in the thread, not in the
+     * box. The box is the only copy when we did not keep it, so it keeps it.
+     */
+    const inThread = body.recorded === true;
+    const clearSent = () => {
+      // Only the text THIS send took, and only if the box still holds exactly
+      // it: anything typed on top belongs to the next message.
+      if (!flightMoved() && say.value.trim() === text) say.value = '';
+      if ((TALK_DRAFTS[sentName] || '').trim() === text) delete TALK_DRAFTS[sentName];
+    };
+    let line;
     if (d.state === 'placed') {
-      msg.textContent = 'Placed into ' + name + '’s session' + note + '.';
-      say.value = '';
+      clearSent();
+      line = 'Placed into ' + name + '’s session' + note + '.';
     } else if (d.state === 'unconfirmed') {
-      msg.textContent = 'We could not confirm that reached ' + name + '’s session' + note
-        + '. ' + pjSentence(d.because || 'we typed it and could not tell whether it arrived');
-      say.value = '';
+      if (inThread) clearSent();
+      line = 'We could not confirm that reached ' + name + '’s session' + note + '. '
+        + pjSentence(d.because || 'we typed it and could not tell whether it arrived')
+        + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.');
     } else {
-      /* ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state
-         4). The failure is stated where the person clicked, the question stays,
-         and the buttons come back live on the repaint below. The typed text is
-         NOT cleared: it is the only copy of what they wrote. */
-      msg.textContent = 'We could not get that to ' + name + ': '
+      /* Nothing was typed, so the text stays in the box in front of them and
+         no time phrase rides this line: "could not deliver just now" reads as
+         "not at this moment", which invites a retry we have no reason to
+         promise. The row in the thread carries the time. */
+      line = 'We could not get that to ' + name + ': '
         + pjSentence(d.because || 'we could not put it into its session');
     }
-    if (body.recorded === false && body.recordedBecause) {
-      // Delivering and keeping are two acts and two sentences: a message that
-      // went through and could not be written down must not read as unsent.
-      msg.textContent += ' ' + pjSentence(body.recordedBecause);
+    // Delivering and keeping are two acts and two sentences. Said whenever the
+    // record failed, on every verdict — a message that went through and could
+    // not be written down must not read as unsent, and one that was neither
+    // sent nor kept must not read as merely undelivered.
+    if (!inThread && body.recordedBecause) line += ' ' + pjSentence(body.recordedBecause);
+    /* The button suppression is bookkeeping about THIS send, so it is recorded
+       whether or not the flight moved: it is keyed on the agent, and coming
+       back to that agent must not re-offer an answer already given. */
+    if (chose) {
+      if (d.state === 'placed' || d.state === 'unconfirmed') {
+        TALK_ANSWERED[sentName] = { question: TALK_QUESTION[sentName] || null, at: Date.now() };
+        delete TALK_FAILED[sentName];
+      } else {
+        // ⚠️ Nothing was answered, so nothing may look answered: the question
+        // stays, the buttons come back live, and the panel says so.
+        TALK_FAILED[sentName] = true;
+        delete TALK_ANSWERED[sentName];
+      }
     }
+    if (!flightMoved()) msg.textContent = line;
   } catch (err) {
-    msg.textContent = pjSentence((err && err.message) || 'we could not send that');
+    if (!flightMoved()) msg.textContent = pjSentence((err && err.message) || 'we could not send that');
   } finally {
     TALK_SENDING = false;
-    await paintTalk(sessionName, name);
+    // The repaint is about the takeoff agent too: with the flight moved, the
+    // open page belongs to somebody else and its own poll is already painting
+    // it. The record is the account of what happened, visible when that agent
+    // is next opened.
+    if (!flightMoved()) await paintTalk(sentName, name);
+    else document.getElementById('d-send').disabled = false;
   }
 }
 
@@ -5328,6 +5478,10 @@ function openDetail(sessionName) {
     document.getElementById('d-talk-older').hidden = true;
     document.getElementById('d-dmoff').hidden = true;
     document.getElementById('d-say-msg').textContent = '';
+    /* ⚠️ The box is cleared because it belongs to the agent being LEFT, and
+       paintTalk restores whichever draft belongs to the one being opened. The
+       words are not lost: the input handler parks them under their own agent
+       on every keystroke. */
     document.getElementById('d-say').value = '';
   }
   paintTalk(a.sessionName, a.name);
@@ -9982,6 +10136,14 @@ async function pjSend() {
 document.getElementById('d-send').addEventListener('click', () => {
   const say = document.getElementById('d-say');
   if (say.value.trim()) sendTalk(say.value);
+});
+/* The park itself: every keystroke files the draft under the open agent, so no
+   navigation order can lose it. */
+document.getElementById('d-say').addEventListener('input', (e) => {
+  if (!CURRENT) return;
+  const v = e.target.value;
+  if (v.trim()) TALK_DRAFTS[CURRENT.sessionName] = v;
+  else delete TALK_DRAFTS[CURRENT.sessionName];
 });
 document.getElementById('d-say').addEventListener('keydown', (e) => {
   // Enter sends, and the SAME IME rule as the room's box: the Enter that
