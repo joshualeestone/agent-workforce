@@ -53,3 +53,19 @@ The section keeps its "Project members" label; the sentence beneath it
 goes. The survival reassurance lives at the moment of the act instead
 (her announcement carries "...still on your computer" exactly when the
 person needs it). The whole-sentence copy pin retires with it.
+
+## Review notes (iterations 1-3)
+
+- The reset pin's first form matched the variable's own declaration and
+  could never fail; all lifecycle pins now live inside their owning
+  functions. The filter fixtures gained discriminating probes (display
+  name diverging from key; operator from not 'you').
+- The no-match sentence is ONE function feeding shown (escaped) and
+  spoken (plain) copies; the announcer respects a partially unreadable
+  record and resets its transition flag on project switch.
+- ACCEPTED with reasoning: a poll that flips the match state does not
+  update the transition flag (under-announcement only, one edge
+  keystroke; per-keystroke noise is the worse trade). The search scope
+  is name+text, not timestamps/receipts (recorded product call). The
+  1px focus-within border is pack-verbatim and AA-passing; any
+  strengthening belongs upstream (flagged to Mona Lisa).

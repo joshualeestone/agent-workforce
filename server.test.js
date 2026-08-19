@@ -6350,19 +6350,27 @@ test('the conversation filter matches what a row shows, and only that', () => {
   const fallbackDecl = rawPage.slice(fbAt, rawPage.indexOf(';', fbAt) + 1);
   const filter = pageFunction('pjRoomFilterRows',
     'const pjNameOf = (p, from) => (p.names && p.names[from]) || from;\n' + fallbackDecl + '\n');
-  const p = { names: { leo: 'Leo' } };
+  // Discriminating probes (review): the display name DIVERGES from the
+  // session key and the operator row's from is NOT 'you', so an
+  // implementation matching raw m.from cannot pass these.
+  const p = { names: { leo: 'Leonardo' } };
   const rows = [
     { id: 'm1', from: 'leo', text: 'The link is stable now.' },
-    { id: 'm2', operator: true, from: 'you', text: 'Cut it to four emails.' },
-    { kind: 'valve', because: 'mikey and leo have been going back and forth without landing.' },
+    { id: 'm2', operator: true, from: 'op-key', text: 'Cut it to four emails.' },
+    { kind: 'valve', because: 'mikey has been going back and forth without landing.' },
   ];
   // Empty query: passthrough, byte-identical list.
   assert.deepEqual(filter(rows, p, ''), rows);
   assert.deepEqual(filter(rows, p, '   '), rows);
   // Text match, case-folded.
   assert.deepEqual(filter(rows, p, 'STABLE').map((r) => r.id), ['m1']);
-  // Sender display-name match (the resolved name, not the session key).
-  assert.deepEqual(filter(rows, p, 'leo').map((r) => r.id || 'valve'), ['m1', 'valve']);
+  // Sender display-name match: the RESOLVED name, provably (only the
+  // display form contains 'nardo'; the key does not).
+  assert.deepEqual(filter(rows, p, 'nardo').map((r) => r.id), ['m1']);
+  // And the raw key must NOT match once a display name exists, or the
+  // filter is matching what the row does not show.
+  assert.deepEqual(filter(rows, p, 'op-key'), [],
+    'the filter matched a session key the row never displays');
   // The operator's rows answer to "you".
   assert.deepEqual(filter(rows, p, 'you').map((r) => r.id), ['m2']);
   // Valve bands match on their sentence.

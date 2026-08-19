@@ -8504,10 +8504,12 @@ function pjRoomRow(m, p) {
 }
 
 /**
- * The conversation filter: case-insensitive substring over what a row
- * SHOWS -- the sender's display name and the text (valve bands match on
- * their sentence). Pure so it is testable; it searches what the room
- * holds, no server round trip, no new claims.
+ * The conversation filter: case-insensitive substring over the sender's
+ * display name and the text (valve bands match on their sentence, the
+ * shared fallback included). Deliberately NOT everything a row shows:
+ * timestamps and receipt sentences are visible but unsearchable, a
+ * product scope call recorded in the plan. Pure so it is testable; no
+ * server round trip, no new claims.
  */
 /* ONE fallback sentence for a valve row with no because, shared by the
    renderer and the filter: a band displaying these words must be
