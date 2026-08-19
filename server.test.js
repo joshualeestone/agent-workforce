@@ -2758,7 +2758,10 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
     pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
   const drive = (card) => {
     const el = { textContent: 'seeded' };
-    const from = script.indexOf("document.getElementById('d-meta').textContent =");
+    // `runs` is hoisted above the meta line so the meta line and the Runs on box
+    // read ONE evaluation; the slice has to start there or `runs` is undefined.
+    const metaAt = script.indexOf("document.getElementById('d-meta').textContent =");
+    const from = script.lastIndexOf('const runs = runsOnLine(a);', metaAt);
     const write = script.indexOf(".filter(Boolean).join(' · ');", from);
     const end = script.indexOf('\n', write) + 1;
     assert.ok(from > -1 && write > from && write < end,
@@ -7001,11 +7004,11 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
  */
 test('a removed-agents section that could not be read says so, and only before it has ever been read', () => {
   const src = pageFnSource('removedUnreadable');
-  const make = (everRead, existing) => {
+  const make = (everRead, existing, onBoard = true) => {
     const msg = { textContent: existing || '' };
     // eslint-disable-next-line no-new-func
-    const fn = new Function('document', 'REMOVED_EVER_READ',
-      src + '\nreturn removedUnreadable;')({ getElementById: () => msg }, everRead);
+    const fn = new Function('document', 'REMOVED_EVER_READ', 'onAgentsTab',
+      src + '\nreturn removedUnreadable;')({ getElementById: () => msg }, everRead, () => onBoard);
     fn();
     return msg.textContent;
   };
@@ -7026,6 +7029,16 @@ test('a removed-agents section that could not be read says so, and only before i
   // and that is the more specific fact.
   assert.equal(make(false, 'Kosmos could not stop it.'), 'Kosmos could not stop it.',
     'the could-not-check line overwrote a more specific message about a removal');
+
+  // ⚠️ CONTROL THREE: not while the person is somewhere else. This is called
+  // from paintRemoved's failure arms BEFORE its own onAgentsTab() gate, and
+  // paintRemoved runs unawaited — so a request in flight when someone switches
+  // to Settings would otherwise write this sentence onto a screen that shows no
+  // removed-agents list, on the one element that lives outside every panel and
+  // is only cleared on the way OUT of the board.
+  assert.equal(make(false, '', false), '',
+    'the could-not-check line leaked onto another tab, describing a list that '
+    + 'screen does not show');
 });
 
 /**

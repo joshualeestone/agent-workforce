@@ -85,7 +85,9 @@ async function measure(engine, scheme) {
   page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  const out = await page.evaluate((sel) => {
+  let out;
+  try {
+  out = await page.evaluate((sel) => {
     /* The wizard covers the board, so it stays hidden -- and is EXCLUDED from
        the unhide sweep below, which previously put it straight back. A line
        stating an intent the next line reverses is worse than no line. */
@@ -133,14 +135,33 @@ async function measure(engine, scheme) {
        whose paint matters to a field, and the stylesheet already knows it. */
     const CONTAINERS = (() => {
       const out = new Set();
-      for (const sheet of document.styleSheets) {
-        let rules;
-        try { rules = sheet.cssRules; } catch { continue; }
+      /* ⚠️ IDs AS WELL AS CLASSES, and rules INSIDE @media too. The first
+         derivation matched only `.class` at the top level, so it silently
+         dropped `#firstrun`, `#pj-settings-view` and `#pj-add-view` — and
+         `#firstrun` is precisely the declarer whose lost background is the
+         blocker this whole mechanism cites in its header. An instrument that
+         quotes a defect as its reason and cannot see that defect is the shape
+         this file exists to reject, and it took three versions to stop making
+         it: enumerate-from-memory, then class-only, then this. */
+      const walk = (rules) => {
         for (const rule of rules || []) {
+          /* ⚠️ RECURSE AND ALSO INSPECT, never `continue`. An empty CSSRuleList
+             is TRUTHY, and with CSS nesting every plain style rule carries one —
+             so `if (rule.cssRules) { walk(...); continue; }` sent every rule
+             down the recursion and none of them ever had its own style read.
+             The derivation returned zero and the run failed loudly, which is the
+             only reason this was a two-minute bug rather than a silent one: the
+             denominator I added an hour ago caught the instrument, not the app. */
+          if (rule.cssRules && rule.cssRules.length) walk(rule.cssRules);
           if (!rule.style || !rule.selectorText) continue;
           if (!rule.style.getPropertyValue('--field-fill')) continue;
-          for (const m of rule.selectorText.matchAll(/\.([a-z][a-z0-9-]*)/gi)) out.add(m[1]);
+          for (const m of rule.selectorText.matchAll(/[.#]([a-z][a-z0-9_-]*)/gi)) {
+            out.add(m[0]);   // keep the sigil: '.dbox' and '#firstrun' are different questions
+          }
         }
+      };
+      for (const sheet of document.styleSheets) {
+        try { walk(sheet.cssRules); } catch { /* cross-origin, not ours */ }
       }
       return [...out];
     })();
@@ -151,9 +172,10 @@ async function measure(engine, scheme) {
       for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
         const bg = getComputedStyle(n).backgroundColor;
         const cls = String(n.className || '').split(' ');
-        const known = CONTAINERS.find((c) => cls.includes(c));
+        const known = CONTAINERS.find((c) =>
+          (c[0] === '.' ? cls.includes(c.slice(1)) : n.id === c.slice(1)));
         const paints = bg && bg !== 'rgba(0, 0, 0, 0)';
-        if (known) { seenContainers.add(known); if (!paints) mute.push('.' + known); }
+        if (known) { seenContainers.add(known); if (!paints) mute.push(known); }
         if (paints && !first) {
           first = { bg, name: n.id ? '#' + n.id : '.' + String(n.className).split(' ')[0] };
         }
@@ -203,7 +225,12 @@ async function measure(engine, scheme) {
     }
     return { fields, badgeHit, listCell, seenContainers: [...seenContainers], containers: CONTAINERS };
   }, FIELDS);
-  await browser.close();
+  } finally {
+    // ⚠️ Without this a throw inside the evaluate leaks the browser and the
+    // script dies on an unhandled rejection, losing its own FAILED: line and
+    // its exit code — a checker that cannot report its own failure.
+    await browser.close();
+  }
   return { ...out, errs };
 }
 

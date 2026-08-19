@@ -649,8 +649,11 @@ const server = http.createServer((req, res) => {
        * What an agent's job will START it on, for the agents whose live model
        * we could not read.
        *
-       * ⚠️ ONLY WHEN `modelName` IS ABSENT, and that is both correctness and
-       * cost. A live transcript reading is what the agent IS running and must
+       * ⚠️ WHEN NO LIVE MODEL WAS READ, PLUS EVERY STOPPED AGENT — and that is
+       * both correctness and cost. (An earlier version of this line said "only
+       * when `modelName` is absent", which the stopped-agent clause below
+       * contradicts. The header is what a later reader trusts, so it is the one
+       * that has to be right.) A live transcript reading is what the agent IS running and must
        * never be second-guessed by a job file that may have been edited since;
        * and this route polls every five seconds for every agent, so a disk read
        * per agent per poll to answer a question already answered would be the

@@ -5540,8 +5540,9 @@ function openDetail(sessionName) {
      no tense, so it reads as THE model, and two elements naming one fact
      differently is precisely what this branch exists to stop. It takes the name
      the box resolved rather than deriving a second one. */
+  const runs = runsOnLine(a);   // one evaluation, read by the meta line and the box
   document.getElementById('d-meta').textContent =
-    [roleLine(a), runsOnLine(a).name,
+    [roleLine(a), runs.name,
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
@@ -5575,7 +5576,6 @@ function openDetail(sessionName) {
   dbadge.hidden = !(dpct !== null && dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
-  const runs = runsOnLine(a);
   drun.innerHTML = esc(runs.lead) + '<b>' + esc(runs.name) + '</b>';
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
@@ -6649,6 +6649,16 @@ let REMOVED_EVER_READ = false;
  */
 function removedUnreadable() {
   if (REMOVED_EVER_READ) return;
+  /* ⚠️ AND ONLY WHILE THE BOARD IS ON SCREEN. This is called from all three
+     failure arms ABOVE `paintRemoved`'s own `onAgentsTab()` gate, and
+     `paintRemoved` runs unawaited from `tick()` — so: on the board, a poll's
+     request in flight, switch to Settings (which clears `#removed-msg` on the
+     way out), then the request fails, and this sentence appears under Settings
+     describing a list that screen does not show. `#removed-msg` sits outside
+     every panel precisely so a repaint cannot erase it, which also means
+     nothing else takes it down. The new failure path stepped around both the
+     gate and the note that exists for it. */
+  if (!onAgentsTab()) return;
   const msg = document.getElementById('removed-msg');
   if (msg && !msg.textContent) {
     msg.textContent = 'We could not check whether any agents have been removed. '
