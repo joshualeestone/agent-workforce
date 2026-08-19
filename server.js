@@ -663,7 +663,16 @@ const server = http.createServer((req, res) => {
        * does not inherit that guard by being written next to them.
        */
       const plannedFor = (a) => {
-        if (!a.isNamedOurs || a.modelName) return null;
+        if (!a.isNamedOurs) return null;
+        // ⚠️ A STOPPED AGENT NEEDS THIS EVEN THOUGH IT HAS A modelName. The
+        // transcript says what it RAN as; only the job says what it will START
+        // on, and the panel makes a future-tense claim for stopped agents. With
+        // the old `|| a.modelName` gate that claim was sourced from a session
+        // that has ended -- and for a job carrying no --model at all (every
+        // agent created before the picker existed) it stated a specific future
+        // model we had no basis for. The cost gate still holds: a RUNNING agent
+        // whose model we could read never reaches the disk.
+        if (a.modelName && a.state !== STATE.STOPPED) return null;
         const arg = create.plannedModelArg(a.sessionName);
         return arg ? modelDisplayName(arg) : null;
       };

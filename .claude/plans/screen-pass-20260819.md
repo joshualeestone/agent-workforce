@@ -66,7 +66,9 @@ The compact surfaces (card, list row, detail meta) name a planned model
 
 ### 4. Navigation and the detail page (commits 13–15)
 
-A tab click lands at the **top** of its section. `showTab`'s restore of
+A tab click lands at the top of its section's own state — it forgets the
+project you were inside. ⚠️ It does NOT reset scroll; nothing in the page
+scrolls on tab change. The earlier wording here was broader than what shipped. `showTab`'s restore of
 `PJ_CURRENT` is correct for its programmatic callers, so the reset lives on the
 **click**, the only place that can know a person did it.
 
@@ -90,7 +92,7 @@ The detail header gets **the card's own badge**, off `cardStOf` / `STATE_COPY` /
 
 ## How it was verified
 
-- `npm test`: **918 tests**, 0 failing.
+- `npm test`: **920 tests**, 0 failing.
 - **Rendered in WebKit and Chromium**, not only Chromium, because the select
   defect is invisible in Chromium and `docs/browser-checks/` is Chromium by
   default.

@@ -2473,6 +2473,12 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   // few parts keeps it by accident and this test passes without meaning to. The
   // notice has to be pinned where it actually sits: LAST, after everything else
   // the line can carry.
+  // ⚠️ THIS PROTECTION IS NOW WEAKER THAN IT READS: the summary lost its
+  // unknown-memory clause on this branch, so only two bits remain and the notice
+  // cannot be placed anywhere but last. The `unknownFullness: 3` below is inert.
+  // Left rather than deleted because the engine still computes and ships the
+  // count; if a clause for it returns, the fixture is ready and so is the
+  // protection.
   const partial = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 });
   assert.match(partial.textContent, /could not read/,
     'the board shows what it managed to parse as the whole machine, with nothing '
@@ -6670,10 +6676,21 @@ test('the Runs on line says which tense it is in, and a live model always wins',
   // badge reading "Not running". Every earlier version of this test passed
   // `modelName` with `state` ABSENT, which is a state the product never
   // produces, so the case was invisible rather than passing.
-  assert.deepEqual(runsOnLine({ modelName: 'Claude Opus 5', state: 'stopped' }),
+  // ⚠️ A STOPPED AGENT'S FUTURE COMES FROM ITS JOB, NOT ITS TRANSCRIPT. The
+  // transcript says what it RAN as, in a session that has ended; only the
+  // launchd job says what it will START on, and the two can differ.
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5', state: 'stopped' }),
     { lead: 'Will start on ', name: 'Claude Opus 5' },
-    'a stopped agent was described in the present tense, on the strength of a '
-    + 'transcript from a session that has ended');
+    'a stopped agent was told it will start on the model it last RAN on, rather '
+    + 'than the one its job actually carries');
+
+  // ⚠️ AND WHEN THE JOB SAYS NOTHING, NO FUTURE IS CLAIMED. Every agent created
+  // before the model picker existed has a job with no --model argument, so
+  // `plannedModelArg` answers null = "we do not know". Stating a specific
+  // future model there would invent one out of a past reading.
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Opus 5', state: 'stopped' }),
+    { lead: '', name: 'Claude Opus 5' },
+    'a stopped agent whose job carries no model still made a future-tense claim');
 
   // ⚠️ THE TENSE FOLLOWS `pres`, WHICH HAS THREE VALUES, NOT TWO. Every state
   // whose presence reads `on` keeps the present tense when a live model was
@@ -6693,7 +6710,8 @@ test('the Runs on line says which tense it is in, and a live model always wins',
   // unrecognised one, asserting the pairing rather than each half. This is the
   // check that would have caught all three of this function's false tenses.
   for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'stopped', 'unknown', 'martian']) {
-    const lead = runsOnLine({ modelName: 'Claude Opus 5', state }).lead;
+    // Carries BOTH readings, so the `off` arm has a job to quote.
+    const lead = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Opus 5', state }).lead;
     const pres = cardStOf({ state }).pres;
     const want = pres === 'on' ? 'Right now: ' : pres === 'off' ? 'Will start on ' : '';
     assert.equal(lead, want,

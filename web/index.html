@@ -53,9 +53,13 @@
      surface is — so the container sets this and every field inherits it. Three
      rounds of hand-listing containers each missed some: first `.pjcol/.dbox`,
      then `.rm-box/.rolepick`, then `#pj-settings-view/#pj-add-view`, and each
-     round shipped believing it was complete. A rule that has to enumerate its
-     own blast radius will keep being wrong; this one cannot be, because the
-     value travels with the box. */
+     round shipped believing it was complete.
+     ⚠️ THIS STILL ENUMERATES, and an earlier version of this comment claimed it
+     "cannot be wrong", which is a property the code does not have. What moved
+     is WHAT is enumerated: containers rather than fields, so the list is short,
+     stable, and each entry is a place a designer already thinks about — and a
+     container that is forgotten inherits the page default instead of silently
+     matching its own box. That is a better failure, not the absence of one. */
   --field-fill: var(--bg-elevated);   /* on the page ground: white, per Josh */
 
   /* Light -- REPOINTED AT THE PACK (pack-pass, scrappy): every surface
@@ -357,6 +361,10 @@ select { font: var(--text-body) var(--font-ui); color: var(--label);
          background-size: 5px 5px, 5px 5px;
          background-repeat: no-repeat, no-repeat; }
 select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* The same move `.ppick:focus-visible` got: a k- component's focus ring rides
+   the k- system. Near-identical in both schemes today, which is exactly the
+   condition under which the two are free to drift apart unnoticed. */
+.dbox select:focus-visible, .pjcol select:focus-visible { outline-color: var(--k-ink); }
 /* ⚠️ A SELECT INSIDE A `k-surface` BOX RIDES THE `k-` SYSTEM, arrow included.
    The shared rule above paints `--bg-elevated`, which in light mode is the same
    `#ffffff` as `.dbox` and `.pjcol`, so `#lim-tier`, `#pj-one-add` and
@@ -729,13 +737,31 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    ⚠️ It reserves no space, by the pack's reasoning: `.membadge` is absolute, so
    it takes no layout and cannot make one card taller than its neighbour. */
 .membadge.unk {
-  top: auto; bottom: -7px; right: auto; left: 50%; transform: translateX(-50%);
+  /* ⚠️ `-15px`, not `-7px`. MEASURED: the caption is 105px wide on an 82px
+     gauge, so it always crosses the presence dot's x-range, and at -7px its 2px
+     ring painted over the bottom 4px of the dot — a distinct signal (online /
+     not running / could not check) partly obscured on every unknown-memory
+     card. Horizontal separation is not available; vertical is. */
+  top: auto; bottom: -15px; right: auto; left: 50%; transform: translateX(-50%);
+  /* ⚠️ AND THE GAUGE MAKES ROOM FOR IT. Moving the caption clear of the presence
+     dot pushed it into the name below: the badge is absolutely positioned, so it
+     takes no layout and cannot push anything itself. There is no offset that
+     clears BOTH a dot above and a name below within the original spacing —
+     measured -7px collided with the dot, -15px collided with the name — so the
+     card gives it the space instead. `:has` scopes that to the cards that
+     actually carry a caption, leaving every other card's rhythm untouched. */
   font: 600 .625rem var(--font-ui); letter-spacing: .01em; white-space: nowrap;
   color: var(--k-ink); background: var(--k-bg);
   border: 1px solid var(--k-rule); border-radius: 100px;
   box-shadow: 0 0 0 2px var(--k-surface);
   padding: .1rem .4rem;
 }
+/* ⚠️ 26px, and the 14px I first wrote was a NO-OP: `.agauge` already carries
+   `margin: 0 auto 14px`, so the rule parsed, applied, and changed nothing —
+   and the measurement afterwards showed the SAME gap, which is what caught it.
+   The badge is 17px tall and hangs 15px below the gauge, so it needs about
+   12px more than the resting rhythm to clear the name. */
+.agauge:has(.membadge.unk) { margin-bottom: 26px; }
 .membadge { position: absolute; top: 2px; right: -6px;
             font: 700 .6875rem var(--k-mono);
             font-variant-numeric: tabular-nums;
@@ -917,7 +943,15 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    📌 LEFT, NOT CENTRED, which is the pack's arrangement and the one open taste
    call in this change: Josh asked for "elements right on the page" and the
    pack puts them left. One word to reverse if he meant centred. */
-#panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0; margin: 0; }
+/* ⚠️ `margin: 0` LEFT THE FORM OUT OF THE APP COLUMN. `.panel` carries
+   `margin: 0 auto`, and `header` is capped at 1320px and centred — so with the
+   margin zeroed the create form aligned to the BODY padding while every other
+   panel and the tab bar aligned to the centred column. Measured at 1400px:
+   header left 40, create left 24. Identical at =<1320px, which is why every
+   render check passed. The intent was left-aligned WITHIN the column, not
+   left-aligned to the window. */
+#panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0;
+                margin: 0 0 0 max(0px, calc((100% - 1320px) / 2)); }
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
@@ -1303,9 +1337,15 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .genav.empty { box-shadow: inset 0 0 0 1.5px var(--separator); }
 .sav-btn { display: inline-block; }
 #cstep-name .field { max-width: 36rem; }
+/* ⚠️ JOINED THE UNIFICATION LATE. This hardcoded `--bg-elevated` and a
+   `1px solid var(--separator)` border while its three neighbours on the same
+   step carry `--field-fill` and `0.5px solid var(--border-strong)`. It LOOKED
+   right only because `#panel-create` inherits the root `--field-fill`, which is
+   the same token by coincidence -- move this textarea into any elevated
+   container and it is the white-on-white defect this branch is about. */
 #create-instr { width: 100%; font: var(--text-callout) var(--font-mono);
-  color: var(--label); background: var(--bg-elevated);
-  border: 1px solid var(--separator); border-radius: var(--radius-control);
+  color: var(--label); background: var(--field-fill);
+  border: 0.5px solid var(--border-strong); border-radius: var(--radius-control);
   padding: 10px 12px; resize: vertical; box-sizing: border-box; }
 #create-instr:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 .flabel-soft { font-weight: 400; color: var(--label-2); }
@@ -1413,7 +1453,14 @@ svg { display: block; }
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 220px;
   font: var(--text-body) var(--font-ui); line-height: 1.5;
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
+  /* ⚠️ `--field-fill` and `--k-ink`, not `--bg` and `--label`. This ID rule beats
+     every class rule that dresses fields, so the `.dbox` treatment applied to
+     its neighbours was INERT here and this textarea alone kept the page-ground
+     paper inside a `k-surface` card -- LIGHTER than its own container in dark,
+     which is the raised-instead-of-recessed inversion, on the largest field in
+     the app. Found by asking the engine which declarations lose, not by reading
+     the stylesheet: nothing in the source says an ID is winning. */
+  border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--k-ink);
 }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
 
@@ -3537,7 +3584,21 @@ function runsOnLine(a) {
   const known = Boolean(a.modelName || a.plannedModelName);
   if (!known) return { lead: '', name };
   if (pres === 'on') return { lead: a.modelName ? 'Right now: ' : '', name };
-  if (pres === 'off') return { lead: 'Will start on ', name };
+  if (pres === 'off') {
+    /* ⚠️ THE JOB IS THE AUTHORITY ON A FUTURE, NOT THE TRANSCRIPT. `name` above
+       prefers `modelName`, which is what this agent RAN as in a session that
+       has ended; what it will START on is in its launchd job. Saying "Will
+       start on" from a transcript is a future-tense claim supported only by a
+       past reading, and for a job with no --model argument at all it would
+       invent one. `modelLine` is reused rather than re-prefixed so the "Claude
+       Claude" guard stays in one place. */
+    if (a.plannedModelName) {
+      return { lead: 'Will start on ', name: modelLine({ plannedModelName: a.plannedModelName }) };
+    }
+    /* Stopped, and the job does not say. We know what it ran as and not what it
+       will start on, so the name is stated as an attribute with no tense. */
+    return { lead: '', name };
+  }
   return { lead: '', name };
 }
 function roleLine(a) {
@@ -4441,7 +4502,7 @@ async function tick() {
        and this removes the only VISIBLE statement of that fact on the screen.
        Said plainly rather than justified away: the dashed ring distinguishes
        those cards, and the words "memory unknown" exist only in the ring's
-       `aria-label` and a `.vh` span (lines 3338 and 3438). So a screen-reader
+       `aria-label` and a `.vh` span (in `ring()` and `card()`; line numbers deliberately not cited, they go stale on the commit that writes them). So a screen-reader
        user keeps the information and a sighted person is left with dashed rings
        and nothing naming what dashed means.
        ✅ THE SECOND HALF IS PAID, in this same change: `.membadge unk` on the
