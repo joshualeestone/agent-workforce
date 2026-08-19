@@ -1815,6 +1815,19 @@ svg { display: block; }
   --k-bg: #faf9f7; --k-surface: #ffffff; --k-ink: #14161a;
   --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
+  /* ⚠️ AND THE --label SYSTEM, which this block missed. The wizard's own fields
+     read `--field-fill` and `--label`, and NEITHER is re-pinned by the k-token
+     list above — so in dark mode they rendered a #2c2c2e field carrying
+     near-white text inside a card this very block forces to #ffffff. Two token
+     systems again: the half that was re-pinned looked right, and the half that
+     was not was invisible in light.
+     This is the FIRST screen anyone sees, and it is the one surface in the app
+     with a stated single-look ruling — so the whole subtree is pinned, not the
+     half of it somebody happened to think of. */
+  --bg: #faf9f7; --bg-elevated: #ffffff; --bg-sunken: #f4f2ee;
+  --label: #14161a; --label-2: #4a4f57; --label-3: rgba(20,22,26,0.48);
+  --separator: #e3e1dc; --border-strong: rgba(20,22,26,0.26);
+  --field-fill: #faf9f7;   /* paper, so a field is never the card's own white */
   background: var(--k-bg);
 }
 #firstrun .fr-box {
@@ -1857,7 +1870,8 @@ svg { display: block; }
 #firstrun .btn { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
 #firstrun .btn:hover { background: rgba(20,22,26,.05); }
 #firstrun .btn:disabled:hover { background: #fff; }
-#firstrun .fr-code-row input { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+/* Same reasoning as `#firstrun .inp` above: paper, not the card's own white. */
+#firstrun .fr-code-row input { background: var(--field-fill); color: var(--k-ink); border-color: var(--border-strong); }
 #firstrun .fr-conn-tail { color: var(--k-ink-2); background: rgba(20,22,26,.04); border-color: var(--k-rule); }
 #firstrun .llm { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
                  border: 1px solid var(--k-rule); border-radius: 12px; margin-bottom: 10px; background: #fff; }
@@ -1940,9 +1954,18 @@ svg { display: block; }
 #firstrun .llm.off .llm-disc { background: radial-gradient(circle at 35% 35%, #d5d3ce, #a9adb3); }
 #firstrun .fieldlab { display: block; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase;
                       font-weight: 600; color: var(--k-ink-2); margin-bottom: 6px; }
+/* ⚠️ THIS IS THE RULE THAT ACTUALLY DRESSES THE WIZARD'S FIELDS, and it beats
+   `.fr-youfield input[type=text]` on specificity (1,1,0 against 0,2,1) — so the
+   `--field-fill` change made to that rule was INERT here, and every wizard field
+   kept a hardcoded `#fff` identical to the `.fr-box` card behind it. A rule that
+   loses the cascade is the same as a rule that is not there, and nothing in the
+   source says which one is winning.
+   Now: the container's `--field-fill` (paper inside this subtree, so a field is
+   never the card's own white), and `--border-strong`, which composites to
+   1.77:1 against the card where `--k-rule` gives 1.31:1. */
 #firstrun .inp { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem;
-                 padding: .6em .9em; border-radius: 10px; border: 1px solid var(--k-rule);
-                 background: #fff; color: var(--k-ink); }
+                 padding: .6em .9em; border-radius: 10px; border: 1px solid var(--border-strong);
+                 background: var(--field-fill); color: var(--k-ink); }
 #firstrun .inp:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 1px; }
 
 /* ⚠️ `p.fr-next`, not `.fr-next`. `.fr-body p` is one specificity point higher
