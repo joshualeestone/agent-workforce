@@ -1938,9 +1938,17 @@ test('optionsIn reads a real menu, both the two-option prompt and a long one', (
   const yesNo = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No');
   assert.deepEqual(yesNo, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
 
-  const theme = chat.optionsIn([' Choose the text style that looks best with your terminal',
-    '   1. Auto (match terminal)', ' ❯ 2. Dark mode ✔', '   3. Light mode'].join('\n'));
-  assert.equal(theme.length, 3);
+  // ⚠️ THE REAL CAPTURE, read out of the file that holds it, not a
+  // hand-truncated three-of-seven retyped here. The earlier version claimed to
+  // be "the captures this repo already holds" while being a subset somebody
+  // typed -- and a fixture that describes itself as real is worse than one that
+  // does not, because the next reader stops checking.
+  const connectSrc = fs.readFileSync(path.join(__dirname, 'connect.test.js'), 'utf8');
+  const at = connectSrc.indexOf('const SCREEN_THEME = `');
+  assert.ok(at > -1, 'the real theme capture moved; re-point this fixture');
+  const real = connectSrc.slice(connectSrc.indexOf('`', at) + 1, connectSrc.indexOf('`;', at));
+  const theme = chat.optionsIn(real);
+  assert.equal(theme.length, 7, 'all seven options a real claude v2.1.229 drew');
   assert.equal(theme[1].label, 'Dark mode ✔', 'the label is the option’s own words, marker and all');
 });
 
@@ -1973,6 +1981,15 @@ test('optionsIn refuses everything it cannot be sure of, and a refusal is the or
   // the whole choice, which is worse than no buttons at all.
   assert.equal(chat.optionsIn('❯ ' + Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n  ')), null,
     'a menu longer than we can read is refused whole');
+  // ⚠️ AND WITH THE CURSOR ANYWHERE ELSE. The line above puts the marker on
+  // option 1, which is the one arrangement where the tenth line is not
+  // swallowed: the marker sits a column LEFT of the unmarked rows (measured in
+  // this repo's own real capture), so with the cursor further down, line 10 is
+  // deeper than line 9 and was folded into it as though it were wrapped text --
+  // nine buttons over an eleven-option prompt, reading as the whole choice,
+  // with the guard that refuses over-long menus never seeing a tenth line.
+  const eleven = Array.from({ length: 11 }, (_, i) => (i === 8 ? '❯ ' : '   ') + (i + 1) + '. item ' + (i + 1));
+  assert.equal(chat.optionsIn(eleven.join('\n')), null, 'refused wherever the cursor happens to be');
   // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This reads like an empty-label
   // guard and there is no empty-label guard: `1. ` does not match at all
   // (the pattern's capture needs a non-space first character), so the two

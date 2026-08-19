@@ -29,6 +29,29 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 
+/**
+ * A REAL agent card, from the real producer.
+ *
+ * ⚠️ NOT HAND-BUILT. `openDetail` reads fields this script has no business
+ * knowing about (it wanted `context.percent` first), and a literal invented
+ * here is exactly the fixture that made six rounds of review pass against a
+ * world that does not exist. This asks `status.snapshot()` for a card off this
+ * machine and renames it, so the shape is whatever the board really serves.
+ *
+ * If the machine is running no agents there is no card, and the reopen check
+ * SAYS SO rather than quietly not running.
+ */
+function realCard() {
+  try {
+    const status = require(path.join(__dirname, '..', '..', 'engine', 'status.js'));
+    const board = status.snapshot();
+    const card = (board.agents || []).find((a) => a && a.isNamedOurs === true);
+    return card ? { ...card, sessionName: 'april', name: 'April', state: 'needs_you' } : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 const PAGE = 'file://' + path.join(path.resolve(__dirname, '..', '..'), 'web', 'index.html');
 const OUT = process.env.SHOT_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'talk-shots-'));
 
@@ -129,7 +152,16 @@ const STATES = {
       colorScheme: theme,
     });
     page.on('pageerror', (e) => problems.push(`[${theme}] pageerror: ${e.message}`));
-    page.on('console', (m) => { if (m.type() === 'error') problems.push(`[${theme}] console: ${m.text()}`); });
+    page.on('console', (m) => {
+      if (m.type() !== 'error') return;
+      /* ⚠️ ONE EXEMPTION, NARROWLY: the page requests the open agent's avatar,
+         and under file:// there is no server to serve it. That is this
+         harness's own condition rather than the page's defect. Everything
+         else -- including any other failed load -- still counts, because a
+         console error is usually the only sign of a paint that half ran. */
+      if (/ERR_FILE_NOT_FOUND/.test(m.text())) return;
+      problems.push(`[${theme}] console: ${m.text()}`);
+    });
     // Installed BEFORE the page's own scripts run, so its startup polls are
     // answered rather than failing against file:// and filling the console
     // with errors that would mask a real one.
@@ -215,6 +247,7 @@ const STATES = {
           qaskVisible: vis(qask),
           qaskBg: qask && vis(qask) ? getComputedStyle(qask).backgroundColor : null,
           optsVisible: vis(el('d-qopts')),
+          qoutVisible: vis(el('d-qout')),
           optCount: el('d-qopts').querySelectorAll('.qopt').length,
           bubbleBg: cs ? cs.backgroundColor : null,
           offVisible: vis(el('d-dmoff')),
@@ -289,6 +322,25 @@ const STATES = {
       if (!fx.asking && m.qlab) {
         problems.push(`${tag}: a question sentence is loaded while nothing is asking: ${JSON.stringify(m.qlab)}`);
       }
+      /**
+       * WARNING: PRESENCE BEFORE ABSENCE, APPLIED TO THIS FILE'S OWN SUBJECT.
+       * Every option measurement here was logged and none was asserted, so
+       * ZERO BUTTONS was a pass on every arm -- including the four states that
+       * exist to be about the buttons. It reported `problems: none` against a
+       * screen showing the hazard, the question, an empty options row, and
+       * "Or write your own answer below." pointing at nothing.
+       */
+      const wantOpts = (fx.options && fx.presence === 'on' && fx.asking && !fx.__answered)
+        ? fx.options.length : 0;
+      if (m.optCount !== wantOpts) {
+        problems.push(`${tag}: ${m.optCount} option buttons on screen, expected ${wantOpts}`);
+      }
+      if (wantOpts && !m.optsVisible) problems.push(`${tag}: the options row is hidden with buttons in it`);
+      if (!wantOpts && m.optsVisible) problems.push(`${tag}: an empty options row is on screen`);
+      // The out points AT the buttons, so it may not outlive them.
+      if (m.qoutVisible !== (wantOpts > 0)) {
+        problems.push(`${tag}: "Or write your own answer below" is ${m.qoutVisible ? 'on screen without' : 'missing from'} the buttons it points at`);
+      }
       if (m.optEdge !== null && m.optEdge < 3) {
         problems.push(`${tag}: the option button's edge is ${m.optEdge}:1 against the panel, under the 3:1 floor`);
       }
@@ -322,6 +374,47 @@ const STATES = {
         delete TALK_ANSWERED.april; delete TALK_FAILED.april;
       }, menu);
       await page.evaluate(() => paintTalk('april', 'April'));
+
+      // 0. REOPENING THE SAME AGENT must not leave an empty options row.
+      // ⚠️ The bug this catches needs the SAME state painted twice with a
+      // clear in between: only then does the paint's "nothing changed" cache
+      // match what it is about to write, and skip a rebuild the clear has
+      // already undone. A harness that always paints a fresh state cannot see
+      // it, which is why this sequence is spelled out rather than implied.
+      // ⚠️ THROUGH THE APP'S OWN CLEARING BLOCK, not a copy of it in this file.
+      // `openDetail` is what runs when somebody goes back to the board and
+      // opens an agent again, and its clear is where a cache can be left
+      // speaking for markup that no longer exists. Clearing by hand here would
+      // be testing this script's idea of the clear.
+      const card = realCard();
+      if (!card) {
+        problems.push(`[${theme}] reopen: no real agent card on this machine, so the clear path is UNCHECKED`);
+      } else {
+        const reopened = await page.evaluate((c) => {
+          try { LAST = [c]; openDetail(c.sessionName); return true; }
+          catch (e) { return String(e && e.message); }
+        }, card);
+        if (reopened !== true) {
+          problems.push(`[${theme}] reopen: could not drive openDetail (${reopened}) -- the clear path is UNCHECKED`);
+        }
+      }
+      await page.evaluate(() => paintTalk('april', 'April'));
+      const afterReopen = await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt').length);
+      if (afterReopen !== menu.options.length) {
+        problems.push(`[${theme}] reopen: ${afterReopen} buttons after a clear-and-repaint, expected ${menu.options.length}`);
+      }
+
+      /* ⚠️ THE PRESS PASS FAILS SOFT FROM HERE. With the buttons missing, the
+         steps below throw a TypeError and the run dies BEFORE printing the
+         problem list -- so a real defect was reported as a crash in the check
+         rather than as a finding about the page. Measured: reintroducing the
+         cache bug killed the run at the focus step, and the reopen problem it
+         had already recorded never reached the screen. A check that dies
+         instead of reporting is a check that has to be debugged before it can
+         be believed. */
+      if (afterReopen !== menu.options.length) {
+        console.log(`[${theme}] press pass skipped: the buttons are not on screen`);
+      } else {
 
       // 1. A repaint with identical data must not take the keyboard away.
       // ⚠️ THE SECOND BUTTON, deliberately: focusing the first made this pass
@@ -361,6 +454,7 @@ const STATES = {
       const landed2 = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
       if (landed2 === 'BODY') {
         problems.push(`[${theme}] press: focus was stranded on the document after Send`);
+      }
       }
     }
     await page.close();

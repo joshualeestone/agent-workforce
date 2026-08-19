@@ -931,6 +931,10 @@ function questionIn(text) {
 // accepted `01.` as option 1 through Number() -- a shape no menu draws and one
 // more way for prose to look like a list.
 const OPTION_LINE = /^(❯\s*)?([1-9])[.)]\s+(\S.*)$/;
+// ⚠️ ANY digit count, deliberately wider than OPTION_LINE: this is what stops
+// a line the pattern cannot READ (a tenth option) from being folded into the
+// previous option as though it were its wrapped text.
+const ANY_NUMBERED = /^(?:❯\s*)?\d+[.)]\s+\S/;
 
 function optionsIn(questionText) {
   const whole = String(questionText == null ? '' : questionText);
@@ -973,12 +977,41 @@ function optionsIn(questionText) {
     const m = OPTION_LINE.exec(bare);
     if (m) {
       if (m[1]) marked = true;
-      found.push({ n: Number(m[2]), label: m[3], at: i, indent, wrapped: 0 });
+      // Where this option's WORDS begin, which is the column its own wrapped
+      // text is aligned to. `m[0]` is the whole match, `m[3]` the label, so
+      // the difference is the marker-plus-number prefix.
+      found.push({ n: Number(m[2]), label: m[3], at: i, indent,
+        prefix: m[0].length - m[3].length, wrapped: 0 });
       continue;
     }
     const last = found.length ? found[found.length - 1] : null;
+    /**
+     * WARNING: A CONTINUATION IS ALIGNED WITH THE LABEL, not merely indented
+     * past the number, and it is never a numbered line. The first version
+     * asked only for `indent > last.indent`, and that swallowed three
+     * different things whole:
+     *
+     *   - A TENTH OPTION. The selection marker sits a column left of the
+     *     unmarked rows (measured in this repo's own real capture: marked
+     *     row indent 1, unmarked 3), so with the cursor on option 9, line 10
+     *     is "deeper" than 9 and folded into its label -- and the guard that
+     *     refuses an over-long menu never saw a tenth line at all. Nine
+     *     buttons over an eleven-option prompt, reading as the whole choice.
+     *   - AN INDENTED FOLLOW-UP QUESTION, which is how Claude draws its own
+     *     tool output. The stale menu then passed the "nothing newer below"
+     *     guard because the newer question had been eaten by option 2.
+     *   - ORDINARY PANE DECORATION. A spinner line under option 1 became part
+     *     of option 1's words, and those words are what the button carries,
+     *     what the server verifies against, and what is stored as the answer.
+     *
+     * Aligning with the label is what a TUI does when it wraps; sitting one
+     * column in is what a sibling row does. The two are different questions
+     * and the first version asked the weaker one.
+     */
+    const labelCol = last ? last.indent + last.prefix : 0;
     if (last && bare && last.at + last.wrapped + 1 === i
-        && indent > last.indent && last.wrapped < CONTINUATIONS) {
+        && indent >= labelCol && last.wrapped < CONTINUATIONS
+        && !ANY_NUMBERED.test(bare)) {
       // The option's own words, continued. Joined with a single space: the
       // line break is the box's, not the label's.
       last.label += ' ' + bare;
@@ -1037,8 +1070,12 @@ function optionsIn(questionText) {
    * excluded, because an option's own label can legitimately contain one
    * ("2. No, and ask permission to continue").
    */
-  const runTo = lastRun.at + lastRun.wrapped;
-  for (let i = runTo + 1; i < lines.length; i += 1) {
+  /* ⚠️ SCANNED FROM THE LAST OPTION'S OWN LINE, folds included. Starting after
+     the folded lines let an indented question hide inside a label and then be
+     invisible to the guard written to catch it -- the fix and the thing it
+     defends against passing each other in the same loop. A marker inside a
+     wrapped label refuses too, which is the safe direction. */
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
     if (status.NEEDS_YOU_MARKERS.some((re) => re.test(lines[i]))) return null;
   }
 
@@ -1051,7 +1088,7 @@ function optionsIn(questionText) {
    * understand well enough to put buttons on.
    */
   if (found.some((o) => messageProblem(o.label))) return null;
-  found.forEach((o) => { delete o.at; delete o.indent; delete o.wrapped; });
+  found.forEach((o) => { delete o.at; delete o.indent; delete o.wrapped; delete o.prefix; });
   /**
    * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
    * than an oversight. One was written, and it could not fail: the pattern's
@@ -1535,8 +1572,10 @@ function appendLocked(projectId, agent, entry, bornAt) {
        * ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered
        * answer sends the digit the agent's prompt is waiting for and shows the
        * option's own words, so `text` alone would either read as a bare "1" a
-       * week later or misdescribe the mechanism. Null on every ordinary
-       * message, which is every message today: the two are the same thing.
+       * week later or misdescribe the mechanism. Null on every message the
+       * person TYPES, because there the two are the same thing; set only by a
+       * button send. (It said "every message today" when written, which stopped
+       * being true in the same branch that wrote it.)
        */
       wire: (entry && typeof entry.wire === 'string' && entry.wire) ? entry.wire : null,
       delivery: {

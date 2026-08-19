@@ -5197,6 +5197,11 @@ async function paintTalk(sessionName, agentName) {
           + esc((err && err.message) || 'no detail') + ')')
       + '</p>';
     document.getElementById('d-qask').hidden = true;
+    /* ⚠️ AND THE TWO SENTENCES FROM THE LAST GOOD PAINT. "5 older messages are
+       still kept" standing over "we could not read this conversation" is the
+       screen asserting a count it just said it could not see. */
+    document.getElementById('d-dmoff').hidden = true;
+    document.getElementById('d-talk-older').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
     return;
@@ -5217,10 +5222,24 @@ async function paintTalk(sessionName, agentName) {
    */
   TALK_QUESTION[sessionName] = (body.asking && body.question) ? body.question.text : null;
   const answered = TALK_ANSWERED[sessionName];
-  const stillTheSame = !!(answered && body.question && answered.question === body.question.text
-    && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
-  // Expired, or a different question, or it stopped asking: the hold is spent.
-  if (answered && !stillTheSame) delete TALK_ANSWERED[sessionName];
+  const held = !!(answered && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
+  /**
+   * ⚠️ A POLL THAT COULD NOT READ THE SCREEN DOES NOT SPEND THE HOLD, and the
+   * first version let it. `question: null` under `asking: true` is a
+   * first-class route state with its own sentence — the capture failed, or the
+   * marker scrolled out of the slice — and treating it as "a different
+   * question" deleted the hold, so the NEXT good poll re-offered live buttons
+   * over a prompt this person had already answered. That is the second press
+   * the hold exists to prevent, and it is the we-could-not-look versus
+   * it-is-not-there conflation this codebase splits everywhere else, including
+   * in the route that feeds this very paint.
+   *
+   * So the hold is spent by exactly two things: TIME, and a question we can
+   * actually see that is a DIFFERENT one. Not by an absent one.
+   */
+  const different = !!(answered && body.question && answered.question !== body.question.text);
+  const stillTheSame = held && !different;
+  if (answered && (!held || different)) delete TALK_ANSWERED[sessionName];
   /* --- the question, and the answers to it --- */
   const qask = document.getElementById('d-qask');
   const qlab = document.getElementById('d-qask-lab');
@@ -5656,6 +5675,16 @@ function openDetail(sessionName) {
   {
     document.getElementById('d-qask').hidden = true;
     document.getElementById('d-qopts').innerHTML = '';
+    /* ⚠️ AND THE CACHE THAT SPEAKS FOR IT. The paint skips its rebuild when
+       `__lastOpts` matches what it is about to write, so clearing the markup
+       here without clearing the cache left the next identical paint believing
+       the buttons were already on screen. They were not: the person got the
+       hazard, the sentence, the terminal question, an empty options row, and
+       "Or write your own answer below." pointing at nothing -- and it never
+       recovered, because every later poll took the same skip. Reproduced two
+       ways: reopening the same agent, and opening a second agent sitting at
+       the identical prompt (the markup carries no name, so it matches). */
+    document.getElementById('d-qopts').__lastOpts = null;
     document.getElementById('d-qopts').hidden = true;
     document.getElementById('d-qout').hidden = true;
     /* ⚠️ THE SENTENCE AND THE CAPTURED PANE TOO. They sit behind `hidden`, so
@@ -5667,6 +5696,7 @@ function openDetail(sessionName) {
     document.getElementById('d-qask-lab').textContent = '';
     document.getElementById('d-qask-text').textContent = '';
     document.getElementById('d-qask-text').hidden = true;
+    document.getElementById('d-qask-fail').textContent = '';
     document.getElementById('d-qask-fail').hidden = true;
     document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">Opening&hellip;</p>';
     document.getElementById('d-talk-older').hidden = true;
