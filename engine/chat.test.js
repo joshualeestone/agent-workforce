@@ -2110,3 +2110,28 @@ test('the LAST option gets the same over-wrap test as every other one', () => {
   assert.equal(fits.length, 2);
   assert.equal(fits[1].label, 'No, and tell Claude what to do differently, then stop and wait');
 });
+
+test('a line only continues a label that ran out of room', () => {
+  // ⚠️ ALIGNMENT ALONE WAS NOT ENOUGH, and the docblock claimed it was. Any
+  // non-numbered line at or past the label column was folded in, which is
+  // exactly where ordinary pane furniture sits. The button then carries words
+  // the option does not have -- and a STATIC decoration line parses the same
+  // way on the server's re-read, so the check that exists to catch a lying
+  // label agrees with it.
+  assert.equal(chat.optionsIn('❯ 1. Yes\n  2. No\n     Reading src/index.js'), null,
+    'a short option did not run out of room, so nothing below it is its wrapping');
+  assert.equal(chat.optionsIn(['│ Do you want to proceed?        │',
+    '│ ❯ 1. Yes                       │', '│   2. No                        │',
+    '│      Press esc to go back      │'].join('\n')), null, 'a box footer is not a label');
+  assert.equal(chat.optionsIn('❯ 1. Yes\n     Reading src/index.js\n  2. No'), null,
+    'and the same under a middle option');
+
+  // ⚠️ THE CONTROL, and without it this test would pass against a parser that
+  // simply refused every wrapped menu. The real permission prompt wraps its
+  // long option BECAUSE the line was full, and that one still reads whole.
+  const real = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don't ask again for rm commands in", '     /Users/agent1/work',
+    '  3. No, and tell Claude what to do differently'].join('\n'));
+  assert.equal(real.length, 3);
+  assert.equal(real[1].label, "Yes, and don't ask again for rm commands in /Users/agent1/work");
+});

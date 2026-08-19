@@ -917,12 +917,13 @@ function questionIn(text) {
  * `│` would make every option line invisible to a pattern anchored at the
  * number.
  *
- * ⚠️ THE TWO ENDS STRIP DIFFERENT SETS, and the asymmetry is the point. On the
- * LEFT, everything before the number is frame by definition, so an ASCII `|`
- * goes too. On the RIGHT, the characters are the label's own last characters —
- * and `2. use a pipe |` is a legitimate option whose final `|` a symmetric
- * strip would silently eat, against the verbatim rule two lines down. A box
- * drawn with `│` still strips; a label ending in `|` survives.
+ * ⚠️ ONLY THE BOX-DRAWING `│` IS FRAME, at either end. An earlier version also
+ * took an ASCII `|` off the LEFT and not the right, which is one end believing
+ * in ASCII frames while the other does not: an ASCII-framed menu then parsed
+ * with the padding and the closing pipe inside every label. Nothing this
+ * product meets draws boxes in ASCII, so such a menu now simply refuses, which
+ * is the safe end of that choice. And `2. use a pipe |` keeps its final
+ * character, which the verbatim rule two lines down requires.
  *
  * Labels ride VERBATIM, which is the pack's rule: a button carries the option's
  * own words, not our summary of them.
@@ -967,11 +968,38 @@ function optionsIn(questionText) {
    * indented text under a numbered line is a document, not a button.
    */
   const CONTINUATIONS = 2;
+  /**
+   * WARNING: A LINE ONLY CONTINUES A LABEL THAT RAN OUT OF ROOM.
+   *
+   * Alignment alone was not enough, and the docblock above claimed it was. Any
+   * non-numbered line at or past the label column was folded in, which is where
+   * ordinary pane furniture sits:
+   *
+   *     > 1. Yes
+   *       2. No
+   *          Press esc to go back      -> option 2 became "No Press esc to go back"
+   *
+   * The button then carries words the option does not have, and a STATIC line
+   * like that parses identically on the server's re-read, so the check that
+   * exists to catch a lying label agrees with it.
+   *
+   * Wrapping has a second property alignment does not: the line it came from is
+   * FULL. "2. No" did not run out of room, so nothing below it can be its
+   * continuation. So a fold now needs both -- aligned to the label column, and a
+   * parent line within a few characters of the widest line in the capture.
+   */
+  const widest = lines.reduce((w, l) => {
+    const body = l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
+    return Math.max(w, body.length);
+  }, 0);
+  // Three characters of slack: a word boundary can leave a wrapped line a
+  // little short of the edge, and a menu drawn at one width is consistent.
+  const RAN_OUT = 3;
   for (let i = 0; i < lines.length; i += 1) {
     // The frame comes off; the INDENT does not. Stripping both (the first
     // version) threw away the only thing that distinguishes a wrapped label
     // from an unrelated line.
-    const body = lines[i].replace(/^\s*[│|]\s?/, '').replace(/[\s│]+$/, '');
+    const body = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
     const bare = body.replace(/^\s+/, '');
     const indent = body.length - bare.length;
     const m = OPTION_LINE.exec(bare);
@@ -981,7 +1009,10 @@ function optionsIn(questionText) {
       // text is aligned to. `m[0]` is the whole match, `m[3]` the label, so
       // the difference is the marker-plus-number prefix.
       found.push({ n: Number(m[2]), label: m[3], at: i, indent,
-        prefix: m[0].length - m[3].length, wrapped: 0 });
+        prefix: m[0].length - m[3].length, wrapped: 0,
+        // How close this line came to the edge. A label that wrapped ran out
+        // of room; one that did not, did not.
+        full: body.replace(/[\s│]+$/, '').length });
       continue;
     }
     const last = found.length ? found[found.length - 1] : null;
@@ -1011,11 +1042,14 @@ function optionsIn(questionText) {
     const labelCol = last ? last.indent + last.prefix : 0;
     if (last && bare && last.at + last.wrapped + 1 === i
         && indent >= labelCol && last.wrapped < CONTINUATIONS
+        && last.full >= widest - RAN_OUT
         && !ANY_NUMBERED.test(bare)) {
       // The option's own words, continued. Joined with a single space: the
       // line break is the box's, not the label's.
       last.label += ' ' + bare;
       last.wrapped += 1;
+      // A second continuation only follows a first that was itself full.
+      last.full = body.replace(/[\s│]+$/, '').length;
     }
   }
   if (found.length < 2) return null;
@@ -1054,7 +1088,7 @@ function optionsIn(questionText) {
    * menu is longer than we can read, and it is refused whole.
    */
   if (after !== undefined) {
-    const afterBody = after.replace(/^\s*[│|]\s?/, '').replace(/[\s│]+$/, '');
+    const afterBody = after.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
     const afterBare = afterBody.replace(/^\s+/, '');
     const afterIndent = afterBody.length - afterBare.length;
     if (afterBare && afterIndent >= lastRun.indent + lastRun.prefix) return null;
@@ -1117,7 +1151,9 @@ function optionsIn(questionText) {
    * understand well enough to put buttons on.
    */
   if (found.some((o) => messageProblem(o.label))) return null;
-  found.forEach((o) => { delete o.at; delete o.indent; delete o.wrapped; delete o.prefix; });
+  found.forEach((o) => {
+    delete o.at; delete o.indent; delete o.wrapped; delete o.prefix; delete o.full;
+  });
   /**
    * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
    * than an oversight. One was written, and it could not fail: the pattern's

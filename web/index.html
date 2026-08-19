@@ -48,8 +48,13 @@
      `--k-rule` measures 1.18:1 against the question panel in light and 1.10:1
      in dark, and WCAG SC 1.4.11 asks 3:1 of anything that identifies a control.
      A button whose edge nobody can see is a button nobody can find. Measured:
-     3.26:1 light, 3.14:1 dark, which are the lightest values that clear the
-     floor -- deliberately, so the pack's quiet treatment survives.
+     3.27:1 light and 3.13:1 dark, which is what `docs/browser-checks/
+     render-talk.js` reports on every state that has buttons, and it is the
+     instrument that checks this rather than the arithmetic that chose it.
+     (An earlier version of this comment carried 3.26 and 3.14, from a
+     hand calculation, which is two numbers nothing measures.) They are the
+     lightest values that clear the floor, deliberately, so the pack's quiet
+     treatment survives.
      ⚠️ The app's OTHER buttons have the same problem (`.btn` measures 1.31:1
      against a card) and this fixes only the control this branch adds; widening
      it is a change to every button in the product and belongs in its own diff,
@@ -1965,7 +1970,7 @@ svg { display: block; }
        Everything here is empty in the markup and filled by paintTalk(): a
        shipped sentence naming an agent would be a claim about whichever agent
        happens to be open. -->
-  <section class="dbox" id="d-talk-box">
+  <section class="dbox" id="d-talk-box" tabindex="-1">
     <h3 class="dlab" id="d-talk-label"></h3>
     <p class="dhint" id="d-talk-hint" style="margin:0 0 12px;"></p>
     <div class="qask" id="d-qask" hidden>
@@ -5062,6 +5067,43 @@ async function paintConversation(sessionName, agentName) {
 
 /* ── the person's own thread with this agent ─────────────────────────────── */
 /**
+ * The ONE writer for the thread box.
+ *
+ * ⚠️ A CACHE WITH FOUR WRITERS IS NOT A CACHE, IT IS A TRAP, and this element
+ * had four: the paint, the paint's failure arm, openDetail's clear, and the
+ * empty-thread arms. Only the paint knew about the key, so the other writers
+ * left it describing markup that was no longer on screen, and the next paint
+ * skipped a rewrite it needed. Measured: reopening an agent whose newest
+ * message is over an hour old left the box reading "Opening…" FOREVER, because
+ * the rendered markup is byte-identical from then on and every later poll took
+ * the same skip. A transient read failure stranded its own sentence the same
+ * way.
+ *
+ * That is the identical defect this branch fixed for the option row one commit
+ * earlier, re-created one element over, by adding a second cache the same way
+ * rather than by removing the shape. The room does not have it because
+ * `#pj-msgs` has exactly ONE writer (`setLive`), which is why its key cannot
+ * drift. This is that.
+ *
+ * The scroll key rides here too: the MARKUP decides whether to rewrite, the
+ * message COUNT decides whether to jump to the bottom -- a new message should
+ * land in view, an unchanged list should not move under a reader.
+ */
+function setThread(el, html, count) {
+  if (el.__lastThread !== html) {
+    el.__lastThread = html;
+    el.innerHTML = html;
+  }
+  // ⚠️ `count` is null for every not-a-list state (opening, unreadable,
+  // nothing yet). Those must not leave a number behind that a later thread of
+  // the same length would match, so the key is cleared rather than kept.
+  if (el.__lastCount !== count) {
+    el.__lastCount = count;
+    if (count !== null) el.scrollTop = el.scrollHeight;
+  }
+}
+
+/**
  * ⚠️ THIS IS THE ONE PLACE ON THIS PAGE THAT TYPES INTO A RUNNING AGENT, and
  * the one place a question can be answered without meeting a number. The pack's
  * note is the design and it predates the panel: the question sits at the top of
@@ -5190,12 +5232,12 @@ async function paintTalk(sessionName, agentName) {
        time, and telling somebody to try again is telling them to wait for
        something that will not change. A transient read failure keeps the
        time phrase, because there it is true. */
-    document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">'
+    setThread(document.getElementById('d-dmthread'), '<p class="dmnone">'
       + (standing
         ? 'We cannot show this conversation. ' + esc(pjSentence((err && err.message) || 'no detail'))
         : 'We could not read this conversation just now. ('
           + esc((err && err.message) || 'no detail') + ')')
-      + '</p>';
+      + '</p>', null);
     document.getElementById('d-qask').hidden = true;
     /* ⚠️ AND THE TWO SENTENCES FROM THE LAST GOOD PAINT. "5 older messages are
        still kept" standing over "we could not read this conversation" is the
@@ -5278,7 +5320,15 @@ async function paintTalk(sessionName, agentName) {
      a person can be standing inside the block this line is about to hide, and
      hiding a focused element drops focus to <body>. Same rule the room records
      at its own question region. */
-  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) say.focus();
+  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) {
+    /* ⚠️ THE BOX MAY STILL BE DISABLED from the previous paint (its own state is
+       set further down), and focusing a disabled input silently does nothing --
+       so the rescue would report success and focus would still fall to <body>.
+       The panel itself takes it in that case: `tabindex="-1"` makes it
+       programmatically focusable without adding a tab stop. */
+    if (!say.disabled) say.focus();
+    else document.getElementById('d-talk-box').focus();
+  }
   qask.hidden = nowHidden;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
@@ -5353,21 +5403,18 @@ async function paintTalk(sessionName, agentName) {
      * no file, and "this is not saying you have sent nothing" over a store that
      * will never hold anything), which is why the route sends the two apart.
      */
-    thread.__lastThread = null; thread.__lastCount = null;
-    thread.innerHTML = '<p class="dmnone"><b>Nothing said here is kept for ' + esc(name) + '.</b> '
+    setThread(thread, '<p class="dmnone"><b>Nothing said here is kept for ' + esc(name) + '.</b> '
       + esc(pjSentence(body.historyBecause || 'we cannot keep a conversation under this agent’s name'))
-      + ' You can still send, and it still arrives.</p>';
+      + ' You can still send, and it still arrives.</p>', null);
   } else if (body.historyBecause && !rows.length) {
     // We could not read a store that does exist. ⚠️ The room's load-bearing
     // second sentence rides along: an unreadable file is not evidence that
     // nothing was said, and silence here would render "we could not look" as
     // "there is nothing".
-    thread.__lastThread = null; thread.__lastCount = null;
-    thread.innerHTML = '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
-      + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>';
+    setThread(thread, '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
+      + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>', null);
   } else if (!rows.length) {
-    thread.__lastThread = null; thread.__lastCount = null;
-    thread.innerHTML = '<p class="dmnone">Nothing here yet.</p>';
+    setThread(thread, '<p class="dmnone">Nothing here yet.</p>', null);
   } else {
     /**
      * ⚠️ NOT REWRITTEN, AND NOT SCROLLED, WHEN NOTHING CHANGED. This box is
@@ -5377,22 +5424,16 @@ async function paintTalk(sessionName, agentName) {
      * sentence selected was thrown 2343px down and lost the selection, every
      * five seconds, for reading their own history.
      *
-     * The room states the rule at its own thread: "yanking a person who
-     * scrolled up to read history to the bottom on a poll tick is the poll
-     * fighting the reader." It guards on two keys, and so does this: the
-     * MARKUP decides whether to rewrite, the message COUNT decides whether to
-     * scroll -- a new message should land in view, an unchanged list should
-     * not move.
+     * The room states the rule at its POSTS box, not at its project thread
+     * (which has no scroll management at all): "yanking a person who scrolled
+     * up to read history to the bottom on a poll tick is the poll fighting the
+     * reader." ⚠️ And its second key is built from post IDS, not a count --
+     * which is the stronger shape, because a count cannot tell two different
+     * lists of the same length apart. Recorded rather than copied: this key is
+     * a count, and the case it cannot see is two agents whose threads happen to
+     * be the same length.
      */
-    const html = rows.map((m) => dmRow(m, name)).join('');
-    if (thread.__lastThread !== html) {
-      thread.__lastThread = html;
-      thread.innerHTML = html;
-    }
-    if (thread.__lastCount !== rows.length) {
-      thread.__lastCount = rows.length;
-      thread.scrollTop = thread.scrollHeight;
-    }
+    setThread(thread, rows.map((m) => dmRow(m, name)).join(''), rows.length);
   }
   /**
    * ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state 4).
@@ -5747,7 +5788,7 @@ function openDetail(sessionName) {
     document.getElementById('d-qask-text').hidden = true;
     document.getElementById('d-qask-fail').textContent = '';
     document.getElementById('d-qask-fail').hidden = true;
-    document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">Opening&hellip;</p>';
+    setThread(document.getElementById('d-dmthread'), '<p class="dmnone">Opening&hellip;</p>', null);
     document.getElementById('d-talk-older').hidden = true;
     document.getElementById('d-dmoff').hidden = true;
     document.getElementById('d-say-msg').textContent = '';

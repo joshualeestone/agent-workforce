@@ -391,7 +391,7 @@ const STATES = {
         problems.push(`[${theme}] reopen: no real agent card on this machine, so the clear path is UNCHECKED`);
       } else {
         const reopened = await page.evaluate((c) => {
-          try { LAST = [c]; openDetail(c.sessionName); return true; }
+          try { window.__card = c; LAST = [c]; openDetail(c.sessionName); return true; }
           catch (e) { return String(e && e.message); }
         }, card);
         if (reopened !== true) {
@@ -400,6 +400,28 @@ const STATES = {
       }
       await page.evaluate(() => paintTalk('april', 'April'));
       const afterReopen = await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt').length);
+      /* ⚠️ THE THREAD BOX TOO, and with MESSAGES in it. The first version of
+         this check reopened on a state whose fixture has none, so it exercised
+         only the empty arms -- which were the arms that already cleared their
+         cache. The stranded box needs a thread that renders rows and a repaint
+         that produces byte-identical markup, which is every thread whose newest
+         message is over an hour old. */
+      const threadAfterReopen = await page.evaluate(async (f) => {
+        window.__fx = f;
+        await paintTalk('april', 'April');
+        const before = document.getElementById('d-dmthread').textContent.slice(0, 40);
+        LAST = [window.__card];
+        openDetail('april');
+        await paintTalk('april', 'April');
+        return { before, after: document.getElementById('d-dmthread').textContent.slice(0, 40) };
+      }, STATES['2-answered-placed']);
+      if (threadAfterReopen.after !== threadAfterReopen.before) {
+        problems.push(`[${theme}] reopen: the thread box is stranded after a reopen `
+          + `(${JSON.stringify(threadAfterReopen.before)} -> ${JSON.stringify(threadAfterReopen.after)})`);
+      }
+      // Put the menu back: the steps below are about the buttons, and the check
+      // above left a thread state with none.
+      await page.evaluate(async (f) => { window.__fx = f; await paintTalk('april', 'April'); }, menu);
       if (afterReopen !== menu.options.length) {
         problems.push(`[${theme}] reopen: ${afterReopen} buttons after a clear-and-repaint, expected ${menu.options.length}`);
       }

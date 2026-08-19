@@ -6511,9 +6511,12 @@ test('--k-sunk is DEFINED, in both themes, not merely defended with a fallback',
   // an SVG fill it fails LOUDLY (undefined resolves to black). The invisible
   // instances are what let three drawings pass while the token was dead.
   //
-  // Here it decides the question box and every message bubble, and the light
-  // fallback on the dark ground is a 5%-black wash on #17191c -- which is not
-  // a sunk panel, it is a missing one. So the token is defined per theme.
+  // Here it decides the QUESTION BOX. (An earlier version of this comment said
+  // "and every message bubble", which is false: `.dm.mine .dm-b` overrides it
+  // and `dmRow` emits `dm mine` unconditionally, as the rule's own note in the
+  // stylesheet says.) The light fallback on the dark ground is a 5%-black wash
+  // on #17191c, which is not a sunk panel, it is a missing one. So the token is
+  // defined per theme.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const decls = raw.match(/--k-sunk:\s*[^;]+;/g) || [];
   assert.ok(decls.length >= 2,
