@@ -6161,6 +6161,7 @@ test('the check route is POST-only, and Check now clears the Later note before a
 });
 
 test('the card standoff, the confirm focus fallback, and the identical-write guard hold', () => {
+  try {
   // (a) UPD_CHECKING owns the card: a poll paint during a check changes nothing.
   const paintBusy = pageFunction('paintUpdateCard', 'let UPD_CHECKING = true;\n');
   const busy = { 'upd-line': { textContent: 'held' }, 'upd-btn': { textContent: 'held', hidden: true, disabled: true, dataset: {} } };
@@ -6197,7 +6198,11 @@ test('the card standoff, the confirm focus fallback, and the identical-write gua
   paint('0.1.9', null, { reached: true, readable: true });
   assert.equal(writes, after, 'an identical repaint rewrote the live region');
   assert.ok(after > 0, 'CONTROL: the first paint never wrote, so the suppression assert proves nothing');
-  delete global.document;
+  } finally {
+    // The stub must not outlive a FAILED assertion either, or it leaks
+    // into every later test in the file (the sibling test's pattern).
+    delete global.document;
+  }
 });
 
 test("the card's Update arm opens the one shared confirm and records itself as opener", async () => {

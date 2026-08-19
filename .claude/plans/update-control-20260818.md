@@ -105,6 +105,21 @@ The sentence is true and ships now.
   focus to body (matches the toast's Later); the deadline-elapsed
   silent-finish hole stands recorded.
 
+## Iterations 5-6 (review, converged on the pair)
+
+- The check fetch gains a ten-second timeout (a hang would have locked
+  the card at Checking with the recovery button disabled).
+- The engine header's fails-soft claim scoped to the toast (the card
+  DOES name failures; that is its job).
+- The Update arm tested (one shared confirm, opener recorded, safe-answer
+  focus); the standoff, the confirm focus fallback, and the identical-
+  write guard each got a test with a control; the button's text gets the
+  same identical-write guard as the line.
+- Accepted with recorded lifetimes: the board-side failure sentence
+  lives one poll interval (the next honest paint outranks it); a page
+  loaded against a fully down board holds the static Checking (the
+  page's own board-down surfaces carry that state).
+
 ## Out of scope
 
 - Stop-the-fleet button (above).

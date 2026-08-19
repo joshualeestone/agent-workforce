@@ -3528,41 +3528,44 @@ function paintUpdateCard(running, offer, look) {
     // toast's dataset.v guard.
     if (line.textContent !== text) line.textContent = text;
   };
+  // The button gets the same guard: focus can be resting on it after a
+  // Check now, and replacing its text node is the same mutation class.
+  const putBtn = (text) => { if (btn.textContent !== text) btn.textContent = text; };
   btn.hidden = false;
   btn.disabled = false;
   if (offer && offer.version) {
     put(v + 'Version ' + offer.version + ' is ready.');
-    btn.textContent = 'Update';
+    putBtn('Update');
     btn.dataset.act = 'update';
   } else if (look && look.looked === false) {
     // The first look is still in flight: say Checking, never a failure
     // that has not happened (boot rendered "could not reach" for the
     // seconds before the first answer landed).
     put(v + 'Checking.');
-    btn.textContent = 'Check now';
+    putBtn('Check now');
     btn.dataset.act = 'check';
     btn.disabled = true;
   } else if (look && look.reached && look.readable) {
     put(v + 'Up to date.');
-    btn.textContent = 'Check now';
+    putBtn('Check now');
     btn.dataset.act = 'check';
   } else if (look && look.reached && !look.readable) {
     // The captive-portal shape: the host answered, the answer was not a
     // version. Saying "Up to date" here would be a claim about a world
     // we could not read; saying "could not reach" blames the wrong leg.
     put(v + "Could not read the update server's answer.");
-    btn.textContent = 'Try again';
+    putBtn('Try again');
     btn.dataset.act = 'check';
   } else if (look && look.reached === false && look.looked !== false) {
     // Never rendered as "up to date": not hearing back is its own state.
     put(v + 'Could not reach the update server.');
-    btn.textContent = 'Try again';
+    putBtn('Try again');
     btn.dataset.act = 'check';
   } else {
     // No look at all (a caller with no data yet): neutral, never a
     // failure that has not happened -- the same rule as the boot arm.
     put(v + 'Checking.');
-    btn.textContent = 'Check now';
+    putBtn('Check now');
     btn.dataset.act = 'check';
     btn.disabled = true;
   }
