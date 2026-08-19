@@ -1911,10 +1911,14 @@ test('the direct thread is its own file, and a project literally named "Direct" 
   assert.equal(theirs.messages[0].text, 'about the Direct project', 'a real project of that name keeps its own thread');
 });
 
-test('the direct token can never arrive through a project route, because the id rules refuse it', () => {
-  // The token is only reachable as the module's own constant. Anything
-  // shaped like it, arriving as an id from a URL, is refused by the charset
-  // check exactly as `..` is.
+test('the direct token is not a spelling any project id can produce', () => {
+  // ⚠️ THIS IS ABOUT THE ID RULES, NOT ABOUT A ROUTE — the earlier name
+  // claimed the second and the body only ever checked the first. The route-level
+  // arm (a project id resolves through `projects.get` and 404s before this
+  // module is asked anything) is the server suite's to hold, not this one's.
+  // The token is only reachable as the module's own constant; anything shaped
+  // like it, arriving as an id from a URL, is refused by the charset check
+  // exactly as `..` is.
   assert.throws(() => chat.threadFile('@you-as-typed', 'casey'), /not a project we can read/);
   assert.throws(() => chat.threadFile('..', 'casey'), /not a project we can read/);
   assert.equal(chat.DIRECT, '@you');
@@ -1947,28 +1951,63 @@ test('optionsIn sees through the pane frame, and does not eat a label that ends 
   // frame by definition; the last character of a label is the label's. A
   // symmetric strip took the pipe off this option's own words, silently,
   // against the verbatim rule.
-  const piped = chat.optionsIn('1. use a pipe |\n2. do not');
+  const piped = chat.optionsIn('\u276f 1. use a pipe |\n  2. do not');
   assert.deepEqual(piped, [{ n: 1, label: 'use a pipe |' }, { n: 2, label: 'do not' }]);
 });
 
 test('optionsIn refuses everything it cannot be sure of, and a refusal is the ordinary screen', () => {
+  // ⚠️ EVERY CASE BELOW CARRIES THE SELECTION MARKER, deliberately. Once the
+  // marker rule existed, a case written without one would be refused for THAT
+  // and pass while the rule it is named for did nothing -- a test passing for
+  // a reason other than the one on the label, which is how a guard goes dead
+  // without anybody noticing.
   // ⚠️ THE FIRST CASE IS THE ONE THAT MATTERS. A pane accumulates, so an
   // already-answered menu can sit above the live one; 1,2,1,2 must not
   // become a two-button panel wired to the older question.
   assert.equal(chat.optionsIn('❯ 1. Yes\n  2. No\nthen later\n❯ 1. Yes\n  2. No'), null, 'a repeated menu is not a menu');
-  assert.equal(chat.optionsIn('1. Yes\n3. No'), null, 'a gap in the numbering');
-  assert.equal(chat.optionsIn('2. Yes\n3. No'), null, 'a run that does not start at 1');
-  assert.equal(chat.optionsIn('1. Yes'), null, 'one option is not a choice');
-  assert.equal(chat.optionsIn(Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n')), null, 'past nine');
+  assert.equal(chat.optionsIn('❯ 1. Yes\n  3. No'), null, 'a gap in the numbering');
+  assert.equal(chat.optionsIn('❯ 2. Yes\n  3. No'), null, 'a run that does not start at 1');
+  assert.equal(chat.optionsIn('❯ 1. Yes'), null, 'one option is not a choice');
+  // ⚠️ REFUSED, NOT TRUNCATED. The pattern reads one digit, so a ten-option
+  // menu parses as nine -- and nine buttons over a ten-option prompt reads as
+  // the whole choice, which is worse than no buttons at all.
+  assert.equal(chat.optionsIn('❯ ' + Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n  ')), null,
+    'a menu longer than we can read is refused whole');
   // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This reads like an empty-label
   // guard and there is no empty-label guard: `1. ` does not match at all
   // (the pattern's capture needs a non-space first character), so the two
   // lines produce ZERO options and the length test refuses them. The
   // assertion is right; the name it used to carry pointed at code that
   // could not run.
-  assert.equal(chat.optionsIn('1. \n2. '), null, 'a numbered line with no words is not an option at all');
-  assert.equal(chat.optionsIn('I tried 1. and it did not work'), null, 'prose that mentions a number');
+  assert.equal(chat.optionsIn('❯ 1. \n  2. '), null, 'a numbered line with no words is not an option at all');
+  assert.equal(chat.optionsIn('❯ I tried 1. and it did not work'), null, 'prose that mentions a number');
   assert.equal(chat.optionsIn('Do you want to proceed?'), null, 'a question with no menu at all');
   assert.equal(chat.optionsIn(''), null);
   assert.equal(chat.optionsIn(null), null);
+});
+
+test('optionsIn refuses PROSE that happens to be numbered, which is the dangerous false positive', () => {
+  // ⚠️ MEASURED AGAINST THE EARLIER VERSION, which said yes to both of these.
+  // The second is the one that mattered: "Would you like to" is itself a
+  // NEEDS_YOU marker, so `asking` is true for exactly this shape, and the page
+  // would have drawn a button that types 1 into a live pane and recorded that
+  // the person chose "Delete the old build folder".
+  assert.equal(chat.optionsIn('Would you like to review the plan?\n 1. Delete the old build folder\n 2. Rebuild from scratch'),
+    null, 'a numbered list in prose is not a menu');
+  assert.equal(chat.optionsIn('\u276f 1. Do X\n' + Array.from({ length: 40 }, () => 'filler').join('\n') + '\n2. Do Y'),
+    null, 'two numbered lines forty lines apart are not one list');
+  assert.equal(chat.optionsIn(' 1. Yes\n 2. No'), null, 'nothing drew this: no selection marker');
+  assert.equal(chat.optionsIn('\u276f 01. Yes\n  2. No'), null, 'a shape no menu draws');
+});
+
+test('optionsIn refuses a whole menu whose label carries what we would not keep', () => {
+  // ⚠️ THE WHOLE MENU, not the one option. A label with a control character
+  // cannot go into the record (messageProblem refuses it), so the button would
+  // send the digit and the bubble would degrade to a bare "1" -- the record
+  // describing a mechanism the person did not use.
+  const esc = String.fromCharCode(27);
+  assert.equal(chat.optionsIn('\u276f 1. Yes' + esc + '[0m\n  2. No'), null);
+  // The control: the same menu without it is still a menu.
+  assert.deepEqual(chat.optionsIn('\u276f 1. Yes\n  2. No'),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
 });

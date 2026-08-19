@@ -5058,6 +5058,9 @@ async function paintConversation(sessionName, agentName) {
  */
 let TALK_LOAD = 0;
 let TALK_SENDING = false;
+// Which agent the in-flight send belongs to. `TALK_SENDING` alone is a fact
+// about the page; the controls it disables belong to one agent.
+let TALK_FLIGHT = null;
 /**
  * ⚠️ THE DRAFT IS PARKED PER AGENT, like the room's `PJ_DRAFTS`. Without this,
  * opening the board and coming back destroyed whatever was half-typed — the
@@ -5173,6 +5176,9 @@ async function paintTalk(sessionName, agentName) {
   say.setAttribute('aria-label', 'A message for ' + name);
   say.placeholder = 'Message ' + name + '…';
 
+  // Whose send is in the air, if any. Read before anything that disables.
+  const flying = TALK_SENDING && TALK_FLIGHT === sessionName;
+
   /* --- the question, and the answers to it --- */
   /**
    * ⚠️ THE HOLD IS COMPUTED FIRST, because two things below read it and the
@@ -5198,6 +5204,14 @@ async function paintTalk(sessionName, agentName) {
     // The agent's SCREEN, in the treatment the room already uses for it.
     pjSetScreen(qtext, body.question.text);
     qtext.hidden = false;
+  } else if (!body.asking) {
+    /* ⚠️ CLEARED WHEN NOTHING IS ASKING. They sit behind `hidden`, so nothing
+       was shown — but the render check reads them directly and found the last
+       question's sentence still loaded on every idle state, which is one
+       `hidden` away from showing one agent's question under another's name. */
+    qlab.textContent = '';
+    pjSetScreen(qtext, '');
+    qtext.hidden = true;
   } else if (body.asking) {
     /* ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is
        the stranded state this feature exists to remove. The ROUTE's own
@@ -5211,7 +5225,13 @@ async function paintTalk(sessionName, agentName) {
   // The drawing's states 2 and 3: an answered question is no longer a thing
   // waiting on you, and the answer takes its place in the thread below as an
   // ordinary message. The whole block goes, not just its buttons.
-  qask.hidden = !body.asking || stillTheSame;
+  const nowHidden = !body.asking || stillTheSame;
+  /* ⚠️ FOCUS IS RESCUED BEFORE THE HIDE. `#d-qask-text` is `tabindex="0"`, so
+     a person can be standing inside the block this line is about to hide, and
+     hiding a focused element drops focus to <body>. Same rule the room records
+     at its own question region. */
+  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) say.focus();
+  qask.hidden = nowHidden;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as
@@ -5233,11 +5253,35 @@ async function paintTalk(sessionName, agentName) {
      disable. The double send was still refused by the TALK_SENDING guard, so
      the press became a silent no-op: a button that looks pressable, is pressed,
      and does nothing at all, for as long as a flight can honestly run. */
-  const dead = TALK_SENDING ? ' disabled' : '';
-  qopts.innerHTML = opts
+  const dead = flying ? ' disabled' : '';
+  const wanted = opts
     ? opts.map((o) => '<button class="qopt" type="button"' + dead + ' data-n="' + esc(String(o.n))
         + '" data-label="' + esc(o.label) + '">' + esc(o.label) + '</button>').join('')
     : '';
+  /**
+   * ⚠️ ONLY WHEN IT CHANGED. This paint runs every five seconds, and an
+   * unconditional `innerHTML =` destroys and recreates the buttons even when
+   * the markup is byte-identical — so a keyboard user who tabs onto an option
+   * loses focus to <body> within five seconds, over and over, on the one
+   * control this panel exists for. The room fixed exactly this at its own
+   * question region ("round 31 … the stranded-keyboard state, rebuilt by the
+   * poll five seconds after the fix for it").
+   */
+  if (qopts.innerHTML !== wanted) {
+    // The focused button is about to stop existing, so the focus goes
+    // somewhere real first rather than to the document.
+    const losing = document.activeElement;
+    const wasMine = losing && qopts.contains(losing);
+    // ⚠️ THE SAME OPTION, not merely an option. Restoring to the first button
+    // moves somebody standing on "No" onto "Yes" -- silently, every five
+    // seconds, on a control whose whole job is which one they picked.
+    const wasN = wasMine ? losing.dataset.n : null;
+    qopts.innerHTML = wanted;
+    if (wasMine) {
+      const same = wasN ? qopts.querySelector('.qopt[data-n="' + wasN + '"]') : null;
+      if (same) same.focus(); else say.focus();
+    }
+  }
   qopts.hidden = !opts;
   qout.hidden = !opts;
 
@@ -5329,8 +5373,14 @@ async function paintTalk(sessionName, agentName) {
    * that locks for it eats the keystrokes of somebody already typing the next
    * message. The button is what stops a double send.
    */
+  /* ⚠️ THE FLIGHT ONLY DISABLES THE AGENT IT BELONGS TO. Opening B while a send
+     to A is still in the air paints B — and keying the disable on the bare
+     TALK_SENDING flag left B's Send and B's option buttons dead, with no
+     sentence explaining it, until the next tick. A's own `finally` will not fix
+     it either, because that path declines to touch anything once the flight has
+     moved. The flag is about a NAME, so it is read against one. */
   say.disabled = body.presence === 'off';
-  document.getElementById('d-send').disabled = body.presence === 'off' || TALK_SENDING;
+  document.getElementById('d-send').disabled = body.presence === 'off' || flying;
   // The parked draft comes back, and never over words already in the box.
   if (!say.disabled && !say.value && TALK_DRAFTS[sessionName]) say.value = TALK_DRAFTS[sessionName];
 }
@@ -5350,7 +5400,20 @@ async function paintTalk(sessionName, agentName) {
  * this path was the hole.
  */
 async function sendTalk(text, chose) {
-  if (TALK_SENDING || !CURRENT) return;
+  // ⚠️ ONE SEND AT A TIME IS THE RULE, and it is the page's rule rather than
+  // the agent's: the message line and the composer are single elements. What
+  // must not happen is a silent refusal — pressing Enter and having nothing at
+  // all occur is indistinguishable from a broken box.
+  if (TALK_SENDING) {
+    const busy = document.getElementById('d-say-msg');
+    if (busy) {
+      busy.textContent = TALK_FLIGHT && CURRENT && TALK_FLIGHT !== CURRENT.sessionName
+        ? 'Still sending your last message to ' + TALK_FLIGHT + '. This will go through in a moment.'
+        : 'Still sending your last message.';
+    }
+    return;
+  }
+  if (!CURRENT) return;
   // The agent this send TOOK OFF from. Everything afterwards is about this
   // name, never about whichever agent happens to be open when the verdict
   // lands.
@@ -5371,14 +5434,27 @@ async function sendTalk(text, chose) {
   const msg = document.getElementById('d-say-msg');
   const say = document.getElementById('d-say');
   const send = document.getElementById('d-send');
+  /**
+   * ⚠️ ASKED BEFORE THE DISABLE, and the first version asked after — which is
+   * dead code with a comment claiming the opposite. MEASURED in Chromium:
+   * setting `disabled = true` on the focused button moves `document.
+   * activeElement` to <body> SYNCHRONOUSLY, so the test was false on every
+   * send and the rescue never once ran. Every keyboard or screen-reader send
+   * from this page stranded focus on the document.
+   *
+   * The room gets this right at its own send: it captures the flag first and
+   * restores at both exits. This does both halves too.
+   */
+  const sendHadFocus = document.activeElement === send;
+  const optHadFocus = document.activeElement && document.activeElement.classList
+    && document.activeElement.classList.contains('qopt');
   TALK_SENDING = true;
+  TALK_FLIGHT = sentName;
   send.disabled = true;
-  /* ⚠️ FOCUS IS RESCUED BEFORE THE DISABLE TAKES EFFECT, like the room's own
-     rescue: disabling the element that currently has focus drops focus to
-     <body>, and a keyboard or screen-reader user loses their place on every
-     single send. The box is the right landing place — it is where they were
-     typing and it stays enabled. */
-  if (document.activeElement === send) say.focus();
+  // The box is the right landing place: it is where they were typing, it stays
+  // enabled through the flight, and it is where the answer they may want to
+  // type instead goes.
+  if (sendHadFocus || optHadFocus) say.focus();
   // ⚠️ The buttons go dead for the round trip too: a second press on a numbered
   // prompt answers it twice.
   document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
@@ -5465,11 +5541,19 @@ async function sendTalk(text, chose) {
     if (!flightMoved()) msg.textContent = pjSentence((err && err.message) || 'we could not send that');
   } finally {
     TALK_SENDING = false;
+    TALK_FLIGHT = null;
     // The repaint is about the takeoff agent too: with the flight moved, the
     // open page belongs to somebody else and its own poll is already painting
     // it. The record is the account of what happened, visible when that agent
     // is next opened.
-    if (!flightMoved()) await paintTalk(sentName, name);
+    if (!flightMoved()) {
+      await paintTalk(sentName, name);
+      // Put the keyboard back where it was. The button may not exist any more
+      // (an answered question takes the whole block), so the box is the
+      // fallback rather than an assumption.
+      if (sendHadFocus && !send.disabled) send.focus();
+      else if ((sendHadFocus || optHadFocus) && document.activeElement === document.body) say.focus();
+    }
     /* ⚠️ NOTHING IS RE-ENABLED WHEN THE FLIGHT MOVED. That button belongs to
        whichever agent is open now, and its own paint has already decided
        whether it may be pressed — an unconditional re-enable put a live Send

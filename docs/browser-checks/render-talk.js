@@ -136,8 +136,16 @@ const STATES = {
     await page.addInitScript(() => {
       window.__fx = null;
       const enc = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
-      window.fetch = async (url) => {
+      window.__posted = [];
+      window.fetch = async (url, opts) => {
         const u = String(url);
+        if (u.includes('/thread') && opts && opts.method === 'POST') {
+          window.__posted.push(JSON.parse(opts.body));
+          return enc(window.__postAnswer || {
+            delivery: { state: 'placed', because: null, at: '2026-08-19T12:00:00.000Z', paneNote: null },
+            recorded: true, recordedBecause: null,
+          });
+        }
         if (u.includes('/thread')) return enc(window.__fx);
         if (u.includes('/api/status')) return enc({ agents: [], version: '0.2.0' });
         return enc({});
@@ -242,6 +250,13 @@ const STATES = {
       if (name !== '4-failed' && m.qfail) {
         problems.push(`${tag}: the failure sentence is showing where nothing failed: ${JSON.stringify(m.qfail)}`);
       }
+      // ⚠️ The question's own two elements are read DIRECTLY, hidden or not:
+      // they were holding the last question's sentence on every idle state,
+      // which is one `hidden` away from one agent's question under another's
+      // name.
+      if (!fx.asking && m.qlab) {
+        problems.push(`${tag}: a question sentence is loaded while nothing is asking: ${JSON.stringify(m.qlab)}`);
+      }
       if (m.onTop !== 'the box') problems.push(`${tag}: something else is painted over the box: ${m.onTop}`);
       if (m.pageOverflow > 0) problems.push(`${tag}: the PAGE scrolls sideways by ${m.pageOverflow}px`);
       if (m.boxOverflow > 0) problems.push(`${tag}: the box overflows by ${m.boxOverflow}px`);
@@ -256,6 +271,62 @@ const STATES = {
         problems.push(`${tag}: a message bubble has NO background`);
       }
       console.log(tag, JSON.stringify(m));
+    }
+    /**
+     * WARNING: THE STATE SWEEP ABOVE ONLY LOOKS. Both of the worst defects this
+     * file has caught lived in what happens when a control is PRESSED -- a
+     * focus rescue that was dead code, and a poll that destroyed the button
+     * under the person's keyboard every five seconds. Neither is visible in a
+     * screenshot or a computed style. So this pass touches things.
+     */
+    {
+      const menu = STATES['1-menu'];
+      await page.evaluate((f) => {
+        window.__fx = f; window.__posted = [];
+        CURRENT = { sessionName: 'april', name: 'April' };
+        delete TALK_ANSWERED.april; delete TALK_FAILED.april;
+      }, menu);
+      await page.evaluate(() => paintTalk('april', 'April'));
+
+      // 1. A repaint with identical data must not take the keyboard away.
+      // ⚠️ THE SECOND BUTTON, deliberately: focusing the first made this pass
+      // against a rebuild that restored focus to whichever option came first,
+      // which moves somebody standing on "No" onto "Yes".
+      await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt')[1].focus());
+      const beforeId = await page.evaluate(() => document.activeElement.dataset.n || document.activeElement.tagName);
+      await page.evaluate(() => paintTalk('april', 'April'));
+      const afterId = await page.evaluate(() => document.activeElement.dataset.n || document.activeElement.tagName);
+      if (beforeId !== afterId) {
+        problems.push(`[${theme}] press: a repaint moved focus off the option button (${beforeId} -> ${afterId})`);
+      }
+
+      // 2. A press sends the digit AND the words, and does not strand focus.
+      await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt')[0].focus());
+      await page.click('#d-qopts .qopt');
+      await page.waitForFunction(() => window.__posted.length > 0, null, { timeout: 4000 });
+      const sent = await page.evaluate(() => window.__posted[0]);
+      if (sent.text !== '1' || sent.chose !== '14 days') {
+        problems.push(`[${theme}] press: the option sent ${JSON.stringify(sent)}, not the digit plus the words`);
+      }
+      const landed = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+      if (landed === 'BODY') {
+        problems.push(`[${theme}] press: focus was stranded on the document after answering`);
+      }
+
+      // 3. Send with the keyboard: the same rescue, from the other control.
+      await page.evaluate(() => {
+        window.__posted = [];
+        delete TALK_ANSWERED.april;
+        document.getElementById('d-say').value = 'typed by hand';
+      });
+      await page.evaluate(() => paintTalk('april', 'April'));
+      await page.evaluate(() => document.getElementById('d-send').focus());
+      await page.click('#d-send');
+      await page.waitForFunction(() => window.__posted.length > 0, null, { timeout: 4000 });
+      const landed2 = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+      if (landed2 === 'BODY') {
+        problems.push(`[${theme}] press: focus was stranded on the document after Send`);
+      }
     }
     await page.close();
   }

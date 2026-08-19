@@ -1644,9 +1644,18 @@ const server = http.createServer((req, res) => {
      * thread, while the POST 404s. That asymmetry is deliberate and it is the
      * commitments route's: a record stays READABLE for an agent that is not
      * running (that is what a record is for), and is not WRITABLE, because
-     * there is nothing to type into. It also means this route cannot be used
-     * as a which-names-exist oracle in the other direction: an unknown name
-     * and a stopped agent answer identically, which is the honest pair.
+     * there is nothing to type into.
+     *
+     * ⚠️ AND IT DOES NOT HIDE WHICH NAMES EXIST. An earlier version of this
+     * comment claimed it did — that an unknown name and a stopped agent
+     * "answer identically" — which is simply false: `presenceBecause` carries
+     * `addressable`'s own two sentences, and "we cannot see an agent by
+     * exactly this name" is plainly not "there is no Claude running in its
+     * window". The claim was never tested, and it was wrong. Nothing here is
+     * an authentication boundary (the whole app is an unauthenticated
+     * loopback server, as `start()` says at length), so this is recorded as
+     * what it is rather than defended: the route tells you whether a name is
+     * running, and so does every other route on this port.
      */
     if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
     // ⚠️ ONE roster read for the whole request, like every sibling: two
@@ -1825,16 +1834,20 @@ const server = http.createServer((req, res) => {
         let chose = (typeof body.chose === 'string' && !chat.messageProblem(body.chose))
           ? body.chose : null;
 
-        const roster = safeRoster();
-        // The write gate. `chat.deliver` refuses on its own too (addressable:
-        // exact match to permit, tied, and a pane with Claude in it) — this
-        // one is about the NAME, so a spelling nobody is running is refused
-        // before we type anything anywhere.
+        // The write gate FIRST, then the expensive look. `knownAgent` is a
+        // `list-panes`; `safeRoster` is that plus a `capture-pane` per agent —
+        // so ordering them the other way made a POST for a name nobody runs
+        // pay for the whole fan-out before its 404, against this route's own
+        // rule two blocks up that a message we would never send must not cost
+        // a tmux fan-out.
+        // (`chat.deliver` refuses on its own too — exact match to permit, tied,
+        // and a pane with Claude in it. This one is about the NAME.)
         if (!knownAgent(name)) {
           const missing = new Error('no agent by that name');
           missing.status = 404;
           throw missing;
         }
+        const roster = safeRoster();
         /**
          * ⚠️ THE WORDS ARE CHECKED AGAINST THE SCREEN WHERE WE CAN SEE IT.
          * `chose` arrives from the client, and it is the half of the pair the
@@ -1857,7 +1870,15 @@ const server = http.createServer((req, res) => {
           const asked = (seen && seen.text) ? chat.questionIn(seen.text) : null;
           const menu = asked ? chat.optionsIn(asked.text) : null;
           const row = menu ? menu.find((o) => String(o.n) === String(body.text).trim()) : null;
-          if (row && row.label !== chose) chose = null;
+          /**
+           * ⚠️ NO ROW IS THE CLEAREST CONTRADICTION, and the first version let
+           * it through: with a menu on screen and a `text` that is not one of
+           * its numbers ("7", or a sentence), there was no row to compare, so
+           * an unverified label was kept and stored as the bubble. That is
+           * exactly "words the visible screen contradicts". When a menu parses,
+           * the digit has to be in it.
+           */
+          if (menu && (!row || row.label !== chose)) chose = null;
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.
@@ -1870,11 +1891,13 @@ const server = http.createServer((req, res) => {
           at: delivery.at,
           delivery,
         });
+        // (No `agentsUnreadable`: nothing reads it here, and the GET on this
+        // same route deleted the identical field for the identical reason.
+        // One rule, both halves.)
         sendJson(res, 200, {
           delivery,
           recorded: kept.recorded === true,
           recordedBecause: kept.because || null,
-          agentsUnreadable: roster === null,
         });
       })
       .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),

@@ -880,8 +880,28 @@ function questionIn(text) {
  * question as it stands today. NEVER GUESS: an unparsed menu costs a person one
  * line of typing; a mis-parsed one answers for them.
  *
- * Confident means ALL of: the numbers run 1..n with no gap and no repeat, there
- * are between 2 and 9 of them, and every label has words in it.
+ * Confident means ALL of: the numbers run 1..n with no gap and no repeat; there
+ * are between 2 and 9 of them; they are CONSECUTIVE lines of the capture; and
+ * one of them carries the selection marker the TUI draws.
+ *
+ * WARNING: THE LAST TWO RULES ARE WHAT SEPARATE A MENU FROM PROSE, and without
+ * them this function was confidently wrong on ordinary agent output. Measured
+ * against the shipped version:
+ *
+ *   '1. Do X' + forty lines of anything + '2. Do Y'   -> a two-button menu
+ *   'Would you like to review the plan?
+ *     1. Delete the old build folder
+ *     2. Rebuild from scratch'                        -> a two-button menu
+ *
+ * The second is the dangerous one: `Would you like to` is itself a
+ * NEEDS_YOU_MARKER (engine/status.js), so `asking` is true for exactly that
+ * shape, and the page would have drawn a button that types `1` into a live
+ * pane and recorded that the person chose "Delete the old build folder".
+ *
+ * ADJACENCY says the lines belong to one list rather than being scattered
+ * through a paragraph. THE MARKER says a TUI drew it: every real menu this
+ * product meets highlights one row, and prose does not contain that glyph.
+ * Both refusals land on state 5, which is the screen this page shows today.
  *
  * ⚠️ THE REPEAT RULE IS DOING REAL WORK. A pane accumulates, so an ALREADY
  * ANSWERED menu can still be on screen above the live one — `questionIn` takes
@@ -907,22 +927,59 @@ function questionIn(text) {
  * Labels ride VERBATIM, which is the pack's rule: a button carries the option's
  * own words, not our summary of them.
  */
-const OPTION_LINE = /^(?:❯\s*)?(\d+)[.)]\s+(\S.*)$/;
+// One digit, 1-9, not `\d+`. The count is capped at 9 anyway, and `\d+`
+// accepted `01.` as option 1 through Number() -- a shape no menu draws and one
+// more way for prose to look like a list.
+const OPTION_LINE = /^(❯\s*)?([1-9])[.)]\s+(\S.*)$/;
 
 function optionsIn(questionText) {
   const whole = String(questionText == null ? '' : questionText);
   if (!whole.trim()) return null;
   const found = [];
-  for (const raw of whole.split('\n')) {
-    const line = raw.replace(/^[\s│|]+/, '').replace(/[\s│]+$/, '');
+  let marked = false;
+  const lines = whole.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].replace(/^[\s│|]+/, '').replace(/[\s│]+$/, '');
     const m = OPTION_LINE.exec(line);
     if (!m) continue;
-    found.push({ n: Number(m[1]), label: m[2] });
+    if (m[1]) marked = true;
+    found.push({ n: Number(m[2]), label: m[3], at: i });
   }
-  if (found.length < 2 || found.length > 9) return null;
+  if (found.length < 2) return null;
+  /**
+   * WARNING: A MENU LONGER THAN WE CAN READ IS REFUSED, not truncated.
+   *
+   * The pattern takes ONE digit, so a ten-option menu parses as nine and the
+   * tenth simply vanishes -- and nine buttons over a ten-option prompt is worse
+   * than none: it reads as the whole choice. So the line straight after the run
+   * is inspected, and any numbered continuation refuses the lot.
+   *
+   * (This replaced a `found.length > 9` test, which the one-digit pattern had
+   * made unreachable -- the same dead guard the empty-label note below
+   * describes, found the same way: by writing a case for it and watching it
+   * pass for another reason.)
+   */
+  const after = found.length ? lines[found[found.length - 1].at + 1] : undefined;
+  if (after !== undefined
+      && /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(after)) return null;
   for (let i = 0; i < found.length; i += 1) {
     if (found[i].n !== i + 1) return null;
+    // Consecutive lines of the capture: a list, not two sentences that happen
+    // to start with numbers.
+    if (i > 0 && found[i].at !== found[i - 1].at + 1) return null;
   }
+  // Somebody's TUI drew this. Prose does not carry a selection marker.
+  if (!marked) return null;
+  /**
+   * WARNING: A CONTROL CHARACTER REFUSES THE WHOLE MENU rather than one option.
+   * A label carrying one cannot be kept (`messageProblem` refuses it on the way
+   * into the record), so the button would send the digit and the bubble would
+   * silently degrade to a bare "1" -- the record describing a mechanism the
+   * person did not use. And a capture with escapes in it is not a screen we
+   * understand well enough to put buttons on.
+   */
+  if (found.some((o) => messageProblem(o.label))) return null;
+  found.forEach((o) => { delete o.at; });
   /**
    * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
    * than an oversight. One was written, and it could not fail: the pattern's

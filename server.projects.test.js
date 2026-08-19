@@ -2003,7 +2003,14 @@ test('the raw window is NOT served from this route, so engineering mode has noth
   try {
     await withAgent(fleet.agent('zeta', { state: 'idle' }), [said('a screen nobody asked this route for')],
       async () => {
-        const body = json(await req('/api/agent/zeta/thread'));
+        const res = await req('/api/agent/zeta/thread');
+        // ⚠️ THE CONTROL FIRST. Three `!('x' in body)` clauses are satisfied by
+        // `{error: …}` — so this test passed against a 404 or a 500, i.e.
+        // against a route broken in any way at all. Absence means nothing
+        // until something is present.
+        assert.equal(res.status, 200);
+        const body = json(res);
+        assert.ok('presence' in body && 'messages' in body, 'the payload really is the thread payload');
         assert.ok(!('viewport' in body), 'the thread route is serving a raw window again');
         assert.ok(!('agentsUnreadable' in body), 'presence already carries this fact');
         assert.ok(!('agent' in body), 'the page names the agent from the card it already holds');
@@ -2052,4 +2059,20 @@ test('a pane that has already moved on is not asked to prove what the person rea
       assert.equal(row.text, '14 days', 'the words the person read are kept');
       assert.equal(row.wire, '1', 'and the record still says what was typed');
     });
+});
+
+test('words are refused when the menu is readable and the digit is not on it', async () => {
+  reset();
+  // ⚠️ THE CASE THE FIRST GUARD MISSED. With a menu on screen and a `text`
+  // that is not one of its numbers, there was no row to compare against, so an
+  // unverified label was kept -- which is precisely "words the visible screen
+  // contradicts", the thing the guard exists for.
+  const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: '7', chose: '14 days' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    assert.equal(row.text, '7', 'the bubble shows what was really sent');
+    assert.equal(row.wire, null);
+  });
 });

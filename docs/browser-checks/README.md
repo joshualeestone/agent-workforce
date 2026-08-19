@@ -22,7 +22,7 @@ Everything in this directory is here because of defects that the 389 tests in
 
 - A variable read one line before it was declared, in the agent page's own
   thread paint. It threw a `ReferenceError` on **every** paint, so the box never
-  rendered at all — and **all 931 tests passed**, because the suite reads text
+  rendered at all — and **the entire suite passed**, because the suite reads text
   and nothing in it had ever put that page on a screen.
 
 The rule they encode: **a test that reads source is testing source.** For
