@@ -1677,3 +1677,68 @@ test('the birth splice never pushes a boot file past the size its own reader acc
   assert.ok(Buffer.byteLength(text, 'utf8') <= instructions.MAX_BYTES, 'the boot file outgrew its own reader');
   fs.rmSync(you.FILE, { force: true });
 });
+
+/**
+ * The model the job will start on, read back out of the job we wrote.
+ *
+ * ⚠️ A ROUND TRIP THROUGH THE REAL WRITER, not a hand-built plist. The reader
+ * takes the model from a fixed position in `ProgramArguments`, so a test that
+ * fed it a plist typed out here would be asserting my arithmetic against
+ * itself: add an argument to `plistFor` and both the product and the fixture
+ * shift, silently, together. Creating the agent for real is what makes the
+ * writer and the reader one contract with two ends.
+ */
+test('the planned model survives the round trip through the real job file', () => {
+  recorder();
+  create.setDryRun(false);
+  const r = create.createAgent({ ...BINS, name: 'plannedone', role: 'pm', model: 'opus' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  // The exact string `claude --model` is handed, not the key the route accepts:
+  // showing a person the key would show them "opus".
+  assert.equal(create.plannedModelArg('plannedone'), 'claude-opus-5');
+});
+
+/**
+ * ⚠️ THE CONTROL FOR THE TEST ABOVE. Without it, `plannedModelArg` could return
+ * a hardcoded string, or read the wrong index and happen to be right for one
+ * model, and both tests would pass. This asserts the value TRACKS the choice.
+ */
+test('a different choice comes back different, and every model in the list round-trips', () => {
+  recorder();
+  create.setDryRun(false);
+  for (const m of create.MODELS) {
+    const name = `rt${m.key}`;
+    const r = create.createAgent({ ...BINS, name, role: 'pm', model: m.key });
+    assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+    assert.equal(create.plannedModelArg(name), m.arg,
+      `${m.key} did not come back as the argument the job runs with`);
+  }
+});
+
+/**
+ * ⚠️ NULL MEANS WE DO NOT KNOW, AND THE THREE WAYS OF NOT KNOWING ALL HAVE TO
+ * REACH IT. A reader that returned the default model for a job that carries no
+ * model argument would put a confident sentence on the screen about an agent
+ * whose model nobody ever chose — the exact could-not-look versus is-not-there
+ * confusion this product refuses everywhere else.
+ */
+test('no job, no model argument, and an unreadable file all answer null', () => {
+  recorder();
+  create.setDryRun(false);
+
+  // 1. No job at all.
+  assert.equal(create.plannedModelArg('never-made-at-all'), null);
+
+  // 2. A job written without a model choice — the five-argument form every
+  //    agent created before the picker existed still runs.
+  const r = create.createAgent({ ...BINS, name: 'nomodelpick', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  const plist = fs.readFileSync(create.plistPath('nomodelpick'), 'utf8');
+  assert.ok(!/claude-(opus|sonnet|fable|haiku)/.test(plist),
+    'this agent was supposed to be created without a model choice');
+  assert.equal(create.plannedModelArg('nomodelpick'), null);
+
+  // 3. Present but unparseable.
+  fs.writeFileSync(create.plistPath('nomodelpick'), 'not a plist at all', 'utf8');
+  assert.equal(create.plannedModelArg('nomodelpick'), null);
+});

@@ -257,6 +257,51 @@ function serviceLabel(name) { return `com.kosmos.agent.${name}`; }
 function plistPath(name) { return path.join(AGENTS_DIR, `${serviceLabel(name)}.plist`); }
 
 /**
+ * The model an agent's launchd job will start it on, read back out of the job
+ * this module wrote.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE PRODUCT WAS THROWING THE ANSWER AWAY. The model a
+ * person picks at create time is written into `ProgramArguments` by `plistFor`
+ * and was then never read again: the screen asked a CLAUDE TRANSCRIPT instead,
+ * and that file does not exist until the agent has completed a session. So a
+ * freshly created agent reported "Unknown Model" — and because the context
+ * limit is looked up BY model, its memory went unknown in the same breath.
+ * Two blanks, one cause, on a fact that was on disk the whole time.
+ *
+ * ⚠️ IT READS OUR OWN FILE AND LIVES BESIDE `plistFor` FOR THAT REASON. The
+ * argument order is the supervisor's contract ($5 log, $6 model); a reader that
+ * knew that order from anywhere else would be a second definition of this
+ * format, free to drift from the writer the first time an argument is added.
+ * This module's own header names that habit as the source of its worst defects.
+ *
+ * ⚠️ THIS IS NOT THE SAME FACT AS THE RUNNING MODEL and must not be shown as
+ * one. It is what the job WILL start on; a transcript says what an agent
+ * actually ran as, and the two can disagree (a job edited by hand, a session
+ * started some other way). The caller decides the tense. Nothing here outranks
+ * a live reading.
+ *
+ * Returns the raw `--model` argument, or null when there is no job, when the
+ * job carries no model argument (every agent created before the picker
+ * existed), or when the file cannot be read. ⚠️ Null means WE DO NOT KNOW. It
+ * never means "the default".
+ */
+function plannedModelArg(name) {
+  let text;
+  try {
+    text = fs.readFileSync(plistPath(name), 'utf8');
+  } catch {
+    return null;
+  }
+  const block = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  if (!block) return null;
+  const args = [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1]));
+  // 0 bash, 1 supervisor, 2 name, 3 worker dir, 4 claude, 5 tmux, 6 log, 7 model.
+  // Anything shorter is the five-argument job an agent without a model choice
+  // gets, which is a real and permanent state rather than a malformed file.
+  return args.length > 7 && args[7] ? args[7] : null;
+}
+
+/**
  * Where the ONE supervisor lives, and how it gets there.
  *
  * ⚠️ It used to be GENERATED PER AGENT: each got its own 151-line copy under
@@ -363,6 +408,21 @@ function xml(value) {
     .split('&').join('&amp;')
     .split('<').join('&lt;')
     .split('>').join('&gt;');
+}
+
+/**
+ * The inverse of `xml`, for reading our own job files back.
+ *
+ * ⚠️ `&amp;` LAST, and that ordering is the whole correctness of it. Unescaping
+ * it first turns a literal `&amp;lt;` (which `xml` produced from the text
+ * "&lt;") into `<`, inventing markup that was never in the value. Every other
+ * entity has to be resolved before the ampersand that introduces it.
+ */
+function unxml(value) {
+  return String(value)
+    .split('&lt;').join('<')
+    .split('&gt;').join('>')
+    .split('&amp;').join('&');
 }
 
 /**
@@ -1091,6 +1151,7 @@ module.exports = {
   workerDir,
   instructionFile,
   plistPath,
+  plannedModelArg,
   setRunner,
   setDryRun,
   OUTCOME,
