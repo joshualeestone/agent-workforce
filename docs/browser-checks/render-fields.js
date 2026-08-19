@@ -111,21 +111,40 @@ async function measure(engine, scheme) {
         instructions: { state: 'unknown', editable: false } });
       grid.innerHTML = card(mk(null)) + card(mk(40));
     }
+    /* ⚠️ A "NEAREST ANCESTOR MATCHING X" QUERY CANNOT REPORT AN ABSENT X. It
+       finds the next match and succeeds, so a container that LOSES its paint
+       makes this function skip past it silently -- and the fields it was
+       flagging get measured against a different ancestor that happens to
+       differ from them. Demonstrated on the design pack: deleting `.dbox`'s
+       background turned four flagged fields into four clean ones. The broken
+       file scored HEALTHIER than the working one.
+
+       That is the same shape as the orphaned declaration this branch shipped,
+       where `#firstrun` lost its background to a parse error and no instrument
+       here could see it. So the chain is reported WHOLE, and any ancestor
+       carrying a known container class is required to paint. */
+    const CONTAINERS = ['dbox', 'pjcol', 'rm-box', 'rolepick', 'fr-box', 'acard', 'modalbox'];
     const ground = (el) => {
+      let first = null;
+      const mute = [];
       for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
         const bg = getComputedStyle(n).backgroundColor;
-        if (bg && bg !== 'rgba(0, 0, 0, 0)') {
-          return { bg, name: n.id ? '#' + n.id : '.' + String(n.className).split(' ')[0] };
+        const cls = String(n.className || '').split(' ');
+        const known = CONTAINERS.find((c) => cls.includes(c));
+        const paints = bg && bg !== 'rgba(0, 0, 0, 0)';
+        if (known && !paints) mute.push('.' + known);
+        if (paints && !first) {
+          first = { bg, name: n.id ? '#' + n.id : '.' + String(n.className).split(' ')[0] };
         }
       }
-      return { bg: null, name: '(page)' };
+      return first ? { ...first, mute } : { bg: null, name: '(page)', mute };
     };
     const fields = [...document.querySelectorAll(sel)].map((el) => {
       const c = getComputedStyle(el);
       const g = ground(el);
       return { id: el.id || el.tagName.toLowerCase(), tag: el.tagName.toLowerCase(),
         fill: c.backgroundColor, border: c.borderTopColor, appearance: c.appearance,
-        radius: c.borderTopLeftRadius, box: g.bg, boxName: g.name,
+        radius: c.borderTopLeftRadius, box: g.bg, boxName: g.name, mute: g.mute,
         arrows: (c.backgroundImage.match(/linear-gradient/g) || []).length };
     });
     // The unknown-memory caption must not paint over the presence dot.
@@ -200,6 +219,14 @@ async function measure(engine, scheme) {
         }
       }
       console.log(`  fields level with their container: ${level}`);
+
+      /* ⚠️ A CONTAINER THAT STOPPED PAINTING. Without this the check reads a
+         lost background as an improvement, because the field is then compared
+         against whatever ancestor paints next. */
+      const muted = new Set();
+      for (const f of r.fields) for (const m of (f.mute || [])) muted.add(m);
+      console.log(`  known containers painting nothing: ${muted.size}${muted.size ? ' — ' + [...muted].join(', ') : ''}`);
+      for (const m of muted) fail(`${engine}/${scheme} ${m} paints nothing, so every field inside it is being measured against some other ancestor`);
 
       /* ⚠️ BOTH REPORT UNCONDITIONALLY, AND A MISSING FIXTURE IS A FAILURE. These
          two used to be wrapped in `if (r.badgeHit)` / `if (r.listCell !== null)`,
