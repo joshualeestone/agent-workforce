@@ -1741,7 +1741,16 @@ svg { display: block; }
 #fr-dots { position: fixed; inset: 0; width: 100%; height: 100%; display: block;
            pointer-events: none; }
 .fr-box { position: relative; }
-.fr-back { position: fixed; inset: 0; background: var(--bg-sunken); z-index: 60;
+/* ⚠️ NO `background` HERE ANY MORE, and its absence is the point. `#firstrun` is
+   the only element wearing this class and its ID rule always won, so this
+   declaration never rendered -- EXCEPT when `#firstrun` lost its background to
+   an orphaned declaration, and then it painted the page-surround colour: a
+   plausible warm ground that read as a considered choice. A dead fallback
+   converted a loud failure into a quiet one and hid a blocker through two
+   review rounds. Removed rather than commented, per this codebase's own rule
+   about `.pjthread`: a rule that parses green and renders never is worse than
+   no rule. With it gone, the same defect renders transparent and is obvious. */
+.fr-back { position: fixed; inset: 0; z-index: 60;
            overflow-y: auto; display: flex; justify-content: center;
            padding: var(--space-8) var(--space-5); }
 /* ⚠️ `margin: auto`, NOT `align-items: center`. Centred that way, a card taller
@@ -2789,7 +2798,19 @@ svg { display: block; }
     <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
   </div>
 
-  <div class="cstep" id="cstep-made" hidden>
+  <!-- ⚠️ `dbox` CARRIES THE CARD, and `cstep` carries nothing at all. The pack
+       draws this screen as `<section class="dbox makestep">`, and stripping the
+       panel shell from `#panel-create` took the card off the OUTCOME screen as
+       well as the two form steps -- justified by "the create steps are form
+       fields, and the pack puts a form on the paper ground", which was never
+       true of this one. A justification that covered two of three was allowed
+       to cover all three.
+       ⚠️ `cstep` is a dead marker: these three are addressed by ID
+       (`getElementById('cstep-' + s)`), and no rule or selector reads the class.
+       Left in place because the pack styles it and the build does not -- a
+       PORTING GAP wearing the appearance of dead code, and deleting it would
+       remove the hook the missing rule attaches to. -->
+  <div class="cstep dbox" id="cstep-made" hidden>
     <h2 id="made-head">Making it</h2>
     <!-- ⚠️ Every line here is either something the engine reported or something
          this page watched happen. Nothing is asserted on a timer. -->
