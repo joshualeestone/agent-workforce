@@ -255,7 +255,54 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .frow { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
 .frow input[type=text] { flex: 1; min-width: 220px; font: var(--text-body) var(--font-ui);
                          padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-                         border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+                         border: 0.5px solid var(--border-strong); background: var(--bg-elevated); color: var(--label); }
+/* EVERY select on the page, because four of the six carried no styling at all
+   and the two that did rendered differently depending on the browser.
+
+   ⚠️ `appearance: none` IS THE LOAD-BEARING LINE, not the colours. MEASURED in
+   both engines (identical page, one select with the declared style, one with
+   `appearance: none` on top):
+
+     WebKit 26.5   radius 20px declared -> 5px RENDERED, padding not applied,
+                   native arrow drawn. Background and border ARE honoured.
+     Chromium 151  radius 20px, padding applied, everything honoured.
+
+   So a `menulist` select is styleable in Chromium and only partly styleable in
+   WebKit. Kosmos opens the DEFAULT browser (`/usr/bin/open`,
+   install/setup.sh), which on a stock Mac is Safari, so the engine that drops
+   half of it is the one most people meet first: beside a fully padded, fully
+   rounded text field, the same declaration reads as an undressed control.
+
+   ⚠️ THE INSTRUMENT WARNING IS THE PART TO KEEP. A Chromium screenshot renders
+   this control CORRECTLY, so the render harness passes it and the defect is
+   still on Josh's screen. `getComputedStyle` catches the radius (it reports the
+   clamped 5px) but reports the declared background either way. The reliable
+   check is a WebKit render, and `docs/browser-checks/` is Chromium by default.
+
+   The arrow is drawn here because removing the native appearance removes the
+   native arrow with it, and a select with no arrow reads as a text field.
+
+   ⚠️ IT IS TWO GRADIENTS RATHER THAN AN SVG DATA URI, and that is deliberate: a
+   data URI cannot read a CSS variable, so its colour would have to be restated
+   in the dark block, again under `prefers-contrast`, and again the day the
+   manual `data-theme` toggle lands (#40, which Josh has already asked for). A
+   gradient takes `var(--label-2)` directly and follows all three for free. The
+   alternative was a rule that silently stops matching its own palette. */
+select { font: var(--text-body) var(--font-ui); color: var(--label);
+         padding: var(--space-4) var(--space-5); padding-right: 2rem;
+         border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
+         appearance: none; -webkit-appearance: none;
+         background-color: var(--bg-elevated);
+         background-image: linear-gradient(45deg, transparent 50%, var(--label-2) 50%),
+                           linear-gradient(135deg, var(--label-2) 50%, transparent 50%);
+         background-position: right 1.05rem center, right 0.75rem center;
+         background-size: 5px 5px, 5px 5px;
+         background-repeat: no-repeat, no-repeat; }
+select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* Same width behaviour as the text input beside it: Josh asked for the model
+   picker to be wider, and "as wide as the field above it" is the version that
+   stays true when the panel resizes. */
+.frow select { flex: 1; min-width: 220px; }
 .btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
@@ -912,9 +959,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
-#pj-one-add { font: var(--text-body) var(--font-ui); color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* #pj-one-add sits in a `.frow`, so the shared `select` rule dresses it and
+   `.frow select` widths it. It used to restate both, in the page-ground colour
+   rather than the field colour, which is why it and #create-model looked like
+   two different controls. */
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
@@ -936,9 +984,8 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
   min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
 /* --- the thread --------------------------------------------------------- */
-#pj-thread-who { font: var(--text-body) var(--font-ui); color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* Same as #pj-one-add above: dressed by the shared `select` rule, widthed by
+   `.frow select`. */
 /* ⚠️ `overflow: auto` and NOT `white-space: pre-wrap`. A Claude permission
    prompt draws its options in columns, and wrapping them at the panel width
    turns the thing the person has to read into a jumble. The box scrolls
@@ -1096,10 +1143,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 }
 .rolepick { border: 1px solid var(--separator); border-radius: var(--radius-card);
   padding: 14px 16px 16px; background: var(--bg-elevated); margin-top: -2px; }
-.rolepick select { width: 100%; font: inherit; color: var(--label);
-  background: var(--bg-elevated); border: 1px solid var(--separator);
-  border-radius: var(--radius-control); padding: 7px 8px; }
-.rolepick select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* Width only. Everything else this used to restate (font, colour, background,
+   border, radius, padding) now lives on `select`, where it renders. Restating
+   it here is what made this control and #create-model drift apart in the first
+   place: two copies of one appearance, edited on different days. */
+.rolepick select { width: 100%; }
 .roledesc { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin: 9px 0 0; }
 /* The limit on a role that has one, read while choosing rather than discovered
    afterwards. Weight and a rule, never hue: it has to survive greyscale like
@@ -1139,8 +1187,9 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .ppick[aria-checked="true"] { border-color: var(--k-ink); box-shadow: inset 0 0 0 1px var(--k-ink); }
 .ppick[aria-checked="true"] .pickmark { color: var(--label); }
 .ppick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
-#create-model { font: inherit; color: var(--label); background: var(--bg-elevated);
-  border: 1px solid var(--separator); border-radius: var(--radius-control); padding: 7px 8px; }
+/* #create-model carries no rule of its own any more. It sits in a `.frow`, so it
+   takes the shared `select` appearance and the same flex width as the text
+   field above it, which is what Josh asked for when he called it unstyled. */
 
 .roledesc .caution, #pick-pm-desc .caution {
   display: block; margin-top: var(--space-3); padding-left: var(--space-4);
@@ -1318,9 +1367,15 @@ svg { display: block; }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
 .tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
-.tk-inp { display: block; width: 100%; margin-top: var(--space-3); font: inherit;
-          padding: .5em .65em; border: 1px solid var(--border-strong);
-          border-radius: var(--radius-control); background: var(--bg-elevated); color: var(--label); }
+/* ⚠️ Used on an input, a textarea AND a select, so it must not restate the
+   select appearance: the shared `select` rule handles that one, and a padding
+   restated here would put its label on top of the arrow. What is left is the
+   block layout the modal needs, plus the input/textarea skin. */
+.tk-inp { display: block; width: 100%; margin-top: var(--space-3);
+          font: var(--text-body) var(--font-ui);
+          border-radius: var(--radius-control); color: var(--label); }
+.tk-inp:not(select) { padding: var(--space-4) var(--space-5);
+          border: 0.5px solid var(--border-strong); background: var(--bg-elevated); }
 .rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
@@ -1568,7 +1623,7 @@ svg { display: block; }
 .fr-youfield input[type=text], .fr-youfield textarea {
   width: 100%; box-sizing: border-box; font: var(--text-body) var(--font-ui);
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+  border: 0.5px solid var(--border-strong); background: var(--bg-elevated); color: var(--label); }
 .fr-youfine { font: var(--text-caption) var(--font-ui); color: var(--label-3);
               margin-top: var(--space-5); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
