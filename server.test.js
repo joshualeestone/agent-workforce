@@ -5995,11 +5995,11 @@ test('the settings members wiring is real, not just extractable', () => {
   assert.ok(pageFnSource('paintProjectSettings').includes("getElementById('pjs-members-msg').textContent = ''"),
     'the entry-clear for the members verdict is gone (the persisted-half misattribution returns)');
 
-  // Her ruled copy, the WHOLE sentence (whitespace-normalized past the
-  // source line wrap; a half-pinned sentence lets the second half drift).
+  // The explanatory sentence is CUT (Josh, 2026-08-18 10:07 PM): the
+  // survival reassurance lives in the removal announcement at act time.
   const flat = raw.replace(/\s+/g, ' ');
-  assert.ok(flat.includes('Who is on this project. Removing an agent takes it off this project only: it stays on your computer, and you can add it back whenever.'),
-    "the members section lost Mona Lisa's ruled sentence");
+  assert.ok(!flat.includes('Who is on this project. Removing an agent takes it off'),
+    'the cut members hint came back');
   // The painter must repaint through setIfChanged: the unit test stubs
   // it, so only a source pin catches a regression to bare innerHTML
   // (which would steal keyboard focus from the rows every five seconds).
@@ -6330,4 +6330,67 @@ test('the centred quiet button is the pack rule, pinned', () => {
   const rule = raw.slice(at, raw.indexOf('}', at));
   assert.ok(rule.includes('justify-content: center'),
     'btn-quiet lost its centring; labels left-pack at full width again');
+});
+
+/* ---------------------------------------------------------------------------
+ * room-search: the conversation filter, its wiring, and the removal
+ * announcement.
+ * ------------------------------------------------------------------------ */
+
+test('the conversation filter matches what a row shows, and only that', () => {
+  const filter = pageFunction('pjRoomFilterRows',
+    'const pjNameOf = (p, from) => (p.names && p.names[from]) || from;\n');
+  const p = { names: { leo: 'Leo' } };
+  const rows = [
+    { id: 'm1', from: 'leo', text: 'The link is stable now.' },
+    { id: 'm2', operator: true, from: 'you', text: 'Cut it to four emails.' },
+    { kind: 'valve', because: 'mikey and leo have been going back and forth without landing.' },
+  ];
+  // Empty query: passthrough, byte-identical list.
+  assert.deepEqual(filter(rows, p, ''), rows);
+  assert.deepEqual(filter(rows, p, '   '), rows);
+  // Text match, case-folded.
+  assert.deepEqual(filter(rows, p, 'STABLE').map((r) => r.id), ['m1']);
+  // Sender display-name match (the resolved name, not the session key).
+  assert.deepEqual(filter(rows, p, 'leo').map((r) => r.id || 'valve'), ['m1', 'valve']);
+  // The operator's rows answer to "you".
+  assert.deepEqual(filter(rows, p, 'you').map((r) => r.id), ['m2']);
+  // Valve bands match on their sentence.
+  assert.equal(filter(rows, p, 'without landing').length, 1);
+  // No match: empty, never a throw.
+  assert.deepEqual(filter(rows, p, 'zzz-not-here'), []);
+});
+
+test('the search is wired: pack markup verbatim, instant repaint, reset on switch, no scroll while filtering', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // The pack's control (18e), placeholder and aria pair verbatim.
+  assert.ok(raw.includes('placeholder="Search this conversation" aria-label="Search this conversation"'),
+    "the search input lost the pack's words");
+  assert.ok(raw.includes('.tsearch { display: flex; align-items: center; gap: 6px; flex: 0 1 15rem; min-width: 0;'),
+    "the tsearch rule drifted from the pack's values");
+  // The wiring: input handler repaints from the cached body; the query
+  // resets on project open; a filtered paint never scrolls.
+  assert.ok(raw.includes("document.getElementById('pj-room-search').addEventListener('input'"),
+    'the search input drives nothing');
+  const paint = pageFnSource('paintRoom');
+  assert.ok(paint.includes('pjRoomFilterRows('), 'paintRoom no longer filters');
+  assert.ok(paint.includes('if (!filtering) box.scrollTop'), 'a filtered paint scrolls the reader to the tail');
+  assert.ok(raw.includes("PJ_ROOM_QUERY = '';"), 'the query does not reset on project switch');
+  // The no-match state is its own sentence, never the empty-room copy.
+  assert.ok(paint.includes('No posts match.'), 'the no-match state lost its sentence');
+});
+
+test("the removal announcement is her sentence, on both verdict arms", () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const handlerSrc = raw.slice(raw.indexOf("document.getElementById('pjs-members').addEventListener"));
+  const handler = handlerSrc.slice(0, handlerSrc.indexOf('\n});') + 4);
+  // Success speaks her sentence; could_not opens with it then warns.
+  assert.ok(handler.split("is off this project and still on your computer.").length >= 3,
+    "an arm of the handler lost her ruled sentence");
+  assert.ok(!handler.includes('Taken off'),
+    'the struck phrase returned to the announcement');
+  // The name is captured BEFORE the awaits (the success repaint removes
+  // the row; reading it later reads a detached node).
+  assert.ok(handler.indexOf('const who =') < handler.indexOf('await fetch'),
+    'the display name is read after the repaint could detach it');
 });

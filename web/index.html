@@ -824,6 +824,16 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .msg-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .msg-h b { font-size: .9375rem; }
 .msg-t { font-size: .75rem; color: var(--k-ink-2); }
+/* The conversation search (18e:380-386, verbatim): the header is a row so
+   the box locks right without the title moving. */
+.pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tsearch { display: flex; align-items: center; gap: 6px; flex: 0 1 15rem; min-width: 0;
+  border: 1px solid var(--k-rule); border-radius: 8px; padding: 4px 9px; background: var(--k-surface); }
+.tsearch:focus-within { border-color: var(--k-ink-2); }
+.tsearch-i { display: grid; place-items: center; color: var(--k-ink-2); flex: 0 0 auto; }
+.tsearch input { flex: 1 1 auto; min-width: 0; border: 0; background: none; font: inherit;
+  font-size: .8125rem; color: var(--k-ink); padding: 3px 0; }
+.tsearch input:focus { outline: none; }
 .msg p { margin: 0; font-size: .9375rem; line-height: 1.55; color: var(--k-ink); overflow-wrap: anywhere; }
 .msg.you p { color: var(--k-ink-2); }
 /* ⚠️ THREE DELIVERY STATES, NEVER TWO (the pack's own warning kept
@@ -2514,7 +2524,14 @@ svg { display: block; }
     </aside>
 
     <section class="pjcol pjmid">
-      <div class="pjmidhead"><span class="flabel">Conversation</span></div>
+      <div class="pjmidhead"><span class="flabel">Conversation</span>
+        <div class="tsearch">
+          <span class="tsearch-i" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </span>
+          <input type="search" id="pj-room-search" placeholder="Search this conversation" aria-label="Search this conversation">
+        </div>
+      </div>
       <!-- THE ROOM (View D): this project's thread, drawn from the record
            by project alone. Every post carries who said it; posts you make
            here go to EVERYONE on the project, @-mentions arrive as
@@ -2696,13 +2713,11 @@ svg { display: block; }
 
     <div class="field">
       <span class="flabel">Project members</span>
-      <!-- 18e's section (sha c69afdb2...), the build's field idiom. Her
-           copy verbatim; the light direct DELETE moves AS-IS from the
-           members column (recoverable in two clicks, so no modal grown:
-           weighting it like Remove from Kosmos would teach clicking
-           through both). -->
-      <p class="fhint">Who is on this project. Removing an agent takes it off this project
-         only: it stays on your computer, and you can add it back whenever.</p>
+      <!-- 18e's section (sha c69afdb2...), the build's field idiom. The
+           explanatory sentence was CUT (Josh, 2026-08-18 10:07 PM); the
+           survival reassurance lives in the removal announcement at the
+           moment of the act instead. Light direct DELETE, no modal:
+           recoverable in two clicks. -->
       <div class="pj-members" id="pjs-members"></div>
       <p class="fmsg" id="pjs-members-msg" aria-live="polite" tabindex="-1"></p>
     </div>
@@ -8376,6 +8391,11 @@ function openProject(id) {
     document.getElementById('pj-room-msg').textContent = '';
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
+    roomBox.__lastBody = undefined;
+    // A query is a reading posture, not project state: carried across
+    // projects it would hide another room's posts silently.
+    PJ_ROOM_QUERY = '';
+    document.getElementById('pj-room-search').value = '';
     /* The scroll key too: left standing, a quick A-to-B-to-A (B's fetch
        failed or still in flight) re-enters A with the key already equal,
        skips the scroll branch, and lands the reader on the OLDEST post. */
@@ -8480,11 +8500,32 @@ function pjRoomRow(m, p) {
     + '<p>' + esc(m.text || '') + '</p>' + receipt + '</div></div>';
 }
 
+/**
+ * The conversation filter: case-insensitive substring over what a row
+ * SHOWS -- the sender's display name and the text (valve bands match on
+ * their sentence). Pure so it is testable; it searches what the room
+ * holds, no server round trip, no new claims.
+ */
+function pjRoomFilterRows(rows, p, q) {
+  const needle = String(q == null ? '' : q).trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter((m) => {
+    const who = m.operator === true ? 'you' : (pjNameOf(p, m.from) || m.from || '');
+    const text = (m.kind === 'valve') ? (m.because || '') : (m.text || '');
+    return String(who).toLowerCase().includes(needle)
+      || String(text).toLowerCase().includes(needle);
+  });
+}
+
+let PJ_ROOM_QUERY = '';
 function paintRoom(body) {
   const p = pjById(PJ_CURRENT);
   if (!p) return;
   const box = document.getElementById('pj-room');
-  const rows = (body.rows || []).map((m) => pjRoomRow(m, p)).join('');
+  const allRows = body.rows || [];
+  const shown = pjRoomFilterRows(allRows, p, PJ_ROOM_QUERY);
+  const filtering = PJ_ROOM_QUERY.trim() !== '';
+  const rows = shown.map((m) => pjRoomRow(m, p)).join('');
   /* An unreadable record is SAID, ahead of whatever could be read --
      no-state-as-silence, the same rule as every list on this app. */
   const note = body.ok === false
@@ -8492,10 +8533,16 @@ function paintRoom(body) {
   /* "Could not look" is never "nothing here": with the record unreadable
      and nothing parsed, only the note renders -- the affirmative empty
      claim would be the unreadable-as-empty defect. */
+  // A no-match FILTER state is its own sentence, never the room's
+  // nothing-here copy: an empty search result must not read as an empty
+  // room (the room may hold plenty). Draft copy MINE, flagged for Mona
+  // Lisa's pass.
   const empty = body.ok === false ? ''
-    : ((p.agents || []).length
-      ? '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>'
-      : '<p class="fhint" style="margin:0;">Put an agent on this project and the room opens.</p>');
+    : (filtering && allRows.length
+      ? '<p class="fhint" style="margin:0;">No posts match.</p>'
+      : ((p.agents || []).length
+        ? '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>'
+        : '<p class="fhint" style="margin:0;">Put an agent on this project and the room opens.</p>'));
   const html = note + (rows || empty);
   if (box.__lastRoom !== html) {
     box.__lastRoom = html;
@@ -8503,14 +8550,25 @@ function paintRoom(body) {
     /* Scrolled only when the POSTS changed, not on a relabel: pjWhen
        re-words every minute, and yanking a person who scrolled up to
        read history to the bottom on a poll tick is the poll fighting
-       the reader. */
-    const key = (body.rows || []).map((m) => m.id || m.at).join('\u0000');
+       the reader. A FILTERED paint never scrolls at all: the person is
+       reading, not following the live tail (clearing the filter
+       restores the newest-post scroll through the key change). */
+    const key = PJ_ROOM_QUERY + '\u0000' + (body.rows || []).map((m) => m.id || m.at).join('\u0000');
     if (box.__lastRoomKey !== key) {
       box.__lastRoomKey = key;
-      box.scrollTop = box.scrollHeight;
+      if (!filtering) box.scrollTop = box.scrollHeight;
     }
   }
 }
+/* The search input repaints from the cached body (loadRoom keeps it on
+   the box) so typing filters instantly between polls; the query resets
+   on project switch (a reading posture, not project state -- carried
+   across projects it would hide another room's posts silently). */
+document.getElementById('pj-room-search').addEventListener('input', () => {
+  PJ_ROOM_QUERY = document.getElementById('pj-room-search').value;
+  const box = document.getElementById('pj-room');
+  if (box.__lastBody) paintRoom(box.__lastBody);
+});
 
 async function loadRoom() {
   const p = pjById(PJ_CURRENT);
@@ -8532,6 +8590,7 @@ async function loadRoom() {
   }
   const msg = document.getElementById('pj-room-msg');
   if (msg.textContent === 'We cannot read this room right now. What is shown may be behind.') msg.textContent = '';
+  document.getElementById('pj-room').__lastBody = body;
   paintRoom(body);
 }
 
@@ -10047,6 +10106,10 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
   // roster -- the in-flight half of the same misattribution the
   // entry-clear above fixes for the persisted half.
   const sentProject = PJ_CURRENT;
+  // The display name is captured BEFORE the awaits: the success repaint
+  // removes the row, and reading it later would read a detached node.
+  const who = (btn.closest('.pj-member') && btn.closest('.pj-member').querySelector('b'))
+    ? btn.closest('.pj-member').querySelector('b').textContent : btn.dataset.drop;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(sentProject) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
     const body = await res.json();
@@ -10067,11 +10130,20 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
     // and wiped by the entry-clear -- told, and the answer dropped.
     const target = document.getElementById('pj-settings-view').hidden
       ? document.getElementById('pj-one-msg') : msg;
+    // Her ruled sentence (2026-08-18 10:07 PM), visible text and aria-live
+    // in one element at one moment: names the agent, states the RESULTING
+    // state, carries the survival fact -- which lives only here now that
+    // the section hint is cut; the vague two-word phrase she struck this
+    // afternoon does not appear. The could_not arm opens with the same sentence, then
+    // the instruction-write warning (composition mine, following her
+    // pattern; flagged for her pass).
     if (body.told && body.told.state === 'could_not') {
       // The engine's clause becomes its own sentence via pjSentence rather
       // than being spliced mid-sentence with hand punctuation (round 24).
-      target.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
+      target.textContent = who + ' is off this project and still on your computer. We could not update its instructions, so it may still mention this project when it next starts. '
         + pjSentence(body.told.because);
+    } else {
+      target.textContent = who + ' is off this project and still on your computer.';
     }
     // The clicked button died with the repaint; the keyboard lands on the
     // verdict element rather than <body> (the pjCloseConfirm pattern) --
