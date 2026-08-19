@@ -138,7 +138,18 @@ async function measure(engine, scheme) {
       const box = document.createElement('div');
       box.innerHTML = html;
       const pct = box.querySelector('.pct');
-      listCell = pct ? pct.textContent.trim() : null;
+      if (pct) {
+        /* ⚠️ VISIBLE TEXT ONLY. Reading `textContent` counts the `.vh`
+           screen-reader span, so a cell containing ONLY hidden words scores as
+           populated -- which is the exact defect this check exists to catch,
+           and the mutation run proved it: blanking the visible cell left this
+           reporting "memory unknown" and passing. The same mistake as asserting
+           /Memory unknown/ against markup where a ring's aria-label already
+           said it. Strip the hidden nodes, then read what is left. */
+        const vis = pct.cloneNode(true);
+        vis.querySelectorAll('.vh').forEach((n) => n.remove());
+        listCell = vis.textContent.trim();
+      }
     }
     return { fields, badgeHit, listCell };
   }, FIELDS);
