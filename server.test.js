@@ -6634,9 +6634,28 @@ test('a parsed role is sentence-cased and an acronym survives it', () => {
 test('the Runs on line says which tense it is in, and a live model always wins', () => {
   const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine'));
 
-  assert.deepEqual(runsOnLine({ modelName: 'Claude Sonnet 5' }),
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Sonnet 5', state: 'working' }),
     { lead: 'Right now: ', name: 'Claude Sonnet 5' },
     'a running agent stopped saying it is running');
+
+  // ⚠️ THE THIRD FALSE TENSE, and the one the suite could not see. `readModel`
+  // reads a TRANSCRIPT, not a process, so a STOPPED agent that has ever run
+  // still has a model — and this said "Right now: Claude Opus 5" beside a card
+  // badge reading "Not running". Every earlier version of this test passed
+  // `modelName` with `state` ABSENT, which is a state the product never
+  // produces, so the case was invisible rather than passing.
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Opus 5', state: 'stopped' }),
+    { lead: 'Will start on ', name: 'Claude Opus 5' },
+    'a stopped agent was described in the present tense, on the strength of a '
+    + 'transcript from a session that has ended');
+
+  // ⚠️ CONTROL: every state that is NOT stopped keeps the present tense when a
+  // live model was read. Without this, gating on `state === 'stopped'` could be
+  // inverted and the assertion above would still pass.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'unknown']) {
+    assert.equal(runsOnLine({ modelName: 'Claude Opus 5', state }).lead, 'Right now: ',
+      `a ${state} agent with a readable model stopped saying it is running`);
+  }
 
   assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
     { lead: 'Will start on ', name: 'Claude Sonnet 5' },

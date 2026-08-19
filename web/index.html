@@ -127,12 +127,22 @@ body {
      which is the pack's `--page-bg`: the colour of the page the MOCK SITS ON,
      behind the app. Using it here painted the product in the shade reserved
      for what is behind the product, which is why two separate screens read as
-     the wrong colour beside the pack. `--bg` is already the pack's `--k-bg`
-     (`#faf9f7`) and is what `.appstage` uses there.
+     the wrong colour beside the pack.
+     ⚠️ `--k-bg`, NOT `--bg`, and the difference is invisible in light. This
+     said `--bg` on the reasoning that it "is already the pack's --k-bg
+     (#faf9f7)" — TRUE IN LIGHT ONLY. In dark `--bg` is #1c1c1e while `--k-bg`
+     is #0c0d0f, so cards (`--k-surface` #17191c) rendered DARKER than the page
+     they sit on, inverting the elevation the whole layout depends on, and
+     `.apphead` (which paints `--k-bg`) became a darker band over its own page.
+     The light-mode result is byte-identical; only dark changes.
+     ⚠️ The same two-token-systems hazard this file records above `.dhead`, and
+     the same shape as reading `--bg-elevated` onto a form control: a token
+     equality asserted from a light-mode reading, of two systems that flip
+     independently.
      ⚠️ The token itself is NOT repointed: ten other rules use `--bg-sunken`
      for what it actually means, a surface recessed INSIDE a card, and they are
      right. The name was fine and the noun it was pointed at was not. */
-  background: var(--bg); color: var(--label);
+  background: var(--k-bg); color: var(--label);
   padding: var(--space-8) var(--space-8) 64px;
 }
 
@@ -240,8 +250,15 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail .dbox .flabel, .detail .dbox .fhint, .detail .dbox .fmsg, .detail .dbox .fpath { color: var(--k-ink-2); }
 .detail .dbox .flabel { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase;
   font-weight: 700; margin-bottom: 8px; }
+/* ⚠️ `--border-strong`, not `--k-rule`. MEASURED with the alpha composited:
+   --k-rule gives 1.31:1 light / 1.27:1 dark against this box; --border-strong
+   gives 1.77 / 2.35. WCAG 1.4.11 wants 3:1 for a component boundary and NEITHER
+   reaches it (recorded as a product-wide gap, not solved here) — but this rule
+   was leaving one field a third weaker than its six neighbours for no reason.
+   The fill stays `--k-bg`: same token system as the surface, recessed in both
+   schemes. */
 .detail .dbox input[type=text], .detail .dbox textarea {
-  background: var(--k-bg); border: 1px solid var(--k-rule); color: var(--k-ink); }
+  background: var(--k-bg); border: 1px solid var(--border-strong); color: var(--k-ink); }
 .detail .dbox .btn { background: var(--k-surface); border: 1px solid var(--k-rule); color: var(--k-ink); }
 .detail .dbox .btn:hover { background: rgba(198,154,50,.14); }
 .detail .dbox .btn:disabled:hover { background: var(--k-surface); }
@@ -339,10 +356,38 @@ select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
    in light mode and diverge in dark, which is why it looked fine at a glance.
    `.detail .dbox input[type=text]` already solved this with `--k-bg`; the
    selects now match their neighbours rather than the page. */
+.dbox select, .pjcol select,
+.dbox input[type=text], .dbox textarea,
+.pjcol input[type=text], .pjcol textarea,
+.composer input[type=text] {
+  background-color: var(--k-bg); color: var(--k-ink);
+}
+/* ⚠️ THE BORDER IS NOT OVERRIDDEN, and an earlier version of this rule did
+   override it to `--k-rule` for token-system tidiness. MEASURED, with the alpha
+   composited (the first measurement dropped it and reported 18:1):
+
+     --border-strong   1.77:1 light   2.35:1 dark
+     --k-rule          1.31:1 light   1.27:1 dark
+
+   ⚠️ WCAG 1.4.11 asks 3:1 for a component's boundary and NEITHER clears it —
+   this is a pre-existing, product-wide gap, recorded rather than solved here.
+   But `--k-rule` is materially worse, and swapping to it traded the stronger
+   channel for a recessed fill worth 1.10:1, which is a hint and not a boundary.
+   `--border-strong` is alpha-based, so it composites correctly on any ground and
+   is consistent across schemes, which is the property that matters. */
 .dbox select, .pjcol select {
-  background-color: var(--k-bg); border-color: var(--k-rule); color: var(--k-ink);
   background-image: linear-gradient(45deg, transparent 50%, var(--k-ink-2) 50%),
                     linear-gradient(135deg, var(--k-ink-2) 50%, transparent 50%);
+}
+/* `#pj-post` had NO rule at all: the build carries `.composer input { flex: 1;
+   min-width: 10rem }`, which is the pack's `.composer .inp` rule with the class
+   filed off — it took the WIDTH and left the SKIN behind, and there is no `.inp`
+   here to supply it. Browser-default white in both schemes since it was ported. */
+.composer input[type=text] {
+  font: var(--text-body) var(--font-ui);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-control);
+  border: 0.5px solid var(--border-strong);
 }
 /* Same width behaviour as the text input beside it: Josh asked for the model
    picker to be wider, and "as wide as the field above it" is the version that
@@ -3416,7 +3461,16 @@ function runsOnLine(a) {
      quotes it. `modelLine` already falls back to the planned name, so this only
      has to decide the LEAD. */
   const name = modelLine(a);
-  if (a.modelName) return { lead: 'Right now: ', name };
+  /* ⚠️ `state` GATES THIS BRANCH TOO, and leaving it off made this the THIRD
+     false tense in one day. `readModel` reads a TRANSCRIPT, not a process: a
+     STOPPED agent that has ever run still has one, so `modelName` is present
+     and this said "Right now: Claude Opus 5" beside a badge reading "Not
+     running". The third branch below already argues the point — "nothing is
+     running in that case either" — and this branch ignored the same evidence. */
+  if (a.modelName && a.state !== 'stopped') return { lead: 'Right now: ', name };
+  /* Stopped, but we did read what it ran as. That is what it WILL start on
+     again: the job is unchanged, and it is the more precise of the two facts. */
+  if (a.modelName) return { lead: 'Will start on ', name };
   /* ⚠️ "NOT RUNNING" IS `state`, NOT "we could not read a model", and getting
      that wrong made this the mirror of the bug it was written to remove.
      `readModel` returns null whenever there is no transcript — and an agent in
@@ -3691,7 +3745,12 @@ function card(a) {
      ordering it this way means the severity badge cannot be reached by an
      unknown, whatever pctOf later returns. */
   const badge = pct === null
-    ? '<span class="membadge unk">Memory unknown</span>'
+    /* ⚠️ `aria-hidden`: the ring's aria-label already says "Memory unknown: we
+       could not read how full it is." — the fuller sentence and the
+       authoritative one. Without this a screen reader says it twice per card.
+       The gap this badge closes was always the SIGHTED half. (Mona Lisa,
+       2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
+    ? '<span class="membadge unk" aria-hidden="true">Memory unknown</span>'
     : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
