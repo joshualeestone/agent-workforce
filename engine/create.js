@@ -264,9 +264,14 @@ function plistPath(name) { return path.join(AGENTS_DIR, `${serviceLabel(name)}.p
  * person picks at create time is written into `ProgramArguments` by `plistFor`
  * and was then never read again: the screen asked a CLAUDE TRANSCRIPT instead,
  * and that file does not exist until the agent has completed a session. So a
- * freshly created agent reported "Unknown Model" — and because the context
- * limit is looked up BY model, its memory went unknown in the same breath.
- * Two blanks, one cause, on a fact that was on disk the whole time.
+ * freshly created agent reported "Unknown Model" on a fact that was on disk
+ * the whole time.
+ *
+ * ⚠️ IT DOES NOT FIX THE MEMORY RING, and an earlier version of this comment
+ * implied it did. The context limit is looked up BY model, so the two blanks
+ * share a cause — but with no transcript there is no numerator either, so
+ * `context.percent` stays null whatever the model is. This closes one blank.
+ * The other needs a reading that does not exist yet.
  *
  * ⚠️ IT READS OUR OWN FILE AND LIVES BESIDE `plistFor` FOR THAT REASON. The
  * argument order is the supervisor's contract ($5 log, $6 model); a reader that

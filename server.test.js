@@ -6728,3 +6728,37 @@ test('a card names a planned model plainly, while the detail panel keeps its ten
     { lead: 'Will start on ', name: 'Claude Sonnet 5' },
     'the detail panel lost its tense when modelLine gained the fallback');
 });
+
+/**
+ * The detail page's box order, pinned.
+ *
+ * ⚠️ THIS IS A GUARD, NOT A RE-VERIFICATION. The order was checked by rendering
+ * the page and sorting the boxes by geometry, which proved it correct on one
+ * afternoon and proves nothing afterwards: a verification is a timestamp. The
+ * next person to insert a `.dbox` shifts every pair below it silently, and this
+ * exact order is the thing Josh reported as wrong.
+ *
+ * ⚠️ SOURCE ORDER IS THE RIGHT THING TO PIN HERE even though it is NOT the
+ * reading order. `.dgrid` is two columns, so the rendered sequence is the source
+ * sequence read in pairs — a stable function of it. Pinning source order pins
+ * reading order for as long as the grid stays two-wide, and a change to the
+ * column count is exactly the kind of change that should have to come here and
+ * say so.
+ */
+test('the agent detail boxes stay in the order Josh asked for', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const panel = raw.slice(raw.indexOf('<section class="detail" id="panel-detail"'));
+  const grid = panel.slice(panel.indexOf('<div class="dgrid">'));
+  const labels = [...grid.matchAll(/<section class="dbox"[^>]*>[\s\S]*?<(?:h3 class="dlab"[^>]*|label class="flabel"[^>]*)>([^<]+)</g)]
+    .map((m) => m[1].trim());
+  assert.deepEqual(labels.slice(0, 4), ['Runs on', 'Memory', 'Conversation', 'Instructions'],
+    'the detail boxes moved. Two columns means these four render as '
+    + 'Runs on | Memory then Conversation | Instructions, which is what Josh '
+    + 'asked for and what the pack draws');
+  // ⚠️ The control: if the extraction silently matched nothing, slice(0,4) would
+  // be [] and deepEqual against a 4-element array would fail — but if it matched
+  // the WRONG four (a different grid on the page) it would not. Anchor it.
+  assert.ok(labels.length >= 5,
+    'the box extraction found fewer sections than the panel has, so it is '
+    + 'reading the wrong markup and the assertion above is meaningless');
+});
