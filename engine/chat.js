@@ -1067,6 +1067,27 @@ function optionsIn(questionText) {
    * pass for another reason.)
    */
   const lastRun = found[found.length - 1];
+  /**
+   * WARNING: THE LAST OPTION'S LABEL IS WHAT FITS ON ITS OWN LINE.
+   *
+   * Fullness stops a footer being folded onto a SHORT option. It does not stop
+   * one being folded onto a long option that genuinely wrapped, because that
+   * parent really did run out of room:
+   *
+   *     3. No, and tell Claude what to do differently, then stop here
+   *        esc to cancel        -> "…then stop here esc to cancel"
+   *
+   * Between two options we can tell the difference, because a continuation is
+   * followed by the next option. After the LAST one there is nothing to tell it
+   * apart from a footer, a hint line, or anything else the box puts at the
+   * bottom -- and that corruption is STATIC, so the server's re-read parses it
+   * the same way and the check meant to catch a lying label agrees with it.
+   *
+   * So the menu is refused rather than guessed at. The cost is real and
+   * accepted: at narrow pane widths, where the last option wraps, this page
+   * shows the question with no buttons. That is the screen it shows today.
+   */
+  if (lastRun.wrapped > 0) return null;
   const after = lines[lastRun.at + lastRun.wrapped + 1];
   /**
    * WARNING: THE LAST OPTION GETS THE SAME TEST AS THE OTHERS, and it did not.

@@ -2102,13 +2102,23 @@ test('the LAST option gets the same over-wrap test as every other one', () => {
     '     look at the file myself', '  2. Yes'].join('\n');
   assert.equal(chat.optionsIn(middleOverWraps), null);
 
-  // And the control on the other side: a label that fits inside the cap is
-  // still read, whole and verbatim.
-  const fits = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
-    '  2. No, and tell Claude what', '     to do differently, then',
-    '     stop and wait'].join('\n'));
-  assert.equal(fits.length, 2);
-  assert.equal(fits[1].label, 'No, and tell Claude what to do differently, then stop and wait');
+  // ⚠️ AND THE LAST OPTION NO LONGER WRAPS AT ALL, which supersedes an earlier
+  // version of this test. Between two options a continuation is followed by the
+  // next option and can be told apart from anything else; after the last one
+  // there is nothing to distinguish a wrap from a footer or a hint line, and
+  // that corruption is STATIC -- so the server's re-read parses it identically
+  // and the check meant to catch a lying label agrees with it.
+  const lastWrapsOnce = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
+    '  2. No, and tell Claude what', '     to do differently'].join('\n'));
+  assert.equal(lastWrapsOnce, null, 'a wrapped LAST label is refused, not guessed at');
+
+  // The control that keeps this a rule about the last option rather than about
+  // wrapping: a middle option still wraps and still reads whole.
+  const middleWraps = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don't ask again for rm commands in", '     /Users/agent1/work',
+    '  3. No, and tell Claude what to do differently'].join('\n'));
+  assert.equal(middleWraps.length, 3);
+  assert.equal(middleWraps[1].label, "Yes, and don't ask again for rm commands in /Users/agent1/work");
 });
 
 test('a line only continues a label that ran out of room', () => {
@@ -2134,4 +2144,26 @@ test('a line only continues a label that ran out of room', () => {
     '  3. No, and tell Claude what to do differently'].join('\n'));
   assert.equal(real.length, 3);
   assert.equal(real[1].label, "Yes, and don't ask again for rm commands in /Users/agent1/work");
+});
+
+test('a footer under a long LAST option is not folded into it', () => {
+  // ⚠️ THE CASE FULLNESS DOES NOT COVER. A short decoration line after a SHORT
+  // option is refused because the parent did not run out of room. After a long
+  // option that genuinely wrapped, the parent DID run out of room, so fullness
+  // is satisfied and the footer folds -- storing "…then stop here esc to
+  // cancel" as the option the person chose, statically, which the server's
+  // re-read agrees with.
+  const w = 62;
+  const box = (rows) => rows.map((r) => '│ ' + r.padEnd(w) + '│').join('\n');
+  assert.equal(chat.optionsIn(box(['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don't ask again for rm commands in this project",
+    '  3. No, and tell Claude what to do differently, then stop here',
+    '     esc to cancel'])), null);
+
+  // The control: the same box with nothing under the last option reads fine.
+  const clean = chat.optionsIn(box(['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don't ask again for rm commands in this project",
+    '  3. No, and tell Claude what to do differently, then stop here']));
+  assert.equal(clean.length, 3);
+  assert.equal(clean[2].label, 'No, and tell Claude what to do differently, then stop here');
 });
