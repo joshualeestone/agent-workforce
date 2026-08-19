@@ -5831,12 +5831,10 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   assert.ok(!gx.includes('<b>note</b>'),
     'raw markup from a group reason survived into the group line');
 
-  // Collapses: the told state too, with the hedge intact (the group form
-  // must not promise more than the per-member form it replaces).
-  const gt = shared([told(), told()]);
-  assert.ok(gt.startsWith('Kosmos told each of them where this folder is'), gt);
-  assert.ok(gt.includes('unless their instructions have been changed since'),
-    'the group told sentence dropped the hedge');
+  // Success says NOTHING (ruled 2026-08-18): an all-told roster has no
+  // sentence to say and nothing to collapse.
+  assert.equal(shared([told(), told()]), '',
+    'an all-told roster grew a group sentence; success is silent now');
 
   // Does NOT collapse: mixed states.
   assert.equal(shared([told(), cn('x')]), '', 'mixed states collapsed');
@@ -5880,6 +5878,15 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     projectsEngine.syncAgent('mikey', board.agents);
     roster = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents;
     m = roster[0];
+    // ⚠️ DETERMINISM GUARD: with success now SILENT, this test only means
+    // something when the produced verdict is a FAILURE (told renders
+    // nothing, so there would be no span to suppress). The sandbox
+    // produces could_not (no instruction files exist for these agents);
+    // assert that so an environment where the sync succeeds fails loudly
+    // here instead of in the pre-control below with a vaguer message.
+    assert.equal((m.told || {}).state, 'could_not',
+      'the sandbox produced a non-failure verdict; this test needs a could_not roster (state: '
+      + (m.told || {}).state + ')');
   } finally {
     board.restore();
   }
@@ -5901,25 +5908,107 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
 
   // CONTROL first: without the flag the span is there, so the absence
   // below is the suppression and not a dropped field.
-  assert.ok(member(m, 'p1').includes('pj-told'),
+  assert.ok(member(m).includes('pj-told'),
     'CONTROL: the per-member verdict span is gone even unsuppressed');
-  assert.ok(!member(m, 'p1', true).includes('pj-told'),
+  assert.ok(!member(m, true).includes('pj-told'),
     'suppressTold left the per-member verdict span in place');
 
-  // The removal action reads "Remove from <scope>" (the pack's pattern,
-  // her ruling 2026-08-18): the scope word is what tells the person their
-  // agent survives this. VISIBLE is a copy pin (a rewrite fails it first
-  // and forces an update here); the containment assertion below it is the
-  // WCAG 2.5.3 property, re-checked against whatever VISIBLE becomes.
-  const rendered = member(m, 'p1');
-  const VISIBLE = 'Remove from project';
-  assert.ok(rendered.includes('>' + VISIBLE + '</button>'),
-    'the removal button no longer reads "Remove from project"');
-  const aria = (rendered.match(/aria-label="([^"]*)"/) || [])[1] || '';
-  assert.ok(aria.includes(VISIBLE),
-    'the accessible name does not contain the visible label: ' + aria);
-  assert.ok(aria.includes(m.name),
-    'the accessible name lost the agent name: ' + aria);
+  // The removal action left these rows entirely (Josh's ruling: it lives
+  // in Project settings now). Asserted as absence WITH the settings
+  // painter's presence below as the control, so this cannot pass because
+  // the feature vanished.
+  assert.ok(!member(m).includes('data-drop'),
+    'a removal control survived on the member rows');
+
+  // The SETTINGS painter carries the action now: rows with the name, the
+  // visible label, the label-leading accessible name (WCAG 2.5.3), and
+  // the data-drop wiring the relocated handler keys on.
+  const paintMembers = pageFunction('paintSettingsMembers',
+    TOLD_PRELUDE
+    + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + 'const setIfChanged = (el, html) => { el.innerHTML = html; };\n');
+  const box = { innerHTML: '' };
+  global.document = { getElementById: (id) => (id === 'pjs-members' ? box : null) };
+  try {
+    paintMembers({ agents: roster });
+    const VISIBLE = 'Remove from project';
+    assert.ok(box.innerHTML.includes('>' + VISIBLE + '</button>'),
+      'CONTROL: the settings rows lack the removal action, so the absence above proves loss, not relocation');
+    const aria = (box.innerHTML.match(/aria-label="([^"]*)"/) || [])[1] || '';
+    assert.ok(aria.indexOf(VISIBLE) === 0,
+      'the accessible name does not lead with the visible label: ' + aria);
+    // N buttons all visibly read the same; the interpolated name is the
+    // ONLY thing distinguishing their accessible names.
+    assert.ok(aria.includes(roster[0].name),
+      'the accessible name lost the agent name: ' + aria);
+    assert.ok(box.innerHTML.includes('data-drop="' + roster[0].sessionName + '"'),
+      'the settings rows lost the data-drop wiring the handler keys on');
+    paintMembers({ agents: [] });
+    assert.ok(box.innerHTML.includes('No agents on this project yet'),
+      'an empty roster rendered as nothing rather than saying so');
+    // The unseen arm, through the real producer: a member the board has
+    // never seen renders its reason, never a healthy-looking bare row.
+    const projectsEngine2 = require('./engine/projects');
+    const gdir = nodePath.join(SANDBOX, 'ghost-member-proj');
+    fs.mkdirSync(gdir, { recursive: true });
+    projectsEngine2.create({ name: 'Ghost Member', folder: gdir, agents: ['nobody-here'], roster: [] });
+    const ghost = projectsEngine2.list([]).find((x) => x.name === 'Ghost Member').agents;
+    paintMembers({ agents: ghost });
+    assert.ok(box.innerHTML.includes('unseen'),
+      'a never-seen member did not wear the unseen treatment');
+    // The ENGINE's specific reason, not the painter's generic fallback:
+    // the fallback alternative made this pin unable to catch a lost
+    // engine because (the row would degrade generic and still pass).
+    assert.ok(box.innerHTML.includes('never seen an agent by this name'),
+      'a never-seen member lost the engine\'s specific reason');
+  } finally {
+    delete global.document;
+  }
+});
+
+test('the settings members wiring is real, not just extractable', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const facts = pageFnSource('paintSettingsFacts');
+  assert.ok(facts.includes('paintSettingsMembers(p)'),
+    'paintSettingsFacts no longer paints the members rows');
+  assert.ok(raw.includes("document.getElementById('pjs-members').addEventListener('click'"),
+    'the relocated removal handler no longer listens on the settings rows');
+  assert.ok(raw.includes('id="pjs-members"'),
+    'CONTROL: the settings rows element is gone, so the listener pin above is vacuous');
+  // The guard trio, pinned at source level (the say-box precedent):
+  // these were fixes to fixes, the least-proven lines on the branch,
+  // and the stubbed unit test cannot see any of them.
+  const handlerSrc = raw.slice(raw.indexOf("document.getElementById('pjs-members').addEventListener"));
+  // The terminator is the listener's own close at column 0: an inner
+  // `});` (the fetch options literal) cut the first version of this
+  // slice short and the pins below never saw the guard.
+  const handler = handlerSrc.slice(0, handlerSrc.indexOf('\n});') + 4);
+  assert.ok(handler.includes('const sentProject = PJ_CURRENT;'),
+    'the in-flight cross-project guard lost its capture');
+  assert.ok(handler.includes('if (PJ_CURRENT !== sentProject) return;'),
+    'the in-flight cross-project guard lost its check');
+  // BOTH arms: the success path and the catch path each carry the
+  // visible-view targeting; a first-occurrence pin let either one revert
+  // alone.
+  assert.ok(handler.split("document.getElementById('pj-settings-view').hidden").length >= 3,
+    'an arm of the handler lost its visible-view targeting');
+  assert.ok(pageFnSource('paintProjectSettings').includes("getElementById('pjs-members-msg').textContent = ''"),
+    'the entry-clear for the members verdict is gone (the persisted-half misattribution returns)');
+
+  // Her ruled copy, the WHOLE sentence (whitespace-normalized past the
+  // source line wrap; a half-pinned sentence lets the second half drift).
+  const flat = raw.replace(/\s+/g, ' ');
+  assert.ok(flat.includes('Who is on this project. Removing an agent takes it off this project only: it stays on your computer, and you can add it back whenever.'),
+    "the members section lost Mona Lisa's ruled sentence");
+  // The painter must repaint through setIfChanged: the unit test stubs
+  // it, so only a source pin catches a regression to bare innerHTML
+  // (which would steal keyboard focus from the rows every five seconds).
+  assert.ok(pageFnSource('paintSettingsMembers').includes('setIfChanged('),
+    'paintSettingsMembers no longer repaints through setIfChanged');
+  // The unknown-says-why arm exists in the painter (its behavioral twin
+  // in pjMember records the bare-caption form as a shipped defect).
+  assert.ok(pageFnSource('paintSettingsMembers').includes("m.state === 'unknown' && m.because"),
+    'the settings rows lost the unknown-says-why arm');
 });
 
 test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {
@@ -6230,4 +6319,15 @@ test("the card's Update arm opens the one shared confirm and records itself as o
   assert.deepEqual(calls, ['uc-no-focus'],
     'the Update arm did something besides opening the confirm on the safe answer: ' + JSON.stringify(calls));
   assert.equal(opener, els['upd-btn'], 'the card button was not recorded as the opener');
+});
+
+test('the centred quiet button is the pack rule, pinned', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // 18e:173 -- inline-flex left-packs at full width without this, which
+  // is the New task / Add member gap Josh saw.
+  const at = raw.indexOf('.btn-quiet {');
+  assert.ok(at > -1, 'the btn-quiet rule moved; re-point this pin');
+  const rule = raw.slice(at, raw.indexOf('}', at));
+  assert.ok(rule.includes('justify-content: center'),
+    'btn-quiet lost its centring; labels left-pack at full width again');
 });

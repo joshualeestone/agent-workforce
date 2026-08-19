@@ -602,7 +602,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .toggle:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .toggle, .toggle i { transition: none; } }
 .btn-quiet {
-  display: inline-flex; align-items: center; gap: .5em;
+  display: inline-flex; align-items: center; justify-content: center; gap: .5em;
   background: transparent; border: 1px solid var(--gold-deep); color: var(--k-ink);
   padding: calc(.9em - 1px) calc(1.75em - 1px); border-radius: 10px; cursor: pointer;
   font-family: inherit; font-size: 1.0625rem; font-weight: 600; line-height: 1.6;
@@ -2692,6 +2692,19 @@ svg { display: block; }
       <p class="pj-folder-state" id="pj-one-folder-state"></p>
       <button class="btn" id="pjs-reveal" type="button">Show me where it is</button>
       <p class="fmsg" id="pjs-reveal-msg" aria-live="polite"></p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Project members</span>
+      <!-- 18e's section (sha c69afdb2...), the build's field idiom. Her
+           copy verbatim; the light direct DELETE moves AS-IS from the
+           members column (recoverable in two clicks, so no modal grown:
+           weighting it like Remove from Kosmos would teach clicking
+           through both). -->
+      <p class="fhint">Who is on this project. Removing an agent takes it off this project
+         only: it stays on your computer, and you can add it back whenever.</p>
+      <div class="pj-members" id="pjs-members"></div>
+      <p class="fmsg" id="pjs-members-msg" aria-live="polite" tabindex="-1"></p>
     </div>
 
     <div class="field">
@@ -7356,20 +7369,12 @@ function pjView(which) {
 }
 
 function pjToldLine(told) {
-  if (told.state === 'told') {
-    // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
-    // inform a running agent, and saying we did would be the one claim on this
-    // screen that nobody could check.
-    //
-    // ⚠️ AND THE PREDICTION IS CONDITIONAL, because the verdict behind it is a
-    // record of a past write, not a re-read of the file. Nothing re-checks that
-    // the block is still there, so if the person (or the agent) edits it out,
-    // the flat form went on promising a future read of something that is no
-    // longer in the file. The past-tense half is evidence; the future half is
-    // an expectation, and now reads as one.
-    return 'Kosmos told it where this folder is. It will see that the next time it '
-      + 'starts, unless its instructions have been changed since.';
-  }
+  // ⚠️ SUCCESS SAYS NOTHING (ruled 2026-08-18, Josh: "Bingo"): a receipt
+  // for the expected thing earns no space on a page a person lives on.
+  // The told sentence and its conditional hedge retired together; silence
+  // claims nothing, which is why it is the honest form of success here.
+  // FAILURE still speaks below -- interim until the project notice is
+  // drawn (exit dependency tracked on Splinter's board).
   if (told.state === 'could_not') {
     return 'We could not tell it where this folder is; ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
@@ -7393,8 +7398,9 @@ function pjSharedTold(roster) {
   }
   // ⚠️ A collapse may never LOSE a reason. Collapsing suppresses every
   // per-member line, so it is only allowed when the group line carries
-  // everything those lines carried: the told sentence (constant), or a
-  // could_not whose because has a plural sibling. A could_not whose
+  // everything those lines carried: now only a could_not whose because
+  // has a plural sibling (the told sentence is retired; success says
+  // nothing and an all-told roster has nothing to collapse). A could_not whose
   // reason has NO plural form keeps its per-member rows -- three
   // repeated sentences are weight, but a vanished reason is a lie of
   // omission (iteration 3: the N-blocks because collapsed to a line
@@ -7405,12 +7411,9 @@ function pjSharedTold(roster) {
 }
 
 function pjToldGroupLine(told) {
-  if (told.state === 'told') {
-    // Plural of pjToldLine's told sentence, hedge and all: the group form
-    // must not promise more than the per-member form it replaces.
-    return 'Kosmos told each of them where this folder is. They will see that the '
-      + 'next time they start, unless their instructions have been changed since.';
-  }
+  // The told (success) arm is GONE with its singular sibling: success
+  // says nothing, so an all-told roster has nothing to collapse.
+
   // Explicit, not an else: pjSharedTold pre-filters through pjToldLine, but
   // the honesty guarantee (no sentence for not_tried/empty) must hold here
   // too, not only in the current caller.
@@ -7433,30 +7436,25 @@ function pjToldGroupLine(told) {
  * The board's rule one level up: an agent we cannot read is shown as unknown,
  * never as something healthy, and never as nothing at all.
  */
-function pjMember(m, projectId, suppressTold) {
+function pjMember(m, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
     + '<b>' + esc(m.name) + '</b>'
-    // ⚠️ An `unknown` state carries its REASON here. A bare "Can't tell" sat
-    // directly above "Kosmos told it where this folder is", and the two read as
-    // a contradiction on one row -- the same juxtaposition the engine calls out
-    // as a shipped defect. Everywhere else in this app an unknown says why.
+    // ⚠️ An `unknown` state carries its REASON here (historical origin: a
+    // bare "Can't tell" once sat beside the now-retired told sentence and
+    // read as a contradiction; the sentence is gone, the rule stands).
+    // Everywhere else in this app an unknown says why.
     + (m.present
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
         + (m.state === 'unknown' && m.because ? ': ' + esc(m.because) : '') + '</small>'
       : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
-    /* "Remove from <scope>" is the pack's removal pattern (beside the
-       destructive "Remove from Kosmos"): the scope word is what tells the
-       person their agent survives this. "Take off" was vague about WHICH
-       removal it was (her ruling, 2026-08-18). */
-    /* The accessible name STARTS with the visible label, name after the
-       colon, so speech input saying the visible words matches the control
-       (WCAG 2.5.3 label-in-name; an interpolated name mid-string broke
-       the substring property). */
-    + (projectId ? '<button class="drop" type="button" aria-label="Remove from project: ' + esc(m.name)
-      + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
+    /* The removal action lives in PROJECT SETTINGS now (Josh's ruling
+       2026-08-18: too easy to hit by accident here, and it took a third
+       of the column; the 18e drawing places it with the other project-
+       scoped actions, the escalation gradient member < archive <
+       remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }
@@ -7469,8 +7467,10 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance: the member list holds the Remove-from-project buttons, so an unconditional
- * repaint threw keyboard focus back to the body every 5 seconds.
+ * performance: an unconditional repaint threw keyboard focus back to the
+ * body every 5 seconds. The buttons this protects live in the SETTINGS
+ * members rows now (paintSettingsMembers rides this same helper); the
+ * column list keeps the guard for its Add-member flow's stability.
  *
  * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated
  * it. A member's state is exactly what the poll exists to notice, so a
@@ -8089,6 +8089,10 @@ function paintProjectSettings(p) {
   document.getElementById('pjs-desc').value = p.description || '';
   document.getElementById('pjs-msg').textContent = '';
   document.getElementById('pjs-reveal-msg').textContent = '';
+  // The members verdict too: without this, project A's failed-removal
+  // sentence survived Back-and-into-project-B and sat under B's roster,
+  // attributing a failure to the wrong project (review blocker).
+  document.getElementById('pjs-members-msg').textContent = '';
   paintSettingsFacts(p);
 }
 
@@ -8097,7 +8101,31 @@ function paintProjectSettings(p) {
    read, while the editable fields and the messages above belong to
    paintProjectSettings alone -- a poll that rewrote pjs-name would eat a
    rename mid-type, the same draft-eater the say box fought (round 33). */
+/**
+ * The settings members rows: name + state + the removal action (18e).
+ * Painted with setIfChanged so the poll never steals keyboard focus from
+ * a row mid-interaction (the same rule the column's painter carries).
+ */
+function paintSettingsMembers(p) {
+  const box = document.getElementById('pjs-members');
+  const rows = (p.agents || []);
+  setIfChanged(box, rows.length
+    ? rows.map((m) => '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+        + '<b>' + esc(m.name) + '</b>'
+        // An unknown says WHY here too (the pjMember comment's rule: a bare
+        // "Can't tell" is the shipped defect this app already fixed once).
+        + '<small>' + esc(m.present
+          ? ((STATE_COPY[m.state] || STATE_COPY.unknown).label
+            + (m.state === 'unknown' && m.because ? ': ' + m.because : ''))
+          : (m.because || 'We cannot see this agent on this computer right now.')) + '</small>'
+        + '<button class="drop" type="button" aria-label="Remove from project: ' + esc(m.name)
+        + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>'
+        + '</div>').join('')
+    : '<p class="fhint">No agents on this project yet.</p>');
+}
+
 function paintSettingsFacts(p) {
+  paintSettingsMembers(p);
   const folder = String(p.folder || '');
   const base = folder.split('/').filter(Boolean).pop() || folder;
   document.getElementById('pjs-folder-name').textContent = base;
@@ -8243,7 +8271,7 @@ function paintOneProject() {
   const roster = p.agents || [];
   const sharedTold = pjSharedTold(roster);
   setIfChanged(document.getElementById('pj-one-agents'), roster.length
-    ? roster.map((m) => pjMember(m, p.id, !!sharedTold)).join('')
+    ? roster.map((m) => pjMember(m, !!sharedTold)).join('')
       + (sharedTold ? '<p class="pj-told-group">' + sharedTold + '</p>' : '')
     : '<p class="fhint">No agents on this project yet.</p>');
 
@@ -10005,16 +10033,26 @@ document.getElementById('pj-one-add-go').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('pj-one-agents').addEventListener('click', async (e) => {
+/* The removal listener lives on the SETTINGS rows now (the column lost
+   its buttons; Josh's ruling). Same DELETE, same verdict-read: only the
+   home and the message element moved. */
+document.getElementById('pjs-members').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-drop]');
   if (!btn || !PJ_CURRENT) return;
-  const msg = document.getElementById('pj-one-msg');
+  const msg = document.getElementById('pjs-members-msg');
   msg.textContent = '';
+  // The say-box guard (its pattern): the verdict lands only on the
+  // project it belongs to. Without this, clicking Back mid-DELETE and
+  // entering project B's settings put A's failure sentence under B's
+  // roster -- the in-flight half of the same misattribution the
+  // entry-clear above fixes for the persisted half.
+  const sentProject = PJ_CURRENT;
   try {
-    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
+    const res = await fetch('/api/project/' + encodeURIComponent(sentProject) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not change that project');
     await loadProjects();
+    if (PJ_CURRENT !== sentProject) return;
     // ⚠️ THE VERDICT IS READ, not discarded. Taking an agent off also takes the
     // block back OUT of its instruction file, and that write can fail for every
     // reason the add can -- the agent stopped, has no folder, keeps its
@@ -10023,14 +10061,31 @@ document.getElementById('pj-one-agents').addEventListener('click', async (e) => 
     // a block in a file an agent boots from naming a project it is no longer
     // on, with nothing on screen. Worse than nobody checking: we checked, we
     // were told, and we dropped the answer.
+    // The verdict lands where the person IS: they may have gone Back to
+    // the project view mid-flight (same project, so the guard passed),
+    // and writing into the hidden settings view would be read by nobody
+    // and wiped by the entry-clear -- told, and the answer dropped.
+    const target = document.getElementById('pj-settings-view').hidden
+      ? document.getElementById('pj-one-msg') : msg;
     if (body.told && body.told.state === 'could_not') {
       // The engine's clause becomes its own sentence via pjSentence rather
       // than being spliced mid-sentence with hand punctuation (round 24).
-      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
+      target.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
         + pjSentence(body.told.because);
     }
+    // The clicked button died with the repaint; the keyboard lands on the
+    // verdict element rather than <body> (the pjCloseConfirm pattern) --
+    // but ONLY when focus actually fell to body: yanking it out of a
+    // field the person moved to mid-flight would be the draft-eater.
+    if (document.activeElement === document.body && target === msg) msg.focus();
   } catch (err) {
-    msg.textContent = pjSentence(err.message) || 'We could not change that project.';
+    if (PJ_CURRENT !== sentProject) return;
+    const target = document.getElementById('pj-settings-view').hidden
+      ? document.getElementById('pj-one-msg') : msg;
+    target.textContent = pjSentence(err.message) || 'We could not change that project.';
+    // The error path repaints nothing, so the retry control survives;
+    // focus moves only if it had already fallen to body.
+    if (document.activeElement === document.body && target === msg) msg.focus();
   }
 });
 
