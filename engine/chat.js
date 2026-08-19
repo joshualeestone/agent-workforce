@@ -932,9 +932,9 @@ function questionIn(text) {
 // accepted `01.` as option 1 through Number() -- a shape no menu draws and one
 // more way for prose to look like a list.
 const OPTION_LINE = /^(❯\s*)?([1-9])[.)]\s+(\S.*)$/;
-// ⚠️ ANY digit count, deliberately wider than OPTION_LINE: this is what stops
-// a line the pattern cannot READ (a tenth option) from being folded into the
-// previous option as though it were its wrapped text.
+// ⚠️ ANY digit count, deliberately wider than OPTION_LINE. It is what sees a
+// line the single-digit pattern cannot read -- a tenth option -- so a menu
+// longer than we can read is refused rather than served as its first nine.
 const ANY_NUMBERED = /^(?:❯\s*)?\d+[.)]\s+\S/;
 
 function optionsIn(questionText) {
@@ -980,22 +980,49 @@ function optionsIn(questionText) {
    * cannot be told apart from a capture alone.
    */
   const lastRun = found[found.length - 1];
-  const after = lines[lastRun.at + 1];
-  if (after !== undefined) {
-    const afterBody = after.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
-    const afterBare = afterBody.replace(/^\s+/, '');
-    const afterIndent = afterBody.length - afterBare.length;
-    const optIndent = lines[lastRun.at].replace(/^\s*│\s?/, '').search(/\S/);
-    /**
-     * ⚠️ TWO SHAPES, AND THE FIRST ONE IS THE MENU-TOO-LONG CASE. A tenth
-     * option sits at the SAME indent as the ninth, so an indent test alone
-     * cannot see it -- which is how a rewrite of this guard turned an
-     * eleven-option prompt back into nine buttons. `ANY_NUMBERED` matches any
-     * digit count, which is the point: it catches exactly the lines the
-     * single-digit pattern above cannot read.
-     */
-    if (afterBare && ANY_NUMBERED.test(afterBare)) return null;
-    if (afterBare && afterIndent > optIndent) return null;
+  /**
+   * WARNING: WHAT MAY FOLLOW THE RUN, and the previous version of this guard
+   * was wrong in three ways at once.
+   *
+   * It said "nothing may hang below" and named three shapes while checking
+   * two, and neither claim was true: a line at or LEFT of the options was
+   * accepted, one BLANK line let a tenth option through, and the indent it
+   * compared against came from the LAST option -- whose own indent depends on
+   * where the cursor is sitting, since the marked row starts a column left of
+   * the others. The same menu with the cursor moved gave different answers.
+   *
+   * So: the comparison is against the DEEPEST option, which is the indent of
+   * the unmarked rows and is where the box actually starts its content -- the
+   * marked row is drawn a column left of it, so the shallowest option moves
+   * with the cursor and the deepest does not. (Measured: using the shallowest
+   * put the reference at the marked row and refused every real screen,
+   * including a composer line sitting at column zero.) Blank lines are skipped
+   * when looking for a numbered continuation, because a gap does not make a
+   * tenth option disappear. And a following line at or past that indent is
+   * refused rather than only one that is deeper, which is what stops a
+   * same-indent wrapped label being silently truncated onto the button.
+   *
+   * ⚠️ AND SOMETHING UNINDENTED BELOW IS FINE ON PURPOSE. A live pane always
+   * has its composer under the menu, and `questionIn` slices to the end of the
+   * capture, so a rule refusing everything below would refuse every real
+   * screen. The indent is what separates the box's own contents from what
+   * comes after it.
+   */
+  const optIndent = found.reduce((deepest, o) => {
+    const body = lines[o.at].replace(/^\s*│\s?/, '');
+    const indent = body.length - body.replace(/^\s+/, '').length;
+    return Math.max(deepest, indent);
+  }, 0);
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
+    const body = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
+    const bare = body.replace(/^\s+/, '');
+    // A blank or frame-only line does not end the search for a numbered
+    // continuation: a menu with a gap in it is still a menu we cannot read.
+    if (!bare) continue;
+    if (ANY_NUMBERED.test(bare)) return null;
+    const indent = body.length - bare.length;
+    if (indent >= optIndent) return null;
+    break;
   }
   // Somebody's TUI drew this. Prose does not carry a selection marker.
   if (!marked) return null;
@@ -1008,7 +1035,7 @@ function optionsIn(questionText) {
    * leaves behind:
    *
    *     Do you want to proceed?
-   *     > 1. Yes
+   *     ❯ 1. Yes
    *       2. No
    *
    *     Build cleaned. Would you like to run the tests now?
@@ -1025,15 +1052,10 @@ function optionsIn(questionText) {
    * excluded, because an option's own label can legitimately contain one
    * ("2. No, and ask permission to continue").
    */
-  /* ⚠️ SCANNED FROM JUST AFTER THE LAST OPTION'S OWN LINE, folds INCLUDED.
-     Both halves matter and the header used to state the first one wrongly.
-     Starting after the FOLDS let an indented question hide inside a label and
-     be invisible to the guard written to catch it -- the fix and the thing it
-     defends against passing each other in the same loop. Starting ON the
-     option's own line would be worse the other way: an option may legitimately
-     say "No, and ask permission to continue", and that is the label's own
-     words rather than a newer question (there is a test for exactly it). A
-     marker inside a wrapped label still refuses, which is the safe side. */
+  /* ⚠️ FROM JUST AFTER THE LAST OPTION'S OWN LINE. Starting ON it would refuse
+     a menu whose own label says "No, and ask permission to continue" -- that
+     is the label's words rather than a newer question, and there is a test for
+     exactly it. */
   for (let i = lastRun.at + 1; i < lines.length; i += 1) {
     if (status.NEEDS_YOU_MARKERS.some((re) => re.test(lines[i]))) return null;
   }

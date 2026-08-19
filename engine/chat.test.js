@@ -2057,10 +2057,12 @@ test('a menu whose label WRAPPED is refused whole, and that is a decision with f
   assert.equal(got[1].label, "Yes, and don’t ask again for rm commands in /Users/agent1/work");
 });
 
-test('a continuation is INDENTATION, so prose between options still breaks the run', () => {
-  // ⚠️ THE RULE THIS MUST NOT REOPEN. Continuations are what lets a wrapped
-  // label through; if they were recognised by anything looser than "further in
-  // than the option's own number", the numbered-prose case would come back.
+test('anything drawn between two options breaks the run, whatever it looks like', () => {
+  // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This used to be called a rule about
+  // continuations and to explain how they are recognised; nothing in
+  // `optionsIn` recognises continuations any more, and both cases below are
+  // refused by the adjacency check alone. The old name would have survived the
+  // indent guard being deleted entirely.
   assert.equal(chat.optionsIn('❯ 1. Do X\n' + Array.from({ length: 40 }, () => 'filler').join('\n') + '\n2. Do Y'),
     null, 'unindented lines between options are not a wrapped label');
   assert.equal(chat.optionsIn('❯ 1. Do X\n    line a\n    line b\n    line c\n  2. Do Y'),
@@ -2108,4 +2110,37 @@ test('nothing drawn under a menu is folded into it, wherever it sits', () => {
   // The control: the same menus with nothing under them still read.
   assert.deepEqual(under(['❯ 1. Yes', '  2. No']),
     [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+});
+
+test('what may follow the run, and the reference is the option indent the cursor cannot move', () => {
+  // ⚠️ SOMETHING UNINDENTED BELOW IS FINE ON PURPOSE. A live pane always has
+  // its composer under the menu, and `questionIn` slices to the end of the
+  // capture, so a rule refusing everything below would refuse every real
+  // screen.
+  const ok = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\nesc to interrupt');
+  assert.equal(ok.length, 2, 'a composer line below the box is not part of the menu');
+
+  // ⚠️ AND THE REFERENCE IS THE DEEPEST OPTION, not the shallowest. The MARKED
+  // row is drawn a column left of the others, so the shallowest moves with the
+  // cursor: measured, using it refused every real screen. These two differ only
+  // in where the cursor sits and must agree.
+  const a = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\n  esc to interrupt');
+  const b = chat.optionsIn('Do you want to proceed?\n  1. Yes\n❯ 2. No\n  esc to interrupt');
+  assert.equal(a, null);
+  assert.equal(b, null, 'the same menu must not answer differently because the cursor moved');
+
+  // A same-indent continuation is refused rather than truncated onto a button:
+  // "No, and tell Claude what to do" is not what that option says.
+  assert.equal(chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do\n  differently'),
+    null);
+
+  // ⚠️ AND A BLANK LINE DOES NOT MAKE A TENTH OPTION DISAPPEAR. The guard used
+  // to inspect only the line straight after the run, so one gap restored the
+  // nine-buttons-over-a-ten-option defect it exists to prevent.
+  const nine = '❯ ' + Array.from({ length: 9 }, (_, i) => (i + 1) + '. j').join('\n  ');
+  assert.equal(chat.optionsIn(nine + '\n\n  10. j'), null, 'a gap is not an ending');
+  // ⚠️ THE CONTROL, and my first version of it asserted null, which would have
+  // made the case above pass for any reason at all. Nine options IS readable,
+  // so the refusal above is about the tenth and nothing else.
+  assert.equal(chat.optionsIn(nine).length, 9, 'the control: nine alone reads as nine');
 });

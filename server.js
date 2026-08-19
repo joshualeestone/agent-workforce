@@ -1667,9 +1667,17 @@ const server = http.createServer((req, res) => {
      * `paneRoster()`, its own uncached `tmux list-panes`. So a GET makes two,
      * and the 404 gate is decided against a different look from the one the
      * payload describes. The harm the comment warns about is therefore
-     * REACHABLE at that seam, and pretending otherwise is worse than saying so:
-     * every value below (presence, asking, the question, the capture) really
-     * does come from this one snapshot, and the gate above really does not.
+     * REACHABLE at that seam, and pretending otherwise is worse than saying so.
+     *
+     * ⚠️ AND THE SECOND HALF OF THAT SENTENCE WAS ALSO WRONG. It said every
+     * value below comes from this one snapshot. `presence` and `asking` do.
+     * `question` does NOT: `chat.viewport` runs its own, later `capture-pane`,
+     * with different flags and a different depth (60 lines with `-J`, against
+     * the snapshot's 40 without, of which `classify` reads the last 25).
+     * `questionIn`'s docblock documents that divergence at length, and
+     * `questionBecause` exists precisely because the two reads can disagree.
+     * So this route makes two roster reads AND two captures, and the honest
+     * claim is only that nothing below re-reads the ROSTER.
      */
     const roster = safeRoster();
     const card = Array.isArray(roster)

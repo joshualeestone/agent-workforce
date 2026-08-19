@@ -216,14 +216,14 @@ const STATES = {
       await page.evaluate((f) => {
         delete TALK_ANSWERED.april;
         delete TALK_FAILED.april;
-        if (f.question) TALK_QUESTION.april = f.question.text;
-        if (f.__answered) {
-          TALK_ANSWERED.april = { question: f.question.text, at: Date.now() };
-        }
-        if (f.__failed) {
-          // Keyed on the question it failed against, exactly as sendTalk keys it.
-          TALK_FAILED.april = { question: f.question.text };
-        }
+        /* ⚠️ ARMED WITH THE KEY THE PAGE ACTUALLY USES, which is the parsed
+           MENU rather than the capture slice. Keying these on `question.text`
+           here would arm a hold the paint immediately discards, and the states
+           would look right for the wrong reason. */
+        const key = Array.isArray(f.options) ? JSON.stringify(f.options) : null;
+        if (key) TALK_QUESTION.april = key;
+        if (f.__answered && key) TALK_ANSWERED.april = { question: key, at: Date.now() };
+        if (f.__failed && key) TALK_FAILED.april = { question: key };
       }, fx);
       await page.evaluate(() => paintTalk('april', 'April'));
       const box = page.locator('#d-talk-box');
@@ -351,11 +351,23 @@ const STATES = {
       if (m.threadOverflowX > 0) problems.push(`${tag}: the thread scrolls sideways by ${m.threadOverflowX}px`);
       // A transparent panel is the defect a screenshot flatters and a text
       // check cannot see at all.
+      /* ⚠️ NAMED FOR WHAT IT CAN ACTUALLY SEE. This used to say it caught the
+         `--k-sunk` failure; it cannot. Every usage site keeps the pack's
+         fallback, so deleting the token yields a WRONG wash in dark, never a
+         transparent one. What this detects is a question box with no ground at
+         all, whatever the cause. The token's own protection is the text pin in
+         server.test.js, which does work. */
       if (m.qaskVisible && (m.qaskBg === 'rgba(0, 0, 0, 0)' || m.qaskBg === 'transparent')) {
-        problems.push(`${tag}: the question box has NO background (the --k-sunk failure)`);
+        problems.push(`${tag}: the question box has no background at all`);
       }
-      if (m.bubbleBg && (m.bubbleBg === 'rgba(0, 0, 0, 0)' || m.bubbleBg === 'transparent')) {
-        problems.push(`${tag}: a message bubble has NO background`);
+      /* ⚠️ THE BUBBLE CHECK IS GONE, because it could not fail. `dmRow` emits
+         `class="dm mine"` unconditionally and `.dm.mine .dm-b` sets a literal
+         gold, so the transparent case it named was unreachable and every run
+         reported the same colour. A guard that reads as protection and cannot
+         fire teaches the next reader that the case is handled. What it is
+         replaced by is the one thing that IS true of every bubble: the gold. */
+      if (m.bubbleBg && m.bubbleBg !== 'rgba(214, 166, 46, 0.14)') {
+        problems.push(`${tag}: a message bubble is not the person's own colour: ${m.bubbleBg}`);
       }
       console.log(tag, JSON.stringify(m));
     }
@@ -546,14 +558,73 @@ const STATES = {
        * attribute and `.focus()` becomes a silent no-op, restoring the
        * stranded-on-<body> state the rescue exists to prevent, with nothing
        * failing. So the pair is asserted rather than the line. */
-      const rescue = await page.evaluate(() => {
-        const box = document.getElementById('d-talk-box');
-        box.focus();
-        return document.activeElement === box;
-      });
-      if (!rescue) {
-        problems.push(`[${theme}] focus: #d-talk-box cannot take focus, so the composer-disabled rescue is a no-op`);
+      /* ⚠️ THE RESCUE ITSELF, not only its `tabindex`. The first version focused
+         the panel by hand and checked it took focus, which fails if the
+         attribute goes -- but left the rescue BLOCK untested: by the time the
+         press pass reaches a repaint, focus is already on `#d-say`, which is
+         outside `#d-qask`, so the branch never ran. Deleting the rescue left
+         this green. So the state is arranged properly: somebody standing
+         INSIDE the question region, on a screen where the composer is closed,
+         at the moment the region is hidden. */
+      const rescue = await page.evaluate(async (f) => {
+        window.__fx = { ...f, presence: 'off',
+          presenceBecause: 'there is no Claude running in its window right now' };
+        delete TALK_ANSWERED.april;
+        await paintTalk('april', 'April');
+        document.getElementById('d-qask-text').focus();
+        const stood = document.activeElement.id;
+        // Now the question goes: asking false, so the block hides underneath them.
+        window.__fx = { ...f, presence: 'off', asking: false, question: null, options: null };
+        await paintTalk('april', 'April');
+        return { stood, landed: document.activeElement.id || document.activeElement.tagName };
+      }, menu);
+      if (rescue.stood !== 'd-qask-text') {
+        problems.push(`[${theme}] focus: could not stand inside the question region, so the rescue is UNCHECKED`);
+      } else if (rescue.landed === 'BODY') {
+        problems.push(`[${theme}] focus: hiding the question region stranded focus on the document`);
       }
+      await page.evaluate(async (f) => { window.__fx = f; await paintTalk('april', 'April'); }, menu);
+
+      /* 2e. THE HOLD SURVIVES THE PANE MOVING ON, which is the whole reason it
+       * exists. A pane accumulates: the agent prints another line, a context
+       * percentage ticks over, the box redraws. None of that is a new question,
+       * and the first version treated all of it as one -- because the hold was
+       * keyed on `questionIn`'s slice, which runs to the end of the capture.
+       * Answering then left live buttons over the answered prompt within one
+       * poll. */
+      await page.evaluate(async (f) => {
+        window.__posted = [];
+        window.__postAnswer = null;
+        window.__fx = f;
+        delete TALK_ANSWERED.april; delete TALK_FAILED.april;
+        await paintTalk('april', 'April');
+      }, menu);
+      await page.click('#d-qopts .qopt');
+      await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
+      const held = await page.evaluate(async (f) => {
+        const count = () => document.querySelectorAll('#d-qopts .qopt').length;
+        const out = { afterAnswer: count() };
+        // The SAME menu, with the pane having moved on underneath it.
+        window.__fx = { ...f, question: { text: f.question.text + '\n\n  ✳ Thinking… (3s · 41% context left)' } };
+        await paintTalk('april', 'April');
+        out.afterPaneMoved = count();
+        // A genuinely different menu DOES spend it.
+        window.__fx = { ...f, options: [{ n: 1, label: 'Something else' }, { n: 2, label: 'No' }] };
+        await paintTalk('april', 'April');
+        out.afterNewMenu = count();
+        return out;
+      }, menu);
+      if (held.afterAnswer !== 0) {
+        problems.push(`[${theme}] hold: ${held.afterAnswer} buttons still on screen straight after answering`);
+      }
+      if (held.afterPaneMoved !== 0) {
+        problems.push(`[${theme}] hold: the pane moving on brought ${held.afterPaneMoved} buttons back over an answered question`);
+      }
+      if (held.afterNewMenu === 0) {
+        problems.push(`[${theme}] hold: a genuinely NEW menu was suppressed, so the hold never releases`);
+      }
+      await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);
+      await page.evaluate(() => paintTalk('april', 'April'));
 
       // 3. Send with the keyboard: the same rescue, from the other control.
       await page.evaluate(() => {

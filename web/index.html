@@ -5269,7 +5269,22 @@ async function paintTalk(sessionName, agentName) {
    * ReferenceError that threw on EVERY paint, with all 931 text tests green,
    * because nothing in the suite renders the page. Caught by rendering it.
    */
-  TALK_QUESTION[sessionName] = (body.asking && body.question) ? body.question.text : null;
+  /**
+   * ⚠️ KEYED ON THE MENU, NOT ON THE SLICE. `question.text` is what
+   * `questionIn` returns: six lines above the marker THROUGH TO THE END OF THE
+   * CAPTURE. So any character changing anywhere below the menu made this a
+   * "different question" and spent the hold -- and the pane accumulates, which
+   * is the whole reason the hold exists. Measured: answer a menu, let the agent
+   * print one more line underneath it, and within one poll the buttons were
+   * back, live, over the prompt just answered. A context percentage ticking
+   * from 42% to 41% did it too.
+   *
+   * The identity of a question, for this purpose, is the options it offers. If
+   * those are the same options, it is the same question, whatever else the pane
+   * has done since.
+   */
+  TALK_QUESTION[sessionName] = (body.asking && Array.isArray(body.options))
+    ? JSON.stringify(body.options) : null;
   const answered = TALK_ANSWERED[sessionName];
   const held = !!(answered && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
   /**
@@ -5286,7 +5301,8 @@ async function paintTalk(sessionName, agentName) {
    * So the hold is spent by exactly two things: TIME, and a question we can
    * actually see that is a DIFFERENT one. Not by an absent one.
    */
-  const different = !!(answered && body.question && answered.question !== body.question.text);
+  const different = !!(answered && TALK_QUESTION[sessionName]
+    && answered.question !== TALK_QUESTION[sessionName]);
   const stillTheSame = held && !different;
   if (answered && (!held || different)) delete TALK_ANSWERED[sessionName];
   /* --- the question, and the answers to it --- */
@@ -5296,6 +5312,30 @@ async function paintTalk(sessionName, agentName) {
   const qopts = document.getElementById('d-qopts');
   const qout = document.getElementById('d-qout');
   const live = body.presence === 'on';
+  const nowHidden = !body.asking || stillTheSame;
+  /**
+   * ⚠️ THE RESCUE COMES BEFORE EVERY HIDE IN THIS SECTION, and its first
+   * version did not.
+   *
+   * It sat just above `qask.hidden = nowHidden`, which reads as "before the
+   * hide" and is not: the branch below clears the question and hides
+   * `#d-qask-text` first, and `#d-qask-text` is `tabindex="0"`, so a person
+   * standing in it had already been dropped to <body> by the time the rescue
+   * asked whether anyone was standing there. The check then found nobody and
+   * did nothing. **Both of those lines were written in the same round, forty
+   * minutes apart, and the second defeated the first.**
+   *
+   * Measured: stand in the question region with the composer closed, let the
+   * question go, and focus landed on the document.
+   *
+   * ⚠️ AND THE BOX MAY BE DISABLED, in which case focusing it silently does
+   * nothing and the rescue would report success. The panel takes focus
+   * instead; `tabindex="-1"` makes it focusable without adding a tab stop.
+   */
+  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) {
+    if (!say.disabled) say.focus();
+    else document.getElementById('d-talk-box').focus();
+  }
   if (body.asking && body.question) {
     qlab.textContent = name + ' is waiting on an answer.';
     // The agent's SCREEN, in the treatment the room already uses for it.
@@ -5322,20 +5362,6 @@ async function paintTalk(sessionName, agentName) {
   // The drawing's states 2 and 3: an answered question is no longer a thing
   // waiting on you, and the answer takes its place in the thread below as an
   // ordinary message. The whole block goes, not just its buttons.
-  const nowHidden = !body.asking || stillTheSame;
-  /* ⚠️ FOCUS IS RESCUED BEFORE THE HIDE. `#d-qask-text` is `tabindex="0"`, so
-     a person can be standing inside the block this line is about to hide, and
-     hiding a focused element drops focus to <body>. Same rule the room records
-     at its own question region. */
-  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) {
-    /* ⚠️ THE BOX MAY STILL BE DISABLED from the previous paint (its own state is
-       set further down), and focusing a disabled input silently does nothing --
-       so the rescue would report success and focus would still fall to <body>.
-       The panel itself takes it in that case: `tabindex="-1"` makes it
-       programmatically focusable without adding a tab stop. */
-    if (!say.disabled) say.focus();
-    else document.getElementById('d-talk-box').focus();
-  }
   qask.hidden = nowHidden;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
@@ -5460,12 +5486,14 @@ async function paintTalk(sessionName, agentName) {
      "The buttons still work." standing under every later menu, on a page that
      polls every five seconds and stays open for days. */
   const failed = TALK_FAILED[sessionName];
+  // Keyed the same way as the hold, for the same reason.
+  const nowQ = TALK_QUESTION[sessionName];
   /* ⚠️ SPENT BY A DIFFERENT QUESTION, NOT BY AN ABSENT ONE -- the same rule as
      the hold above, which was decided this way three lines up while this was
      decided the other way. One poll that could not read the screen would
      otherwise drop the state-4 sentence for a question still standing. It
      costs a reassurance rather than an answer, and it is the same split. */
-  if (failed && body.question && failed.question !== body.question.text) {
+  if (failed && nowQ && failed.question !== nowQ) {
     delete TALK_FAILED[sessionName];
   }
   const qfail = document.getElementById('d-qask-fail');
@@ -5540,8 +5568,12 @@ async function sendTalk(text, chose) {
   if (TALK_SENDING) {
     const busy = document.getElementById('d-say-msg');
     if (busy) {
+      /* ⚠️ NO PROMISE OF A RETRY, because there is none: this arm returns
+         without sending and the words stay in the box for the person to send
+         again. "This will go through in a moment" was the screen undertaking
+         something no code does. */
       busy.textContent = TALK_FLIGHT && CURRENT && TALK_FLIGHT !== CURRENT.sessionName
-        ? 'Still sending your last message to ' + TALK_FLIGHT + '. This will go through in a moment.'
+        ? 'Still sending your last message to ' + TALK_FLIGHT + '. Try again in a moment.'
         : 'Still sending your last message.';
     }
     return;
