@@ -6552,13 +6552,14 @@ document.getElementById('made-retry').addEventListener('click', openCreate);
 document.getElementById('role-next').addEventListener('click', () => {
   const role = roleByKey(PICKED);
   if (!role) return;
-  // Lowercase for the sentence, except all-caps words: "Name your SEO
-  // specialist", never "Name your seo specialist" (the catalogue brought
-  // the first acronym labels this line had ever seen).
-  const spoken = (role.label || 'agent').split(' ')
-    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
-    .join(' ');
-  document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
+  /* ⚠️ THE ROLE'S OWN CASE, unchanged (Josh, 2026-08-19). This line used to
+     lower-case the label so it read as a sentence ("Set up your executive
+     assistant"), with a carve-out so acronyms survived ("SEO specialist"). He
+     overruled it: the roles are named things and they keep their capitals.
+     📌 The carve-out is gone WITH the lowercasing rather than left behind: it
+     existed only to protect against that transform, so keeping it would be a
+     guard against something that no longer happens. */
+  document.getElementById('create-meet').textContent = 'Set up your ' + (role.label || 'agent');
   // Back then Next with the SAME role keeps everything the person set:
   // edited words, chosen model, picked projects. A different role is a
   // different template and resets the form on purpose.
