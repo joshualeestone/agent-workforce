@@ -7060,7 +7060,15 @@ test('every CSS declaration in the page sits inside a selector', () => {
     const opens = (t.match(/\{/g) || []).length;
     const closes = (t.match(/\}/g) || []).length;
     // A declaration is `prop: value` with no brace on the line.
-    if (!opens && !closes && /^[-a-z]+\s*:/i.test(t)) {
+    // ⚠️ DIGITS. The first version was /^[-a-z]+\s*:/ , which matches
+    // `background:` and NOT `--label-2:`, `--k-ink-2:` or `--space-5:` — the
+    // majority of declarations in this stylesheet, and precisely the ones
+    // surrounding the real blocker this guard exists for. Had the orphan been
+    // `--label-2:` the guard would have been silent, and its control used the
+    // same non-digit case so it could not expose the gap.
+    // ⚠️ THIS IS THE SAME REGEX BUG AS THE DARK-MODE SWEEP EARLIER THE SAME
+    // DAY, in a new guard, hours later.
+    if (!opens && !closes && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t)) {
       // Legal only when we are inside a RULE, i.e. deeper than any @media.
       if (depth <= Math.max(atRuleDepth + 1, 0) && depth <= 1) {
         stray.push(`${i + 1}: ${t.slice(0, 60)}`);
@@ -7076,7 +7084,11 @@ test('every CSS declaration in the page sits inside a selector', () => {
 
   // ⚠️ THE CONTROL. Without it a scanner that never flags anything passes, and
   // this whole test becomes a comment. Feeds the exact shape of the real defect.
-  const broken = '#x {\n  color: red;\n}\n@media (prefers-color-scheme: dark) {\n  #x { --a: 1; }\n  background: var(--k-bg);\n}\n';
+  // ⚠️ TWO ORPHANS, and the SECOND one carries a digit. A control that only
+  // feeds `background:` cannot expose a property filter that rejects
+  // `--label-2:` — which is exactly the hole this control missed the first
+  // time, because it shared the scanner's blind spot.
+  const broken = '#x {\n  color: red;\n}\n@media (prefers-color-scheme: dark) {\n  #x { --a: 1; }\n  background: var(--k-bg);\n  --label-2: #4a4f57;\n}\n';
   let d = 0; let ad = -1; const found = [];
   broken.split('\n').forEach((line) => {
     const t = line.trim();
@@ -7084,13 +7096,14 @@ test('every CSS declaration in the page sits inside a selector', () => {
     if (/^@media[^{]*\{/.test(t)) { ad = d; d += 1; return; }
     const o = (t.match(/\{/g) || []).length;
     const c = (t.match(/\}/g) || []).length;
-    if (!o && !c && /^[-a-z]+\s*:/i.test(t) && d <= Math.max(ad + 1, 0) && d <= 1) found.push(t);
+    if (!o && !c && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t) && d <= Math.max(ad + 1, 0) && d <= 1) found.push(t);
     d += o - c;
     if (ad >= 0 && d <= ad) ad = -1;
   });
-  assert.deepEqual(found, ['background: var(--k-bg);'],
+  assert.deepEqual(found, ['background: var(--k-bg);', '--label-2: #4a4f57;'],
     'the scanner cannot see the defect it exists for, so its silence above '
-    + 'proves nothing');
+    + 'proves nothing — and if only the first is found, its property filter '
+    + 'rejects custom properties containing a digit, which is most of them');
 });
 
 /**

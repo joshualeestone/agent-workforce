@@ -123,7 +123,28 @@ async function measure(engine, scheme) {
        where `#firstrun` lost its background to a parse error and no instrument
        here could see it. So the chain is reported WHOLE, and any ancestor
        carrying a known container class is required to paint. */
-    const CONTAINERS = ['dbox', 'pjcol', 'rm-box', 'rolepick', 'fr-box', 'acard', 'modalbox'];
+    /* ⚠️ DERIVED FROM THE STYLESHEET, NOT LISTED. The first version enumerated
+       these from memory and included `modalbox`, which appears nowhere in this
+       build — an entry that can never match. The second version then failed on
+       `.fr-box` and `.acard`, which are perfectly healthy: one is hidden in this
+       fixture and the other holds no fields at all. Both mistakes are the
+       enumerate-from-memory habit, the second one inside the fix for the first.
+       A container is whatever DECLARES `--field-fill`, which is exactly the set
+       whose paint matters to a field, and the stylesheet already knows it. */
+    const CONTAINERS = (() => {
+      const out = new Set();
+      for (const sheet of document.styleSheets) {
+        let rules;
+        try { rules = sheet.cssRules; } catch { continue; }
+        for (const rule of rules || []) {
+          if (!rule.style || !rule.selectorText) continue;
+          if (!rule.style.getPropertyValue('--field-fill')) continue;
+          for (const m of rule.selectorText.matchAll(/\.([a-z][a-z0-9-]*)/gi)) out.add(m[1]);
+        }
+      }
+      return [...out];
+    })();
+    const seenContainers = new Set();
     const ground = (el) => {
       let first = null;
       const mute = [];
@@ -132,7 +153,7 @@ async function measure(engine, scheme) {
         const cls = String(n.className || '').split(' ');
         const known = CONTAINERS.find((c) => cls.includes(c));
         const paints = bg && bg !== 'rgba(0, 0, 0, 0)';
-        if (known && !paints) mute.push('.' + known);
+        if (known) { seenContainers.add(known); if (!paints) mute.push('.' + known); }
         if (paints && !first) {
           first = { bg, name: n.id ? '#' + n.id : '.' + String(n.className).split(' ')[0] };
         }
@@ -180,7 +201,7 @@ async function measure(engine, scheme) {
         listCell = vis.textContent.trim();
       }
     }
-    return { fields, badgeHit, listCell };
+    return { fields, badgeHit, listCell, seenContainers: [...seenContainers], containers: CONTAINERS };
   }, FIELDS);
   await browser.close();
   return { ...out, errs };
@@ -226,6 +247,15 @@ async function measure(engine, scheme) {
       const muted = new Set();
       for (const f of r.fields) for (const m of (f.mute || [])) muted.add(m);
       console.log(`  known containers painting nothing: ${muted.size}${muted.size ? ' — ' + [...muted].join(', ') : ''}`);
+      /* ⚠️ THE DENOMINATOR. Without it a renamed or deleted container prints
+         "0 painting nothing" and passes, which is the silent-skip shape this
+         file rejects one screen below for badgeHit and listCell. */
+      console.log(`  containers declaring --field-fill: ${(r.containers || []).length}`
+        + `  (reached by a field in this fixture: ${(r.seenContainers || []).length})`);
+      /* ⚠️ NOT REACHING one is not a failure — `.fr-box` is hidden here and
+         `.acard` holds no fields — but declaring ZERO is, because it means the
+         derivation found nothing and every verdict above is over an empty set. */
+      if (!(r.containers || []).length) fail(`${engine}/${scheme} no container declares --field-fill, so the container check ran over nothing`);
       for (const m of muted) fail(`${engine}/${scheme} ${m} paints nothing, so every field inside it is being measured against some other ancestor`);
 
       /* ⚠️ BOTH REPORT UNCONDITIONALLY, AND A MISSING FIXTURE IS A FAILURE. These

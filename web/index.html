@@ -1896,7 +1896,8 @@ svg { display: block; }
    anyone sees. That is the exact defect the `body` fix at the top of this file
    exists to correct, reintroduced by an unrelated fix. A stray declaration is
    silent in every text search and in the diff; only a brace-aware scan or the
-   render shows it, which is why `no-stray-declarations` now guards it. */
+   render shows it, which is why the suite now carries "every CSS declaration in the page sits
+   inside a selector" to guard it. */
 @media (prefers-color-scheme: dark) {
   #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
 }
@@ -2020,6 +2021,17 @@ svg { display: block; }
 #firstrun .fr-sleepbtn:focus-visible, #firstrun #fr-reveal:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 #firstrun .fr-progress { background: var(--k-rule); }
 #firstrun .fr-progress-fill, #firstrun .fr-progress i, #firstrun .fr-progress > div { background: var(--gold-deep); }
+/* ⚠️ A PORTING GAP, not dead markup. `.llm-m` carries the DIMENSIONS and never
+   came across from the pack, so every provider row rendered a fully styled disc
+   at 0x0 — gradient, border-radius and all, invisible. Measured on the install
+   screen: six rows, six markers, all zero-sized.
+   ⚠️ AND IT LOOKED LIKE DEAD CODE FROM INSIDE THE BUILD. A class worn by six
+   elements with no rule anywhere reads as a marker to delete; deleting it would
+   have removed the hook the missing rule attaches to, and then nothing in
+   either file would have shown the gap. "Dead in the build" and "dead in the
+   pack" are different questions (Mona Lisa, 2026-08-19), and only asking both
+   tells you which. */
+#firstrun .llm-m { width: 34px; height: 34px; flex: 0 0 34px; display: block; }
 #firstrun .llm-disc { border-radius: 100px; background: radial-gradient(circle at 35% 35%, #d8b65a, #b88920); }
 #firstrun .llm.off .llm-disc { background: radial-gradient(circle at 35% 35%, #d5d3ce, #a9adb3); }
 #firstrun .fieldlab { display: block; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase;
@@ -3801,10 +3813,12 @@ function ring(a) {
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
-     third cue after arc length and colour. "Memory unknown" is carried three
-     ways: this ring's aria-label, the dashed shape the pack pairs with the
-     unknown card, and -- since the caption was restored as `.membadge unk` --
-     visible words in the same .agauge container. ⚠️ This used to say the
+     third cue after arc length and colour. The unknown-memory fact is carried
+     three ways: this ring's aria-label ("Memory could not be read."), the dashed
+     shape the pack pairs with the unknown card, and -- since the caption was
+     restored as `.membadge unk` -- the visible word "Unknown" in the same
+     .agauge container. ⚠️ The two strings are deliberately disjoint, so an
+     assertion about one cannot be satisfied by the other; see the badge. ⚠️ This used to say the
      caption "is gone at Josh's call", which stopped being true when the badge
      came back and would have read as permission to delete it again. The avatar stays inside the ring (this app's real data;
      the pack draws faces in the same slot). */
@@ -3891,9 +3905,10 @@ function card(a) {
      ordering it this way means the severity badge cannot be reached by an
      unknown, whatever pctOf later returns. */
   const badge = pct === null
-    /* ⚠️ `aria-hidden`: the ring's aria-label already says "Memory unknown: we
-       could not read how full it is." — the fuller sentence and the
-       authoritative one. Without this a screen reader says it twice per card.
+    /* ⚠️ `aria-hidden`: the ring's aria-label already says "Memory could not be
+       read." — the authoritative statement, and the one that says what HAPPENED
+       rather than naming a state. Without this a screen reader says the fact
+       twice per card.
        The gap this badge closes was always the SIGHTED half. (Mona Lisa,
        2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
     ? '<span class="membadge unk" aria-hidden="true">Unknown</span>'
@@ -5289,7 +5304,12 @@ function refreshAvatar() {
 function memoryBox(a) {
   const pct = pctOf(a.context);
   if (pct === null) {
-    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">?</span></div>'
+    /* ⚠️ THE WORD, matching the card and the list row. This kept a bare `?`
+       after the ruling moved the other two surfaces to "Unknown" -- three
+       surfaces, one fact, and the third left on the old treatment. Not
+       dishonest, since the sentence below states it in full, but not the rule
+       either, and the rule exists so the three cannot drift apart. */
+    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">Unknown</span></div>'
       + '<p class="dhint" style="margin:12px 0 0;"><b>We could not read ' + esc(a.name) + '\u2019s memory.</b> '
       + 'That is not the same as it being empty. Nothing here can tell you how much room is left.</p>';
   }
