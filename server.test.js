@@ -6356,8 +6356,22 @@ test('the conversation filter matches what a row shows, and only that', () => {
     + fallbackDecl + '\n');
   // Discriminating probes (review): the display name DIVERGES from the
   // session key and the operator row's from is NOT 'you', so an
-  // implementation matching raw m.from cannot pass these.
-  const p = { agents: [{ sessionName: 'leo', name: 'Leonardo' }] };
+  // implementation matching raw m.from cannot pass these. The project
+  // row comes from the REAL producer (fleet identity -> create -> list),
+  // never a hand-built roster shape (fixture discipline).
+  const projectsEngine3 = require('./engine/projects');
+  const board3 = fleet.install([fleet.agent('leo', { state: 'idle', displayName: 'Leonardo' })]);
+  const fdir = nodePath.join(SANDBOX, 'filter-names-proj');
+  fs.mkdirSync(fdir, { recursive: true });
+  let p;
+  try {
+    projectsEngine3.create({ name: 'Filter Names', folder: fdir, agents: ['leo'], roster: board3.agents });
+    p = projectsEngine3.list(board3.agents).find((x) => x.name === 'Filter Names');
+    assert.equal((p.agents[0] || {}).name, 'Leonardo',
+      'PRE-CONTROL: the producer did not resolve the divergent display name');
+  } finally {
+    board3.restore();
+  }
   const rows = [
     { id: 'm1', from: 'leo', text: 'The link is stable now.' },
     { id: 'm2', operator: true, from: 'op-key', text: 'Cut it to four emails.' },
