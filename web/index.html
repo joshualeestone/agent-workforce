@@ -113,7 +113,16 @@ body {
   font: var(--text-body) var(--font-ui);
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.006em;
-  background: var(--bg-sunken); color: var(--label);
+  /* ⚠️ THE APP'S OWN GROUND, not the surround. `--bg-sunken` is `#f4f2ee`,
+     which is the pack's `--page-bg`: the colour of the page the MOCK SITS ON,
+     behind the app. Using it here painted the product in the shade reserved
+     for what is behind the product, which is why two separate screens read as
+     the wrong colour beside the pack. `--bg` is already the pack's `--k-bg`
+     (`#faf9f7`) and is what `.appstage` uses there.
+     ⚠️ The token itself is NOT repointed: ten other rules use `--bg-sunken`
+     for what it actually means, a surface recessed INSIDE a card, and they are
+     right. The name was fine and the noun it was pointed at was not. */
+  background: var(--bg); color: var(--label);
   padding: var(--space-8) var(--space-8) 64px;
 }
 
