@@ -693,7 +693,7 @@ const server = http.createServer((req, res) => {
       // available() is the cached verdict -- the request path never waits on
       // the release host, and a down host just means no toast.
       updates.poke();
-      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available() });
+      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available(), updateLook: updates.lastLook() });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       res.writeHead(500, { 'content-type': 'application/json' });
@@ -1204,6 +1204,19 @@ const server = http.createServer((req, res) => {
    * their launchd jobs and tmux sessions are separate process trees this
    * update never touches.
    */
+  /* Ask the release host RIGHT NOW (Check now): bypasses the TTL, and
+     the answer carries reachability so the screen can say "could not
+     reach" instead of a false "up to date". POST because it makes a
+     network request on the person's behalf (cross-site guard). */
+  if (pathname === '/api/update/check' && req.method === 'POST') {
+    updates.checkNow()
+      // offer is the newer()-gated verdict (same gate the toast rides), so
+      // the card never has to re-derive version ordering client-side.
+      .then((out) => sendJson(res, 200, { ...out, offer: updates.available() }))
+      .catch(() => sendJson(res, 200, { running: updates.RUNNING, latest: null, reached: false, offer: null }));
+    return;
+  }
+
   if (pathname === '/api/update' && req.method === 'POST') {
     const avail = updates.available();
     if (!avail) { sendJson(res, 409, { error: 'there is no update to install right now' }); return; }

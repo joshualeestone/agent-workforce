@@ -383,7 +383,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 }
 .headleft { display: flex; align-items: center; gap: var(--space-5); }
 /* An empty slot is a flex item and would spend one trailing gap. */
-#utoast-slot:empty { display: none; }
+#utoast-slot:empty, #unote-slot:empty { display: none; }
 .klink { border: 0; background: none; padding: 0; cursor: pointer; display: block; line-height: 0; }
 .klink img { width: 34px; height: 34px; display: block; }
 .klink:focus-visible { outline: 2px solid var(--label); outline-offset: 4px; border-radius: 8px; }
@@ -1742,6 +1742,7 @@ svg { display: block; }
          reasoning, drawn 2e4e100). Renders only when a newer version is
          published; role=status per the pack. -->
     <div id="utoast-slot"></div>
+    <div id="unote-slot"></div>
   </div>
   <!-- The pack's centre column: the nav lives IN the header grid, centred,
        and collapses behind the burger under 56rem. THREE tabs, the pack's,
@@ -2921,13 +2922,28 @@ svg { display: block; }
     </section>
 
     <section class="dbox">
+      <!-- The update control joins the pack's Updates card rather than
+           becoming a second update-ish card (flagged for Mona Lisa's
+           pass; her spec placed the line "in Settings" without naming a
+           card). The version line carries her four states, Check now
+           clears the Later note, and the runs-in-background sentence
+           sits beside the version per her spec. A Stop button is
+           deliberately ABSENT: kosmos stop kills the BOARD process
+           only; the agents live in tmux under launchd and keep working,
+           so a Stop button beside this sentence would read as "stop the
+           spending" while doing no such thing. Fleet-stop is its own
+           chunk. -->
       <h3 class="dlab">Updates</h3>
-      <div class="setrow off">
+      <div class="setrow" id="upd-row">
+        <div><b id="upd-line">Checking.</b>
+          <p class="dhint" style="margin:2px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p></div>
+        <button class="btn-quiet" type="button" id="upd-btn" hidden>Check now</button>
+      </div>
+      <div class="setrow off" style="margin-top:12px;">
         <div><b>Tell me when there is a new version</b>
           <p class="dhint" style="margin:2px 0 0;">Kosmos always tells you. Turning that off is not built yet.</p></div>
         <span class="toggle" aria-hidden="true"><i></i></span>
       </div>
-      <p class="dhint" id="set-version" style="margin:12px 0 0;"></p>
     </section>
 
     <section class="dbox">
@@ -3492,6 +3508,69 @@ function renderUpdateToast(u) {
     document.getElementById('uc-no').focus();
   });
 }
+/* The update card (Settings): her four states, painted from the SAME
+   status payload the toast reads, so the two surfaces can never disagree.
+   A Check now in flight owns the card; poll paints stand off until it
+   lands (UPD_CHECKING), so the Checking sentence is never overwritten by
+   a stale poll mid-ask. */
+let UPD_CHECKING = false;
+function paintUpdateCard(running, offer, look) {
+  if (UPD_CHECKING) return;
+  const line = document.getElementById('upd-line');
+  const btn = document.getElementById('upd-btn');
+  const v = running ? 'Kosmos ' + running + '. ' : 'Kosmos. ';
+  btn.hidden = false;
+  btn.disabled = false;
+  if (offer && offer.version) {
+    line.textContent = v + 'Version ' + offer.version + ' is ready.';
+    btn.textContent = 'Update';
+    btn.dataset.act = 'update';
+  } else if (look && look.looked === false) {
+    // The first look is still in flight: say Checking, never a failure
+    // that has not happened (boot rendered "could not reach" for the
+    // seconds before the first answer landed).
+    line.textContent = v + 'Checking.';
+    btn.textContent = 'Check now';
+    btn.dataset.act = 'check';
+    btn.disabled = true;
+  } else if (look && look.reached) {
+    line.textContent = v + 'Up to date.';
+    btn.textContent = 'Check now';
+    btn.dataset.act = 'check';
+  } else {
+    // Never rendered as "up to date": not hearing back is its own state.
+    line.textContent = v + 'Could not reach the update server.';
+    btn.textContent = 'Try again';
+    btn.dataset.act = 'check';
+  }
+}
+document.getElementById('upd-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('upd-btn');
+  const line = document.getElementById('upd-line');
+  if (btn.dataset.act === 'update') {
+    // ONE install path: the same confirm the toast opens, same safe-focus rule.
+    document.getElementById('uc-err').hidden = true;
+    document.getElementById('updconfirm').hidden = false;
+    document.getElementById('uc-no').focus();
+    return;
+  }
+  /* Check now does three things, in the spec's order: clears the Later
+     note (the trap: Later silenced a version FOREVER, across relaunches),
+     asks the host immediately (TTL bypassed server-side), updates the
+     line. Clearing first means a found update is OFFERED again, toast
+     included. */
+  try { localStorage.removeItem('kosmos-update-later'); } catch { /* the check still runs */ }
+  UPD_CHECKING = true;
+  line.textContent = (LAST_VERSION ? 'Kosmos ' + LAST_VERSION + '. ' : 'Kosmos. ') + 'Checking.';
+  btn.disabled = true;
+  let out = null;
+  try { out = await (await fetch('/api/update/check', { method: 'POST' })).json(); } catch { out = null; }
+  UPD_CHECKING = false;
+  paintUpdateCard((out && out.running) || LAST_VERSION, out && out.offer, { reached: !!(out && out.reached) });
+  // The Later note is gone, so a live offer returns to the toast too.
+  renderUpdateToast(out && out.offer);
+});
+
 /* ⚠️ THE CONFIRM GETS THE SAME MODAL MACHINERY AS rm-modal, not adjacency:
    aria-modal promises focus is held, Escape leaves, the backdrop leaves, and
    closing returns the keyboard to the button that opened it. A new sibling
@@ -3551,6 +3630,10 @@ document.getElementById('uc-go').addEventListener('click', async () => {
     return;
   }
   UPDATING_NOW = true;
+  /* The toast says what the poll saw; the FINISH LINE says what actually
+     landed (her rule). The fresh page reads this note and names the
+     version it is really serving. */
+  try { sessionStorage.setItem('kosmos-updated-from', LAST_VERSION || ''); } catch { /* the update still runs */ }
   document.getElementById('updconfirm').hidden = true;
   renderUpdateToast(null);
   const back = document.createElement('div');
@@ -3585,6 +3668,29 @@ document.getElementById('uc-go').addEventListener('click', async () => {
   location.reload();
 });
 
+/* "Updated. You are on Kosmos X." -- once, from the first status after a
+   reload that followed an install. Shown ONLY when the served version
+   actually CHANGED: an installer that found nothing to do did not update
+   anything, and saying so would be the stale-label defect at the finish
+   line instead of the start. */
+let UPDATED_NOTE_DONE = false;
+function updatedNoteOnce(nowVersion) {
+  if (UPDATED_NOTE_DONE) return;
+  UPDATED_NOTE_DONE = true;
+  let from = null;
+  try {
+    from = sessionStorage.getItem('kosmos-updated-from');
+    sessionStorage.removeItem('kosmos-updated-from');
+  } catch { return; }
+  if (!from || !nowVersion || nowVersion === from) return;
+  const slot = document.getElementById('unote-slot');
+  slot.innerHTML = '<div class="utoast" role="status">'
+    + '<span class="udot" aria-hidden="true"></span>'
+    + '<div class="utxt"><b>Updated.</b><small>You are on Kosmos ' + esc(nowVersion) + '.</small></div>'
+    + '<div class="uacts"><button type="button" id="un-ok">OK</button></div></div>';
+  document.getElementById('un-ok').addEventListener('click', () => { slot.innerHTML = ''; });
+}
+
 async function tick() {
   const checked = document.getElementById('checked');
   try {
@@ -3600,6 +3706,8 @@ async function tick() {
     BOARD_SEEN = true;
     updateRecPill();
     renderUpdateToast(data.update);
+    paintUpdateCard(data.version, data.update, data.updateLook);
+    updatedNoteOnce(data.version);
     LAST_VERSION = data.version || LAST_VERSION;
     // Set only after a response, never after a failure: a poll that threw has
     // still not told us what is on this machine.
@@ -4027,7 +4135,6 @@ async function paintSettings() {
   const loc = document.getElementById('set-applocation');
   const mach = document.getElementById('set-machine');
   const acct = document.getElementById('set-account');
-  const ver = document.getElementById('set-version');
   try {
     const m = await (await fetch('/api/machine')).json();
     mach.innerHTML = machineRows(m);
@@ -4067,13 +4174,10 @@ async function paintSettings() {
   try {
     const st = await (await fetch('/api/status')).json();
     acct.innerHTML = accountRow(st.connection);
-    ver.textContent = '';
-    const vb = document.createElement('b');
-    vb.textContent = st.version || 'unknown';
-    ver.append('You are on ', vb, '.');
+    paintUpdateCard(st.version, st.update, st.updateLook);
   } catch {
     acct.innerHTML = accountRow(null);
-    ver.textContent = 'We could not read the version just now.';
+    // The card keeps its last honest paint; the poll repaints it.
   }
   await paintLimits();
   await refreshEngMode();

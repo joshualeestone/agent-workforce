@@ -20,12 +20,20 @@ const { spawn } = require('node:child_process');
 const { version: RUNNING } = require('../package.json');
 
 const DEFAULT_BASE = 'https://installkosmos.com/dist';
-const TTL = 6 * 60 * 60 * 1000;
+// 15 minutes, down from 6 hours (2026-08-18): latest.json is ~25 bytes
+// behind a CDN, so a fast pull is indistinguishable from push at this
+// scale, and Josh's test hour showed what a 6-hour memory feels like: a
+// release nobody's running app would admit existed.
+const TTL = 15 * 60 * 1000;
 const FETCH_TIMEOUT = 3000;
 
 let base = process.env.AGENT_WORKFORCE_RELEASE_BASE || DEFAULT_BASE;
 let fetcher = null;            // tests inject; null means global fetch
-let cache = { at: 0, latest: null };
+// reached: did the LAST look actually get an answer from the host?
+// "could not reach the update server" must never render as "up to date",
+// so the cache carries the distinction rather than flattening both into
+// latest: null. at 0 means we have never looked.
+let cache = { at: 0, latest: null, reached: false };
 let inFlight = null;
 let installRunner = null;   // tests inject; production spawns the real installer
 let installedRootFn = null; // tests inject; production checks the real layout
@@ -67,20 +75,51 @@ async function refresh() {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT);
   const started = Date.now();
+  let landed = false;
   try {
     const res = await doFetch(`${base}/latest.json`, { signal: ctl.signal, cache: 'no-store' });
-    if (!res || !res.ok) return;
-    const body = await res.json().catch(() => null);
-    const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
-    cache = { at: Date.now(), latest: v };
+    if (res && res.ok) {
+      const body = await res.json().catch(() => null);
+      const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
+      // A well-formed answer AND a malformed one both count as REACHED: the
+      // host spoke. reached false is reserved for never hearing back.
+      cache = { at: Date.now(), latest: v, reached: true };
+      landed = true;
+    }
   } finally {
     clearTimeout(timer);
     // ⚠️ A MISS IS AN ANSWER, INCLUDING A THROWN ONE. This stamp used to sit
     // after the await, so a rejecting fetch (offline, DNS, the abort) never
-    // stamped, and the five-second status poll asked a down host forever --
-    // the exact once-per-TTL promise the comment made and the code broke.
-    if (cache.at < started) cache = { at: started, latest: null };
+    // stamped, and the five-second status poll asked a down host forever.
+    // Keyed on the attempt itself, not a timestamp comparison: two
+    // refreshes inside one millisecond made `cache.at < started` skip the
+    // stamp, and checkNow (TTL-bypassing) makes back-to-back refreshes a
+    // real path, not a test artifact.
+    if (!landed) cache = { at: started, latest: null, reached: false };
   }
+}
+
+/** What the last look established: for the screen's could-not-reach state.
+    looked distinguishes "the first look is still in flight" (at 0) from
+    "we looked and could not reach": at boot the screen must say Checking,
+    not claim a failure that has not happened. */
+function lastLook() {
+  return { reached: cache.reached === true, at: cache.at, looked: cache.at > 0 };
+}
+
+/**
+ * Ask the host RIGHT NOW, TTL be damned: the person pressed Check now,
+ * and a button that silently serves a 14-minute-old answer is the Later
+ * trap wearing a new coat. Coalesces with an in-flight background
+ * refresh rather than racing it.
+ */
+async function checkNow() {
+  if (!inFlight) {
+    inFlight = refresh().catch(() => { /* reached:false is the record */ })
+      .finally(() => { inFlight = null; });
+  }
+  await inFlight;
+  return { running: RUNNING, latest: cache.latest, reached: cache.reached === true };
 }
 
 /**
@@ -168,6 +207,7 @@ function setBase(b) { base = b || (process.env.AGENT_WORKFORCE_RELEASE_BASE || D
 function setInstallRunner(f) { installRunner = f; }
 function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
-function resetCache() { cache = { at: 0, latest: null }; inFlight = null; installStarted = false; }
+function resetCache() { cache = { at: 0, latest: null, reached: false }; inFlight = null; installStarted = false; }
 
-module.exports = { available, poke, refresh, newer, installedRoot, setupUrl, beginInstall, alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot, resetCache, RUNNING };
+module.exports = { available, poke, refresh, newer, installedRoot, setupUrl, beginInstall, alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot, resetCache, RUNNING, lastLook, checkNow,
+};

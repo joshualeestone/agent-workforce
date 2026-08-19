@@ -5970,3 +5970,128 @@ test('the group line is wired into paintOneProject, not just extractable', () =>
   assert.ok(raw.includes('.pj-members .pj-told-group {'),
     'CONTROL: the .pj-told-group CSS rule is gone, so the emitted class styles nothing');
 });
+
+/* ---------------------------------------------------------------------------
+ * update-control: Check now, reachability on the wire, the card's four
+ * states, and the finish line that names what landed.
+ * ------------------------------------------------------------------------ */
+
+test('the check route asks fresh, carries reachability, and rides the cross-site guard', async () => {
+  const updates = require('./engine/update');
+  try {
+    updates.resetCache();
+    // Prime a fresh look so the TTL would normally sit on it...
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: updates.RUNNING }) }));
+    await updates.refresh();
+    // ...then publish something newer behind the TTL's back.
+    updates.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+    const out = await req('/api/update/check', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    assert.equal(out.status, 200);
+    const body = JSON.parse(out.body);
+    assert.equal(body.latest, '99.0.0', 'the check served the TTL cache instead of asking fresh');
+    assert.equal(body.reached, true);
+    assert.deepEqual(body.offer, { version: '99.0.0' }, 'the check does not carry the ready-to-install offer');
+
+    // Unreachable says so, and the status payload agrees (could-not-reach
+    // must never render as up-to-date anywhere).
+    updates.setFetcher(async () => { throw new Error('offline'); });
+    const down = JSON.parse((await req('/api/update/check', { method: 'POST', headers: { 'content-type': 'application/json' } })).body);
+    assert.equal(down.reached, false);
+    const st = JSON.parse((await req('/api/status', {})).body);
+    assert.equal(st.updateLook.reached, false, 'the status payload does not carry reachability');
+
+    // The guard, asserted rather than assumed (a new sibling does not
+    // inherit one by adjacency).
+    const cross = await req('/api/update/check', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    assert.equal(cross.status, 403, 'a cross-site origin reached the check route');
+  } finally {
+    updates.resetCache();
+    updates.setFetcher(null);
+  }
+});
+
+test("the update card's states are mutually exclusive and the line is never blank", () => {
+  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\n');
+  const mk = () => {
+    const els = {
+      'upd-line': { textContent: '' },
+      'upd-btn': { textContent: '', hidden: true, disabled: false, dataset: {} },
+    };
+    global.document = { getElementById: (id) => els[id] };
+    return els;
+  };
+  try {
+    // Newer exists.
+    let els = mk();
+    paint('0.1.8', { version: '0.1.9' }, { reached: true });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.8. Version 0.1.9 is ready.');
+    assert.equal(els['upd-btn'].textContent, 'Update');
+    // Current.
+    els = mk();
+    paint('0.1.9', null, { reached: true });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.');
+    assert.equal(els['upd-btn'].textContent, 'Check now');
+    // Could not look: NEVER "up to date".
+    els = mk();
+    paint('0.1.9', null, { reached: false });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Could not reach the update server.');
+    assert.equal(els['upd-btn'].textContent, 'Try again');
+    // The first look still in flight: Checking, never a failure that has
+    // not happened (boot rendered "could not reach" before the first
+    // answer landed; measured on the render sandbox).
+    els = mk();
+    paint('0.1.9', null, { reached: false, looked: false });
+    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Checking.');
+    assert.equal(els['upd-btn'].disabled, true, 'the button was pressable mid-first-look');
+    // The line is never blank, even before the first status.
+    els = mk();
+    paint(null, null, null);
+    assert.ok(els['upd-line'].textContent.length > 0, 'the line rendered blank');
+    assert.ok(!els['upd-line'].textContent.includes('Up to date'),
+      'an unknown look claimed up-to-date');
+  } finally {
+    delete global.document;
+  }
+});
+
+test('the finish line names what actually landed, and only when something did', () => {
+  const src = pageFnSource('updatedNoteOnce');
+  const run = (stored, nowVersion) => {
+    const slot = { innerHTML: '' };
+    const store = { v: stored };
+    const clicks = {};
+    const sandbox = {
+      sessionStorage: {
+        getItem: () => store.v,
+        removeItem: () => { store.v = null; },
+      },
+      document: {
+        getElementById: (id) => (id === 'unote-slot' ? slot
+          : { addEventListener: (ev, fn) => { clicks[id] = fn; } }),
+      },
+      esc: (x) => String(x),
+    };
+    // eslint-disable-next-line no-new-func
+    new Function('sessionStorage', 'document', 'esc',
+      'let UPDATED_NOTE_DONE = false;\n' + src + '\nupdatedNoteOnce(arguments[3]);')(
+      sandbox.sessionStorage, sandbox.document, sandbox.esc, nowVersion);
+    return { slot, store };
+  };
+  // Version changed: the note names the version now installed.
+  const changed = run('0.1.8', '0.1.9');
+  assert.ok(changed.slot.innerHTML.includes('You are on Kosmos 0.1.9.'),
+    'the finish line does not name the landed version');
+  assert.ok(changed.slot.innerHTML.includes('Updated.'));
+  // No change: an installer that found nothing to do did not update
+  // anything, and saying so would be the stale label at the finish line.
+  const same = run('0.1.9', '0.1.9');
+  assert.equal(same.slot.innerHTML, '', 'an unchanged version still claimed Updated');
+  // No note stored: nothing renders.
+  const none = run(null, '0.1.9');
+  assert.equal(none.slot.innerHTML, '', 'a reload with no install note grew a toast');
+  // The note is consumed either way (no repeat on the next reload).
+  assert.equal(changed.store.v, null, 'the note survived its own rendering');
+});
