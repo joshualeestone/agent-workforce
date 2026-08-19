@@ -2020,19 +2020,24 @@ test('the raw window is NOT served from this route, so engineering mode has noth
   }
 });
 
-test('the words in the bubble are checked against the screen, where the screen can still be read', async () => {
+test('a button the visible screen contradicts is refused, and nothing is typed', async () => {
   reset();
   // ⚠️ `chose` is the one half of the pair the server does not derive: the
   // digit is what it types, the words are what the client hands it. A record
   // whose whole job is not to lie about the mechanism must not carry words the
   // visible screen contradicts.
   const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
-  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
-    await post('/api/agent/zeta/thread', { text: '1', chose: 'something nobody was offered' });
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async ({ calls }) => {
+    // ⚠️ REFUSED, NOT STRIPPED. An earlier version dropped the words and sent
+    // the digit anyway, which treated losing the label as the whole problem
+    // when the label was the evidence that the DIGIT was stale too: a button's
+    // number only means anything against the menu it was drawn from.
+    const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'something nobody was offered' });
+    assert.equal(res.status, 409);
+    assert.match(json(res).error, /changed on its screen/);
+    assert.equal(calls.sends().length, 0, 'and nothing was typed into the pane');
     const body = json(await req('/api/agent/zeta/thread'));
-    const row = body.messages[body.messages.length - 1];
-    assert.equal(row.text, '1', 'the bubble falls back to what was actually sent');
-    assert.equal(row.wire, null, 'and no mechanism is claimed that did not happen');
+    assert.deepEqual(body.messages, [], 'nothing recorded either');
   });
   reset();
   // The control: the SAME send with the label the screen really shows is kept.
@@ -2061,18 +2066,32 @@ test('a pane that has already moved on is not asked to prove what the person rea
     });
 });
 
-test('words are refused when the menu is readable and the digit is not on it', async () => {
+test('a button whose digit the visible menu does not offer is refused, not sent', async () => {
   reset();
   // ⚠️ THE CASE THE FIRST GUARD MISSED. With a menu on screen and a `text`
   // that is not one of its numbers, there was no row to compare against, so an
   // unverified label was kept -- which is precisely "words the visible screen
   // contradicts", the thing the guard exists for.
   const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
-  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
-    await post('/api/agent/zeta/thread', { text: '7', chose: '14 days' });
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '7', chose: '14 days' });
+    assert.equal(res.status, 409, 'a digit the visible menu does not offer is a stale button');
+    assert.equal(calls.sends().length, 0);
+  });
+});
+
+test('words on a button are not kept when nothing is being asked', async () => {
+  reset();
+  // ⚠️ `chose` is a claim that these words were on a button. If the board does
+  // not say this agent is asking anything, there was no button -- and because
+  // a non-question screen parses to no menu, the contradiction check below it
+  // would be SKIPPED, so an unverified label went straight into the record.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    const res = await post('/api/agent/zeta/thread', { text: 'ok', chose: 'Approve the wire transfer' });
+    assert.equal(res.status, 200, 'the message still sends: only the words are refused');
     const body = json(await req('/api/agent/zeta/thread'));
     const row = body.messages[body.messages.length - 1];
-    assert.equal(row.text, '7', 'the bubble shows what was really sent');
-    assert.equal(row.wire, null);
+    assert.equal(row.text, 'ok', 'the record keeps what was actually sent');
+    assert.equal(row.wire, null, 'and claims no mechanism that did not happen');
   });
 });

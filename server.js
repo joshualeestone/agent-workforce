@@ -1883,19 +1883,55 @@ const server = http.createServer((req, res) => {
          * bubble's wording is at stake.
          */
         if (chose) {
-          const seen = chat.viewport(name, roster);
+          /**
+           * ⚠️ A BUTTON SEND IS REFUSED WHEN THE SCREEN CONTRADICTS IT, rather
+           * than stripped of its words and sent anyway.
+           *
+           * The first version dropped `chose` on a contradiction and still
+           * typed the digit. But a button's digit is only meaningful against
+           * the menu it was drawn from: if the pane has redrawn into a
+           * DIFFERENT menu, `3` no longer means what the person pressed, and we
+           * would be sending an answer to a question they never saw. Losing the
+           * words was treated as the whole problem when the words were the
+           * evidence that the digit was stale too.
+           *
+           * ⚠️ ONLY WHERE THERE IS POSITIVE EVIDENCE. A pane that has moved on
+           * parses to no menu at all, and that is NOT a contradiction: the
+           * person did read those words a moment ago, and refusing there would
+           * refuse the ordinary case. So: a menu we can read that disagrees is
+           * a refusal; a screen we cannot read a menu from is not.
+           */
+          /**
+           * ⚠️ AND ONLY WHERE SOMETHING IS BEING ASKED. `chose` is words the
+           * client says were on a button; if the board does not say this agent
+           * is asking anything, there was no button. A stale or buggy client
+           * could otherwise POST `{text:'ok', chose:'Approve the wire
+           * transfer'}` at an idle agent, and because a non-question screen
+           * parses to no menu, the verification below would be skipped and the
+           * record would keep words nobody was ever offered.
+           *
+           * The roster is already read, so this costs nothing.
+           */
+          const card = Array.isArray(roster)
+            ? (roster.find((a) => a && a.sessionName === name && a.isNamedOurs === true) || null)
+            : null;
+          if (!card || card.state !== STATE.NEEDS_YOU) chose = null;
+          const seen = chose ? chat.viewport(name, roster) : null;
           const asked = (seen && seen.text) ? chat.questionIn(seen.text) : null;
           const menu = asked ? chat.optionsIn(asked.text) : null;
           const row = menu ? menu.find((o) => String(o.n) === String(body.text).trim()) : null;
-          /**
-           * ⚠️ NO ROW IS THE CLEAREST CONTRADICTION, and the first version let
-           * it through: with a menu on screen and a `text` that is not one of
-           * its numbers ("7", or a sentence), there was no row to compare, so
-           * an unverified label was kept and stored as the bubble. That is
-           * exactly "words the visible screen contradicts". When a menu parses,
-           * the digit has to be in it.
-           */
-          if (menu && (!row || row.label !== chose)) chose = null;
+          /* ⚠️ COMPARED AS IT WILL BE STORED. `appendMessage` puts the bubble
+             text through `cleanMessage`, so comparing the raw string here
+             admitted a label that then changed on its way into the record --
+             small, and the whole point of this pair is that the record does not
+             drift from the screen. */
+          if (chose) chose = chat.cleanMessage(chose);
+          if (menu && (!row || chat.cleanMessage(row.label) !== chose)) {
+            const moved = new Error('that question changed on its screen before this was sent, '
+              + 'so we did not answer it. Its current question is on this page.');
+            moved.status = 409;
+            throw moved;
+          }
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.

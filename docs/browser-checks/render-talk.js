@@ -220,7 +220,9 @@ const STATES = {
            MENU rather than the capture slice. Keying these on `question.text`
            here would arm a hold the paint immediately discards, and the states
            would look right for the wrong reason. */
-        const key = Array.isArray(f.options) ? JSON.stringify(f.options) : null;
+        // The page's own key function, so a fixture cannot arm a hold the paint
+        // would immediately discard.
+        const key = talkKey(f);
         if (key) TALK_QUESTION.april = key;
         if (f.__answered && key) TALK_ANSWERED.april = { question: key, at: Date.now() };
         if (f.__failed && key) TALK_FAILED.april = { question: key };
@@ -578,6 +580,35 @@ const STATES = {
         await paintTalk('april', 'April');
         return { stood, landed: document.activeElement.id || document.activeElement.tagName };
       }, menu);
+      /* ⚠️ THE TRANSITION ARM, which the check above cannot reach. That one
+       * paints `presence:'off'` FIRST and only then hides the question, so the
+       * composer is already disabled and the rescue takes its `else` branch.
+       * The branch that was broken is the other one: the paint where the agent's
+       * Claude exits, so the question hides and the composer closes AT ONCE.
+       * There the rescue used to read a composer that was still open, hand it
+       * focus, and have the same paint disable it underneath -- landing on the
+       * document, which is what the rescue exists to prevent. A check that only
+       * ever exercises the working branch is the third time on this branch that
+       * has happened. */
+      const transition = await page.evaluate(async (f) => {
+        window.__fx = { ...f, presence: 'on' };
+        delete TALK_ANSWERED.april;
+        await paintTalk('april', 'April');
+        document.getElementById('d-qask-text').focus();
+        const stood = document.activeElement.id;
+        // The agent's Claude exits: no question any more AND nowhere to type.
+        window.__fx = { ...f, presence: 'off', asking: false, question: null, options: null,
+          presenceBecause: 'there is no Claude running in its window right now' };
+        await paintTalk('april', 'April');
+        return { stood, landed: document.activeElement.id || document.activeElement.tagName };
+      }, menu);
+      if (transition.stood !== 'd-qask-text') {
+        problems.push(`[${theme}] focus: could not set up the closing-composer case, so it is UNCHECKED`);
+      } else if (transition.landed === 'BODY') {
+        problems.push(`[${theme}] focus: the composer closing on the same paint stranded focus on the document`);
+      }
+      await page.evaluate(async (f) => { window.__fx = f; await paintTalk('april', 'April'); }, menu);
+
       if (rescue.stood !== 'd-qask-text') {
         problems.push(`[${theme}] focus: could not stand inside the question region, so the rescue is UNCHECKED`);
       } else if (rescue.landed === 'BODY') {
@@ -612,6 +643,16 @@ const STATES = {
         window.__fx = { ...f, options: [{ n: 1, label: 'Something else' }, { n: 2, label: 'No' }] };
         await paintTalk('april', 'April');
         out.afterNewMenu = count();
+        /* ⚠️ AND A NEW QUESTION WITH THE SAME LABELS. Claude's edit-permission
+           menu draws identical labels for every file, so a key made of the
+           options alone hid the next question entirely -- panel gone, no
+           buttons, while the board card still said the person was needed. */
+        window.__fx = { ...f, question: { text: 'Edit file src/a.js?\n❯ 1. Yes\n  2. No' } };
+        await paintTalk('april', 'April');
+        TALK_ANSWERED.april = { question: talkKey(window.__fx), at: Date.now() };
+        window.__fx = { ...f, question: { text: 'Edit file src/b.js?\n❯ 1. Yes\n  2. No' } };
+        await paintTalk('april', 'April');
+        out.afterSameLabelsNewQuestion = count();
         return out;
       }, menu);
       if (held.afterAnswer !== 0) {
@@ -622,6 +663,9 @@ const STATES = {
       }
       if (held.afterNewMenu === 0) {
         problems.push(`[${theme}] hold: a genuinely NEW menu was suppressed, so the hold never releases`);
+      }
+      if (held.afterSameLabelsNewQuestion === 0) {
+        problems.push(`[${theme}] hold: a NEW question with the same option words was suppressed`);
       }
       await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);
       await page.evaluate(() => paintTalk('april', 'April'));

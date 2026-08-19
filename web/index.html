@@ -5117,6 +5117,32 @@ function setThread(el, html, count) {
  * the thread rather than on a page of its own, because the box you answer in is
  * the thing you need next to it.
  */
+/**
+ * What makes one question different from another, for the answered-hold.
+ *
+ * ⚠️ TWO PARTS, AND EACH ONE FIXES THE OTHER'S FAILURE.
+ *
+ * Keyed on the whole capture slice, the hold released whenever the pane moved
+ * on underneath the menu -- which a pane always does, and which is the thing
+ * the hold exists to survive.
+ *
+ * Keyed on the OPTIONS alone, it suppressed a genuinely new question whose
+ * labels happened to match. That is not exotic: Claude's edit-permission menu
+ * draws the same three labels for every file, so answering one hid the next,
+ * with the board card still saying the person was needed.
+ *
+ * So the key is the options PLUS what is written above them. The text above the
+ * first option line is the question itself; everything below is the pane
+ * accumulating. One half tells two prompts apart, the other ignores the noise.
+ */
+function talkKey(body) {
+  if (!body.asking || !Array.isArray(body.options) || !body.question) return null;
+  const lines = String(body.question.text || '').split('\n');
+  const first = lines.findIndex((l) => /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(l));
+  const above = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
+  return JSON.stringify(body.options) + '\u0000' + above;
+}
+
 let TALK_LOAD = 0;
 let TALK_SENDING = false;
 // Which agent the in-flight send belongs to. `TALK_SENDING` alone is a fact
@@ -5156,7 +5182,9 @@ const TALK_ANSWER_HOLD_MS = 30000;
  */
 const TALK_FAILED = {};
 /**
- * The question text last PAINTED for each agent.
+ * The KEY of the question last painted for each agent (see `talkKey`: the
+ * options plus the text above them, not the capture slice and not the options
+ * alone).
  *
  * ⚠️ Read at press time rather than at verdict time: by the time the send
  * answers, the poll may have repainted with a different capture, and the hold
@@ -5283,8 +5311,7 @@ async function paintTalk(sessionName, agentName) {
    * those are the same options, it is the same question, whatever else the pane
    * has done since.
    */
-  TALK_QUESTION[sessionName] = (body.asking && Array.isArray(body.options))
-    ? JSON.stringify(body.options) : null;
+  TALK_QUESTION[sessionName] = talkKey(body);
   const answered = TALK_ANSWERED[sessionName];
   const held = !!(answered && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
   /**
@@ -5332,8 +5359,24 @@ async function paintTalk(sessionName, agentName) {
    * nothing and the rescue would report success. The panel takes focus
    * instead; `tabindex="-1"` makes it focusable without adding a tab stop.
    */
+  /**
+   * ⚠️ THE COMPOSER'S NEXT STATE, NOT ITS LAST ONE. `say.disabled` is written
+   * two hundred lines below this, so reading it here reads the PREVIOUS paint.
+   * On the paint where the agent's Claude exits, `asking` goes false and
+   * `presence` goes 'off' together: the rescue saw a composer that was still
+   * open, handed focus to it, and the line below then disabled it -- and
+   * disabling a focused element blurs it synchronously, which is the mechanism
+   * `sendTalk` documents having measured. Focus landed on the document, which
+   * is the exact state this rescue exists to prevent.
+   *
+   * This is the fourth defect in these few lines, and every one of them has
+   * been an ORDERING: the rescue after the hide, the rescue reading a stale
+   * flag. So it now derives what the composer is ABOUT to be, from the same
+   * payload the disable will use.
+   */
+  const closing = body.presence === 'off';
   if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) {
-    if (!say.disabled) say.focus();
+    if (!closing) say.focus();
     else document.getElementById('d-talk-box').focus();
   }
   if (body.asking && body.question) {
@@ -5417,7 +5460,11 @@ async function paintTalk(sessionName, agentName) {
     qopts.innerHTML = wanted;
     if (wasMine) {
       const same = wasN ? qopts.querySelector('.qopt[data-n="' + wasN + '"]') : null;
-      if (same) same.focus(); else say.focus();
+      // Same rule as the hide rescue above: never hand focus to a box this
+      // paint is about to disable.
+      if (same) same.focus();
+      else if (!closing) say.focus();
+      else document.getElementById('d-talk-box').focus();
     }
   }
   qopts.hidden = !opts;
@@ -5481,8 +5528,8 @@ async function paintTalk(sessionName, agentName) {
    * and saying the failure twice on one screen is the noise this codebase
    * keeps removing.
    */
-  /* ⚠️ THE FAILURE LINE BELONGS TO THE QUESTION IT FAILED AGAINST. Keyed on
-     the text, so a new question clears it: without that, a failed answer left
+  /* ⚠️ THE FAILURE LINE BELONGS TO THE QUESTION IT FAILED AGAINST. Keyed the
+     same way as the hold, so a new question clears it: without that, a failed answer left
      "The buttons still work." standing under every later menu, on a page that
      polls every five seconds and stays open for days. */
   const failed = TALK_FAILED[sessionName];
@@ -5572,9 +5619,16 @@ async function sendTalk(text, chose) {
          without sending and the words stay in the box for the person to send
          again. "This will go through in a moment" was the screen undertaking
          something no code does. */
-      busy.textContent = TALK_FLIGHT && CURRENT && TALK_FLIGHT !== CURRENT.sessionName
-        ? 'Still sending your last message to ' + TALK_FLIGHT + '. Try again in a moment.'
-        : 'Still sending your last message.';
+      /* ⚠️ THE DISPLAY NAME, not the session name: every other sentence in this
+         panel says "April" and this one said "april". And BOTH arms carry the
+         same instruction now -- the words stay in the box either way, so the
+         one that said nothing left a person looking at a dead press. */
+      const who = (TALK_FLIGHT && CURRENT && TALK_FLIGHT !== CURRENT.sessionName)
+        ? ((LAST || []).find((a) => a && a.sessionName === TALK_FLIGHT) || {}).name || TALK_FLIGHT
+        : null;
+      busy.textContent = who
+        ? 'Still sending your last message to ' + who + '. Try again in a moment.'
+        : 'Still sending your last message. Try again in a moment.';
     }
     return;
   }
