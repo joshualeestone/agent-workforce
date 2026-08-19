@@ -720,6 +720,20 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    the surfaces, so the panel shell would be a white box behind white
    boxes. */
 #panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* ⚠️ AND CREATE, for the same reason one line up, which is why this is the
+   existing exemption rather than a new idea: the create steps are form fields,
+   and the pack puts a form on the paper ground. Wrapping them in the panel
+   shell put a white card behind a white form, which is what Josh saw and
+   called "this kind of centered modal thing instead of the elements being
+   right on the page".
+   ⚠️ ITS OWN WIDTH, NOT THE 1320 ABOVE. Settings and Projects are wide
+   card layouts; a form is not. The pack's own form container is
+   `.sform { max-width: 34rem }`, so the number comes from there rather than
+   from a second guess.
+   📌 LEFT, NOT CENTRED, which is the pack's arrangement and the one open taste
+   call in this change: Josh asked for "elements right on the page" and the
+   pack puts them left. One word to reverse if he meant centred. */
+#panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0; margin: 0; }
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
