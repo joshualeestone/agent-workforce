@@ -602,7 +602,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .toggle:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .toggle, .toggle i { transition: none; } }
 .btn-quiet {
-  display: inline-flex; align-items: center; gap: .5em;
+  display: inline-flex; align-items: center; justify-content: center; gap: .5em;
   background: transparent; border: 1px solid var(--gold-deep); color: var(--k-ink);
   padding: calc(.9em - 1px) calc(1.75em - 1px); border-radius: 10px; cursor: pointer;
   font-family: inherit; font-size: 1.0625rem; font-weight: 600; line-height: 1.6;
@@ -2692,6 +2692,19 @@ svg { display: block; }
       <p class="pj-folder-state" id="pj-one-folder-state"></p>
       <button class="btn" id="pjs-reveal" type="button">Show me where it is</button>
       <p class="fmsg" id="pjs-reveal-msg" aria-live="polite"></p>
+    </div>
+
+    <div class="field">
+      <span class="flabel">Project members</span>
+      <!-- 18e's section (sha c69afdb2...), the build's field idiom. Her
+           copy verbatim; the light direct DELETE moves AS-IS from the
+           members column (recoverable in two clicks, so no modal grown:
+           weighting it like Remove from Kosmos would teach clicking
+           through both). -->
+      <p class="fhint">Who is on this project. Removing an agent takes it off this project
+         only: it stays on your computer, and you can add it back whenever.</p>
+      <div id="pjs-members"></div>
+      <p class="fmsg" id="pjs-members-msg" aria-live="polite"></p>
     </div>
 
     <div class="field">
@@ -7356,20 +7369,12 @@ function pjView(which) {
 }
 
 function pjToldLine(told) {
-  if (told.state === 'told') {
-    // ⚠️ Future tense, deliberately. We wrote a line into a file. We did not
-    // inform a running agent, and saying we did would be the one claim on this
-    // screen that nobody could check.
-    //
-    // ⚠️ AND THE PREDICTION IS CONDITIONAL, because the verdict behind it is a
-    // record of a past write, not a re-read of the file. Nothing re-checks that
-    // the block is still there, so if the person (or the agent) edits it out,
-    // the flat form went on promising a future read of something that is no
-    // longer in the file. The past-tense half is evidence; the future half is
-    // an expectation, and now reads as one.
-    return 'Kosmos told it where this folder is. It will see that the next time it '
-      + 'starts, unless its instructions have been changed since.';
-  }
+  // ⚠️ SUCCESS SAYS NOTHING (ruled 2026-08-18, Josh: "Bingo"): a receipt
+  // for the expected thing earns no space on a page a person lives on.
+  // The told sentence and its conditional hedge retired together; silence
+  // claims nothing, which is why it is the honest form of success here.
+  // FAILURE still speaks below -- interim until the project notice is
+  // drawn (exit dependency tracked on Splinter's board).
   if (told.state === 'could_not') {
     return 'We could not tell it where this folder is; ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
@@ -7405,12 +7410,9 @@ function pjSharedTold(roster) {
 }
 
 function pjToldGroupLine(told) {
-  if (told.state === 'told') {
-    // Plural of pjToldLine's told sentence, hedge and all: the group form
-    // must not promise more than the per-member form it replaces.
-    return 'Kosmos told each of them where this folder is. They will see that the '
-      + 'next time they start, unless their instructions have been changed since.';
-  }
+  // The told (success) arm is GONE with its singular sibling: success
+  // says nothing, so an all-told roster has nothing to collapse.
+
   // Explicit, not an else: pjSharedTold pre-filters through pjToldLine, but
   // the honesty guarantee (no sentence for not_tried/empty) must hold here
   // too, not only in the current caller.
@@ -7447,16 +7449,11 @@ function pjMember(m, projectId, suppressTold) {
       ? '<small>' + esc((STATE_COPY[m.state] || STATE_COPY.unknown).label)
         + (m.state === 'unknown' && m.because ? ': ' + esc(m.because) : '') + '</small>'
       : '<small>' + esc(m.because || 'We cannot see this agent on this computer right now.') + '</small>')
-    /* "Remove from <scope>" is the pack's removal pattern (beside the
-       destructive "Remove from Kosmos"): the scope word is what tells the
-       person their agent survives this. "Take off" was vague about WHICH
-       removal it was (her ruling, 2026-08-18). */
-    /* The accessible name STARTS with the visible label, name after the
-       colon, so speech input saying the visible words matches the control
-       (WCAG 2.5.3 label-in-name; an interpolated name mid-string broke
-       the substring property). */
-    + (projectId ? '<button class="drop" type="button" aria-label="Remove from project: ' + esc(m.name)
-      + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>' : '')
+    /* The removal action lives in PROJECT SETTINGS now (Josh's ruling
+       2026-08-18: too easy to hit by accident here, and it took a third
+       of the column; the 18e drawing places it with the other project-
+       scoped actions, the escalation gradient member < archive <
+       remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
     + '</div>';
 }
@@ -8097,7 +8094,27 @@ function paintProjectSettings(p) {
    read, while the editable fields and the messages above belong to
    paintProjectSettings alone -- a poll that rewrote pjs-name would eat a
    rename mid-type, the same draft-eater the say box fought (round 33). */
+/**
+ * The settings members rows: name + state + the removal action (18e).
+ * Painted with setIfChanged so the poll never steals keyboard focus from
+ * a row mid-interaction (the same rule the column's painter carries).
+ */
+function paintSettingsMembers(p) {
+  const box = document.getElementById('pjs-members');
+  const rows = (p.agents || []);
+  setIfChanged(box, rows.length
+    ? rows.map((m) => '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+        + '<b>' + esc(m.name) + '</b>'
+        + '<small>' + esc(m.present ? ((STATE_COPY[m.state] || STATE_COPY.unknown).label)
+          : (m.because || 'We cannot see this agent on this computer right now.')) + '</small>'
+        + '<button class="linkish" type="button" aria-label="Remove from project: ' + esc(m.name)
+        + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>'
+        + '</div>').join('')
+    : '<p class="fhint">No agents on this project yet.</p>');
+}
+
 function paintSettingsFacts(p) {
+  paintSettingsMembers(p);
   const folder = String(p.folder || '');
   const base = folder.split('/').filter(Boolean).pop() || folder;
   document.getElementById('pjs-folder-name').textContent = base;
@@ -10005,10 +10022,13 @@ document.getElementById('pj-one-add-go').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('pj-one-agents').addEventListener('click', async (e) => {
+/* The removal listener lives on the SETTINGS rows now (the column lost
+   its buttons; Josh's ruling). Same DELETE, same verdict-read: only the
+   home and the message element moved. */
+document.getElementById('pjs-members').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-drop]');
   if (!btn || !PJ_CURRENT) return;
-  const msg = document.getElementById('pj-one-msg');
+  const msg = document.getElementById('pjs-members-msg');
   msg.textContent = '';
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });

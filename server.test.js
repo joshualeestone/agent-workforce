@@ -5831,12 +5831,10 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   assert.ok(!gx.includes('<b>note</b>'),
     'raw markup from a group reason survived into the group line');
 
-  // Collapses: the told state too, with the hedge intact (the group form
-  // must not promise more than the per-member form it replaces).
-  const gt = shared([told(), told()]);
-  assert.ok(gt.startsWith('Kosmos told each of them where this folder is'), gt);
-  assert.ok(gt.includes('unless their instructions have been changed since'),
-    'the group told sentence dropped the hedge');
+  // Success says NOTHING (ruled 2026-08-18): an all-told roster has no
+  // sentence to say and nothing to collapse.
+  assert.equal(shared([told(), told()]), '',
+    'an all-told roster grew a group sentence; success is silent now');
 
   // Does NOT collapse: mixed states.
   assert.equal(shared([told(), cn('x')]), '', 'mixed states collapsed');
@@ -5880,6 +5878,15 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     projectsEngine.syncAgent('mikey', board.agents);
     roster = projectsEngine.list(board.agents).find((x) => x.name === 'Suppress Told').agents;
     m = roster[0];
+    // ⚠️ DETERMINISM GUARD: with success now SILENT, this test only means
+    // something when the produced verdict is a FAILURE (told renders
+    // nothing, so there would be no span to suppress). The sandbox
+    // produces could_not (no instruction files exist for these agents);
+    // assert that so an environment where the sync succeeds fails loudly
+    // here instead of in the pre-control below with a vaguer message.
+    assert.equal((m.told || {}).state, 'could_not',
+      'the sandbox produced a non-failure verdict; this test needs a could_not roster (state: '
+      + (m.told || {}).state + ')');
   } finally {
     board.restore();
   }
@@ -5906,20 +5913,49 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
   assert.ok(!member(m, 'p1', true).includes('pj-told'),
     'suppressTold left the per-member verdict span in place');
 
-  // The removal action reads "Remove from <scope>" (the pack's pattern,
-  // her ruling 2026-08-18): the scope word is what tells the person their
-  // agent survives this. VISIBLE is a copy pin (a rewrite fails it first
-  // and forces an update here); the containment assertion below it is the
-  // WCAG 2.5.3 property, re-checked against whatever VISIBLE becomes.
-  const rendered = member(m, 'p1');
-  const VISIBLE = 'Remove from project';
-  assert.ok(rendered.includes('>' + VISIBLE + '</button>'),
-    'the removal button no longer reads "Remove from project"');
-  const aria = (rendered.match(/aria-label="([^"]*)"/) || [])[1] || '';
-  assert.ok(aria.includes(VISIBLE),
-    'the accessible name does not contain the visible label: ' + aria);
-  assert.ok(aria.includes(m.name),
-    'the accessible name lost the agent name: ' + aria);
+  // The removal action left these rows entirely (Josh's ruling: it lives
+  // in Project settings now). Asserted as absence WITH the settings
+  // painter's presence below as the control, so this cannot pass because
+  // the feature vanished.
+  assert.ok(!member(m, 'p1').includes('data-drop'),
+    'a removal control survived on the member rows');
+
+  // The SETTINGS painter carries the action now: rows with the name, the
+  // visible label, the label-leading accessible name (WCAG 2.5.3), and
+  // the data-drop wiring the relocated handler keys on.
+  const paintMembers = pageFunction('paintSettingsMembers',
+    TOLD_PRELUDE
+    + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + 'const setIfChanged = (el, html) => { el.innerHTML = html; };\n');
+  const box = { innerHTML: '' };
+  global.document = { getElementById: (id) => (id === 'pjs-members' ? box : null) };
+  try {
+    paintMembers({ agents: roster });
+    const VISIBLE = 'Remove from project';
+    assert.ok(box.innerHTML.includes('>' + VISIBLE + '</button>'),
+      'CONTROL: the settings rows lack the removal action, so the absence above proves loss, not relocation');
+    const aria = (box.innerHTML.match(/aria-label="([^"]*)"/) || [])[1] || '';
+    assert.ok(aria.includes(VISIBLE) && aria.indexOf(VISIBLE) === 0,
+      'the accessible name does not lead with the visible label: ' + aria);
+    assert.ok(box.innerHTML.includes('data-drop="' + roster[0].sessionName + '"'),
+      'the settings rows lost the data-drop wiring the handler keys on');
+    paintMembers({ agents: [] });
+    assert.ok(box.innerHTML.includes('No agents on this project yet'),
+      'an empty roster rendered as nothing rather than saying so');
+  } finally {
+    delete global.document;
+  }
+});
+
+test('the settings members wiring is real, not just extractable', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const facts = pageFnSource('paintSettingsFacts');
+  assert.ok(facts.includes('paintSettingsMembers(p)'),
+    'paintSettingsFacts no longer paints the members rows');
+  assert.ok(raw.includes("document.getElementById('pjs-members').addEventListener('click'"),
+    'the relocated removal handler no longer listens on the settings rows');
+  assert.ok(raw.includes('id="pjs-members"'),
+    'CONTROL: the settings rows element is gone, so the listener pin above is vacuous');
 });
 
 test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {
@@ -6230,4 +6266,15 @@ test("the card's Update arm opens the one shared confirm and records itself as o
   assert.deepEqual(calls, ['uc-no-focus'],
     'the Update arm did something besides opening the confirm on the safe answer: ' + JSON.stringify(calls));
   assert.equal(opener, els['upd-btn'], 'the card button was not recorded as the opener');
+});
+
+test('the centred quiet button is the pack rule, pinned', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  // 18e:173 -- inline-flex left-packs at full width without this, which
+  // is the New task / Add member gap Josh saw.
+  const at = raw.indexOf('.btn-quiet {');
+  assert.ok(at > -1, 'the btn-quiet rule moved; re-point this pin');
+  const rule = raw.slice(at, raw.indexOf('}', at));
+  assert.ok(rule.includes('justify-content: center'),
+    'btn-quiet lost its centring; labels left-pack at full width again');
 });
