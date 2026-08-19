@@ -7137,3 +7137,58 @@ test('the card, the list row and the detail meta line never name two different m
   assert.equal(modelLine(noJob), 'Claude Haiku 4.5');
   assert.equal(runsOnLine(noJob).name, 'Claude Haiku 4.5');
 });
+
+/**
+ * No visible caption is contained in a hidden label beside it.
+ *
+ * ⚠️ THE PROPERTY THAT MAKES EVERY OTHER ASSERTION IN THIS AREA MEAN ANYTHING.
+ * The unknown-memory badge said "Memory unknown" while the ring's `aria-label`
+ * began "Memory unknown: …", so a test asserting the visible badge was satisfied
+ * by the hidden label and stayed green with the badge deleted — and the browser
+ * check passed a blank list cell for the same reason. The words were in the
+ * markup twice for two audiences, and writing the short one as a PREFIX of the
+ * long one is the most natural thing to do and the one thing that makes them
+ * indistinguishable.
+ *
+ * ⚠️ CASE-INSENSITIVE ON PURPOSE. "Unknown" is not inside "Memory unknown" only
+ * if you compare case-sensitively, and instruments get written both ways without
+ * anyone deciding to. The strings are chosen to survive the stricter test so
+ * this can be the obvious comparison rather than a subtle one.
+ */
+test('a visible caption is never a substring of the hidden text beside it', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  // The pairs this rule exists for: a caption a person reads, and the hidden
+  // sentence covering the same fact for a screen reader.
+  const VISIBLE = ['Unknown'];
+  const hidden = [];
+  for (const m of script.matchAll(/aria-label="([^"]*)"/g)) hidden.push(m[1]);
+  for (const m of script.matchAll(/class="vh"[^>]*>([^<]*)</g)) hidden.push(m[1]);
+  for (const m of raw.matchAll(/class="vh"[^>]*>([^<]*)</g)) hidden.push(m[1]);
+  // Template placeholders are not text a person or a screen reader ever hears.
+  const real = hidden.map((h) => h.replace(/\$\{[^}]*\}/g, '').trim()).filter(Boolean);
+
+  assert.ok(real.length >= 5,
+    `only ${real.length} hidden strings found — the extraction is not reading the `
+    + 'page, so the assertion below passes over almost nothing');
+
+  const clashes = [];
+  for (const v of VISIBLE) {
+    for (const h of real) {
+      if (h.toLowerCase().includes(v.toLowerCase())) clashes.push(`"${v}" is inside "${h}"`);
+    }
+  }
+  assert.deepEqual(clashes, [],
+    'a visible caption also appears in hidden text, so any check asserting the '
+    + 'visible one can be satisfied by the hidden one and will pass with the '
+    + 'visible element deleted:\n  ' + clashes.join('\n  '));
+
+  // ⚠️ THE CONTROL. Fed the exact shape of the original defect, the comparison
+  // must report it — otherwise the empty result above proves only that the
+  // matcher never matches.
+  const wouldClash = ['Memory unknown: we could not read how full it is.']
+    .filter((h) => h.toLowerCase().includes('memory unknown'.toLowerCase()));
+  assert.equal(wouldClash.length, 1,
+    'the substring comparison cannot detect the defect it exists for');
+});
