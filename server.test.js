@@ -5908,16 +5908,16 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
 
   // CONTROL first: without the flag the span is there, so the absence
   // below is the suppression and not a dropped field.
-  assert.ok(member(m, 'p1').includes('pj-told'),
+  assert.ok(member(m).includes('pj-told'),
     'CONTROL: the per-member verdict span is gone even unsuppressed');
-  assert.ok(!member(m, 'p1', true).includes('pj-told'),
+  assert.ok(!member(m, true).includes('pj-told'),
     'suppressTold left the per-member verdict span in place');
 
   // The removal action left these rows entirely (Josh's ruling: it lives
   // in Project settings now). Asserted as absence WITH the settings
   // painter's presence below as the control, so this cannot pass because
   // the feature vanished.
-  assert.ok(!member(m, 'p1').includes('data-drop'),
+  assert.ok(!member(m).includes('data-drop'),
     'a removal control survived on the member rows');
 
   // The SETTINGS painter carries the action now: rows with the name, the
@@ -5935,8 +5935,12 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     assert.ok(box.innerHTML.includes('>' + VISIBLE + '</button>'),
       'CONTROL: the settings rows lack the removal action, so the absence above proves loss, not relocation');
     const aria = (box.innerHTML.match(/aria-label="([^"]*)"/) || [])[1] || '';
-    assert.ok(aria.includes(VISIBLE) && aria.indexOf(VISIBLE) === 0,
+    assert.ok(aria.indexOf(VISIBLE) === 0,
       'the accessible name does not lead with the visible label: ' + aria);
+    // N buttons all visibly read the same; the interpolated name is the
+    // ONLY thing distinguishing their accessible names.
+    assert.ok(aria.includes(roster[0].name),
+      'the accessible name lost the agent name: ' + aria);
     assert.ok(box.innerHTML.includes('data-drop="' + roster[0].sessionName + '"'),
       'the settings rows lost the data-drop wiring the handler keys on');
     paintMembers({ agents: [] });
@@ -5956,6 +5960,10 @@ test('the settings members wiring is real, not just extractable', () => {
     'the relocated removal handler no longer listens on the settings rows');
   assert.ok(raw.includes('id="pjs-members"'),
     'CONTROL: the settings rows element is gone, so the listener pin above is vacuous');
+  // Her ruled copy, verbatim (2026-08-18: a claim about what we do, not
+  // a promise about anything we do not control).
+  assert.ok(raw.includes('Who is on this project. Removing an agent takes it off this project'),
+    "the members section lost Mona Lisa's ruled sentence");
 });
 
 test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {

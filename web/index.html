@@ -2703,7 +2703,7 @@ svg { display: block; }
            through both). -->
       <p class="fhint">Who is on this project. Removing an agent takes it off this project
          only: it stays on your computer, and you can add it back whenever.</p>
-      <div id="pjs-members"></div>
+      <div class="pj-members" id="pjs-members"></div>
       <p class="fmsg" id="pjs-members-msg" aria-live="polite"></p>
     </div>
 
@@ -7435,7 +7435,7 @@ function pjToldGroupLine(told) {
  * The board's rule one level up: an agent we cannot read is shown as unknown,
  * never as something healthy, and never as nothing at all.
  */
-function pjMember(m, projectId, suppressTold) {
+function pjMember(m, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
@@ -7466,8 +7466,10 @@ function pjFolderLine(p) {
 
 /**
  * ⚠️ REPAINT ONLY WHEN THE HTML ACTUALLY CHANGED, and the reason is not
- * performance: the member list holds the Remove-from-project buttons, so an unconditional
- * repaint threw keyboard focus back to the body every 5 seconds.
+ * performance: an unconditional repaint threw keyboard focus back to the
+ * body every 5 seconds. The buttons this protects live in the SETTINGS
+ * members rows now (paintSettingsMembers rides this same helper); the
+ * column list keeps the guard for its Add-member flow's stability.
  *
  * ⚠️ It is a MITIGATION, not a cure, and the earlier comment here overstated
  * it. A member's state is exactly what the poll exists to notice, so a
@@ -8086,6 +8088,10 @@ function paintProjectSettings(p) {
   document.getElementById('pjs-desc').value = p.description || '';
   document.getElementById('pjs-msg').textContent = '';
   document.getElementById('pjs-reveal-msg').textContent = '';
+  // The members verdict too: without this, project A's failed-removal
+  // sentence survived Back-and-into-project-B and sat under B's roster,
+  // attributing a failure to the wrong project (review blocker).
+  document.getElementById('pjs-members-msg').textContent = '';
   paintSettingsFacts(p);
 }
 
@@ -8105,9 +8111,13 @@ function paintSettingsMembers(p) {
   setIfChanged(box, rows.length
     ? rows.map((m) => '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
         + '<b>' + esc(m.name) + '</b>'
-        + '<small>' + esc(m.present ? ((STATE_COPY[m.state] || STATE_COPY.unknown).label)
+        // An unknown says WHY here too (the pjMember comment's rule: a bare
+        // "Can't tell" is the shipped defect this app already fixed once).
+        + '<small>' + esc(m.present
+          ? ((STATE_COPY[m.state] || STATE_COPY.unknown).label
+            + (m.state === 'unknown' && m.because ? ': ' + m.because : ''))
           : (m.because || 'We cannot see this agent on this computer right now.')) + '</small>'
-        + '<button class="linkish" type="button" aria-label="Remove from project: ' + esc(m.name)
+        + '<button class="drop" type="button" aria-label="Remove from project: ' + esc(m.name)
         + '" data-drop="' + esc(m.sessionName) + '">Remove from project</button>'
         + '</div>').join('')
     : '<p class="fhint">No agents on this project yet.</p>');
@@ -8260,7 +8270,7 @@ function paintOneProject() {
   const roster = p.agents || [];
   const sharedTold = pjSharedTold(roster);
   setIfChanged(document.getElementById('pj-one-agents'), roster.length
-    ? roster.map((m) => pjMember(m, p.id, !!sharedTold)).join('')
+    ? roster.map((m) => pjMember(m, !!sharedTold)).join('')
       + (sharedTold ? '<p class="pj-told-group">' + sharedTold + '</p>' : '')
     : '<p class="fhint">No agents on this project yet.</p>');
 
