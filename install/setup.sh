@@ -125,6 +125,11 @@ case "$KOSMOS_HOME" in
     ;;
 esac
 BIN_DIR="${KOSMOS_BIN_DIR:-$HOME/.local/bin}"
+# ONE definition for the profile-wiring literals, used by the install
+# wiring AND the uninstall sweep: two derivations of these strings is how
+# the sweep silently stops matching what install wrote.
+PATH_MARKER="# kosmos: PATH for the kosmos command (removed by --uninstall)"
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 # ⚠️ Overridable for the same reason the sources are: the sandboxed test of
 # this installer must not write an app icon into the real Applications
 # folders of the machine it runs on. Everything this script writes goes
@@ -568,8 +573,8 @@ uninstall() {
   if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
     _profile=""
   fi
-  _marker="# kosmos: PATH for the kosmos command (removed by --uninstall)"
-  _pline="export PATH=\"$BIN_DIR:\$PATH\""
+  _marker="$PATH_MARKER"
+  _pline="$PATH_LINE"
   if [ -n "$_profile" ] && [ -f "$_profile" ] && grep -qxF "$_marker" "$_profile" 2>/dev/null; then
     _ptmp="$(mktemp "${TMPDIR:-/tmp}/kosmos-profile.XXXXXXXXXX" 2>/dev/null || true)"
     # The export is matched by ADJACENCY to the marker as well as by exact
@@ -607,8 +612,9 @@ uninstall() {
       _bak_ok=yes
     fi
     fi
-    # Announced only when this run will actually attempt the edit: a
-    # halted run must not say "removing" and then retract it.
+    # Announced unless HALTED (a halted run must not say "removing" and
+    # then retract it). A failed-backup run still announces the attempt
+    # and then reports the failure, which is the honest transcript.
     if [ "$_bak_ok" != halt ]; then
       info "removing the kosmos PATH line from ${_profile##*/}"
     fi
@@ -1121,8 +1127,6 @@ esac
 if [ -n "${KOSMOS_APP_DIR:-}${KOSMOS_SYS_APP_DIR:-}" ] && [ -z "${KOSMOS_PROFILE_FILE:-}" ]; then
   PROFILE_FILE=""
 fi
-PATH_MARKER="# kosmos: PATH for the kosmos command (removed by --uninstall)"
-PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
@@ -1139,7 +1143,7 @@ case ":$PATH:" in
     else
       case "$BIN_DIR" in
         *"
-"*|*'"'*|*'$'*|*'`'*|*'\'*)
+"*|*'"'*|*'$'*|*'`'*|*'\'*|*':'*)
           # Same class as the KOSMOS_HOME guard above: these characters
           # would corrupt (or execute inside) a file sourced at every
           # login. Refuse the write, keep the honest note.
