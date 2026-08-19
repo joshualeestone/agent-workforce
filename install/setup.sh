@@ -567,7 +567,6 @@ uninstall() {
   _marker="# kosmos: PATH for the kosmos command (removed by --uninstall)"
   _pline="export PATH=\"$BIN_DIR:\$PATH\""
   if [ -n "$_profile" ] && [ -f "$_profile" ] && grep -qxF "$_marker" "$_profile" 2>/dev/null; then
-    info "removing the kosmos PATH line from ${_profile##*/}"
     _ptmp="$(mktemp "${TMPDIR:-/tmp}/kosmos-profile.XXXXXXXXXX" 2>/dev/null || true)"
     # The export is matched by ADJACENCY to the marker as well as by exact
     # text: an uninstall run with a different KOSMOS_BIN_DIR than the
@@ -604,8 +603,13 @@ uninstall() {
       _bak_ok=yes
     fi
     fi
+    # Announced only when this run will actually attempt the edit: a
+    # halted run must not say "removing" and then retract it.
+    if [ "$_bak_ok" != halt ]; then
+      info "removing the kosmos PATH line from ${_profile##*/}"
+    fi
     if [ "$_bak_ok" = halt ]; then
-      : # said above; nothing touched
+      : # said above; nothing touched, and nothing was announced
     elif [ "$_bak_ok" = yes ] \
        && awk -v m="$_marker" -v p="$_pline" '
             skip { skip=0; if ($0 == p || $0 ~ /^export PATH=".*:\$PATH"$/) next }

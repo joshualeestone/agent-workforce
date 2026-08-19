@@ -112,6 +112,9 @@ only newborns. No migration needed.
   so (tested as the refusal it is): refuse-don't-guess on a non-verdict
   surface; the agent keeps its stale command until a human resolves the
   duplicate markers.
+- The BIN_DIR unsafe-character case matches the existing KOSMOS_HOME
+  guard's class (no carriage return); a CR-bearing bin dir writes a
+  broken PATH entry, not code. Consistency with the sibling guard kept.
 - The sandbox profile gate keys on app-dir overrides only, matching the
   established lsregister keying; a hypothetical harness overriding only
   HOME/BIN_DIR could still reach a real profile. Consistency kept over

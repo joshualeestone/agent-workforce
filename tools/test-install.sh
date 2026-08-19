@@ -57,9 +57,10 @@ done
 
 export KOSMOS_HOME="$SB/home" KOSMOS_BIN_DIR="$SB/bin" KOSMOS_APP_DIR="$SB/apps"
 export KOSMOS_PROFILE_FILE="$SB/zprofile"
-# SHELL pinned: setup.sh's non-zsh arm refuses to wire and prints the note,
-# so on a bash/fish operator's machine every profile assertion below would
-# fail for an environmental reason that looks like a code regression.
+# SHELL pinned for determinism only (belt and suspenders): with
+# KOSMOS_PROFILE_FILE exported above, setup.sh's non-zsh hedge is
+# unreachable in this run regardless of SHELL; the pin keeps that true
+# even if the hedge's precedence ever changes.
 export SHELL=/bin/zsh
 printf '# the operator\047s own line\n' > "$SB/zprofile"
 export KOSMOS_TMUX_SRC="$TMUX_SRC" KOSMOS_SRC="$KOS_SRC" KOSMOS_PORT="$PORT"

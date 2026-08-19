@@ -10009,7 +10009,7 @@ document.getElementById('pj-one-archive').addEventListener('click', async () => 
     // and an untouched button must not look the same. (The 5s poll may
     // repaint this label from state truth; the message above persists,
     // which is the removal path's accepted shape.)
-    archBtn.textContent = want ? 'Archive failed. Try again' : 'Restore failed. Try again.';
+    archBtn.textContent = want ? 'Archive failed. Try again.' : 'Restore failed. Try again.';
   } finally {
     // Held while the PUT flies, like the disclosure sibling: two fast
     // clicks fired two PUTs (idempotent today only by the carry-forward).

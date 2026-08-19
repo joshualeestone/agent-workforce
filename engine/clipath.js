@@ -54,7 +54,12 @@ function kosmosCliShown(probeRoot) {
   // put a literal newline (and whatever follows it) inside the managed
   // block, which no other sanitizer ever sees. Marker strings likewise.
   if (/["$`\\\n\r!]/.test(cli) || cli.includes('<!--') || cli.includes('-->')) return 'kosmos';
-  return /\s/.test(cli) ? '"' + cli + '"' : cli;
+  // Quote on ANYTHING outside a conservative allowlist, not just
+  // whitespace: & ; | < > ( ) * ? [ # ~ are shell-significant bare but
+  // neutralized by double quotes -- an unquoted R&D path taught a
+  // backgrounded half-command, the exact class the comment above
+  // promises never to teach.
+  return /[^A-Za-z0-9._/-]/.test(cli) ? '"' + cli + '"' : cli;
 }
 
 module.exports = { kosmosCli, kosmosCliShown };
