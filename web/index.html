@@ -192,7 +192,13 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .dav-wrap .detail-av { width: 88px; height: 88px; }
 .dav-wrap .membadge { top: 0; right: -8px; }
 .dnamerow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* ⚠️ Beats `.astate`'s own `margin: 12px auto 0` on specificity (0,2,0 to
+   0,1,0), which is what stops the badge dropping a line and centring itself
+   when it joined the name row. */
 .dnamerow .detail-state { margin: 0; }
+/* What the agent is doing, beside the badge rather than inside it. Reads as
+   the quieter half of the pair: the badge is the state, this is the subject. */
+.dtask { font: var(--text-body) var(--font-ui); color: var(--label-2); min-width: 0; }
 .dname { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; color: var(--k-ink); }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .dprojlab { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
@@ -1897,7 +1903,20 @@ svg { display: block; }
     <div>
       <div class="dnamerow">
         <span class="dname" id="d-name"></span>
+        <!-- ⚠️ THE SAME BADGE THE CARD DRAWS, off the same three derivations
+             (`cardStOf` for the class, `STATE_COPY` for the word, `GLYPH` for
+             the mark). Josh asked for the badge here; building a second one
+             would be two renderings of one state, free to disagree the day a
+             state is added, which is this codebase's named worst habit.
+             The classes are set by the painter, not here, because the state
+             is not known until an agent is opened. -->
         <span class="detail-state" id="d-state"></span>
+        <!-- ⚠️ TO THE RIGHT OF THE BADGE, Josh's item C, and a SEPARATE element
+             rather than more text inside it. The badge said "Needs you: Mac" as
+             one string, so the state and the thing it is about were one
+             unstyleable run. Split, the badge is a badge and the task can sit
+             beside it the way the pack draws it. -->
+        <span class="dtask" id="d-task" hidden></span>
       </div>
       <div class="detail-meta" id="d-meta"></div>
       <div class="detail-why" id="d-why" hidden></div>
@@ -5141,8 +5160,20 @@ function openDetail(sessionName) {
     [a.profile && a.profile.role || a.role, modelLine(a),
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  document.getElementById('d-state').textContent =
-    copy.label + (a.task ? ': ' + a.task : '');
+  /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
+     class, `GLYPH` the mark, `STATE_COPY` the word. A card and its detail page
+     disagreeing about an agent's state is worse than either being wrong. */
+  const dm = cardStOf(a);
+  const dst = document.getElementById('d-state');
+  dst.className = 'detail-state astate st-' + dm.st;
+  dst.innerHTML = GLYPH[dm.st] + '<b>' + esc(copy.label) + '</b>';
+  /* ⚠️ HIDDEN WHEN THERE IS NO TASK, rather than the card's "no task showing".
+     Beside a badge that already says Idle, that sentence restates the badge;
+     on a card, where the badge is small and the row is the only line, it
+     carries. Same fact, different surface, and the pack shows nothing here. */
+  const dtask = document.getElementById('d-task');
+  dtask.textContent = a.task || '';
+  dtask.hidden = !dtask.textContent;
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
