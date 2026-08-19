@@ -2704,6 +2704,13 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   // The REAL modelLine, because the meta line routes through it: a stub
   // here would reconstruct the derivation this line exists to share.
   const modelLine = pageFunction('modelLine');
+  // ⚠️ THE REAL roleLine TOO, and for a stronger reason than modelLine's. This
+  // line used to inline `a.profile && a.profile.role || a.role`, which was
+  // roleLine's body BEFORE roleLine learned to sentence-case a parsed role — so
+  // the card read "Archive worker" and the panel you reached by clicking it
+  // read "archive worker". A stub here would let that divergence back in
+  // silently, which is precisely what a shared derivation is for.
+  const roleLine = pageFunction('roleLine');
   const drive = (card) => {
     const el = { textContent: 'seeded' };
     const from = script.indexOf("document.getElementById('d-meta').textContent =");
@@ -2712,15 +2719,23 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
     assert.ok(from > -1 && write > from && write < end,
       'the meta-line write fell outside the extracted slice');
     // eslint-disable-next-line no-new-func
-    new Function('document', 'a', 'modelLine', script.slice(from, end))(
-      { getElementById: () => el }, card, modelLine);
+    new Function('document', 'a', 'modelLine', 'roleLine', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine, roleLine);
     return el.textContent;
   };
   const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
   assert.match(surfaced, /shown by its machine name/,
     'a display name that IS the machine name carries no disclosure on the panel');
-  assert.match(surfaced, /archive worker · Claude Opus 5 · /,
+  assert.match(surfaced, /Archive worker · Claude Opus 5 · /,
     'CONTROL: the meta line lost its role and model, so the disclosure assertion floats free');
+  // ⚠️ CAPITAL A, and that is the assertion rather than an incidental. The
+  // fixture role is lower-case `archive worker`; the panel must render it the
+  // way the CARD does, which is sentence-cased through roleLine. Written as its
+  // own assertion so the reason survives if the control line above is ever
+  // reworded.
+  assert.match(surfaced, /^Archive worker/,
+    'the panel rendered a parsed role in different capitals from the card that '
+    + 'links to it, which is the second-definition drift roleLine exists to end');
   const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
   assert.doesNotMatch(named, /machine name/,
     'an agent with a real display name is told it is shown by its machine name');
@@ -2728,9 +2743,12 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   // provider-less name gets the same provider-first treatment everywhere,
   // and a missing name is the card's honest "Unknown Model", not an
   // omission.
-  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /r · Claude Fable 5/,
+  // `R`, not `r`: a one-character parsed role is sentence-cased like any other,
+  // which is the boundary case for a `charAt(0).toUpperCase()` on a length-1
+  // string and is worth having land here rather than nowhere.
+  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /R · Claude Fable 5/,
     'the panel model line diverged from the card on a provider-less name');
-  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /r · Unknown Model/,
+  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /R · Unknown Model/,
     'a missing model is silently omitted on the panel while the card says Unknown Model');
 });
 

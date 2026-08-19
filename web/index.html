@@ -104,8 +104,18 @@
     --k-knob:    #e8e9eb;
   }
 }
+/* ⚠️ THIS BLOCK USED TO BREAK DARK MODE, and it sits after the dark block, so it
+   won. Someone on dark + increased contrast got `--label-2: rgba(0,0,0,0.78)`
+   — near-black — on a `#1c1c1e` ground, which is not a contrast enhancement but
+   a contrast failure, against a floor this project holds as a hard rule.
+   Found because the select arrow is drawn in `--label-2` and its comment
+   claimed to follow all three schemes; checking that claim is what surfaced a
+   token bug older than the arrow. The light values are unchanged. */
 @media (prefers-contrast: more) {
   :root { --label-2: rgba(0,0,0,0.78); --separator: rgba(0,0,0,0.3); }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -307,8 +317,18 @@ select { font: var(--text-body) var(--font-ui); color: var(--label);
 select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 /* Same width behaviour as the text input beside it: Josh asked for the model
    picker to be wider, and "as wide as the field above it" is the version that
-   stays true when the panel resizes. */
-.frow select { flex: 1; min-width: 220px; }
+   stays true when the panel resizes.
+
+   ⚠️ NAMED RATHER THAN `.frow select`, because not every select in a `.frow` is
+   a field. `#lim-tier` sits INSIDE a sentence — "Stop them after [n] exchanges
+   an hour" — and `flex: 1; min-width: 220px` on a control holding two digits
+   grabs every spare pixel and tears that sentence in half. The blanket rule
+   measured 307px there.
+   ⚠️ Worth the memory: the run that caught the six selects sharing one
+   appearance PRINTED that 307px width and I read past it, because the check was
+   asserting the property being fixed and was blind to the property being
+   broken. */
+#create-model, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
 .btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
@@ -611,6 +631,23 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
                       border: 2px dashed #9aa0a6; }
 /* THE MEMORY WARNING IS A NUMBER, NOT A METAPHOR: it sits on the gauge, the
    instrument it belongs to, not in the status row. */
+/* The unknown-memory caption, ported from the pack (FROZEN-2026-08-19).
+   ⚠️ IT EXISTS BECAUSE THE WORDS WERE ONLY IN AN `aria-label`. The dashed ring
+   distinguishes those cards and nothing on screen said what dashed MEANT, so a
+   screen-reader user had the fact and a sighted person had a shape. The pack's
+   own rule is "shape distinguishes, words identify"; this is the words.
+   ⚠️ IT MUST NOT INHERIT .membadge's RED. Red there is "nearly full", a measured
+   severity. Unknown is not a severity and must never borrow one.
+   ⚠️ It reserves no space, by the pack's reasoning: `.membadge` is absolute, so
+   it takes no layout and cannot make one card taller than its neighbour. */
+.membadge.unk {
+  top: auto; bottom: -7px; right: auto; left: 50%; transform: translateX(-50%);
+  font: 600 .625rem var(--font-ui); letter-spacing: .01em; white-space: nowrap;
+  color: var(--k-ink); background: var(--k-bg);
+  border: 1px solid var(--k-rule); border-radius: 100px;
+  box-shadow: 0 0 0 2px var(--k-surface);
+  padding: .1rem .4rem;
+}
 .membadge { position: absolute; top: 2px; right: -6px;
             font: 700 .6875rem var(--k-mono);
             font-variant-numeric: tabular-nums;
@@ -2518,8 +2555,22 @@ svg { display: block; }
     </div>
 
     <!-- ⚠️ NO BACK BUTTON (Josh, 2026-08-19), and the pack has none here either:
-         the step's own heading names the role, and the role picker is one
-         screen away by the panel's back link. -->
+         the step's own heading names the role.
+
+         ⚠️ AND THERE IS NOW NO WAY BACK TO THE ROLE PICKER THAT KEEPS WHAT YOU
+         TYPED. Stated plainly because the first version of this comment claimed
+         the opposite: it said the picker was "one screen away by the panel's
+         back link", and `#create-back` is labelled "← All agents" and calls
+         `showTab('agents')`. Re-entering runs `openCreate()`, which resets
+         CREATE_PROJECTS, FILLED_ROLE, AVATAR_FILE and the dirty flags, so a
+         person who picked the wrong role loses their words.
+
+         That is the COST of the removal, not an argument against it — Josh
+         asked for the button to go and this is what it bought. Recorded here so
+         the next reader sees a real trade rather than a reassurance, and so it
+         can be reversed knowingly if the cost turns out to bite. The
+         same-role-preserving path below still works; only the way to reach it
+         is gone. -->
     <div class="sfoot">
       <button class="btn uprime big" id="create-go" type="button">Create agent</button>
     </div>
@@ -3573,7 +3624,19 @@ function card(a) {
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
     : '';
 
-  const badge = pct !== null && pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '';
+  /* ⚠️ THREE STATES IN ONE SLOT, and the unknown one is the whole point. The
+     board's summary line used to carry "N with unknown memory limits"; Josh cut
+     it, which left the dashed ring as the only sighted signal and the words
+     "Memory unknown" living solely in an `aria-label`. That is the could-not-
+     look versus is-not-there split failing for exactly the people who cannot
+     hear the label. The tally was doing this job by accident, fleet-wide; this
+     does it per card, which is where it belonged.
+     `unk` is checked FIRST: a null percent can never be >= NEARLY_FULL, but
+     ordering it this way means the severity badge cannot be reached by an
+     unknown, whatever pctOf later returns. */
+  const badge = pct === null
+    ? '<span class="membadge unk">Memory unknown</span>'
+    : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
@@ -5156,8 +5219,15 @@ function openDetail(sessionName) {
      or the card says "Claude X" while this panel says "X" the day a name
      arrives without its provider. The panel gains the card's honest
      "Unknown Model" for a missing name rather than silently omitting it. */
+  /* ⚠️ `roleLine`, not a private copy of its expression. This line said
+     `a.profile && a.profile.role || a.role`, which was `roleLine`'s body before
+     `roleLine` learned to sentence-case a PARSED role — so the card read
+     "Web-properties worker" and the detail page you reached by clicking it read
+     "web-properties worker", for the same agent, on the same click. Exactly the
+     second-definition trap the comment directly above argues against for the
+     model, one line away. */
   document.getElementById('d-meta').textContent =
-    [a.profile && a.profile.role || a.role, modelLine(a),
+    [roleLine(a), modelLine(a),
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
@@ -6779,9 +6849,15 @@ document.getElementById('role-next').addEventListener('click', () => {
      existed only to protect against that transform, so keeping it would be a
      guard against something that no longer happens. */
   document.getElementById('create-meet').textContent = 'Set up your ' + (role.label || 'agent');
-  // Back then Next with the SAME role keeps everything the person set:
+  // Re-entering step 2 with the SAME role keeps everything the person set:
   // edited words, chosen model, picked projects. A different role is a
   // different template and resets the form on purpose.
+  // ⚠️ THIS USED TO SAY "Back then Next", and that button was deleted on
+  // 2026-08-19, so the flow the comment described no longer exists. The
+  // preservation itself still does, reached now only by `create-go`'s
+  // defensive `cstep('role')` bail-out. Kept rather than deleted: it is the
+  // behaviour that makes that bail-out safe, and it is what a restored Back
+  // button would rely on.
   const roleChanged = FILLED_ROLE !== PICKED;
   refillDetails(roleChanged);
   if (roleChanged) loadCreateExtras();
@@ -10109,7 +10185,10 @@ function addAgentsHtml() {
       + '" data-pick="' + esc(a.sessionName) + '">'
       + '<span class="pick-mark" aria-hidden="true">✓</span>'
       + '<span><b>' + esc(a.name) + '</b>'
-      + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
+      /* The THIRD copy of the role expression, and the one furthest from the
+         card: a member row in a project and an agent card disagreed about the
+         same agent's role text. `roleLine` is the one derivation. */
+      + '<small>' + esc(roleLine(a)) + '</small></span>'
       + '</button>';
   }).join('');
 }
