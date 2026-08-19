@@ -3520,40 +3520,47 @@ function paintUpdateCard(running, offer, look) {
   const line = document.getElementById('upd-line');
   const btn = document.getElementById('upd-btn');
   const v = running ? 'Kosmos ' + running + '. ' : 'Kosmos. ';
+  const put = (text) => {
+    // The line is a role="status" live region and the poll repaints every
+    // five seconds: writing an IDENTICAL text node is still a mutation,
+    // and some screen readers re-announce it each time. Same rule as the
+    // toast's dataset.v guard.
+    if (line.textContent !== text) line.textContent = text;
+  };
   btn.hidden = false;
   btn.disabled = false;
   if (offer && offer.version) {
-    line.textContent = v + 'Version ' + offer.version + ' is ready.';
+    put(v + 'Version ' + offer.version + ' is ready.');
     btn.textContent = 'Update';
     btn.dataset.act = 'update';
   } else if (look && look.looked === false) {
     // The first look is still in flight: say Checking, never a failure
     // that has not happened (boot rendered "could not reach" for the
     // seconds before the first answer landed).
-    line.textContent = v + 'Checking.';
+    put(v + 'Checking.');
     btn.textContent = 'Check now';
     btn.dataset.act = 'check';
     btn.disabled = true;
   } else if (look && look.reached && look.readable) {
-    line.textContent = v + 'Up to date.';
+    put(v + 'Up to date.');
     btn.textContent = 'Check now';
     btn.dataset.act = 'check';
   } else if (look && look.reached && !look.readable) {
     // The captive-portal shape: the host answered, the answer was not a
     // version. Saying "Up to date" here would be a claim about a world
     // we could not read; saying "could not reach" blames the wrong leg.
-    line.textContent = v + "Could not read the update server's answer.";
+    put(v + "Could not read the update server's answer.");
     btn.textContent = 'Try again';
     btn.dataset.act = 'check';
   } else if (look && look.reached === false && look.looked !== false) {
     // Never rendered as "up to date": not hearing back is its own state.
-    line.textContent = v + 'Could not reach the update server.';
+    put(v + 'Could not reach the update server.');
     btn.textContent = 'Try again';
     btn.dataset.act = 'check';
   } else {
     // No look at all (a caller with no data yet): neutral, never a
     // failure that has not happened -- the same rule as the boot arm.
-    line.textContent = v + 'Checking.';
+    put(v + 'Checking.');
     btn.textContent = 'Check now';
     btn.dataset.act = 'check';
     btn.disabled = true;
@@ -3581,7 +3588,13 @@ async function updCheckNowClick() {
   line.textContent = (LAST_VERSION ? 'Kosmos ' + LAST_VERSION + '. ' : 'Kosmos. ') + 'Checking.';
   btn.disabled = true;
   let out = null;
-  try { out = await (await fetch('/api/update/check', { method: 'POST' })).json(); } catch { out = null; }
+  try {
+    const res = await fetch('/api/update/check', { method: 'POST' });
+    // A non-ok answer is the BOARD failing, not the release host: parsing
+    // it would paint "could not reach the update server", blaming the
+    // wrong leg (the arm below owns board-side failures).
+    out = res.ok ? await res.json() : null;
+  } catch { out = null; }
   UPD_CHECKING = false;
   if (!out) {
     // The BOARD did not answer (restarting, or the page is orphaned).

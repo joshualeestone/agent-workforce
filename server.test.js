@@ -6117,7 +6117,7 @@ test('the check route is POST-only, and Check now clears the Later note before a
   };
   const sandbox = {
     localStorage: { removeItem: (k) => { calls.push('clear:' + k); } },
-    fetch: async () => { calls.push('fetch'); return { json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, readable: true, offer: null }) }; },
+    fetch: async () => { calls.push('fetch'); return { ok: true, json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, readable: true, offer: null }) }; },
     document: { getElementById: (id) => els[id] },
     renderUpdateToast: () => { calls.push('toast'); },
   };
@@ -6132,4 +6132,30 @@ test('the check route is POST-only, and Check now clears the Later note before a
   assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.',
     'the answer did not land on the line');
   assert.ok(calls.includes('focus'), 'the keyboard was not returned to the button');
+
+  // The client-failure arm: the BOARD did not answer. The sentence names
+  // the check (not the release host), and the toast is NEVER touched --
+  // clearing it on our own failure could eat a valid offer. The arm's
+  // whole value is what it does NOT do, which is exactly what a refactor
+  // silently breaks.
+  const calls2 = [];
+  const els2 = {
+    'upd-line': { textContent: '' },
+    'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: { act: 'check' }, focus: () => { calls2.push('focus'); } },
+  };
+  const run2 = new Function('localStorage', 'fetch', 'document', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + pageFnSource('updCheckNowClick') + '\nreturn updCheckNowClick();');
+  await run2(
+    { removeItem: () => { calls2.push('clear'); } },
+    async () => { throw new Error('board down'); },
+    { getElementById: (id) => els2[id] },
+    () => { calls2.push('toast'); },
+    '0.1.9');
+  assert.equal(els2['upd-line'].textContent, 'Kosmos 0.1.9. Could not check just now.',
+    'a board-side failure blamed the wrong leg');
+  assert.equal(els2['upd-btn'].textContent, 'Try again');
+  assert.ok(!calls2.includes('toast'),
+    'a board-side failure cleared the toast (could eat a valid offer)');
+  assert.ok(calls2.includes('focus'), 'the keyboard was not returned after the failed check');
 });

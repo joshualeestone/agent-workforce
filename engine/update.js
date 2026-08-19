@@ -3,7 +3,7 @@
  *
  * The published truth is one tiny file, `latest.json` on the release host
  * (`{ "version": "0.1.1" }`), written by the same publish step that uploads
- * the bundle. This module fetches it RARELY (six-hour cache), NEVER on the
+ * the bundle. This module fetches it RARELY (once per TTL window), NEVER on the
  * request path (the status route calls `poke()`, which returns immediately
  * and refreshes in the background), and fails soft in every direction: no
  * network, bad JSON, a weird shape -- all of them mean "no update showing",
@@ -33,7 +33,7 @@ let fetcher = null;            // tests inject; null means global fetch
 // "could not reach the update server" must never render as "up to date",
 // so the cache carries the distinction rather than flattening both into
 // latest: null. at 0 means we have never looked.
-let cache = { at: 0, latest: null, reached: false };
+let cache = { at: 0, latest: null, reached: false, readable: false };
 let inFlight = null;
 let installRunner = null;   // tests inject; production spawns the real installer
 let installedRootFn = null; // tests inject; production checks the real layout

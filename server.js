@@ -689,7 +689,7 @@ const server = http.createServer((req, res) => {
       // is ~95KB. See the cache's own comment for why its key is paranoid.
       const connection = subscription.checkCached();
       // Update awareness rides the status tick the screen already polls:
-      // poke() returns immediately (six-hour cache, background refresh) and
+      // poke() returns immediately (once per TTL window, background refresh) and
       // available() is the cached verdict -- the request path never waits on
       // the release host, and a down host just means no toast.
       updates.poke();
@@ -1197,7 +1197,7 @@ const server = http.createServer((req, res) => {
       // offer is the newer()-gated verdict (same gate the toast rides), so
       // the card never has to re-derive version ordering client-side.
       .then((out) => sendJson(res, 200, { ...out, offer: updates.available() }))
-      .catch(() => sendJson(res, 200, { running: updates.RUNNING, latest: null, reached: false, offer: null }));
+      .catch(() => sendJson(res, 200, { running: updates.RUNNING, latest: null, reached: false, readable: false, offer: null }));
     return;
   }
 
