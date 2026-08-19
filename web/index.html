@@ -8525,7 +8525,11 @@ function pjRoomFilterRows(rows, p, q) {
   const needle = String(q == null ? '' : q).trim().toLowerCase();
   if (!needle) return rows;
   return rows.filter((m) => {
-    const who = m.operator === true ? 'you' : (pjNameOf(p, m.from) || m.from || '');
+    // A valve band displays NO sender: the who arm is empty by local
+    // rule, not by trusting the route to strip `from` (the a2a record
+    // route does carry it, so the guarantee must live here).
+    const who = m.kind === 'valve' ? ''
+      : (m.operator === true ? 'you' : (pjNameOf(p, m.from) || m.from || ''));
     const text = (m.kind === 'valve') ? (m.because || PJ_VALVE_FALLBACK) : (m.text || '');
     return String(who).toLowerCase().includes(needle)
       || String(text).toLowerCase().includes(needle);
@@ -10142,8 +10146,8 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
   const sentProject = PJ_CURRENT;
   // The display name is captured BEFORE the awaits: the success repaint
   // removes the row, and reading it later would read a detached node.
-  const who = (btn.closest('.pj-member') && btn.closest('.pj-member').querySelector('b'))
-    ? btn.closest('.pj-member').querySelector('b').textContent : btn.dataset.drop;
+  const row = btn.closest('.pj-member');
+  const who = (row && row.querySelector('b')) ? row.querySelector('b').textContent : btn.dataset.drop;
   try {
     const res = await fetch('/api/project/' + encodeURIComponent(sentProject) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
     const body = await res.json();

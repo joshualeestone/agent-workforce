@@ -6366,8 +6366,8 @@ test('the conversation filter matches what a row shows, and only that', () => {
   // Empty query: the SAME array back (identity, not a copy -- this is
   // the per-keystroke hot path, and deepEqual could not tell a slice()
   // regression from the fast path).
-  assert.equal(filter(rows, p, ''), rows);
-  assert.equal(filter(rows, p, '   '), rows);
+  assert.strictEqual(filter(rows, p, ''), rows);
+  assert.strictEqual(filter(rows, p, '   '), rows);
   // Text match, case-folded.
   assert.deepEqual(filter(rows, p, 'STABLE').map((r) => r.id), ['m1']);
   // Sender display-name match: the RESOLVED name, provably (only the
@@ -6381,6 +6381,11 @@ test('the conversation filter matches what a row shows, and only that', () => {
   assert.deepEqual(filter(rows, p, 'you').map((r) => r.id), ['m2']);
   // Valve bands match on their sentence.
   assert.equal(filter(rows, p, 'without landing').length, 1);
+  // A valve carrying a stray from (the a2a record shape) is still never
+  // matched by it: the band displays no sender, and the guarantee is
+  // local, not the route's row shape.
+  assert.deepEqual(filter([{ kind: 'valve', from: 'leo', because: 'quiet words' }], p, 'leonardo'), [],
+    'a valve band was found by a sender it does not display');
   // A valve with NO because displays the shared fallback and must be
   // findable by its words (the filter matches what a row SHOWS).
   const bare = [{ kind: 'valve' }];
