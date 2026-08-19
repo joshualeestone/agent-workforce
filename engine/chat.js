@@ -943,184 +943,59 @@ function optionsIn(questionText) {
   const found = [];
   let marked = false;
   const lines = whole.split('\n');
-  /**
-   * WARNING: A WRAPPED LABEL IS ONE OPTION, and without this the feature almost
-   * never fired. The standard permission prompt at an ordinary pane width:
-   *
-   *     > 1. Yes
-   *       2. Yes, and don't ask again for rm commands in
-   *          /Users/agent1/work
-   *       3. No, and tell Claude what to do differently
-   *
-   * The TUI wraps inside its own box, so those are genuinely separate lines
-   * (`capture-pane -J` does not join them -- it joins lines TMUX wrapped, not
-   * ones the program drew). Adjacency alone therefore refused the commonest
-   * real menu in the product, safely and uselessly.
-   *
-   * A continuation is recognised by INDENTATION, not by content: strictly
-   * further in than the option's own number, non-empty, and not itself an
-   * option. That is what the TUI does to align wrapped text under its label,
-   * and it is not what prose does -- an unindented paragraph between two
-   * numbered lines still breaks the run, which is the case this rule must not
-   * reopen.
-   *
-   * BOUNDED AT TWO, because a wrapped label is a line or two and a page of
-   * indented text under a numbered line is a document, not a button.
-   */
-  const CONTINUATIONS = 2;
-  /**
-   * WARNING: A LINE ONLY CONTINUES A LABEL THAT RAN OUT OF ROOM.
-   *
-   * Alignment alone was not enough, and the docblock above claimed it was. Any
-   * non-numbered line at or past the label column was folded in, which is where
-   * ordinary pane furniture sits:
-   *
-   *     > 1. Yes
-   *       2. No
-   *          Press esc to go back      -> option 2 became "No Press esc to go back"
-   *
-   * The button then carries words the option does not have, and a STATIC line
-   * like that parses identically on the server's re-read, so the check that
-   * exists to catch a lying label agrees with it.
-   *
-   * Wrapping has a second property alignment does not: the line it came from is
-   * FULL. "2. No" did not run out of room, so nothing below it can be its
-   * continuation. So a fold now needs both -- aligned to the label column, and a
-   * parent line within a few characters of the widest line in the capture.
-   */
-  const widest = lines.reduce((w, l) => {
-    const body = l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
-    return Math.max(w, body.length);
-  }, 0);
-  // Three characters of slack: a word boundary can leave a wrapped line a
-  // little short of the edge, and a menu drawn at one width is consistent.
-  const RAN_OUT = 3;
   for (let i = 0; i < lines.length; i += 1) {
-    // The frame comes off; the INDENT does not. Stripping both (the first
-    // version) threw away the only thing that distinguishes a wrapped label
-    // from an unrelated line.
+    // The frame comes off both ends, and only the box-drawing character counts
+    // as frame: an ASCII `|` may be the last character of somebody's label.
     const body = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
     const bare = body.replace(/^\s+/, '');
-    const indent = body.length - bare.length;
     const m = OPTION_LINE.exec(bare);
-    if (m) {
-      if (m[1]) marked = true;
-      // Where this option's WORDS begin, which is the column its own wrapped
-      // text is aligned to. `m[0]` is the whole match, `m[3]` the label, so
-      // the difference is the marker-plus-number prefix.
-      found.push({ n: Number(m[2]), label: m[3], at: i, indent,
-        prefix: m[0].length - m[3].length, wrapped: 0,
-        // How close this line came to the edge. A label that wrapped ran out
-        // of room; one that did not, did not.
-        full: body.replace(/[\s│]+$/, '').length });
-      continue;
-    }
-    const last = found.length ? found[found.length - 1] : null;
-    /**
-     * WARNING: A CONTINUATION IS ALIGNED WITH THE LABEL, not merely indented
-     * past the number, and it is never a numbered line. The first version
-     * asked only for `indent > last.indent`, and that swallowed three
-     * different things whole:
-     *
-     *   - A TENTH OPTION. The selection marker sits a column left of the
-     *     unmarked rows (measured in this repo's own real capture: marked
-     *     row indent 1, unmarked 3), so with the cursor on option 9, line 10
-     *     is "deeper" than 9 and folded into its label -- and the guard that
-     *     refuses an over-long menu never saw a tenth line at all. Nine
-     *     buttons over an eleven-option prompt, reading as the whole choice.
-     *   - AN INDENTED FOLLOW-UP QUESTION, which is how Claude draws its own
-     *     tool output. The stale menu then passed the "nothing newer below"
-     *     guard because the newer question had been eaten by option 2.
-     *   - ORDINARY PANE DECORATION. A spinner line under option 1 became part
-     *     of option 1's words, and those words are what the button carries,
-     *     what the server verifies against, and what is stored as the answer.
-     *
-     * Aligning with the label is what a TUI does when it wraps; sitting one
-     * column in is what a sibling row does. The two are different questions
-     * and the first version asked the weaker one.
-     */
-    const labelCol = last ? last.indent + last.prefix : 0;
-    if (last && bare && last.at + last.wrapped + 1 === i
-        && indent >= labelCol && last.wrapped < CONTINUATIONS
-        && last.full >= widest - RAN_OUT
-        && !ANY_NUMBERED.test(bare)) {
-      // The option's own words, continued. Joined with a single space: the
-      // line break is the box's, not the label's.
-      last.label += ' ' + bare;
-      last.wrapped += 1;
-      // A second continuation only follows a first that was itself full.
-      last.full = body.replace(/[\s│]+$/, '').length;
-    }
+    if (!m) continue;
+    if (m[1]) marked = true;
+    found.push({ n: Number(m[2]), label: m[3], at: i });
   }
   if (found.length < 2) return null;
+  for (let i = 0; i < found.length; i += 1) {
+    // 1..n, no gap and no repeat.
+    if (found[i].n !== i + 1) return null;
+    /**
+     * ⚠️ CONSECUTIVE LINES OF THE CAPTURE. A list, not two sentences that
+     * happen to start with numbers, and not a list with anything drawn between
+     * its rows -- which is also what refuses a menu whose label wrapped, since
+     * the wrapped line sits between two options. That refusal is deliberate;
+     * see the note above the scan.
+     */
+    if (i > 0 && found[i].at !== found[i - 1].at + 1) return null;
+  }
   /**
-   * WARNING: A MENU LONGER THAN WE CAN READ IS REFUSED, not truncated.
+   * WARNING: NOTHING MAY HANG BELOW THE RUN, and there are three shapes it
+   * could be. All three are refusals.
    *
-   * The pattern takes ONE digit, so a ten-option menu parses as nine and the
-   * tenth simply vanishes -- and nine buttons over a ten-option prompt is worse
-   * than none: it reads as the whole choice. So the line straight after the run
-   * is inspected, and any numbered continuation refuses the lot.
+   * A NUMBERED line is a menu longer than the single-digit pattern can read.
+   * Nine buttons over a ten-option prompt is worse than none, because it reads
+   * as the whole choice. (This replaced a `found.length > 9` test that the
+   * one-digit pattern had made unreachable.)
    *
-   * (This replaced a `found.length > 9` test, which the one-digit pattern had
-   * made unreachable -- the same dead guard the empty-label note below
-   * describes, found the same way: by writing a case for it and watching it
-   * pass for another reason.)
+   * An INDENTED line is either a wrapped label, which we have decided not to
+   * guess at, or pane furniture. See the note above the scan for why those two
+   * cannot be told apart from a capture alone.
    */
   const lastRun = found[found.length - 1];
-  /**
-   * WARNING: THE LAST OPTION'S LABEL IS WHAT FITS ON ITS OWN LINE.
-   *
-   * Fullness stops a footer being folded onto a SHORT option. It does not stop
-   * one being folded onto a long option that genuinely wrapped, because that
-   * parent really did run out of room:
-   *
-   *     3. No, and tell Claude what to do differently, then stop here
-   *        esc to cancel        -> "…then stop here esc to cancel"
-   *
-   * Between two options we can tell the difference, because a continuation is
-   * followed by the next option. After the LAST one there is nothing to tell it
-   * apart from a footer, a hint line, or anything else the box puts at the
-   * bottom -- and that corruption is STATIC, so the server's re-read parses it
-   * the same way and the check meant to catch a lying label agrees with it.
-   *
-   * So the menu is refused rather than guessed at. The cost is real and
-   * accepted: at narrow pane widths, where the last option wraps, this page
-   * shows the question with no buttons. That is the screen it shows today.
-   */
-  if (lastRun.wrapped > 0) return null;
-  const after = lines[lastRun.at + lastRun.wrapped + 1];
-  /**
-   * WARNING: THE LAST OPTION GETS THE SAME TEST AS THE OTHERS, and it did not.
-   *
-   * `CONTINUATIONS` caps a fold at two lines. For a MIDDLE option a third
-   * wrapped line breaks the contiguity check and the whole menu is refused,
-   * which is the designed behaviour: a menu we cannot read whole is refused
-   * rather than truncated. The last option has no option after it to break
-   * contiguity against, so its third line was simply dropped -- and a
-   * TRUNCATED label is exactly what the docblock above forbids: it is what the
-   * button carries, what the record stores, and what the server compares
-   * against (both sides truncating identically, so the check cannot see it).
-   *
-   * Measured on a boxed prompt at plausible widths: "No, and tell Claude what
-   * to do differently, then stop and wait for me to" -- a half sentence,
-   * stored as the option the person chose.
-   *
-   * So: if the line after its folds is still hanging text of its own, this
-   * menu is longer than we can read, and it is refused whole.
-   */
+  const after = lines[lastRun.at + 1];
   if (after !== undefined) {
     const afterBody = after.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
     const afterBare = afterBody.replace(/^\s+/, '');
     const afterIndent = afterBody.length - afterBare.length;
-    if (afterBare && afterIndent >= lastRun.indent + lastRun.prefix) return null;
-  }
-  if (after !== undefined
-      && /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(after)) return null;
-  for (let i = 0; i < found.length; i += 1) {
-    if (found[i].n !== i + 1) return null;
-    // Consecutive lines of the capture: a list, not two sentences that happen
-    // to start with numbers.
-    if (i > 0 && found[i].at !== found[i - 1].at + found[i - 1].wrapped + 1) return null;
+    const optIndent = lines[lastRun.at].replace(/^\s*│\s?/, '').search(/\S/);
+    /**
+     * ⚠️ TWO SHAPES, AND THE FIRST ONE IS THE MENU-TOO-LONG CASE. A tenth
+     * option sits at the SAME indent as the ninth, so an indent test alone
+     * cannot see it -- which is how a rewrite of this guard turned an
+     * eleven-option prompt back into nine buttons. `ANY_NUMBERED` matches any
+     * digit count, which is the point: it catches exactly the lines the
+     * single-digit pattern above cannot read.
+     */
+    if (afterBare && ANY_NUMBERED.test(afterBare)) return null;
+    if (afterBare && afterIndent > optIndent) return null;
   }
   // Somebody's TUI drew this. Prose does not carry a selection marker.
   if (!marked) return null;
@@ -1172,9 +1047,7 @@ function optionsIn(questionText) {
    * understand well enough to put buttons on.
    */
   if (found.some((o) => messageProblem(o.label))) return null;
-  found.forEach((o) => {
-    delete o.at; delete o.indent; delete o.wrapped; delete o.prefix; delete o.full;
-  });
+  found.forEach((o) => { delete o.at; });
   /**
    * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
    * than an oversight. One was written, and it could not fail: the pattern's
@@ -1421,7 +1294,11 @@ const LOCK_WAIT_MS = 2000;
  * waiting, which is the cost to weigh before raising LOCK_WAIT_MS. And the
  * lock is the SMALL half of the request's blocking budget: deliver's tmux
  * path is up to three execFileSync calls at 5s timeout each (probe, text,
- * Enter), so a wedged tmux stalls the whole board ~15s on its own.
+ * Enter), so a wedged tmux stalls the whole board ~15s on its own. ⚠️ A
+ * NUMBERED ANSWER ADDS A FOURTH: the route reads the pane once more to check
+ * the words against the menu before sending, so that path is ~20s. The number
+ * in this sentence has already been wrong once by being left behind when a
+ * call was added.
  * Consistent with the codebase's synchronous design; named so the number
  * being watched is the real one (round 19).
  */

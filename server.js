@@ -1658,10 +1658,19 @@ const server = http.createServer((req, res) => {
      * running, and so does every other route on this port.
      */
     if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
-    // ⚠️ ONE roster read for the whole request, like every sibling: two
-    // `tmux list-panes` calls can disagree, and a question reported from one
-    // look beside a presence described from another is the same
-    // one-fact-two-derivations sentence this app exists not to say.
+    /**
+     * ⚠️ ONE roster read for everything DERIVED BELOW THIS LINE, which is a
+     * narrower claim than the one that used to sit here.
+     *
+     * The earlier comment said "one roster read for the whole request", and
+     * that is false: `borrowedName` five lines up runs `claimantFor` ->
+     * `paneRoster()`, its own uncached `tmux list-panes`. So a GET makes two,
+     * and the 404 gate is decided against a different look from the one the
+     * payload describes. The harm the comment warns about is therefore
+     * REACHABLE at that seam, and pretending otherwise is worse than saying so:
+     * every value below (presence, asking, the question, the capture) really
+     * does come from this one snapshot, and the gate above really does not.
+     */
     const roster = safeRoster();
     const card = Array.isArray(roster)
       ? (roster.find((a) => a && a.sessionName === name && a.isNamedOurs === true) || null)

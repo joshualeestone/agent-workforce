@@ -510,6 +510,51 @@ const STATES = {
       }
       await page.evaluate(() => { window.__postAnswer = null; delete TALK_FAILED.april; });
 
+      /* 2c. THE SCROLL HALF, which nothing asserted. Mutating `setThread`'s
+       * count key into an unconditional scroll-to-bottom -- the documented
+       * "poll fighting the reader" defect -- left the whole suite green and
+       * this file reporting no problems. The most documented half of the
+       * newest function had no check at all. */
+      const scroll = await page.evaluate(async () => {
+        const many = Array.from({ length: 30 }, (_, i) => ({
+          at: new Date(Date.UTC(2026, 0, 1, 9, 0, i)).toISOString(),
+          text: 'message number ' + (i + 1), wire: null,
+          delivery: { state: 'placed', because: null, paneNote: null },
+        }));
+        window.__fx = { ...window.__fx, asking: false, question: null, options: null, messages: many };
+        await paintTalk('april', 'April');
+        const box = document.getElementById('d-dmthread');
+        box.scrollTop = 0;
+        await paintTalk('april', 'April');           // identical repaint
+        const held = box.scrollTop;
+        window.__fx = { ...window.__fx, messages: many.concat([{
+          at: new Date(Date.UTC(2026, 0, 1, 9, 0, 31)).toISOString(),
+          text: 'a new one', wire: null,
+          delivery: { state: 'placed', because: null, paneNote: null },
+        }]) };
+        await paintTalk('april', 'April');           // one more message
+        return { held, moved: box.scrollTop, height: box.scrollHeight };
+      });
+      if (scroll.held !== 0) {
+        problems.push(`[${theme}] scroll: an identical repaint moved a reader from 0 to ${scroll.held}`);
+      }
+      if (scroll.moved === 0) {
+        problems.push(`[${theme}] scroll: a new message did not bring the thread into view`);
+      }
+
+      /* 2d. THE FOCUS RESCUE AND ITS `tabindex="-1"` ARE A PAIR. Delete the
+       * attribute and `.focus()` becomes a silent no-op, restoring the
+       * stranded-on-<body> state the rescue exists to prevent, with nothing
+       * failing. So the pair is asserted rather than the line. */
+      const rescue = await page.evaluate(() => {
+        const box = document.getElementById('d-talk-box');
+        box.focus();
+        return document.activeElement === box;
+      });
+      if (!rescue) {
+        problems.push(`[${theme}] focus: #d-talk-box cannot take focus, so the composer-disabled rescue is a no-op`);
+      }
+
       // 3. Send with the keyboard: the same rescue, from the other control.
       await page.evaluate(() => {
         window.__posted = [];

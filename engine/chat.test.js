@@ -2029,24 +2029,32 @@ test('optionsIn refuses a whole menu whose label carries what we would not keep'
     [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
 });
 
-test('optionsIn reads the permission prompt people actually see, wrapped label and all', () => {
-  // ⚠️ THE COMMONEST REAL MENU IN THE PRODUCT, and adjacency alone refused it:
-  // the TUI wraps inside its own box, so a long option is genuinely two lines.
-  // A feature that is safe and never fires is not a feature.
-  const boxed = [
-    '│ Do you want to proceed?                          │',
-    '│ ❯ 1. Yes                                         │',
-    '│   2. Yes, and don’t ask again for rm commands in   │',
-    '│      /Users/agent1/work                          │',
-    '│   3. No, and tell Claude what to do differently   │',
-  ].join('\n');
-  const got = chat.optionsIn(boxed);
-  assert.equal(got.length, 3, 'a wrapped label is one option, not two and not none');
-  assert.equal(got[1].label, 'Yes, and don’t ask again for rm commands in /Users/agent1/work',
-    'and the label keeps the words the box broke');
-  // The same shape with no box drawn around it.
-  const bare = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don’t ask again for rm commands in\n     /Users/agent1/work\n  3. No, and tell Claude what to do differently');
-  assert.deepEqual(bare.map((o) => o.n), [1, 2, 3]);
+test('a menu whose label WRAPPED is refused whole, and that is a decision with four defects behind it', () => {
+  // ⚠️ THIS TEST USED TO ASSERT THE OPPOSITE. Folding a wrapped label back
+  // together was attempted three times and produced four defects: an indented
+  // follow-up question eaten into a label, a tenth option folded into the
+  // ninth, a box footer folded into whatever option it sat under, and finally a
+  // fullness rule measured against the widest line in the slice -- which is
+  // normally the tool line the prompt is ABOUT, so the real permission prompt
+  // got no buttons at any width where wrapping happens.
+  //
+  // All four were guesses at one unmeasurable quantity: the width the box was
+  // drawn at. So a wrapped menu is refused, and the cost is the screen this
+  // page shows today.
+  const wrapped = ['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don’t ask again for rm commands in", '     /Users/agent1/work',
+    '  3. No, and tell Claude what to do differently'].join('\n');
+  assert.equal(chat.optionsIn(wrapped), null, 'refused rather than folded or truncated');
+
+  // ⚠️ THE CONTROL, and it is what stops this being "the parser refuses
+  // everything": the same prompt drawn wide enough that nothing wraps reads in
+  // full, verbatim, labels and all.
+  const unwrapped = ['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don’t ask again for rm commands in /Users/agent1/work",
+    '  3. No, and tell Claude what to do differently'].join('\n');
+  const got = chat.optionsIn(unwrapped);
+  assert.equal(got.length, 3);
+  assert.equal(got[1].label, "Yes, and don’t ask again for rm commands in /Users/agent1/work");
 });
 
 test('a continuation is INDENTATION, so prose between options still breaks the run', () => {
@@ -2082,88 +2090,22 @@ test('a menu with a NEWER question below it is not that question’s menu', () =
   assert.equal(withMarker.length, 2, 'a marker inside a label is the label’s, not a newer question');
 });
 
-test('the LAST option gets the same over-wrap test as every other one', () => {
-  // ⚠️ THE ASYMMETRY THIS CLOSES. The fold caps at two lines. A middle option
-  // that needs a third breaks contiguity and the menu is refused whole, which
-  // is the designed behaviour: a menu we cannot read whole is not truncated.
-  // The last option had no option after it to break against, so its third line
-  // was silently DROPPED -- and a half-sentence label is what the button
-  // carries, what the record stores, and what the server compares against
-  // (both sides truncating identically, so the check cannot see it).
-  const lastOverWraps = ['Do you want to proceed?', '❯ 1. Yes',
-    '  2. No, and tell Claude what', '     to do differently, then',
-    '     stop and wait for me to', '     look at the file myself'].join('\n');
-  assert.equal(chat.optionsIn(lastOverWraps), null, 'refused rather than truncated');
+test('nothing drawn under a menu is folded into it, wherever it sits', () => {
+  // Every one of these was a separate defect when folding existed. They are one
+  // rule now: a line under an option, indented past it, refuses the menu.
+  const under = (rows) => chat.optionsIn(rows.join('\n'));
+  assert.equal(under(['❯ 1. Yes', '  2. No', '     Reading src/index.js']), null,
+    'tool output under the last option');
+  assert.equal(under(['❯ 1. Yes', '     Reading src/index.js', '  2. No']), null,
+    'and under a middle one, which breaks the run');
+  assert.equal(under(['│ ❯ 1. Yes    │', '│   2. No     │', '│    esc      │']), null,
+    'a box footer');
+  assert.equal(under(['Do you want to proceed?', '❯ 1. Yes',
+    '  2. No, and tell Claude what to do differently (esc)',
+    '     Press esc to go back', '  3. Yes, and do not ask again']), null,
+    'and a hint line under the widest option, which the fullness rule could not see');
 
-  // The control that makes it a symmetry rather than a coincidence: the SAME
-  // over-wrap in the middle was already refused.
-  const middleOverWraps = ['Do you want to proceed?', '❯ 1. No, and tell Claude what',
-    '     to do differently, then', '     stop and wait for me to',
-    '     look at the file myself', '  2. Yes'].join('\n');
-  assert.equal(chat.optionsIn(middleOverWraps), null);
-
-  // ⚠️ AND THE LAST OPTION NO LONGER WRAPS AT ALL, which supersedes an earlier
-  // version of this test. Between two options a continuation is followed by the
-  // next option and can be told apart from anything else; after the last one
-  // there is nothing to distinguish a wrap from a footer or a hint line, and
-  // that corruption is STATIC -- so the server's re-read parses it identically
-  // and the check meant to catch a lying label agrees with it.
-  const lastWrapsOnce = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
-    '  2. No, and tell Claude what', '     to do differently'].join('\n'));
-  assert.equal(lastWrapsOnce, null, 'a wrapped LAST label is refused, not guessed at');
-
-  // The control that keeps this a rule about the last option rather than about
-  // wrapping: a middle option still wraps and still reads whole.
-  const middleWraps = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
-    "  2. Yes, and don't ask again for rm commands in", '     /Users/agent1/work',
-    '  3. No, and tell Claude what to do differently'].join('\n'));
-  assert.equal(middleWraps.length, 3);
-  assert.equal(middleWraps[1].label, "Yes, and don't ask again for rm commands in /Users/agent1/work");
-});
-
-test('a line only continues a label that ran out of room', () => {
-  // ⚠️ ALIGNMENT ALONE WAS NOT ENOUGH, and the docblock claimed it was. Any
-  // non-numbered line at or past the label column was folded in, which is
-  // exactly where ordinary pane furniture sits. The button then carries words
-  // the option does not have -- and a STATIC decoration line parses the same
-  // way on the server's re-read, so the check that exists to catch a lying
-  // label agrees with it.
-  assert.equal(chat.optionsIn('❯ 1. Yes\n  2. No\n     Reading src/index.js'), null,
-    'a short option did not run out of room, so nothing below it is its wrapping');
-  assert.equal(chat.optionsIn(['│ Do you want to proceed?        │',
-    '│ ❯ 1. Yes                       │', '│   2. No                        │',
-    '│      Press esc to go back      │'].join('\n')), null, 'a box footer is not a label');
-  assert.equal(chat.optionsIn('❯ 1. Yes\n     Reading src/index.js\n  2. No'), null,
-    'and the same under a middle option');
-
-  // ⚠️ THE CONTROL, and without it this test would pass against a parser that
-  // simply refused every wrapped menu. The real permission prompt wraps its
-  // long option BECAUSE the line was full, and that one still reads whole.
-  const real = chat.optionsIn(['Do you want to proceed?', '❯ 1. Yes',
-    "  2. Yes, and don't ask again for rm commands in", '     /Users/agent1/work',
-    '  3. No, and tell Claude what to do differently'].join('\n'));
-  assert.equal(real.length, 3);
-  assert.equal(real[1].label, "Yes, and don't ask again for rm commands in /Users/agent1/work");
-});
-
-test('a footer under a long LAST option is not folded into it', () => {
-  // ⚠️ THE CASE FULLNESS DOES NOT COVER. A short decoration line after a SHORT
-  // option is refused because the parent did not run out of room. After a long
-  // option that genuinely wrapped, the parent DID run out of room, so fullness
-  // is satisfied and the footer folds -- storing "…then stop here esc to
-  // cancel" as the option the person chose, statically, which the server's
-  // re-read agrees with.
-  const w = 62;
-  const box = (rows) => rows.map((r) => '│ ' + r.padEnd(w) + '│').join('\n');
-  assert.equal(chat.optionsIn(box(['Do you want to proceed?', '❯ 1. Yes',
-    "  2. Yes, and don't ask again for rm commands in this project",
-    '  3. No, and tell Claude what to do differently, then stop here',
-    '     esc to cancel'])), null);
-
-  // The control: the same box with nothing under the last option reads fine.
-  const clean = chat.optionsIn(box(['Do you want to proceed?', '❯ 1. Yes',
-    "  2. Yes, and don't ask again for rm commands in this project",
-    '  3. No, and tell Claude what to do differently, then stop here']));
-  assert.equal(clean.length, 3);
-  assert.equal(clean[2].label, 'No, and tell Claude what to do differently, then stop here');
+  // The control: the same menus with nothing under them still read.
+  assert.deepEqual(under(['❯ 1. Yes', '  2. No']),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
 });

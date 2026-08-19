@@ -4003,7 +4003,14 @@ async function tick() {
          is in flight: that would repaint the box from underneath the send's
          own refresh, and not for an invisible panel (a capture every five
          seconds for a surface nobody is looking at is a standing subprocess). */
-      if (!TALK_SENDING && !document.getElementById('panel-detail').hidden) {
+      /* ⚠️ THE GATE IS PER AGENT, like every other flight check on this page.
+         A send to A used to freeze the repaint of whichever agent was open for
+         the whole flight, which can honestly run many seconds: open B while A
+         is sending and B's screen stops updating for reasons that have nothing
+         to do with B. `TALK_FLIGHT` is the same term `paintTalk` already uses
+         to decide whose controls to disable. */
+      if (!(TALK_SENDING && TALK_FLIGHT === CURRENT.sessionName)
+          && !document.getElementById('panel-detail').hidden) {
         paintTalk(CURRENT.sessionName, CURRENT.name);
       }
       if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
