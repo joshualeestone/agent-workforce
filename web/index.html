@@ -44,6 +44,17 @@
      definition, not just the defence its source happened to carry. The
      fallbacks stay at the usage sites anyway, verbatim from the pack. */
   --k-sunk: rgba(20,22,26,.05);
+  /* ⚠️ THE OPTION BUTTON'S BOUNDARY IS A CONTRAST FLOOR, not a preference.
+     `--k-rule` measures 1.18:1 against the question panel in light and 1.10:1
+     in dark, and WCAG SC 1.4.11 asks 3:1 of anything that identifies a control.
+     A button whose edge nobody can see is a button nobody can find. Measured:
+     3.26:1 light, 3.14:1 dark, which are the lightest values that clear the
+     floor -- deliberately, so the pack's quiet treatment survives.
+     ⚠️ The app's OTHER buttons have the same problem (`.btn` measures 1.31:1
+     against a card) and this fixes only the control this branch adds; widening
+     it is a change to every button in the product and belongs in its own diff,
+     flagged rather than silently taken. */
+  --k-optline: #82878f;
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
   --k-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -115,6 +126,7 @@
     /* The inverse: a raised-looking wash on the dark ground, because a
        darker-than-black panel is not a thing anybody can see. */
     --k-sunk:    rgba(245,245,244,.06);
+    --k-optline: #6e7278;
   }
 }
 @media (prefers-contrast: more) {
@@ -919,7 +931,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    ones are not. */
 .qopt { font: inherit; font-size: .9375rem; font-weight: 600;
   color: var(--k-ink); background: var(--k-surface);
-  border: 1px solid var(--k-rule); border-radius: 10px;
+  border: 1px solid var(--k-optline); border-radius: 10px;
   padding: .5em 1.05em; cursor: pointer; }
 .qopt:hover { border-color: var(--k-ink-2); }
 .qopt:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
@@ -5131,6 +5143,33 @@ async function paintTalk(sessionName, agentName) {
   // quickly) pass the sessionName guard both times, and the older answer must
   // not paint last.
   const mine = ++TALK_LOAD;
+  /**
+   * ⚠️ THE FIVE SENTENCES THAT NAME THE AGENT ARE WRITTEN FIRST, before the
+   * fetch, because not one of them depends on its answer.
+   *
+   * Written after it, they carried the PREVIOUS agent's name over every failed
+   * open — and a 404 is a standing condition here, not a blip: a pane holding a
+   * name untied answers 404 on every poll forever. Measured: open April, then
+   * open a borrowed-name agent, and the panel reads "Talk to April", "Just
+   * between you and April", "April will not remember it", with an aria-label
+   * and placeholder naming April, over the sentence saying this conversation
+   * cannot be shown. Indefinitely.
+   *
+   * The markup ships these EMPTY for exactly this reason — "a shipped sentence
+   * naming an agent would be a claim about whichever agent happens to be open"
+   * — and a stale sentence is that same claim with a different way of being
+   * wrong.
+   */
+  const name = agentName || sessionName;
+  document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
+  document.getElementById('d-talk-hint').textContent =
+    'Just between you and ' + name + '. Nothing here belongs to a project.';
+  document.getElementById('d-persist').textContent =
+    'This stays here after a restart. ' + name + ' will not remember it. '
+    + 'Anything that needs to last belongs in their instructions.';
+  const say = document.getElementById('d-say');
+  say.setAttribute('aria-label', 'A message for ' + name);
+  say.placeholder = 'Message ' + name + '…';
   let body;
   // 404 is the route's standing refusal (a pane holding this name untied), not
   // a read that failed this second. The sentence below branches on it.
@@ -5165,16 +5204,6 @@ async function paintTalk(sessionName, agentName) {
   if (mine !== TALK_LOAD) return;
   if (!CURRENT || CURRENT.sessionName !== sessionName) return;
 
-  const name = agentName || sessionName;
-  document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
-  document.getElementById('d-talk-hint').textContent =
-    'Just between you and ' + name + '. Nothing here belongs to a project.';
-  document.getElementById('d-persist').textContent =
-    'This stays here after a restart. ' + name + ' will not remember it. '
-    + 'Anything that needs to last belongs in their instructions.';
-  const say = document.getElementById('d-say');
-  say.setAttribute('aria-label', 'A message for ' + name);
-  say.placeholder = 'Message ' + name + '…';
 
   // Whose send is in the air, if any. Read before anything that disables.
   const flying = TALK_SENDING && TALK_FLIGHT === sessionName;
@@ -5267,7 +5296,14 @@ async function paintTalk(sessionName, agentName) {
    * question region ("round 31 … the stranded-keyboard state, rebuilt by the
    * poll five seconds after the fix for it").
    */
-  if (qopts.innerHTML !== wanted) {
+  /* ⚠️ COMPARED AGAINST WHAT WE WROTE, not against what the DOM reads back.
+     `esc()` writes `&quot;` and serialization returns a bare `"`, so an option
+     labelled `Yes, run "npm test"` never matched itself and rebuilt on every
+     poll — the exact round-trip the picker's own cache replaced in round 35,
+     with its comment saying so. Measured here in Chromium before the change:
+     rebuilt on a byte-identical repaint for that label and no other. */
+  if (qopts.__lastOpts !== wanted) {
+    qopts.__lastOpts = wanted;
     // The focused button is about to stop existing, so the focus goes
     // somewhere real first rather than to the document.
     const losing = document.activeElement;
@@ -5450,16 +5486,24 @@ async function sendTalk(text, chose) {
     && document.activeElement.classList.contains('qopt');
   TALK_SENDING = true;
   TALK_FLIGHT = sentName;
-  send.disabled = true;
-  // The box is the right landing place: it is where they were typing, it stays
-  // enabled through the flight, and it is where the answer they may want to
-  // type instead goes.
-  if (sendHadFocus || optHadFocus) say.focus();
-  // ⚠️ The buttons go dead for the round trip too: a second press on a numbered
-  // prompt answers it twice.
-  document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
-  msg.textContent = 'Sending…';
+  /**
+   * ⚠️ EVERYTHING AFTER THE FLAG IS INSIDE THE TRY. Three DOM statements used
+   * to sit between the flag and the `try`, and a throw in any of them would
+   * have left `TALK_SENDING` true for the life of the page: Send dead, the
+   * option buttons dead, and the poll's own repaint skipped — the one stuck
+   * state with no sentence attached to it, because the code that writes the
+   * sentence is below.
+   */
   try {
+    send.disabled = true;
+    // The box is the right landing place: it is where they were typing, it
+    // stays enabled through the flight, and it is where the answer they may
+    // want to type instead goes.
+    if (sendHadFocus || optHadFocus) say.focus();
+    // ⚠️ The buttons go dead for the round trip too: a second press on a
+    // numbered prompt answers it twice.
+    document.getElementById('d-qopts').querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
+    msg.textContent = 'Sending…';
     const res = await fetch('/api/agent/' + encodeURIComponent(sentName) + '/thread', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

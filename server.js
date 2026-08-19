@@ -1885,9 +1885,17 @@ const server = http.createServer((req, res) => {
         const delivery = chat.deliver(name, body.text, roster);
         const kept = chat.appendMessage(chat.DIRECT, name, {
           text: chose || body.text,
-          // What was actually typed into the pane, when it is not what the
-          // bubble shows.
-          wire: chose ? body.text : null,
+          /**
+           * What was actually typed into the pane, when it is not what the
+           * bubble shows.
+           *
+           * ⚠️ THROUGH `cleanMessage`, because that is what `deliver` types.
+           * Storing the raw body made this field's own comment false: a text
+           * with interior padding or a newline is collapsed on the way to the
+           * pane and was kept here uncollapsed, so the record's account of the
+           * mechanism differed from the mechanism.
+           */
+          wire: chose ? chat.cleanMessage(body.text) : null,
           at: delivery.at,
           delivery,
         });

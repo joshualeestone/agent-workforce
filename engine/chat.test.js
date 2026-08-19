@@ -2011,3 +2011,56 @@ test('optionsIn refuses a whole menu whose label carries what we would not keep'
   assert.deepEqual(chat.optionsIn('\u276f 1. Yes\n  2. No'),
     [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
 });
+
+test('optionsIn reads the permission prompt people actually see, wrapped label and all', () => {
+  // ⚠️ THE COMMONEST REAL MENU IN THE PRODUCT, and adjacency alone refused it:
+  // the TUI wraps inside its own box, so a long option is genuinely two lines.
+  // A feature that is safe and never fires is not a feature.
+  const boxed = [
+    '│ Do you want to proceed?                          │',
+    '│ ❯ 1. Yes                                         │',
+    '│   2. Yes, and don’t ask again for rm commands in   │',
+    '│      /Users/agent1/work                          │',
+    '│   3. No, and tell Claude what to do differently   │',
+  ].join('\n');
+  const got = chat.optionsIn(boxed);
+  assert.equal(got.length, 3, 'a wrapped label is one option, not two and not none');
+  assert.equal(got[1].label, 'Yes, and don’t ask again for rm commands in /Users/agent1/work',
+    'and the label keeps the words the box broke');
+  // The same shape with no box drawn around it.
+  const bare = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don’t ask again for rm commands in\n     /Users/agent1/work\n  3. No, and tell Claude what to do differently');
+  assert.deepEqual(bare.map((o) => o.n), [1, 2, 3]);
+});
+
+test('a continuation is INDENTATION, so prose between options still breaks the run', () => {
+  // ⚠️ THE RULE THIS MUST NOT REOPEN. Continuations are what lets a wrapped
+  // label through; if they were recognised by anything looser than "further in
+  // than the option's own number", the numbered-prose case would come back.
+  assert.equal(chat.optionsIn('❯ 1. Do X\n' + Array.from({ length: 40 }, () => 'filler').join('\n') + '\n2. Do Y'),
+    null, 'unindented lines between options are not a wrapped label');
+  assert.equal(chat.optionsIn('❯ 1. Do X\n    line a\n    line b\n    line c\n  2. Do Y'),
+    null, 'a page of indented text under a numbered line is a document, not a button');
+});
+
+test('a menu with a NEWER question below it is not that question’s menu', () => {
+  // ⚠️ THE CASE THE MARKER AND ADJACENCY RULES DO NOT COVER. A pane
+  // accumulates: an answered prompt sits above, `questionIn` takes the LAST
+  // marker (prose at the bottom) and slices six lines above it, so the stale
+  // menu rides along -- adjacent, marked, numbered 1..n. Buttons built from it
+  // would answer a question that was already answered, and record the person
+  // as having chosen words they were only reading.
+  const capture = ['● Bash(rm -rf build)', '  Removed 4 files', '',
+    'Do you want to proceed?', '❯ 1. Yes', '  2. No', '',
+    'Build cleaned. Would you like to run the tests now?'].join('\n');
+  const slice = chat.questionIn(capture);
+  assert.ok(slice, 'the control: the capture really does read as a question');
+  assert.match(slice.text, /Would you like to run the tests/, 'and it is the LAST question');
+  assert.equal(chat.optionsIn(slice.text), null, 'so the older menu is not offered for it');
+  // The control that makes the refusal mean something: the same menu with
+  // nothing newer under it is still a menu.
+  assert.deepEqual(chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No'),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+  // And an option's OWN label may contain a marker phrase without refusing.
+  const withMarker = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No, and ask permission to continue');
+  assert.equal(withMarker.length, 2, 'a marker inside a label is the label’s, not a newer question');
+});

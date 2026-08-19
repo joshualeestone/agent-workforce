@@ -225,6 +225,38 @@ const STATES = {
           label: el('d-talk-label').textContent,
           qlab: el('d-qask-lab').textContent,
           qfail: el('d-qask-fail').hidden ? '' : el('d-qask-fail').textContent,
+          // ⚠️ THE CONTROL'S BOUNDARY, measured in the page. WCAG SC 1.4.11
+          // asks 3:1 of whatever identifies a control, and a screenshot cannot
+          // tell you a border is invisible -- it looks tasteful.
+          optEdge: (() => {
+            const b = document.querySelector('#d-qopts .qopt');
+            if (!b) return null;
+            const parse = (c) => (c.match(/[\d.]+/g) || ['0', '0', '0']).map(Number);
+            /* ⚠️ THE ALPHA IS APPLIED, and the first version dropped it: a
+               computed `rgba(20, 22, 26, .05)` panel read as its own rgb —
+               near-black — so the check reported 5:1 for a boundary that
+               measures 3.3:1, and it reported it as a PASS. A measurement that
+               ignores the compositing is not measuring the screen. */
+            const over = (fg, bg) => {
+              const f = parse(fg); const g = parse(bg);
+              const a = f.length > 3 ? f[3] : 1;
+              return [0, 1, 2].map((i) => f[i] * a + g[i] * (1 - a));
+            };
+            const lum = (rgb) => {
+              const n = rgb.map((v) => v / 255)
+                .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+              return 0.2126 * n[0] + 0.7152 * n[1] + 0.0722 * n[2];
+            };
+            // The panel sits on the card, which sits on the page.
+            const page = getComputedStyle(document.body).backgroundColor;
+            const card = over(getComputedStyle(el('d-talk-box')).backgroundColor, page);
+            const panel = over(getComputedStyle(el('d-qask')).backgroundColor,
+              'rgb(' + card.map(Math.round).join(',') + ')');
+            const edge = over(getComputedStyle(b).borderTopColor,
+              'rgb(' + panel.map(Math.round).join(',') + ')');
+            const l1 = lum(edge); const l2 = lum(panel);
+            return Number(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2));
+          })(),
           // ⚠️ WHAT IS ACTUALLY ON TOP at the box's own centre. `hidden` on
           // an overlay is a claim; this is the pixel.
           rect: JSON.stringify(el('d-talk-box').getBoundingClientRect()),
@@ -256,6 +288,9 @@ const STATES = {
       // name.
       if (!fx.asking && m.qlab) {
         problems.push(`${tag}: a question sentence is loaded while nothing is asking: ${JSON.stringify(m.qlab)}`);
+      }
+      if (m.optEdge !== null && m.optEdge < 3) {
+        problems.push(`${tag}: the option button's edge is ${m.optEdge}:1 against the panel, under the 3:1 floor`);
       }
       if (m.onTop !== 'the box') problems.push(`${tag}: something else is painted over the box: ${m.onTop}`);
       if (m.pageOverflow > 0) problems.push(`${tag}: the PAGE scrolls sideways by ${m.pageOverflow}px`);

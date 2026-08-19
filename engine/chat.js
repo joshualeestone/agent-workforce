@@ -938,12 +938,52 @@ function optionsIn(questionText) {
   const found = [];
   let marked = false;
   const lines = whole.split('\n');
+  /**
+   * WARNING: A WRAPPED LABEL IS ONE OPTION, and without this the feature almost
+   * never fired. The standard permission prompt at an ordinary pane width:
+   *
+   *     > 1. Yes
+   *       2. Yes, and don't ask again for rm commands in
+   *          /Users/agent1/work
+   *       3. No, and tell Claude what to do differently
+   *
+   * The TUI wraps inside its own box, so those are genuinely separate lines
+   * (`capture-pane -J` does not join them -- it joins lines TMUX wrapped, not
+   * ones the program drew). Adjacency alone therefore refused the commonest
+   * real menu in the product, safely and uselessly.
+   *
+   * A continuation is recognised by INDENTATION, not by content: strictly
+   * further in than the option's own number, non-empty, and not itself an
+   * option. That is what the TUI does to align wrapped text under its label,
+   * and it is not what prose does -- an unindented paragraph between two
+   * numbered lines still breaks the run, which is the case this rule must not
+   * reopen.
+   *
+   * BOUNDED AT TWO, because a wrapped label is a line or two and a page of
+   * indented text under a numbered line is a document, not a button.
+   */
+  const CONTINUATIONS = 2;
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].replace(/^[\s│|]+/, '').replace(/[\s│]+$/, '');
-    const m = OPTION_LINE.exec(line);
-    if (!m) continue;
-    if (m[1]) marked = true;
-    found.push({ n: Number(m[2]), label: m[3], at: i });
+    // The frame comes off; the INDENT does not. Stripping both (the first
+    // version) threw away the only thing that distinguishes a wrapped label
+    // from an unrelated line.
+    const body = lines[i].replace(/^\s*[│|]\s?/, '').replace(/[\s│]+$/, '');
+    const bare = body.replace(/^\s+/, '');
+    const indent = body.length - bare.length;
+    const m = OPTION_LINE.exec(bare);
+    if (m) {
+      if (m[1]) marked = true;
+      found.push({ n: Number(m[2]), label: m[3], at: i, indent, wrapped: 0 });
+      continue;
+    }
+    const last = found.length ? found[found.length - 1] : null;
+    if (last && bare && last.at + last.wrapped + 1 === i
+        && indent > last.indent && last.wrapped < CONTINUATIONS) {
+      // The option's own words, continued. Joined with a single space: the
+      // line break is the box's, not the label's.
+      last.label += ' ' + bare;
+      last.wrapped += 1;
+    }
   }
   if (found.length < 2) return null;
   /**
@@ -959,17 +999,49 @@ function optionsIn(questionText) {
    * describes, found the same way: by writing a case for it and watching it
    * pass for another reason.)
    */
-  const after = found.length ? lines[found[found.length - 1].at + 1] : undefined;
+  const lastRun = found[found.length - 1];
+  const after = lines[lastRun.at + lastRun.wrapped + 1];
   if (after !== undefined
       && /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(after)) return null;
   for (let i = 0; i < found.length; i += 1) {
     if (found[i].n !== i + 1) return null;
     // Consecutive lines of the capture: a list, not two sentences that happen
     // to start with numbers.
-    if (i > 0 && found[i].at !== found[i - 1].at + 1) return null;
+    if (i > 0 && found[i].at !== found[i - 1].at + found[i - 1].wrapped + 1) return null;
   }
   // Somebody's TUI drew this. Prose does not carry a selection marker.
   if (!marked) return null;
+  /**
+   * WARNING: NOTHING MAY ASK A NEWER QUESTION BELOW THE MENU.
+   *
+   * The adjacency and marker rules above say "this is a list something drew".
+   * They do NOT say the list belongs to the question being asked now, and a
+   * pane accumulates. Measured, on the shape a permission prompt actually
+   * leaves behind:
+   *
+   *     Do you want to proceed?
+   *     > 1. Yes
+   *       2. No
+   *
+   *     Build cleaned. Would you like to run the tests now?
+   *
+   * `questionIn` takes the LAST marker (the prose question at the bottom) and
+   * slices from six lines above it, so the ANSWERED menu rides along inside the
+   * slice -- adjacent, marked, numbered 1..n. The docblock's repeat rule does
+   * not cover this: that one only fires when the live question ALSO draws a
+   * menu, and here the live question is prose, which is the exact shape the
+   * marker rule was added for.
+   *
+   * So: if any line BELOW the run is itself a needs-you marker, something newer
+   * is being asked and this menu is not its answer. Lines inside the run are
+   * excluded, because an option's own label can legitimately contain one
+   * ("2. No, and ask permission to continue").
+   */
+  const runTo = lastRun.at + lastRun.wrapped;
+  for (let i = runTo + 1; i < lines.length; i += 1) {
+    if (status.NEEDS_YOU_MARKERS.some((re) => re.test(lines[i]))) return null;
+  }
+
   /**
    * WARNING: A CONTROL CHARACTER REFUSES THE WHOLE MENU rather than one option.
    * A label carrying one cannot be kept (`messageProblem` refuses it on the way
@@ -979,7 +1051,7 @@ function optionsIn(questionText) {
    * understand well enough to put buttons on.
    */
   if (found.some((o) => messageProblem(o.label))) return null;
-  found.forEach((o) => { delete o.at; });
+  found.forEach((o) => { delete o.at; delete o.indent; delete o.wrapped; });
   /**
    * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
    * than an oversight. One was written, and it could not fail: the pattern's
