@@ -6,9 +6,11 @@
  * the bundle. This module fetches it RARELY (once per TTL window), NEVER on the
  * request path (the status route calls `poke()`, which returns immediately
  * and refreshes in the background), and fails soft in every direction: no
- * network, bad JSON, a weird shape -- all of them mean "no update showing",
- * never an error a person has to read. An update notice is the one feature
- * whose absence must cost nothing.
+ * network, bad JSON, a weird shape -- all of them mean "no update showing"
+ * ON THE TOAST, never an error thrown at anyone. The Settings card DOES
+ * name failures (lastLook's reached/readable exist for it), which is a
+ * different posture for a surface the person deliberately visits. An
+ * update notice is the one feature whose absence must cost nothing.
  *
  * ⚠️ The comparison is strictly numeric dotted-triple, and UNKNOWN LOSES:
  * a malformed remote version compares as older than anything, so a corrupted

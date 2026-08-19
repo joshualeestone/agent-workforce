@@ -6199,3 +6199,30 @@ test('the card standoff, the confirm focus fallback, and the identical-write gua
   assert.ok(after > 0, 'CONTROL: the first paint never wrote, so the suppression assert proves nothing');
   delete global.document;
 });
+
+test("the card's Update arm opens the one shared confirm and records itself as opener", async () => {
+  const calls = [];
+  const els = {
+    'upd-btn': { textContent: 'Update', hidden: false, disabled: false, dataset: { act: 'update' }, focus: () => calls.push('btn-focus') },
+    'upd-line': { textContent: '' },
+    'uc-err': { hidden: false },
+    updconfirm: { hidden: true },
+    'uc-no': { focus: () => calls.push('uc-no-focus') },
+  };
+  const doc = { getElementById: (id) => els[id] };
+  // eslint-disable-next-line no-new-func
+  const opener = await new Function('document', 'localStorage', 'fetch', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + pageFnSource('updCheckNowClick')
+    + '\nreturn updCheckNowClick().then(() => UPD_CONFIRM_OPENER);')(
+    doc,
+    { removeItem: () => calls.push('clear') },
+    async () => { calls.push('fetch'); throw new Error('must not be called'); },
+    () => calls.push('toast'),
+    '0.1.9');
+  assert.equal(els.updconfirm.hidden, false, 'the shared confirm did not open');
+  assert.equal(els['uc-err'].hidden, true, 'a stale error survived into the confirm');
+  assert.deepEqual(calls, ['uc-no-focus'],
+    'the Update arm did something besides opening the confirm on the safe answer: ' + JSON.stringify(calls));
+  assert.equal(opener, els['upd-btn'], 'the card button was not recorded as the opener');
+});

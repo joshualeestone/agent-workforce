@@ -3590,7 +3590,15 @@ async function updCheckNowClick() {
   btn.disabled = true;
   let out = null;
   try {
-    const res = await fetch('/api/update/check', { method: 'POST' });
+    // A hang would otherwise lock the card at Checking with the recovery
+    // button disabled (UPD_CHECKING stands off every poll paint); ten
+    // seconds is generous for localhost answering a 25-byte question.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10000);
+    let res;
+    try {
+      res = await fetch('/api/update/check', { method: 'POST', signal: ctl.signal });
+    } finally { clearTimeout(timer); }
     // A non-ok answer is the BOARD failing, not the release host: parsing
     // it would paint "could not reach the update server", blaming the
     // wrong leg (the arm below owns board-side failures).
