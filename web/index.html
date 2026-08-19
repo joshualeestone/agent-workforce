@@ -7398,8 +7398,9 @@ function pjSharedTold(roster) {
   }
   // ⚠️ A collapse may never LOSE a reason. Collapsing suppresses every
   // per-member line, so it is only allowed when the group line carries
-  // everything those lines carried: the told sentence (constant), or a
-  // could_not whose because has a plural sibling. A could_not whose
+  // everything those lines carried: now only a could_not whose because
+  // has a plural sibling (the told sentence is retired; success says
+  // nothing and an all-told roster has nothing to collapse). A could_not whose
   // reason has NO plural form keeps its per-member rows -- three
   // repeated sentences are weight, but a vanished reason is a lie of
   // omission (iteration 3: the N-blocks because collapsed to a line
@@ -10060,19 +10061,31 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
     // a block in a file an agent boots from naming a project it is no longer
     // on, with nothing on screen. Worse than nobody checking: we checked, we
     // were told, and we dropped the answer.
+    // The verdict lands where the person IS: they may have gone Back to
+    // the project view mid-flight (same project, so the guard passed),
+    // and writing into the hidden settings view would be read by nobody
+    // and wiped by the entry-clear -- told, and the answer dropped.
+    const target = document.getElementById('pj-settings-view').hidden
+      ? document.getElementById('pj-one-msg') : msg;
     if (body.told && body.told.state === 'could_not') {
       // The engine's clause becomes its own sentence via pjSentence rather
       // than being spliced mid-sentence with hand punctuation (round 24).
-      msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
+      target.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
         + pjSentence(body.told.because);
     }
     // The clicked button died with the repaint; the keyboard lands on the
-    // verdict element rather than <body> (the pjCloseConfirm pattern).
-    msg.focus();
+    // verdict element rather than <body> (the pjCloseConfirm pattern) --
+    // but ONLY when focus actually fell to body: yanking it out of a
+    // field the person moved to mid-flight would be the draft-eater.
+    if (document.activeElement === document.body && target === msg) msg.focus();
   } catch (err) {
     if (PJ_CURRENT !== sentProject) return;
-    msg.textContent = pjSentence(err.message) || 'We could not change that project.';
-    msg.focus();
+    const target = document.getElementById('pj-settings-view').hidden
+      ? document.getElementById('pj-one-msg') : msg;
+    target.textContent = pjSentence(err.message) || 'We could not change that project.';
+    // The error path repaints nothing, so the retry control survives;
+    // focus moves only if it had already fallen to body.
+    if (document.activeElement === document.body && target === msg) msg.focus();
   }
 });
 

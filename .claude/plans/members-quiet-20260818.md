@@ -64,3 +64,19 @@ drawn (morning); their exit dependency is on Splinter's board.
   row body; the project-notice chunk (morning drawing) reshapes both
   rows again, so the shared-helper refactor waits for the shape that
   survives it rather than being written twice.
+
+## Iteration 3 (review)
+
+- Focus is stolen only when it actually fell to body (the pjCloseConfirm
+  pattern's missing half; yanking it out of a field mid-flight is the
+  draft-eater class).
+- A same-project verdict now lands where the person IS: Back-mid-flight
+  put it into the hidden settings view, where the entry-clear wiped it
+  unread (told, and the answer dropped). The target is the visible
+  view's message element.
+- OPEN QUESTION for Mona Lisa (recorded, not invented): a successful
+  removal announces nothing to a screen-reader user (the row vanishes
+  in a repaint they cannot see). Whether "success says nothing" covers
+  user-initiated action feedback is a copy ruling; a short "Taken off."
+  in the aria-live element would not contradict the ruled column copy,
+  but the sentence is hers to give.
