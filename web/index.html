@@ -3190,7 +3190,29 @@ function modelLine(a) {
   return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
 }
 function roleLine(a) {
-  return (a.profile && a.profile.role) || a.role || '';
+  /**
+   * ⚠️ TWO KINDS OF VALUE SHARE THIS SLOT, and only one of them was ever
+   * written to be read here.
+   *
+   * `profile.role` is a label from a fixed set, chosen off a menu, and it
+   * carries its own capitals. `a.role` is a line PARSED out of the agent's
+   * instruction file: real, the agent's own self-description, and arbitrary
+   * lower-case prose. Measured on this machine: fourteen agents, zero with a
+   * profile role, fourteen falling back. **The fallback is not an edge case,
+   * it is the board**, which is why it is normalised rather than dropped.
+   *
+   * ⚠️ THE FIRST CHARACTER ONLY, NOT TITLE CASE. Title case mangles what it
+   * cannot know: "SEO specialist" becomes "Seo Specialist". That is the exact
+   * acronym problem whose carve-out this branch just deleted, and a transform
+   * would bring the carve-out back with it. Sentence case is a display
+   * convention rather than a claim about the words: it edits nothing, asserts
+   * no provenance, and simply lets a chosen label and a parsed line sit in the
+   * same register.
+   */
+  const chosen = a.profile && a.profile.role;
+  if (chosen) return chosen;
+  const parsed = a.role || '';
+  return parsed ? parsed.charAt(0).toUpperCase() + parsed.slice(1) : '';
 }
 /* ⚠️ ONE encoding of the memory thresholds, because there were four: the
    ring band, the list bar band, the membadge and the heat wash each wrote

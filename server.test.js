@@ -6471,3 +6471,27 @@ test("the removal announcement is her sentence, on both verdict arms", () => {
   assert.ok(handler.indexOf('const who =') < handler.indexOf('await fetch'),
     'the display name is read after the repaint could detach it');
 });
+
+test('a parsed role is sentence-cased and an acronym survives it', () => {
+  // ⚠️ TWO KINDS OF VALUE IN ONE SLOT. `profile.role` is a label chosen off a
+  // menu and carries its own capitals; `a.role` is a line parsed out of the
+  // agent's instruction file, which is arbitrary lower-case prose. Measured
+  // when this landed: 14 agents on the dev machine, ZERO with a profile role,
+  // all 14 falling back. So the fallback is the board, not an edge case.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const at = raw.indexOf('function roleLine(a)');
+  assert.ok(at > -1, 'roleLine moved; re-point this test');
+  // eslint-disable-next-line no-new-func
+  const roleLine = new Function(raw.slice(at, raw.indexOf('\n}\n', at) + 3) + '\nreturn roleLine;')();
+
+  assert.equal(roleLine({ role: 'web-properties worker' }), 'Web-properties worker');
+  assert.equal(roleLine({ role: 'executive assistant' }), 'Executive assistant');
+  // ⚠️ THE ACRONYM IS THE REASON THIS IS NOT TITLE CASE. Title case turns
+  // "SEO specialist" into "Seo Specialist", which is the exact problem whose
+  // carve-out this branch deleted from the create heading; a transform here
+  // would bring that carve-out back with it.
+  assert.equal(roleLine({ role: 'SEO specialist' }), 'SEO specialist');
+  // A chosen label is never touched: it already carries its own capitals.
+  assert.equal(roleLine({ profile: { role: 'Executive Assistant' }, role: 'prose' }), 'Executive Assistant');
+  assert.equal(roleLine({}), '', 'and nothing invents a role for an agent with none');
+});
