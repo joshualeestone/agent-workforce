@@ -2961,7 +2961,14 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     for (const html of [api.card(spoofed), api.lrow(spoofed)]) {
       assert.doesNotMatch(html, /onmouseover/, 'a non-numeric percent reached the DOM raw');
     }
-    assert.match(api.card(spoofed), /Memory unknown/,
+    // ⚠️ ANCHORED ON THE RING'S LABEL, which is what "degraded to the unknown
+    // ring" actually means. This used to read /Memory unknown/, a string that
+    // matched the ring's aria-label AND the visible badge, so it never had to
+    // choose which it was testing -- and that ambiguity is exactly why a
+    // separate assertion about the BADGE could pass with the badge deleted.
+    // The two strings are now deliberately disjoint, so an assertion has to
+    // name the one it means.
+    assert.match(api.card(spoofed), /Memory could not be read/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
 
     // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the

@@ -3552,7 +3552,14 @@ function modelLine(a) {
      the detail panel. There it contradicted a fact we held. Here it answered a
      question nobody asked: the card never claimed to know what was running, so
      it never needed to confess that it did not. */
-  const name = a.modelName || a.plannedModelName;
+  /* ⚠️ FOR A STOPPED AGENT THE JOB WINS HERE TOO. `runsOnLine` prefers the job
+     for a stopped agent and this preferred the transcript, so closing the
+     meta-vs-box disagreement opened a CARD-vs-meta one: the card said "Claude
+     Haiku 4.5" and the detail page you reached by clicking it said "Claude Opus
+     5". The identical shape as the role-line divergence below, and the server
+     now populates both readings deliberately for exactly this case. One rule,
+     every surface: what it will start on, when it is not running. */
+  const name = (a.state === 'stopped' && a.plannedModelName) || a.modelName || a.plannedModelName;
   if (!name) return 'Unknown Model';
   return /^claude/i.test(name) ? name : 'Claude ' + name;
 }
@@ -3804,7 +3811,7 @@ function ring(a) {
   const pct = pctOf(ctx);
   if (pct === null) {
     return `<svg viewBox="0 0 72 72" role="img"
-         aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
+         aria-label="${esc(a.name)}. Memory could not be read.">
       <circle class="gu" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
       ${av}
     </svg>`;
@@ -3889,7 +3896,7 @@ function card(a) {
        authoritative one. Without this a screen reader says it twice per card.
        The gap this badge closes was always the SIGHTED half. (Mona Lisa,
        2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
-    ? '<span class="membadge unk" aria-hidden="true">Memory unknown</span>'
+    ? '<span class="membadge unk" aria-hidden="true">Unknown</span>'
     : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
@@ -3920,7 +3927,7 @@ function lrow(a) {
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
     : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
-  /* ⚠️ A VISIBLE `?`, NOT AN EMPTY SLOT. This rendered a dashed track beside a
+  /* ⚠️ A VISIBLE WORD, NOT AN EMPTY SLOT. This rendered a dashed track beside a
      BLANK percent, which reads as "0% used, room to spare" -- the inverse of
      the truth. The words existed only in the `.vh` span, so a screen-reader
      user had the fact and a sighted person had a bar that looked reassuring.
@@ -3928,8 +3935,11 @@ function lrow(a) {
      this debt on `card()` alone left the other half without it. The unknown
      caption went onto the card and its neighbour was left holding the defect,
      which is the shape this branch has repeated all day.
-     ⚠️ THE WORD, NOT A GLYPH, and never blank (Mona Lisa's ruling): the column
-     already sizes for "100%", so "Unknown" fits, and the two channels then match
+     ⚠️ THE WORD, NOT A GLYPH, and never blank (Mona Lisa's ruling). `.pct` is a
+     `min-width`, not a fixed column, so the cell GROWS for "Unknown" and the
+     flex bar beside it shrinks -- the outcome is fine and the earlier claim that
+     it "already sizes for 100%" described a property the rule does not have.
+     The two channels then match
      the card's -- dashed bar for shape, word for identity. The pack does not
      draw this row at all, which is why nobody checked it: it depicts this state
      only on a card. */
@@ -4542,8 +4552,8 @@ async function tick() {
        user keeps the information and a sighted person is left with dashed rings
        and nothing naming what dashed means.
        ✅ THE SECOND HALF IS PAID ON BOTH LAYOUTS: `.membadge unk` carries
-       "Memory unknown" as visible words on the card, and the list row's percent
-       slot carries a visible `?` instead of a blank. Per the pack's own section
+       "Unknown" as a visible word on the card, and the list row's percent
+       slot carries the same word instead of a blank. Per the pack's own section
        10 ("shape distinguishes, words identify"), ported from
        FROZEN-2026-08-19.
        ⚠️ An earlier version of this note said the debt was paid and named
