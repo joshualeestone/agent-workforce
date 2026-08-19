@@ -149,7 +149,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked b { display: block; font-size: .75rem; letter-spacing: 0;
              text-transform: none; color: var(--k-ink); font-weight: 600; }
 .checked.stale b { text-decoration: underline wavy; }
-.build { max-width: 1320px; margin: calc(var(--space-2) * -1) auto var(--space-7);
+.build { max-width: 1320px; margin: 0 auto var(--space-7);   /* the -4px top was tuned for its old spot under the New agent row; at the foot it just pulls against #removed-wrap */
           font: var(--text-caption) var(--font-ui); color: var(--label-3); }
   .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
   .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
@@ -208,7 +208,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .dnamerow .detail-state { margin: 0; }
 /* What the agent is doing, beside the badge rather than inside it. Reads as
    the quieter half of the pair: the badge is the state, this is the subject. */
-.dtask { font: var(--text-body) var(--font-ui); color: var(--label-2); min-width: 0; }
+/* `min-width: 0` WITH the overflow pair, or it does nothing: on its own the
+   element neither shrinks nor truncates, it just wraps the flex row. */
+.dtask { font: var(--text-body) var(--font-ui); color: var(--label-2);
+         min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dname { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; color: var(--k-ink); }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .dprojlab { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
@@ -263,7 +266,8 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-state { font: var(--text-body) var(--font-ui); margin-top: var(--space-4); }
 /* The panel's half of the pack split ("the card carries signals, the panel
    carries explanation"): the board's stated reason for its belief about
-   this agent. A sentence to read, so label-2 like the state line above. */
+   this agent. A sentence to read, so label-2 — no longer "like the state line
+   above", which became a badge and gave up its colour in the same change. */
 .detail-why { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
 .flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
@@ -322,6 +326,24 @@ select { font: var(--text-body) var(--font-ui); color: var(--label);
          background-size: 5px 5px, 5px 5px;
          background-repeat: no-repeat, no-repeat; }
 select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* ⚠️ A SELECT INSIDE A `k-surface` BOX RIDES THE `k-` SYSTEM, arrow included.
+   The shared rule above paints `--bg-elevated`, which in light mode is the same
+   `#ffffff` as `.dbox` and `.pjcol`, so `#lim-tier`, `#pj-one-add` and
+   `#pj-thread-who` dissolved into their own containers with only a 0.5px border
+   left. Two of them previously had `background: var(--bg)` — paper on a white
+   card — and read as fields because of it.
+
+   ⚠️ This is the hazard this file already records above `.dhead`: "mixing
+   --label furniture into a k-surface box pairs values from two systems that
+   flip separately". The shared rule did exactly that, and the two systems agree
+   in light mode and diverge in dark, which is why it looked fine at a glance.
+   `.detail .dbox input[type=text]` already solved this with `--k-bg`; the
+   selects now match their neighbours rather than the page. */
+.dbox select, .pjcol select {
+  background-color: var(--k-bg); border-color: var(--k-rule); color: var(--k-ink);
+  background-image: linear-gradient(45deg, transparent 50%, var(--k-ink-2) 50%),
+                    linear-gradient(135deg, var(--k-ink-2) 50%, transparent 50%);
+}
 /* Same width behaviour as the text input beside it: Josh asked for the model
    picker to be wider, and "as wide as the field above it" is the version that
    stays true when the panel resizes.
@@ -1010,7 +1032,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
 /* #pj-one-add sits in a `.frow`, so the shared `select` rule dresses it and
-   `.frow select` widths it. It used to restate both, in the page-ground colour
+   the named width rule above widths it. ⚠️ NOT `.frow select` — this comment
+   said so and that selector does not exist: it was deliberately replaced by an
+   ID list, because `.frow select` also caught #lim-tier and blew a control that
+   holds two digits out to 220px. A comment naming the rejected mechanism is
+   permission to reinstate the bug.
+   It used to restate width and appearance both, in the page-ground colour
    rather than the field colour, which is why it and #create-model looked like
    two different controls. */
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
@@ -1035,7 +1062,8 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
 /* --- the thread --------------------------------------------------------- */
 /* Same as #pj-one-add above: dressed by the shared `select` rule, widthed by
-   `.frow select`. */
+   the named width rule above — NOT `.frow select`, which does not exist and
+   was rejected for catching #lim-tier. */
 /* ⚠️ `overflow: auto` and NOT `white-space: pre-wrap`. A Claude permission
    prompt draws its options in columns, and wrapping them at the panel width
    turns the thing the person has to read into a jumble. The box scrolls
@@ -3381,12 +3409,27 @@ function modelLine(a) {
  * only looks up the second when the first is absent.
  */
 function runsOnLine(a) {
-  if (a.modelName) return { lead: 'Right now: ', name: modelLine(a) };
-  if (a.plannedModelName) {
-    const n = a.plannedModelName;
-    return { lead: 'Will start on ', name: /^claude/i.test(n) ? n : 'Claude ' + n };
-  }
-  return { lead: '', name: 'Unknown Model' };
+  /* ⚠️ THE NAME COMES FROM `modelLine`, ALWAYS. This function used to restate
+     both of its derivations — the `Claude ` prefix guard and the literal
+     "Unknown Model" — which is the second definition of one fact that the
+     comment in `modelLine` argues against, reintroduced by the change that
+     quotes it. `modelLine` already falls back to the planned name, so this only
+     has to decide the LEAD. */
+  const name = modelLine(a);
+  if (a.modelName) return { lead: 'Right now: ', name };
+  /* ⚠️ "NOT RUNNING" IS `state`, NOT "we could not read a model", and getting
+     that wrong made this the mirror of the bug it was written to remove.
+     `readModel` returns null whenever there is no transcript — and an agent in
+     its FIRST, CURRENTLY-ACTIVE session has no transcript yet, which is exactly
+     the state `create.js` relies on. Gated on `!modelName`, a `working` agent
+     was told "Will start on Claude Opus 5" while it was running on it.
+     Only `stopped` means no Claude process in that pane. */
+  if (a.plannedModelName && a.state === 'stopped') return { lead: 'Will start on ', name };
+  /* Running (or unreadable) with no live model: we know what the job is
+     configured with and we could NOT read what it is actually on. Neither tense
+     is true, so neither is claimed — the name alone, which is how every compact
+     surface already states it. */
+  return { lead: '', name };
 }
 function roleLine(a) {
   /**
@@ -3410,6 +3453,10 @@ function roleLine(a) {
    */
   const chosen = a.profile && a.profile.role;
   if (chosen) return chosen;
+  /* ⚠️ `charAt(0).toUpperCase()` is not free of edits, and an earlier version of
+     this comment claimed it was: a parsed role of `iOS engineer` renders
+     `IOS engineer`. Much narrower than the title-casing it replaced, which
+     mangled every word, but the claim should match the behaviour. */
   const parsed = a.role || '';
   return parsed ? parsed.charAt(0).toUpperCase() + parsed.slice(1) : '';
 }
@@ -3554,10 +3601,12 @@ function ring(a) {
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
-     third cue after arc length and colour. The caption is gone at Josh's
-     call; "memory unknown" is carried by the dashed ring's aria-label and,
-     for sighted readers, by the dashed shape the pack pairs with the
-     unknown card. The avatar stays inside the ring (this app's real data;
+     third cue after arc length and colour. "Memory unknown" is carried three
+     ways: this ring's aria-label, the dashed shape the pack pairs with the
+     unknown card, and -- since the caption was restored as `.membadge unk` --
+     visible words in the same .agauge container. ⚠️ This used to say the
+     caption "is gone at Josh's call", which stopped being true when the badge
+     came back and would have read as permission to delete it again. The avatar stays inside the ring (this app's real data;
      the pack draws faces in the same slot). */
   const pct = pctOf(ctx);
   if (pct === null) {
@@ -4281,11 +4330,14 @@ async function tick() {
        `aria-label` and a `.vh` span (lines 3338 and 3438). So a screen-reader
        user keeps the information and a sighted person is left with dashed rings
        and nothing naming what dashed means.
-       ⚠️ THE SECOND HALF IS OWED: a visible caption on the card itself, which
-       the pack's own section 10 already requires ("shape distinguishes, words
-       identify") and does not currently draw either. Mona Lisa has it. The
-       tally was doing that job by accident, for the whole fleet at once, which
-       is why removing it looks free and is not.
+       ✅ THE SECOND HALF IS PAID, in this same change: `.membadge unk` on the
+       card carries "Memory unknown" as visible words, per the pack's own
+       section 10 ("shape distinguishes, words identify"), ported from
+       FROZEN-2026-08-19. The tally was doing that job by accident, for the
+       whole fleet at once, which is why removing it looked free and was not.
+       ⚠️ This comment previously said the caption was still owed, while the
+       code three hundred lines up already drew it. Two comments in one change
+       disagreeing about whether a debt is paid is how it gets paid twice.
        The line above it, "N we cannot read", STAYS: that one is about agents
        missing from this board entirely, which is a different and louder fact. */
     // ⚠️ Part of the fleet is MISSING FROM THIS BOARD. tmux said something we

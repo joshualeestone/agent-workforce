@@ -291,6 +291,15 @@ function plistPath(name) { return path.join(AGENTS_DIR, `${serviceLabel(name)}.p
  * never means "the default".
  */
 function plannedModelArg(name) {
+  /* ⚠️ THE ONLY CALLER THAT RECEIVES AN UNVALIDATED NAME. Every other use of
+     `plistPath` is downstream of `NAME_RE`; this one is handed `a.sessionName`
+     straight out of `tmux list-panes`, so the name is whatever a person called
+     their session. `path.join(AGENTS_DIR, 'com.….' + name + '.plist')` with
+     separators or `..` in it walks out of LaunchAgents and reads an arbitrary
+     file. It is not reachable today only because tmux forbids `.` in session
+     names — an invariant nothing in this repo states, tests, or controls, which
+     is not a guarantee, it is a coincidence we would inherit. */
+  if (!NAME_RE.test(String(name == null ? '' : name))) return null;
   let text;
   try {
     text = fs.readFileSync(plistPath(name), 'utf8');

@@ -1233,21 +1233,29 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
   const create = require('./engine/create');
-  // ⚠️ A REAL JOB FILE FOR THE REAL `angel`, so the planned-model assertion
-  // below is testing the GATE and not an empty sandbox. Written with the
-  // product's own writer rather than typed out here: a hand-built plist would
-  // be a second definition of a format whose reader takes an argument by
-  // position, and the two would drift apart the first time an argument moved.
-  fs.writeFileSync(create.plistPath('angel'),
-    create.plistFor('angel', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
-  assert.equal(create.plannedModelArg('angel'), 'claude-opus-5',
+  // ⚠️ A REAL JOB FILE, so the planned-model assertion below is testing the
+  // GATE and not an empty sandbox. Written with the product's own writer rather
+  // than typed out here: a hand-built plist would be a second definition of a
+  // format whose reader takes an argument by position, and the two would drift
+  // apart the first time an argument moved.
+  //
+  // ⚠️ `fixtureborrowed`, NOT `angel`, and this suite's sibling records why in
+  // its own header: a fixture that names a REAL agent means the day the sandbox
+  // slips, the test overwrites that agent's boot file instead of failing. This
+  // one WRITES AND DELETES a launchd job, and `angel` is a live agent on this
+  // machine — an unset AGENT_WORKFORCE_LAUNCH would have turned the cleanup
+  // below into removing its real job. The gate under test does not care what
+  // the name is, only that a pane borrowed it.
+  fs.writeFileSync(create.plistPath('fixtureborrowed'),
+    create.plistFor('fixtureborrowed', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  assert.equal(create.plannedModelArg('fixtureborrowed'), 'claude-opus-5',
     'the fixture job does not carry a model, so the gate assertion below would '
     + 'pass whether or not the gate exists');
-  status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
+  status.setPaneSource(() => fleet.line({ session: 'fixtureborrowed', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
-    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixtureborrowed');
     assert.ok(card, 'the fixture did not produce the borrowed-name card');
     assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
 
@@ -1283,7 +1291,7 @@ test('an untied card carries no commitments and no boot-file hash of the name it
     status.setPaneCapture(null);
     // The sandbox is shared across this file, so the fixture job must not
     // outlive the test that needed it.
-    fs.rmSync(create.plistPath('angel'), { force: true });
+    fs.rmSync(create.plistPath('fixtureborrowed'), { force: true });
   }
 });
 
@@ -1301,15 +1309,17 @@ test('an untied card carries no commitments and no boot-file hash of the name it
 test('a tied card reports the model its job will start it on, and only when no live model was read', async () => {
   const status = require('./engine/status');
   const create = require('./engine/create');
-  fs.writeFileSync(create.plistPath('angel'),
-    create.plistFor('angel', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  // ⚠️ A fixture name no real agent has — see the note in the gate test above.
+  // This one writes and deletes a launchd job.
+  fs.writeFileSync(create.plistPath('fixturetied'),
+    create.plistFor('fixturetied', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
   // `-discord` is what ties a pane to the name: the same suffix `isNamedOurs`
   // requires before this server will read anything filed under it.
-  status.setPaneSource(() => fleet.line({ session: 'angel-discord', title: 'angel' }));
+  status.setPaneSource(() => fleet.line({ session: 'fixturetied-discord', title: 'fixturetied' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
-    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixturetied');
     assert.ok(card, 'the fixture did not produce a card');
     assert.equal(card.isNamedOurs, true, 'the fixture is not exercising the tied case');
     // No transcript in the sandbox, so there is no live model: exactly Josh's
@@ -1322,7 +1332,7 @@ test('a tied card reports the model its job will start it on, and only when no l
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
-    fs.rmSync(create.plistPath('angel'), { force: true });
+    fs.rmSync(create.plistPath('fixturetied'), { force: true });
   }
 });
 
@@ -2918,6 +2928,24 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     }
     assert.match(api.card(spoofed), /Memory unknown/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
+
+    // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the
+    // ring's `aria-label="… Memory unknown: we could not read how full it is."`
+    // and was satisfied by it long before a visible caption existed — so it
+    // stayed green with the whole badge deleted. The words are in the markup
+    // twice for two different audiences; only one of them is the sighted one.
+    assert.match(api.card(spoofed), /class="membadge unk"/,
+      'the visible unknown-memory caption is gone, leaving a dashed ring whose '
+      + 'meaning is stated only in an aria-label');
+    // ⚠️ And it must NOT appear when the memory IS known — otherwise the
+    // assertion above passes for a badge that is always on.
+    assert.doesNotMatch(api.card(withPct(leo, 40)), /membadge unk/,
+      'a card with a readable memory claimed its memory was unknown');
+    // ⚠️ The severity badge must be unreachable at an unknown percent. Red on
+    // that badge means "nearly full", a measured fact; an unknown must never
+    // borrow a severity it has not measured.
+    assert.doesNotMatch(api.card(spoofed), /class="membadge">/,
+      'an unknown memory rendered the nearly-full severity badge');
     assert.match(api.lrow(spoofed), /bar unknown/,
       'CONTROL: the spoofed percent did not degrade to the unknown bar');
 
@@ -6610,10 +6638,24 @@ test('the Runs on line says which tense it is in, and a live model always wins',
     { lead: 'Right now: ', name: 'Claude Sonnet 5' },
     'a running agent stopped saying it is running');
 
-  assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5' }),
+  assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
     { lead: 'Will start on ', name: 'Claude Sonnet 5' },
     'a created-but-never-run agent did not say what it will start on, which is '
     + 'the whole defect Josh reported');
+
+  // ⚠️ THE MIRROR OF THAT BUG, and the reason the future tense is keyed on
+  // `state` rather than on "we could not read a model". `readModel` returns
+  // null whenever there is no transcript, and an agent in its FIRST, CURRENTLY
+  // ACTIVE session has none yet. Gated on `!modelName`, a running agent was
+  // told "Will start on Claude Opus 5" while it was running on it.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'unknown']) {
+    const r = runsOnLine({ modelName: null, plannedModelName: 'Claude Opus 5', state });
+    assert.equal(r.lead, '',
+      `a ${state} agent was described in the future tense; it is running now, we `
+      + 'just could not read what on');
+    assert.equal(r.name, 'Claude Opus 5',
+      'the name we do hold was dropped along with the tense');
+  }
 
   // ⚠️ NO LEAD, not "Right now". Nothing is running in this case either, so a
   // present tense is exactly as false here as it was on a planned model.
@@ -6724,7 +6766,7 @@ test('a card names a planned model plainly, while the detail panel keeps its ten
 
   // ⚠️ The detail panel must NOT inherit the flattening: same card, and it
   // still has to say which tense it is in.
-  assert.deepEqual(runsOnLine({ plannedModelName: 'Claude Sonnet 5' }),
+  assert.deepEqual(runsOnLine({ plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
     { lead: 'Will start on ', name: 'Claude Sonnet 5' },
     'the detail panel lost its tense when modelLine gained the fallback');
 });
@@ -6761,4 +6803,84 @@ test('the agent detail boxes stay in the order Josh asked for', () => {
   assert.ok(labels.length >= 5,
     'the box extraction found fewer sections than the panel has, so it is '
     + 'reading the wrong markup and the assertion above is meaningless');
+});
+
+/**
+ * The detail header's badge is the CARD's badge, and the task sits beside it.
+ *
+ * ⚠️ THIS HAD NO TEST AT ALL. The stated point of the change is that the panel
+ * reads `cardStOf` / `GLYPH` / `STATE_COPY` instead of keeping a second copy of
+ * them — and a regression to the old `copy.label + (a.task ? ': ' + a.task : '')`
+ * passed all 919 other tests, because nothing looked at this.
+ *
+ * ⚠️ The three tables are read OUT OF THE PAGE rather than restated here. A stub
+ * would let the panel and the card drift apart, which is the exact thing under
+ * test: restating them would make this pass while they disagreed on screen.
+ */
+test('the detail badge reads the card’s own derivations, and the task is a separate element', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  const tablesFrom = script.indexOf('const STATE_COPY = {');
+  const cardStAt = script.indexOf('function cardStOf(a)');
+  assert.ok(tablesFrom > -1 && cardStAt > tablesFrom, 'the shared state tables moved');
+  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1);
+
+  const dmAt = script.indexOf('  const dm = cardStOf(a);');
+  assert.ok(dmAt > -1,
+    'the detail badge no longer derives its state from cardStOf, so the panel '
+    + 'and the card can disagree about what an agent is doing');
+  // `copy` is declared just above the badge lines. Searched BACKWARDS from the
+  // badge rather than forwards from the top: `card()` declares a `copy` of its
+  // own earlier in the file, and a forward search finds that one.
+  const from = script.lastIndexOf('  const copy = STATE_COPY[a.state]', dmAt);
+  assert.ok(from > -1 && from < dmAt, 'the state copy lookup moved away from the badge');
+  const TAIL = 'dtask.hidden = !dtask.textContent;';
+  const end = script.indexOf(TAIL, from);
+  assert.ok(end > from, 'the detail task line vanished');
+  const body = script.slice(from, end + TAIL.length);
+
+  const els = {};
+  const doc = {
+    getElementById: (id) => {
+      if (!els[id]) els[id] = { className: '', innerHTML: '', textContent: '', hidden: false };
+      return els[id];
+    },
+  };
+  const drive = (card) => {
+    for (const k of Object.keys(els)) delete els[k];
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', 'esc', `${tables}\n${body}`)(doc, card, (x) => String(x));
+    return { state: els['d-state'], task: els['d-task'] };
+  };
+
+  const needs = drive({ state: 'needs_you', task: 'Mac' });
+  assert.match(needs.state.className, /\bastate\b/,
+    'the detail state is not rendered as the card badge');
+  assert.match(needs.state.className, /\bst-attn\b/,
+    'the badge class does not track the state, so its colour cannot');
+  assert.match(needs.state.innerHTML, /Needs you/, 'the badge lost its word');
+  assert.equal(needs.task.textContent, 'Mac', 'the task did not reach its own element');
+  assert.equal(needs.task.hidden, false, 'a real task was hidden');
+  // ⚠️ The regression this change exists to prevent: the badge must NOT swallow
+  // the task. "Needs you: Mac" as one string is what Josh marked up.
+  assert.doesNotMatch(needs.state.innerHTML, /Mac/,
+    'the badge swallowed the task again, so the state and the thing it is about '
+    + 'are one unstyleable run');
+
+  const working = drive({ state: 'working', task: 'Building the campaign calendar' });
+  assert.match(working.state.className, /\bst-working\b/);
+  assert.match(working.state.innerHTML, /Working/);
+
+  // ⚠️ CONTROL: no task means no line, not an empty one. Without this, a task
+  // element that never hides would satisfy every assertion above.
+  const idle = drive({ state: 'idle' });
+  assert.match(idle.state.className, /\bst-idle\b/);
+  assert.equal(idle.task.hidden, true, 'an agent with no task showed an empty task line');
+
+  // ⚠️ An unrecognised state must still draw a badge, by the same rule the card
+  // holds: cardStOf maps anything it does not know to the unknown treatment.
+  const martian = drive({ state: 'martian' });
+  assert.match(martian.state.className, /\bst-unknown\b/,
+    'an unrecognised state drew no badge treatment at all');
 });
