@@ -324,6 +324,12 @@ html { scroll-padding-top: 132px; }
    the confirm's Update. Two selectors so it outweighs .btn regardless of
    declaration order. */
 button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
+/* ⚠️ THE FLOW'S PRIMARY, at the pack's own size (`.btn-gold`: 1.0625rem,
+   .9em/1.75em padding, 10px radius). Scoped to `.big` rather than widened onto
+   every `.uprime`, because this is the create flow's weight and not a change to
+   every primary button in the product. */
+.btn.uprime.big { font-size: 1.0625rem; padding: .9em 1.75em; border-radius: 10px; }
+.sfoot { margin-top: var(--space-8); display: flex; justify-content: flex-end; }
 /* Narrow screens: in-flow like everywhere else now (the float this rule
    used to break against is retired). The version line hides and the left
    group wraps the notice onto its own row -- "the header grows when an
@@ -2334,8 +2340,12 @@ svg { display: block; }
       </div>
     </div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
-    <div class="frow" style="margin-top: var(--space-6);">
-      <button class="btn uprime" id="role-next" type="button" disabled>Continue</button>
+    <!-- ⚠️ THE PACK'S FOOTER: right-aligned, one primary, and the SAME size on
+         both steps. Its own comment says why the two must match: "two primary
+         buttons in one flow at two different sizes reads as two different
+         weights." -->
+    <div class="sfoot">
+      <button class="btn uprime big" id="role-next" type="button" disabled>Continue</button>
     </div>
   </div>
 
@@ -2433,9 +2443,11 @@ svg { display: block; }
       </div>
     </div>
 
-    <div class="frow" style="margin-top: var(--space-6);">
-      <button class="btn" id="create-prev" type="button">&#8592; Back</button>
-      <button class="btn uprime" id="create-go" type="button">Create it</button>
+    <!-- ⚠️ NO BACK BUTTON (Josh, 2026-08-19), and the pack has none here either:
+         the step's own heading names the role, and the role picker is one
+         screen away by the panel's back link. -->
+    <div class="sfoot">
+      <button class="btn uprime big" id="create-go" type="button">Create agent</button>
     </div>
     <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
   </div>
@@ -6589,7 +6601,10 @@ document.getElementById('new-agent').addEventListener('click', openCreate);
 // did not, so walking away mid-creation left the loop polling /api/status every
 // two seconds and repainting a hidden panel for the rest of the thirty seconds.
 document.getElementById('create-back').addEventListener('click', () => { WATCH += 1; showTab('agents'); });
-document.getElementById('create-prev').addEventListener('click', () => cstep('role'));
+/* ⚠️ NO `create-prev` LISTENER: the Back button it belonged to was removed
+   (Josh, 2026-08-19), and leaving this behind threw "Cannot read properties of
+   null" at page load, which killed every listener registered after it. A
+   removal is two changes and the second one is never where you made it. */
 document.getElementById('made-done').addEventListener('click', () => { showTab('agents'); tick(); });
 document.getElementById('made-retry').addEventListener('click', openCreate);
 
