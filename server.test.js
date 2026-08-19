@@ -6338,8 +6338,14 @@ test('the centred quiet button is the pack rule, pinned', () => {
  * ------------------------------------------------------------------------ */
 
 test('the conversation filter matches what a row shows, and only that', () => {
+  // The prelude carries the REAL shared fallback constant, lifted from
+  // the page (a copy here would be the check-containing-a-copy class).
+  const rawPage = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const fbAt = rawPage.indexOf('const PJ_VALVE_FALLBACK');
+  assert.ok(fbAt > -1, 'the shared valve fallback constant vanished');
+  const fallbackDecl = rawPage.slice(fbAt, rawPage.indexOf(';', fbAt) + 1);
   const filter = pageFunction('pjRoomFilterRows',
-    'const pjNameOf = (p, from) => (p.names && p.names[from]) || from;\n');
+    'const pjNameOf = (p, from) => (p.names && p.names[from]) || from;\n' + fallbackDecl + '\n');
   const p = { names: { leo: 'Leo' } };
   const rows = [
     { id: 'm1', from: 'leo', text: 'The link is stable now.' },
@@ -6357,6 +6363,11 @@ test('the conversation filter matches what a row shows, and only that', () => {
   assert.deepEqual(filter(rows, p, 'you').map((r) => r.id), ['m2']);
   // Valve bands match on their sentence.
   assert.equal(filter(rows, p, 'without landing').length, 1);
+  // A valve with NO because displays the shared fallback and must be
+  // findable by its words (the filter matches what a row SHOWS).
+  const bare = [{ kind: 'valve' }];
+  assert.equal(filter(bare, p, 'bring you in').length, 1,
+    'the fallback valve sentence is displayed but unsearchable');
   // No match: empty, never a throw.
   assert.deepEqual(filter(rows, p, 'zzz-not-here'), []);
 });
@@ -6372,10 +6383,28 @@ test('the search is wired: pack markup verbatim, instant repaint, reset on switc
   // resets on project open; a filtered paint never scrolls.
   assert.ok(raw.includes("document.getElementById('pj-room-search').addEventListener('input'"),
     'the search input drives nothing');
+  // The LISTENER BODY, not just its existence: an emptied listener passes
+  // an attachment pin while typing does nothing. Sliced at the column-0
+  // close (the members-handler technique).
+  const lsrc = raw.slice(raw.indexOf("document.getElementById('pj-room-search').addEventListener"));
+  const listener = lsrc.slice(0, lsrc.indexOf('\n});') + 4);
+  assert.ok(listener.includes('PJ_ROOM_QUERY = document'), 'the listener no longer reads the query');
+  assert.ok(listener.includes('paintRoom(box.__lastBody)'), 'the listener no longer repaints from the cached body');
+  assert.ok(listener.includes('pjRoomAnnounce('), 'the no-match transition is silent to screen readers again');
+  // The cache lifecycle: loadRoom stores the body; openProject invalidates
+  // it AND resets the query (both lines pinned INSIDE their functions --
+  // a whole-file pin matched the variable declaration and could not fail).
+  assert.ok(pageFnSource('loadRoom').includes('__lastBody = body'),
+    'loadRoom no longer caches the body the listener repaints from');
+  const open_ = pageFnSource('openProject');
+  assert.ok(open_.includes("PJ_ROOM_QUERY = '';"), 'the query does not reset on project switch');
+  assert.ok(open_.includes("getElementById('pj-room-search').value = ''"),
+    'stale query text survives in the box across a project switch');
+  assert.ok(open_.includes('__lastBody = undefined'),
+    'a stale body survives a project switch (the filter would search another room)');
   const paint = pageFnSource('paintRoom');
   assert.ok(paint.includes('pjRoomFilterRows('), 'paintRoom no longer filters');
   assert.ok(paint.includes('if (!filtering) box.scrollTop'), 'a filtered paint scrolls the reader to the tail');
-  assert.ok(raw.includes("PJ_ROOM_QUERY = '';"), 'the query does not reset on project switch');
   // The no-match state is HER sentence (ruled 10:16 PM): names the
   // query, says the way out.
   assert.ok(paint.includes('Nothing here matches'), 'the no-match state lost her sentence');

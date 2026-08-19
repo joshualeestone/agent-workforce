@@ -824,9 +824,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .msg-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .msg-h b { font-size: .9375rem; }
 .msg-t { font-size: .75rem; color: var(--k-ink-2); }
-/* The conversation search (18e:380-386, verbatim): the header is a row so
-   the box locks right without the title moving. */
-.pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* The conversation search (18e:380-386, verbatim). The header row that
+   locks it right is the EXISTING .pjmidhead rule above; a duplicate
+   selector here shadowed its gap while its margin survived, a hybrid
+   neither rule described (review). */
 .tsearch { display: flex; align-items: center; gap: 6px; flex: 0 1 15rem; min-width: 0;
   border: 1px solid var(--k-rule); border-radius: 8px; padding: 4px 9px; background: var(--k-surface); }
 .tsearch:focus-within { border-color: var(--k-ink-2); }
@@ -8470,8 +8471,7 @@ function pjRoomRow(m, p) {
        The timestamp span only exists when there is a timestamp, so its
        margin never hangs as a trailing gap on an empty inline. */
     const when = pjWhen(m.at) || '';
-    return '<div class="msg-valve">' + esc(m.because
-      || 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
+    return '<div class="msg-valve">' + esc(m.because || PJ_VALVE_FALLBACK)
       + (when ? '<span class="msg-t">' + esc(when) + '</span>' : '') + '</div>';
   }
   const isOp = m.operator === true;
@@ -8506,12 +8506,16 @@ function pjRoomRow(m, p) {
  * their sentence). Pure so it is testable; it searches what the room
  * holds, no server round trip, no new claims.
  */
+/* ONE fallback sentence for a valve row with no because, shared by the
+   renderer and the filter: a band displaying these words must be
+   findable by searching them (the filter matches what a row SHOWS). */
+const PJ_VALVE_FALLBACK = 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.';
 function pjRoomFilterRows(rows, p, q) {
   const needle = String(q == null ? '' : q).trim().toLowerCase();
   if (!needle) return rows;
   return rows.filter((m) => {
     const who = m.operator === true ? 'you' : (pjNameOf(p, m.from) || m.from || '');
-    const text = (m.kind === 'valve') ? (m.because || '') : (m.text || '');
+    const text = (m.kind === 'valve') ? (m.because || PJ_VALVE_FALLBACK) : (m.text || '');
     return String(who).toLowerCase().includes(needle)
       || String(text).toLowerCase().includes(needle);
   });
@@ -8565,10 +8569,23 @@ function paintRoom(body) {
    the box) so typing filters instantly between polls; the query resets
    on project switch (a reading posture, not project state -- carried
    across projects it would hide another room's posts silently). */
+let PJ_SEARCH_WAS_EMPTY = false;
 document.getElementById('pj-room-search').addEventListener('input', () => {
   PJ_ROOM_QUERY = document.getElementById('pj-room-search').value;
   const box = document.getElementById('pj-room');
-  if (box.__lastBody) paintRoom(box.__lastBody);
+  if (!box.__lastBody) return;
+  paintRoom(box.__lastBody);
+  /* The no-match state is announced ON THE TRANSITION only: a filtered
+     room repaints silently for a screen-reader user, and per-keystroke
+     announcements would be noise. Same helper the say-box uses. */
+  const p = pjById(PJ_CURRENT);
+  const nowEmpty = PJ_ROOM_QUERY.trim() !== '' && p
+    && (box.__lastBody.rows || []).length > 0
+    && pjRoomFilterRows(box.__lastBody.rows || [], p, PJ_ROOM_QUERY).length === 0;
+  if (nowEmpty && !PJ_SEARCH_WAS_EMPTY) {
+    pjRoomAnnounce('Nothing here matches "' + PJ_ROOM_QUERY.trim() + '". Clearing the search brings the conversation back.');
+  }
+  PJ_SEARCH_WAS_EMPTY = nowEmpty;
 });
 
 async function loadRoom() {
