@@ -1595,9 +1595,10 @@ function tellAgent(sessionName, projects, roster) {
 /**
  * Heal a drifted colleagues block in place; NEVER introduce one.
  *
- * Shared by every writer into an agent's instruction file (this module's
- * tellAgent and you.js's), so a projectless agent still heals on an
- * About-you write. Heal-only: spliceBlock APPENDS when the markers are
+ * Shared by every ENGINE writer into an agent's instruction file (this
+ * module's tellAgent and you.js's), so a projectless agent still heals on
+ * an About-you write. The person's own instructions PUT deliberately does
+ * NOT heal: their text is verbatim by design. Heal-only: spliceBlock APPENDS when the markers are
  * absent, which would grow an adopted agent's file nobody asked us to
  * grow, so a file without the markers (or with an ambiguous pair) comes
  * back byte-identical. Callers keep their own equality short-circuit, so

@@ -114,6 +114,10 @@ only newborns. No migration needed.
   so (tested as the refusal it is): refuse-don't-guess on a non-verdict
   surface; the agent keeps its stale command until a human resolves the
   duplicate markers.
+- A person who hand-deletes the kosmos export and puts their OWN
+  export-PATH-shaped line directly under the marker loses that line on
+  uninstall (the adjacency rule's stated carve-out). Accepted: the
+  marker's own text says the line is removed by --uninstall.
 - A reinstall with a CHANGED KOSMOS_BIN_DIR reads "already wired" from
   the earlier dir's pair and does not re-point the export; the gap needs
   the old symlink independently gone to bite, and the message makes no
