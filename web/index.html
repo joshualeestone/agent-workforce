@@ -874,6 +874,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   max-height: 15rem; overflow-y: auto; padding-right: 4px; }
 .dm { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .dm.mine { align-items: flex-end; }
+/* ⚠️ THE INCOMING BUBBLE HAS NO PRODUCER, and that is worth stating rather
+   than leaving as a rule nobody can reach. The pack's dbox draws both sides of
+   this conversation; the build stores only the person's side, because there is
+   no record anywhere of an agent saying something to the person -- its side is
+   read live off the pane and is not kept (see `chat.viewport`, which had its
+   only timestamp removed on the unread-surface rule). That is the SAME missing
+   record the silence card is blocked on, arriving on a second surface.
+   So every bubble this page emits today is `.mine`, and the base background
+   below waits on that record rather than on a style decision. Kept, not
+   deleted: when the agent's side lands, the drawing is already right and this
+   is the rule it needs. (Distinct from the 18e `.pjthread` case, which was a
+   rule that DID have an element and was silently outranked by another rule.) */
 .dm-b { max-width: 92%; padding: 9px 13px; border-radius: 12px; font-size: .9375rem;
   line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
   overflow-wrap: anywhere; }
