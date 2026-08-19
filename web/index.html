@@ -48,6 +48,15 @@
   --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px;
 
   --radius-card: 16px; --radius-control: 10px; --radius-pill: 100px;  /* pack radii */
+  /* ⚠️ WHAT A FIELD IS FILLED WITH, DECLARED BY ITS CONTAINER. A field must
+     differ from the surface it sits on, and only the container knows what that
+     surface is — so the container sets this and every field inherits it. Three
+     rounds of hand-listing containers each missed some: first `.pjcol/.dbox`,
+     then `.rm-box/.rolepick`, then `#pj-settings-view/#pj-add-view`, and each
+     round shipped believing it was complete. A rule that has to enumerate its
+     own blast radius will keep being wrong; this one cannot be, because the
+     value travels with the box. */
+  --field-fill: var(--bg-elevated);   /* on the page ground: white, per Josh */
 
   /* Light -- REPOINTED AT THE PACK (pack-pass, scrappy): every surface
      still on these older tokens (projects, create, the modals) adopts the
@@ -117,6 +126,11 @@
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
   :root { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
 }
+
+/* Containers that are themselves elevated: a field on them takes the PAPER of
+   the same token system, so it is never the identical colour as its own box. */
+.dbox, .pjcol { --field-fill: var(--k-bg); }
+.rm-box, .rolepick, #pj-settings-view, #pj-add-view { --field-fill: var(--bg); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -258,7 +272,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    The fill stays `--k-bg`: same token system as the surface, recessed in both
    schemes. */
 .detail .dbox input[type=text], .detail .dbox textarea {
-  background: var(--k-bg); border: 1px solid var(--border-strong); color: var(--k-ink); }
+  background: var(--field-fill); border: 1px solid var(--border-strong); color: var(--k-ink); }
 .detail .dbox .btn { background: var(--k-surface); border: 1px solid var(--k-rule); color: var(--k-ink); }
 .detail .dbox .btn:hover { background: rgba(198,154,50,.14); }
 .detail .dbox .btn:disabled:hover { background: var(--k-surface); }
@@ -299,7 +313,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .frow { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
 .frow input[type=text] { flex: 1; min-width: 220px; font: var(--text-body) var(--font-ui);
                          padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-                         border: 0.5px solid var(--border-strong); background: var(--bg-elevated); color: var(--label); }
+                         border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--label); }
 /* EVERY select on the page, because four of the six carried no styling at all
    and the two that did rendered differently depending on the browser.
 
@@ -336,7 +350,7 @@ select { font: var(--text-body) var(--font-ui); color: var(--label);
          padding: var(--space-4) var(--space-5); padding-right: 2rem;
          border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
          appearance: none; -webkit-appearance: none;
-         background-color: var(--bg-elevated);
+         background-color: var(--field-fill);
          background-image: linear-gradient(45deg, transparent 50%, var(--label-2) 50%),
                            linear-gradient(135deg, var(--label-2) 50%, transparent 50%);
          background-position: right 1.05rem center, right 0.75rem center;
@@ -360,7 +374,7 @@ select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 .dbox input[type=text], .dbox textarea,
 .pjcol input[type=text], .pjcol textarea,
 .composer input[type=text] {
-  background-color: var(--k-bg); color: var(--k-ink);
+  background-color: var(--field-fill); color: var(--k-ink);
 }
 /* ⚠️ THE BORDER IS NOT OVERRIDDEN, and an earlier version of this rule did
    override it to `--k-rule` for token-system tidiness. MEASURED, with the alpha
@@ -1308,8 +1322,14 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .ppick:hover { border-color: var(--gold-deep); }
 .ppick .pickmark { color: transparent; font-weight: 700; font-size: .75rem; }
 .ppick[aria-checked="true"] { border-color: var(--k-ink); box-shadow: inset 0 0 0 1px var(--k-ink); }
-.ppick[aria-checked="true"] .pickmark { color: var(--label); }
-.ppick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
+/* ⚠️ `--k-ink`, not `--label`. `.ppick` is a k- component (k-ink on k-surface
+   with a k-rule border) and these two state rules were left on the --label
+   system. Both land readably today, which is the only reason it survived: the
+   two systems are free to diverge the next time either moves, and this is the
+   mixing the note above `.dhead` records and the `.dbox select` rule was
+   written to undo. */
+.ppick[aria-checked="true"] .pickmark { color: var(--k-ink); }
+.ppick:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 /* #create-model carries no rule of its own any more. It sits in a `.frow`, so it
    takes the shared `select` appearance and the same flex width as the text
    field above it, which is what Josh asked for when he called it unstyled. */
@@ -1498,10 +1518,17 @@ svg { display: block; }
           font: var(--text-body) var(--font-ui);
           border-radius: var(--radius-control); color: var(--label); }
 .tk-inp:not(select) { padding: var(--space-4) var(--space-5);
-          border: 0.5px solid var(--border-strong); background: var(--bg-elevated); }
+          border: 0.5px solid var(--border-strong); background: var(--field-fill); }
 .rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
+/* ⚠️ A FIELD INSIDE A `--bg-elevated` BOX TAKES `--bg`, the paper of that
+   system, for the same reason a field inside a `k-surface` box takes `--k-bg`:
+   otherwise it is the same colour as its own container and only a hairline
+   border says a control is there. `.rm-box` and `.rolepick` are both
+   `--bg-elevated`, so `#nt-who`, `#nt-what`, `#nt-detail` and `#rolesel` were
+   dissolving into them — the third of the six selects the "one appearance"
+   change claimed to unify and did not. */
 .rm-box { background: var(--bg-elevated); border: 1px solid var(--border-strong);
           border-radius: 12px; padding: var(--space-8); max-width: 30rem;
           width: 100%; box-shadow: 0 18px 48px rgba(17, 20, 24, 0.28); }
@@ -1746,7 +1773,7 @@ svg { display: block; }
 .fr-youfield input[type=text], .fr-youfield textarea {
   width: 100%; box-sizing: border-box; font: var(--text-body) var(--font-ui);
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--bg-elevated); color: var(--label); }
+  border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--label); }
 .fr-youfine { font: var(--text-caption) var(--font-ui); color: var(--label-3);
               margin-top: var(--space-5); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
