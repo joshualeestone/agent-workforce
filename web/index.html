@@ -8394,8 +8394,11 @@ function openProject(id) {
     roomBox.__lastRoom = undefined;
     roomBox.__lastBody = undefined;
     // A query is a reading posture, not project state: carried across
-    // projects it would hide another room's posts silently.
+    // projects it would hide another room's posts silently. The
+    // transition flag resets with it, or project B's first no-match
+    // would be silently skipped against A's stale state.
     PJ_ROOM_QUERY = '';
+    PJ_SEARCH_WAS_EMPTY = false;
     document.getElementById('pj-room-search').value = '';
     /* The scroll key too: left standing, a quick A-to-B-to-A (B's fetch
        failed or still in flight) re-enters A with the key already equal,
@@ -8510,6 +8513,12 @@ function pjRoomRow(m, p) {
    renderer and the filter: a band displaying these words must be
    findable by searching them (the filter matches what a row SHOWS). */
 const PJ_VALVE_FALLBACK = 'This conversation went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.';
+/* Shown and spoken from ONE source (her sentence, ruled 10:16 PM): the
+   paint escapes it into HTML, the announcer speaks it plain; two hand
+   copies would drift exactly the way the valve fallback almost did. */
+function pjNoMatchSentence(q) {
+  return 'Nothing here matches "' + String(q == null ? '' : q).trim() + '". Clearing the search brings the conversation back.';
+}
 function pjRoomFilterRows(rows, p, q) {
   const needle = String(q == null ? '' : q).trim().toLowerCase();
   if (!needle) return rows;
@@ -8544,7 +8553,7 @@ function paintRoom(body) {
   // screen with a search box is somewhere people get stuck.
   const empty = body.ok === false ? ''
     : (filtering && allRows.length
-      ? '<p class="fhint" style="margin:0;">Nothing here matches &quot;' + esc(PJ_ROOM_QUERY.trim()) + '&quot;. Clearing the search brings the conversation back.</p>'
+      ? '<p class="fhint" style="margin:0;">' + esc(pjNoMatchSentence(PJ_ROOM_QUERY)) + '</p>'
       : ((p.agents || []).length
         ? '<p class="fhint" style="margin:0;">Nothing here yet. Post below and everyone on this project receives it; use @name to hand someone a request.</p>'
         : '<p class="fhint" style="margin:0;">Put an agent on this project and the room opens.</p>'));
@@ -8579,11 +8588,16 @@ document.getElementById('pj-room-search').addEventListener('input', () => {
      room repaints silently for a screen-reader user, and per-keystroke
      announcements would be noise. Same helper the say-box uses. */
   const p = pjById(PJ_CURRENT);
+  // A partially-unreadable record never claims "nothing matches" ALOUD
+  // either: the visible branch already withholds the sentence when
+  // ok === false, and the spoken path must not say what the shown path
+  // refuses to (review: the announcer was the one place it leaked).
   const nowEmpty = PJ_ROOM_QUERY.trim() !== '' && p
+    && box.__lastBody.ok !== false
     && (box.__lastBody.rows || []).length > 0
     && pjRoomFilterRows(box.__lastBody.rows || [], p, PJ_ROOM_QUERY).length === 0;
   if (nowEmpty && !PJ_SEARCH_WAS_EMPTY) {
-    pjRoomAnnounce('Nothing here matches "' + PJ_ROOM_QUERY.trim() + '". Clearing the search brings the conversation back.');
+    pjRoomAnnounce(pjNoMatchSentence(PJ_ROOM_QUERY));
   }
   PJ_SEARCH_WAS_EMPTY = nowEmpty;
 });

@@ -5998,6 +5998,10 @@ test('the settings members wiring is real, not just extractable', () => {
   // The explanatory sentence is CUT (Josh, 2026-08-18 10:07 PM): the
   // survival reassurance lives in the removal announcement at act time.
   const flat = raw.replace(/\s+/g, ' ');
+  // Presence control first: the section this absence speaks about must
+  // exist, or a typo in the needle passes vacuously forever.
+  assert.ok(flat.includes('Project members'),
+    'CONTROL: the members section is gone; the absence below proves nothing');
   assert.ok(!flat.includes('Who is on this project. Removing an agent takes it off'),
     'the cut members hint came back');
   // The painter must repaint through setIfChanged: the unit test stubs
@@ -6390,7 +6394,10 @@ test('the search is wired: pack markup verbatim, instant repaint, reset on switc
   const listener = lsrc.slice(0, lsrc.indexOf('\n});') + 4);
   assert.ok(listener.includes('PJ_ROOM_QUERY = document'), 'the listener no longer reads the query');
   assert.ok(listener.includes('paintRoom(box.__lastBody)'), 'the listener no longer repaints from the cached body');
-  assert.ok(listener.includes('pjRoomAnnounce('), 'the no-match transition is silent to screen readers again');
+  assert.ok(listener.includes('pjRoomAnnounce(pjNoMatchSentence('),
+    'the spoken no-match copy no longer shares the shown sentence');
+  assert.ok(listener.includes('__lastBody.ok !== false'),
+    'the announcer claims nothing-matches against a partially unreadable record');
   // The cache lifecycle: loadRoom stores the body; openProject invalidates
   // it AND resets the query (both lines pinned INSIDE their functions --
   // a whole-file pin matched the variable declaration and could not fail).
@@ -6402,16 +6409,19 @@ test('the search is wired: pack markup verbatim, instant repaint, reset on switc
     'stale query text survives in the box across a project switch');
   assert.ok(open_.includes('__lastBody = undefined'),
     'a stale body survives a project switch (the filter would search another room)');
+  assert.ok(open_.includes('PJ_SEARCH_WAS_EMPTY = false;'),
+    "project B's first no-match announce would be skipped against A's stale flag");
   const paint = pageFnSource('paintRoom');
   assert.ok(paint.includes('pjRoomFilterRows('), 'paintRoom no longer filters');
   assert.ok(paint.includes('if (!filtering) box.scrollTop'), 'a filtered paint scrolls the reader to the tail');
   // The no-match state is HER sentence (ruled 10:16 PM): names the
   // query, says the way out.
-  assert.ok(paint.includes('Nothing here matches'), 'the no-match state lost her sentence');
-  assert.ok(paint.includes('Clearing the search brings the conversation back.'),
-    'the no-match state lost the way out');
-  assert.ok(paint.includes('esc(PJ_ROOM_QUERY.trim())'),
-    'the no-match sentence stopped naming (or escaping) the query');
+  assert.ok(paint.includes('esc(pjNoMatchSentence(PJ_ROOM_QUERY))'),
+    'the shown no-match state stopped using the shared, escaped sentence');
+  const sentence = pageFunction('pjNoMatchSentence');
+  assert.equal(sentence('trial length'),
+    'Nothing here matches "trial length". Clearing the search brings the conversation back.',
+    'her ruled sentence drifted');
 });
 
 test("the removal announcement is her sentence, on both verdict arms", () => {
