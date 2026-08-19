@@ -6562,3 +6562,51 @@ test('a parsed role is sentence-cased and an acronym survives it', () => {
   assert.equal(roleLine({ profile: { role: 'Executive Assistant' }, role: 'prose' }), 'Executive Assistant');
   assert.equal(roleLine({}), '', 'and nothing invents a role for an agent with none');
 });
+
+/**
+ * The Runs on line's three states, and the one the server test cannot reach.
+ *
+ * ⚠️ THIS EXISTS BECAUSE A MUTATION SURVIVED. Letting the server consult the
+ * job file even when a live model was read passed every test in this suite: the
+ * positive control over there runs with NO live model, so it never exercises
+ * which of the two wins. The precedence is a claim the code comments make, and
+ * a claim nothing can fail is not a tested one.
+ *
+ * It is pinned HERE rather than on the route because this is where it becomes
+ * visible: whatever the payload carries, what a person reads is what this
+ * function returns.
+ */
+test('the Runs on line says which tense it is in, and a live model always wins', () => {
+  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine'));
+
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Sonnet 5' }),
+    { lead: 'Right now: ', name: 'Claude Sonnet 5' },
+    'a running agent stopped saying it is running');
+
+  assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5' }),
+    { lead: 'Will start on ', name: 'Claude Sonnet 5' },
+    'a created-but-never-run agent did not say what it will start on, which is '
+    + 'the whole defect Josh reported');
+
+  // ⚠️ NO LEAD, not "Right now". Nothing is running in this case either, so a
+  // present tense is exactly as false here as it was on a planned model.
+  assert.deepEqual(runsOnLine({}), { lead: '', name: 'Unknown Model' },
+    'an unknowable model asserted a present tense about an agent that may '
+    + 'never have started');
+
+  // ⚠️ THE CONTROL THE ROUTE CANNOT PROVIDE. A job file can be edited by hand
+  // after an agent starts, so the two sources can disagree; the live reading is
+  // what the agent IS running and must win. Both wrong answers are named, so
+  // this cannot pass by returning the right string for the wrong reason.
+  const both = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5' });
+  assert.equal(both.name, 'Claude Opus 5',
+    'the job file overruled the model the agent is demonstrably running');
+  assert.equal(both.lead, 'Right now: ',
+    'a running agent was described in the future tense');
+
+  // The provider prefix reaches the planned name too, or the same model reads
+  // two different ways depending on which source answered.
+  assert.equal(runsOnLine({ plannedModelName: 'Opus 5' }).name, 'Claude Opus 5');
+  assert.equal(runsOnLine({ plannedModelName: 'Claude Opus 5' }).name, 'Claude Opus 5',
+    'the guard against "Claude Claude" did not reach the planned branch');
+});
