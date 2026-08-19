@@ -5946,6 +5946,18 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     paintMembers({ agents: [] });
     assert.ok(box.innerHTML.includes('No agents on this project yet'),
       'an empty roster rendered as nothing rather than saying so');
+    // The unseen arm, through the real producer: a member the board has
+    // never seen renders its reason, never a healthy-looking bare row.
+    const projectsEngine2 = require('./engine/projects');
+    const gdir = nodePath.join(SANDBOX, 'ghost-member-proj');
+    fs.mkdirSync(gdir, { recursive: true });
+    projectsEngine2.create({ name: 'Ghost Member', folder: gdir, agents: ['nobody-here'], roster: [] });
+    const ghost = projectsEngine2.list([]).find((x) => x.name === 'Ghost Member').agents;
+    paintMembers({ agents: ghost });
+    assert.ok(box.innerHTML.includes('unseen'),
+      'a never-seen member did not wear the unseen treatment');
+    assert.ok(/never seen an agent by this name|cannot see this agent/.test(box.innerHTML),
+      'a never-seen member rendered without its reason');
   } finally {
     delete global.document;
   }
@@ -5960,10 +5972,20 @@ test('the settings members wiring is real, not just extractable', () => {
     'the relocated removal handler no longer listens on the settings rows');
   assert.ok(raw.includes('id="pjs-members"'),
     'CONTROL: the settings rows element is gone, so the listener pin above is vacuous');
-  // Her ruled copy, verbatim (2026-08-18: a claim about what we do, not
-  // a promise about anything we do not control).
-  assert.ok(raw.includes('Who is on this project. Removing an agent takes it off this project'),
+  // Her ruled copy, the WHOLE sentence (whitespace-normalized past the
+  // source line wrap; a half-pinned sentence lets the second half drift).
+  const flat = raw.replace(/\s+/g, ' ');
+  assert.ok(flat.includes('Who is on this project. Removing an agent takes it off this project only: it stays on your computer, and you can add it back whenever.'),
     "the members section lost Mona Lisa's ruled sentence");
+  // The painter must repaint through setIfChanged: the unit test stubs
+  // it, so only a source pin catches a regression to bare innerHTML
+  // (which would steal keyboard focus from the rows every five seconds).
+  assert.ok(pageFnSource('paintSettingsMembers').includes('setIfChanged('),
+    'paintSettingsMembers no longer repaints through setIfChanged');
+  // The unknown-says-why arm exists in the painter (its behavioral twin
+  // in pjMember records the bare-caption form as a shipped defect).
+  assert.ok(pageFnSource('paintSettingsMembers').includes("m.state === 'unknown' && m.because"),
+    'the settings rows lost the unknown-says-why arm');
 });
 
 test('the receipt pill borders have dark twins (the trio that missed the #71 pass)', () => {

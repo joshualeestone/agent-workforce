@@ -50,3 +50,17 @@ against CURRENT-FREEZE).
 
 could_not verdict lines remain in-column until the project notice is
 drawn (morning); their exit dependency is on Splinter's board.
+
+## Iteration 2 (review)
+
+- The in-flight half of the misattribution fixed with the say-box guard
+  (sentProject captured at click; every write checks it); focus lands on
+  the verdict element after the clicked button dies with the repaint.
+- Pins added: setIfChanged at source level, her WHOLE sentence
+  whitespace-normalized, the unknown-says-why arm, and the unseen arm
+  driven through the real producer (a never-seen member wears its
+  reason).
+- DEFERRED with reasoning: paintSettingsMembers duplicates pjMember's
+  row body; the project-notice chunk (morning drawing) reshapes both
+  rows again, so the shared-helper refactor waits for the shape that
+  survives it rather than being written twice.

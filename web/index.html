@@ -2704,7 +2704,7 @@ svg { display: block; }
       <p class="fhint">Who is on this project. Removing an agent takes it off this project
          only: it stays on your computer, and you can add it back whenever.</p>
       <div class="pj-members" id="pjs-members"></div>
-      <p class="fmsg" id="pjs-members-msg" aria-live="polite"></p>
+      <p class="fmsg" id="pjs-members-msg" aria-live="polite" tabindex="-1"></p>
     </div>
 
     <div class="field">
@@ -10040,11 +10040,18 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
   if (!btn || !PJ_CURRENT) return;
   const msg = document.getElementById('pjs-members-msg');
   msg.textContent = '';
+  // The say-box guard (its pattern): the verdict lands only on the
+  // project it belongs to. Without this, clicking Back mid-DELETE and
+  // entering project B's settings put A's failure sentence under B's
+  // roster -- the in-flight half of the same misattribution the
+  // entry-clear above fixes for the persisted half.
+  const sentProject = PJ_CURRENT;
   try {
-    const res = await fetch('/api/project/' + encodeURIComponent(PJ_CURRENT) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
+    const res = await fetch('/api/project/' + encodeURIComponent(sentProject) + '/agent/' + encodeURIComponent(btn.dataset.drop), { method: 'DELETE' });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not change that project');
     await loadProjects();
+    if (PJ_CURRENT !== sentProject) return;
     // ⚠️ THE VERDICT IS READ, not discarded. Taking an agent off also takes the
     // block back OUT of its instruction file, and that write can fail for every
     // reason the add can -- the agent stopped, has no folder, keeps its
@@ -10059,8 +10066,13 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
       msg.textContent = 'Taken off. We could not update its instructions, so it may still mention this project when it next starts. '
         + pjSentence(body.told.because);
     }
+    // The clicked button died with the repaint; the keyboard lands on the
+    // verdict element rather than <body> (the pjCloseConfirm pattern).
+    msg.focus();
   } catch (err) {
+    if (PJ_CURRENT !== sentProject) return;
     msg.textContent = pjSentence(err.message) || 'We could not change that project.';
+    msg.focus();
   }
 });
 

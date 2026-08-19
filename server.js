@@ -101,7 +101,9 @@ function safeRoster() {
     // present, with a live state, and the write gate still let us splice the
     // managed block into its boot file. So Kosmos would have edited the
     // instructions of an agent it had told the person was gone, and the row
-    // would have said "Kosmos told it where this folder is" about it.
+    // would have claimed a successful tell about it (the told sentence
+    // itself is retired now -- success says nothing -- but the write
+    // gate this comment justifies is unchanged).
     const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
     return agents.filter((a) => !gone.has(a.sessionName));
   } catch {
