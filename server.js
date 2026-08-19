@@ -1822,7 +1822,7 @@ const server = http.createServer((req, res) => {
          * waiting for. So it is dropped rather than refused, and the bubble
          * falls back to showing what was actually sent.
          */
-        const chose = (typeof body.chose === 'string' && !chat.messageProblem(body.chose))
+        let chose = (typeof body.chose === 'string' && !chat.messageProblem(body.chose))
           ? body.chose : null;
 
         const roster = safeRoster();
@@ -1834,6 +1834,30 @@ const server = http.createServer((req, res) => {
           const missing = new Error('no agent by that name');
           missing.status = 404;
           throw missing;
+        }
+        /**
+         * ⚠️ THE WORDS ARE CHECKED AGAINST THE SCREEN WHERE WE CAN SEE IT.
+         * `chose` arrives from the client, and it is the half of the pair the
+         * server does not derive — so a client bug could put words in the
+         * record that were never on the person's screen, under a mechanism
+         * that says the opposite. Where the pane still shows a menu we can
+         * parse, the label for that digit must be the label we were handed.
+         *
+         * ⚠️ AND IT IS NOT REQUIRED WHERE WE CANNOT SEE IT. A pane that has
+         * already redrawn parses to nothing, and the person DID read those
+         * words a moment ago — dropping them there would make the record less
+         * faithful in the ordinary case to defend against a case this app's
+         * single-origin write guard already covers. So: never claim words the
+         * visible screen contradicts, and do not demand proof from a screen
+         * that has moved on. The digit is unaffected either way; only the
+         * bubble's wording is at stake.
+         */
+        if (chose) {
+          const seen = chat.viewport(name, roster);
+          const asked = (seen && seen.text) ? chat.questionIn(seen.text) : null;
+          const menu = asked ? chat.optionsIn(asked.text) : null;
+          const row = menu ? menu.find((o) => String(o.n) === String(body.text).trim()) : null;
+          if (row && row.label !== chose) chose = null;
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.

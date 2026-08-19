@@ -1961,7 +1961,7 @@ test('an agent whose name cannot be filed under is a third fact, not an unreadab
   });
 });
 
-test('the two question failures are two sentences, and neither is silence', async () => {
+test('a question we cannot find on the screen is SAID, not rendered as no question', async () => {
   reset();
   // "We read its screen and the question is not in the capture" is not "we
   // could not read its screen at all". They were one string once, so a failed
@@ -2011,4 +2011,45 @@ test('the raw window is NOT served from this route, so engineering mode has noth
   } finally {
     restoreEng();
   }
+});
+
+test('the words in the bubble are checked against the screen, where the screen can still be read', async () => {
+  reset();
+  // ⚠️ `chose` is the one half of the pair the server does not derive: the
+  // digit is what it types, the words are what the client hands it. A record
+  // whose whole job is not to lie about the mechanism must not carry words the
+  // visible screen contradicts.
+  const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: '1', chose: 'something nobody was offered' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    assert.equal(row.text, '1', 'the bubble falls back to what was actually sent');
+    assert.equal(row.wire, null, 'and no mechanism is claimed that did not happen');
+  });
+  reset();
+  // The control: the SAME send with the label the screen really shows is kept.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    assert.equal(row.text, '14 days', 'the option’s own words, as the person read them');
+    assert.equal(row.wire, '1');
+  });
+});
+
+test('a pane that has already moved on is not asked to prove what the person read', async () => {
+  reset();
+  // ⚠️ THE ASYMMETRY IS DELIBERATE. A prompt closes the moment it is answered,
+  // so by the next send the menu is gone -- and demanding proof from a screen
+  // that has moved on would strip the words in the ORDINARY case to defend
+  // against one the single-origin write guard already covers.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('working on it now, no menu here\n'), said(), said()], async () => {
+      await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' });
+      const body = json(await req('/api/agent/zeta/thread'));
+      const row = body.messages[body.messages.length - 1];
+      assert.equal(row.text, '14 days', 'the words the person read are kept');
+      assert.equal(row.wire, '1', 'and the record still says what was typed');
+    });
 });

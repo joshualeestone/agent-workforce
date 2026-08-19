@@ -42,20 +42,26 @@ const QUESTION = {
   ].join('\n'),
 };
 
+/**
+ * ⚠️ EXACTLY THE ROUTE'S OWN PAYLOAD, field for field. The first version also
+ * carried `agent`, `viewport` and `agentsUnreadable` — three fields the route
+ * deliberately does NOT serve, and whose absence `server.projects.test.js`
+ * pins. A fixture that invents fields the producer does not make is how six
+ * rounds of review passed against a world that does not exist (see the note at
+ * `safeRoster`), and nothing lints this file: `fixture-discipline.test.js`
+ * only reads `*.test.js`.
+ */
 const base = {
-  agent: { sessionName: 'april', name: 'April' },
   messages: [],
   olderCount: 0,
   historyBecause: null,
   historyUnfilable: false,
   presence: 'on',
   presenceBecause: null,
-  viewport: { text: null, because: 'engineering mode is off, so the window is not shown' },
   asking: false,
   question: null,
   questionBecause: null,
   options: null,
-  agentsUnreadable: false,
 };
 
 const placed = (text, wire) => ({
@@ -81,6 +87,10 @@ const STATES = {
       at: new Date().toISOString(), text: '14 days', wire: '1',
       delivery: { state: 'could_not', because: 'it stopped responding while we were sending', paneNote: null },
     }],
+    // ⚠️ THE FLAG A REAL FAILED SEND SETS. Without it this state rendered as
+    // "the buttons happen to still be there" and the committed screenshot did
+    // not show the one sentence that distinguishes state 4 in the drawing.
+    __failed: true,
   },
   '5-no-parse': { ...base, asking: true, question: { text: '│ One I cannot answer from the docs: when somebody adds a second\n│ person, does that person get their own trial, or join the existing one?' } },
   '6-off': {
@@ -164,12 +174,15 @@ const STATES = {
       // The answered-hold is client state, so it is armed the way a real send
       // arms it: keyed on the question text the paint recorded.
       await page.evaluate((f) => {
+        delete TALK_ANSWERED.april;
+        delete TALK_FAILED.april;
+        if (f.question) TALK_QUESTION.april = f.question.text;
         if (f.__answered) {
-          TALK_QUESTION.april = f.question.text;
           TALK_ANSWERED.april = { question: f.question.text, at: Date.now() };
-        } else {
-          delete TALK_ANSWERED.april;
-          delete TALK_FAILED.april;
+        }
+        if (f.__failed) {
+          // Keyed on the question it failed against, exactly as sendTalk keys it.
+          TALK_FAILED.april = { question: f.question.text };
         }
       }, fx);
       await page.evaluate(() => paintTalk('april', 'April'));
@@ -203,6 +216,7 @@ const STATES = {
           sendDisabled: el('d-send').disabled,
           label: el('d-talk-label').textContent,
           qlab: el('d-qask-lab').textContent,
+          qfail: el('d-qask-fail').hidden ? '' : el('d-qask-fail').textContent,
           // ⚠️ WHAT IS ACTUALLY ON TOP at the box's own centre. `hidden` on
           // an overlay is a claim; this is the pixel.
           rect: JSON.stringify(el('d-talk-box').getBoundingClientRect()),
@@ -218,6 +232,16 @@ const STATES = {
         };
       });
       const tag = `${name}/${theme}`;
+      // ⚠️ THE STATE-4 SENTENCE IS ASSERTED, not merely photographed. It is the
+      // one thing that distinguishes that state, and the fixture that was
+      // supposed to produce it did not, so the committed evidence for state 4
+      // showed everything except state 4.
+      if (name === '4-failed' && !/buttons still work/.test(m.qfail)) {
+        problems.push(`${tag}: state 4 is missing its own sentence (qfail: ${JSON.stringify(m.qfail)})`);
+      }
+      if (name !== '4-failed' && m.qfail) {
+        problems.push(`${tag}: the failure sentence is showing where nothing failed: ${JSON.stringify(m.qfail)}`);
+      }
       if (m.onTop !== 'the box') problems.push(`${tag}: something else is painted over the box: ${m.onTop}`);
       if (m.pageOverflow > 0) problems.push(`${tag}: the PAGE scrolls sideways by ${m.pageOverflow}px`);
       if (m.boxOverflow > 0) problems.push(`${tag}: the box overflows by ${m.boxOverflow}px`);

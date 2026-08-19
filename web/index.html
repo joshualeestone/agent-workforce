@@ -5129,10 +5129,13 @@ async function paintTalk(sessionName, agentName) {
   // not paint last.
   const mine = ++TALK_LOAD;
   let body;
+  // 404 is the route's standing refusal (a pane holding this name untied), not
+  // a read that failed this second. The sentence below branches on it.
+  let standing = false;
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', { cache: 'no-store' });
     body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'we could not read this conversation');
+    if (!res.ok) { standing = res.status === 404; throw new Error(body.error || 'we could not read this conversation'); }
   } catch (err) {
     if (mine !== TALK_LOAD) return;
     if (!CURRENT || CURRENT.sessionName !== sessionName) return;
@@ -5140,9 +5143,17 @@ async function paintTalk(sessionName, agentName) {
        and never an empty composer either: a box that accepts text over a
        thread we could not read is the two-state lie the pack's own rule is
        about. */
-    document.getElementById('d-dmthread').innerHTML =
-      '<p class="dmnone">We could not read this conversation just now. ('
-      + esc((err && err.message) || 'no detail') + ')</p>';
+    /* ⚠️ "JUST NOW" IS A CLAIM ABOUT TIME and it is wrong for a standing
+       refusal: a name a pane holds without being that agent answers 404 every
+       time, and telling somebody to try again is telling them to wait for
+       something that will not change. A transient read failure keeps the
+       time phrase, because there it is true. */
+    document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">'
+      + (standing
+        ? 'We cannot show this conversation. ' + esc(pjSentence((err && err.message) || 'no detail'))
+        : 'We could not read this conversation just now. ('
+          + esc((err && err.message) || 'no detail') + ')')
+      + '</p>';
     document.getElementById('d-qask').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
@@ -5217,8 +5228,14 @@ async function paintTalk(sessionName, agentName) {
    * prompt twice.
    */
   const opts = (body.asking && !stillTheSame && live && Array.isArray(body.options)) ? body.options : null;
+  /* ⚠️ DEAD WHILE A SEND IS IN THE AIR. A paint that lands mid-flight rebuilds
+     these, and the first version rebuilt them ENABLED — undoing the send's own
+     disable. The double send was still refused by the TALK_SENDING guard, so
+     the press became a silent no-op: a button that looks pressable, is pressed,
+     and does nothing at all, for as long as a flight can honestly run. */
+  const dead = TALK_SENDING ? ' disabled' : '';
   qopts.innerHTML = opts
-    ? opts.map((o) => '<button class="qopt" type="button" data-n="' + esc(String(o.n))
+    ? opts.map((o) => '<button class="qopt" type="button"' + dead + ' data-n="' + esc(String(o.n))
         + '" data-label="' + esc(o.label) + '">' + esc(o.label) + '</button>').join('')
     : '';
   qopts.hidden = !opts;
@@ -5266,6 +5283,14 @@ async function paintTalk(sessionName, agentName) {
    * and saying the failure twice on one screen is the noise this codebase
    * keeps removing.
    */
+  /* ⚠️ THE FAILURE LINE BELONGS TO THE QUESTION IT FAILED AGAINST. Keyed on
+     the text, so a new question clears it: without that, a failed answer left
+     "The buttons still work." standing under every later menu, on a page that
+     polls every five seconds and stays open for days. */
+  const failed = TALK_FAILED[sessionName];
+  if (failed && (!body.question || failed.question !== body.question.text)) {
+    delete TALK_FAILED[sessionName];
+  }
   const qfail = document.getElementById('d-qask-fail');
   qfail.textContent = (opts && TALK_FAILED[sessionName]) ? 'The buttons still work.' : '';
   qfail.hidden = !qfail.textContent;
@@ -5331,6 +5356,17 @@ async function sendTalk(text, chose) {
   // lands.
   const sentName = CURRENT.sessionName;
   const name = CURRENT.name || sentName;
+  /**
+   * ⚠️ READ NOW, NOT AT VERDICT TIME, and the difference is reachable. The poll
+   * only skips `paintTalk` when `TALK_SENDING` is ALREADY true, so a paint that
+   * entered its fetch a beat before this press lands inside the flight and
+   * rewrites `TALK_QUESTION` from a fresh capture. Reading it afterwards keyed
+   * the hold to a question nobody answered, so the buttons came straight back
+   * over an already-answered prompt — the exact harm the hold exists for.
+   * (The comment on `TALK_QUESTION` said this was done from the beginning. It
+   * was not; the comment described the intent and the code read it late.)
+   */
+  const askedAbout = TALK_QUESTION[sentName] || null;
   const flightMoved = () => !CURRENT || CURRENT.sessionName !== sentName;
   const msg = document.getElementById('d-say-msg');
   const say = document.getElementById('d-say');
@@ -5397,17 +5433,33 @@ async function sendTalk(text, chose) {
     /* The button suppression is bookkeeping about THIS send, so it is recorded
        whether or not the flight moved: it is keyed on the agent, and coming
        back to that agent must not re-offer an answer already given. */
-    if (chose) {
+    /**
+     * ⚠️ ANY SEND MADE WHILE A QUESTION WAS UP IS AN ANSWER TO IT, not only a
+     * button press. The panel's own line invites the other path — "Or write
+     * your own answer below" — and gating this on `chose` meant a typed answer
+     * left the buttons live over a question it had just answered. That is the
+     * second-press harm arriving on the route the pack recommends.
+     *
+     * The delivery states split two ways, not three: placed and unconfirmed
+     * both mean the words may be in that session, so neither may be offered
+     * again. Only an outright failure leaves the question live.
+     */
+    if (askedAbout) {
       if (d.state === 'placed' || d.state === 'unconfirmed') {
-        TALK_ANSWERED[sentName] = { question: TALK_QUESTION[sentName] || null, at: Date.now() };
-        delete TALK_FAILED[sentName];
+        TALK_ANSWERED[sentName] = { question: askedAbout, at: Date.now() };
       } else {
         // ⚠️ Nothing was answered, so nothing may look answered: the question
         // stays, the buttons come back live, and the panel says so.
-        TALK_FAILED[sentName] = true;
+        TALK_FAILED[sentName] = { question: askedAbout };
         delete TALK_ANSWERED[sentName];
       }
     }
+    // ⚠️ CLEARED BY ANY SEND THAT GOT THROUGH, not only by a button one. The
+    // first version cleared it on a successful `chose` alone, so a failure
+    // followed by a typed answer left "The buttons still work." standing on a
+    // page that polls every five seconds and is left open for days. (The paint
+    // clears it too, when the question itself changes.)
+    if (d.state === 'placed' || d.state === 'unconfirmed') delete TALK_FAILED[sentName];
     if (!flightMoved()) msg.textContent = line;
   } catch (err) {
     if (!flightMoved()) msg.textContent = pjSentence((err && err.message) || 'we could not send that');
@@ -5418,7 +5470,11 @@ async function sendTalk(text, chose) {
     // it. The record is the account of what happened, visible when that agent
     // is next opened.
     if (!flightMoved()) await paintTalk(sentName, name);
-    else document.getElementById('d-send').disabled = false;
+    /* ⚠️ NOTHING IS RE-ENABLED WHEN THE FLIGHT MOVED. That button belongs to
+       whichever agent is open now, and its own paint has already decided
+       whether it may be pressed — an unconditional re-enable put a live Send
+       over a closed box, beside a sentence saying the agent cannot be handed a
+       message. The open agent's poll owns its own controls. */
   }
 }
 
@@ -5474,6 +5530,16 @@ function openDetail(sessionName) {
     document.getElementById('d-qopts').innerHTML = '';
     document.getElementById('d-qopts').hidden = true;
     document.getElementById('d-qout').hidden = true;
+    /* ⚠️ THE SENTENCE AND THE CAPTURED PANE TOO. They sit behind `hidden`, so
+       nothing was shown — but this block's own rule is that the box holds the
+       strongest version of cross-agent misattribution, and leaving one agent's
+       question text loaded under another agent's name is that, one `hidden`
+       away. The render check reads them directly and saw April's sentence on
+       every state, including the ones where nothing was asking. */
+    document.getElementById('d-qask-lab').textContent = '';
+    document.getElementById('d-qask-text').textContent = '';
+    document.getElementById('d-qask-text').hidden = true;
+    document.getElementById('d-qask-fail').hidden = true;
     document.getElementById('d-dmthread').innerHTML = '<p class="dmnone">Opening&hellip;</p>';
     document.getElementById('d-talk-older').hidden = true;
     document.getElementById('d-dmoff').hidden = true;
