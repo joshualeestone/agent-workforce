@@ -730,8 +730,8 @@ function blockBody() {
   // ⚠️ The command is taught as THIS machine can run it (clipath): bare
   // `kosmos` is not on a stock install's PATH, and an agent whose shell
   // says "command not found" never reaches the engine, so its failure
-  // draws nothing anywhere. Existing agents' copies heal through
-  // tellAgent's piggyback splice, so this body must stay derivable from
+  // leaves no trace for anyone to find. Existing agents' copies heal
+  // through tellAgent's piggyback splice, so this body must stay derivable from
   // the machine alone (no per-agent state).
   const cli = require('./clipath').kosmosCliShown();
   return [
@@ -745,9 +745,9 @@ function blockBody() {
     '',
     '    ' + cli + ' post <project-id> "what you want to tell the room"',
     '',
-    'If one of these commands fails in your shell, say what happened in',
-    'your own words rather than staying silent: the message never arrived,',
-    'and a command that never ran draws nothing anywhere.',
+    'If one of these commands fails in your shell, tell your operator in',
+    'your own words rather than staying silent. The message never arrived,',
+    'and a command that never ran leaves no trace for anyone to find.',
     '',
     'Mention @<their-name> to address someone directly; everyone else on',
     'the project receives it marked as background.',
