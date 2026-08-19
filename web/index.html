@@ -3534,9 +3534,16 @@ function paintUpdateCard(running, offer, look) {
     btn.textContent = 'Check now';
     btn.dataset.act = 'check';
     btn.disabled = true;
-  } else if (look && look.reached) {
+  } else if (look && look.reached && look.readable) {
     line.textContent = v + 'Up to date.';
     btn.textContent = 'Check now';
+    btn.dataset.act = 'check';
+  } else if (look && look.reached && !look.readable) {
+    // The captive-portal shape: the host answered, the answer was not a
+    // version. Saying "Up to date" here would be a claim about a world
+    // we could not read; saying "could not reach" blames the wrong leg.
+    line.textContent = v + "Could not read the update server's answer.";
+    btn.textContent = 'Try again';
     btn.dataset.act = 'check';
   } else if (look && look.reached === false && look.looked !== false) {
     // Never rendered as "up to date": not hearing back is its own state.
@@ -3576,9 +3583,20 @@ async function updCheckNowClick() {
   let out = null;
   try { out = await (await fetch('/api/update/check', { method: 'POST' })).json(); } catch { out = null; }
   UPD_CHECKING = false;
-  paintUpdateCard((out && out.running) || LAST_VERSION, out && out.offer, { reached: !!(out && out.reached) });
+  if (!out) {
+    // The BOARD did not answer (restarting, or the page is orphaned).
+    // Naming the update server here would blame the wrong leg, and
+    // clearing the toast on our own failure could eat a valid offer.
+    line.textContent = (LAST_VERSION ? 'Kosmos ' + LAST_VERSION + '. ' : 'Kosmos. ') + 'Could not check just now.';
+    btn.textContent = 'Try again';
+    btn.dataset.act = 'check';
+    btn.disabled = false;
+    btn.focus();
+    return;
+  }
+  paintUpdateCard(out.running || LAST_VERSION, out.offer, { reached: !!out.reached, readable: !!out.readable, looked: true });
   // The Later note is gone, so a live offer returns to the toast too.
-  renderUpdateToast(out && out.offer);
+  renderUpdateToast(out.offer);
   // The keyboard's place is restored: disabling the focused button had
   // dropped focus to <body>, and the person who pressed Check now was
   // left nowhere while the answer landed (announced by the line's
@@ -3696,6 +3714,10 @@ document.getElementById('uc-go').addEventListener('click', async () => {
    actually CHANGED: an installer that found nothing to do did not update
    anything, and saying so would be the stale-label defect at the finish
    line instead of the start. */
+/* Known hole, erring honest: on the deadline-elapsed reload (installer
+   still running after three minutes), the first status serves the OLD
+   version, the note is consumed, and no "Updated." ever shows for that
+   install. Silence beats a claim we cannot time correctly. */
 let UPDATED_NOTE_DONE = false;
 function updatedNoteOnce(nowVersion) {
   if (UPDATED_NOTE_DONE) return;

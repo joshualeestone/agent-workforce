@@ -78,19 +78,11 @@ test('a down host is asked once per cache window, not once per status tick', asy
  * update-control: reachability, checkNow, and the 15-minute TTL.
  * ------------------------------------------------------------------------ */
 
-test('the check interval is fifteen minutes, not six hours', () => {
-  // Pinned as a value because it is a PROMISE made in-channel: a release
-  // reaches every running app within the quarter hour.
-  const src = require('node:fs').readFileSync(require.resolve('./update'), 'utf8');
-  assert.ok(src.includes('const TTL = 15 * 60 * 1000;'),
-    'the TTL drifted from the promised fifteen minutes');
-});
-
 test('reachability is its own fact: could-not-reach never reads as up-to-date', async () => {
   // Never looked: not reached, and LOOKED false -- the boot contract the
   // card's Checking arm renders (asserted against what lastLook actually
   // emits, not a hand-built literal).
-  assert.deepEqual(update.lastLook(), { reached: false, at: 0, looked: false });
+  assert.deepEqual(update.lastLook(), { reached: false, readable: false, at: 0, looked: false });
   // A look that got an answer (even "nothing newer") is reached.
   update.setFetcher(async () => ({ ok: true, json: async () => ({ version: RUNNING }) }));
   await update.refresh();
@@ -120,7 +112,7 @@ test('checkNow bypasses the TTL and answers fresh, with reachability', async () 
   assert.equal(update.available(), null,
     'CONTROL: poke inside the TTL refreshed anyway, so checkNow proves nothing');
   const out = await update.checkNow();
-  assert.deepEqual(out, { running: RUNNING, latest: '99.0.0', reached: true });
+  assert.deepEqual(out, { running: RUNNING, latest: '99.0.0', reached: true, readable: true });
   assert.deepEqual(update.available(), { version: '99.0.0' },
     'the fresh answer did not land in the cache the toast reads');
   // And a checkNow that cannot reach says so rather than throwing.
@@ -128,4 +120,22 @@ test('checkNow bypasses the TTL and answers fresh, with reachability', async () 
   const down = await update.checkNow();
   assert.equal(down.reached, false);
   assert.equal(down.running, RUNNING, 'the running version vanished from an unreachable answer');
+});
+
+test('a reachable host with an unusable answer is readable:false, never up-to-date material', async () => {
+  // The captive-portal shape: 200 with a splash page (unparseable body).
+  update.setFetcher(async () => ({ ok: true, json: async () => { throw new Error('html'); } }));
+  await update.refresh();
+  const look = update.lastLook();
+  assert.equal(look.reached, true, 'a host that answered read as unreached');
+  assert.equal(look.readable, false, 'an unusable answer read as usable');
+  assert.equal(update.available(), null, 'CONTROL: no offer, the exact case the card maps');
+  // And a good answer flips readable back.
+  update.setFetcher(async () => ({ ok: true, json: async () => ({ version: RUNNING }) }));
+  await update.refresh();
+  assert.equal(update.lastLook().readable, true);
+});
+
+test('the fifteen-minute promise, asserted on the exported value', () => {
+  assert.equal(update.TTL, 15 * 60 * 1000, 'the check interval drifted from the promised fifteen minutes');
 });

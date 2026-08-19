@@ -6026,14 +6026,19 @@ test("the update card's states are mutually exclusive and the line is never blan
   try {
     // Newer exists.
     let els = mk();
-    paint('0.1.8', { version: '0.1.9' }, { reached: true });
+    paint('0.1.8', { version: '0.1.9' }, { reached: true, readable: true });
     assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.8. Version 0.1.9 is ready.');
     assert.equal(els['upd-btn'].textContent, 'Update');
-    // Current.
+    // Current: up-to-date needs BOTH reached and readable.
     els = mk();
-    paint('0.1.9', null, { reached: true });
+    paint('0.1.9', null, { reached: true, readable: true });
     assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.');
     assert.equal(els['upd-btn'].textContent, 'Check now');
+    // Reached but unreadable (the captive-portal shape): NEVER up-to-date.
+    els = mk();
+    paint('0.1.9', null, { reached: true, readable: false, looked: true });
+    assert.equal(els['upd-line'].textContent, "Kosmos 0.1.9. Could not read the update server's answer.");
+    assert.equal(els['upd-btn'].textContent, 'Try again');
     // Could not look: NEVER "up to date".
     els = mk();
     paint('0.1.9', null, { reached: false });
@@ -6112,7 +6117,7 @@ test('the check route is POST-only, and Check now clears the Later note before a
   };
   const sandbox = {
     localStorage: { removeItem: (k) => { calls.push('clear:' + k); } },
-    fetch: async () => { calls.push('fetch'); return { json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, offer: null }) }; },
+    fetch: async () => { calls.push('fetch'); return { json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, readable: true, offer: null }) }; },
     document: { getElementById: (id) => els[id] },
     renderUpdateToast: () => { calls.push('toast'); },
   };

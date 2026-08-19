@@ -81,11 +81,14 @@ async function refresh() {
     if (res && res.ok) {
       const body = await res.json().catch(() => null);
       const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
-      // reached true means the host answered with an ok response (a
-      // malformed BODY still counts: the host spoke). Silence, errors,
-      // and non-ok statuses all land reached false and render as
-      // could-not-reach -- erring toward the claim we can back.
-      cache = { at: Date.now(), latest: v, reached: true };
+      // reached true means the host answered with an ok response;
+      // readable true means the answer carried a usable version. The
+      // split exists because a captive portal answers EVERYTHING with a
+      // 200 splash page, and "reached, unreadable, no offer" must not
+      // render as "Up to date" -- the exact false sentence this module
+      // exists to prevent. Silence, errors, and non-ok statuses land
+      // reached false (could-not-reach).
+      cache = { at: Date.now(), latest: v, reached: true, readable: v !== null };
       landed = true;
     }
   } finally {
@@ -97,7 +100,7 @@ async function refresh() {
     // refreshes inside one millisecond made `cache.at < started` skip the
     // stamp, and checkNow (TTL-bypassing) makes back-to-back refreshes a
     // real path, not a test artifact.
-    if (!landed) cache = { at: started, latest: null, reached: false };
+    if (!landed) cache = { at: started, latest: null, reached: false, readable: false };
   }
 }
 
@@ -106,7 +109,12 @@ async function refresh() {
     "we looked and could not reach": at boot the screen must say Checking,
     not claim a failure that has not happened. */
 function lastLook() {
-  return { reached: cache.reached === true, at: cache.at, looked: cache.at > 0 };
+  return {
+    reached: cache.reached === true,
+    readable: cache.readable === true,
+    at: cache.at,
+    looked: cache.at > 0,
+  };
 }
 
 /**
@@ -121,7 +129,7 @@ async function checkNow() {
       .finally(() => { inFlight = null; });
   }
   await inFlight;
-  return { running: RUNNING, latest: cache.latest, reached: cache.reached === true };
+  return { running: RUNNING, latest: cache.latest, reached: cache.reached === true, readable: cache.readable === true };
 }
 
 /**
@@ -209,10 +217,10 @@ function setBase(b) { base = b || (process.env.AGENT_WORKFORCE_RELEASE_BASE || D
 function setInstallRunner(f) { installRunner = f; }
 function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
-function resetCache() { cache = { at: 0, latest: null, reached: false }; inFlight = null; installStarted = false; }
+function resetCache() { cache = { at: 0, latest: null, reached: false, readable: false }; inFlight = null; installStarted = false; }
 
 module.exports = {
   available, poke, refresh, newer, installedRoot, setupUrl, beginInstall,
   alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot,
-  resetCache, RUNNING, lastLook, checkNow,
+  resetCache, RUNNING, TTL, lastLook, checkNow,
 };

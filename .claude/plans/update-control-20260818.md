@@ -71,6 +71,24 @@ The sentence is true and ships now.
   a second update-ish card (flagged for Mona Lisa's pass; the spec
   placed the line "in Settings" without naming a card).
 
+## Iteration 2 (review): the captive-portal state, and copy owed a pass
+
+- reached split into reached + READABLE: a captive portal answers every
+  request 200 with a splash page, and "reached, unreadable, no offer"
+  rendered the exact false "Up to date" this chunk exists to prevent.
+  New card sentence (MINE, for Mona Lisa's pass, following her
+  name-the-thing-that-failed rule): "Could not read the update server's
+  answer." with Try again.
+- A failed CLIENT fetch (the board itself not answering) now says
+  "Could not check just now." instead of blaming the update server, and
+  no longer clears a possibly valid toast.
+- The finish-line's deadline-elapsed hole is recorded in a comment:
+  silence beats a claim we cannot time (accepted).
+- TTL exported and pinned as a value instead of a source spelling.
+- Copy for Mona Lisa's pass, gathered: "Could not read the update
+  server's answer.", "Could not check just now.", the card joining the
+  Updates card, and the runs-in-background sentence placement.
+
 ## Out of scope
 
 - Stop-the-fleet button (above).
