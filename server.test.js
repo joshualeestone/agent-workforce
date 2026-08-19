@@ -6095,3 +6095,36 @@ test('the finish line names what actually landed, and only when something did', 
   // The note is consumed either way (no repeat on the next reload).
   assert.equal(changed.store.v, null, 'the note survived its own rendering');
 });
+
+test('the check route is POST-only, and Check now clears the Later note before asking', async () => {
+  // POST-only, asserted rather than assumed: a GET must fall through.
+  const got = await req('/api/update/check', {});
+  assert.notEqual(got.status, 200, 'a GET reached the check route');
+
+  // The named handler, driven with stubs: the Later note is cleared
+  // BEFORE the host is asked (the spec's order), and the card leaves the
+  // Checking state with the answer painted.
+  const src = pageFnSource('updCheckNowClick');
+  const calls = [];
+  const els = {
+    'upd-line': { textContent: '' },
+    'upd-btn': { textContent: '', hidden: false, disabled: false, dataset: { act: 'check' }, focus: () => { calls.push('focus'); } },
+  };
+  const sandbox = {
+    localStorage: { removeItem: (k) => { calls.push('clear:' + k); } },
+    fetch: async () => { calls.push('fetch'); return { json: async () => ({ running: '0.1.9', latest: '0.1.9', reached: true, offer: null }) }; },
+    document: { getElementById: (id) => els[id] },
+    renderUpdateToast: () => { calls.push('toast'); },
+  };
+  // eslint-disable-next-line no-new-func
+  const run = new Function('localStorage', 'fetch', 'document', 'renderUpdateToast', 'LAST_VERSION',
+    'let UPD_CHECKING = false; let UPD_CONFIRM_OPENER = null;\n'
+    + pageFnSource('paintUpdateCard') + '\n' + src + '\nreturn updCheckNowClick();');
+  await run(sandbox.localStorage, sandbox.fetch, sandbox.document, sandbox.renderUpdateToast, '0.1.9');
+  assert.ok(calls.indexOf('clear:kosmos-update-later') > -1, 'Check now never cleared the Later note');
+  assert.ok(calls.indexOf('clear:kosmos-update-later') < calls.indexOf('fetch'),
+    'the Later note was cleared AFTER the ask, not before (the spec\'s order)');
+  assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.',
+    'the answer did not land on the line');
+  assert.ok(calls.includes('focus'), 'the keyboard was not returned to the button');
+});

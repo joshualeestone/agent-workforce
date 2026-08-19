@@ -81,8 +81,10 @@ async function refresh() {
     if (res && res.ok) {
       const body = await res.json().catch(() => null);
       const v = body && typeof body.version === 'string' && parts(body.version) ? body.version : null;
-      // A well-formed answer AND a malformed one both count as REACHED: the
-      // host spoke. reached false is reserved for never hearing back.
+      // reached true means the host answered with an ok response (a
+      // malformed BODY still counts: the host spoke). Silence, errors,
+      // and non-ok statuses all land reached false and render as
+      // could-not-reach -- erring toward the claim we can back.
       cache = { at: Date.now(), latest: v, reached: true };
       landed = true;
     }
@@ -209,5 +211,8 @@ function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
 function resetCache() { cache = { at: 0, latest: null, reached: false }; inFlight = null; installStarted = false; }
 
-module.exports = { available, poke, refresh, newer, installedRoot, setupUrl, beginInstall, alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot, resetCache, RUNNING, lastLook, checkNow,
+module.exports = {
+  available, poke, refresh, newer, installedRoot, setupUrl, beginInstall,
+  alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot,
+  resetCache, RUNNING, lastLook, checkNow,
 };

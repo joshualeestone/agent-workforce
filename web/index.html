@@ -2935,7 +2935,7 @@ svg { display: block; }
            chunk. -->
       <h3 class="dlab">Updates</h3>
       <div class="setrow" id="upd-row">
-        <div><b id="upd-line">Checking.</b>
+        <div><b id="upd-line" role="status">Checking.</b>
           <p class="dhint" style="margin:2px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p></div>
         <button class="btn-quiet" type="button" id="upd-btn" hidden>Check now</button>
       </div>
@@ -3500,6 +3500,7 @@ function renderUpdateToast(u) {
     slot.innerHTML = ''; delete slot.dataset.v;
   });
   document.getElementById('ut-install').addEventListener('click', () => {
+    UPD_CONFIRM_OPENER = document.getElementById('ut-install');
     document.getElementById('uc-err').hidden = true;
     document.getElementById('updconfirm').hidden = false;
     // Focus lands on the SAFE answer, same rule as every dialog here: the
@@ -3537,18 +3538,27 @@ function paintUpdateCard(running, offer, look) {
     line.textContent = v + 'Up to date.';
     btn.textContent = 'Check now';
     btn.dataset.act = 'check';
-  } else {
+  } else if (look && look.reached === false && look.looked !== false) {
     // Never rendered as "up to date": not hearing back is its own state.
     line.textContent = v + 'Could not reach the update server.';
     btn.textContent = 'Try again';
     btn.dataset.act = 'check';
+  } else {
+    // No look at all (a caller with no data yet): neutral, never a
+    // failure that has not happened -- the same rule as the boot arm.
+    line.textContent = v + 'Checking.';
+    btn.textContent = 'Check now';
+    btn.dataset.act = 'check';
+    btn.disabled = true;
   }
 }
-document.getElementById('upd-btn').addEventListener('click', async () => {
+async function updCheckNowClick() {
   const btn = document.getElementById('upd-btn');
   const line = document.getElementById('upd-line');
+  if (UPD_CHECKING) return;
   if (btn.dataset.act === 'update') {
     // ONE install path: the same confirm the toast opens, same safe-focus rule.
+    UPD_CONFIRM_OPENER = btn;
     document.getElementById('uc-err').hidden = true;
     document.getElementById('updconfirm').hidden = false;
     document.getElementById('uc-no').focus();
@@ -3569,16 +3579,29 @@ document.getElementById('upd-btn').addEventListener('click', async () => {
   paintUpdateCard((out && out.running) || LAST_VERSION, out && out.offer, { reached: !!(out && out.reached) });
   // The Later note is gone, so a live offer returns to the toast too.
   renderUpdateToast(out && out.offer);
-});
+  // The keyboard's place is restored: disabling the focused button had
+  // dropped focus to <body>, and the person who pressed Check now was
+  // left nowhere while the answer landed (announced by the line's
+  // role="status").
+  btn.focus();
+}
+document.getElementById('upd-btn').addEventListener('click', updCheckNowClick);
 
 /* ⚠️ THE CONFIRM GETS THE SAME MODAL MACHINERY AS rm-modal, not adjacency:
    aria-modal promises focus is held, Escape leaves, the backdrop leaves, and
    closing returns the keyboard to the button that opened it. A new sibling
    does not inherit a guard by sitting beside one. */
+/* Whoever opened the confirm gets the keyboard back on close: the toast's
+   Install OR the card's Update (after Later, the toast is gone, so the
+   old ut-install lookup dropped keyboard users onto <body>). */
+let UPD_CONFIRM_OPENER = null;
 function closeUpdConfirm() {
   document.getElementById('updconfirm').hidden = true;
-  const inst = document.getElementById('ut-install');
-  if (inst) inst.focus();
+  const back = (UPD_CONFIRM_OPENER && document.contains(UPD_CONFIRM_OPENER))
+    ? UPD_CONFIRM_OPENER
+    : (document.getElementById('ut-install') || document.getElementById('upd-btn'));
+  UPD_CONFIRM_OPENER = null;
+  if (back) back.focus();
 }
 document.getElementById('uc-no').addEventListener('click', closeUpdConfirm);
 document.getElementById('updconfirm').addEventListener('click', (e) => {

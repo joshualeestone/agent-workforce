@@ -61,7 +61,15 @@ The sentence is true and ships now.
   mutually exclusive, line never blank: her claim 4); Check now clears
   the later key (her claim 3); completion note only on version change.
 - Render evidence both themes: the card in current/newer/could-not-look
-  states.
+  states. CAPTURED (scratchpad upd-newer/uptodate/unreachable.png +
+  upd-card-{light,dark}.png, against a local release-host fixture);
+  attached to the PR and the channel per house rule. The boot render
+  also caught a real state the spec missed: the first look in flight
+  rendered "could not reach" before any look had failed -- lastLook now
+  carries `looked` and the card says Checking until the first answer.
+- The card joined the pack's existing Updates card rather than becoming
+  a second update-ish card (flagged for Mona Lisa's pass; the spec
+  placed the line "in Settings" without naming a card).
 
 ## Out of scope
 

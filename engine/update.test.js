@@ -87,12 +87,17 @@ test('the check interval is fifteen minutes, not six hours', () => {
 });
 
 test('reachability is its own fact: could-not-reach never reads as up-to-date', async () => {
-  // Never looked: not reached.
-  assert.deepEqual(update.lastLook().reached, false);
+  // Never looked: not reached, and LOOKED false -- the boot contract the
+  // card's Checking arm renders (asserted against what lastLook actually
+  // emits, not a hand-built literal).
+  assert.deepEqual(update.lastLook(), { reached: false, at: 0, looked: false });
   // A look that got an answer (even "nothing newer") is reached.
   update.setFetcher(async () => ({ ok: true, json: async () => ({ version: RUNNING }) }));
   await update.refresh();
-  assert.equal(update.lastLook().reached, true, 'a successful look did not read as reached');
+  const after = update.lastLook();
+  assert.equal(after.reached, true, 'a successful look did not read as reached');
+  assert.equal(after.looked, true, 'a completed look still reads as first-look-in-flight');
+  assert.ok(after.at > 0, 'the look left no timestamp');
   assert.equal(update.available(), null, 'CONTROL: no offer, which is exactly the up-to-date case');
   // The next look fails: reached flips false even though a cached answer exists.
   update.setFetcher(async () => { throw new Error('offline'); });
@@ -109,6 +114,9 @@ test('checkNow bypasses the TTL and answers fresh, with reachability', async () 
   // ...then change the world: poke() would sit on the TTL, checkNow asks anyway.
   update.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
   update.poke();
+  // Settled first: poke's refresh is async, and an unsettled assertion
+  // would pass even with the TTL gate deleted (the control could not fail).
+  await new Promise((r) => setTimeout(r, 30));
   assert.equal(update.available(), null,
     'CONTROL: poke inside the TTL refreshed anyway, so checkNow proves nothing');
   const out = await update.checkNow();
