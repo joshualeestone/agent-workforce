@@ -1451,7 +1451,7 @@ function blockBody(projects, sessionName) {
     // ⚠️ The command is taught as THIS machine can run it (kosmosCli):
     // bare `kosmos` is not on a stock install's PATH, and an agent whose
     // shell says "command not found" never reaches the engine, so its
-    // failure draws nothing anywhere. Re-spliced on every membership
+    // failure leaves no trace for anyone to find. Re-spliced on every membership
     // change, so existing agents get the corrected form, not only new.
     const head = `- **${oneLine(p.name)}**: \`${oneLine(p.folder)}\`` + (p.id
       ? `\n  - Post to everyone on it: \`${cliShown} post ${oneLine(String(p.id))} "your message"\``
