@@ -1740,8 +1740,10 @@ test('the project block and the colleagues block both teach the resolved command
     'the colleagues block still teaches a bare msg command');
   assert.ok(colleagues.includes(kosmosCliShown() + ' post <project-id>'),
     'the colleagues block still teaches a bare post command');
-  assert.ok(colleagues.includes('say what happened in'),
-    'the failure line is gone: a pre-engine failure is silent everywhere else');
+  assert.ok(colleagues.includes('tell your operator'),
+    'the failure line lost its audience: an instruction satisfiable by an '
+    + 'agent narrating to itself is obeyable silently, the exact outcome '
+    + 'it exists to prevent');
 });
 
 test('a stale colleagues block heals on syncAgent; a file without one is not grown', () => {
