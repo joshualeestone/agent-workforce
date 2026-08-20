@@ -243,3 +243,37 @@ Also observed: a `render-projects.js` run rewrote `projects.json` in the shared
 sandbox and removed a fixture project created by hand. Expected collateral --
 that check drives the real create and archive routes -- but worth knowing
 before concluding a project "vanished".
+
+## 🛑 There is no message corpus, and `.quoteb` is not benign
+
+Two findings that change how the remaining message-content types get built.
+
+**No Kosmos message has ever been sent on this machine.**
+`~/Library/Application Support/AgentWorkforce/messages.jsonl` does not exist;
+the store holds avatars, first-run.json, profiles and projects.json only. So
+the spec's central line, the pack's "a day of watching this fleet says that is
+the real shape", is an observation of the FLEET transferred to a surface nobody
+has used. Legitimate, but a transfer rather than a measurement, and Mona Lisa
+has corrected her spec to say so.
+
+⚠️ Anyone who later decides to "measure what messages contain" must look at the
+fleet transcripts. An hour spent on the empty Kosmos file would conclude that
+agents never cite paths.
+
+**The admission rule for building ahead of evidence** (mine, sharpened by her):
+build it if being WRONG is invisible. `.ref` failing renders as plain text.
+`.codeb` failing renders as nothing. `.ogcard` failing is an outbound request
+that already happened, which cannot be un-failed.
+
+🛑 **And `.quoteb` fails that test, which I had it passing.** I grouped it with
+`.xlink` as "unambiguous". Its only plausible trigger is a leading `>`, which is
+also shell redirects, diff markers, comparisons and arrows in prose -- the most
+ambiguous of the four. And a false positive wraps an agent's OWN prose in a
+blockquote, which asserts *these are not my words*: a semantic claim about
+authorship, in a product whose whole discipline is not asserting what nobody
+computed. Wrong in the worst available direction.
+
+**Corrected order:** `.xlink` (a literal prefix, genuinely unambiguous),
+`.codeb` (structurally safe, because the engine can only emit it when it can
+name the file AND the line -- the same proof `.ref` already requires), and
+`.quoteb` only on an EXPLICIT engine marker, never on inference.

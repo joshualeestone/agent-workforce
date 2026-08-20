@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: a7448ab40f4845a97ae9c0160956cfbd51a67dfc27157da3ff48a673ea343427
+diff_hash: 17255900a72dfbd4a47b12edca411e83806dd5171e45ce1fe9e144f81ab5a4f8
 subdir_audit: passed
-timestamp: 2026-08-20T05:09:28Z
+timestamp: 2026-08-20T05:28:23Z
 iterations: 1
 converged: true
 ---
@@ -275,3 +275,47 @@ plan.
 | 19 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FOURTH time |
 | 20 | 1 | NIT | pj-msg-text | DEFERRED | belongs to the answer-panel chunk |
 | 21 | 1 | NIT | tmux not sandboxed | DEFERRED | recorded; needs a fixture, not a flag |
+
+## Sixth slice (2026-08-20): external links
+
+[STRENGTH] **Not a sniffer, and the distinction is load-bearing.** `https://`
+is a DELIMITER, not an inference: a token either starts with it or does not. The
+test is a literal prefix rather than a URL parse, so there is no scheme for it
+to be tricked about -- `javascript:`, `data:`, `file:` and `vbscript:`
+are not matched at all and return as plain escaped text, PROVEN with a positive
+control that a real URL still links.
+
+[STRENGTH] `rel="noreferrer noopener"` on the one click in this product that
+leaves the machine.
+
+[STRENGTH] Verified in a real browser, both schemes, WITHOUT touching tmux: the
+fixture message was written into the sandbox store rather than posted through
+the route, because a real post types into a live agent's session and this test
+needed a render, not a delivery. 2 links, correct hrefs, trailing full stop
+excluded, no dangerous scheme linked, no raw script, 0 page errors.
+
+[BLOCKER -> FIXED, MINE] ⚠️ **I had the build order wrong and Mona Lisa caught
+it with my own rule.** I grouped `.quoteb` with `.xlink` as "unambiguous".
+Its only plausible trigger is a leading `>`, which is also shell redirects,
+diff markers and arrows in prose, and its false positive wraps an agent's OWN
+prose in a blockquote -- asserting *these are not my words*, a claim about
+AUTHORSHIP. My benign-failure test was right; I scored it by whether anything
+would RENDER rather than by what a wrong render would CLAIM.
+
+[STRENGTH] **The merge was proven rather than judged.** Thirteen conflict hunks
+across three files, resolved wholesale toward this branch only after showing
+the sole main-side commit touching them is this branch's own squash (#99), then
+verified by content, then gated on a zero-marker count.
+
+[NIT] There is NO message corpus: the Kosmos room has never carried a message,
+so the spec's evidence claim is a transfer from the fleet. Recorded so nobody
+measures an empty file and concludes agents do not cite paths.
+
+### Sixth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 22 | 1 | BLOCKER | build order | FIXED | .quoteb moved behind an explicit marker |
+| 23 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FIFTH time |
+| 24 | 1 | NIT | .quoteb | DEFERRED | ships on an engine marker or not at all |
+| 25 | 1 | NIT | no corpus | DEFERRED | recorded; measurement must use fleet data |

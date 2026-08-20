@@ -7539,7 +7539,7 @@ test('the documents list of a project that does not exist is a 404', async () =>
    =========================================================================== */
 
 test('a body with no citation is byte-for-byte what esc() produced before', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const esc = pageFunction('esc');
   const names = new Set(['brief.md']);
   for (const body of [
@@ -7563,7 +7563,7 @@ test('a body with no citation is byte-for-byte what esc() produced before', () =
    not escaped". Verified by doing exactly that. Neither test covers the other's
    escape, so removing either would open an injection with a green suite. */
 test('a citation becomes a chip and everything around it stays escaped', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const out = link('see brief.md and <script>alert(1)</script>', new Set(['brief.md']));
   assert.match(out, /<span class="ref">brief\.md<button class="refgo"/,
     'the cited file did not become a chip');
@@ -7572,7 +7572,7 @@ test('a citation becomes a chip and everything around it stays escaped', () => {
 });
 
 test('the chip carries the BASENAME, because that is what the opener takes', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const out = link('look at docs/brief.md', new Set(['brief.md']));
   // The person sees the path they wrote; the button carries what open-file
   // accepts, which is a bare filename and nothing else.
@@ -7581,7 +7581,7 @@ test('the chip carries the BASENAME, because that is what the opener takes', () 
 });
 
 test('a token containing .. is never dressed as a citation, even when its basename matches', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const esc = pageFunction('esc');
   for (const body of ['../brief.md', 'a/../../brief.md', '..\\brief.md']) {
     const out = link(body, new Set(['brief.md']));
@@ -7591,14 +7591,14 @@ test('a token containing .. is never dressed as a citation, even when its basena
 });
 
 test('trailing punctuation is stripped for the lookup and put back after', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const out = link('it is in brief.md.', new Set(['brief.md']));
   assert.match(out, /<span class="ref">brief\.md<button/, 'the full stop blocked the match');
   assert.ok(out.endsWith('.'), 'the sentence lost its full stop');
 });
 
 test('whitespace the agent typed survives the reassembly', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   // Agents paste columns. Collapsing runs would edit what they said.
   const out = link('a    b\n\tbrief.md', new Set(['brief.md']));
   assert.ok(out.includes('a    b'), 'a run of spaces was collapsed');
@@ -7606,11 +7606,71 @@ test('whitespace the agent typed survives the reassembly', () => {
 });
 
 test('an empty or absent name list leaves every body untouched', () => {
-  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
   const esc = pageFunction('esc');
   // CONTROL: the same body DOES become a chip when the list has the name, so
   // "untouched" here is the list being empty rather than the matcher being dead.
   assert.equal(link('brief.md', new Set()), esc('brief.md'));
   assert.equal(link('brief.md', null), esc('brief.md'));
   assert.match(link('brief.md', new Set(['brief.md'])), /refgo/);
+});
+
+/* ===========================================================================
+   EXTERNAL LINKS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   🛑 THE ONE PLACE A CLICK LEAVES THE MACHINE in a local-first product, and
+   the second place a message body becomes markup.
+   =========================================================================== */
+
+test('an http token becomes a link and carries noreferrer noopener', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const out = inline('see https://example.test/a for details');
+  assert.match(out, /<a class="xlink" href="https:\/\/example\.test\/a"/, 'the URL did not become a link');
+  assert.ok(out.includes('rel="noreferrer noopener"'),
+    'the one click that leaves this machine told the destination where it came from');
+  assert.ok(out.includes('target="_blank"'), 'the link replaced the board');
+});
+
+test('a scheme that is not http(s) is never linked, and that includes the dangerous ones', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  // ⚠️ The test is a literal `http://`/`https://` PREFIX rather than a URL
+  // parse, so there is no scheme for it to be tricked about. These come back
+  // as plain escaped text, not as links with a refused scheme.
+  for (const body of [
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'file:///etc/passwd',
+    'vbscript:msgbox(1)',
+    'HTTPS://SHOUTING.test',
+  ]) {
+    const out = inline(body);
+    assert.ok(!out.includes('<a '), JSON.stringify(body) + ' became a link');
+    assert.equal(out, esc(body), JSON.stringify(body) + ' was not returned as plain escaped text');
+  }
+  // CONTROL: the same function DOES link a real one, so the assertions above
+  // are not passing because the linker is dead.
+  assert.match(inline('https://ok.test'), /<a class="xlink"/);
+});
+
+test('a body with no URL in it is byte-for-byte what esc() produced', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  for (const body of ['plain words', 'a <b>tag</b> & an amp', '<script>alert(1)</script>', '']) {
+    assert.equal(inline(body), esc(body), JSON.stringify(body) + ' changed with no URL in it');
+  }
+});
+
+test('trailing punctuation is not swallowed into the href', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const out = inline('go to https://example.test/page.');
+  assert.match(out, /href="https:\/\/example\.test\/page"/, 'the full stop went into the link');
+  assert.ok(out.endsWith('.'), 'the sentence lost its full stop');
+});
+
+test('a URL inside a message that also cites a file gets both treatments', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const out = link('brief.md and https://example.test', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md/, 'the citation was lost when a URL was present');
+  assert.match(out, /<a class="xlink"/, 'the URL was lost when a citation was present');
 });
