@@ -43,8 +43,36 @@ naming the variable is the one useful thing it can say.
 recorded as an EXPECTED hit rather than an unfixed one, so nobody fixes correct
 copy to make a number go down.
 
+🛑 **AND SIX IS A FLOOR, NOT A CEILING.** `jargon.py`'s `engine_strings` reads
+QUOTED LITERALS of 15+ characters. Template literals are structurally invisible
+to it, and `engine/remove.js` composes several of its sentences that way -- so
+these are live engine copy the count cannot see:
+
+    remove.js:733   `${shown} has no startup job to turn off, and`
+    remove.js:828   `${didToJob} we could not ask tmux whether it is still running`
+    remove.js:865   `${didToJob} we could not end the session it is running in`
+    remove.js:1078  `${shown} is no longer removed from Kosmos. It has no startup job`
+    remove.js:537   `something is running in a session called ${clean}`
+
+So "44 to 6" is true of what the tool can read, and the sweep is incomplete by
+an amount the tool cannot report. `remove.test.js:1384` still pins
+`/could not ask tmux/` and still PASSES, which is the proof: a live sentence
+carrying the jargon, held by a live pin, invisible to the count.
+
+Recorded rather than swept, because these are Mona Lisa's rewrites to write.
+
 ## Two defects the patch introduced, found by applying it
 
+0. **A step label that contradicts its sibling in the same list.** The patch
+   rewrote `it had no startup job to stop` to `there was nothing running to
+   stop`, which drops the referent (the job) and takes the session's. The very
+   next step is labelled `stopped it`, so a jobless agent with a live session
+   got a list saying both. **That row is reverted here** -- the old wording is
+   jargon and the new one is a contradiction, and choosing words that lose
+   "startup job" without borrowing the session's is a copy decision. Flagged.
+   ⚠️ My own re-aimed test pin had come to rest on that label, so the suite was
+   certifying the contradiction: the assertion's message says it checks what was
+   true "of the job" while the label it matched said nothing about one.
 1. **A sentence starting lower case, on the removal dialog.** The patch splits
    `It has no startup job, so Kosmos cannot start it again for you -- you would
    start it...` into two sentences, and the second half kept its lower-case

@@ -1503,7 +1503,10 @@ test('the steps report what was done, including when nothing was', () => {
   assert.ok(labels.length > 0, 'no steps were reported at all, so this asserts nothing');
   assert.ok(!labels.includes('stopped it starting again'),
     'it reported stopping a startup job for an agent that never had one');
-  assert.ok(labels.some((l) => /did not set this one up|nothing running to stop/.test(l)),
+  /* Back to naming the JOB, which is what this assertion's own message says it
+     checks. The alternation that briefly replaced it matched a label about the
+     SESSION, so the test certified a step list that contradicted itself. */
+  assert.ok(labels.some((l) => /no startup job/.test(l)),
     'it does not say what was actually true of the job');
 });
 

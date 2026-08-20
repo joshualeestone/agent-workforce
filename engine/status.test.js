@@ -1575,7 +1575,13 @@ test('a machine with tmux and no sessions shows an EMPTY board, not an unreadabl
     delete process.env.TMUX;
     if (!status.shDetail('tmux', ['-V']).ran) {
       // Same rule as above: say what is still true rather than passing silently.
-      assert.throws(() => status.snapshot(), /could not ask tmux/,
+      /* ⚠️ THE COPY SWEEP MOVED THIS SENTENCE AND THIS PIN WAS MISSED, because
+         the arm only runs where tmux is NOT installed. On a machine with tmux
+         it never executes, so the suite stayed green here while the assertion
+         was dead -- and it would have failed on a runner without tmux, which is
+         the machine the test is named for. A pin inside a
+         host-capability branch is invisible to every run on the wrong host. */
+      assert.throws(() => status.snapshot(), /could not check what it is doing on this computer/,
         'tmux is absent here, and the board did not refuse to speak about a machine it cannot see');
       return;
     }
