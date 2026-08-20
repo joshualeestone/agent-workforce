@@ -252,6 +252,9 @@ const STATES = {
        all, so the per-state check skips. If it skipped EVERY state the selector
        has moved and the whole assertion went quiet. */
     let measuredMeta = 0;
+    /* Said once per theme rather than per state: a headless run cannot see the
+       scrollbar at all, and eleven identical lines would bury the rest. */
+    let headlessNoted = false;
     for (const [name, fx] of Object.entries(STATES)) {
       await page.evaluate((f) => {
         window.__fx = f;
@@ -368,6 +371,11 @@ const STATES = {
               cut: q.scrollWidth > q.clientWidth + 1,
               scrollable: getComputedStyle(q).overflowX !== 'visible',
               focusable: q.tabIndex >= 0,
+              /* The horizontal scrollbar's own height, which is layout space
+                 only because `::-webkit-scrollbar` opts this box out of macOS
+                 overlay behaviour. Borders included; the arms differ by 6. */
+              chrome: q.offsetHeight - q.clientHeight,
+              headless: /HeadlessChrome/.test(navigator.userAgent),
             };
           })(),
           metaAlign: (() => {
@@ -470,6 +478,26 @@ const STATES = {
       if (m.qtext && m.qtext.cut && !(m.qtext.scrollable && m.qtext.focusable)) {
         problems.push(`${tag}: the question is cut off and what is left cannot be reached `
           + `(${JSON.stringify(m.qtext)})`);
+      }
+      /* ⚠️ THE BAR IS ONLY REAL IN A HEADED RUN, and this is measured rather
+         than assumed: with a deliberately 24px-high rule injected at runtime,
+         headless Chromium's layout does not move ONE pixel, while headed moves
+         by exactly 24. So `::-webkit-scrollbar` is not honoured headless at
+         all, and a headless run asserting its absence would report a correct
+         fix as broken. The states still say which arm they are in; the
+         assertion holds only where the engine can answer. */
+      if (m.qtext && !m.qtext.headless) {
+        const bar = m.qtext.chrome - 2;   // the box's own 0.5px borders
+        if (m.qtext.cut && bar < 5) {
+          problems.push(`${tag}: the question is cut and no scrollbar says so (chrome ${m.qtext.chrome}px)`);
+        }
+        if (!m.qtext.cut && bar > 2) {
+          problems.push(`${tag}: a scrollbar is drawn over a question that fits (chrome ${m.qtext.chrome}px)`);
+        }
+      } else if (m.qtext && m.qtext.headless && !headlessNoted) {
+        headlessNoted = true;
+        problems.push(`[${theme}] scrollbar: this run is HEADLESS, where ::-webkit-scrollbar is ignored `
+          + 'entirely, so the question box\u2019s affordance is UNCHECKED (run headed, which is the default)');
       }
       if (m.metaAlign !== null) {
         measuredMeta += 1;

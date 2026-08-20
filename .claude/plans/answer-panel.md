@@ -206,6 +206,73 @@ somebody scrolls. `talk-5-no-confident-parse` is the one that matters most,
 because state 5 exists precisely so a person can read the question and type the
 answer, and its committed screenshot ends mid-word at "or join the existi".
 
+**RULED by Mona Lisa, 2026-08-20 07:42, then NARROWED by her at 07:44 after
+reading the pack.** The first ruling was that both `#d-talk-box` and
+`#d-window-box` should span the grid (`grid-column: 1 / -1`), because the box is
+half-width only from the detail page happening to be a two-column `.dgrid`,
+while the content is 220 columns because `connect.js` creates the session at
+`-x 220`. Measured headless at 6.021px/char: a half-column box shows 100
+characters, a spanning one shows 211.
+
+The narrowing is the useful half, and it came from a question about the
+CONSEQUENCE rather than about the measurement. Spanning `#d-talk-box` widens the
+whole panel, not the question inside it: the bubbles, the option buttons and the
+composer go with it. The pack answers this directly, and I verified it myself in
+`kosmos-app-style.FROZEN-2026-08-19.html`:
+
+    .dspan { grid-column: 1 / -1; }     declared, line 1424
+    used as a class attribute           ZERO times
+
+A rule with a name and no instances is not silence; the pack considered spanning
+and did not want it for these boxes. And a conversation needs a bounded line
+length: right-aligned bubbles stop reading as replies when a two-word answer
+sits alone at the far end of a 211-column row.
+
+**Corrected ruling, split by box:**
+
+- `#d-window-box` SPANS, via `.dspan` ported from the pack. It holds a heading,
+  a hint, the `pre` and a message, so widening it widens exactly what the
+  measurement was about and nothing else.
+- `#d-talk-box` STAYS in the column. The question pane keeps `pre` and keeps its
+  scroll, and gets a VISIBLE EDGE at the cut.
+
+Her own statement of what she got wrong is worth keeping: she measured one
+element and prescribed a mechanism that moves its container, and those are the
+same thing only when the container holds nothing else.
+
+**The visible edge SHIPPED HERE, and it is not the fade it started as.** I told
+her the fade needed logic -- an edge always drawn lies in the two states where
+nothing is cut, and lies again once the box is scrolled to its end -- and she
+came back with something that needs none: style the scrollbar. Four rules on
+`#d-qask-text` opt this one box out of macOS overlay behaviour and back to a
+persistent bar. The BROWSER owns the condition, so neither lie is reachable, no
+per-paint measurement exists to test, and the thumb's length says how much more
+there is, which a fade cannot say at all.
+
+⚠️ **It is invisible headless, measured rather than assumed.** With a
+deliberately 24px-high rule injected at runtime, headless Chromium's layout does
+not move one pixel while headed moves by exactly 24: the pseudo-element is
+ignored entirely headless. So the check asserts the bar only in a headed run and
+says UNCHECKED once per theme otherwise. A headless run asserting its absence
+would have reported a correct fix as broken -- and my own first probe of this
+change ran headless and said the fix did nothing.
+
+**Still to come, and it is what remains of the question-width pass:** `.dspan`
+ported from the pack, `#d-window-box` spanning the grid, and the scrollbar
+generalised from `#d-qask-text` to `.pj-screen`, which the room uses and which
+has the same defect. Scoped narrowly here on purpose: the room's panes are not
+this branch's surface.
+
+🛑 **PR TWO therefore waits on TWO things, not one:** the room able to carry an
+agent's blocking question, AND the question-width pass. Until PR two lands, the
+room still shows the question, so this branch's cut is not the only path to
+reading it. The moment the room's box is deleted, it is.
+
+⚠️ The second gate was set BEFORE the scrollbar shipped on this branch, when the
+cut had no affordance at all. It now has one. Whether that is enough to relax
+the gate is Mona Lisa's ruling and not mine, and it stays a gate until she says
+otherwise: an ordering preference gets reordered by whoever is fastest.
+
 What this branch guarantees, and now asserts per state: the rest is REACHABLE.
 The box is scrollable and carries `tabindex="0"`, so it can be reached from the
 keyboard rather than by trackpad alone. Whether "reachable" is good enough for

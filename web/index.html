@@ -1261,6 +1261,32 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    screen treatment this app already uses for it in the room, inside the pack's
    box. Rewording a terminal into prose would be a claim about what was asked. */
 .qask .pj-screen { margin-top: 6px; max-height: 200px; }
+/* ⚠️ A PERSISTENT SCROLLBAR ON THE QUESTION, and it replaces a fade that would
+   have needed logic. `white-space: pre` is deliberate -- a captured line is
+   what the agent's screen showed, and wrapping a permission prompt destroys
+   the column alignment its options are drawn in -- so a line wider than the
+   box is CUT. Measured 2026-08-20: the box shows 100 characters of a session
+   `connect.js` creates at `-x 220`, and 10 of the 12 question-bearing states
+   in `render-talk.js` cut. macOS hides the OVERLAY scrollbar until somebody
+   scrolls, so there was no affordance saying anything was missing, on the one
+   screen whose whole job is that a person READS the question.
+
+   Styling the pseudo-element opts this box out of overlay behaviour and back
+   to a bar that is always there when it is needed. It is better than the fade
+   it replaces for a reason worth keeping: the BROWSER owns the condition, so
+   it cannot draw when nothing is cut and cannot keep claiming "there is more"
+   once you have scrolled to the end -- the two lies a hand-drawn edge has to
+   be tested against. And the thumb's LENGTH says how much more, which a fade
+   cannot say at all.
+
+   Scoped to THIS box rather than to `.pj-screen`, which the room also uses:
+   the room's panes have the same defect and fixing them is not this branch's
+   surface. `-webkit-` is not a gamble here -- Kosmos opens the default
+   browser, which on a stock Mac is Safari, and both engines this product
+   meets are WebKit or Chromium. */
+#d-qask-text::-webkit-scrollbar { height: 6px; -webkit-appearance: none; }
+#d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2, rgba(20,22,26,.4)); border-radius: 3px; }
+#d-qask-text::-webkit-scrollbar-track { background: var(--k-sunk, rgba(20,22,26,.08)); border-radius: 3px; }
 .qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 /* An option. Deliberately NOT the page's commit styling: a question with two
    equal answers has no primary, and emphasising one would recommend it.
