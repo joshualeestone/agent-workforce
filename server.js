@@ -649,11 +649,17 @@ const server = http.createServer((req, res) => {
        * What an agent's job will START it on, for the agents whose live model
        * we could not read.
        *
-       * ⚠️ WHEN NO LIVE MODEL WAS READ, PLUS EVERY STOPPED AGENT — and that is
-       * both correctness and cost. (An earlier version of this line said "only
-       * when `modelName` is absent", which the stopped-agent clause below
-       * contradicts. The header is what a later reader trusts, so it is the one
-       * that has to be right.) A live transcript reading is what the agent IS running and must
+       * ⚠️ WHEN NO LIVE MODEL WAS READ, PLUS EVERY STOPPED AGENT.
+       * ⚠️ THIS GATE IS COST, NOT CORRECTNESS, and an earlier version of this
+       * line claimed both. Which reading WINS is decided on the page, by
+       * `modelLine` and `runsOnLine`; populating this field for a running agent
+       * would change nothing on screen, only add a disk read per agent per
+       * five-second poll. Measured: mutating the gate to always consult the job
+       * fails no test, and correctly so — the display layer is where the
+       * precedence lives, and that half IS pinned.
+       * (The line also said "only when `modelName` is absent", which the
+       * stopped-agent clause contradicts. A header is what a later reader
+       * trusts, so it is the one that has to be right.) A live transcript reading is what the agent IS running and must
        * never be second-guessed by a job file that may have been edited since;
        * and this route polls every five seconds for every agent, so a disk read
        * per agent per poll to answer a question already answered would be the

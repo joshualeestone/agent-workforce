@@ -72,6 +72,31 @@ const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
+// ⚠️ AND THE CLAUDE CONFIG ROOT, which this file's own header said it did not
+// set and should. Until now /api/status read the operator's real `~/.claude` on
+// every run here -- reads only, but it also meant no test could give a fixture
+// agent a MODEL, because a model comes from a registry entry plus the transcript
+// that entry names. That is why the stopped-agent clause below had no test that
+// could exercise it: every fixture arrived with `modelName` null, so the branch
+// the clause guards was never reached.
+const CONFIG_ROOT = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-config-'));
+process.env.AGENT_WORKFORCE_CONFIG_ROOT = CONFIG_ROOT;
+
+/**
+ * Give a fixture agent a readable model: a registry entry naming a session, and
+ * the transcript that session names. `readModel` needs both — seeding only the
+ * registry leaves it null, which is one layer of vacuity further down.
+ */
+function seedTranscript(name, model) {
+  const dir = nodePath.join(CONFIG_ROOT, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, `${name}-discord_0.0.json`),
+    JSON.stringify({ session_id: `sess-${name}`, model }), 'utf8');
+  const projects = nodePath.join(CONFIG_ROOT, 'projects', 'seeded');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, `sess-${name}.jsonl`),
+    JSON.stringify({ message: { model, usage: { input_tokens: 1000, output_tokens: 10 } } }) + '\n', 'utf8');
+}
 // ⚠️ AND THE LAUNCH AGENTS DIRECTORY, which this file did not sandbox while it
 // now drives the create route. Both cases here are refused before anything is
 // written, so nothing has leaked — but the first happy-path route test somebody
@@ -7331,8 +7356,11 @@ test('exactly one agent state means "not running", and both sides name the same 
 test('a stopped agent with a readable model still gets the model its job will start it on', async () => {
   const status = require('./engine/status');
   const create = require('./engine/create');
+  // The JOB says Opus; the TRANSCRIPT says Haiku. Two readings that disagree,
+  // which is the only shape that can tell the two branches apart.
   fs.writeFileSync(create.plistPath('fixturestopped'),
     create.plistFor('fixturestopped', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  seedTranscript('fixturestopped', 'claude-haiku-4-5');
   // A pane whose Claude process is gone: `classify` returns STOPPED, and the
   // transcript (if any) is what it RAN as.
   // ⚠️ `command: 'zsh'` is what makes this STOPPED. `classify` decides it from
@@ -7347,6 +7375,13 @@ test('a stopped agent with a readable model still gets the model its job will st
     const card = (board.agents || []).find((a) => a.sessionName === 'fixturestopped');
     assert.ok(card, 'the fixture did not produce a card');
     assert.equal(card.state, 'stopped', 'the fixture is not exercising the stopped case');
+    // ⚠️ THE PRECONDITION THAT MAKES THE ASSERTION BELOW MEAN ANYTHING. Without
+    // a live model the clause `a.modelName && a.state !== STATE.STOPPED` is
+    // never reached, and deleting it passes — which is exactly what happened the
+    // first time this test was written.
+    assert.equal(card.modelName, 'Claude Haiku 4.5',
+      'the fixture has no live model, so the stopped-agent clause is not being '
+      + 'exercised and this test would pass with it deleted');
     assert.equal(card.plannedModelName, 'Claude Opus 5',
       'a stopped agent was not given the model its job will start it on, so the '
       + 'panel would quote a transcript from a session that has ended');
