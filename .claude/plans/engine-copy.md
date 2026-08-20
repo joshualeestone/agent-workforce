@@ -187,6 +187,30 @@ sentences at all. Proven by deleting the row: it fails naming the sentence.
 📌 **Same family as `[[a-new-sibling-does-not-inherit-the-guard]]`.** A check
 written in one direction is not a check.
 
+### The composition matrix, checked, including the cell that does not exist
+
+`didToJob` has two forms and four partial returns quote it, so I rendered all
+eight compositions and read them as a person would rather than reading the
+source and reasoning about them.
+
+⚠️ **One of the eight looked like a real defect and is a state the product
+cannot be in.** `remove.js:795` reads `${didToJob} could not stop it right now`,
+with the subject elided. Against the job form that is *"we stopped Casey from
+starting again, but could not stop it right now"* and the elided subject is
+**we**. Against the jobless form it would be *"Casey was not set to start on its
+own, and could not stop it right now"*, where the elided subject reads as
+**Casey**, which is a dangling-subject defect.
+
+✅ **It is unreachable.** `:795` sits inside the `if (job)` branch that opens at
+`:757` and closes at `:800`, so it only ever composes with the job form. I
+checked the structure before changing anything, and the change I was about to
+make would have been a fix aimed at a fixture the producer refuses to produce.
+
+📌 **That is this branch's own recurring class, arriving in my analysis rather
+than in the code**, and it is the reason the check was worth doing anyway: the
+other seven cells all read correctly, which is a measurement rather than an
+assumption.
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and
