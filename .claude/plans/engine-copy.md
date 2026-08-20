@@ -21,7 +21,20 @@ No behaviour changes: every edit is a string.
 
     KOSMOS_REPO=<worktree> python3 Projects/kosmos-design/jargon.py --engine
 
-- **kind:** guard · **pass:** `== 8` · **before (fixed counter):** 57 · **after:** 8
+- **kind:** guard · **pass:** `== 5` · **main (same tool):** 62 · **this branch:** 5
+
+⚠️ **This number has moved three times and every move was the TOOL, not the
+branch.** 8 with the counter as it read this afternoon, 11 once the backslash
+blindness was lifted, then **5** once Mona Lisa found a third defect: the pattern
+required 15+ characters *inside* the quotes, so the regex **paired the closing
+quote of a short literal with the opening quote of the next one** and swallowed
+the real sentence between them. `server.js:707` came back as
+`', commitments: [], reportedAt: null, because: '`. That was manufacturing false
+positives out of junk spans *and* hiding real ones, in every file, for as long as
+the tool has existed.
+
+> 🔑 **The count went DOWN when the checker got stricter.** Any story that treats
+> a falling number as progress would have read that backwards.
 
 🛑 **THE NUMBERS IN THE FIRST VERSION OF THIS PLAN WERE BOTH WRONG, and the
 counter was wrong with them.** It said 44 → 6 and that six was the pass. Mona
@@ -34,24 +47,27 @@ Lisa then found two defects in `jargon.py` itself:
 - it held a **hardcoded path**, so it could only ever measure `main`. It could
   not have verified this branch before merge. It honours `KOSMOS_REPO` now.
 
-On the fixed counter: `main` is **57**, not 44, and this branch is **8**.
+On the counter as it read this afternoon: `main` was **57**, not 44, and this
+branch **8**. Both of those figures are superseded by the block above; they are
+kept because the SHAPE of the correction is the durable part and the numbers are
+not.
 
 ⚠️ **So the sweep is better than "44 to 6" in absolute terms and less complete in
 relative ones**, and the honest form of both numbers is the command above rather
 than either figure.
 
-### What the remaining eight are
+### What the remaining five are
 
 | count | what | why it stays |
 |---|---|---|
-| 2 | `connect.js:146,147`, `stderr` in an object literal | a FIELD NAME, not copy. It was briefly renamed here and reverted: four call sites read `.stderr`, so renaming it is a behaviour change wearing a copy branch. |
-| 4 | `create.js:708,715,722,761`, the README pointer | ruled ("say what to do in the sentence, never name a document") but the words are **not written yet**. Mona Lisa's. |
-| 1 | `messages.js:141` | reachable only from a shell, by measurement. Expected, not unfixed. |
-| 1 | `remove.js:857`, `${found.session}` | the checker matches the word inside an **identifier**; the sentence itself says "something called X is still running". |
+| 3 | `connect.js:735,799,1095` | `${x.stdout}\n${x.stderr}` interpolations. **Identifiers, not copy.** Renaming the field is a behaviour change wearing a copy branch: four call sites read `.stderr`, which is why the rename was tried here and reverted. |
+| 1 | `messages.js:141` | reachable **only from a shell**, by measurement: the page never fetches `/api/msg` or `/api/messages`, and the only producers of `from_pane` are `kosmos msg` and `kosmos post`. Expected, not unfixed. ⚠️ Her ruling §5 and her patch disagree about whether this names `TMUX_PANE`; flagged to her, tree currently names it. |
+| 1 | `remove.js:857` | `${found.session}` is an **identifier**. The reader sees "something called casey is still running"; the word is not on the screen. |
 
-**Eight is the pass and fewer is a failure**, for the same reason six was: four of
-these are waiting on words, and the other four are things the checker cannot
-distinguish from copy.
+**Five is the pass and fewer is a failure**: four of these are things the checker
+cannot distinguish from copy, and the fifth is correct copy for a reader who is
+not in the product at all.
+
 
 ### 🛑 The checker has two blind spots, both measured, neither one closed here
 
@@ -72,86 +88,42 @@ distinguish from copy.
 widening either one changes what `== 8` means, and a verification whose polarity
 moves under you is worse than one with a stated limit.
 
-### The second verification: every ruled row is actually IN the tree
+### 🛑 The second verification is RETIRED, and the reason is the finding
 
-```
-KOSMOS_REPO=<worktree> PATCH=~/work/Josh-Brain/Projects/kosmos-engine-copy-PATCH-2026-08-20.md \
-python3 - <<'PY'
-import io, os, re, glob
-patch, repo = os.environ['PATCH'], os.environ['KOSMOS_REPO']
-src = "\n".join(io.open(f, encoding="utf-8").read()
-                for f in sorted(glob.glob(repo + "/engine/*.js")) + [repo + "/server.js"])
-unq = lambda x: (re.match(r"^``(.+)``$", x) or re.match(r"^`(.+)`$", x)
-                 or re.match(r"^(.*)$", x)).group(1)
-missing = 0
-for line in io.open(os.path.expanduser(patch), encoding="utf-8"):
-    if not line.startswith("|"): continue
-    c = [x.strip() for x in line.strip().strip("|").split("|")]
-    if len(c) != 2 or c[0] == "find" or set(c[0]) <= set("-"): continue
-    ruled = unq(c[1])
-    if ruled not in src:
-        missing += 1
-        print("not as ruled:", ruled[:90])
-print("=>", missing)
-PY
-```
+I built a guard that read Mona Lisa's **PATCH** file (07:14) and required every
+ruled replacement to be present in the tree. It was green at `== 5`.
 
-- **kind:** guard · **pass:** `== 5` · **source:** `Josh-Brain/Projects/kosmos-engine-copy-PATCH-2026-08-20.md`
+⚠️ **It drove me to reintroduce a defect she had already ruled against by name.**
+Her **RULING** doc (18:22) supersedes the patch wherever they overlap, and on
+`status.js` it says so explicitly:
 
-⚠️ **This was 8 and three of them were silent half-applications.** Mona Lisa's
-patch warns that *a find matching nothing is silent*. The mirror is louder and
-nobody was watching it: **a replacement can be applied in words the applier chose
-rather than the words that were ruled**, and nothing anywhere compares the two.
-
-The three that were wrong: the usage-limit sentence had only its banned noun
-swapped rather than taking the ruled wording; `we do not know which pane this
-agent is in` became *"we do not know where to reach this agent"* instead of the
-ruled *"we cannot tell where this agent is running"* -- **and that substitution
-is what caused a reviewer finding**, because the ruled wording is direction-
-neutral and one string serves both a send gate and a read gate; and
-`messages.js:141` kept the closing clause of the ruled sentence and **dropped the
-half that tells the caller what to set**. All three now carry the ruled words.
-
-| the five that remain | why |
+| | |
 |---|---|
-| `Kosmos did not set this one up...` | superseded by the later "set to start on its own" ruling, which rewrote the same sentence |
-| `we could not check what it is doing on this computer` | changed deliberately: the failure is fleet-wide and the "it" referred to nothing |
-| `we could not get the message to it` | changed deliberately: it made a claim about ARRIVAL, which is the neighbouring state's claim |
-| `we could not check whether it arrived` | superseded by a richer sentence at `chat.js:686` carrying the same meaning |
-| `we could not find any of them...` | the live plural is the longer "by exactly these names" form the group map holds |
+| was | `the pane mentions a usage limit` |
+| her patch | `it says it has hit a usage limit` |
+| **her ruling** | **`its screen mentions a usage limit`** |
 
-📌 **Three of these five are wordings I chose over hers.** They are hers to
-overrule, and each is recorded above with the measurement that prompted it.
+> 🔑 *"The jargon was `pane`. `mentions` was correct and I should not have touched
+> it. The markers are substring matches over the last 25 lines, so a 429 in a log
+> matches. 'It says it has hit' attributes a statement to the agent and asserts
+> the limit is real."*
 
-## Two defects the patch introduced, found by applying it
+**I had flagged that exact over-attribution in my own first pass**, and then a
+green check told me the tree disagreed with the authority, so I changed it back
+toward the withdrawn wording. Reverted.
 
-0. **A step label that contradicts its sibling in the same list.** The patch
-   rewrote `it had no startup job to stop` to `there was nothing running to
-   stop`, which drops the referent (the job) and takes the session's. The very
-   next step is labelled `stopped it`, so a jobless agent with a live session
-   got a list saying both. **That row is reverted here** -- the old wording is
-   jargon and the new one is a contradiction, and choosing words that lose
-   "startup job" without borrowing the session's is a copy decision. Flagged.
-   ⚠️ My own re-aimed test pin had come to rest on that label, so the suite was
-   certifying the contradiction: the assertion's message says it checks what was
-   true "of the job" while the label it matched said nothing about one.
-1. **A sentence starting lower case, on the removal dialog.** The patch splits
-   `It has no startup job, so Kosmos cannot start it again for you -- you would
-   start it...` into two sentences, and the second half kept its lower-case
-   opening: `...for you. you would start it...`. Capitalised. This is the screen
-   the patch itself calls highest-stakes.
-2. **Two sibling refusals stopped reading alike.** `paneRoster` now says "we
-   could not see what is running on this computer" and `snapshot` says "we could
-   not check what it is doing on this computer" -- and `snapshot`'s "it" has no
-   referent when the thing being read is the whole machine. The property both
-   hold (an unreadable answer is not an empty fleet) is unchanged and asserted
-   separately now.
-   ✅ **FIXED after the second blind pass, which found the sharper half:** the
-   sentence did not merely lack a referent, it was **near-identical to
-   `classify`'s single-agent sentence** (`status.js:976`, "we could not tell what
-   it is doing"), so a whole-machine failure read as a statement about one agent.
-   It says "we could not check what is running on this computer" now. Two pins
-   moved with it. Still Mona Lisa's to overrule.
+📌 **A guard keyed on a superseded artifact is worse than no guard**, because it
+carries the authority of a passing check while pointing at the wrong document.
+The lesson is not "check less", it is `[[build-from-current-freeze]]`: **a guard
+must name which artifact is the SOURCE, and that claim goes stale silently.** The
+patch is a view; the ruling is the source, and there was no operation anywhere
+that would have told me the view had been superseded.
+
+The idea itself was sound and it did find three real half-applications. What it
+lacked was a statement of what it was measuring conformance TO. It is not
+re-pointed at the ruling doc because that doc's tables are prose in three
+different shapes, and a mechanical check over them would be a guess wearing a
+number.
 
 ## The second blind pass, run against the post-ruling tree
 

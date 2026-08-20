@@ -158,7 +158,7 @@ function resolveSender(fromPane, roster) {
     ? roster.find((a) => a && a.session === who.session && a.isNamedOurs === true)
     : null;
   if (!card) {
-    return { ok: false, because: 'we cannot tell which agent this is from, and we will not deliver a message with no sender.' };
+    return { ok: false, because: 'we could not match that to one of your agents' };
   }
   return { ok: true, card };
 }

@@ -112,7 +112,8 @@ test('a pane we cannot tie to an agent is refused as anonymous, and nothing is t
     const tmux = arm([ok(), ok()]);
     const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'hello' }, board.agents);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
-    assert.match(sent.because, /with no sender/, 'the refusal does not say why the sender was rejected');
+    assert.match(sent.because, /could not match that to one of your agents/,
+      'the refusal does not say why the sender was rejected');
     assert.equal(tmux.sends().length, 0, 'a refused sender still reached a pane');
     assert.equal(messages.list().length, 0, 'a refused send was written into the record');
   });

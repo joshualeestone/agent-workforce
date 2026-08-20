@@ -6010,7 +6010,7 @@ test('identical roster verdicts collapse to one group line, and only then', () =
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet')]);
-  assert.ok(g.startsWith('We could not tell any of them where this folder is'),
+  assert.ok(g.startsWith('This folder was not added to their instructions'),
     'three identical could_not verdicts did not collapse: ' + g);
   assert.ok(g.includes('none of them has a folder on this computer yet'),
     'the group sentence did not carry the plural sibling: ' + g);
@@ -6029,7 +6029,7 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // arm for a razed could_not (no because at all) reached directly.
   const gline = pageFunction('pjToldGroupLine', TOLD_PRELUDE);
   assert.equal(gline({ state: 'could_not' }),
-    'We could not tell any of them where this folder is.',
+    'This folder was not added to their instructions.',
     'the defensive reasonless arm changed or vanished');
 
   // The group line lands in the page as raw HTML (paintOneProject), so a

@@ -1004,7 +1004,7 @@ function classify(pane, paneText) {
   const tail = paneText.split('\n').slice(-25).join('\n');
 
   if (RATE_LIMIT_MARKERS.some((re) => re.test(tail))) {
-    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'it says it has hit a usage limit' };
+    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'its screen mentions a usage limit' };
   }
   if (NEEDS_YOU_MARKERS.some((re) => re.test(tail))) {
     return { state: STATE.NEEDS_YOU, confidence: CONFIDENCE.SCRAPED, because: 'it is asking you something' };

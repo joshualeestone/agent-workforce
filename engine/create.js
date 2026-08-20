@@ -705,21 +705,21 @@ function createAgent(opts) {
   if (hasFolder && hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already an agent called ${shown}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
+      because: `there is already an agent called ${shown}. If it never came up, it is half made rather than missing. Remove it and make it again, or pick another name.`,
       steps,
     };
   }
   if (hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${shown} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${shown} is still set to start on this computer, though there is no folder for it. Remove it to free the name, or pick another one.`,
       steps,
     };
   }
   if (hasFolder) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already a folder for an agent called ${shown}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
+      because: `there is already a folder for an agent called ${shown}. If you removed that agent, its folder was left behind. Remove it to free the name, or pick another one.`,
       steps,
     };
   }
@@ -758,7 +758,7 @@ function createAgent(opts) {
   if (loaded) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is already set to start on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${name} is already set to start on this computer, though there is nothing else left of it. Remove it to free the name, or pick another one.`,
       steps,
     };
   }
