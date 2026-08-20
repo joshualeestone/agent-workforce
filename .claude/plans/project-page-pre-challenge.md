@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: 17255900a72dfbd4a47b12edca411e83806dd5171e45ce1fe9e144f81ab5a4f8
+diff_hash: b82a7642d837308a84620770e79ee80c49441d15cbca34b9b9b9df9bc9c74a3e
 subdir_audit: passed
-timestamp: 2026-08-20T05:28:23Z
+timestamp: 2026-08-20T05:39:44Z
 iterations: 1
 converged: true
 ---
@@ -319,3 +319,37 @@ measures an empty file and concludes agents do not cite paths.
 | 23 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FIFTH time |
 | 24 | 1 | NIT | .quoteb | DEFERRED | ships on an engine marker or not at all |
 | 25 | 1 | NIT | no corpus | DEFERRED | recorded; measurement must use fleet data |
+
+## Seventh slice (2026-08-20): fenced blocks
+
+[STRENGTH] The fence is a DELIMITER, not an inference: a line either is three
+backticks at its start or it is not.
+
+[STRENGTH] An UNCLOSED fence returns the body as prose, whole. Half a block is a
+guess about where the author meant it to end.
+
+[STRENGTH] **Nothing inside a fence is linked, and this is the distinction that
+matters.** A path in a quoted block is CONTENT an agent is showing you, not a
+citation it is making. Same characters, different speech act, opposite correct
+treatment. PROVEN: routing block contents through the linker turns the suite red
+with "a path INSIDE a quoted block was offered as a citation".
+
+[STRENGTH] 📌 NO figcaption. The pack draws one naming file and line; nothing in
+this product can produce that, so shipping it would assert what nobody computed.
+A test now fails if a caption appears without a mechanism behind it.
+
+[STRENGTH] Verified in a real browser, both schemes, without touching tmux:
+block renders monospaced with white-space pre and overflow-x auto, no caption,
+nothing linked inside, the angle brackets inside escaped, chips still working
+outside, 0 page errors.
+
+[STRENGTH] The merge was proven rather than judged, second time: the sole
+main-side commit touching the shared files is this branch's own squash.
+
+### Seventh-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 26 | 1 | BLOCKER | package.json | FIXED | version regression, caught a SIXTH time |
+| 27 | 1 | NIT | .codeb figcaption | DEFERRED | needs a source mechanism; test guards it |
+| 28 | 1 | NIT | .quoteb / .msg-att | DEFERRED | marker, and attachments, respectively |
