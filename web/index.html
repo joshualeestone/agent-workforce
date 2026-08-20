@@ -1265,7 +1265,19 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    attribute: full column width, its own smaller type and tighter padding. The
    pack carries these inline because a mock has nowhere else to put them. */
 .pj-addmem { margin-top: 14px; width: 100%; font-size: .875rem;
-             padding: calc(.5em - 1px) calc(1.05em - 1px); }.pj-member b { font: 600 var(--text-body) var(--font-ui); }
+             padding: calc(.5em - 1px) calc(1.05em - 1px); }
+/* The pack's path chip (FROZEN-2026-08-19:474), on this file's tokens: its
+   `--mono`/`--ui` do not exist here, and its two rgba() grounds are literals
+   that would not flip with the theme. */
+.ref { display: inline-flex; align-items: center; gap: 6px;
+       font: 13px var(--font-mono); background: var(--k-surface);
+       border: 1px solid var(--k-rule); border-radius: 6px;
+       padding: 1px 3px 1px 7px; vertical-align: baseline; }
+.refgo { font: 600 11px var(--font-ui); letter-spacing: .02em; border: 0;
+         border-radius: 4px; background: var(--k-bg); color: var(--k-ink-2);
+         cursor: pointer; padding: 2px 6px; min-height: 24px; }
+.refgo:hover { color: var(--k-ink); }
+.refgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }
 /* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
    floor this project holds as a hard rule. "It is only a scannable caption"
@@ -8943,6 +8955,11 @@ function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
    who chip is the status, "Nobody yet" is the only state word, and closed
    tasks live behind the door with the unassigned ones. */
 let TK_SHOW_ALL = false;   // the door's reveal; resets when the project changes
+/* Every filename in the open project's folder, for matching path citations in
+   message bodies. Cleared on switch with the rest of the project's state: a
+   list left standing would dress another project's words as citations of files
+   this one does not have. */
+let PJ_DOC_NAMES = null;
 let TK_OPEN = null;        // the task number the view dialog is showing
 
 /** Re-read the store; loadProjects itself repaints the open project on
@@ -9505,6 +9522,12 @@ async function pjLoadDocs(id) {
     all.hidden = true;
     return;
   }
+  PJ_DOC_NAMES = Array.isArray(body.names) ? new Set(body.names) : null;
+  /* The room is repainted so citations become chips as soon as the names land.
+     Its own cache key is cleared first, or the change-guard skips the repaint
+     and the chips appear only after the next unrelated change. */
+  const roomBox = document.getElementById('pj-room');
+  if (roomBox) { roomBox.__lastRoom = undefined; if (roomBox.__lastBody) paintRoom(roomBox.__lastBody); }
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) {
     msg.textContent = 'Nothing here yet. Files you or your agents put in this project\u2019s folder show up here.';
@@ -9627,6 +9650,30 @@ document.getElementById('pj-docs').addEventListener('click', async (e) => {
   }
 });
 
+/* ⚠️ DELEGATED ON THE THREAD, because every poll rebuilds the messages: a
+   listener bound to a chip is bound to an element the next repaint destroys.
+   The button carries the BASENAME, which is the only shape open-file accepts,
+   and the refusal shown is the engine's own sentence rather than a second,
+   weaker copy of it. */
+document.getElementById('pj-room').addEventListener('click', async (e) => {
+  const go = e.target && e.target.closest ? e.target.closest('.refgo') : null;
+  if (!go || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-room-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/open-file',
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: go.dataset.ref }) });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
+    let because = 'That file did not open.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'That file did not open.';
+  }
+});
+
 document.getElementById('pj-docs-all').addEventListener('click', async () => {
   if (!PJ_CURRENT) return;
   const msg = document.getElementById('pj-docs-msg');
@@ -9712,6 +9759,7 @@ function openProject(id) {
     document.getElementById('pj-docs').textContent = '';
     document.getElementById('pj-docs-msg').textContent = '';
     document.getElementById('pj-docs-all').hidden = true;
+    PJ_DOC_NAMES = null;
     pjLoadDocs(id);
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
@@ -9823,7 +9871,7 @@ function pjRoomRow(m, p) {
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
-    + '<p>' + esc(m.text || '') + '</p>' + receipt + '</div></div>';
+    + '<p>' + pjLinkPaths(m.text, PJ_DOC_NAMES) + '</p>' + receipt + '</div></div>';
 }
 
 /**

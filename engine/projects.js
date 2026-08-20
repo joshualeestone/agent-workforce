@@ -907,7 +907,15 @@ function listFiles(folder, limit) {
     files.push({ name: ent.name, size: st.size, modified: st.mtime.toISOString() });
   }
   files.sort((a, b) => (a.modified < b.modified ? 1 : a.modified > b.modified ? -1 : 0));
-  return { ok: true, total: files.length, files: files.slice(0, cap) };
+  /* ⚠️ `names` IS EVERY FILE, not the capped view, and it is here rather than
+     behind a second route because the two answers must come from ONE read of
+     the folder. A message body's path citations are matched against this list,
+     so a name that is in the folder but past the cap would render as dead text
+     while its neighbour rendered as a chip -- the same file, two appearances,
+     decided by sort order. It carries no sizes or times: the matcher needs
+     identity, and shipping more than that would invite a second, divergent
+     documents list built off the wrong field. */
+  return { ok: true, total: files.length, files: files.slice(0, cap), names: files.map((f) => f.name) };
 }
 
 /**
