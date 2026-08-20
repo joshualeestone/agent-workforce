@@ -116,3 +116,21 @@ into an invisible gap, which is strictly worse.
 ⚠️ One more will join it: `#pj-one-view .flabel` in the same list resolves
 today only because "Talk to one of them" still wears that class. When that box
 is deleted the selector goes unmeasurable too, and the same repair covers both.
+
+## ⚠️ Read this next to the 926/926: the browser check is RED and is being carried
+
+Stated plainly because the two sentences sit together and the second is easy to
+read as green. On every commit of this branch:
+
+- `yarn test` RUNS and PASSES. 926/926.
+- `docs/browser-checks/render-projects.js` RUNS and FAILS, with the 4
+  pre-existing contrast failures described above.
+
+So this branch is proceeding past a known red, deliberately, with the red
+diagnosed and attributed to #87 rather than to this work. It is not "both
+checks pass". Anyone reading 926/926 and assuming the screens are green is
+reading it wrong.
+
+Every other check in that run is green, including the members-wording step that
+this branch broke and repaired, so the red is exactly four measurements wide and
+its boundary is known.

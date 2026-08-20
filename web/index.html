@@ -1114,9 +1114,21 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pjcol .field + .field { margin-top: var(--space-6); }
 .pjmid { display: flex; flex-direction: column; min-width: 0; }
 .pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+/* ⚠️ THE MESSAGES GET A BOX OF THEIR OWN, matching Project members and Tasks:
+   without it the middle column is the only one whose content floats, and the
+   three columns read as two panels and a gap. The pack puts the box on the
+   COMPOUND selector `.pjmid .thread` (FROZEN-2026-08-19:446) and leaves its
+   bare `.thread` undressed. This file has exactly ONE element wearing
+   `.thread` (#pj-room), so the split would be structure with nothing on the
+   other side of it; the declarations live here until a second thread exists.
+   `background` was missing entirely until 2026-08-19 — found by Mona Lisa, and
+   found only because she read the compound rule while I read the bare one.
+   Radius takes the pack's 10px; the build had drifted to 12px and neither of
+   us had an argument for the drift. */
 .thread { padding: 14px 16px; display: flex; flex-direction: column; gap: 18px;
           max-height: 26rem; overflow-y: auto;
-          border: 1px solid var(--k-rule); border-radius: 12px; }
+          border: 1px solid var(--k-rule); border-radius: 10px;
+          background: var(--k-bg); }
 .msg { display: flex; gap: 14px; }
 .msg-av { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: grid;
           place-items: center; background: rgba(20,22,26,.06); font-size: .875rem;
