@@ -48,6 +48,26 @@
   --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px;
 
   --radius-card: 16px; --radius-control: 10px; --radius-pill: 100px;  /* pack radii */
+  /* ⚠️ WHAT A FIELD IS FILLED WITH, DECLARED BY ITS CONTAINER. A field must
+     differ from the surface it sits on, and only the container knows what that
+     surface is — so the container sets this and every field inherits it. Three
+     rounds of hand-listing containers each missed some: first `.pjcol/.dbox`,
+     then `.rm-box/.rolepick`, then `#pj-settings-view/#pj-add-view`, and each
+     round shipped believing it was complete.
+     ⚠️ THIS STILL ENUMERATES, and an earlier version of this comment claimed it
+     "cannot be wrong", which is a property the code does not have. What moved
+     is WHAT is enumerated: containers rather than fields, so the list is short,
+     stable, and each entry is a place a designer already thinks about — and a
+     container that is forgotten inherits the page default instead of silently
+     matching its own box. That is a better failure, not the absence of one. */
+  /* ⚠️ `--k-bg`'s partner, NOT `--bg-elevated`, because `body` is now painted
+     with `--k-bg`. Leaving this on the label system made a field on the page
+     ground fill `--bg-elevated` while a `.ppick` chip beside it filled
+     `--k-surface`: identical `#ffffff` in light, `#2c2c2e` against `#17191c` in
+     dark. The ground moved to the k- system and its default field colour did
+     not follow it -- the same "equal in light, divergent in dark" pairing this
+     file warns about, reintroduced at the root by the fix for it. */
+  --field-fill: var(--k-surface);   /* on the page ground: white, per Josh */
 
   /* Light -- REPOINTED AT THE PACK (pack-pass, scrappy): every surface
      still on these older tokens (projects, create, the modals) adopts the
@@ -104,16 +124,50 @@
     --k-knob:    #e8e9eb;
   }
 }
+/* ⚠️ THIS BLOCK USED TO BREAK DARK MODE, and it sits after the dark block, so it
+   won. Someone on dark + increased contrast got `--label-2: rgba(0,0,0,0.78)`
+   — near-black — on a `#1c1c1e` ground, which is not a contrast enhancement but
+   a contrast failure, against a floor this project holds as a hard rule.
+   Found because the select arrow is drawn in `--label-2` and its comment
+   claimed to follow all three schemes; checking that claim is what surfaced a
+   token bug older than the arrow. The light values are unchanged. */
 @media (prefers-contrast: more) {
   :root { --label-2: rgba(0,0,0,0.78); --separator: rgba(0,0,0,0.3); }
 }
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
+}
+
+/* Containers that are themselves elevated: a field on them takes the PAPER of
+   the same token system, so it is never the identical colour as its own box. */
+.dbox, .pjcol { --field-fill: var(--k-bg); }
+.rm-box, .rolepick, #pj-settings-view, #pj-add-view { --field-fill: var(--bg); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font: var(--text-body) var(--font-ui);
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.006em;
-  background: var(--bg-sunken); color: var(--label);
+  /* ⚠️ THE APP'S OWN GROUND, not the surround. `--bg-sunken` is `#f4f2ee`,
+     which is the pack's `--page-bg`: the colour of the page the MOCK SITS ON,
+     behind the app. Using it here painted the product in the shade reserved
+     for what is behind the product, which is why two separate screens read as
+     the wrong colour beside the pack.
+     ⚠️ `--k-bg`, NOT `--bg`, and the difference is invisible in light. This
+     said `--bg` on the reasoning that it "is already the pack's --k-bg
+     (#faf9f7)" — TRUE IN LIGHT ONLY. In dark `--bg` is #1c1c1e while `--k-bg`
+     is #0c0d0f, so cards (`--k-surface` #17191c) rendered DARKER than the page
+     they sit on, inverting the elevation the whole layout depends on, and
+     `.apphead` (which paints `--k-bg`) became a darker band over its own page.
+     The light-mode result is byte-identical; only dark changes.
+     ⚠️ The same two-token-systems hazard this file records above `.dhead`, and
+     the same shape as reading `--bg-elevated` onto a form control: a token
+     equality asserted from a light-mode reading, of two systems that flip
+     independently.
+     ⚠️ The token itself is NOT repointed: ten other rules use `--bg-sunken`
+     for what it actually means, a surface recessed INSIDE a card, and they are
+     right. The name was fine and the noun it was pointed at was not. */
+  background: var(--k-bg); color: var(--label);
   padding: var(--space-8) var(--space-8) 64px;
 }
 
@@ -130,7 +184,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked b { display: block; font-size: .75rem; letter-spacing: 0;
              text-transform: none; color: var(--k-ink); font-weight: 600; }
 .checked.stale b { text-decoration: underline wavy; }
-.build { max-width: 1320px; margin: calc(var(--space-2) * -1) auto var(--space-7);
+.build { max-width: 1320px; margin: 0 auto var(--space-7);   /* the -4px top was tuned for its old spot under the New agent row; at the foot it just pulls against #removed-wrap */
           font: var(--text-caption) var(--font-ui); color: var(--label-3); }
   .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
   .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
@@ -183,7 +237,21 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .dav-wrap .detail-av { width: 88px; height: 88px; }
 .dav-wrap .membadge { top: 0; right: -8px; }
 .dnamerow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* ⚠️ Beats `.astate`'s own `margin: 12px auto 0` on specificity (0,2,0 to
+   0,1,0), which is what stops the badge dropping a line and centring itself
+   when it joined the name row. */
 .dnamerow .detail-state { margin: 0; }
+/* What the agent is doing, beside the badge rather than inside it. Reads as
+   the quieter half of the pair: the badge is the state, this is the subject. */
+/* `min-width: 0` WITH the overflow pair, or it does nothing: on its own the
+   element neither shrinks nor truncates, it just wraps the flex row. */
+/* ⚠️ `--k-ink-2`, matching `.atask`, its card counterpart. This took `--label-2`
+   inside `.detail`, which sets `color: var(--k-ink)` — the two tokens are
+   byte-identical in light (`--label-2` IS the pack's k-ink-2) and diverge in
+   dark and again under prefers-contrast. The `.dhead` hazard this file records,
+   in code this branch added. */
+.dtask { font: var(--text-body) var(--font-ui); color: var(--k-ink-2);
+         min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dname { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; color: var(--k-ink); }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .dprojlab { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
@@ -212,11 +280,39 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail .dbox .flabel, .detail .dbox .fhint, .detail .dbox .fmsg, .detail .dbox .fpath { color: var(--k-ink-2); }
 .detail .dbox .flabel { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase;
   font-weight: 700; margin-bottom: 8px; }
+/* ⚠️ `--border-strong`, not `--k-rule`. MEASURED with the alpha composited:
+   --k-rule gives 1.31:1 light / 1.27:1 dark against this box; --border-strong
+   gives 1.77 / 2.35. WCAG 1.4.11 wants 3:1 for a component boundary and NEITHER
+   reaches it (recorded as a product-wide gap, not solved here) — but this rule
+   was leaving one field a third weaker than its six neighbours for no reason.
+   The fill stays `--k-bg`: same token system as the surface, recessed in both
+   schemes. */
 .detail .dbox input[type=text], .detail .dbox textarea {
-  background: var(--k-bg); border: 1px solid var(--k-rule); color: var(--k-ink); }
-.detail .dbox .btn { background: var(--k-surface); border: 1px solid var(--k-rule); color: var(--k-ink); }
-.detail .dbox .btn:hover { background: rgba(198,154,50,.14); }
-.detail .dbox .btn:disabled:hover { background: var(--k-surface); }
+  background: var(--field-fill); border: 1px solid var(--border-strong); color: var(--k-ink); }
+/* ⚠️ ANY `.dbox`, NOT ONLY THE DETAIL PAGE'S. This is the rule that reconciles a
+   `--label`-system button with a `--k-surface` container, and scoping it to
+   `.detail` meant the moment another screen gained a `.dbox` — the create flow's
+   outcome step — its buttons fell back to `.btn { background: var(--bg) }` and
+   sat at 1.05:1 light / 1.035:1 dark against their own card, held up by a
+   0.26-alpha border alone.
+   ⚠️ AND `render-fields.js` CANNOT SEE THIS: it measures FIELDS against their
+   container, and a button is not a field. The check written for exactly this
+   defect class has a hole shaped like a button. */
+/* ⚠️ A BUTTON IS RAISED; A FIELD IS RECESSED. Opposite affordances, and an
+   earlier version of this rule gave buttons the field treatment — recessed
+   `--k-bg` on the card — which improved the contrast numbers and made a button
+   look like somewhere you type. (Mona Lisa, 2026-08-19.) The separation comes
+   from the button's OWN border, which is what `.btn-quiet` already does:
+
+     --gold-deep #b88920 on a --k-surface card    3.16:1 light   5.57:1 dark
+
+   ⚠️ ONE STRONG CHANNEL BEATS TWO WEAK ONES, and this is the only control
+   boundary on the branch that CLEARS WCAG 1.4.11's 3:1 in both schemes. The
+   fields sit at 1.77/2.35 and are recorded for Josh as one decision; this one
+   needed no decision because the pack had already made it. */
+.dbox .btn { background: transparent; border: 1px solid var(--gold-deep); color: var(--k-ink); }
+.dbox .btn:hover { background: rgba(198,154,50,.14); }
+.dbox .btn:disabled:hover { background: transparent; }
 .detail .dremove { color: var(--k-ink); }
 .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--k-ink-2); }
 .back { background: none; border: 0; color: var(--label-2); cursor: pointer;
@@ -228,14 +324,25 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .detail-av img { width: 100%; height: 100%; object-fit: cover; }
 .detail-initials { font: 600 var(--text-title-3) var(--font-ui); color: var(--label-3); }
 .detail-meta { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-top: 2px; }
-.detail-state { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); }
+/* ⚠️ NO `color` HERE ANY MORE. This declared `--label-2` and, sitting before
+   `.astate` at equal specificity, its colour survived while `.astate`'s size and
+   weight won — so the card's badge rendered in `--k-ink` and the detail page's
+   in `--k-ink-2`: the same badge, two inks, from a change whose whole point was
+   that they be one badge. `.astate` sets no colour and inherits `--k-ink` from
+   `.acard`; the detail panel inherits the same. `#d-state` is the only user of
+   this class and is always given `astate` too. */
+.detail-state { font: var(--text-body) var(--font-ui); margin-top: var(--space-4); }
 /* The panel's half of the pack split ("the card carries signals, the panel
    carries explanation"): the board's stated reason for its belief about
-   this agent. A sentence to read, so label-2 like the state line above. */
+   this agent. A sentence to read, so label-2 — no longer "like the state line
+   above", which became a badge and gave up its colour in the same change. */
 .detail-why { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
 .flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
 .fhint { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
+/* An empty hint keeps its margin box and leaves a band where a deleted sentence
+   used to be. Same idiom this file already uses for `.removed-msg`. */
+.fhint:empty { display: none; }
 /* ⚠️ The PROJECTS panel's hints carry load-bearing sentences ("nothing sent
    here is kept", "it is not a transcript"), and --label-3 at this size is
    3.04:1 on the light ground -- under the 4.5 AA floor (round 20). Scoped
@@ -246,7 +353,117 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .frow { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
 .frow input[type=text] { flex: 1; min-width: 220px; font: var(--text-body) var(--font-ui);
                          padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-                         border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+                         border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--label); }
+/* EVERY select on the page, because four of the six carried no styling at all
+   and the two that did rendered differently depending on the browser.
+
+   ⚠️ `appearance: none` IS THE LOAD-BEARING LINE, not the colours. MEASURED in
+   both engines (identical page, one select with the declared style, one with
+   `appearance: none` on top):
+
+     WebKit 26.5   radius 20px declared -> 5px RENDERED, padding not applied,
+                   native arrow drawn. Background and border ARE honoured.
+     Chromium 151  radius 20px, padding applied, everything honoured.
+
+   So a `menulist` select is styleable in Chromium and only partly styleable in
+   WebKit. Kosmos opens the DEFAULT browser (`/usr/bin/open`,
+   install/setup.sh), which on a stock Mac is Safari, so the engine that drops
+   half of it is the one most people meet first: beside a fully padded, fully
+   rounded text field, the same declaration reads as an undressed control.
+
+   ⚠️ THE INSTRUMENT WARNING IS THE PART TO KEEP. A Chromium screenshot renders
+   this control CORRECTLY, so the render harness passes it and the defect is
+   still on Josh's screen. `getComputedStyle` catches the radius (it reports the
+   clamped 5px) but reports the declared background either way. The reliable
+   check is a WebKit render, and `docs/browser-checks/` is Chromium by default.
+
+   The arrow is drawn here because removing the native appearance removes the
+   native arrow with it, and a select with no arrow reads as a text field.
+
+   ⚠️ IT IS TWO GRADIENTS RATHER THAN AN SVG DATA URI, and that is deliberate: a
+   data URI cannot read a CSS variable, so its colour would have to be restated
+   in the dark block, again under `prefers-contrast`, and again the day the
+   manual `data-theme` toggle lands (#40, which Josh has already asked for). A
+   gradient takes `var(--label-2)` directly and follows all three for free. The
+   alternative was a rule that silently stops matching its own palette. */
+select { font: var(--text-body) var(--font-ui); color: var(--label);
+         padding: var(--space-4) var(--space-5); padding-right: 2rem;
+         border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
+         appearance: none; -webkit-appearance: none;
+         background-color: var(--field-fill);
+         background-image: linear-gradient(45deg, transparent 50%, var(--label-2) 50%),
+                           linear-gradient(135deg, var(--label-2) 50%, transparent 50%);
+         background-position: right 1.05rem center, right 0.75rem center;
+         background-size: 5px 5px, 5px 5px;
+         background-repeat: no-repeat, no-repeat; }
+select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* The same move `.ppick:focus-visible` got: a k- component's focus ring rides
+   the k- system. Near-identical in both schemes today, which is exactly the
+   condition under which the two are free to drift apart unnoticed. */
+.dbox select:focus-visible, .pjcol select:focus-visible { outline-color: var(--k-ink); }
+/* ⚠️ A SELECT INSIDE A `k-surface` BOX RIDES THE `k-` SYSTEM, arrow included.
+   The shared rule above paints `--bg-elevated`, which in light mode is the same
+   `#ffffff` as `.dbox` and `.pjcol`, so `#lim-tier`, `#pj-one-add` and
+   `#pj-thread-who` dissolved into their own containers with only a 0.5px border
+   left. Two of them previously had `background: var(--bg)` — paper on a white
+   card — and read as fields because of it.
+
+   ⚠️ This is the hazard this file already records above `.dhead`: "mixing
+   --label furniture into a k-surface box pairs values from two systems that
+   flip separately". The shared rule did exactly that, and the two systems agree
+   in light mode and diverge in dark, which is why it looked fine at a glance.
+   `.detail .dbox input[type=text]` already solved this with `--k-bg`; the
+   selects now match their neighbours rather than the page. */
+.dbox select, .pjcol select,
+.dbox input[type=text], .dbox textarea,
+.pjcol input[type=text], .pjcol textarea,
+.composer input[type=text] {
+  background-color: var(--field-fill); color: var(--k-ink);
+}
+/* ⚠️ THE BORDER IS NOT OVERRIDDEN, and an earlier version of this rule did
+   override it to `--k-rule` for token-system tidiness. MEASURED, with the alpha
+   composited (the first measurement dropped it and reported 18:1):
+
+     --border-strong   1.77:1 light   2.35:1 dark
+     --k-rule          1.31:1 light   1.27:1 dark
+
+   ⚠️ WCAG 1.4.11 asks 3:1 for a component's boundary and NEITHER clears it —
+   this is a pre-existing, product-wide gap, recorded rather than solved here.
+   But `--k-rule` is materially worse, and swapping to it traded the stronger
+   channel for a recessed fill worth 1.10:1, which is a hint and not a boundary.
+   `--border-strong` is alpha-based, so it composites correctly on any ground and
+   is consistent across schemes, which is the property that matters. */
+/* Only the ink and the arrow: the FILL comes from `--field-fill`, which these
+   containers already declare, and restating it here was a second statement of
+   one fact. */
+.dbox select, .pjcol select {
+  background-image: linear-gradient(45deg, transparent 50%, var(--k-ink-2) 50%),
+                    linear-gradient(135deg, var(--k-ink-2) 50%, transparent 50%);
+}
+/* `#pj-post` had NO rule at all: the build carries `.composer input { flex: 1;
+   min-width: 10rem }`, which is the pack's `.composer .inp` rule with the class
+   filed off — it took the WIDTH and left the SKIN behind, and there is no `.inp`
+   here to supply it. Browser-default white in both schemes since it was ported. */
+.composer input[type=text] {
+  font: var(--text-body) var(--font-ui);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-control);
+  border: 0.5px solid var(--border-strong);
+}
+/* Same width behaviour as the text input beside it: Josh asked for the model
+   picker to be wider, and "as wide as the field above it" is the version that
+   stays true when the panel resizes.
+
+   ⚠️ NAMED RATHER THAN `.frow select`, because not every select in a `.frow` is
+   a field. `#lim-tier` sits INSIDE a sentence — "Stop them after [n] exchanges
+   an hour" — and `flex: 1; min-width: 220px` on a control holding two digits
+   grabs every spare pixel and tears that sentence in half. The blanket rule
+   measured 307px there.
+   ⚠️ Worth the memory: the run that caught the six selects sharing one
+   appearance PRINTED that 307px width and I read past it, because the check was
+   asserting the property being fixed and was blind to the property being
+   broken. */
+#create-model, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
 .btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
@@ -315,6 +532,12 @@ html { scroll-padding-top: 132px; }
    the confirm's Update. Two selectors so it outweighs .btn regardless of
    declaration order. */
 button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; border-color: #e3b341; color: #14161a; }
+/* ⚠️ THE FLOW'S PRIMARY, at the pack's own size (`.btn-gold`: 1.0625rem,
+   .9em/1.75em padding, 10px radius). Scoped to `.big` rather than widened onto
+   every `.uprime`, because this is the create flow's weight and not a change to
+   every primary button in the product. */
+.btn.uprime.big { font-size: 1.0625rem; padding: .9em 1.75em; border-radius: 10px; }
+.sfoot { margin-top: var(--space-8); display: flex; justify-content: flex-end; }
 /* Narrow screens: in-flow like everywhere else now (the float this rule
    used to break against is retired). The version line hides and the left
    group wraps the notice onto its own row -- "the header grows when an
@@ -492,7 +715,24 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* ⚠️ No dimming for stopped (the pack retired it: "Not running" at 72% while
    "Can't tell" sat full-strength was backwards on honesty grounds). Only the
    STATE is off; the name, role and face are true either way. */
-.acard.off .astate, .acard.off .atask { color: var(--k-ink-2); }
+/* ⚠️ THE BADGE DIM IS SCOPED TO THE BADGE, not to the card. `.acard.off .astate`
+   dimmed it on the board while the detail panel — same badge, no `.acard.off`
+   ancestor — kept `--k-ink`: the same "one badge, two inks" this branch removed
+   the `.detail-state` colour to fix, surviving for `stopped`, the one state the
+   rest of the branch cares most about. `.atask` stays card-scoped: that IS a
+   card treatment, and the panel has its own task element. */
+.astate.st-stopped { color: var(--k-ink-2); }
+/* ⚠️ `.acard.off` NO LONGER HAS A RULE, and that is deliberate rather than a
+   leftover: the dim moved onto the badge itself so the detail panel gets it too.
+   `boardMods` still emits the class and `.lrow.off` still uses it, so it is a
+   live hook on one layout and inert on the other — NOT dead, and not to be
+   swept up by a dead-class pass. (The `.llm-m` lesson: a class with no rule is
+   a question, not a verdict.) */
+/* ⚠️ NO `.acard.off .atask` RULE. An earlier version added one and it was a
+   NO-OP: `.atask` already declares exactly `--k-ink-2`, in both schemes, with no
+   dark override — so the rule restated a value and its comment claimed a dim it
+   did not produce. Same class as the `.agauge` 14px margin this branch caught by
+   re-measuring and seeing an unchanged gap. */
 .agauge { width: 82px; margin: 0 auto 14px; position: relative; }
 .agauge svg { width: 82px; height: 82px; display: block; }
 .gt { stroke: rgba(20,22,26,.10); }
@@ -543,6 +783,41 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
                       border: 2px dashed #9aa0a6; }
 /* THE MEMORY WARNING IS A NUMBER, NOT A METAPHOR: it sits on the gauge, the
    instrument it belongs to, not in the status row. */
+/* The unknown-memory caption, ported from the pack (FROZEN-2026-08-19).
+   ⚠️ IT EXISTS BECAUSE THE WORDS WERE ONLY IN AN `aria-label`. The dashed ring
+   distinguishes those cards and nothing on screen said what dashed MEANT, so a
+   screen-reader user had the fact and a sighted person had a shape. The pack's
+   own rule is "shape distinguishes, words identify"; this is the words.
+   ⚠️ IT MUST NOT INHERIT .membadge's RED. Red there is "nearly full", a measured
+   severity. Unknown is not a severity and must never borrow one.
+   ⚠️ It reserves no space, by the pack's reasoning: `.membadge` is absolute, so
+   it takes no layout and cannot make one card taller than its neighbour. */
+.membadge.unk {
+  /* ⚠️ `-15px`, not `-7px`. MEASURED: the caption is 105px wide on an 82px
+     gauge, so it always crosses the presence dot's x-range, and at -7px its 2px
+     ring painted over the bottom 4px of the dot — a distinct signal (online /
+     not running / could not check) partly obscured on every unknown-memory
+     card. Horizontal separation is not available; vertical is. */
+  top: auto; bottom: -15px; right: auto; left: 50%; transform: translateX(-50%);
+  /* ⚠️ AND THE GAUGE MAKES ROOM FOR IT. Moving the caption clear of the presence
+     dot pushed it into the name below: the badge is absolutely positioned, so it
+     takes no layout and cannot push anything itself. There is no offset that
+     clears BOTH a dot above and a name below within the original spacing —
+     measured -7px collided with the dot, -15px collided with the name — so the
+     card gives it the space instead. `:has` scopes that to the cards that
+     actually carry a caption, leaving every other card's rhythm untouched. */
+  font: 600 .625rem var(--font-ui); letter-spacing: .01em; white-space: nowrap;
+  color: var(--k-ink); background: var(--k-bg);
+  border: 1px solid var(--k-rule); border-radius: 100px;
+  box-shadow: 0 0 0 2px var(--k-surface);
+  padding: .1rem .4rem;
+}
+/* ⚠️ 26px, and the 14px I first wrote was a NO-OP: `.agauge` already carries
+   `margin: 0 auto 14px`, so the rule parsed, applied, and changed nothing —
+   and the measurement afterwards showed the SAME gap, which is what caught it.
+   The badge is 17px tall and hangs 15px below the gauge, so it needs about
+   12px more than the resting rhythm to clear the name. */
+.agauge:has(.membadge.unk) { margin-bottom: 26px; }
 .membadge { position: absolute; top: 2px; right: -6px;
             font: 700 .6875rem var(--k-mono);
             font-variant-numeric: tabular-nums;
@@ -711,6 +986,28 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    the surfaces, so the panel shell would be a white box behind white
    boxes. */
 #panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* ⚠️ AND CREATE, for the same reason one line up, which is why this is the
+   existing exemption rather than a new idea: the create steps are form fields,
+   and the pack puts a form on the paper ground. Wrapping them in the panel
+   shell put a white card behind a white form, which is what Josh saw and
+   called "this kind of centered modal thing instead of the elements being
+   right on the page".
+   ⚠️ ITS OWN WIDTH, NOT THE 1320 ABOVE. Settings and Projects are wide
+   card layouts; a form is not. The pack's own form container is
+   `.sform { max-width: 34rem }`, so the number comes from there rather than
+   from a second guess.
+   📌 LEFT, NOT CENTRED, which is the pack's arrangement and the one open taste
+   call in this change: Josh asked for "elements right on the page" and the
+   pack puts them left. One word to reverse if he meant centred. */
+/* ⚠️ `margin: 0` LEFT THE FORM OUT OF THE APP COLUMN. `.panel` carries
+   `margin: 0 auto`, and `header` is capped at 1320px and centred — so with the
+   margin zeroed the create form aligned to the BODY padding while every other
+   panel and the tab bar aligned to the centred column. Measured at 1400px:
+   header left 40, create left 24. Identical at =<1320px, which is why every
+   render check passed. The intent was left-aligned WITHIN the column, not
+   left-aligned to the window. */
+#panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0;
+                margin: 0 0 0 max(0px, calc((100% - 1320px) / 2)); }
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
@@ -883,9 +1180,15 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
-#pj-one-add { font: var(--text-body) var(--font-ui); color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* #pj-one-add sits in a `.frow`, so the shared `select` rule dresses it and
+   the named width rule above widths it. ⚠️ NOT `.frow select` — this comment
+   said so and that selector does not exist: it was deliberately replaced by an
+   ID list, because `.frow select` also caught #lim-tier and blew a control that
+   holds two digits out to 220px. A comment naming the rejected mechanism is
+   permission to reinstate the bug.
+   It used to restate width and appearance both, in the page-ground colour
+   rather than the field colour, which is why it and #create-model looked like
+   two different controls. */
 .pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
@@ -907,9 +1210,9 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   font: var(--text-callout) var(--font-ui); color: var(--label-2); text-decoration: underline;
   min-height: 24px; min-width: 24px; padding: var(--space-3) var(--space-4); }
 /* --- the thread --------------------------------------------------------- */
-#pj-thread-who { font: var(--text-body) var(--font-ui); color: var(--label);
-  background: var(--bg); border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-control); padding: var(--space-4) var(--space-5); min-width: 220px; }
+/* Same as #pj-one-add above: dressed by the shared `select` rule, widthed by
+   the named width rule above — NOT `.frow select`, which does not exist and
+   was rejected for catching #lim-tier. */
 /* ⚠️ `overflow: auto` and NOT `white-space: pre-wrap`. A Claude permission
    prompt draws its options in columns, and wrapping them at the panel width
    turns the thing the person has to read into a jumble. The box scrolls
@@ -1067,10 +1370,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 }
 .rolepick { border: 1px solid var(--separator); border-radius: var(--radius-card);
   padding: 14px 16px 16px; background: var(--bg-elevated); margin-top: -2px; }
-.rolepick select { width: 100%; font: inherit; color: var(--label);
-  background: var(--bg-elevated); border: 1px solid var(--separator);
-  border-radius: var(--radius-control); padding: 7px 8px; }
-.rolepick select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+/* Width only. Everything else this used to restate (font, colour, background,
+   border, radius, padding) now lives on `select`, where it renders. Restating
+   it here is what made this control and #create-model drift apart in the first
+   place: two copies of one appearance, edited on different days. */
+.rolepick select { width: 100%; }
 .roledesc { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin: 9px 0 0; }
 /* The limit on a role that has one, read while choosing rather than discovered
    afterwards. Weight and a rule, never hue: it has to survive greyscale like
@@ -1089,23 +1393,42 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .genav.empty { box-shadow: inset 0 0 0 1.5px var(--separator); }
 .sav-btn { display: inline-block; }
 #cstep-name .field { max-width: 36rem; }
+/* ⚠️ JOINED THE UNIFICATION LATE. This hardcoded `--bg-elevated` and a
+   `1px solid var(--separator)` border while its three neighbours on the same
+   step carry `--field-fill` and `0.5px solid var(--border-strong)`. It LOOKED
+   right only because `#panel-create` inherits the root `--field-fill`, which is
+   the same token by coincidence -- move this textarea into any elevated
+   container and it is the white-on-white defect this branch is about. */
 #create-instr { width: 100%; font: var(--text-callout) var(--font-mono);
-  color: var(--label); background: var(--bg-elevated);
-  border: 1px solid var(--separator); border-radius: var(--radius-control);
+  color: var(--label); background: var(--field-fill);
+  border: 0.5px solid var(--border-strong); border-radius: var(--radius-control);
   padding: 10px 12px; resize: vertical; box-sizing: border-box; }
 #create-instr:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
 .flabel-soft { font-weight: 400; color: var(--label-2); }
-.projpick { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
-.ppick { display: flex; gap: var(--space-4); align-items: baseline; width: 100%;
-  text-align: left; font: inherit; color: var(--label); cursor: pointer;
-  background: var(--bg-elevated); border: 1px solid var(--separator);
-  border-radius: var(--radius-control); padding: 8px 12px; }
+/* ⚠️ CHIPS THAT WRAP, which is the pack's own rule and which the build had
+   replaced with a single-column grid of full-width rows. That is why Josh
+   asked whether it was "a dropdown list" and whether he could add more than
+   one: MULTI-SELECT ALREADY WORKED (each of these is a real checkbox), and
+   full-width rows say pick one while pills say pick several. The width WAS the
+   behaviour question. */
+.projpick { display: flex; gap: 6px; flex-wrap: wrap; }
+.ppick { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font: inherit; font-size: .875rem; color: var(--k-ink); background: var(--k-surface);
+  border: 1px solid var(--k-rule); border-radius: 100px; padding: .38rem .85rem; }
+.ppick:hover { border-color: var(--gold-deep); }
 .ppick .pickmark { color: transparent; font-weight: 700; font-size: .75rem; }
-.ppick[aria-checked="true"] { border-color: var(--label); }
-.ppick[aria-checked="true"] .pickmark { color: var(--label); }
-.ppick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
-#create-model { font: inherit; color: var(--label); background: var(--bg-elevated);
-  border: 1px solid var(--separator); border-radius: var(--radius-control); padding: 7px 8px; }
+.ppick[aria-checked="true"] { border-color: var(--k-ink); box-shadow: inset 0 0 0 1px var(--k-ink); }
+/* ⚠️ `--k-ink`, not `--label`. `.ppick` is a k- component (k-ink on k-surface
+   with a k-rule border) and these two state rules were left on the --label
+   system. Both land readably today, which is the only reason it survived: the
+   two systems are free to diverge the next time either moves, and this is the
+   mixing the note above `.dhead` records and the `.dbox select` rule was
+   written to undo. */
+.ppick[aria-checked="true"] .pickmark { color: var(--k-ink); }
+.ppick:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+/* #create-model carries no rule of its own any more. It sits in a `.frow`, so it
+   takes the shared `select` appearance and the same flex width as the text
+   field above it, which is what Josh asked for when he called it unstyled. */
 
 .roledesc .caution, #pick-pm-desc .caution {
   display: block; margin-top: var(--space-3); padding-left: var(--space-4);
@@ -1186,7 +1509,14 @@ svg { display: block; }
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 220px;
   font: var(--text-body) var(--font-ui); line-height: 1.5;
   padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label);
+  /* ⚠️ `--field-fill` and `--k-ink`, not `--bg` and `--label`. This ID rule beats
+     every class rule that dresses fields, so the `.dbox` treatment applied to
+     its neighbours was INERT here and this textarea alone kept the page-ground
+     paper inside a `k-surface` card -- LIGHTER than its own container in dark,
+     which is the raised-instead-of-recessed inversion, on the largest field in
+     the app. Found by asking the engine which declarations lose, not by reading
+     the stylesheet: nothing in the source says an ID is winning. */
+  border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--k-ink);
 }
 .instr-foot { justify-content: space-between; align-items: baseline; margin-top: var(--space-4); }
 
@@ -1283,12 +1613,25 @@ svg { display: block; }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
 .tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
-.tk-inp { display: block; width: 100%; margin-top: var(--space-3); font: inherit;
-          padding: .5em .65em; border: 1px solid var(--border-strong);
-          border-radius: var(--radius-control); background: var(--bg-elevated); color: var(--label); }
+/* ⚠️ Used on an input, a textarea AND a select, so it must not restate the
+   select appearance: the shared `select` rule handles that one, and a padding
+   restated here would put its label on top of the arrow. What is left is the
+   block layout the modal needs, plus the input/textarea skin. */
+.tk-inp { display: block; width: 100%; margin-top: var(--space-3);
+          font: var(--text-body) var(--font-ui);
+          border-radius: var(--radius-control); color: var(--label); }
+.tk-inp:not(select) { padding: var(--space-4) var(--space-5);
+          border: 0.5px solid var(--border-strong); background: var(--field-fill); }
 .rm-back { position: fixed; inset: 0; background: rgba(17, 20, 24, 0.72);
            display: flex; align-items: center; justify-content: center;
            padding: var(--space-5); z-index: 50; }
+/* ⚠️ A FIELD INSIDE A `--bg-elevated` BOX TAKES `--bg`, the paper of that
+   system, for the same reason a field inside a `k-surface` box takes `--k-bg`:
+   otherwise it is the same colour as its own container and only a hairline
+   border says a control is there. `.rm-box` and `.rolepick` are both
+   `--bg-elevated`, so `#nt-who`, `#nt-what`, `#nt-detail` and `#rolesel` were
+   dissolving into them — the third of the six selects the "one appearance"
+   change claimed to unify and did not. */
 .rm-box { background: var(--bg-elevated); border: 1px solid var(--border-strong);
           border-radius: 12px; padding: var(--space-8); max-width: 30rem;
           width: 100%; box-shadow: 0 18px 48px rgba(17, 20, 24, 0.28); }
@@ -1447,7 +1790,16 @@ svg { display: block; }
 #fr-dots { position: fixed; inset: 0; width: 100%; height: 100%; display: block;
            pointer-events: none; }
 .fr-box { position: relative; }
-.fr-back { position: fixed; inset: 0; background: var(--bg-sunken); z-index: 60;
+/* ⚠️ NO `background` HERE ANY MORE, and its absence is the point. `#firstrun` is
+   the only element wearing this class and its ID rule always won, so this
+   declaration never rendered -- EXCEPT when `#firstrun` lost its background to
+   an orphaned declaration, and then it painted the page-surround colour: a
+   plausible warm ground that read as a considered choice. A dead fallback
+   converted a loud failure into a quiet one and hid a blocker through two
+   review rounds. Removed rather than commented, per this codebase's own rule
+   about `.pjthread`: a rule that parses green and renders never is worse than
+   no rule. With it gone, the same defect renders transparent and is obvious. */
+.fr-back { position: fixed; inset: 0; z-index: 60;
            overflow-y: auto; display: flex; justify-content: center;
            padding: var(--space-8) var(--space-5); }
 /* ⚠️ `margin: auto`, NOT `align-items: center`. Centred that way, a card taller
@@ -1530,10 +1882,14 @@ svg { display: block; }
 .fr-youfield { margin-top: var(--space-5); }
 .fr-youfield label { display: block; font: var(--text-callout) var(--font-ui);
                      color: var(--label-2); margin-bottom: var(--space-2); }
-.fr-youfield input[type=text], .fr-youfield textarea {
-  width: 100%; box-sizing: border-box; font: var(--text-body) var(--font-ui);
-  padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--bg); color: var(--label); }
+/* ⚠️ NO `.fr-youfield input[type=text]` RULE. There was one, declaring nine
+   properties, and it rendered NEVER: every element it targets carries
+   `class="inp"`, and `#firstrun .inp` (1,1,0) beats it (0,2,1) on all nine. The
+   `--field-fill` edit made to it read in the diff as if it did something.
+   Removed on the same ground this branch removed `.fr-back`'s background: a rule
+   that parses green and renders never is worse than no rule, because the next
+   reader takes it for true — and this branch has now been caught by that twice
+   in one file. The wizard's fields are dressed by `#firstrun .inp`. */
 .fr-youfine { font: var(--text-caption) var(--font-ui); color: var(--label-3);
               margin-top: var(--space-5); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);
@@ -1575,7 +1931,37 @@ svg { display: block; }
   --k-bg: #faf9f7; --k-surface: #ffffff; --k-ink: #14161a;
   --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
+  /* ⚠️ AND THE --label SYSTEM, which this block missed. The wizard's own fields
+     read `--field-fill` and `--label`, and NEITHER is re-pinned by the k-token
+     list above — so in dark mode they rendered a #2c2c2e field carrying
+     near-white text inside a card this very block forces to #ffffff. Two token
+     systems again: the half that was re-pinned looked right, and the half that
+     was not was invisible in light.
+     This is the FIRST screen anyone sees, and it is the one surface in the app
+     with a stated single-look ruling — so the whole subtree is pinned, not the
+     half of it somebody happened to think of. */
+  --bg: #faf9f7; --bg-elevated: #ffffff; --bg-sunken: #f4f2ee;
+  --label: #14161a; --label-3: rgba(20,22,26,0.48);
+  --border-strong: rgba(20,22,26,0.26);
+  --field-fill: #faf9f7;   /* paper, so a field is never the card's own white */
   background: var(--k-bg);
+}
+/* ⚠️ `--label-2` AND `--separator` ARE PINNED IN DARK ONLY, because the root
+   `prefers-contrast: more` block enhances exactly those two. Pinning them
+   unconditionally made the wizard decline the person's stated contrast
+   preference in BOTH schemes -- on the first screen anyone meets. The
+   single-look ruling needs the dark half; the light half was collateral.
+   ⚠️ WHEN THIS BLOCK WAS ADDED IT WAS INSERTED BEFORE `background`, leaving
+   that declaration ORPHANED at the media block's top level -- a parse error,
+   discarded, so `#firstrun` lost its background and fell through to
+   `.fr-back`'s `--bg-sunken`: the PAGE SURROUND colour, on the first screen
+   anyone sees. That is the exact defect the `body` fix at the top of this file
+   exists to correct, reintroduced by an unrelated fix. A stray declaration is
+   silent in every text search and in the diff; only a brace-aware scan or the
+   render shows it, which is why the suite now carries "every CSS declaration in the page sits
+   inside a selector" to guard it. */
+@media (prefers-color-scheme: dark) {
+  #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
 }
 #firstrun .fr-box {
   width: min(660px, 100%); background: #fff; border-radius: 24px; border: 0;
@@ -1617,7 +2003,8 @@ svg { display: block; }
 #firstrun .btn { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
 #firstrun .btn:hover { background: rgba(20,22,26,.05); }
 #firstrun .btn:disabled:hover { background: #fff; }
-#firstrun .fr-code-row input { background: #fff; color: var(--k-ink); border-color: var(--k-rule); }
+/* Same reasoning as `#firstrun .inp` above: paper, not the card's own white. */
+#firstrun .fr-code-row input { background: var(--field-fill); color: var(--k-ink); border-color: var(--border-strong); }
 #firstrun .fr-conn-tail { color: var(--k-ink-2); background: rgba(20,22,26,.04); border-color: var(--k-rule); }
 #firstrun .llm { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
                  border: 1px solid var(--k-rule); border-radius: 12px; margin-bottom: 10px; background: #fff; }
@@ -1696,13 +2083,33 @@ svg { display: block; }
 #firstrun .fr-sleepbtn:focus-visible, #firstrun #fr-reveal:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 3px; }
 #firstrun .fr-progress { background: var(--k-rule); }
 #firstrun .fr-progress-fill, #firstrun .fr-progress i, #firstrun .fr-progress > div { background: var(--gold-deep); }
+/* ⚠️ A PORTING GAP, not dead markup. `.llm-m` carries the DIMENSIONS and never
+   came across from the pack, so every provider row rendered a fully styled disc
+   at 0x0 — gradient, border-radius and all, invisible. Measured on the install
+   screen: six rows, six markers, all zero-sized.
+   ⚠️ AND IT LOOKED LIKE DEAD CODE FROM INSIDE THE BUILD. A class worn by six
+   elements with no rule anywhere reads as a marker to delete; deleting it would
+   have removed the hook the missing rule attaches to, and then nothing in
+   either file would have shown the gap. "Dead in the build" and "dead in the
+   pack" are different questions (Mona Lisa, 2026-08-19), and only asking both
+   tells you which. */
+#firstrun .llm-m { width: 34px; height: 34px; flex: 0 0 34px; display: block; }
 #firstrun .llm-disc { border-radius: 100px; background: radial-gradient(circle at 35% 35%, #d8b65a, #b88920); }
 #firstrun .llm.off .llm-disc { background: radial-gradient(circle at 35% 35%, #d5d3ce, #a9adb3); }
 #firstrun .fieldlab { display: block; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase;
                       font-weight: 600; color: var(--k-ink-2); margin-bottom: 6px; }
+/* ⚠️ THIS IS THE RULE THAT ACTUALLY DRESSES THE WIZARD'S FIELDS, and it beats
+   `.fr-youfield input[type=text]` on specificity (1,1,0 against 0,2,1) — so the
+   `--field-fill` change made to that rule was INERT here, and every wizard field
+   kept a hardcoded `#fff` identical to the `.fr-box` card behind it. A rule that
+   loses the cascade is the same as a rule that is not there, and nothing in the
+   source says which one is winning.
+   Now: the container's `--field-fill` (paper inside this subtree, so a field is
+   never the card's own white), and `--border-strong`, which composites to
+   1.77:1 against the card where `--k-rule` gives 1.31:1. */
 #firstrun .inp { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem;
-                 padding: .6em .9em; border-radius: 10px; border: 1px solid var(--k-rule);
-                 background: #fff; color: var(--k-ink); }
+                 padding: .6em .9em; border-radius: 10px; border: 1px solid var(--border-strong);
+                 background: var(--field-fill); color: var(--k-ink); }
 #firstrun .inp:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 1px; }
 
 /* ⚠️ `p.fr-next`, not `.fr-next`. `.fr-body p` is one specificity point higher
@@ -1807,7 +2214,20 @@ svg { display: block; }
     <div>
       <div class="dnamerow">
         <span class="dname" id="d-name"></span>
+        <!-- ⚠️ THE SAME BADGE THE CARD DRAWS, off the same three derivations
+             (`cardStOf` for the class, `STATE_COPY` for the word, `GLYPH` for
+             the mark). Josh asked for the badge here; building a second one
+             would be two renderings of one state, free to disagree the day a
+             state is added, which is this codebase's named worst habit.
+             The classes are set by the painter, not here, because the state
+             is not known until an agent is opened. -->
         <span class="detail-state" id="d-state"></span>
+        <!-- ⚠️ TO THE RIGHT OF THE BADGE, Josh's item C, and a SEPARATE element
+             rather than more text inside it. The badge said "Needs you: Mac" as
+             one string, so the state and the thing it is about were one
+             unstyleable run. Split, the badge is a badge and the task can sit
+             beside it the way the pack draws it. -->
+        <span class="dtask" id="d-task" hidden></span>
       </div>
       <div class="detail-meta" id="d-meta"></div>
       <div class="detail-why" id="d-why" hidden></div>
@@ -1824,13 +2244,13 @@ svg { display: block; }
 
   <div class="dgrid">
   <section class="dbox">
-    <h3 class="dlab">Memory</h3>
-    <div id="d-memory"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
-  </section>
-  <section class="dbox">
     <h3 class="dlab">Runs on</h3>
     <p class="runnow" id="d-runson"></p>
     <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
+  </section>
+  <section class="dbox">
+    <h3 class="dlab">Memory</h3>
+    <div id="d-memory"><p class="dhint" style="margin:0;">Opening&hellip;</p></div>
   </section>
 
   <!-- ⚠️ THE CONVERSATION (Mona Lisa's messaging-screens spec, 2026-08-18):
@@ -1853,42 +2273,6 @@ svg { display: block; }
          alike -- any causal clause was false for at least one of them.
          It earns a button when teach-existing lands, not before. -->
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
-  </section>
-
-  <!-- Engineering mode's surface on this page (eng-mode): the raw
-       session, shown only when the person turned the switch on. Same
-       viewport-not-transcript honesty as the project page's block. -->
-  <section class="dbox" id="d-window-box" hidden>
-    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
-    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
-         sentence is the runtime paint's to make, only over a capture
-         that succeeded (the project viewport recorded this exact
-         reversal at its own block). -->
-    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
-    <pre class="pj-screen" id="d-window" tabindex="0" hidden
-         role="region" aria-labelledby="d-window-label"></pre>
-    <p class="dhint" id="d-window-msg" hidden></p>
-  </section>
-
-  <section class="dbox">
-  <div class="field">
-    <label class="flabel" for="d-file">Picture</label>
-    <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
-    <div class="frow">
-      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
-      <button class="btn" id="d-remove" type="button">Remove</button>
-    </div>
-    <div class="fmsg" id="d-msg"></div>
-  </div>
-  <div class="field" style="margin-top:18px;">
-    <label class="flabel" for="d-role">What they do</label>
-    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
-    <div class="frow">
-      <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
-      <button class="btn" id="d-save" type="button">Save</button>
-    </div>
-    <div class="fmsg" id="d-role-msg"></div>
-  </div>
   </section>
 
   <section class="dbox">
@@ -1941,6 +2325,42 @@ svg { display: block; }
          still exists, not what it is called. -->
     <div class="fpath" id="d-instr-prev" hidden>The previous version is kept alongside it, so nothing you replace is lost.</div>
     <div class="fmsg" id="d-instr-msg" role="status" aria-live="polite"></div>
+  </div>
+  </section>
+
+  <!-- Engineering mode's surface on this page (eng-mode): the raw
+       session, shown only when the person turned the switch on. Same
+       viewport-not-transcript honesty as the project page's block. -->
+  <section class="dbox" id="d-window-box" hidden>
+    <h3 class="dlab" id="d-window-label">The window it is running in</h3>
+    <!-- The hint ships EMPTY: the affirmative "as it looks right now"
+         sentence is the runtime paint's to make, only over a capture
+         that succeeded (the project viewport recorded this exact
+         reversal at its own block). -->
+    <p class="dhint" id="d-window-hint" style="margin:0 0 10px;"></p>
+    <pre class="pj-screen" id="d-window" tabindex="0" hidden
+         role="region" aria-labelledby="d-window-label"></pre>
+    <p class="dhint" id="d-window-msg" hidden></p>
+  </section>
+
+  <section class="dbox">
+  <div class="field">
+    <label class="flabel" for="d-file">Picture</label>
+    <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
+    <div class="frow">
+      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <button class="btn" id="d-remove" type="button">Remove</button>
+    </div>
+    <div class="fmsg" id="d-msg"></div>
+  </div>
+  <div class="field" style="margin-top:18px;">
+    <label class="flabel" for="d-role">What they do</label>
+    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
+    <div class="frow">
+      <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
+      <button class="btn" id="d-save" type="button">Save</button>
+    </div>
+    <div class="fmsg" id="d-role-msg"></div>
   </div>
   </section>
   </div>
@@ -2247,10 +2667,8 @@ svg { display: block; }
   <button class="back" id="create-back">&#8592; All agents</button>
 
   <div class="cstep" id="cstep-role">
-    <p class="crumb">Step 1 of 2</p>
     <h2>What should this agent do?</h2>
-    <p>Most people start with a project manager. You can change any of this
-       afterwards, and nothing here is permanent.</p>
+
     <!-- ⚠️ THREE CHOICES IN THE PACK, TWO SHIPPED HERE. The pack's rule
          (2026-08-15): a radio for the recommended role and a radio that
          opens the rest as a grouped menu -- twenty-six cards is a wall, and
@@ -2307,13 +2725,16 @@ svg { display: block; }
       </div>
     </div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
-    <div class="frow" style="margin-top: var(--space-6);">
-      <button class="btn uprime" id="role-next" type="button" disabled>Continue</button>
+    <!-- ⚠️ THE PACK'S FOOTER: right-aligned, one primary, and the SAME size on
+         both steps. Its own comment says why the two must match: "two primary
+         buttons in one flow at two different sizes reads as two different
+         weights." -->
+    <div class="sfoot">
+      <button class="btn uprime big" id="role-next" type="button" disabled>Continue</button>
     </div>
   </div>
 
   <div class="cstep" id="cstep-name" hidden>
-    <p class="crumb">Step 2 of 2</p>
     <h2 id="create-meet">Set up your agent</h2>
     <p id="create-blurb"></p>
 
@@ -2338,7 +2759,12 @@ svg { display: block; }
         <button class="btn sav-btn" type="button" id="create-avatar-btn">Change picture</button>
         <input type="file" id="create-avatar" accept="image/png,image/jpeg,image/webp" hidden>
       </div>
-      <p class="fhint" id="genav-hint">A unique mark will be created from the name unless you add a picture.</p>
+      <!-- ⚠️ SHIPS EMPTY. This line used to explain that a mark is generated
+           from the name; Josh cut it ("people know how to make an avatar").
+           The ELEMENT stays because it does a second job: when somebody picks a
+           file it confirms which one. Deleting it would have taken the
+           confirmation with the explanation. -->
+      <p class="fhint" id="genav-hint"></p>
     </section>
 
     <div class="field">
@@ -2354,9 +2780,6 @@ svg { display: block; }
            agent's name the way they would write a colleague's. Capitals are
            kept for what you see; the machine quietly uses the lower-case form
            for its folder and its window. -->
-      <div class="fhint">Letters, numbers, hyphens and underscores. Capitals are
-        fine: you will see it written the way you type it, and the folder it
-        gets on this computer uses the lower-case form.</div>
       <div class="frow">
         <input type="text" id="create-name" autocomplete="off" spellcheck="false"
                placeholder="Casey">
@@ -2365,7 +2788,6 @@ svg { display: block; }
 
     <div class="field">
       <label class="flabel" for="create-label">Role label</label>
-      <div class="fhint">A short label shown below the agent&rsquo;s name.</div>
       <div class="frow">
         <input type="text" id="create-label" autocomplete="off" maxlength="80"
                placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
@@ -2389,8 +2811,13 @@ svg { display: block; }
          the archived list): a brand-new person should not meet an empty
          section explaining a thing they have none of. -->
     <div class="field" id="create-projects-wrap" hidden>
-      <span class="flabel" id="create-projects-lab">Project <span class="flabel-soft">(optional)</span></span>
-      <div class="fhint">Gives the agent context about where its work belongs. This does not change permissions.</div>
+      <span class="flabel" id="create-projects-lab">Add this agent to any projects <span class="flabel-soft">(optional)</span></span>
+      <!-- ⚠️ ONE LINE, AND IT IS LOAD-BEARING AT COUNT ONE. Plurality and pill
+           shape are what make a multi-select obvious, and somebody with a
+           single project has neither: one chip on its own reads as a label.
+           The pack uses this sentence on the members surface for the same
+           reason. It is true at any count. -->
+      <div class="fhint">Pick as many as you like.</div>
       <div class="projpick" id="create-projects" role="group" aria-labelledby="create-projects-lab"></div>
     </div>
 
@@ -2401,14 +2828,42 @@ svg { display: block; }
       </div>
     </div>
 
-    <div class="frow" style="margin-top: var(--space-6);">
-      <button class="btn" id="create-prev" type="button">&#8592; Back</button>
-      <button class="btn uprime" id="create-go" type="button">Create it</button>
+    <!-- ⚠️ NO BACK BUTTON (Josh, 2026-08-19), and the pack has none here either:
+         the step's own heading names the role.
+
+         ⚠️ AND THERE IS NOW NO WAY BACK TO THE ROLE PICKER THAT KEEPS WHAT YOU
+         TYPED. Stated plainly because the first version of this comment claimed
+         the opposite: it said the picker was "one screen away by the panel's
+         back link", and `#create-back` is labelled "← All agents" and calls
+         `showTab('agents')`. Re-entering runs `openCreate()`, which resets
+         CREATE_PROJECTS, FILLED_ROLE, AVATAR_FILE and the dirty flags, so a
+         person who picked the wrong role loses their words.
+
+         That is the COST of the removal, not an argument against it — Josh
+         asked for the button to go and this is what it bought. Recorded here so
+         the next reader sees a real trade rather than a reassurance, and so it
+         can be reversed knowingly if the cost turns out to bite. The
+         same-role-preserving path below still works; only the way to reach it
+         is gone. -->
+    <div class="sfoot">
+      <button class="btn uprime big" id="create-go" type="button">Create agent</button>
     </div>
     <div class="fmsg" id="create-msg" role="status" aria-live="polite"></div>
   </div>
 
-  <div class="cstep" id="cstep-made" hidden>
+  <!-- ⚠️ `dbox` CARRIES THE CARD, and `cstep` carries nothing at all. The pack
+       draws this screen as `<section class="dbox makestep">`, and stripping the
+       panel shell from `#panel-create` took the card off the OUTCOME screen as
+       well as the two form steps -- justified by "the create steps are form
+       fields, and the pack puts a form on the paper ground", which was never
+       true of this one. A justification that covered two of three was allowed
+       to cover all three.
+       ⚠️ `cstep` is a dead marker: these three are addressed by ID
+       (`getElementById('cstep-' + s)`), and no rule or selector reads the class.
+       Left in place because the pack styles it and the build does not -- a
+       PORTING GAP wearing the appearance of dead code, and deleting it would
+       remove the hook the missing rule attaches to. -->
+  <div class="cstep dbox" id="cstep-made" hidden>
     <h2 id="made-head">Making it</h2>
     <!-- ⚠️ Every line here is either something the engine reported or something
          this page watched happen. Nothing is asserted on a timer. -->
@@ -3046,7 +3501,6 @@ svg { display: block; }
      what stays here is what has no tile home -- unknowns, unknown memory
      limits, and the part-of-the-fleet-is-missing clause. Empty hides. -->
 <div class="summary" id="summary">Loading…</div>
-<div class="build" id="build"></div>
 <div class="cards" id="grid"></div>
 <div class="alist" id="alist" hidden></div>
 
@@ -3083,6 +3537,18 @@ svg { display: block; }
      `role="alert"` also announces nothing from inside a hidden subtree, so the
      screen-reader half was silently gone too. -->
 <p class="removed-msg" id="removed-msg" role="alert" aria-live="assertive"></p>
+<!-- ⚠️ THE FOOT, not the top (Josh, 2026-08-19). This line sat above the cards,
+     under the New agent button, where the first thing a person met on their
+     board was its version number. It belongs where a version belongs: at the
+     bottom, which is also where the pack draws it.
+     ⚠️ AFTER `#removed-msg`, not between it and `#removed-wrap`. It was moved
+     into that gap, which put a removal alert -- "what the removal could not
+     reach" -- BELOW the version footer at the very bottom of the page, split
+     from the section it is about. The long note above `#removed-msg` exists to
+     protect exactly that adjacency, and the move stepped through it.
+     Kept OUTSIDE `#removed-wrap` for the reason that note gives: the wrap hides
+     itself entirely when nothing is removed. -->
+<div class="build" id="build"></div>
 
 <script>
 'use strict';
@@ -3160,11 +3626,133 @@ function modelLine(a) {
      ASSUMES every agent runs Claude, which is true of everything the
      engine can create today -- the day a second provider lands, this line
      would stamp "Claude" onto its names and MUST change with it. */
-  if (!a.modelName) return 'Unknown Model';
-  return /^claude/i.test(a.modelName) ? a.modelName : 'Claude ' + a.modelName;
+  /* ⚠️ THE PLANNED MODEL COUNTS HERE, with no tense and no marker, and that is
+     Mona Lisa's ruling (2026-08-19) rather than a shortcut. A TENSE IS ASSERTED
+     BY WORDS, NOT BY A VALUE: "Right now:" appears exactly once in this page,
+     on the detail panel, which is why that one surface needed `runsOnLine`.
+     The card's `.amodel`, the list row and the detail meta line emit this with
+     no surrounding claim at all — they sit in the identity block under the
+     role, and read as an attribute of the agent the same way "Researcher"
+     does. Neither dates.
+     ⚠️ So "Unknown Model" was wrong on those three in a DIFFERENT way than on
+     the detail panel. There it contradicted a fact we held. Here it answered a
+     question nobody asked: the card never claimed to know what was running, so
+     it never needed to confess that it did not. */
+  /* ⚠️ FOR A STOPPED AGENT THE JOB WINS HERE TOO. `runsOnLine` prefers the job
+     for a stopped agent and this preferred the transcript, so closing the
+     meta-vs-box disagreement opened a CARD-vs-meta one: the card said "Claude
+     Haiku 4.5" and the detail page you reached by clicking it said "Claude Opus
+     5". The identical shape as the role-line divergence below, and the server
+     now populates both readings deliberately for exactly this case. One rule,
+     every surface: what it will start on, when it is not running. */
+  /* ⚠️ `pres`, NOT the literal 'stopped'. `runsOnLine` decides the same
+     question — is this agent running — from `cardStOf(a).pres`, and this
+     decided it from the state string. They agree today ONLY because `stopped`
+     happens to be the single CARD_ST entry mapping to `pres: 'off'`. Add one
+     more and the card would name the transcript model while the detail panel
+     named the job's, reopening the card-vs-meta disagreement this branch
+     closed. One question, one derivation. */
+  const notRunning = cardStOf(a).pres === 'off';
+  const name = (notRunning && a.plannedModelName) || a.modelName || a.plannedModelName;
+  if (!name) return 'Unknown Model';
+  return /^claude/i.test(name) ? name : 'Claude ' + name;
+}
+/**
+ * The Runs on line, in the tense that is true of it.
+ *
+ * ⚠️ THREE STATES, AND THE LEAD IS THE HONEST PART. Ruled by Mona Lisa
+ * 2026-08-19 after Josh asked why an agent he had just created showed
+ * "Unknown Model": say what WILL be true and when, never claim it already is.
+ *
+ *   running          Right now: Claude Sonnet 5   (read from a live transcript)
+ *   never run        Will start on Claude Sonnet 5 (read from its launchd job)
+ *   neither known    Unknown Model                 (no lead at all)
+ *
+ * ⚠️ THE THIRD STATE DROPS THE LEAD RATHER THAN KEEPING "Right now", by the
+ * same rule that produced the second: nothing is running in that case either,
+ * so "Right now" is exactly as false there as it would be on a planned model.
+ * It previously read "Right now: Unknown Model", which asserted a present tense
+ * about an agent that may never have started.
+ *
+ * ⚠️ A PLANNED MODEL NEVER OUTRANKS A LIVE ONE. `modelName` is what the agent
+ * IS running; the job file is what it will be started with, and the two can
+ * disagree (a job edited by hand, a session started some other way). The server
+ * only looks up the second when the first is absent.
+ */
+function runsOnLine(a) {
+  const name = modelLine(a);
+  /* ⚠️ THE TENSE COMES FROM `pres`, THE SAME DERIVATION THE PRESENCE DOT DRAWS,
+     and that is the fix for a bug this function got wrong three times in one
+     afternoon. Every version derived the lead from whether a MODEL could be
+     read, and that is not what a tense is about:
+
+       "Right now: Unknown Model"   present tense, agent may never have started
+       "Will start on X"            future tense, agent running on X right now
+       "Right now: X"               present tense, agent stopped
+
+     Each time the VALUE was right and the LEAD was the lie. The panel ended up
+     saying "Right now:" beside a badge reading "Not running" — two elements,
+     one fact, two answers. ⚠️ THEY CANNOT DISAGREE IF ONLY ONE OF THEM DECIDES
+     (Mona Lisa, 2026-08-19), so the lead now reads `cardStOf(a).pres`, which is
+     what the dot beside it already uses. A new state adds one CARD_ST entry and
+     the dot, the badge and the tense all move together.
+
+       on      a Claude process is there  -> present tense, if we could read it
+       off     no process                 -> future tense; the job is unchanged
+       unsure  we could not classify      -> NO tense. We cannot tell.
+
+     ⚠️ The card's own model line has no lead and has never been wrong today: an
+     attribute under a role has no tense to get wrong. The panel needs one only
+     because it is where the model gets changed. */
+  const pres = cardStOf(a).pres;
+  const known = Boolean(a.modelName || a.plannedModelName);
+  if (!known) return { lead: '', name };
+  if (pres === 'on') return { lead: a.modelName ? 'Right now: ' : '', name };
+  if (pres === 'off') {
+    /* ⚠️ THE JOB IS THE AUTHORITY ON A FUTURE, NOT THE TRANSCRIPT. `name` above
+       prefers `modelName`, which is what this agent RAN as in a session that
+       has ended; what it will START on is in its launchd job. Saying "Will
+       start on" from a transcript is a future-tense claim supported only by a
+       past reading, and for a job with no --model argument at all it would
+       invent one. `modelLine` is reused rather than re-prefixed so the "Claude
+       Claude" guard stays in one place. */
+    if (a.plannedModelName) {
+      return { lead: 'Will start on ', name: modelLine({ plannedModelName: a.plannedModelName }) };
+    }
+    /* Stopped, and the job does not say. We know what it ran as and not what it
+       will start on, so the name is stated as an attribute with no tense. */
+    return { lead: '', name };
+  }
+  return { lead: '', name };
 }
 function roleLine(a) {
-  return (a.profile && a.profile.role) || a.role || '';
+  /**
+   * ⚠️ TWO KINDS OF VALUE SHARE THIS SLOT, and only one of them was ever
+   * written to be read here.
+   *
+   * `profile.role` is a label from a fixed set, chosen off a menu, and it
+   * carries its own capitals. `a.role` is a line PARSED out of the agent's
+   * instruction file: real, the agent's own self-description, and arbitrary
+   * lower-case prose. Measured on this machine: fourteen agents, zero with a
+   * profile role, fourteen falling back. **The fallback is not an edge case,
+   * it is the board**, which is why it is normalised rather than dropped.
+   *
+   * ⚠️ THE FIRST CHARACTER ONLY, NOT TITLE CASE. Title case mangles what it
+   * cannot know: "SEO specialist" becomes "Seo Specialist". That is the exact
+   * acronym problem whose carve-out this branch just deleted, and a transform
+   * would bring the carve-out back with it. Sentence case is a display
+   * convention rather than a claim about the words: it edits nothing, asserts
+   * no provenance, and simply lets a chosen label and a parsed line sit in the
+   * same register.
+   */
+  const chosen = a.profile && a.profile.role;
+  if (chosen) return chosen;
+  /* ⚠️ `charAt(0).toUpperCase()` is not free of edits, and an earlier version of
+     this comment claimed it was: a parsed role of `iOS engineer` renders
+     `IOS engineer`. Much narrower than the title-casing it replaced, which
+     mangled every word, but the claim should match the behaviour. */
+  const parsed = a.role || '';
+  return parsed ? parsed.charAt(0).toUpperCase() + parsed.slice(1) : '';
 }
 /* ⚠️ ONE encoding of the memory thresholds, because there were four: the
    ring band, the list bar band, the membadge and the heat wash each wrote
@@ -3307,15 +3895,19 @@ function ring(a) {
 
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
-     third cue after arc length and colour. The caption is gone at Josh's
-     call; "memory unknown" is carried by the dashed ring's aria-label and,
-     for sighted readers, by the dashed shape the pack pairs with the
-     unknown card. The avatar stays inside the ring (this app's real data;
+     third cue after arc length and colour. The unknown-memory fact is carried
+     three ways: this ring's aria-label ("Memory could not be read."), the dashed
+     shape the pack pairs with the unknown card, and -- since the caption was
+     restored as `.membadge unk` -- the visible word "Unknown" in the same
+     .agauge container. ⚠️ The two strings are deliberately disjoint, so an
+     assertion about one cannot be satisfied by the other; see the badge. ⚠️ This used to say the
+     caption "is gone at Josh's call", which stopped being true when the badge
+     came back and would have read as permission to delete it again. The avatar stays inside the ring (this app's real data;
      the pack draws faces in the same slot). */
   const pct = pctOf(ctx);
   if (pct === null) {
     return `<svg viewBox="0 0 72 72" role="img"
-         aria-label="${esc(a.name)}. Memory unknown: we could not read how full it is.">
+         aria-label="${esc(a.name)}. Memory could not be read.">
       <circle class="gu" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
       ${av}
     </svg>`;
@@ -3384,7 +3976,25 @@ function card(a) {
     ? '<div class="note">Not the same as idle. We cannot see this one, so we are not telling you it is fine.</div>'
     : '';
 
-  const badge = pct !== null && pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '';
+  /* ⚠️ THREE STATES IN ONE SLOT, and the unknown one is the whole point. The
+     board's summary line used to carry "N with unknown memory limits"; Josh cut
+     it, which left the dashed ring as the only sighted signal and the words
+     "Memory unknown" living solely in an `aria-label`. That is the could-not-
+     look versus is-not-there split failing for exactly the people who cannot
+     hear the label. The tally was doing this job by accident, fleet-wide; this
+     does it per card, which is where it belonged.
+     `unk` is checked FIRST: a null percent can never be >= NEARLY_FULL, but
+     ordering it this way means the severity badge cannot be reached by an
+     unknown, whatever pctOf later returns. */
+  const badge = pct === null
+    /* ⚠️ `aria-hidden`: the ring's aria-label already says "Memory could not be
+       read." — the authoritative statement, and the one that says what HAPPENED
+       rather than naming a state. Without this a screen reader says the fact
+       twice per card.
+       The gap this badge closes was always the SIGHTED half. (Mona Lisa,
+       2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
+    ? '<span class="membadge unk" aria-hidden="true">Unknown</span>'
+    : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
@@ -3414,8 +4024,24 @@ function lrow(a) {
   const av = a.hasAvatar
     ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
     : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
+  /* ⚠️ A VISIBLE WORD, NOT AN EMPTY SLOT. This rendered a dashed track beside a
+     BLANK percent, which reads as "0% used, room to spare" -- the inverse of
+     the truth. The words existed only in the `.vh` span, so a screen-reader
+     user had the fact and a sighted person had a bar that looked reassuring.
+     ⚠️ AND THE LIST IS HALF THE BOARD: the layout is user-selectable, so paying
+     this debt on `card()` alone left the other half without it. The unknown
+     caption went onto the card and its neighbour was left holding the defect,
+     which is the shape this branch has repeated all day.
+     ⚠️ THE WORD, NOT A GLYPH, and never blank (Mona Lisa's ruling). `.pct` is a
+     `min-width`, not a fixed column, so the cell GROWS for "Unknown" and the
+     flex bar beside it shrinks -- the outcome is fine and the earlier claim that
+     it "already sizes for 100%" described a property the rule does not have.
+     The two channels then match
+     the card's -- dashed bar for shape, word for identity. The pack does not
+     draw this row at all, which is why nobody checked it: it depicts this state
+     only on a card. */
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct"><span class="vh">memory unknown</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct">Unknown<span class="vh"> memory</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
@@ -4015,7 +4641,29 @@ async function tick() {
     document.getElementById('st-attn-tile').hidden = !c.needsYou;
     const bits = [];
     if (c.unknown) bits.push(`${c.unknown} we cannot read`);
-    if (c.unknownFullness) bits.push(`${c.unknownFullness} with unknown memory limits`);
+    /* ⚠️ THE UNKNOWN-MEMORY COUNT IS NOT SUMMARISED HERE (Josh, 2026-08-19),
+       and this removes the only VISIBLE statement of that fact on the screen.
+       Said plainly rather than justified away: the dashed ring distinguishes
+       those cards, and the words "memory unknown" exist only in the ring's
+       `aria-label` (in `ring()`) and a `.vh` span (in `lrow()`). So a screen-reader
+       user keeps the information and a sighted person is left with dashed rings
+       and nothing naming what dashed means.
+       ✅ THE SECOND HALF IS PAID ON BOTH LAYOUTS: `.membadge unk` carries
+       "Unknown" as a visible word on the card, and the list row's percent
+       slot carries the same word instead of a blank. Per the pack's own section
+       10 ("shape distinguishes, words identify"), ported from
+       FROZEN-2026-08-19.
+       ⚠️ An earlier version of this note said the debt was paid and named
+       `ring()` and `card()` as carrying the words. `card()` had no such span and
+       the LIST had no visible statement at all -- a comment asserting a debt is
+       settled when it was settled for one of two renderers, which is how the
+       gap stayed invisible. The tally was doing that job by accident, for the
+       whole fleet at once, which is why removing it looked free and was not.
+       ⚠️ This comment previously said the caption was still owed, while the
+       code three hundred lines up already drew it. Two comments in one change
+       disagreeing about whether a debt is paid is how it gets paid twice.
+       The line above it, "N we cannot read", STAYS: that one is about agents
+       missing from this board entirely, which is a different and louder fact. */
     // ⚠️ Part of the fleet is MISSING FROM THIS BOARD. tmux said something we
     // could not read, and the agents behind those lines are not below — so this
     // has to be on screen, or the board is presenting what it managed to parse
@@ -4041,9 +4689,13 @@ async function tick() {
     // agent boots from. A banner asserting something false about safety is the
     // worst possible instance of the trap this whole codebase is written
     // against, so it now says which way the writing goes.
+    /* ⚠️ THE CLAUSE ABOUT EDITING IS CUT (Josh, 2026-08-19), and the history
+       above it explains what must NOT come back with it: this line once said
+       "read-only, nothing here can change your agents", which stopped being
+       true the moment the screen could edit an instruction file. Saying nothing
+       is honest. Saying that again would not be. */
     document.getElementById('build').innerHTML =
-      '<b>BETA</b> · version ' + esc(data.version || 'unknown')
-      + ' · editing an agent here changes the real file it starts from';
+      '<b>BETA</b> · version ' + esc(data.version || 'unknown');
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
@@ -4126,6 +4778,20 @@ const PANELS = ['projects', 'settings', 'detail', 'create'];
 // LIST rather than one hardcoded name, because the second buttonless panel was
 // always going to arrive.
 const BUTTONLESS = ['detail', 'create'];
+/**
+ * What a top-level tab click has to forget before `showTab` runs.
+ *
+ * ⚠️ Named and separate so the tab handler stays one readable line and so this
+ * is testable without a DOM. Only Projects holds within-section state today;
+ * the shape is here so the next section that gains some has somewhere obvious
+ * to declare it, rather than growing a second `if` inside the click handler.
+ */
+function topLevelReset(tab) {
+  if (tab !== 'projects') return;
+  pjCloseConfirm();
+  PJ_CURRENT = null;
+}
+
 function showTab(tab) {
   const btn = document.querySelector('.tab[data-tab="' + tab + '"]');
   document.querySelectorAll('.tab').forEach((t) => {
@@ -4463,7 +5129,23 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   // Same reason as the back button: a tab click is also walking away from a
   // creation in flight.
   if (btn) {
-    WATCH += 1; showTab(btn.dataset.tab);
+    WATCH += 1;
+    /* ⚠️ A TAB CLICK MEANS THE TOP OF THAT SECTION, and this is the only place
+       that can know it was a click. Josh: "if I'm somewhere on some other page
+       and I hit a top-level page (like Projects), it'll jump me back inside of
+       whatever project I was previously in."
+
+       `showTab` ends with `pjView(PJ_CURRENT ? 'one' : 'list')`, which is RIGHT
+       for the programmatic callers -- the "which projects is this agent on"
+       flow calls `showTab('projects')` precisely in order to land inside one --
+       and WRONG for a person pressing the tab. So the reset lives on the click
+       rather than in `showTab`, where it would break the callers that depend on
+       the restore.
+
+       Same three steps the project Back button does, so arriving by the tab and
+       arriving by Back leave the screen in one state rather than two. */
+    topLevelReset(btn.dataset.tab);
+    showTab(btn.dataset.tab);
     /* Choosing from the OPEN menu display:none's the element focus is on --
        the same hazard the Escape path below guards -- and this is the common
        path, so it carries the same guard: back to the burger, the visible
@@ -4704,7 +5386,12 @@ function refreshAvatar() {
 function memoryBox(a) {
   const pct = pctOf(a.context);
   if (pct === null) {
-    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">?</span></div>'
+    /* ⚠️ THE WORD, matching the card and the list row. This kept a bare `?`
+       after the ruling moved the other two surfaces to "Unknown" -- three
+       surfaces, one fact, and the third left on the old treatment. Not
+       dishonest, since the sentence below states it in full, but not the rule
+       either, and the rule exists so the three cannot drift apart. */
+    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">Unknown</span></div>'
       + '<p class="dhint" style="margin:12px 0 0;"><b>We could not read ' + esc(a.name) + '\u2019s memory.</b> '
       + 'That is not the same as it being empty. Nothing here can tell you how much room is left.</p>';
   }
@@ -4920,12 +5607,40 @@ function openDetail(sessionName) {
      or the card says "Claude X" while this panel says "X" the day a name
      arrives without its provider. The panel gains the card's honest
      "Unknown Model" for a missing name rather than silently omitting it. */
+  /* ⚠️ `roleLine`, not a private copy of its expression. This line said
+     `a.profile && a.profile.role || a.role`, which was `roleLine`'s body before
+     `roleLine` learned to sentence-case a PARSED role — so the card read
+     "Web-properties worker" and the detail page you reached by clicking it read
+     "web-properties worker", for the same agent, on the same click. Exactly the
+     second-definition trap the comment directly above argues against for the
+     model, one line away. */
+  /* ⚠️ THE SAME MODEL THE BOX BELOW NAMES. `modelLine` prefers `modelName`
+     (what a transcript says it RAN as) while `runsOnLine`'s stopped arm prefers
+     `plannedModelName` (what the job will START it on) -- so for a stopped agent
+     whose two readings disagree, this line said "Claude Haiku 4.5" and the Runs
+     on box six lines below said "Will start on Claude Opus 5". This line carries
+     no tense, so it reads as THE model, and two elements naming one fact
+     differently is precisely what this branch exists to stop. It takes the name
+     the box resolved rather than deriving a second one. */
+  const runs = runsOnLine(a);   // one evaluation, read by the meta line and the box
   document.getElementById('d-meta').textContent =
-    [a.profile && a.profile.role || a.role, modelLine(a),
+    [roleLine(a), runs.name,
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
-  document.getElementById('d-state').textContent =
-    copy.label + (a.task ? ': ' + a.task : '');
+  /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
+     class, `GLYPH` the mark, `STATE_COPY` the word. A card and its detail page
+     disagreeing about an agent's state is worse than either being wrong. */
+  const dm = cardStOf(a);
+  const dst = document.getElementById('d-state');
+  dst.className = 'detail-state astate st-' + dm.st;
+  dst.innerHTML = GLYPH[dm.st] + '<b>' + esc(copy.label) + '</b>';
+  /* ⚠️ HIDDEN WHEN THERE IS NO TASK, rather than the card's "no task showing".
+     Beside a badge that already says Idle, that sentence restates the badge;
+     on a card, where the badge is small and the row is the only line, it
+     carries. Same fact, different surface, and the pack shows nothing here. */
+  const dtask = document.getElementById('d-task');
+  dtask.textContent = a.task || '';
+  dtask.hidden = !dtask.textContent;
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
@@ -4938,12 +5653,19 @@ function openDetail(sessionName) {
   /* The pack's header badge and the two reading boxes, all off the same
      shared derivations the board uses (memBand/pctOf/modelLine). */
   const dpct = pctOf(a.context);
+  /* ⚠️ THE FOURTH SURFACE OF ONE FACT. `card()`, `lrow()` and `memoryBox()` all
+     say "Unknown" at `pct === null`; this stayed a two-state slot (percent or
+     nothing) while the card's `.membadge` became a three-state one. The fact is
+     still stated on this screen by the Memory box, so it was never an honesty
+     failure — but "three surfaces, one fact, and the third left on the old
+     treatment" was this branch's own note, and this was the fourth. */
   const dbadge = document.getElementById('d-membadge');
-  dbadge.textContent = dpct === null ? '' : dpct + '%';
-  dbadge.hidden = !(dpct !== null && dpct >= NEARLY_FULL);
+  dbadge.className = 'membadge' + (dpct === null ? ' unk' : '');
+  dbadge.textContent = dpct === null ? 'Unknown' : dpct + '%';
+  dbadge.hidden = !(dpct === null || dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
-  drun.innerHTML = 'Right now: <b>' + esc(modelLine(a)) + '</b>';
+  drun.innerHTML = esc(runs.lead) + '<b>' + esc(runs.name) + '</b>';
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
@@ -5987,6 +6709,59 @@ let REMOVED_OPEN = false;
  * for exactly this.
  */
 let REMOVED_TOKEN = 0;
+/**
+ * Has `/api/removed` EVER answered on this page load?
+ *
+ * ⚠️ WITHOUT THIS, "no removed agents" AND "we could not ask" ARE THE SAME
+ * SCREEN. Every failure arm below returns without touching the section, which
+ * is right on a poll -- emptying a drawn list because one request failed would
+ * tell somebody their removed agents are gone. But `#removed-wrap` starts
+ * `hidden` in the markup, so on the FIRST load "leave what is on screen alone"
+ * leaves nothing on screen, and the honest fix for the poll became the same
+ * inversion one moment earlier.
+ *
+ * ⚠️ IT MATTERS MORE HERE THAN IT LOOKS. The Remove confirmation is
+ * deliberately LIGHT because removal is recoverable, and this section is the
+ * way back. If the way back can be invisible for a reason that is not
+ * "there is nothing to go back to", that confirmation is a trapdoor.
+ */
+let REMOVED_EVER_READ = false;
+
+/**
+ * We could not ask, and we have never had an answer. Says so on `#removed-msg`,
+ * which lives OUTSIDE `#removed-wrap` precisely so a repaint cannot erase it
+ * and `showTab` clears it on leaving the board.
+ *
+ * ⚠️ SILENT ONCE A READ HAS SUCCEEDED. After that, absence is a fact we
+ * measured rather than one we could not check, and a later failed poll must
+ * not overwrite a list that is on screen and correct.
+ */
+/**
+ * The exact sentence `removedUnreadable` writes, so the success path can take
+ * down THAT message and only that one.
+ *
+ * ⚠️ A SENTINEL RATHER THAN A BLANKET CLEAR. `#removed-msg` is shared: a partial
+ * removal reports what it could not reach there, and that is the more specific
+ * fact. Clearing the element on success would erase it.
+ */
+const REMOVED_UNREADABLE_SAY = 'We could not check whether any agents have been '
+  + 'removed. That is not the same as none having been.';
+
+function removedUnreadable() {
+  if (REMOVED_EVER_READ) return;
+  /* ⚠️ AND ONLY WHILE THE BOARD IS ON SCREEN. This is called from all three
+     failure arms ABOVE `paintRemoved`'s own `onAgentsTab()` gate, and
+     `paintRemoved` runs unawaited from `tick()` — so: on the board, a poll's
+     request in flight, switch to Settings (which clears `#removed-msg` on the
+     way out), then the request fails, and this sentence appears under Settings
+     describing a list that screen does not show. `#removed-msg` sits outside
+     every panel precisely so a repaint cannot erase it, which also means
+     nothing else takes it down. The new failure path stepped around both the
+     gate and the note that exists for it. */
+  if (!onAgentsTab()) return;
+  const msg = document.getElementById('removed-msg');
+  if (msg && !msg.textContent) msg.textContent = REMOVED_UNREADABLE_SAY;
+}
 
 async function paintRemoved() {
   const wrap = document.getElementById('removed-wrap');
@@ -6006,15 +6781,31 @@ async function paintRemoved() {
      * the same inversion `loadRemoval` fixes twenty lines up, and the `catch`
      * immediately below states the rule this broke.
      */
-    if (!res.ok) return;
+    if (!res.ok) return removedUnreadable();
     const body = await res.json().catch(() => null);
-    if (!body || !Array.isArray(body.agents)) return;
+    if (!body || !Array.isArray(body.agents)) return removedUnreadable();
     gone = body.agents;
+    REMOVED_EVER_READ = true;
+    /* ⚠️ AND TAKE THE SENTENCE DOWN. Written on a first-load failure, it was
+       never retracted: one transient /api/removed failure left "we could not
+       check" standing indefinitely UNDER a correctly painted list, or under a
+       correctly measured absence. That is the same could-not-look versus
+       is-not-there inversion this section exists to fix, pointed the other way —
+       and the test only asserted the message is not written twice, never that a
+       stale one comes down, so it passed with the defect live.
+       ⚠️ Only OUR sentence: `#removed-msg` also carries what a partial removal
+       could not reach, which is the more specific fact and must survive. */
+    {
+      const stale = document.getElementById('removed-msg');
+      if (stale && stale.textContent === REMOVED_UNREADABLE_SAY) stale.textContent = '';
+    }
   } catch {
     // ⚠️ Leave whatever is on screen alone. Emptying the list because one poll
     // failed would tell somebody their removed agents are gone, which is the
-    // opposite of what this section exists to promise.
-    return;
+    // opposite of what this section exists to promise. On the FIRST load there
+    // is nothing on screen to leave alone, and silence there says the same
+    // wrong thing -- so `removedUnreadable` speaks, once, only in that case.
+    return removedUnreadable();
   }
   // ⚠️ A newer paint has started since this one asked. Its answer is the
   // current one; ours is not, and painting it would also cache it.
@@ -6492,8 +7283,8 @@ function openCreate() {
   document.getElementById('create-msg').textContent = '';
   AVATAR_FILE = null;
   document.getElementById('create-avatar').value = '';
-  document.getElementById('genav-hint').textContent =
-    'A unique mark will be created from the name unless you add a picture.';
+  // Back to empty, not back to the explanation.
+  document.getElementById('genav-hint').textContent = '';
   INSTR_DIRTY = false; LABEL_DIRTY = false; CREATE_PROJECTS = [];
   FILLED_ROLE = null; LAST_MARK_SEED = null; PENDING_AVATAR = null;
   LAST_TYPED_NAME = 'your agent';
@@ -6512,23 +7303,33 @@ document.getElementById('new-agent').addEventListener('click', openCreate);
 // did not, so walking away mid-creation left the loop polling /api/status every
 // two seconds and repainting a hidden panel for the rest of the thirty seconds.
 document.getElementById('create-back').addEventListener('click', () => { WATCH += 1; showTab('agents'); });
-document.getElementById('create-prev').addEventListener('click', () => cstep('role'));
+/* ⚠️ NO `create-prev` LISTENER: the Back button it belonged to was removed
+   (Josh, 2026-08-19), and leaving this behind threw "Cannot read properties of
+   null" at page load, which killed every listener registered after it. A
+   removal is two changes and the second one is never where you made it. */
 document.getElementById('made-done').addEventListener('click', () => { showTab('agents'); tick(); });
 document.getElementById('made-retry').addEventListener('click', openCreate);
 
 document.getElementById('role-next').addEventListener('click', () => {
   const role = roleByKey(PICKED);
   if (!role) return;
-  // Lowercase for the sentence, except all-caps words: "Name your SEO
-  // specialist", never "Name your seo specialist" (the catalogue brought
-  // the first acronym labels this line had ever seen).
-  const spoken = (role.label || 'agent').split(' ')
-    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
-    .join(' ');
-  document.getElementById('create-meet').textContent = 'Set up your ' + spoken;
-  // Back then Next with the SAME role keeps everything the person set:
+  /* ⚠️ THE ROLE'S OWN CASE, unchanged (Josh, 2026-08-19). This line used to
+     lower-case the label so it read as a sentence ("Set up your executive
+     assistant"), with a carve-out so acronyms survived ("SEO specialist"). He
+     overruled it: the roles are named things and they keep their capitals.
+     📌 The carve-out is gone WITH the lowercasing rather than left behind: it
+     existed only to protect against that transform, so keeping it would be a
+     guard against something that no longer happens. */
+  document.getElementById('create-meet').textContent = 'Set up your ' + (role.label || 'agent');
+  // Re-entering step 2 with the SAME role keeps everything the person set:
   // edited words, chosen model, picked projects. A different role is a
   // different template and resets the form on purpose.
+  // ⚠️ THIS USED TO SAY "Back then Next", and that button was deleted on
+  // 2026-08-19, so the flow the comment described no longer exists. The
+  // preservation itself still does, reached now only by `create-go`'s
+  // defensive `cstep('role')` bail-out. Kept rather than deleted: it is the
+  // behaviour that makes that bail-out safe, and it is what a restored Back
+  // button would rely on.
   const roleChanged = FILLED_ROLE !== PICKED;
   refillDetails(roleChanged);
   if (roleChanged) loadCreateExtras();
@@ -6832,7 +7633,7 @@ document.getElementById('create-avatar').addEventListener('change', (e) => {
   AVATAR_FILE = (e.target.files && e.target.files[0]) || null;
   document.getElementById('genav-hint').textContent = AVATAR_FILE
     ? AVATAR_FILE.name + ' will be its picture.'
-    : 'A unique mark will be created from the name unless you add a picture.';
+    : '';
   // Show the picture that will actually be used: leaving the generated mark
   // frozen at however much of the name existed at pick time made the canvas
   // disagree with the hint beside it.
@@ -9856,7 +10657,10 @@ function addAgentsHtml() {
       + '" data-pick="' + esc(a.sessionName) + '">'
       + '<span class="pick-mark" aria-hidden="true">✓</span>'
       + '<span><b>' + esc(a.name) + '</b>'
-      + '<small>' + esc((a.profile && a.profile.role) || a.role || '') + '</small></span>'
+      /* The THIRD copy of the role expression, and the one furthest from the
+         card: a member row in a project and an agent card disagreed about the
+         same agent's role text. `roleLine` is the one derivation. */
+      + '<small>' + esc(roleLine(a)) + '</small></span>'
       + '</button>';
   }).join('');
 }

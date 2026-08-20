@@ -37,7 +37,7 @@ PORT=4399 \
 
 # 2. playwright, installed OUTSIDE this repo
 PW=$(mktemp -d)
-cd "$PW" && npm init -y && npm i playwright && npx playwright install chromium
+cd "$PW" && npm init -y && npm i playwright && npx playwright install chromium webkit   # webkit is REQUIRED by render-fields.js
 
 # 3. the checks
 #    ⚠️ NODE_PATH is not optional. `require` resolves from the SCRIPT's
@@ -60,6 +60,46 @@ Headless renders through SwiftShader rather than the real compositor, so a
 paint or geometry result from it is weaker evidence than a headed one.
 
 ## What each does
+
+**`render-fields.js`** measures the field and control invariants in **both
+engines and both schemes**: that every select renders our own control rather than
+the browser's, that no field is the same fill as the box it sits in, that a
+field's relationship to its container does not FLIP between light and dark, that
+the unknown-memory caption does not paint over the presence dot, and that the
+list row's unknown cell carries a word rather than a blank (a blank number cell
+reads as `0%`, and for memory `0%` means "loads of room" — the inverse of the
+truth).
+
+⚠️ **It exists because CSS had no standing guard at all.** `node --test` reads
+source, and source is exactly what lies: the `screen-pass` branch found **three
+separate rules that lost the cascade and read in the diff as if they had
+worked**. A rule that loses the cascade is identical to a rule that is not there,
+and only the element knows which one is winning.
+
+⚠️ **WebKit is not optional here.** Kosmos opens the DEFAULT browser, which on a
+stock Mac is Safari, and WebKit renders a `menulist` select differently from
+Chromium — a declared 20px radius comes back 5px. A Chromium-only run passes that
+defect.
+
+⚠️ **Dark is not optional either.** The app carries two token systems that are
+equal in light and divergent in dark; every defect of that class this project has
+shipped was invisible in light. A light-only check measures agreement between the
+two systems, not correctness of either.
+
+📌 **Its contrast function validates itself on six known pairs before printing a
+single real number**, and every check prints its denominator — "all 6 selects
+share one appearance" and "all 0 selects share one appearance" are the same
+sentence.
+
+```sh
+NODE_PATH="$PW/node_modules" node <repo>/docs/browser-checks/render-fields.js
+```
+
+⚠️ **This one is headless-only and does not read `HEADED`**, unlike the scripts
+described further down. Everything it asserts is computed style plus the relative
+geometry of two elements inside one card, both of which are layout rather than
+paint — so SwiftShader's software rendering does not weaken them. It would matter
+for a screenshot or a compositor result, and this script takes neither.
 
 **`render-first-run.js`** opens all fifteen first-run states in light and dark,
 screenshots them into the output directory you pass it (copy them to `docs/screenshots/firstrun-*.png` when they are what you want in the PR), and measures the

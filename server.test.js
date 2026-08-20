@@ -72,6 +72,31 @@ const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
+// ⚠️ AND THE CLAUDE CONFIG ROOT, which this file's own header said it did not
+// set and should. Until now /api/status read the operator's real `~/.claude` on
+// every run here -- reads only, but it also meant no test could give a fixture
+// agent a MODEL, because a model comes from a registry entry plus the transcript
+// that entry names. That is why the stopped-agent clause below had no test that
+// could exercise it: every fixture arrived with `modelName` null, so the branch
+// the clause guards was never reached.
+const CONFIG_ROOT = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-config-'));
+process.env.AGENT_WORKFORCE_CONFIG_ROOT = CONFIG_ROOT;
+
+/**
+ * Give a fixture agent a readable model: a registry entry naming a session, and
+ * the transcript that session names. `readModel` needs both — seeding only the
+ * registry leaves it null, which is one layer of vacuity further down.
+ */
+function seedTranscript(name, model) {
+  const dir = nodePath.join(CONFIG_ROOT, 'agent-registry');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(nodePath.join(dir, `${name}-discord_0.0.json`),
+    JSON.stringify({ session_id: `sess-${name}`, model }), 'utf8');
+  const projects = nodePath.join(CONFIG_ROOT, 'projects', 'seeded');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, `sess-${name}.jsonl`),
+    JSON.stringify({ message: { model, usage: { input_tokens: 1000, output_tokens: 10 } } }) + '\n', 'utf8');
+}
 // ⚠️ AND THE LAUNCH AGENTS DIRECTORY, which this file did not sandbox while it
 // now drives the create route. Both cases here are refused before anything is
 // written, so nothing has leaked — but the first happy-path route test somebody
@@ -1232,11 +1257,30 @@ test('an untied card carries no commitments and no boot-file hash of the name it
   //
   // Deleting either gate in the /api/status map fails here.
   const status = require('./engine/status');
-  status.setPaneSource(() => fleet.line({ session: 'angel', title: 'stranger' }));
+  const create = require('./engine/create');
+  // ⚠️ A REAL JOB FILE, so the planned-model assertion below is testing the
+  // GATE and not an empty sandbox. Written with the product's own writer rather
+  // than typed out here: a hand-built plist would be a second definition of a
+  // format whose reader takes an argument by position, and the two would drift
+  // apart the first time an argument moved.
+  //
+  // ⚠️ `fixtureborrowed`, NOT `angel`, and this suite's sibling records why in
+  // its own header: a fixture that names a REAL agent means the day the sandbox
+  // slips, the test overwrites that agent's boot file instead of failing. This
+  // one WRITES AND DELETES a launchd job, and `angel` is a live agent on this
+  // machine — an unset AGENT_WORKFORCE_LAUNCH would have turned the cleanup
+  // below into removing its real job. The gate under test does not care what
+  // the name is, only that a pane borrowed it.
+  fs.writeFileSync(create.plistPath('fixtureborrowed'),
+    create.plistFor('fixtureborrowed', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  assert.equal(create.plannedModelArg('fixtureborrowed'), 'claude-opus-5',
+    'the fixture job does not carry a model, so the gate assertion below would '
+    + 'pass whether or not the gate exists');
+  status.setPaneSource(() => fleet.line({ session: 'fixtureborrowed', title: 'stranger' }));
   status.setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const board = JSON.parse((await req('/api/status')).body);
-    const card = (board.agents || []).find((a) => a.sessionName === 'angel');
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixtureborrowed');
     assert.ok(card, 'the fixture did not produce the borrowed-name card');
     assert.equal(card.isNamedOurs, false, 'the fixture is not exercising the untied case');
 
@@ -1253,9 +1297,67 @@ test('an untied card carries no commitments and no boot-file hash of the name it
     assert.equal(card.instructions.editable, false,
       'the untied card offered an Edit that knownAgent 404s, which is worse than '
       + 'refusing plainly');
+
+    // ⚠️ THE FOURTH NAME-KEYED FIELD, added long after this gate was written.
+    // `plannedModelName` reads the launchd job filed under the NAME, so without
+    // the same `isNamedOurs` gate a stranger's pane reports the REAL agent's
+    // model — the identical leak the three assertions above already close. A
+    // new field does not inherit a guard by being written beside the ones that
+    // have it, and this suite has been caught by that exact shape before.
+    //
+    // The positive control is its own test below: without one, this assertion
+    // passes for an agent that simply has no job file, which is the state every
+    // agent in a fresh sandbox is in.
+    assert.equal(card.plannedModelName, null,
+      'the untied card carried the real agent’s planned model, read out of a '
+      + 'launchd job filed under the name it merely borrowed');
   } finally {
     status.setPaneSource(null);
     status.setPaneCapture(null);
+    // The sandbox is shared across this file, so the fixture job must not
+    // outlive the test that needed it.
+    fs.rmSync(create.plistPath('fixtureborrowed'), { force: true });
+  }
+});
+
+/**
+ * ⚠️ THE POSITIVE CONTROL for the planned-model gate above, and it is not
+ * optional. Every agent in a fresh sandbox has no job file, so `null` is what
+ * the gate assertion would see whether the gate existed or not. This proves the
+ * value is reachable at all — that a card entitled to it gets it.
+ *
+ * It also pins the FALLBACK ORDER, which is the behaviour Josh actually asked
+ * about: a live model always wins, and the job is consulted only when there is
+ * no live reading. The other way round would let a job file edited by hand
+ * contradict the model an agent is demonstrably running.
+ */
+test('a tied card reports the model its job will start it on, and only when no live model was read', async () => {
+  const status = require('./engine/status');
+  const create = require('./engine/create');
+  // ⚠️ A fixture name no real agent has — see the note in the gate test above.
+  // This one writes and deletes a launchd job.
+  fs.writeFileSync(create.plistPath('fixturetied'),
+    create.plistFor('fixturetied', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  // `-discord` is what ties a pane to the name: the same suffix `isNamedOurs`
+  // requires before this server will read anything filed under it.
+  status.setPaneSource(() => fleet.line({ session: 'fixturetied-discord', title: 'fixturetied' }));
+  status.setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixturetied');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.isNamedOurs, true, 'the fixture is not exercising the tied case');
+    // No transcript in the sandbox, so there is no live model: exactly Josh's
+    // freshly created agent, which reported "Unknown Model" while its own job
+    // file said otherwise.
+    assert.ok(!card.modelName, 'the fixture unexpectedly produced a live model');
+    assert.equal(card.plannedModelName, 'Claude Opus 5',
+      'a tied card did not report the model written into its own launchd job, '
+      + 'which is the whole defect this field exists to close');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    fs.rmSync(create.plistPath('fixturetied'), { force: true });
   }
 });
 
@@ -1861,6 +1963,28 @@ function pageFnSource(name) {
   return script.slice(start, end);
 }
 
+/**
+ * The source of a top-level `const NAME = { … };` table on the page.
+ *
+ * ⚠️ A sibling to `pageFnSource` rather than a second copy of the brace-matching
+ * idea: the page's shared derivations live in const OBJECTS (`CARD_ST`,
+ * `STATE_COPY`, `GLYPH`) as well as in functions, and a test that restated one
+ * of those tables would be asserting its own copy rather than the product's.
+ */
+function pageConstSource(name) {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const start = script.indexOf('const ' + name + ' = {');
+  assert.ok(start > -1, name + ' vanished from the page');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  assert.ok(end > -1, 'could not find the end of ' + name);
+  return script.slice(start, end) + ';';
+}
+
 function pageFunction(name, prelude = '') {
   // eslint-disable-next-line no-new-func
   return new Function(`${prelude}\n${pageFnSource(name)}\nreturn ${name};`)();
@@ -2374,6 +2498,12 @@ test('the board SAYS part of the fleet could not be read, in words on the screen
   // few parts keeps it by accident and this test passes without meaning to. The
   // notice has to be pinned where it actually sits: LAST, after everything else
   // the line can carry.
+  // ⚠️ THIS PROTECTION IS NOW WEAKER THAN IT READS: the summary lost its
+  // unknown-memory clause on this branch, so only two bits remain and the notice
+  // cannot be placed anywhere but last. The `unknownFullness: 3` below is inert.
+  // Left rather than deleted because the engine still computes and ships the
+  // count; if a clause for it returns, the fixture is ready and so is the
+  // protection.
   const partial = summarise({ total: 12, needsYou: 2, unknown: 1, unknownFullness: 3, unreadableLines: 1 });
   assert.match(partial.textContent, /could not read/,
     'the board shows what it managed to parse as the whole machine, with nothing '
@@ -2636,34 +2766,62 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   // The REAL modelLine, because the meta line routes through it: a stub
   // here would reconstruct the derivation this line exists to share.
-  const modelLine = pageFunction('modelLine');
+  const modelLine = pageFunction('modelLine', pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
+  // ⚠️ THE REAL roleLine TOO, and for a stronger reason than modelLine's. This
+  // line used to inline `a.profile && a.profile.role || a.role`, which was
+  // roleLine's body BEFORE roleLine learned to sentence-case a parsed role — so
+  // the card read "Archive worker" and the panel you reached by clicking it
+  // read "archive worker". A stub here would let that divergence back in
+  // silently, which is precisely what a shared derivation is for.
+  const roleLine = pageFunction('roleLine');
+  // ⚠️ And the REAL runsOnLine, for the strongest reason of the three: the meta
+  // line and the Runs on box below it must name the SAME model. This line used
+  // to call `modelLine` directly, which prefers the transcript reading, while
+  // the box prefers the job's — so a stopped agent whose two readings disagreed
+  // had two elements naming one fact differently, six lines apart.
+  const runsOnLine = pageFunction('runsOnLine',
+    pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
   const drive = (card) => {
     const el = { textContent: 'seeded' };
-    const from = script.indexOf("document.getElementById('d-meta').textContent =");
+    // `runs` is hoisted above the meta line so the meta line and the Runs on box
+    // read ONE evaluation; the slice has to start there or `runs` is undefined.
+    const metaAt = script.indexOf("document.getElementById('d-meta').textContent =");
+    const from = script.lastIndexOf('const runs = runsOnLine(a);', metaAt);
     const write = script.indexOf(".filter(Boolean).join(' · ');", from);
     const end = script.indexOf('\n', write) + 1;
     assert.ok(from > -1 && write > from && write < end,
       'the meta-line write fell outside the extracted slice');
     // eslint-disable-next-line no-new-func
-    new Function('document', 'a', 'modelLine', script.slice(from, end))(
-      { getElementById: () => el }, card, modelLine);
+    new Function('document', 'a', 'modelLine', 'roleLine', 'runsOnLine', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine, roleLine, runsOnLine);
     return el.textContent;
   };
-  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false });
+  const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false, state: 'working' });
   assert.match(surfaced, /shown by its machine name/,
     'a display name that IS the machine name carries no disclosure on the panel');
-  assert.match(surfaced, /archive worker · Claude Opus 5 · /,
+  assert.match(surfaced, /Archive worker · Claude Opus 5 · /,
     'CONTROL: the meta line lost its role and model, so the disclosure assertion floats free');
-  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true });
+  // ⚠️ CAPITAL A, and that is the assertion rather than an incidental. The
+  // fixture role is lower-case `archive worker`; the panel must render it the
+  // way the CARD does, which is sentence-cased through roleLine. Written as its
+  // own assertion so the reason survives if the control line above is ever
+  // reworded.
+  assert.match(surfaced, /^Archive worker/,
+    'the panel rendered a parsed role in different capitals from the card that '
+    + 'links to it, which is the second-definition drift roleLine exists to end');
+  const named = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: true, state: 'working' });
   assert.doesNotMatch(named, /machine name/,
     'an agent with a real display name is told it is shown by its machine name');
   // The panel reads the SAME model derivation as both board renderers: a
   // provider-less name gets the same provider-first treatment everywhere,
   // and a missing name is the card's honest "Unknown Model", not an
   // omission.
-  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true }), /r · Claude Fable 5/,
+  // `R`, not `r`: a one-character parsed role is sentence-cased like any other,
+  // which is the boundary case for a `charAt(0).toUpperCase()` on a length-1
+  // string and is worth having land here rather than nowhere.
+  assert.match(drive({ role: 'r', modelName: 'Fable 5', nameDerived: true, state: 'working' }), /R · Claude Fable 5/,
     'the panel model line diverged from the card on a provider-less name');
-  assert.match(drive({ role: 'r', modelName: null, nameDerived: true }), /r · Unknown Model/,
+  assert.match(drive({ role: 'r', modelName: null, nameDerived: true, state: 'unknown' }), /R · Unknown Model/,
     'a missing model is silently omitted on the panel while the card says Unknown Model');
 });
 
@@ -2713,9 +2871,15 @@ test('the narrow-screen menu keeps the keyboard: forward in on open, back to the
   };
   // eslint-disable-next-line no-new-func
   const api = new Function('document',
-    'let WATCH = 0; const SHOWN = [];\nconst showTab = (t) => SHOWN.push(t);\n'
+    // ⚠️ `topLevelReset` is stubbed for the same reason `showTab` is: this test
+    // is about the FOCUS behaviour of the menu, and the real one reaches
+    // projects state that has nothing to do with it. It is recorded rather than
+    // ignored so a handler that stopped calling it would still be visible here.
+    'let WATCH = 0; const SHOWN = []; const RESET = [];\n'
+    + 'const showTab = (t) => SHOWN.push(t);\n'
+    + 'const topLevelReset = (t) => RESET.push(t);\n'
     + script.slice(from, end)
-    + '\n; return { SHOWN };')(doc);
+    + '\n; return { SHOWN, RESET };')(doc);
   const chooseTab = () => tabs.listeners.click({ target: { closest: (s) => (s === '.tab' ? firstTab : null) } });
 
   // ⚠️ THE CONTROL: on a wide screen the menu is closed and the tabs are
@@ -2723,6 +2887,9 @@ test('the narrow-screen menu keeps the keyboard: forward in on open, back to the
   // that fires unconditionally would steal focus on every desktop click.
   chooseTab();
   assert.equal(api.SHOWN[0], 'agents', 'the tab click never reached showTab, so nothing below means anything');
+  assert.deepEqual(api.RESET, ['agents'],
+    'the tab click never reached topLevelReset, so a person clicking a tab '
+    + 'would land back inside whatever they had open in that section');
   assert.equal(burger.focused, 0, 'a wide-screen tab click had its focus stolen by the burger guard');
 
   // Open: aria flips, the class comes off, and focus moves INTO the menu --
@@ -2822,8 +2989,33 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     for (const html of [api.card(spoofed), api.lrow(spoofed)]) {
       assert.doesNotMatch(html, /onmouseover/, 'a non-numeric percent reached the DOM raw');
     }
-    assert.match(api.card(spoofed), /Memory unknown/,
+    // ⚠️ ANCHORED ON THE RING'S LABEL, which is what "degraded to the unknown
+    // ring" actually means. This used to read /Memory unknown/, a string that
+    // matched the ring's aria-label AND the visible badge, so it never had to
+    // choose which it was testing -- and that ambiguity is exactly why a
+    // separate assertion about the BADGE could pass with the badge deleted.
+    // The two strings are now deliberately disjoint, so an assertion has to
+    // name the one it means.
+    assert.match(api.card(spoofed), /Memory could not be read/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
+
+    // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the
+    // ring's `aria-label="… Memory unknown: we could not read how full it is."`
+    // and was satisfied by it long before a visible caption existed — so it
+    // stayed green with the whole badge deleted. The words are in the markup
+    // twice for two different audiences; only one of them is the sighted one.
+    assert.match(api.card(spoofed), /class="membadge unk"/,
+      'the visible unknown-memory caption is gone, leaving a dashed ring whose '
+      + 'meaning is stated only in an aria-label');
+    // ⚠️ And it must NOT appear when the memory IS known — otherwise the
+    // assertion above passes for a badge that is always on.
+    assert.doesNotMatch(api.card(withPct(leo, 40)), /membadge unk/,
+      'a card with a readable memory claimed its memory was unknown');
+    // ⚠️ The severity badge must be unreachable at an unknown percent. Red on
+    // that badge means "nearly full", a measured fact; an unknown must never
+    // borrow a severity it has not measured.
+    assert.doesNotMatch(api.card(spoofed), /class="membadge">/,
+      'an unknown memory rendered the nearly-full severity badge');
     assert.match(api.lrow(spoofed), /bar unknown/,
       'CONTROL: the spoofed percent did not degrade to the unknown bar');
 
@@ -6470,4 +6662,732 @@ test("the removal announcement is her sentence, on both verdict arms", () => {
   // the row; reading it later reads a detached node).
   assert.ok(handler.indexOf('const who =') < handler.indexOf('await fetch'),
     'the display name is read after the repaint could detach it');
+});
+
+test('a parsed role is sentence-cased and an acronym survives it', () => {
+  // ⚠️ TWO KINDS OF VALUE IN ONE SLOT. `profile.role` is a label chosen off a
+  // menu and carries its own capitals; `a.role` is a line parsed out of the
+  // agent's instruction file, which is arbitrary lower-case prose. Measured
+  // when this landed: 14 agents on the dev machine, ZERO with a profile role,
+  // all 14 falling back. So the fallback is the board, not an edge case.
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const at = raw.indexOf('function roleLine(a)');
+  assert.ok(at > -1, 'roleLine moved; re-point this test');
+  // eslint-disable-next-line no-new-func
+  const roleLine = new Function(raw.slice(at, raw.indexOf('\n}\n', at) + 3) + '\nreturn roleLine;')();
+
+  assert.equal(roleLine({ role: 'web-properties worker' }), 'Web-properties worker');
+  assert.equal(roleLine({ role: 'executive assistant' }), 'Executive assistant');
+  // ⚠️ THE ACRONYM IS THE REASON THIS IS NOT TITLE CASE. Title case turns
+  // "SEO specialist" into "Seo Specialist", which is the exact problem whose
+  // carve-out this branch deleted from the create heading; a transform here
+  // would bring that carve-out back with it.
+  assert.equal(roleLine({ role: 'SEO specialist' }), 'SEO specialist');
+  // A chosen label is never touched: it already carries its own capitals.
+  assert.equal(roleLine({ profile: { role: 'Executive Assistant' }, role: 'prose' }), 'Executive Assistant');
+  assert.equal(roleLine({}), '', 'and nothing invents a role for an agent with none');
+});
+
+/**
+ * The Runs on line's three states, and the one the server test cannot reach.
+ *
+ * ⚠️ THIS EXISTS BECAUSE A MUTATION SURVIVED. Letting the server consult the
+ * job file even when a live model was read passed every test in this suite: the
+ * positive control over there runs with NO live model, so it never exercises
+ * which of the two wins. The precedence is a claim the code comments make, and
+ * a claim nothing can fail is not a tested one.
+ *
+ * It is pinned HERE rather than on the route because this is where it becomes
+ * visible: whatever the payload carries, what a person reads is what this
+ * function returns.
+ */
+test('the Runs on line says which tense it is in, and a live model always wins', () => {
+  const tables = pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const runsOnLine = pageFunction('runsOnLine', tables);
+  // The REAL cardStOf, so the coherence check below compares the product's two
+  // answers rather than one product answer and one restatement.
+  const cardStOf = pageFunction('cardStOf', pageConstSource('CARD_ST'));
+
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Sonnet 5', state: 'working' }),
+    { lead: 'Right now: ', name: 'Claude Sonnet 5' },
+    'a running agent stopped saying it is running');
+
+  // ⚠️ THE THIRD FALSE TENSE, and the one the suite could not see. `readModel`
+  // reads a TRANSCRIPT, not a process, so a STOPPED agent that has ever run
+  // still has a model — and this said "Right now: Claude Opus 5" beside a card
+  // badge reading "Not running". Every earlier version of this test passed
+  // `modelName` with `state` ABSENT, which is a state the product never
+  // produces, so the case was invisible rather than passing.
+  // ⚠️ A STOPPED AGENT'S FUTURE COMES FROM ITS JOB, NOT ITS TRANSCRIPT. The
+  // transcript says what it RAN as, in a session that has ended; only the
+  // launchd job says what it will START on, and the two can differ.
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5', state: 'stopped' }),
+    { lead: 'Will start on ', name: 'Claude Opus 5' },
+    'a stopped agent was told it will start on the model it last RAN on, rather '
+    + 'than the one its job actually carries');
+
+  // ⚠️ AND WHEN THE JOB SAYS NOTHING, NO FUTURE IS CLAIMED. Every agent created
+  // before the model picker existed has a job with no --model argument, so
+  // `plannedModelArg` answers null = "we do not know". Stating a specific
+  // future model there would invent one out of a past reading.
+  assert.deepEqual(runsOnLine({ modelName: 'Claude Opus 5', state: 'stopped' }),
+    { lead: '', name: 'Claude Opus 5' },
+    'a stopped agent whose job carries no model still made a future-tense claim');
+
+  // ⚠️ THE TENSE FOLLOWS `pres`, WHICH HAS THREE VALUES, NOT TWO. Every state
+  // whose presence reads `on` keeps the present tense when a live model was
+  // read; `unknown` reads `unsure` and gets NO tense, because a panel saying
+  // "Right now: Claude Opus 5" beside a badge reading "Can't tell" is the same
+  // contradiction as the three this function already produced.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited']) {
+    assert.equal(runsOnLine({ modelName: 'Claude Opus 5', state }).lead, 'Right now: ',
+      `a ${state} agent with a readable model stopped saying it is running`);
+  }
+  assert.equal(runsOnLine({ modelName: 'Claude Opus 5', state: 'unknown' }).lead, '',
+    'a pane we could not classify was described in the present tense anyway, '
+    + 'contradicting the badge beside it');
+
+  // ⚠️ COHERENCE: the lead and the badge must never disagree, because they are
+  // one fact. Driven across EVERY state the engine can emit plus an
+  // unrecognised one, asserting the pairing rather than each half. This is the
+  // check that would have caught all three of this function's false tenses.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'stopped', 'unknown', 'martian']) {
+    // Carries BOTH readings, so the `off` arm has a job to quote.
+    const lead = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Opus 5', state }).lead;
+    const pres = cardStOf({ state }).pres;
+    const want = pres === 'on' ? 'Right now: ' : pres === 'off' ? 'Will start on ' : '';
+    assert.equal(lead, want,
+      `the Runs on lead and the presence dot disagree for state "${state}": the `
+      + `dot says ${pres} and the line says ${JSON.stringify(lead)}`);
+  }
+
+  assert.deepEqual(runsOnLine({ modelName: null, plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
+    { lead: 'Will start on ', name: 'Claude Sonnet 5' },
+    'a created-but-never-run agent did not say what it will start on, which is '
+    + 'the whole defect Josh reported');
+
+  // ⚠️ THE MIRROR OF THAT BUG, and the reason the future tense is keyed on
+  // `state` rather than on "we could not read a model". `readModel` returns
+  // null whenever there is no transcript, and an agent in its FIRST, CURRENTLY
+  // ACTIVE session has none yet. Gated on `!modelName`, a running agent was
+  // told "Will start on Claude Opus 5" while it was running on it.
+  for (const state of ['working', 'idle', 'needs_you', 'rate_limited', 'unknown']) {
+    const r = runsOnLine({ modelName: null, plannedModelName: 'Claude Opus 5', state });
+    assert.equal(r.lead, '',
+      `a ${state} agent was described in the future tense; it is running now, we `
+      + 'just could not read what on');
+    assert.equal(r.name, 'Claude Opus 5',
+      'the name we do hold was dropped along with the tense');
+  }
+
+  // ⚠️ NO LEAD, not "Right now". Nothing is running in this case either, so a
+  // present tense is exactly as false here as it was on a planned model.
+  assert.deepEqual(runsOnLine({ state: 'unknown' }), { lead: '', name: 'Unknown Model' },
+    'an unknowable model asserted a present tense about an agent that may '
+    + 'never have started');
+
+  // ⚠️ THE CONTROL THE ROUTE CANNOT PROVIDE. A job file can be edited by hand
+  // after an agent starts, so the two sources can disagree; the live reading is
+  // what the agent IS running and must win. Both wrong answers are named, so
+  // this cannot pass by returning the right string for the wrong reason.
+  // ⚠️ `state` ON EVERY FIXTURE from here down. A card carrying a model with no
+  // state is a shape the product never emits, and fixtures that cannot occur
+  // are how all three of this function's false tenses stayed invisible.
+  const both = runsOnLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5', state: 'working' });
+  assert.equal(both.name, 'Claude Opus 5',
+    'the job file overruled the model the agent is demonstrably running');
+  assert.equal(both.lead, 'Right now: ',
+    'a running agent was described in the future tense');
+
+  // The provider prefix reaches the planned name too, or the same model reads
+  // two different ways depending on which source answered.
+  assert.equal(runsOnLine({ plannedModelName: 'Opus 5', state: 'stopped' }).name, 'Claude Opus 5');
+  assert.equal(runsOnLine({ plannedModelName: 'Claude Opus 5', state: 'stopped' }).name, 'Claude Opus 5',
+    'the guard against "Claude Claude" did not reach the planned branch');
+});
+
+/**
+ * A top-level tab click lands at the top of that section.
+ *
+ * Josh: "if I'm somewhere on some other page and I hit a top-level page (like
+ * Projects), it'll jump me back inside of whatever project I was previously in
+ * … If I click Agents it should take me back to the main Agents top-level
+ * page. Same with Projects."
+ *
+ * ⚠️ THE CONTROL IS THE OTHER HALF OF THE FEATURE, not decoration. `showTab`
+ * restores `PJ_CURRENT` on purpose, because the "which projects is this agent
+ * on" flow calls `showTab('projects')` in order to land INSIDE one. A reset
+ * that fired on every arrival would break that flow while every assertion about
+ * the tab click still passed.
+ */
+test('a Projects tab click forgets the project you were in, and nothing else does', () => {
+  const make = (current) => new Function(
+    `let PJ_CURRENT = ${JSON.stringify(current)}; let closed = 0;\n`
+    + 'function pjCloseConfirm() { closed += 1; }\n'
+    + pageFnSource('topLevelReset')
+    + '\nreturn { topLevelReset, get current() { return PJ_CURRENT; },'
+    + ' get closed() { return closed; } };')();
+
+  const proj = make('proj-7');
+  proj.topLevelReset('projects');
+  assert.equal(proj.current, null,
+    'clicking Projects left you inside the project you last opened');
+  assert.equal(proj.closed, 1,
+    'arriving by the tab left a confirmation open that arriving by Back closes');
+
+  // ⚠️ EVERY OTHER TAB LEAVES IT ALONE. Without this, `topLevelReset` could
+  // clear unconditionally and the test above would still pass, taking the
+  // agent-to-project flow with it.
+  for (const tab of ['agents', 'settings', 'detail', 'create']) {
+    const other = make('proj-7');
+    other.topLevelReset(tab);
+    assert.equal(other.current, 'proj-7',
+      `the ${tab} tab cleared the project the agent-to-project flow needs kept`);
+    assert.equal(other.closed, 0, `the ${tab} tab closed a projects confirmation`);
+  }
+});
+
+/**
+ * ⚠️ AND THE WIRING, because the function above is inert if nothing calls it.
+ * A passing unit test on a function no handler invokes is the shape that let a
+ * removed Back button take every listener after it down with it earlier today.
+ */
+test('the tab click handler actually calls the top-level reset, before showTab', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script.indexOf("getElementById('tabs').addEventListener");
+  assert.ok(at > -1, 'the tab click handler vanished from the page');
+  const body = script.slice(at, at + 1600);
+  const reset = body.indexOf('topLevelReset(btn.dataset.tab)');
+  const show = body.indexOf('showTab(btn.dataset.tab)');
+  assert.ok(reset > -1, 'the tab handler no longer resets to the top of the section');
+  assert.ok(show > -1, 'the tab handler no longer changes tab');
+  assert.ok(reset < show,
+    'the reset runs AFTER showTab, so showTab still painted the old project '
+    + 'before it was forgotten');
+});
+
+/**
+ * The compact surfaces name the model with no tense attached.
+ *
+ * ⚠️ THE PAIR THAT MATTERS: `modelLine` must accept a planned model, and
+ * `runsOnLine` must still put the right LEAD on it. Testing either alone lets
+ * the other regress — a modelLine that ignored the planned name would leave
+ * three cards saying "Unknown Model" about an agent whose model we hold, and a
+ * runsOnLine reading modelLine's fallback directly would print "Right now"
+ * about an agent that has never started.
+ */
+test('a card names a planned model plainly, while the detail panel keeps its tense', () => {
+  const tbl = pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const modelLine = pageFunction('modelLine', tbl);
+  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine') + '\n' + tbl);
+
+  assert.equal(modelLine({ plannedModelName: 'Claude Sonnet 5' }), 'Claude Sonnet 5',
+    'a card said "Unknown Model" about an agent whose model is in its own job file');
+  assert.equal(modelLine({ modelName: 'Claude Opus 5', plannedModelName: 'Claude Haiku 4.5' }),
+    'Claude Opus 5', 'a job file overruled the model the agent is running');
+  assert.equal(modelLine({}), 'Unknown Model',
+    'a genuinely unknown model stopped saying so');
+  assert.equal(modelLine({ plannedModelName: 'Opus 5' }), 'Claude Opus 5',
+    'the provider prefix did not reach the planned name');
+
+  // ⚠️ The detail panel must NOT inherit the flattening: same card, and it
+  // still has to say which tense it is in.
+  assert.deepEqual(runsOnLine({ plannedModelName: 'Claude Sonnet 5', state: 'stopped' }),
+    { lead: 'Will start on ', name: 'Claude Sonnet 5' },
+    'the detail panel lost its tense when modelLine gained the fallback');
+});
+
+/**
+ * The detail page's box order, pinned.
+ *
+ * ⚠️ THIS IS A GUARD, NOT A RE-VERIFICATION. The order was checked by rendering
+ * the page and sorting the boxes by geometry, which proved it correct on one
+ * afternoon and proves nothing afterwards: a verification is a timestamp. The
+ * next person to insert a `.dbox` shifts every pair below it silently, and this
+ * exact order is the thing Josh reported as wrong.
+ *
+ * ⚠️ SOURCE ORDER IS THE RIGHT THING TO PIN HERE even though it is NOT the
+ * reading order. `.dgrid` is two columns, so the rendered sequence is the source
+ * sequence read in pairs — a stable function of it. Pinning source order pins
+ * reading order for as long as the grid stays two-wide, and a change to the
+ * column count is exactly the kind of change that should have to come here and
+ * say so.
+ */
+test('the agent detail boxes stay in the order Josh asked for', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const panel = raw.slice(raw.indexOf('<section class="detail" id="panel-detail"'));
+  const grid = panel.slice(panel.indexOf('<div class="dgrid">'));
+  const labels = [...grid.matchAll(/<section class="dbox"[^>]*>[\s\S]*?<(?:h3 class="dlab"[^>]*|label class="flabel"[^>]*)>([^<]+)</g)]
+    .map((m) => m[1].trim());
+  assert.deepEqual(labels.slice(0, 4), ['Runs on', 'Memory', 'Conversation', 'Instructions'],
+    'the detail boxes moved. Two columns means these four render as '
+    + 'Runs on | Memory then Conversation | Instructions, which is what Josh '
+    + 'asked for and what the pack draws');
+  // ⚠️ The control: if the extraction silently matched nothing, slice(0,4) would
+  // be [] and deepEqual against a 4-element array would fail — but if it matched
+  // the WRONG four (a different grid on the page) it would not. Anchor it.
+  assert.ok(labels.length >= 5,
+    'the box extraction found fewer sections than the panel has, so it is '
+    + 'reading the wrong markup and the assertion above is meaningless');
+});
+
+/**
+ * The detail header's badge is the CARD's badge, and the task sits beside it.
+ *
+ * ⚠️ THIS HAD NO TEST AT ALL. The stated point of the change is that the panel
+ * reads `cardStOf` / `GLYPH` / `STATE_COPY` instead of keeping a second copy of
+ * them — and a regression to the old `copy.label + (a.task ? ': ' + a.task : '')`
+ * passed all 919 other tests, because nothing looked at this.
+ *
+ * ⚠️ The three tables are read OUT OF THE PAGE rather than restated here. A stub
+ * would let the panel and the card drift apart, which is the exact thing under
+ * test: restating them would make this pass while they disagreed on screen.
+ */
+test('the detail badge reads the card’s own derivations, and the task is a separate element', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  const tablesFrom = script.indexOf('const STATE_COPY = {');
+  const cardStAt = script.indexOf('function cardStOf(a)');
+  assert.ok(tablesFrom > -1 && cardStAt > tablesFrom, 'the shared state tables moved');
+  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1);
+
+  const dmAt = script.indexOf('  const dm = cardStOf(a);');
+  assert.ok(dmAt > -1,
+    'the detail badge no longer derives its state from cardStOf, so the panel '
+    + 'and the card can disagree about what an agent is doing');
+  // `copy` is declared just above the badge lines. Searched BACKWARDS from the
+  // badge rather than forwards from the top: `card()` declares a `copy` of its
+  // own earlier in the file, and a forward search finds that one.
+  const from = script.lastIndexOf('  const copy = STATE_COPY[a.state]', dmAt);
+  assert.ok(from > -1 && from < dmAt, 'the state copy lookup moved away from the badge');
+  const TAIL = 'dtask.hidden = !dtask.textContent;';
+  const end = script.indexOf(TAIL, from);
+  assert.ok(end > from, 'the detail task line vanished');
+  const body = script.slice(from, end + TAIL.length);
+
+  const els = {};
+  const doc = {
+    getElementById: (id) => {
+      if (!els[id]) els[id] = { className: '', innerHTML: '', textContent: '', hidden: false };
+      return els[id];
+    },
+  };
+  const drive = (card) => {
+    for (const k of Object.keys(els)) delete els[k];
+    // eslint-disable-next-line no-new-func
+    new Function('document', 'a', 'esc', `${tables}\n${body}`)(doc, card, (x) => String(x));
+    return { state: els['d-state'], task: els['d-task'] };
+  };
+
+  const needs = drive({ state: 'needs_you', task: 'Mac' });
+  assert.match(needs.state.className, /\bastate\b/,
+    'the detail state is not rendered as the card badge');
+  assert.match(needs.state.className, /\bst-attn\b/,
+    'the badge class does not track the state, so its colour cannot');
+  assert.match(needs.state.innerHTML, /Needs you/, 'the badge lost its word');
+  assert.equal(needs.task.textContent, 'Mac', 'the task did not reach its own element');
+  assert.equal(needs.task.hidden, false, 'a real task was hidden');
+  // ⚠️ The regression this change exists to prevent: the badge must NOT swallow
+  // the task. "Needs you: Mac" as one string is what Josh marked up.
+  assert.doesNotMatch(needs.state.innerHTML, /Mac/,
+    'the badge swallowed the task again, so the state and the thing it is about '
+    + 'are one unstyleable run');
+
+  const working = drive({ state: 'working', task: 'Building the campaign calendar' });
+  assert.match(working.state.className, /\bst-working\b/);
+  assert.match(working.state.innerHTML, /Working/);
+
+  // ⚠️ CONTROL: no task means no line, not an empty one. Without this, a task
+  // element that never hides would satisfy every assertion above.
+  const idle = drive({ state: 'idle' });
+  assert.match(idle.state.className, /\bst-idle\b/);
+  assert.equal(idle.task.hidden, true, 'an agent with no task showed an empty task line');
+
+  // ⚠️ An unrecognised state must still draw a badge, by the same rule the card
+  // holds: cardStOf maps anything it does not know to the unknown treatment.
+  const martian = drive({ state: 'martian' });
+  assert.match(martian.state.className, /\bst-unknown\b/,
+    'an unrecognised state drew no badge treatment at all');
+});
+
+/**
+ * "No agents have been removed" and "we could not ask" are different screens.
+ *
+ * ⚠️ Every failure arm of `paintRemoved` returns without touching the section,
+ * which is correct on a POLL — emptying a drawn list because one request failed
+ * would tell somebody their removed agents are gone. But `#removed-wrap` starts
+ * `hidden` in the markup, so on the FIRST load "leave what is on screen alone"
+ * leaves nothing on screen, and the honest fix for the poll was the same
+ * inversion one moment earlier.
+ *
+ * ⚠️ This section is the way back from a removal, and the Remove confirmation is
+ * deliberately light BECAUSE removal is recoverable. A way back that can be
+ * invisible for a reason other than "there is nothing to go back to" turns that
+ * confirmation into a trapdoor.
+ */
+test('a removed-agents section that could not be read says so, and only before it has ever been read', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // The sentence is read out of the page, not restated here: the retraction
+  // below compares against it exactly, and a test carrying its own copy could
+  // not catch the two drifting apart.
+  const sayAt = script.indexOf('const REMOVED_UNREADABLE_SAY');
+  assert.ok(sayAt > -1, 'the could-not-check sentence lost its sentinel');
+  const saySrc = script.slice(sayAt, script.indexOf(';', script.indexOf("having been.'", sayAt)) + 1);
+  const src = saySrc + '\n' + pageFnSource('removedUnreadable');
+  const make = (everRead, existing, onBoard = true) => {
+    const msg = { textContent: existing || '' };
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('document', 'REMOVED_EVER_READ', 'onAgentsTab',
+      src + '\nreturn removedUnreadable;')({ getElementById: () => msg }, everRead, () => onBoard);
+    fn();
+    return msg.textContent;
+  };
+  // eslint-disable-next-line no-new-func
+  const SAY = new Function(saySrc + '\nreturn REMOVED_UNREADABLE_SAY;')();
+
+  assert.match(make(false, ''), /could not check/,
+    'a first load that could not reach /api/removed showed the same empty screen '
+    + 'as a machine with nothing removed');
+  assert.match(make(false, ''), /not the same as none having been/,
+    'the sentence states the absence without distinguishing the two causes');
+
+  // ⚠️ CONTROL ONE: once an answer has arrived, absence is measured, not
+  // unknown — and a later failed poll must not overwrite a correct list.
+  assert.equal(make(true, ''), '',
+    'a failed poll spoke over a section that had already been read successfully');
+
+  // ⚠️ CONTROL TWO: it must not clobber a message already on that surface.
+  // `#removed-msg` is where a partial removal reports what it could not reach,
+  // and that is the more specific fact.
+  assert.equal(make(false, 'Kosmos could not stop it.'), 'Kosmos could not stop it.',
+    'the could-not-check line overwrote a more specific message about a removal');
+
+  // ⚠️ CONTROL THREE: not while the person is somewhere else. This is called
+  // from paintRemoved's failure arms BEFORE its own onAgentsTab() gate, and
+  // paintRemoved runs unawaited — so a request in flight when someone switches
+  // to Settings would otherwise write this sentence onto a screen that shows no
+  // removed-agents list, on the one element that lives outside every panel and
+  // is only cleared on the way OUT of the board.
+  assert.equal(make(false, '', false), '',
+    'the could-not-check line leaked onto another tab, describing a list that '
+    + 'screen does not show');
+
+  /**
+   * ⚠️ AND IT MUST COME DOWN when a read finally succeeds. It was written on a
+   * first-load failure and never retracted, so one transient failure left "we
+   * could not check" standing indefinitely UNDER a correctly painted list — the
+   * same could-not-look versus is-not-there inversion, pointed the other way.
+   * ⚠️ The previous test asserted only that the sentence is not written TWICE.
+   * That passes with the defect live: silence on the second call is not the same
+   * as taking the first one down.
+   */
+  const script2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8')
+    .match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script2.indexOf('REMOVED_EVER_READ = true;');
+  assert.ok(at > -1, 'the success path lost its ever-read flag');
+  const retraction = script2.slice(at, at + 900);
+  assert.match(retraction, /removed-msg/,
+    'the success path never touches #removed-msg, so a stale "we could not '
+    + 'check" sentence outlives the answer that disproves it');
+  assert.match(retraction, /REMOVED_UNREADABLE_SAY/,
+    'the retraction does not compare against the sentinel, so it either clears '
+    + 'the wrong message or fails to recognise its own');
+
+  // ⚠️ AND ONLY OURS. #removed-msg also carries what a partial removal could not
+  // reach, which is the more specific fact and must survive a later success.
+  const clearOurs = new Function('text', 'SAY',
+    'const stale = { textContent: text };'
+    + 'if (stale && stale.textContent === SAY) stale.textContent = "";'
+    + 'return stale.textContent;');
+  assert.equal(clearOurs(SAY, SAY), '', 'the retraction did not recognise its own sentence');
+  assert.equal(clearOurs('Kosmos could not stop it.', SAY), 'Kosmos could not stop it.',
+    'the retraction cleared a partial-removal message that had nothing to do with it');
+});
+
+/**
+ * No declaration sits outside a selector.
+ *
+ * ⚠️ A REAL BLOCKER THIS BRANCH SHIPPED AND ALMOST MERGED. Inserting an
+ * `@media` block into the middle of `#firstrun {}` left `background:
+ * var(--k-bg)` at the media block's TOP LEVEL — a parse error, silently
+ * discarded, so the first screen anyone sees lost its background and fell
+ * through to the page-surround colour.
+ *
+ * ⚠️ IT IS INVISIBLE TO EVERY OTHER INSTRUMENT HERE. The declaration is still
+ * present in the file, so a text search finds it; the diff shows a plausible
+ * brace move; the render check walks up from a field and stops at the first
+ * opaque ancestor, never reaching the element that lost its paint. Only a
+ * brace-aware scan sees it, and it is nine lines.
+ */
+test('every CSS declaration in the page sits inside a selector', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const style = raw.slice(raw.indexOf('<style>') + 7, raw.indexOf('</style>'));
+
+  /**
+   * ⚠️ ONE WALK, USED BY BOTH THE FILE SCAN AND THE CONTROL. The first version
+   * hand-copied the algorithm into its control, so the control could not see the
+   * scanner drift — and it did drift: the `@media` branch returned BEFORE
+   * counting the braces on its own line, so every single-line
+   * `@media (…) { .x { … } }` inflated the depth permanently. This stylesheet
+   * has six of them, the walk ended at depth 6 instead of 0, and the flag
+   * condition was unreachable after line 453. The guard written for the
+   * orphaned-declaration blocker was silent over four fifths of the file,
+   * including the region the blocker was in.
+   *
+   * A check containing a copy of the thing it checks cannot fail.
+   */
+  const scan = (css) => {
+    const src = css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''));
+    let depth = 0;
+    let atRuleDepth = -1;
+    const stray = [];
+    src.split('\n').forEach((line, i) => {
+      const t = line.trim();
+      if (!t) return;
+      const opens = (t.match(/\{/g) || []).length;
+      const closes = (t.match(/\}/g) || []).length;
+      if (/^@[a-z-]+[^{]*\{/.test(t)) {
+        atRuleDepth = depth;
+        depth += opens - closes;      // ⚠️ NOT `depth += 1; return;`
+        if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
+        return;
+      }
+      // A declaration is `prop: value` with no brace on the line. Custom
+      // properties contain digits (`--label-2`), which an earlier `[-a-z]+`
+      // filter silently rejected — most of this stylesheet.
+      if (!opens && !closes && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t)) {
+        if (depth <= Math.max(atRuleDepth + 1, 0) && depth <= 1) {
+          stray.push(`${i + 1}: ${t.slice(0, 60)}`);
+        }
+      }
+      depth += opens - closes;
+      if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
+    });
+    return { stray, depth };
+  };
+
+  const real = scan(style);
+  // ⚠️ THE WALK MUST BALANCE. A drifting depth is how the first version went
+  // silent, and it reported nothing while doing so — so the imbalance is
+  // asserted directly rather than inferred from an empty result.
+  assert.equal(real.depth, 0,
+    `the brace walk ended at depth ${real.depth}, so it lost track of nesting and `
+    + 'every verdict below it is over the wrong scope');
+  assert.deepEqual(real.stray, [],
+    'declaration(s) outside any selector — the browser discards these silently, '
+    + 'so the rule they belonged to lost that property:\n  ' + real.stray.join('\n  '));
+
+  // ⚠️ THE CONTROL, run through THE SAME `scan`. Two orphans: one ordinary
+  // property and one custom property carrying a digit. And a single-line
+  // `@media` above them, which is what defeated the first version.
+  const broken = [
+    '@media (max-width: 720px) { html { scroll-padding-top: 165px; } }',
+    '#x {',
+    '  color: red;',
+    '}',
+    '@media (prefers-color-scheme: dark) {',
+    '  #x { --a: 1; }',
+    '  background: var(--k-bg);',
+    '  --label-2: #4a4f57;',
+    '}',
+  ].join('\n');
+  const ctl = scan(broken);
+  assert.equal(ctl.depth, 0, 'the control fixture is unbalanced, so it tests the wrong thing');
+  assert.deepEqual(ctl.stray.map((x) => x.split(': ').slice(1).join(': ')),
+    ['background: var(--k-bg);', '--label-2: #4a4f57;'],
+    'the scanner cannot see the defect it exists for, so its silence above '
+    + 'proves nothing. If neither is found, a single-line @media has broken the '
+    + 'depth count; if only the first, the property filter rejects custom '
+    + 'properties containing a digit.');
+});
+
+
+/**
+ * Every surface names the SAME model for one agent.
+ *
+ * ⚠️ THIS DISAGREEMENT HAS NOW BEEN OPENED TWICE BY CLOSING IT ONCE. The detail
+ * meta line and the Runs on box disagreed; routing the meta line through
+ * `runsOnLine` fixed that and opened a CARD-versus-meta gap instead, because
+ * `card()` and `lrow()` still preferred the transcript while the panel preferred
+ * the job. The card said one model and the page you reached by clicking it said
+ * another.
+ *
+ * ⚠️ The fixture carries BOTH readings, disagreeing, for a STOPPED agent —
+ * exactly the state the server now populates on purpose. Every earlier test of
+ * these functions passed one reading or the other, so no fixture could ever
+ * expose a preference difference between them.
+ */
+test('the card, the list row and the detail meta line never name two different models', () => {
+  const tables = pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const modelLine = pageFunction('modelLine', pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
+  const runsOnLine = pageFunction('runsOnLine', tables);
+
+  // A stopped agent whose transcript and job disagree: it RAN as Haiku, its job
+  // will START it on Opus.
+  const stopped = { state: 'stopped', modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+  assert.equal(modelLine(stopped), 'Claude Opus 5',
+    'the card and list row name the model a stopped agent last RAN as, while the '
+    + 'detail page names the one its job will start it on');
+  assert.equal(runsOnLine(stopped).name, 'Claude Opus 5');
+  assert.equal(modelLine(stopped), runsOnLine(stopped).name,
+    'two surfaces name one agent’s model differently');
+
+  // ⚠️ CONTROL: a RUNNING agent still prefers the live reading everywhere. If
+  // the job simply won always, the assertions above would pass and the product
+  // would report a stale job value over a measured one.
+  const running = { state: 'working', modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+  assert.equal(modelLine(running), 'Claude Haiku 4.5',
+    'a running agent was described by its job file instead of what it is running');
+  assert.equal(runsOnLine(running).name, 'Claude Haiku 4.5');
+
+  // ⚠️ CONTROL: a stopped agent whose job says nothing keeps the transcript
+  // reading rather than falling to "Unknown Model".
+  const noJob = { state: 'stopped', modelName: 'Claude Haiku 4.5' };
+  assert.equal(modelLine(noJob), 'Claude Haiku 4.5');
+  assert.equal(runsOnLine(noJob).name, 'Claude Haiku 4.5');
+
+  /**
+   * ⚠️ EVERY STATE, not just `stopped`. Both functions answer "is this agent
+   * running" and they used to answer it two ways — `modelLine` from the literal
+   * `state === 'stopped'`, `runsOnLine` from `cardStOf(a).pres`. They agreed
+   * only because `stopped` is currently the single CARD_ST entry mapping to
+   * `pres: 'off'`; adding another would have split them, and a test that
+   * exercises one state cannot see that.
+   */
+  const CARD_ST = new Function(pageConstSource('CARD_ST') + '\nreturn CARD_ST;')();
+  for (const state of [...Object.keys(CARD_ST), 'martian']) {
+    const both = { state, modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+    assert.equal(modelLine(both), runsOnLine(both).name,
+      `the card and the detail panel name different models for a "${state}" agent`);
+  }
+});
+
+/**
+ * No visible caption is contained in a hidden label beside it.
+ *
+ * ⚠️ THE PROPERTY THAT MAKES EVERY OTHER ASSERTION IN THIS AREA MEAN ANYTHING.
+ * The unknown-memory badge said "Memory unknown" while the ring's `aria-label`
+ * began "Memory unknown: …", so a test asserting the visible badge was satisfied
+ * by the hidden label and stayed green with the badge deleted — and the browser
+ * check passed a blank list cell for the same reason. The words were in the
+ * markup twice for two audiences, and writing the short one as a PREFIX of the
+ * long one is the most natural thing to do and the one thing that makes them
+ * indistinguishable.
+ *
+ * ⚠️ CASE-INSENSITIVE ON PURPOSE. "Unknown" is not inside "Memory unknown" only
+ * if you compare case-sensitively, and instruments get written both ways without
+ * anyone deciding to. The strings are chosen to survive the stricter test so
+ * this can be the obvious comparison rather than a subtle one.
+ */
+test('a visible caption is never a substring of the hidden text beside it', () => {
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+  // The pairs this rule exists for: a caption a person reads, and the hidden
+  // sentence covering the same fact for a screen reader.
+  const VISIBLE = ['Unknown'];
+  const hidden = [];
+  for (const m of script.matchAll(/aria-label="([^"]*)"/g)) hidden.push(m[1]);
+  for (const m of script.matchAll(/class="vh"[^>]*>([^<]*)</g)) hidden.push(m[1]);
+  for (const m of raw.matchAll(/class="vh"[^>]*>([^<]*)</g)) hidden.push(m[1]);
+  // Template placeholders are not text a person or a screen reader ever hears.
+  const real = hidden.map((h) => h.replace(/\$\{[^}]*\}/g, '').trim()).filter(Boolean);
+
+  assert.ok(real.length >= 5,
+    `only ${real.length} hidden strings found — the extraction is not reading the `
+    + 'page, so the assertion below passes over almost nothing');
+
+  const clashes = [];
+  for (const v of VISIBLE) {
+    for (const h of real) {
+      if (h.toLowerCase().includes(v.toLowerCase())) clashes.push(`"${v}" is inside "${h}"`);
+    }
+  }
+  assert.deepEqual(clashes, [],
+    'a visible caption also appears in hidden text, so any check asserting the '
+    + 'visible one can be satisfied by the hidden one and will pass with the '
+    + 'visible element deleted:\n  ' + clashes.join('\n  '));
+
+  // ⚠️ THE CONTROL. Fed the exact shape of the original defect, the comparison
+  // must report it — otherwise the empty result above proves only that the
+  // matcher never matches.
+  const wouldClash = ['Memory unknown: we could not read how full it is.']
+    .filter((h) => h.toLowerCase().includes('memory unknown'.toLowerCase()));
+  assert.equal(wouldClash.length, 1,
+    'the substring comparison cannot detect the defect it exists for');
+});
+
+/**
+ * The client and the server answer "is this agent running" separately, and the
+ * only thing keeping them in step is that `stopped` is the single `CARD_ST`
+ * entry mapping to `pres: 'off'`.
+ *
+ * ⚠️ THEY CANNOT SHARE THE DERIVATION: `web/index.html` cannot import `STATE`
+ * and `server.js` cannot import `CARD_ST`. So the coincidence is pinned here.
+ * Add a second state mapping to `off` and the page would prefer the job's model
+ * for it while `/api/status` never populated `plannedModelName`, so "Will start
+ * on …" would silently stop appearing — a degradation with nothing to catch it.
+ */
+test('exactly one agent state means "not running", and both sides name the same one', () => {
+  const CARD_ST = new Function(pageConstSource('CARD_ST') + '\nreturn CARD_ST;')();
+  const off = Object.entries(CARD_ST).filter(([, v]) => v.pres === 'off').map(([k]) => k);
+  assert.deepEqual(off, ['stopped'],
+    'the client now treats ' + JSON.stringify(off) + ' as not-running, but '
+    + 'server.js gates plannedModelName on `a.state !== STATE.STOPPED` alone. '
+    + 'Either give the server the same set or share one derivation — as it '
+    + 'stands the new state gets no plannedModelName and its "Will start on" '
+    + 'line silently disappears');
+
+  const status = require('./engine/status');
+  assert.equal(status.STATE.STOPPED, 'stopped',
+    'the server’s STATE.STOPPED and the client’s CARD_ST key have drifted apart');
+});
+
+/**
+ * ⚠️ THE STOPPED-AGENT CLAUSE HAD NO ROUTE-LEVEL TEST. Both existing
+ * `/api/status` tests run with no `modelName`, so the branch that says "a
+ * stopped agent needs this EVEN THOUGH it has a modelName" was asserted only by
+ * its own comment — and a mutation deleting `&& a.state !== STATE.STOPPED`
+ * passed the whole suite.
+ */
+test('a stopped agent with a readable model still gets the model its job will start it on', async () => {
+  const status = require('./engine/status');
+  const create = require('./engine/create');
+  // The JOB says Opus; the TRANSCRIPT says Haiku. Two readings that disagree,
+  // which is the only shape that can tell the two branches apart.
+  fs.writeFileSync(create.plistPath('fixturestopped'),
+    create.plistFor('fixturestopped', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  seedTranscript('fixturestopped', 'claude-haiku-4-5');
+  // A pane whose Claude process is gone: `classify` returns STOPPED, and the
+  // transcript (if any) is what it RAN as.
+  // ⚠️ `command: 'zsh'` is what makes this STOPPED. `classify` decides it from
+  // the pane's COMMAND (no Claude process), not from its text — the first
+  // version of this fixture set the capture and got `unknown`, which the
+  // precondition below caught. A fixture in a state the product never produces
+  // proves nothing, and that is the failure this whole suite keeps finding.
+  status.setPaneSource(() => fleet.line({ session: 'fixturestopped-discord', title: 'fixturestopped', command: 'zsh' }));
+  status.setPaneCapture(() => '');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixturestopped');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.state, 'stopped', 'the fixture is not exercising the stopped case');
+    // ⚠️ THE PRECONDITION THAT MAKES THE ASSERTION BELOW MEAN ANYTHING. Without
+    // a live model the clause `a.modelName && a.state !== STATE.STOPPED` is
+    // never reached, and deleting it passes — which is exactly what happened the
+    // first time this test was written.
+    assert.equal(card.modelName, 'Claude Haiku 4.5',
+      'the fixture has no live model, so the stopped-agent clause is not being '
+      + 'exercised and this test would pass with it deleted');
+    assert.equal(card.plannedModelName, 'Claude Opus 5',
+      'a stopped agent was not given the model its job will start it on, so the '
+      + 'panel would quote a transcript from a session that has ended');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    fs.rmSync(create.plistPath('fixturestopped'), { force: true });
+  }
 });

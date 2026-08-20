@@ -24,7 +24,7 @@ const path = require('node:path');
 // `STATE` travels with them: the thread route compares a member's state, and a
 // literal there is a comparison that silently stops matching the day the engine
 // renames one.
-const { snapshot, paneRoster, countAgents, STATE } = require('./engine/status');
+const { snapshot, paneRoster, countAgents, STATE, modelDisplayName } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -645,8 +645,63 @@ const server = http.createServer((req, res) => {
       // every five-second poll. `stopped !== false` is `isHidden`'s own test;
       // if the two ever diverge this is the copy that is wrong.
       const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
+      /**
+       * What an agent's job will START it on, for the agents whose live model
+       * we could not read.
+       *
+       * ⚠️ WHEN NO LIVE MODEL WAS READ, PLUS EVERY STOPPED AGENT.
+       * ⚠️ THIS GATE IS COST, NOT CORRECTNESS, and an earlier version of this
+       * line claimed both. Which reading WINS is decided on the page, by
+       * `modelLine` and `runsOnLine`; populating this field for a running agent
+       * would change nothing on screen, only add a disk read per agent per
+       * five-second poll. Measured: mutating the gate to always consult the job
+       * fails no test, and correctly so — the display layer is where the
+       * precedence lives, and that half IS pinned.
+       * (The line also said "only when `modelName` is absent", which the
+       * stopped-agent clause contradicts. A header is what a later reader
+       * trusts, so it is the one that has to be right.) The cost half stands on its own: this route polls every
+       * five seconds for every agent, so a disk read per agent per poll to
+       * answer a question already answered is the waste the instruction-text
+       * note above refuses. ⚠️ The correctness half USED to be here too — "a
+       * live reading must never be second-guessed by a job file" — and it was
+       * left standing after the header above retracted it. Two claims about one
+       * fact in one comment, which is what this block's own last line warns
+       * against.
+       *
+       * ⚠️ GATED ON `isNamedOurs` LIKE EVERY OTHER NAME-KEYED READ IN THIS
+       * BLOCK. The plist is keyed on the NAME, so without the gate an untied
+       * stranger's pane reports the REAL agent's planned model — the precise
+       * leak this block's other three fields already close, and a new field
+       * does not inherit that guard by being written next to them.
+       */
+      const plannedFor = (a) => {
+        if (!a.isNamedOurs) return null;
+        // ⚠️ A STOPPED AGENT NEEDS THIS EVEN THOUGH IT HAS A modelName. The
+        // transcript says what it RAN as; only the job says what it will START
+        // on, and the panel makes a future-tense claim for stopped agents. With
+        // the old `|| a.modelName` gate that claim was sourced from a session
+        // that has ended -- and for a job carrying no --model at all (every
+        // agent created before the picker existed) it stated a specific future
+        // model we had no basis for. The cost gate still holds: a RUNNING agent
+        // whose model we could read never reaches the disk.
+        // ⚠️ THIS AND `modelLine`'s `cardStOf(a).pres === 'off'` ARE THE SAME
+        // QUESTION ACROSS A BOUNDARY. The client cannot import STATE and the
+        // server cannot import CARD_ST, so they cannot literally share the
+        // derivation — they agree because `stopped` is the only CARD_ST entry
+        // mapping to `pres: 'off'`. That coincidence is pinned by a test rather
+        // than left to be discovered: add a second `off` state and the client
+        // would prefer the job for it while this never populated the field, so
+        // "Will start on" would silently stop appearing.
+        if (a.modelName && a.state !== STATE.STOPPED) return null;
+        const arg = create.plannedModelArg(a.sessionName);
+        return arg ? modelDisplayName(arg) : null;
+      };
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
+        // The name only. `plannedModelArg` returns null for "we do not know",
+        // and null travels as null: the screen must not be able to tell a
+        // missing job from a default.
+        plannedModelName: plannedFor(a),
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
           : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
