@@ -328,3 +328,42 @@ test for the defect it shows had been written one layer away from it — asserti
 on the route payload while the defect was a page SENTENCE, so reverting the
 exact string left the suite green. Driving the screen fixed the guard and made
 the screenshot regenerable in the same move. One exception fewer.
+
+## ⚠️ Known: `render-sleep-button` times out, cause NOT established (2026-08-20)
+
+It times out at `waitForSelector('.fr-check')`, which defaults to waiting for
+VISIBILITY. Playwright reports `43 × locator resolved to hidden
+<div class="fr-check attention">`.
+
+**What was measured:**
+
+- It fails identically on `main` and on `9282275` (a genuinely different tree).
+- On a fresh sandbox at first-run step 2, there is exactly **one** `.fr-check`
+  element, it carries `attention`, and it is **hidden**. Its text begins
+  "needs your attention: We could not find t…".
+- This machine is genuinely set never to sleep — `pmset -g custom` reports
+  `sleep 0`, which is the setting rather than a caffeinate artefact.
+
+**Two hypotheses raised and both killed by measurement:**
+
+1. *The selector is ambiguous — several rows, and Playwright resolves to a
+   hidden one.* No: there is exactly one row.
+2. *The sleep warning does not fire because this machine never sleeps.* Not
+   established either; the row exists and carries `attention`, so something
+   built it and then did not show it.
+
+🛑 **The cause is NOT established, and "fails on two trees" is not a proof of
+pre-existence** — two failures agreeing only means something if they cannot
+share a cause you have not ruled out. Whoever picks this up should start from
+"why is a built `.fr-check` hidden at step 2" rather than from either
+hypothesis above.
+
+⚠️ **Check for orphaned servers holding ports before diagnosing ANY of these.**
+On 2026-08-20 a survey found seven orphaned node processes on this machine, six
+holding ports, the oldest eight days old — every one from a worktree that no
+longer exists. A check that binds one of those ports fails with no visible
+cause, and the natural reading is "the check is broken". That misdiagnosis cost
+an hour on `render-first-run`, which is fine.
+
+**The rule that makes the survey possible: a server whose working directory no
+longer exists is decidable and always wrong.** No threshold, no judgement.

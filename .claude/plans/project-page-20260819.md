@@ -84,6 +84,8 @@ last touched 2026-08-19 14:47 at challenge-loop iteration 10, no PR),
 which touches the same answering surface and must be reconciled with
 this plan before either lands.
 
+## ✅ RESOLVED 2026-08-20 00:57 — see the section below; kept for the record
+
 ## Known red in `render-projects.js`, PRE-EXISTING, deliberately not fixed here
 
 `docs/browser-checks/render-projects.js` reports `✖ 4 contrast failures`. All
@@ -161,3 +163,153 @@ panel's section wrappers into inline-flex chips with circles in them. Found by
 Mona Lisa. This is the second instance tonight of a class name meaning
 different things in the two files; the first was `.panel`, where the pack's
 wears `--page-*` mock-chrome tokens and the build's is a real surface.
+
+## ⚠️ Project documents has TWO possible sources and they are not the same set
+
+Found by Mona Lisa re-verifying her spec against 0.2.3, and it needs Josh
+rather than either of us.
+
+    built    GET /api/project/:id/documents reads the PROJECT FOLDER
+    specced  engine/projects.js:9 -- "everything this module writes lives in
+             app data, NEVER in the project folder (§7b)"
+
+So a file attached through the composer's `+` would land in app data and would
+NOT appear in the documents list. The attach chunk and the documents list,
+which we have both been treating as one feature, are today two lists of two
+different things.
+
+**Neither of us was careless. Josh said both, sixteen seconds apart:**
+
+    21:23  "all files, files i dropped in and agent files"
+    21:23  "it would be files from the conversation"
+
+My route comment cites the first, her spec cites the second.
+
+- **folder only** misses everything attached in chat, which is exactly what the
+  `+` will create.
+- **conversation only** misses everything an agent WRITES while working, which
+  is most of what a project produces, and is his "agent files".
+- **both, merged** is what the first sentence asks for, and the only option
+  that neither breaks §7b nor hides a category the person watched arrive.
+
+Recommendation: merge. Recorded rather than built, because the disagreement is
+between two of his sentences, not between two of our readings.
+
+⚠️ **A merged list changes a copy ruling.** Mona Lisa ruled that "These are
+Kosmos's copies. Your originals have not changed" sits once under the list.
+That is true of a conversation-only list, where every row is a copy, and FALSE
+on a merged one: a folder file IS the original, and editing it edits the real
+thing. On a merged list the line has to be per row and only on the copies.
+
+**Nothing shipped tonight is wrong under either answer.** The folder list is
+true about the folder and says so; it is only incomplete under the merged
+answer, and the `+` that would expose the gap is deliberately not built.
+
+## The revealed add-member row has NO pack reference, and that is why it is not "restyled"
+
+Josh's markup highlights the Sponsor picker and circles "Put it on this
+project". Both live in the REVEALED state of the add-member control, and the
+pack does not draw that state at all: its members column ends at a single
+`btn-quiet` "+ Add member", because the picker hides behind the button.
+
+So "restyle to the pack" is not an executable instruction for those two
+controls. What IS executable, and is done: the pack's treatment of the BUTTON
+itself, which the build had as a solid primary in title case.
+
+⚠️ Recorded rather than guessed. Reading intent off a circle is what produced
+the avatar decision, which is still flagged as possibly wrong. Two circles on
+one screen, one of which had a pack answer and one of which did not, is exactly
+the case where inventing the second would be indistinguishable from having
+matched something.
+
+## 🛑 The sandbox sandboxes the STORE, not tmux delivery
+
+Found by doing it. Posting a test message into a sandboxed project's room
+delivered it into a REAL agent's live tmux session, because `chat.deliver`
+targets tmux directly and there is no `AGENT_WORKFORCE_TMUX_*` root to point
+somewhere disposable the way DATA, WORKERS, LAUNCH and PROJECTS can be.
+
+    PORT / DATA / WORKERS / LAUNCH / PROJECTS   sandboxed
+    the tmux server the message is typed into   NOT sandboxed
+
+So anyone testing the room locally is messaging live agents, and the browser
+checks that drive room routes would do the same. `engine/projects.js` has
+`setRevealRunner` and `engine/chat.js` has `setRunner` for exactly this reason
+in the TEST suite; a manually driven board has neither.
+
+**Practical rule until there is a knob:** point a local board's fixture at
+project names whose members do not exist on this machine, or accept that a
+post is a real message to a real agent. My test post reached my own pane.
+
+Also observed: a `render-projects.js` run rewrote `projects.json` in the shared
+sandbox and removed a fixture project created by hand. Expected collateral --
+that check drives the real create and archive routes -- but worth knowing
+before concluding a project "vanished".
+
+## 🛑 There is no message corpus, and `.quoteb` is not benign
+
+Two findings that change how the remaining message-content types get built.
+
+**No Kosmos message has ever been sent on this machine.**
+`~/Library/Application Support/AgentWorkforce/messages.jsonl` does not exist;
+the store holds avatars, first-run.json, profiles and projects.json only. So
+the spec's central line, the pack's "a day of watching this fleet says that is
+the real shape", is an observation of the FLEET transferred to a surface nobody
+has used. Legitimate, but a transfer rather than a measurement, and Mona Lisa
+has corrected her spec to say so.
+
+⚠️ Anyone who later decides to "measure what messages contain" must look at the
+fleet transcripts. An hour spent on the empty Kosmos file would conclude that
+agents never cite paths.
+
+**The admission rule for building ahead of evidence** (mine, sharpened by her):
+build it if being WRONG is invisible. `.ref` failing renders as plain text.
+`.codeb` failing renders as nothing. `.ogcard` failing is an outbound request
+that already happened, which cannot be un-failed.
+
+🛑 **And `.quoteb` fails that test, which I had it passing.** I grouped it with
+`.xlink` as "unambiguous". Its only plausible trigger is a leading `>`, which is
+also shell redirects, diff markers, comparisons and arrows in prose -- the most
+ambiguous of the four. And a false positive wraps an agent's OWN prose in a
+blockquote, which asserts *these are not my words*: a semantic claim about
+authorship, in a product whose whole discipline is not asserting what nobody
+computed. Wrong in the worst available direction.
+
+**Corrected order:** `.xlink` (a literal prefix, genuinely unambiguous),
+`.codeb` (structurally safe, because the engine can only emit it when it can
+name the file AND the line -- the same proof `.ref` already requires), and
+`.quoteb` only on an EXPLICIT engine marker, never on inference.
+
+## ✅ The known red is GREEN, and the fixture already existed
+
+`render-projects.js` now reports `✔ 7-contrast (WCAG AA, light and dark)`.
+
+**The finding was smaller than either of us thought.** `.pj-told` only exists
+when an agent's tell comes back `could_not`, and the sweep was looking for it
+on a HEALTHY project. Mona Lisa traced that correctly and said it needed a
+failed-tell fixture she could not confirm existed.
+
+**One does, and this check already creates it.** "Quarter close" is created with
+`claudebot`, which has no folder on this machine, so its tell fails:
+
+    quarterclose / claudebot  told='could_not'
+                              because='this agent has no folder on this computer yet'
+
+Confirmed in the browser before touching the check: the element renders, is
+visible, and carries a real sentence.
+
+**The repair is the same one `.drop` got**: measure it where it renders. It is a
+SEPARATE pass from the missing-folder one on purpose -- a failed tell is "we
+could not write to its instructions", a missing folder is "the folder is gone",
+and neither implies the other, so folding them together would let one state
+stand in for the other's coverage.
+
+⚠️ The new pass ASSERTS rather than finds. An empty `.pj-told` would measure
+perfectly and mean nothing, and the whole point of that element is that it
+speaks, so an empty one is reported as a wrong element rather than a pass.
+
+⚠️ **And the tool refusing was the information, again.** The first version
+clicked `#pj-back` while the page was still on the settings VIEW, and Playwright
+spent its full timeout waiting for an element that was never going to appear.
+Two doors -- `#pj-settings-back` out of settings, `#pj-back` out of the project
+-- and the check has to walk through both.

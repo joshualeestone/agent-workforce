@@ -1356,10 +1356,44 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    It used to restate width and appearance both, in the page-ground colour
    rather than the field colour, which is why it and #create-model looked like
    two different controls. */
-.pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+/* ⚠️ `align-items: center` and NOT `baseline` now that the row has a face.
+   A 34px disc baseline-aligned against a 15px name sits low and drags the row
+   with it; the pack's member row centres them. `flex-wrap` stays, so a long
+   because-sentence still wraps under rather than squeezing the name. */
+.pj-member { display: flex; align-items: center; gap: var(--space-4); flex-wrap: nowrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
-.pj-member b { font: 600 var(--text-body) var(--font-ui); }
-/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+/* The text half: everything that was directly in the row before the face
+   arrived. Column, because the name, the state and the told line were three
+   siblings of a wrapping flex row and are now one block beside the disc. */
+.pj-member-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pj-face { flex: 0 0 34px; }
+/* The pack's inline sizing for this one button, as a rule rather than a style
+   attribute: full column width, its own smaller type and tighter padding. The
+   pack carries these inline because a mock has nowhere else to put them. */
+.pj-addmem { margin-top: 14px; width: 100%; font-size: .875rem;
+             padding: calc(.5em - 1px) calc(1.05em - 1px); }
+/* The pack's path chip (FROZEN-2026-08-19:474), on this file's tokens: its
+   `--mono`/`--ui` do not exist here, and its two rgba() grounds are literals
+   that would not flip with the theme. */
+.ref { display: inline-flex; align-items: center; gap: 6px;
+       font: 13px var(--font-mono); background: var(--k-surface);
+       border: 1px solid var(--k-rule); border-radius: 6px;
+       padding: 1px 3px 1px 7px; vertical-align: baseline; }
+.refgo { font: 600 11px var(--font-ui); letter-spacing: .02em; border: 0;
+         border-radius: 4px; background: var(--k-bg); color: var(--k-ink-2);
+         cursor: pointer; padding: 2px 6px; min-height: 24px; }
+.refgo:hover { color: var(--k-ink); }
+.refgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+/* The pack's external link. It keeps the ink colour rather than taking a link
+   blue: in a room where most of what is written is local, the ONE thing that
+   leaves the machine should not also be the one thing that shouts. */
+.xlink { color: var(--k-ink); text-underline-offset: 3px; }
+/* The pack's quoted block, on this file's tokens. No figcaption rule: nothing
+   can produce a source yet, so there is no caption to style. */
+.codeb { margin: 10px 0 0; border: 1px solid var(--k-rule); border-radius: 10px;
+         overflow: hidden; background: var(--k-surface); }
+.codeb pre { margin: 0; padding: 11px 12px; font: 12.5px/1.6 var(--font-mono);
+             overflow-x: auto; white-space: pre; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
    floor this project holds as a hard rule. "It is only a scannable caption"
    was the recorded defence, and the floor does not have a caption exemption. */
@@ -1822,6 +1856,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
             font-size: 10px; font-weight: 700; color: var(--label); }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
 .tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
+/* ⚠️ A DIFFERENT APPEARANCE, not just different words. `.tksay` carries what
+   the AGENT said; this carries what WE could not establish, which is a
+   different kind of statement and the app says so everywhere else it has an
+   unknown. Dotted underline rather than a colour change alone: the four states
+   must be distinguishable without relying on hue, and two of them already sit
+   at `--label-2`. */
+.tkunk { font-style: normal; color: var(--label-2); margin-left: 4px;
+         text-decoration: underline dotted; text-underline-offset: 2px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
 /* ⚠️ Used on an input, a textarea AND a select, so it must not restate the
    select appearance: the shared `select` rule handles that one, and a padding
@@ -2644,7 +2686,17 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   </div>
   <div class="field" style="margin-top:18px;">
     <label class="flabel" for="d-role">What they do</label>
-    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
+    <!-- ⚠️ FOUR WORDS DOING THE JOB OF A SENTENCE. This read "Your words.
+         Nothing on this computer records it, so it is blank until you say."
+         Mona Lisa's three objections, all right: it is a MECHANISM sentence
+         told to someone who only needs the outcome, the same shape the pack
+         has now fixed twice in the composer; it stops being true after the
+         first save, because the profile record does hold it; and "blank until
+         you say" never says until you say WHAT. The half worth keeping is that
+         this is free text rather than a picked role, since a role catalogue
+         exists and would make a reader expect a list. The placeholder beside
+         it already carries the examples. -->
+    <div class="fhint">Your words, not a fixed list.</div>
     <div class="frow">
       <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
     </div>
@@ -2749,6 +2801,8 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <h2 class="rm-title" id="tk-title"></h2>
     <p class="rm-small" id="tk-meta"></p>
     <p class="rm-small" id="tk-detail" hidden></p>
+    <!-- The unknown's reason, too long for the card that reports the state. -->
+    <p class="rm-small" id="tk-why" hidden></p>
     <p class="rm-small" id="tk-note" hidden></p>
     <div class="rm-acts">
       <button class="btn" id="tk-back" type="button">Back</button>
@@ -3277,7 +3331,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <!-- ⚠️ The picker hides behind the button, not the other way round: the
            resting state of the box is the members, and "+ Add Member" (the
            pinned words) is the one control that opens the choosing row. -->
-      <button class="btn" id="pj-add-member" type="button" style="margin-top: var(--space-5)"><span aria-hidden="true">+</span> Add Member</button>
+      <!-- ⚠️ THE PACK'S TREATMENT, VERBATIM (FROZEN-2026-08-19:3022): quiet
+           rather than primary, full width of the column, .875rem, and its own
+           padding. It is the resting state of this box, not an action anybody
+           came here to take, and a solid primary button sitting permanently
+           under the member list reads as the thing to do next.
+           Sentence case too: the pack writes "Add member". This file had
+           "Add Member", and title case on a control makes it read as a proper
+           noun rather than an instruction. -->
+      <button class="btn-quiet pj-addmem" id="pj-add-member" type="button"><span aria-hidden="true">+</span> Add member</button>
       <div class="frow" id="pj-one-add-row" hidden style="margin-top: var(--space-5)">
         <select id="pj-one-add" aria-label="An agent to add to this project"></select>
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
@@ -9442,7 +9504,26 @@ function pjMember(m, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
+  /* ⚠️ THE FACE, and it is the SAME disc as everywhere else. Josh circled the
+     blank rings on this column in his 2026-08-19 markup; the pack draws a
+     `.lav` chip here and every other member surface in this app already draws
+     one. Reused rather than re-derived: the photograph when the agent has one,
+     otherwise the tinted initials from `discTint`/`discInk`, so an agent's
+     mark is one identity on the card, the list, the room and here.
+     `hasAvatar` is gated on TIED in the engine, and that gate is the whole
+     point: a stranger's pane borrowing the name must not lend this row a
+     photograph of somebody it is not. A face is the strongest identity claim
+     on a screen, so it is the one that must not be guessed.
+     aria-hidden, because the name is right beside it in <b> and a screen
+     reader announcing initials as well would say the agent twice. */
+  const face = m.hasAvatar
+    ? '<span class="lav pj-face" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(m.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav pj-face" aria-hidden="true" style="background:' + discTint(m.name)
+      + ';color:' + discInk(m.name) + '">' + esc(initials(m.name)) + '</span>';
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+    + face
+    + '<span class="pj-member-b">'
     + '<b>' + esc(m.name) + '</b>'
     // ⚠️ An `unknown` state carries its REASON here (historical origin: a
     // bare "Can't tell" once sat beside the now-retired told sentence and
@@ -9458,6 +9539,7 @@ function pjMember(m, suppressTold) {
        scoped actions, the escalation gradient member < archive <
        remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + '</span>'
     + '</div>';
 }
 
@@ -9826,6 +9908,11 @@ function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
    who chip is the status, "Nobody yet" is the only state word, and closed
    tasks live behind the door with the unassigned ones. */
 let TK_SHOW_ALL = false;   // the door's reveal; resets when the project changes
+/* Every filename in the open project's folder, for matching path citations in
+   message bodies. Cleared on switch with the rest of the project's state: a
+   list left standing would dress another project's words as citations of files
+   this one does not have. */
+let PJ_DOC_NAMES = null;
 let TK_OPEN = null;        // the task number the view dialog is showing
 
 /** Re-read the store; loadProjects itself repaints the open project on
@@ -9854,13 +9941,35 @@ function paintProjectTasks(p) {
     const who = t.who
       ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
         + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who))
-        /* The join, rendered ONLY as the agent's own words (the pack's
-           phrase for the commitments source: "says it is on this").
-           claimed false is NOT "not started" and renders nothing, and
-           claimed null (could-not-read) renders nothing here -- Mona
-           Lisa's chip-is-the-status ruling stands for both. */
-        + (t.claim && t.claim.claimed === true
-          ? '<em class="tksay">· says it is on this</em>'
+        /* ⚠️ FOUR STATES, FOUR APPEARANCES. Two of these used to render as
+           NOTHING, and Josh wrote "Add Task Status" on a card whose status was
+           deliberately blank -- which is the whole finding: a state that
+           renders as nothing is indistinguishable from a feature nobody built.
+
+           Mona Lisa's ruling (2026-08-19) RETIRED her earlier chip-is-the-
+           status rule rather than reversing it: she had attached the condition
+           "no second word until the commitments join can support one", the
+           join shipped in #52, and the rule expired on its own terms.
+
+           ⚠️ "says it is not on this", NOT the pack's "Not started". Nothing
+           here knows whether the WORK started. commitments.js is explicit that
+           an empty list only counts when it is an ASSERTION rather than an
+           absence -- the agent has to have said, recently, that it is holding
+           nothing. So claimed:false is a statement the agent made, and
+           mirroring the positive exactly (same verb, opposite polarity) keeps
+           the subject on the agent's report where it belongs. "Not started"
+           would be a claim about the work that nobody computed, and "has not
+           said it is on this" describes a silence and invites "so it is
+           slacking".
+
+           claimed:null is OURS rather than the agent's, so it gets its own
+           class and its own voice. The engine's `because` runs 30-50 words and
+           belongs where the task opens, not on a card: the card carries
+           signals, the panel carries explanation. */
+        + (t.claim
+          ? (t.claim.claimed === true ? '<em class="tksay">· says it is on this</em>'
+            : t.claim.claimed === false ? '<em class="tksay">· says it is not on this</em>'
+              : '<em class="tkunk">· we could not check</em>')
           : '')
         + '</span>'
       : '<span class="tkcard-who">Nobody yet</span>';
@@ -9912,6 +10021,19 @@ function openTaskModal(n) {
   const det = document.getElementById('tk-detail');
   det.textContent = t.detail || '';
   det.hidden = !t.detail;
+  /* ⚠️ THE UNKNOWN'S REASON LIVES HERE, not on the card. The card says "we
+     could not check" in three words; the engine's own sentence explaining WHY
+     runs to fifty ("we cannot tie the pane holding this name to the agent, so
+     we will not speak for what that name is holding") and would set the width
+     of every card in the column. The card carries the signal, the panel
+     carries the explanation.
+     Only for the unknown: `claimed` true and false are complete statements and
+     have no because to give. */
+  const why = document.getElementById('tk-why');
+  const unknownBecause = (t.claim && t.claim.claimed === null && t.claim.because) ? t.claim.because : '';
+  why.textContent = unknownBecause ? 'We could not check whether ' + (who || 'it')
+    + ' is on this: ' + unknownBecause + '.' : '';
+  why.hidden = !unknownBecause;
   /* The close-note, Mona Lisa's blessed v1 wording: both clauses are about
      what KOSMOS does not do, verifiable tonight, and needed MORE before the
      commitments join exists, because tonight is when someone will assume
@@ -10353,6 +10475,12 @@ async function pjLoadDocs(id) {
     all.hidden = true;
     return;
   }
+  PJ_DOC_NAMES = Array.isArray(body.names) ? new Set(body.names) : null;
+  /* The room is repainted so citations become chips as soon as the names land.
+     Its own cache key is cleared first, or the change-guard skips the repaint
+     and the chips appear only after the next unrelated change. */
+  const roomBox = document.getElementById('pj-room');
+  if (roomBox) { roomBox.__lastRoom = undefined; if (roomBox.__lastBody) paintRoom(roomBox.__lastBody); }
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) {
     msg.textContent = 'Nothing here yet. Files you or your agents put in this project\u2019s folder show up here.';
@@ -10386,6 +10514,132 @@ async function pjLoadDocs(id) {
     : 'Show them all in Finder';
 }
 
+/**
+ * Turn a message body into HTML, with the file paths it cites rendered as the
+ * pack's `.ref` chip and everything else escaped exactly as before.
+ *
+ * 🛑 THE ESCAPE IS NOT RELAXED. Every span of this function's output is either
+ * `esc()`d text or markup this function built from a filename that was matched
+ * against a list the SERVER produced. A message body never reaches innerHTML
+ * unescaped, on any path, including the no-match path which returns exactly
+ * what the old `esc(m.text)` returned.
+ *
+ * ⚠️ THE CLIENT DOES NOT SNIFF, AND THAT IS THE WHOLE DESIGN. A regex that
+ * decides what "looks like a path" will be wrong, and a mis-detected path
+ * renders as a control that appears broken, where plain text merely appears
+ * plain. The failure modes are not symmetric. So a token becomes a chip ONLY
+ * when it matches, exactly, the name of a file the project's folder actually
+ * contains right now. Anything we cannot prove stays a paragraph, which is the
+ * honest default we already ship.
+ *
+ * That rule is also what makes the chip's promise keepable: "Show me" opens
+ * through the same route the documents list uses, with the same three gates,
+ * so a chip is never offered for something the opener would refuse.
+ */
+function pjLinkPaths(text, names) {
+  const raw = String(text == null ? '' : text);
+  if (!names || !names.size) return pjInline(raw);
+  /* Split on whitespace RUNS but keep them, so the reassembled body preserves
+     the spacing the person typed. A body is not a sentence: agents paste
+     columns and indentation, and collapsing it would edit what they said. */
+  const parts = raw.split(/(\s+)/);
+  let hit = false;
+  const out = parts.map((tok) => {
+    if (!tok || /^\s+$/.test(tok)) return esc(tok);
+    /* Trailing punctuation is stripped for the LOOKUP and put back after, so
+       "see notes.md." matches while the sentence keeps its full stop. Only
+       characters that cannot start a filename on this platform are stripped,
+       and never from the middle. */
+    const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
+    const core = m[1];
+    const tail = m[2];
+    if (!core) return pjInline(tok);
+    /* A cited path may be written with folders in front of it. The FILE is
+       what we can open, so the last segment is what is matched -- but only
+       when the whole token has no `..` in it, because a token that walks up
+       is not describing a file in this project and should not be dressed as
+       one even if its basename collides. */
+    if (core.includes('..')) return pjInline(tok);
+    const base = core.split('/').pop();
+    if (!names.has(base)) return pjInline(tok);
+    hit = true;
+    return '<span class="ref">' + esc(core)
+      + '<button class="refgo" type="button" data-ref="' + esc(base)
+      + '" aria-label="Show me ' + esc(base) + '">Show me</button></span>' + esc(tail);
+  }).join('');
+  /* ⚠️ Identical output to the old path when nothing matched, byte for byte:
+     the reassembly above escapes every token and every whitespace run, so a
+     body with no citation is unchanged rather than merely equivalent. */
+  return hit ? out : pjInline(raw);
+}
+
+/**
+ * Inline treatments that need no lookup: an external link.
+ *
+ * 🛑 STILL NOT A SNIFFER, and the distinction is the same one the path rule
+ * rests on. `https://` is a DELIMITER, not an inference: a token either starts
+ * with it or does not, and there is no judgement in between that could be
+ * wrong. "Looks like a path" was a guess; this is a prefix.
+ *
+ * ⚠️ AND THE ESCAPE STILL HOLDS. The href is built from the escaped token, the
+ * text is the escaped token, and anything that is not an http(s) token comes
+ * back through `esc()` unchanged. A `javascript:` or `data:` token is not
+ * matched at all -- the test is a literal prefix, not a URL parse, so there is
+ * no scheme for it to be tricked about.
+ *
+ * `rel="noreferrer noopener"` because this is the ONE place in a local-first
+ * product where a click leaves the machine, and the page it lands on should
+ * learn nothing about where it came from.
+ */
+/**
+ * The whole body: fenced blocks drawn as blocks, everything else as prose.
+ *
+ * ⚠️ THE FENCE IS A DELIMITER, NOT AN INFERENCE, which is the same test
+ * `https://` passes and "looks like a path" failed. A line either is ``` at its
+ * start or it is not. There is no judgement in between that could be wrong.
+ *
+ * ⚠️ AN UNCLOSED FENCE IS NOT A BLOCK. A body with an odd number of fences is
+ * returned as prose, whole. Half a block is a guess about where the author
+ * meant it to end, and this file's rule everywhere else is that an uncertain
+ * reading stays the flat paragraph it already was.
+ *
+ * ⚠️ AND NOTHING INSIDE A FENCE IS LINKED. A path in a quoted block is CONTENT
+ * an agent is showing you, not a citation it is making, and dressing it with a
+ * "Show me" would offer to open a file the message was only quoting. Same for
+ * URLs. Inside the fence the only treatment is `esc()`.
+ *
+ * 📌 NO figcaption YET, and its absence is the honest half. The pack draws
+ * `.codeb` with a caption naming the source ("docs/trial.md, line 12"), and
+ * nothing in this product can produce that: an agent has no way to say which
+ * file and which line a block came from. A caption we invented would be the
+ * first thing on this screen asserting something nobody computed. The box
+ * ships; the caption waits for a mechanism.
+ */
+function pjBody(text, names) {
+  const raw = String(text == null ? '' : text);
+  const parts = raw.split(/^```[^\n]*$/m);
+  /* Even count of segments means an odd number of fences: one is unclosed. */
+  if (parts.length < 3 || parts.length % 2 === 0) return pjLinkPaths(raw, names);
+  return parts.map((seg, i) => (i % 2
+    ? '<figure class="codeb"><pre>' + esc(seg.replace(/^\n|\n$/g, '')) + '</pre></figure>'
+    : pjLinkPaths(seg, names))).join('');
+}
+
+function pjInline(text) {
+  const raw = String(text == null ? '' : text);
+  if (raw.indexOf('http://') === -1 && raw.indexOf('https://') === -1) return esc(raw);
+  return raw.split(/(\s+)/).map((tok) => {
+    if (!tok || /^\s+$/.test(tok)) return esc(tok);
+    if (!/^https?:\/\/[^\s]+$/.test(tok)) return esc(tok);
+    /* Trailing punctuation is not part of the link: "see https://x.test." */
+    const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
+    const url = m[1];
+    if (!/^https?:\/\/[^\s]+$/.test(url)) return esc(tok);
+    return '<a class="xlink" href="' + esc(url) + '" target="_blank" rel="noreferrer noopener">'
+      + esc(url) + '</a>' + esc(m[2]);
+  }).join('');
+}
+
 function pjSize(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n < 0) return '';
@@ -10408,6 +10662,30 @@ document.getElementById('pj-docs').addEventListener('click', async (e) => {
     /* The refusal is the ENGINE's sentence, shown verbatim. It already says
        what happened in words a person can act on ("that file lives outside
        this project"), and rewriting it here would be a second, weaker copy. */
+    let because = 'That file did not open.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'That file did not open.';
+  }
+});
+
+/* ⚠️ DELEGATED ON THE THREAD, because every poll rebuilds the messages: a
+   listener bound to a chip is bound to an element the next repaint destroys.
+   The button carries the BASENAME, which is the only shape open-file accepts,
+   and the refusal shown is the engine's own sentence rather than a second,
+   weaker copy of it. */
+document.getElementById('pj-room').addEventListener('click', async (e) => {
+  const go = e.target && e.target.closest ? e.target.closest('.refgo') : null;
+  if (!go || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-room-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/open-file',
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: go.dataset.ref }) });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
     let because = 'That file did not open.';
     try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
     msg.textContent = because;
@@ -10501,6 +10779,7 @@ function openProject(id) {
     document.getElementById('pj-docs').textContent = '';
     document.getElementById('pj-docs-msg').textContent = '';
     document.getElementById('pj-docs-all').hidden = true;
+    PJ_DOC_NAMES = null;
     pjLoadDocs(id);
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
@@ -10612,7 +10891,7 @@ function pjRoomRow(m, p) {
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
-    + '<p>' + esc(m.text || '') + '</p>' + receipt + '</div></div>';
+    + '<p>' + pjBody(m.text, PJ_DOC_NAMES) + '</p>' + receipt + '</div></div>';
 }
 
 /**

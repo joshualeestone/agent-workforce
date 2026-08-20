@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: 30d4a55bc5c192cbacb4b7fc1f849c92b77109a7169dd30784a24695346f1be1
+diff_hash: c77d82b5fdf71686913c323a539164be37b2ce3ae393f18c851d4c0536777708
 subdir_audit: passed
-timestamp: 2026-08-20T04:04:36Z
+timestamp: 2026-08-20T05:57:18Z
 iterations: 1
 converged: true
 ---
@@ -134,3 +134,267 @@ with the screen recorded as a later slice.
 | 8 | 1 | BLOCKER | server.js open-file | FIXED | readBody returns a Buffer, not JSON |
 | 9 | 1 | BLOCKER | render-projects.js contrast sweep | FIXED | selector asserted with `expect` |
 | 10 | 1 | NIT | documents view-all | DEFERRED | by design: screen is a later slice |
+
+## Third slice on the same branch (2026-08-19, after #93)
+
+Member faces, task status, and the role-hint copy fix. Same review shape:
+single pass, explicit override, every visual change rendered rather than read.
+
+[STRENGTH] **The version regression was caught a SECOND time, the same way.**
+Branch at 0.2.2, main at 0.2.3; merging as-is would have set it backwards and
+every board on 0.2.3 would read that as "no update available", silently. The
+suite pins no version to a number, so nothing would have failed. This is now a
+known trap with a known check, and the check is "compare both sides before
+merging", not a test.
+
+[STRENGTH] The plan-file conflict was resolved toward this branch only AFTER
+proving ours is a SUPERSET: every heading on main's side was confirmed present
+here first. "Take ours" on a file both sides edited is otherwise a silent
+deletion.
+
+[STRENGTH] **Two real defects in the test harness, both fixed rather than
+worked around.** `pageConstSource` matched only object consts, so lifting an
+array asserted "DISC_TINTS vanished from the page" about a const sitting right
+there; and after that was widened, `DISC_INKS` still "vanished" because it is
+written with two spaces before its `=`. Both failures said the same untrue
+sentence about different causes. Now a whitespace-tolerant regex over either
+opener.
+
+[STRENGTH] The pjMember test lifts the REAL disc helpers rather than stubs. It
+went red with "discTint is not defined", which is the extraction harness working
+as designed; stubbing would have kept it green while no longer exercising the
+face branch.
+
+[WARNING -> RESOLVED] **The first verification of task status was worthless and
+reported 4 of 4.** It measured `.tkcard-who`, the WRAPPER, so it read
+textDecoration 'none' for every state including the one whose point is a
+decoration -- and still counted four distinct signatures because the TEXT was in
+the signature. Re-measured on the mark elements: `.tkunk` is underline/dotted
+in both schemes, `.tksay` is none. Second time tonight a check of mine answered
+confidently about the wrong element.
+
+[NIT] `claimed` true and false deliberately share `.tksay`: same kind of
+statement, same voice, opposite polarity. Distinguished by their words, which is
+the distinction that is real.
+
+[NIT] Project documents reads the project FOLDER while the attach path would
+write to app data (§7b), so the two would disagree once the `+` lands.
+Recorded in the plan with Mona Lisa's merge recommendation; it needs Josh,
+because it is two of HIS sentences that disagree.
+
+### Third-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 11 | 1 | BLOCKER | package.json | FIXED | version regression caught pre-PR, second time |
+| 12 | 1 | BLOCKER | server.test.js pageConstSource | FIXED | arrays + whitespace-tolerant matcher |
+| 13 | 1 | WARNING | task-status verification | FIXED | re-measured on the mark, not the wrapper |
+| 14 | 1 | NIT | documents source | DEFERRED | needs Josh; recorded with options |
+
+## Fourth slice (2026-08-19, after #95)
+
+The pack's treatment of the "+ Add member" button, and a recorded NON-answer.
+
+[STRENGTH] ⚠️ THE VERSION TRAP APPEARED A THIRD TIME AND WAS CAUGHT A THIRD
+TIME. Branch 0.2.3, main 0.2.4. Same silent failure, same defence: compare both
+sides before merging.
+
+[STRENGTH] ⚠️ THE MERGE COMMIT FAILED LOUDLY AND THAT WAS THE POINT. One
+conflict was reported in the tail I read; a SECOND (the plan file) was not, and
+`git commit` refused with "you have unmerged files" rather than committing a
+half-resolved tree. Resolved only after confirming again that this branch's plan
+is a superset of main's, heading by heading.
+
+[STRENGTH] The button is FROZEN-2026-08-19:3022 verbatim: quiet, full column
+width, .875rem, the pack's padding, sentence case.
+
+[STRENGTH] ⚠️ AND THE TWO CONTROLS JOSH ACTUALLY CIRCLED ARE RECORDED AS
+UNANSWERABLE rather than invented. The Sponsor picker and "Put it on this
+project" live in the revealed state of that control, which the pack does not
+draw at all. Two circles on one screen, one with a pack answer and one without,
+is exactly where inventing the second is indistinguishable from having matched
+something.
+
+[WARNING -> RESOLVED] My first measurement reported `fullWidth:false` on a
+full-width button: it subtracted the column's padding and forgot its 1px border.
+Re-measured against clientWidth minus padding, 212 = 212. Third probe of mine
+tonight that measured a NEIGHBOUR of the thing I meant.
+
+### Fourth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 15 | 1 | BLOCKER | package.json | FIXED | version regression, caught third time |
+| 16 | 1 | WARNING | full-width probe | FIXED | measured the content box, not the border box |
+| 17 | 1 | NIT | Sponsor picker / confirm button | DEFERRED | no pack drawing exists; recorded |
+
+## Fifth slice (2026-08-20): path citations
+
+[STRENGTH] **The escape is not relaxed, and the guard is PROVEN.** Deleting the
+per-token escapes turns the suite red with "a script tag beside a citation was
+not escaped". Verified in a real browser on a body containing all four cases at
+once: two chips for the two files that exist, a path shown as written with the
+basename in `data-ref`, a non-existent file left as plain text, and
+`<script>alert(1)</script>` rendered escaped with no raw tag in the markup.
+
+[STRENGTH] **The client does not sniff.** A token becomes a chip only when it
+matches a file the folder contains right now, which is also what makes the
+chip's promise keepable: "Show me" goes through the same route with the same
+three gates, so a chip is never offered for something the opener would refuse.
+
+[STRENGTH] The two escape tests cover DIFFERENT escapes, measured by
+perturbation rather than assumed: the byte-for-byte test stays GREEN when the
+per-token escapes are deleted, because its bodies never reach that path. The
+test file says so where someone would otherwise delete one as a duplicate.
+
+[STRENGTH] `names` comes from the SAME folder read as the capped list. Behind
+a second route, a file past the cap would render as dead text while its
+neighbour rendered as a chip: one file, two appearances, decided by sort order.
+
+[BLOCKER -> FIXED] ⚠️ **A previous commit on this branch shipped CONFLICT
+MARKERS.** A resolve script asserted and died; the `git add` and `git commit`
+on the following lines ran anyway, and `git add` does not care about markers.
+Caught by "every CSS declaration in the page sits inside a selector" failing
+with "the brace walk ended at depth -1" -- a CSS-structure test doing a merge
+check's job, because `<<<<<<<` is not valid CSS. The resolve is now gated on a
+proven zero-marker count, and this branch is pushed only after the same check.
+
+[NIT] The per-agent thread (`pj-msg-text`) still escapes plainly and does not
+link. The pack draws `.ref` in the room; that surface is part of the
+answer-panel chunk and will get it there rather than by a drive-by.
+
+[NIT] ⚠️ Sandboxing DATA/WORKERS/LAUNCH/PROJECTS does NOT sandbox tmux: a test
+post into a sandboxed room typed into a live agent's session. Recorded in the
+plan.
+
+### Fifth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 18 | 1 | BLOCKER | web/index.html | FIXED | conflict markers committed; resolve now gated |
+| 19 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FOURTH time |
+| 20 | 1 | NIT | pj-msg-text | DEFERRED | belongs to the answer-panel chunk |
+| 21 | 1 | NIT | tmux not sandboxed | DEFERRED | recorded; needs a fixture, not a flag |
+
+## Sixth slice (2026-08-20): external links
+
+[STRENGTH] **Not a sniffer, and the distinction is load-bearing.** `https://`
+is a DELIMITER, not an inference: a token either starts with it or does not. The
+test is a literal prefix rather than a URL parse, so there is no scheme for it
+to be tricked about -- `javascript:`, `data:`, `file:` and `vbscript:`
+are not matched at all and return as plain escaped text, PROVEN with a positive
+control that a real URL still links.
+
+[STRENGTH] `rel="noreferrer noopener"` on the one click in this product that
+leaves the machine.
+
+[STRENGTH] Verified in a real browser, both schemes, WITHOUT touching tmux: the
+fixture message was written into the sandbox store rather than posted through
+the route, because a real post types into a live agent's session and this test
+needed a render, not a delivery. 2 links, correct hrefs, trailing full stop
+excluded, no dangerous scheme linked, no raw script, 0 page errors.
+
+[BLOCKER -> FIXED, MINE] ⚠️ **I had the build order wrong and Mona Lisa caught
+it with my own rule.** I grouped `.quoteb` with `.xlink` as "unambiguous".
+Its only plausible trigger is a leading `>`, which is also shell redirects,
+diff markers and arrows in prose, and its false positive wraps an agent's OWN
+prose in a blockquote -- asserting *these are not my words*, a claim about
+AUTHORSHIP. My benign-failure test was right; I scored it by whether anything
+would RENDER rather than by what a wrong render would CLAIM.
+
+[STRENGTH] **The merge was proven rather than judged.** Thirteen conflict hunks
+across three files, resolved wholesale toward this branch only after showing
+the sole main-side commit touching them is this branch's own squash (#99), then
+verified by content, then gated on a zero-marker count.
+
+[NIT] There is NO message corpus: the Kosmos room has never carried a message,
+so the spec's evidence claim is a transfer from the fleet. Recorded so nobody
+measures an empty file and concludes agents do not cite paths.
+
+### Sixth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 22 | 1 | BLOCKER | build order | FIXED | .quoteb moved behind an explicit marker |
+| 23 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FIFTH time |
+| 24 | 1 | NIT | .quoteb | DEFERRED | ships on an engine marker or not at all |
+| 25 | 1 | NIT | no corpus | DEFERRED | recorded; measurement must use fleet data |
+
+## Seventh slice (2026-08-20): fenced blocks
+
+[STRENGTH] The fence is a DELIMITER, not an inference: a line either is three
+backticks at its start or it is not.
+
+[STRENGTH] An UNCLOSED fence returns the body as prose, whole. Half a block is a
+guess about where the author meant it to end.
+
+[STRENGTH] **Nothing inside a fence is linked, and this is the distinction that
+matters.** A path in a quoted block is CONTENT an agent is showing you, not a
+citation it is making. Same characters, different speech act, opposite correct
+treatment. PROVEN: routing block contents through the linker turns the suite red
+with "a path INSIDE a quoted block was offered as a citation".
+
+[STRENGTH] 📌 NO figcaption. The pack draws one naming file and line; nothing in
+this product can produce that, so shipping it would assert what nobody computed.
+A test now fails if a caption appears without a mechanism behind it.
+
+[STRENGTH] Verified in a real browser, both schemes, without touching tmux:
+block renders monospaced with white-space pre and overflow-x auto, no caption,
+nothing linked inside, the angle brackets inside escaped, chips still working
+outside, 0 page errors.
+
+[STRENGTH] The merge was proven rather than judged, second time: the sole
+main-side commit touching the shared files is this branch's own squash.
+
+### Seventh-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 26 | 1 | BLOCKER | package.json | FIXED | version regression, caught a SIXTH time |
+| 27 | 1 | NIT | .codeb figcaption | DEFERRED | needs a source mechanism; test guards it |
+| 28 | 1 | NIT | .quoteb / .msg-att | DEFERRED | marker, and attachments, respectively |
+
+## Eighth slice (2026-08-20): the last known red goes green
+
+[STRENGTH] **Measured where it renders, not deleted.** `.pj-told` only exists
+when a tell comes back could_not, and the sweep looked for it on a HEALTHY
+project. The failed-tell fixture already existed: "Quarter close" is created
+with `claudebot`, which has no folder on this machine. Confirmed in the browser
+before touching the check.
+
+[STRENGTH] A SEPARATE pass from the missing-folder one, deliberately. A failed
+tell and a missing folder share a symptom and not a cause; folded together, one
+would stand in for the other's coverage and the check would go green having
+measured half of what it names.
+
+[STRENGTH] The pass ASSERTS rather than finds. An element whose whole purpose is
+to SPEAK cannot be measured for contrast while empty, because empty measures
+perfectly. The assertion is not a nicety on top of the measurement, it is what
+makes the measurement mean anything.
+
+[WARNING -> RESOLVED] The first version clicked `#pj-back` on the settings VIEW
+and Playwright spent its full timeout on an element that was never going to
+appear. Two doors. Diagnosed the refusal rather than routing around it -- second
+time tonight that rule paid, and both times the workaround would have "worked",
+which is what makes it dangerous: it converts a signal into a pass.
+
+[WARNING -> RESOLVED] ⚠️ AND THIS FILE WAS DAMAGED BY THE SHELL ON ITS FIRST
+WRITE. An UNQUOTED heredoc (`<<PY`) expands backticks, so every `.pj-told` and
+`claudebot` in the prose above was executed as a command and replaced with
+nothing -- leaving "**Measured where it renders, not deleted.**  only exists",
+a sentence with its subject missing. `<<'PY'` does not expand. Third time
+tonight a shell interpreted content I meant to store; recorded in memory with
+the mechanism named rather than as "be careful with quoting".
+
+[NIT] ⚠️ NO VERSION BUMP RIDES WITH THIS. It changes a browser check, not the
+app; nothing a person can see is different. A release whose note has nothing
+true to say would devalue the eight tonight that did.
+
+### Eighth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 29 | 1 | BLOCKER | render-projects.js .pj-told | FIXED | measured on a failed-tell project |
+| 30 | 1 | WARNING | check navigation | FIXED | walk out of settings before going back |
+| 31 | 1 | WARNING | this proof file | FIXED | unquoted heredoc ate the backticked terms |
+| 32 | 1 | NIT | version bump | DEFERRED | deliberately none; check-only change |

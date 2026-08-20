@@ -1973,15 +1973,30 @@ function pageFnSource(name) {
  * `STATE_COPY`, `GLYPH`) as well as in functions, and a test that restated one
  * of those tables would be asserting its own copy rather than the product's.
  */
+/* ⚠️ OBJECT **OR** ARRAY. This only matched `const NAME = {`, so lifting
+   `DISC_TINTS` (an array) failed with "DISC_TINTS vanished from the page" --
+   a message that describes a deletion when the const was sitting right there.
+   Widened rather than worked around, because the misleading sentence was the
+   real defect: the previous behaviour on an array const was to assert an
+   untruth. Purely additive; every caller that worked before still matches the
+   object arm first. */
 function pageConstSource(name) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const start = script.indexOf('const ' + name + ' = {');
-  assert.ok(start > -1, name + ' vanished from the page');
+  /* ⚠️ A REGEX, NOT indexOf, AND THAT IS THE SECOND HALF OF THE SAME BUG.
+     After the array arm was added, `DISC_INKS` still "vanished" -- because it
+     is written `const DISC_INKS  = [` with TWO spaces, and a fixed string
+     cannot see that. A matcher that depends on incidental whitespace reports a
+     deletion when the thing is sitting on the line it names. */
+  const m = new RegExp('const\\s+' + name + '\\s*=\\s*([{\\[])').exec(script);
+  assert.ok(m, name + ' was not found on the page as an object or array const');
+  const start = m.index;
+  const open = m[1];
+  const close = open === '{' ? '}' : ']';
   let depth = 0; let end = -1;
-  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
-    if (script[k] === '{') depth += 1;
-    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  for (let k = script.indexOf(open, start); k < script.length; k += 1) {
+    if (script[k] === open) depth += 1;
+    else if (script[k] === close) { depth -= 1; if (depth === 0) { end = k + 1; break; } }
   }
   assert.ok(end > -1, 'could not find the end of ' + name);
   return script.slice(start, end) + ';';
@@ -6046,8 +6061,20 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
   // STATE_COPY here is a DELIBERATELY partial stand-in (two of six keys):
   // it only feeds the state caption, which no assertion below reads, and
   // the real const is not a `function` pageFnSource can lift.
+  // ⚠️ `discTint`, `discInk` and `initials` are lifted from the REAL page
+  // rather than stubbed. pjMember grew a face on 2026-08-19 and this test went
+  // red with "discTint is not defined" -- which is the extraction harness
+  // working exactly as intended: it runs the real function, so a new
+  // dependency has to be a real one. Stubbing them would keep the test green
+  // while quietly no longer exercising the branch that draws the face.
   const prelude = TOLD_PRELUDE
     + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + pageConstSource('DISC_TINTS') + '\n'
+    + pageConstSource('DISC_INKS') + '\n'
+    + pageFnSource('discIndex') + '\n'
+    + pageFnSource('discTint') + '\n'
+    + pageFnSource('discInk') + '\n'
+    + pageFnSource('initials') + '\n'
     + pageFnSource('pjToldLine') + '\n';
   const member = pageFunction('pjMember', prelude);
   const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
@@ -7592,4 +7619,209 @@ test('a project with no folder any more still answers the documents list, with a
 
 test('the documents list of a project that does not exist is a 404', async () => {
   const listed = await req('/api/project/no-such-project/documents');
-  assert.equal(listed.status, 404);});
+  assert.equal(listed.status, 404);
+});
+
+/* ===========================================================================
+   PATH CITATIONS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   🛑 THE ONLY PLACE IN THIS APP WHERE A MESSAGE BODY BECOMES MARKUP. Every
+   test below exists because the previous line was `esc(m.text)` and nothing
+   else, and the one thing that must survive this change is that a message can
+   never inject anything.
+   =========================================================================== */
+
+test('a body with no citation is byte-for-byte what esc() produced before', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const esc = pageFunction('esc');
+  const names = new Set(['brief.md']);
+  for (const body of [
+    'nothing here',
+    'a <b>bold</b> claim & an ampersand',
+    '<script>alert(1)</script>',
+    '"quotes" and \'apostrophes\'',
+    'notes.mdx is not notes.md',
+    '',
+  ]) {
+    assert.equal(link(body, names), esc(body), JSON.stringify(body) + ' changed with no citation in it');
+  }
+});
+
+/* ⚠️ THIS TEST AND THE ONE ABOVE COVER DIFFERENT ESCAPES, which is not obvious
+   and was measured rather than assumed. `pjLinkPaths` escapes in two places: a
+   whole-body `esc(raw)` on the no-match path, and a per-token `esc()` on the
+   matching path. Deleting the per-token escapes leaves the byte-for-byte test
+   above GREEN -- it never reaches that code, because its bodies contain no
+   citation -- and turns THIS one red with "a script tag beside a citation was
+   not escaped". Verified by doing exactly that. Neither test covers the other's
+   escape, so removing either would open an injection with a green suite. */
+test('a citation becomes a chip and everything around it stays escaped', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const out = link('see brief.md and <script>alert(1)</script>', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md<button class="refgo"/,
+    'the cited file did not become a chip');
+  assert.ok(out.includes('&lt;script&gt;'), 'a script tag beside a citation was not escaped');
+  assert.ok(!out.includes('<script>'), 'RAW SCRIPT TAG SURVIVED into message markup');
+});
+
+test('the chip carries the BASENAME, because that is what the opener takes', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const out = link('look at docs/brief.md', new Set(['brief.md']));
+  // The person sees the path they wrote; the button carries what open-file
+  // accepts, which is a bare filename and nothing else.
+  assert.ok(out.includes('>docs/brief.md<'), 'the chip stopped showing the path as written');
+  assert.match(out, /data-ref="brief\.md"/, 'the button lost the basename the route needs');
+});
+
+test('a token containing .. is never dressed as a citation, even when its basename matches', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const esc = pageFunction('esc');
+  for (const body of ['../brief.md', 'a/../../brief.md', '..\\brief.md']) {
+    const out = link(body, new Set(['brief.md']));
+    assert.equal(out, esc(body), JSON.stringify(body) + ' was offered as a chip');
+    assert.ok(!out.includes('refgo'), 'a walking-up path got a Show me button');
+  }
+});
+
+test('trailing punctuation is stripped for the lookup and put back after', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const out = link('it is in brief.md.', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md<button/, 'the full stop blocked the match');
+  assert.ok(out.endsWith('.'), 'the sentence lost its full stop');
+});
+
+test('whitespace the agent typed survives the reassembly', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  // Agents paste columns. Collapsing runs would edit what they said.
+  const out = link('a    b\n\tbrief.md', new Set(['brief.md']));
+  assert.ok(out.includes('a    b'), 'a run of spaces was collapsed');
+  assert.ok(out.includes('\n\t'), 'a newline and tab were lost');
+});
+
+test('an empty or absent name list leaves every body untouched', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const esc = pageFunction('esc');
+  // CONTROL: the same body DOES become a chip when the list has the name, so
+  // "untouched" here is the list being empty rather than the matcher being dead.
+  assert.equal(link('brief.md', new Set()), esc('brief.md'));
+  assert.equal(link('brief.md', null), esc('brief.md'));
+  assert.match(link('brief.md', new Set(['brief.md'])), /refgo/);
+});
+
+/* ===========================================================================
+   EXTERNAL LINKS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   🛑 THE ONE PLACE A CLICK LEAVES THE MACHINE in a local-first product, and
+   the second place a message body becomes markup.
+   =========================================================================== */
+
+test('an http token becomes a link and carries noreferrer noopener', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const out = inline('see https://example.test/a for details');
+  assert.match(out, /<a class="xlink" href="https:\/\/example\.test\/a"/, 'the URL did not become a link');
+  assert.ok(out.includes('rel="noreferrer noopener"'),
+    'the one click that leaves this machine told the destination where it came from');
+  assert.ok(out.includes('target="_blank"'), 'the link replaced the board');
+});
+
+test('a scheme that is not http(s) is never linked, and that includes the dangerous ones', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  // ⚠️ The test is a literal `http://`/`https://` PREFIX rather than a URL
+  // parse, so there is no scheme for it to be tricked about. These come back
+  // as plain escaped text, not as links with a refused scheme.
+  for (const body of [
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'file:///etc/passwd',
+    'vbscript:msgbox(1)',
+    'HTTPS://SHOUTING.test',
+  ]) {
+    const out = inline(body);
+    assert.ok(!out.includes('<a '), JSON.stringify(body) + ' became a link');
+    assert.equal(out, esc(body), JSON.stringify(body) + ' was not returned as plain escaped text');
+  }
+  // CONTROL: the same function DOES link a real one, so the assertions above
+  // are not passing because the linker is dead.
+  assert.match(inline('https://ok.test'), /<a class="xlink"/);
+});
+
+test('a body with no URL in it is byte-for-byte what esc() produced', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  for (const body of ['plain words', 'a <b>tag</b> & an amp', '<script>alert(1)</script>', '']) {
+    assert.equal(inline(body), esc(body), JSON.stringify(body) + ' changed with no URL in it');
+  }
+});
+
+test('trailing punctuation is not swallowed into the href', () => {
+  const inline = pageFunction('pjInline', pageFnSource('esc') + '\n');
+  const out = inline('go to https://example.test/page.');
+  assert.match(out, /href="https:\/\/example\.test\/page"/, 'the full stop went into the link');
+  assert.ok(out.endsWith('.'), 'the sentence lost its full stop');
+});
+
+test('a URL inside a message that also cites a file gets both treatments', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  const out = link('brief.md and https://example.test', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md/, 'the citation was lost when a URL was present');
+  assert.match(out, /<a class="xlink"/, 'the URL was lost when a citation was present');
+});
+
+/* ===========================================================================
+   FENCED BLOCKS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   The third and last place a message body becomes markup without an explicit
+   engine marker. The fence is a DELIMITER; everything below tests that an
+   uncertain reading falls back to the flat paragraph rather than guessing.
+   =========================================================================== */
+
+function bodyFn() {
+  return pageFunction('pjBody', pageFnSource('esc') + '\n'
+    + pageFnSource('pjInline') + '\n' + pageFnSource('pjLinkPaths') + '\n');
+}
+
+test('a closed fence becomes a block and its contents are escaped, not linked', () => {
+  const body = bodyFn();
+  const out = body('before\n```\n<script>alert(1)</script>\nbrief.md\nhttps://example.test\n```\nafter',
+    new Set(['brief.md']));
+  assert.match(out, /<figure class="codeb"><pre>/, 'the fenced block did not become a block');
+  assert.ok(out.includes('&lt;script&gt;'), 'a script tag inside a block was not escaped');
+  assert.ok(!out.includes('<script>'), 'RAW SCRIPT TAG survived inside a block');
+  // ⚠️ The important half: quoted content is not a citation.
+  const inBlock = out.slice(out.indexOf('<pre>'), out.indexOf('</pre>'));
+  assert.ok(!inBlock.includes('refgo'), 'a path INSIDE a quoted block was offered as a citation');
+  assert.ok(!inBlock.includes('xlink'), 'a URL INSIDE a quoted block was turned into a link');
+});
+
+test('an UNCLOSED fence is prose, not half a block', () => {
+  const body = bodyFn();
+  const out = body('here is the start\n```\nsome lines that never close', new Set());
+  assert.ok(!out.includes('codeb'), 'an unclosed fence was rendered as a block');
+  assert.ok(out.includes('```'), 'the fence characters vanished from a body that was left as prose');
+});
+
+test('outside the fence, citations and links still work', () => {
+  const body = bodyFn();
+  const out = body('see brief.md\n```\nquoted\n```\nand https://example.test', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md/, 'a citation before the block was lost');
+  assert.match(out, /<a class="xlink"/, 'a URL after the block was lost');
+});
+
+test('a body with no fence is exactly what it was before pjBody existed', () => {
+  const body = bodyFn();
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  for (const t of ['plain', 'brief.md here', '<script>alert(1)</script>', 'https://example.test']) {
+    assert.equal(body(t, new Set(['brief.md'])), link(t, new Set(['brief.md'])),
+      JSON.stringify(t) + ' changed when it contains no fence');
+  }
+});
+
+test('no figcaption is emitted, because nothing can name a source yet', () => {
+  const body = bodyFn();
+  const out = body('```\nx\n```', new Set());
+  assert.ok(out.includes('<figure class="codeb">'), 'CONTROL: the block did not render at all');
+  assert.ok(!out.includes('figcaption'),
+    'a caption was invented; the pack draws one naming file and line, and nothing in this '
+    + 'product can produce that, so shipping it would assert what nobody computed');
+});

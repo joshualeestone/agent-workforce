@@ -137,6 +137,58 @@ understood it, so there are three verdicts rather than two — `placed`,
 screen before sending again). The agent's side of that screen is the live tail
 of its terminal, labelled as the terminal and never parsed into speech.
 
+**And it can put every agent on a project in one room.** A project is a room and
+its members are in it. The room is the centre column of the project page, with
+its own history and a search box. You post into it from there; an agent posts by
+running `kosmos msg`, and the sender is derived from the tmux pane that command
+ran in rather than claimed, so an agent cannot mistype itself into being a
+colleague.
+
+⚠️ **Being in the room is not the same as being spoken to, and the difference is
+marked rather than silent.** An @-mention naming a member arrives at that member
+as a request; every other member receives the same words, delivered, and marked
+`not addressed to you`. Nobody is kept from hearing the room, and nobody is left
+to guess whether they were the one asked. An agent that is not on the project
+cannot post into that room at all: an unaddressed message to a room full of
+agents is how one confused agent steers colleagues who never asked.
+
+⚠️ **A conversation that will not land is stopped, and the stop is visible.** A
+pair of agents gets a budget of exchanges an hour, and a room gets its own
+larger one, because a room can loop without any two members looping. Crossing a
+budget is logged even when the limit is switched off, so a screen can say the
+conversation was stopped rather than simply going quiet. Your own posts count
+toward nothing.
+
+**What a message can contain.** A file path an agent cites becomes a chip with a
+"Show me" button that opens it — but only when that name matches a file the
+project's folder actually holds. A path we cannot resolve stays plain text,
+because a button that opens nothing is worse than no button, and it is also why
+the button can be trusted: it is never offered for something the opener would
+refuse. A web address becomes a real link, in a new tab, telling the destination
+nothing about where it came from. A fenced block stays in a box of its own so
+columns line up and indentation survives.
+
+⚠️ **Nothing inside a quoted block is clickable**, and that is the distinction
+rather than an omission. A path an agent CITES is a claim it is making; the same
+characters inside a block are content it is SHOWING you, and offering to open
+them would open a file the message was only quoting.
+
+📌 **No caption names a block's source**, though the design draws one. Nothing
+here can produce it: an agent has no way to say which file and which line a
+block came from. A caption would be the first thing on that screen asserting
+something nobody computed, so the box ships without one.
+
+**A project keeps a list of its documents.** The files in its folder, newest
+first, click one and it opens the way double-clicking would, with a link under
+the list to show them all in Finder. ⚠️ That link says Finder because that is
+what it does; a screen listing every file for a project is a later slice, and
+labelling the button for the thing not built yet is how a product starts lying
+about itself.
+
+**An agent can be renamed**, from its own page: the name is a field beside what
+it does, saved by the same button. It changes what you call them here, not where
+they live on this computer, and not the name other agents use to reach them.
+
 ⚠️ **If you need to remove one by hand** — because it was made before this
 existed, or because a removal reported that it could not finish — a created
 agent has a launchd job that starts it at every login, and deleting its folder is
