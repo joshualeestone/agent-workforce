@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: b82a7642d837308a84620770e79ee80c49441d15cbca34b9b9b9df9bc9c74a3e
+diff_hash: c77d82b5fdf71686913c323a539164be37b2ce3ae393f18c851d4c0536777708
 subdir_audit: passed
-timestamp: 2026-08-20T05:39:44Z
+timestamp: 2026-08-20T05:57:18Z
 iterations: 1
 converged: true
 ---
@@ -353,3 +353,39 @@ main-side commit touching the shared files is this branch's own squash.
 | 26 | 1 | BLOCKER | package.json | FIXED | version regression, caught a SIXTH time |
 | 27 | 1 | NIT | .codeb figcaption | DEFERRED | needs a source mechanism; test guards it |
 | 28 | 1 | NIT | .quoteb / .msg-att | DEFERRED | marker, and attachments, respectively |
+
+## Eighth slice (2026-08-20): the last known red goes green
+
+[STRENGTH] **Measured where it renders, not deleted.**  only exists
+when a tell comes back could_not, and the sweep looked for it on a HEALTHY
+project. The failed-tell fixture already existed: "Quarter close" is created
+with , which has no folder on this machine. Confirmed in the browser
+before touching the check.
+
+[STRENGTH] A SEPARATE pass from the missing-folder one, deliberately. A failed
+tell and a missing folder share a symptom and not a cause; folded together, one
+would stand in for the other's coverage and the check would go green having
+measured half of what it names.
+
+[STRENGTH] The pass ASSERTS rather than finds. An element whose whole purpose is
+to SPEAK cannot be measured for contrast while empty, because empty measures
+perfectly. The assertion is not a nicety on top of the measurement, it is what
+makes the measurement mean anything.
+
+[WARNING -> RESOLVED] The first version clicked `#pj-back` on the settings
+VIEW and Playwright spent its full timeout on an element that was never going to
+appear. Two doors. Diagnosed the refusal rather than routing around it -- second
+time tonight that rule paid, and both times the workaround would have "worked",
+which is what makes it dangerous: it converts a signal into a pass.
+
+[NIT] ⚠️ NO VERSION BUMP RIDES WITH THIS. It changes a browser check, not the
+app; nothing a person can see is different. A release whose note has nothing
+true to say would devalue the eight tonight that did.
+
+### Eighth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 29 | 1 | BLOCKER | render-projects.js .pj-told | FIXED | measured on a failed-tell project |
+| 30 | 1 | WARNING | check navigation | FIXED | walk out of settings before going back |
+| 31 | 1 | NIT | version bump | DEFERRED | deliberately none; check-only change |
