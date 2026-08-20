@@ -2171,8 +2171,9 @@ test('a menu that redrew into a DIFFERENT question with the SAME labels is refus
   const bPrompt = 'Edit file src/b.js?\n❯ 1. Yes\n  2. No\n';
   await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
     [said(bPrompt), said(), said()], async ({ calls }) => {
-      const res = await post('/api/agent/zeta/thread',
-        { text: '1', chose: 'Yes', asked: 'Edit file src/a.js?' });
+      const chatEngine = require('./engine/chat');
+      const asked = chatEngine.questionAbove(chatEngine.questionIn('Edit file src/a.js?\n❯ 1. Yes\n  2. No').text);
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
       assert.equal(res.status, 409, 'the screen is asking about a different file now');
       assert.equal(calls.sends().length, 0, 'and nothing was typed into the pane');
     });
@@ -2186,10 +2187,42 @@ test('the same question still on screen is sent, so the check above is not refus
   const aPrompt = 'Edit file src/a.js?\n❯ 1. Yes\n  2. No\n';
   await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
     [said(aPrompt), said(), said()], async ({ calls }) => {
-      const res = await post('/api/agent/zeta/thread',
-        { text: '1', chose: 'Yes', asked: 'Edit file src/a.js?' });
+      const chatEngine = require('./engine/chat');
+      const asked = chatEngine.questionAbove(chatEngine.questionIn(aPrompt).text);
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
       assert.equal(res.status, 200, 'the question it was answering is the one on screen');
       assert.equal(calls.sends().length > 0, true, 'and the digit reached the pane');
+    });
+});
+
+test('a pane that ACCUMULATED a new question above the same menu is refused', async () => {
+  reset();
+  /**
+   * ⚠️ THE CASE CONTAINMENT LET THROUGH, and neither existing test covered it.
+   * The two tests beside this one use "src/a.js" and "src/b.js", which contain
+   * neither other, so a containment guard passes them both and looks correct.
+   * A pane ACCUMULATES: the answered question's prose stays on screen above the
+   * new one, so the new identity legitimately CONTAINS the old. Measured
+   * through the producers: asked "Do you want to proceed?", screen now reads
+   * "rm -rf /Users/josh/build" above the same Yes/No menu, and containment
+   * called that the same question.
+   *
+   * Equality refuses it. The reason equality is safe again is that the identity
+   * no longer moves with the cursor -- see `questionAbove`.
+   */
+  const chatEngine = require('./engine/chat');
+  const painted = 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\n> ';
+  const accumulated = 'rm -rf /Users/josh/build\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n';
+  const asked = chatEngine.questionAbove(chatEngine.questionIn(painted).text);
+  assert.ok(asked, 'CONTROL: the painted screen has an identity');
+  const nowIdent = chatEngine.questionAbove(chatEngine.questionIn(accumulated).text);
+  assert.ok(nowIdent && nowIdent.includes(asked),
+    'CONTROL: the new identity really does CONTAIN the old one, which is what containment got wrong');
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(accumulated), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
+      assert.equal(res.status, 409, 'answering the older question would type 1 at the newer one');
+      assert.equal(calls.sends().length, 0, 'and nothing reached the pane');
     });
 });
 
@@ -2207,11 +2240,19 @@ test('the cursor moving inside the SAME question is not "asking something else"'
    * screen was asking something else. Containment accepts it, because one
    * window is a prefix of the other whenever only the anchor moved.
    */
+  /* ⚠️ THE IDENTITY IS DERIVED, NOT TYPED. A hand-written `asked` pins what the
+     test's author believed the page sends, which is how this test kept passing
+     against an identity rule that had changed underneath it. `chat.questionAbove`
+     is the same function the page's copy is pinned against, so the test now
+     sends what a real client would. */
+  const chatEngine = require('./engine/chat');
+  const painted = 'I will run the test suite now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n';
   const moved = 'I will run the test suite now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No\n';
+  const asked = chatEngine.questionAbove(chatEngine.questionIn(painted).text);
+  assert.ok(asked, 'CONTROL: the painted screen has an identity to send');
   await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
     [said(moved), said(), said()], async ({ calls }) => {
-      const res = await post('/api/agent/zeta/thread',
-        { text: '1', chose: 'Yes', asked: 'Do you want to proceed?' });
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
       assert.equal(res.status, 200, 'the same question with the cursor moved is not a different question');
       assert.equal(calls.sends().length > 0, true, 'and the answer reached the pane');
     });

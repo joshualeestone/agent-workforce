@@ -1958,12 +1958,55 @@ test('questionAbove is the identity of a question, and never an empty one', () =
   assert.ok(padded, 'CONTROL: the padded capture is still a question');
   assert.deepEqual(chat.optionsIn(padded.text), [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
     'CONTROL: and still a confident menu, so an identity is required for it');
-  assert.ok(chat.questionAbove(padded.text),
-    'a run-up window of blank lines produced an empty identity, which disables the check that reads it');
+  /* ⚠️ NULL, AND THE PREVIOUS VERSION OF THIS LINE COULD NOT FAIL. It asserted
+     the identity was truthy, at a moment when the fallback returned the whole
+     slice -- which `optionsIn` has already guaranteed is non-empty. So it was
+     tautological, while the invariant nineteen lines up (two questions with
+     identical labels must not share an identity) was BROKEN by that same
+     fallback: two padded captures both keyed on the options and collided.
+     A blank run-up window means the screen carries nothing that identifies the
+     question. Null says so; inventing an identity from the options is the
+     collision this function exists to prevent. */
+  assert.equal(chat.questionAbove(padded.text), null,
+    'a screen with no text above its menu cannot be told from another one, and must say so');
+  const paddedB = chat.questionIn('Delete the production database?' + '\n'.repeat(9) + '❯ 1. Yes\n  2. No\n\n> ');
+  assert.ok(paddedB, 'CONTROL: the second padded capture is also a question');
+  assert.equal(chat.questionAbove(paddedB.text), null,
+    'and the collision is closed by refusing to guess rather than by guessing differently');
 
-  /* And the run at the very top, the case the fallback was written for. */
-  assert.ok(chat.questionAbove('❯ 1. Yes\n  2. No'),
-    'nothing above the run is not the same as no identity');
+  /* ⚠️ THE IDENTITY DOES NOT MOVE WITH THE CURSOR, which is why equality is
+     safe again. `questionIn` anchors on the LAST needs-you marker and the
+     marked option line is itself one, so arrowing from 1 to 2 moves the window
+     top. The last meaningful lines above the run do not move with it. */
+  /* ⚠️ THE PROSE MARKER IS LOAD-BEARING IN THIS FIXTURE. With the cursor on 2,
+     `❯ 1. Yes` no longer matches, so a capture whose only marker was that line
+     is not a question at all -- `questionIn` returns null and this case cannot
+     be built. "Do you want to proceed?" is a marker in its own right, which is
+     what makes the cursor-move case reachable. (Written with "Proceed?" first,
+     which is not a marker, and the fixture threw rather than asserting.) */
+  const onOne = chat.questionIn('L2\nL3\nL4\nL5\nL6\nsixth\nI will run the tests now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  const onTwo = chat.questionIn('L2\nL3\nL4\nL5\nL6\nsixth\nI will run the tests now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No');
+  assert.ok(onOne && onTwo, 'CONTROL: both cursor positions are questions the route can serve');
+  assert.notEqual(onOne.text, onTwo.text, 'CONTROL: the two captures really do differ');
+  assert.equal(chat.questionAbove(onOne.text), chat.questionAbove(onTwo.text),
+    'the cursor moving is not a different question, and refusing that send is worse than the hole it closes');
+
+  /* ⚠️ AND AN ACCUMULATED NEW QUESTION IS NOT THE SAME ONE, which is what
+     containment got wrong: a pane accumulates, so the new window CONTAINS the
+     answered one's text. */
+  const before = chat.questionIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\n\n> ');
+  const after = chat.questionIn('rm -rf /Users/josh/build\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  assert.notEqual(chat.questionAbove(before.text), chat.questionAbove(after.text),
+    'a newer question above the same menu answered as the old one is a wrong digit in a live terminal');
+
+  /* ⚠️ AND A MENU WITH NOTHING ABOVE IT HAS NO IDENTITY EITHER, which is the
+     same ruling as the padded case and the opposite of what this assertion
+     said when the fallback returned the whole slice. The page's `talkKey`
+     DIVERGES here and falls back, deliberately: its collision costs a
+     suppressed question for thirty seconds, this one's costs a digit typed
+     into a live terminal. */
+  assert.equal(chat.questionAbove('❯ 1. Yes\n  2. No'), null,
+    'a menu with nothing above it cannot be told from another menu with nothing above it');
 });
 
 test('optionsIn reads a real menu, both the two-option prompt and a long one', () => {

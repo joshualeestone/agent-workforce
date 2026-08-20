@@ -6247,12 +6247,26 @@ function talkKey(body) {
      live question leaves the person unable to answer at all, while a second
      press requires them to press again over a question they can see they have
      answered -- but it is a choice between two harms and not a free one. */
-  /* ⚠️ THE RESULT, NOT THE INDEX, and `chat.questionAbove` carries the same
-     correction. `first > 0` says there are lines above the run; it does not say
-     they contain anything, and a run-up window of blank lines (an ordinary pane
-     after `/clear`) returned '' from the branch written to avoid ''. */
-  const trimmedAbove = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
-  const above = trimmedAbove || lines.join('\n').trim();
+  /* ⚠️ THE LAST THREE MEANINGFUL LINES ABOVE THE RUN, matching
+     `chat.questionAbove` exactly -- see its docblock for why the whole window,
+     containment, and the whole-slice fallback were each wrong. The short
+     version: the window's TOP moves with the cursor, a newly accumulated
+     question inserts its lines NEAREST the menu, and the options alone are
+     what two different questions share. */
+  const aboveLines = lines.slice(0, first)
+    .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
+  /* ⚠️ AND HERE THE FALLBACK STAYS, WHERE THE ENGINE'S TWIN RETURNS NULL. The
+     two functions compute the same `above` and then diverge ON PURPOSE, because
+     the cost of a weak identity is not the same on both sides:
+       this key decides whether to keep HIDING buttons. A collision suppresses a
+       live question for up to thirty seconds -- bad, bounded, and strictly
+       better than having no key at all, which suppresses every question.
+       `questionAbove` decides whether to TYPE A DIGIT into a live terminal. A
+       collision there answers a question nobody read, so it refuses to guess
+       and the route falls back to the label check it had before.
+     Same rule, different answer to "what if the rule yields nothing", and the
+     agreement test asserts both halves rather than pretending they match. */
+  const above = aboveLines.slice(-3).join('\n').trim() || lines.join('\n').trim();
   return JSON.stringify(body.options) + '\u0000' + above;
 }
 

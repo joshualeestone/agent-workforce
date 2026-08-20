@@ -2036,41 +2036,41 @@ const server = http.createServer((req, res) => {
            * Optional on the wire: a client that does not send it is no worse
            * off than before, and a button send from this page always does.
            */
-          /* ⚠️ SAME GATE AS EVERY OTHER FIELD OFF THE WIRE. `chose` carries a
-             docblock arguing that a wire field goes through `messageProblem`
-             rather than a hand-rolled condition, and this one was taking only
-             `cleanMessage`. It is compare-only and never stored, so the
-             exposure was bounded -- and "bounded" is what the rule exists to
-             stop being the reason. */
-          const askedAbove = (typeof body.asked === 'string' && !chat.messageProblem(body.asked))
-            ? chat.cleanMessage(body.asked) : null;
-          const nowAbove = asked ? chat.questionAbove(asked.text) : null;
-          const nowClean = nowAbove ? chat.cleanMessage(nowAbove) : null;
           /**
-           * ⚠️ CONTAINMENT, NOT EQUALITY, and equality refused correct sends.
-           *
-           * `questionIn` anchors on the LAST needs-you marker, and `❯ 1. Yes`
-           * is itself one -- so on a Yes-first menu the anchor is the option
-           * line while the cursor sits on 1, and the prose marker above it the
-           * moment the person arrows to 2. The six-line run-up window shifts
-           * with the anchor, so `above` changes while the question, the options
-           * and the labels are all identical. MEASURED: the same "Do you want
-           * to proceed?" prompt gives "Do you want to proceed?" with the cursor
-           * on 1 and "I will run the test suite now.\nDo you want to proceed?"
-           * with it on 2. Equality 409s that, and the sentence it shows -- "its
-           * screen is asking something else now" -- is false. The trigger is a
-           * person arrowing in their own pane, which nothing here can prevent.
-           *
-           * One window is always a prefix of the other when only the anchor
-           * moved, so containment accepts exactly that case and still refuses
-           * the one this guard is for: "Edit file src/a.js?" and "Edit file
-           * src/b.js?" contain neither.
-           *
-           * ⚠️ A guard that refuses correct sends is worse than the hole it
-           * closes, because the hole is rare and the refusal is not.
+           * ⚠️ BOUNDED, NOT GATED, and `messageProblem` here disabled the guard
+           * silently. It refuses over MAX_TEXT and on any control character,
+           * and a refusal made `askedAbove` null, which skips this check with
+           * no error and no log. `viewport` captures with `-J`, which JOINS
+           * wrapped lines, so one logical line of agent output can be
+           * arbitrarily long -- the guard would switch itself off on exactly
+           * the busiest screens. This field is compare-only and never stored,
+           * so the right treatment is to bound BOTH SIDES identically and
+           * compare what is left, rather than to stop looking.
            */
-          const sameQuestion = !!askedAbove && !!nowClean
-            && (nowClean.includes(askedAbove) || askedAbove.includes(nowClean));
+          const bound = (v) => chat.cleanMessage(v).slice(0, 2000);
+          const askedAbove = typeof body.asked === 'string' && body.asked.trim()
+            ? bound(body.asked) : null;
+          const nowAbove = asked ? chat.questionAbove(asked.text) : null;
+          const nowClean = nowAbove ? bound(nowAbove) : null;
+          /**
+           * ⚠️ EQUALITY, and containment was a hole rather than a fix.
+           *
+           * Containment was written for a false refusal: the identity moved
+           * when the cursor did, because `questionIn` anchors on the last
+           * needs-you marker and the marked option line is one. But a pane
+           * ACCUMULATES, so a genuinely new question's window legitimately
+           * contains the answered one's, and `includes` called that the same
+           * question. Measured end to end through the real producers: buttons
+           * drawn for "Do you want to proceed?", the pane redrew to `rm -rf
+           * /Users/josh/build` above the same Yes/No menu, both 409s passed,
+           * and "1" went through.
+           *
+           * The cursor problem is fixed where it belongs -- `questionAbove` now
+           * keys on the last three meaningful lines ABOVE the run, which do not
+           * move when the window's top does -- so equality is exact again, and
+           * exact is what a guard against answering the wrong question needs.
+           */
+          const sameQuestion = askedAbove !== null && nowClean !== null && nowClean === askedAbove;
           if (askedAbove && nowClean && !sameQuestion) {
             const moved = new Error('its screen is asking something else now, so we did not send that '
               + 'answer. The question on this page is the current one.');

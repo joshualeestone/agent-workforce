@@ -963,17 +963,40 @@ function questionAbove(questionText) {
   const lines = String(questionText == null ? '' : questionText).split('\n');
   const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
     l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
-  /* ⚠️ THE RESULT, NOT THE INDEX. `first > 0` says there are lines above the
-     run; it does not say they contain anything. A capture whose run-up window
-     is all blank -- an ordinary pane right after `/clear`, where tmux pads and
-     `viewport` trims only the trailing end -- takes the `first > 0` branch and
-     returns ''. That is precisely the empty string the paragraph above says
-     must never be returned, produced by the guard written to prevent it.
-     Measured: a "Welcome back." nine lines above a Yes/No menu slices to six
-     blank lines and an empty above, and an empty above is FALSY, so the
-     server's screen-check skips itself with no error and no log. */
-  const above = (first > 0 ? lines.slice(0, first).join('\n') : '').trim();
-  return above || lines.join('\n').trim();
+  /**
+   * ⚠️ THE LAST THREE MEANINGFUL LINES ABOVE THE RUN, and every other shape
+   * tried here was wrong in a way that mattered.
+   *
+   *   the WHOLE window   moves with the cursor. `questionIn` anchors on the
+   *                      LAST needs-you marker and the marked option line is
+   *                      itself one, so arrowing from 1 to 2 moves the anchor
+   *                      UP and the window gains lines at the TOP. Equality
+   *                      then refused a send answering the question actually on
+   *                      screen.
+   *   CONTAINMENT        was the fix for that and it opened a hole: a pane
+   *                      accumulates, so a NEW question's window legitimately
+   *                      CONTAINS the answered one's. Measured end to end, "1"
+   *                      went through against `rm -rf` after being drawn for
+   *                      "Do you want to proceed?".
+   *   the WHOLE SLICE    as an empty-window fallback is the options themselves,
+   *                      which two different questions share by definition.
+   *
+   * Lines adjacent to the run do not move when the window's top does, and a
+   * newly accumulated question inserts its own lines NEAREST the menu. So the
+   * last three carry the discriminating text in both directions, and equality
+   * over them is tight rather than loose.
+   *
+   * ⚠️ NULL WHEN NOTHING IDENTIFIES IT. A run-up window of only blanks or frame
+   * means the screen carries no text that could tell one question from another,
+   * and inventing an identity from the options is exactly the collision this
+   * function exists to prevent. Null leaves the caller with the label check it
+   * had before this existed, which is the state of the world this mechanism was
+   * added to improve on rather than a new hole.
+   */
+  const above = lines.slice(0, first)
+    .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
+  if (!above.length) return null;
+  return above.slice(-3).join('\n').trim() || null;
 }
 
 function optionsIn(questionText) {

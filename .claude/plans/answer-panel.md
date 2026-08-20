@@ -211,6 +211,13 @@ request, and the suite reads text.
 - **`engine/chat.js` exports `questionAbove`**, which the Engine section above
   does not mention. It is the engine twin of the page's identity rule, so both
   sides of that comparison read the same fact rather than two spellings of it.
+  ⚠️ **And they diverge in exactly one place, deliberately.** When the rule
+  yields nothing -- a menu with only blanks or frame above it -- the engine
+  returns `null` and the page falls back to the whole slice. The costs are not
+  symmetric: the page's key decides whether to keep HIDING buttons, so a
+  collision suppresses a live question for thirty seconds; the engine's decides
+  whether to TYPE A DIGIT, so a collision answers a question nobody read. The
+  agreement test asserts both halves rather than pretending they match.
 - **`optionsIn` is materially stricter than the "iff" written above**, and this
   is the largest drift on the branch rather than the smallest. The spec says
   confident iff the numbers are contiguous ascending from 1, the count is in

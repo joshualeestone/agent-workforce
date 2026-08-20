@@ -6798,8 +6798,21 @@ test('talkKey reads the option run exactly where optionsIn does, decoys included
       question: { text },
     });
     assert.ok(key, 'talkKey refused a body the engine parses: ' + JSON.stringify(text));
-    assert.equal(key.split('\u0000')[1], engineAbove(text),
-      'the page and the engine disagree about which question this is: ' + JSON.stringify(text));
+    /* `slice(1).join`, not `[1]`: an identity containing the separator would be
+       truncated by the index form, which is the correction `sendTalk` already
+       carries and this test did not. */
+    const pageAbove = key.split('\u0000').slice(1).join('\u0000');
+    const engine = engineAbove(text);
+    if (engine === null) {
+      /* ⚠️ THE DELIBERATE DIVERGENCE, asserted rather than skipped. When the
+         rule yields nothing the engine refuses to guess (a wrong match types a
+         digit into a live terminal) and the page falls back to the whole slice
+         (a wrong match suppresses a question for thirty seconds). */
+      assert.ok(pageAbove, 'the page must still key something when the engine declines to');
+    } else {
+      assert.equal(pageAbove, engine,
+        'the page and the engine disagree about which question this is: ' + JSON.stringify(text));
+    }
   }
 
   for (const decoy of [
