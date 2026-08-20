@@ -1265,8 +1265,19 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    attribute: full column width, its own smaller type and tighter padding. The
    pack carries these inline because a mock has nowhere else to put them. */
 .pj-addmem { margin-top: 14px; width: 100%; font-size: .875rem;
-             padding: calc(.5em - 1px) calc(1.05em - 1px); }.pj-member b { font: 600 var(--text-body) var(--font-ui); }
-/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+             padding: calc(.5em - 1px) calc(1.05em - 1px); }
+/* The pack's path chip (FROZEN-2026-08-19:474), on this file's tokens: its
+   `--mono`/`--ui` do not exist here, and its two rgba() grounds are literals
+   that would not flip with the theme. */
+.ref { display: inline-flex; align-items: center; gap: 6px;
+       font: 13px var(--font-mono); background: var(--k-surface);
+       border: 1px solid var(--k-rule); border-radius: 6px;
+       padding: 1px 3px 1px 7px; vertical-align: baseline; }
+.refgo { font: 600 11px var(--font-ui); letter-spacing: .02em; border: 0;
+         border-radius: 4px; background: var(--k-bg); color: var(--k-ink-2);
+         cursor: pointer; padding: 2px 6px; min-height: 24px; }
+.refgo:hover { color: var(--k-ink); }
+.refgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
    floor this project holds as a hard rule. "It is only a scannable caption"
    was the recorded defence, and the floor does not have a caption exemption. */
@@ -8943,6 +8954,11 @@ function pjById(id) { return PROJECTS.find((p) => p.id === id) || null; }
    who chip is the status, "Nobody yet" is the only state word, and closed
    tasks live behind the door with the unassigned ones. */
 let TK_SHOW_ALL = false;   // the door's reveal; resets when the project changes
+/* Every filename in the open project's folder, for matching path citations in
+   message bodies. Cleared on switch with the rest of the project's state: a
+   list left standing would dress another project's words as citations of files
+   this one does not have. */
+let PJ_DOC_NAMES = null;
 let TK_OPEN = null;        // the task number the view dialog is showing
 
 /** Re-read the store; loadProjects itself repaints the open project on
@@ -9505,6 +9521,12 @@ async function pjLoadDocs(id) {
     all.hidden = true;
     return;
   }
+  PJ_DOC_NAMES = Array.isArray(body.names) ? new Set(body.names) : null;
+  /* The room is repainted so citations become chips as soon as the names land.
+     Its own cache key is cleared first, or the change-guard skips the repaint
+     and the chips appear only after the next unrelated change. */
+  const roomBox = document.getElementById('pj-room');
+  if (roomBox) { roomBox.__lastRoom = undefined; if (roomBox.__lastBody) paintRoom(roomBox.__lastBody); }
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) {
     msg.textContent = 'Nothing here yet. Files you or your agents put in this project\u2019s folder show up here.';
@@ -9538,6 +9560,65 @@ async function pjLoadDocs(id) {
     : 'Show them all in Finder';
 }
 
+/**
+ * Turn a message body into HTML, with the file paths it cites rendered as the
+ * pack's `.ref` chip and everything else escaped exactly as before.
+ *
+ * 🛑 THE ESCAPE IS NOT RELAXED. Every span of this function's output is either
+ * `esc()`d text or markup this function built from a filename that was matched
+ * against a list the SERVER produced. A message body never reaches innerHTML
+ * unescaped, on any path, including the no-match path which returns exactly
+ * what the old `esc(m.text)` returned.
+ *
+ * ⚠️ THE CLIENT DOES NOT SNIFF, AND THAT IS THE WHOLE DESIGN. A regex that
+ * decides what "looks like a path" will be wrong, and a mis-detected path
+ * renders as a control that appears broken, where plain text merely appears
+ * plain. The failure modes are not symmetric. So a token becomes a chip ONLY
+ * when it matches, exactly, the name of a file the project's folder actually
+ * contains right now. Anything we cannot prove stays a paragraph, which is the
+ * honest default we already ship.
+ *
+ * That rule is also what makes the chip's promise keepable: "Show me" opens
+ * through the same route the documents list uses, with the same three gates,
+ * so a chip is never offered for something the opener would refuse.
+ */
+function pjLinkPaths(text, names) {
+  const raw = String(text == null ? '' : text);
+  if (!names || !names.size) return esc(raw);
+  /* Split on whitespace RUNS but keep them, so the reassembled body preserves
+     the spacing the person typed. A body is not a sentence: agents paste
+     columns and indentation, and collapsing it would edit what they said. */
+  const parts = raw.split(/(\s+)/);
+  let hit = false;
+  const out = parts.map((tok) => {
+    if (!tok || /^\s+$/.test(tok)) return esc(tok);
+    /* Trailing punctuation is stripped for the LOOKUP and put back after, so
+       "see notes.md." matches while the sentence keeps its full stop. Only
+       characters that cannot start a filename on this platform are stripped,
+       and never from the middle. */
+    const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
+    const core = m[1];
+    const tail = m[2];
+    if (!core) return esc(tok);
+    /* A cited path may be written with folders in front of it. The FILE is
+       what we can open, so the last segment is what is matched -- but only
+       when the whole token has no `..` in it, because a token that walks up
+       is not describing a file in this project and should not be dressed as
+       one even if its basename collides. */
+    if (core.includes('..')) return esc(tok);
+    const base = core.split('/').pop();
+    if (!names.has(base)) return esc(tok);
+    hit = true;
+    return '<span class="ref">' + esc(core)
+      + '<button class="refgo" type="button" data-ref="' + esc(base)
+      + '" aria-label="Show me ' + esc(base) + '">Show me</button></span>' + esc(tail);
+  }).join('');
+  /* ⚠️ Identical output to the old path when nothing matched, byte for byte:
+     the reassembly above escapes every token and every whitespace run, so a
+     body with no citation is unchanged rather than merely equivalent. */
+  return hit ? out : esc(raw);
+}
+
 function pjSize(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n < 0) return '';
@@ -9560,6 +9641,30 @@ document.getElementById('pj-docs').addEventListener('click', async (e) => {
     /* The refusal is the ENGINE's sentence, shown verbatim. It already says
        what happened in words a person can act on ("that file lives outside
        this project"), and rewriting it here would be a second, weaker copy. */
+    let because = 'That file did not open.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'That file did not open.';
+  }
+});
+
+/* ⚠️ DELEGATED ON THE THREAD, because every poll rebuilds the messages: a
+   listener bound to a chip is bound to an element the next repaint destroys.
+   The button carries the BASENAME, which is the only shape open-file accepts,
+   and the refusal shown is the engine's own sentence rather than a second,
+   weaker copy of it. */
+document.getElementById('pj-room').addEventListener('click', async (e) => {
+  const go = e.target && e.target.closest ? e.target.closest('.refgo') : null;
+  if (!go || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-room-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/open-file',
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: go.dataset.ref }) });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
     let because = 'That file did not open.';
     try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
     msg.textContent = because;
@@ -9653,6 +9758,7 @@ function openProject(id) {
     document.getElementById('pj-docs').textContent = '';
     document.getElementById('pj-docs-msg').textContent = '';
     document.getElementById('pj-docs-all').hidden = true;
+    PJ_DOC_NAMES = null;
     pjLoadDocs(id);
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
@@ -9764,7 +9870,7 @@ function pjRoomRow(m, p) {
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
-    + '<p>' + esc(m.text || '') + '</p>' + receipt + '</div></div>';
+    + '<p>' + pjLinkPaths(m.text, PJ_DOC_NAMES) + '</p>' + receipt + '</div></div>';
 }
 
 /**

@@ -7528,3 +7528,89 @@ test('the documents list of a project that does not exist is a 404', async () =>
   const listed = await req('/api/project/no-such-project/documents');
   assert.equal(listed.status, 404);
 });
+
+/* ===========================================================================
+   PATH CITATIONS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   🛑 THE ONLY PLACE IN THIS APP WHERE A MESSAGE BODY BECOMES MARKUP. Every
+   test below exists because the previous line was `esc(m.text)` and nothing
+   else, and the one thing that must survive this change is that a message can
+   never inject anything.
+   =========================================================================== */
+
+test('a body with no citation is byte-for-byte what esc() produced before', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  const names = new Set(['brief.md']);
+  for (const body of [
+    'nothing here',
+    'a <b>bold</b> claim & an ampersand',
+    '<script>alert(1)</script>',
+    '"quotes" and \'apostrophes\'',
+    'notes.mdx is not notes.md',
+    '',
+  ]) {
+    assert.equal(link(body, names), esc(body), JSON.stringify(body) + ' changed with no citation in it');
+  }
+});
+
+/* ⚠️ THIS TEST AND THE ONE ABOVE COVER DIFFERENT ESCAPES, which is not obvious
+   and was measured rather than assumed. `pjLinkPaths` escapes in two places: a
+   whole-body `esc(raw)` on the no-match path, and a per-token `esc()` on the
+   matching path. Deleting the per-token escapes leaves the byte-for-byte test
+   above GREEN -- it never reaches that code, because its bodies contain no
+   citation -- and turns THIS one red with "a script tag beside a citation was
+   not escaped". Verified by doing exactly that. Neither test covers the other's
+   escape, so removing either would open an injection with a green suite. */
+test('a citation becomes a chip and everything around it stays escaped', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const out = link('see brief.md and <script>alert(1)</script>', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md<button class="refgo"/,
+    'the cited file did not become a chip');
+  assert.ok(out.includes('&lt;script&gt;'), 'a script tag beside a citation was not escaped');
+  assert.ok(!out.includes('<script>'), 'RAW SCRIPT TAG SURVIVED into message markup');
+});
+
+test('the chip carries the BASENAME, because that is what the opener takes', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const out = link('look at docs/brief.md', new Set(['brief.md']));
+  // The person sees the path they wrote; the button carries what open-file
+  // accepts, which is a bare filename and nothing else.
+  assert.ok(out.includes('>docs/brief.md<'), 'the chip stopped showing the path as written');
+  assert.match(out, /data-ref="brief\.md"/, 'the button lost the basename the route needs');
+});
+
+test('a token containing .. is never dressed as a citation, even when its basename matches', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  for (const body of ['../brief.md', 'a/../../brief.md', '..\\brief.md']) {
+    const out = link(body, new Set(['brief.md']));
+    assert.equal(out, esc(body), JSON.stringify(body) + ' was offered as a chip');
+    assert.ok(!out.includes('refgo'), 'a walking-up path got a Show me button');
+  }
+});
+
+test('trailing punctuation is stripped for the lookup and put back after', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const out = link('it is in brief.md.', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md<button/, 'the full stop blocked the match');
+  assert.ok(out.endsWith('.'), 'the sentence lost its full stop');
+});
+
+test('whitespace the agent typed survives the reassembly', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  // Agents paste columns. Collapsing runs would edit what they said.
+  const out = link('a    b\n\tbrief.md', new Set(['brief.md']));
+  assert.ok(out.includes('a    b'), 'a run of spaces was collapsed');
+  assert.ok(out.includes('\n\t'), 'a newline and tab were lost');
+});
+
+test('an empty or absent name list leaves every body untouched', () => {
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n');
+  const esc = pageFunction('esc');
+  // CONTROL: the same body DOES become a chip when the list has the name, so
+  // "untouched" here is the list being empty rather than the matcher being dead.
+  assert.equal(link('brief.md', new Set()), esc('brief.md'));
+  assert.equal(link('brief.md', null), esc('brief.md'));
+  assert.match(link('brief.md', new Set(['brief.md'])), /refgo/);
+});

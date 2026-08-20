@@ -219,3 +219,27 @@ the avatar decision, which is still flagged as possibly wrong. Two circles on
 one screen, one of which had a pack answer and one of which did not, is exactly
 the case where inventing the second would be indistinguishable from having
 matched something.
+
+## 🛑 The sandbox sandboxes the STORE, not tmux delivery
+
+Found by doing it. Posting a test message into a sandboxed project's room
+delivered it into a REAL agent's live tmux session, because `chat.deliver`
+targets tmux directly and there is no `AGENT_WORKFORCE_TMUX_*` root to point
+somewhere disposable the way DATA, WORKERS, LAUNCH and PROJECTS can be.
+
+    PORT / DATA / WORKERS / LAUNCH / PROJECTS   sandboxed
+    the tmux server the message is typed into   NOT sandboxed
+
+So anyone testing the room locally is messaging live agents, and the browser
+checks that drive room routes would do the same. `engine/projects.js` has
+`setRevealRunner` and `engine/chat.js` has `setRunner` for exactly this reason
+in the TEST suite; a manually driven board has neither.
+
+**Practical rule until there is a knob:** point a local board's fixture at
+project names whose members do not exist on this machine, or accept that a
+post is a real message to a real agent. My test post reached my own pane.
+
+Also observed: a `render-projects.js` run rewrote `projects.json` in the shared
+sandbox and removed a fixture project created by hand. Expected collateral --
+that check drives the real create and archive routes -- but worth knowing
+before concluding a project "vanished".
