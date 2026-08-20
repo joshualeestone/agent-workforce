@@ -1841,6 +1841,38 @@ test('a pane holding the name untied is refused, on the read as well as the writ
   });
 });
 
+test('a name NO pane runs at all reads as an empty conversation and refuses the send', async () => {
+  reset();
+  /**
+   * ⚠️ THE ASYMMETRY IS WRITTEN INTO THE ROUTE AND WAS HELD BY NOTHING. Its
+   * comment states it exactly: a name with no pane behind it passes the read
+   * gate and answers 200 with an empty thread, while the POST 404s. That is
+   * deliberate -- the record is the person's and must stay readable for an
+   * agent that is not running -- but the branch above it found a NEIGHBOURING
+   * comment that claimed a behaviour the code did not have, and the only
+   * difference between the two was that neither had a test.
+   *
+   * The borrowed-name test above covers a pane that EXISTS untied. This is the
+   * other half: no pane by that name anywhere.
+   */
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said()], async () => {
+    // CONTROL: the fleet really is installed, so a 200 below is this route
+    // answering rather than a fixture that never came up.
+    assert.equal((await req('/api/agent/zeta/thread')).status, 200);
+
+    const res = await req('/api/agent/nobodyhere/thread');
+    assert.equal(res.status, 200, 'a name nothing runs is not an error, it is an empty conversation');
+    const body = json(res);
+    assert.deepEqual(body.messages, [], 'and nothing is in it');
+    assert.equal(body.presence, 'off', 'with the composer told there is nobody to hand it to');
+    assert.equal(body.asking, false);
+
+    const sent = await post('/api/agent/nobodyhere/thread', { text: 'are you there' });
+    assert.equal(sent.status, 404,
+      'the WRITE refuses: there is no pane to type into, and a record of a send that never happened is a lie');
+  });
+});
+
 test('a numbered answer records the WORDS and keeps what was typed beside them', async () => {
   reset();
   await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(), said()], async ({ calls }) => {

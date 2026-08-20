@@ -236,7 +236,14 @@ const STATES = {
       await page.evaluate(() => paintTalk('april', 'April'));
       const box = page.locator('#d-talk-box');
       await box.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: `${OUT}/${name}-${theme}.png`, clip: await box.boundingBox() });
+      /* ⚠️ THE COMMITTED NAME, `talk-<state>-<theme>.png`, and not a shorter
+         one. render-thread's header states the rule this file was breaking:
+         "a screenshot in the repo is evidence only if the next person can
+         regenerate the same picture", and the committed set was a hand-picked
+         subset renamed by hand (`4-failed` copied onto `talk-4-send-failed`).
+         Nobody reproduces that, and a mismatched pair is how a stale image
+         outlives the screen it claims to show. */
+      await page.screenshot({ path: `${OUT}/talk-${name}-${theme}.png`, clip: await box.boundingBox() });
 
       // ⚠️ MEASURED IN THE PAGE, not judged from the picture: scrollWidth vs
       // clientWidth is the one comparison immune to a capture narrower than

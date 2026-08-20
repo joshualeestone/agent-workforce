@@ -115,46 +115,65 @@ deletion.
 
 ---
 
-## State as of 2026-08-19 23:20, measured rather than remembered
+## State as of 2026-08-20 06:12 CDT, re-derived rather than inherited
 
-Written because the next person to open this branch will otherwise have to
-re-derive whether it is alive. It is.
+The 2026-08-19 23:20 block that used to sit here said the branch was "merged
+with main at 0.2.3" and "every instrument green". Both were true when written
+and neither survived the night: main released seven more times, so this branch
+was thirteen commits behind and its `package.json` would have REVERTED the app
+to 0.2.3 on merge, and one instrument was never run against it at all. That is
+the lesson worth keeping from this file: **a relational claim is a timestamp,
+not a property.** "Current with main", "in sync", "green" all decay the moment
+either side moves, and they read as durable attributes of the thing they
+describe.
 
-**Merged with main at 0.2.3** (commit above). Two conflicts, both resolved by
-keeping BOTH sides; see that commit for why taking either side alone would have
-deleted shipped work.
+**Merged with main at 0.2.8.** One conflict, in `server.test.js`, and not a real
+disagreement: HEAD held a collapsed closing line for the documents-404 test,
+main held the same assertion plus the whole path-citation suite. Taking main's
+side dropped nothing.
 
-**Every instrument available to this branch is green:**
+**What the challenge loop found, and how.** The blind reviewer found the two
+page defects that survive in the diff as fixes: the composer sent `say.value`
+raw while `clearSent` compared it trimmed (a pasted line was delivered,
+recorded, and left armed in the box under "Placed into its session"), and
+`paintTalk`'s failure arm hid the question region and disabled the composer
+with none of the four focus rescues its success path carries.
 
-    yarn test                975 tests, 0 failing
-    render-talk.js           11 states x 2 themes, "=== problems === none"
+**And re-running a SIBLING check found the one nothing on this branch could
+see.** `render-thread.js` fails on this branch and passes on main: opening a
+borrowed-name card now fires `GET /api/agent/rook/thread`, the route 404s by
+design, and the arm that draws that refusal was painting the SERVER's sentence,
+"No agent by that name", into the panel of an agent whose card the person is
+looking at. The window box twenty lines above it refuses the identical 404 for
+the identical reason, in a comment. Nothing on this branch could have caught it:
+`render-talk.js` runs against fixtures over `file://` and never issues that
+request, and the suite reads text.
 
-The browser check measures what text cannot: page/box/options overflow all 0,
-the question panel visible in exactly the states that should show it, the
-composer disabled in `6-off` and enabled in `7-unsure`, and the long-label
-state (an unbroken 100-character URL) producing no horizontal overflow.
+## Drift from the plan above, recorded rather than silent
 
-## 🛑 WHY IT IS STILL NOT SHIPPED, and this is a decision rather than a pause
+- **Screenshots are state-named, not sha-named** (`talk-<state>-<theme>.png`).
+  The plan asked for sha-named files; the directory's own rule is stronger and
+  won: a screenshot is evidence only if the next person can regenerate it, so
+  the check now emits exactly the committed filenames. The first committed set
+  was a hand-renamed subset of shorter names, which is the drift this replaces.
+- **The GET gate is `borrowedName`, not the 404-unknown the plan asked for.**
+  Recorded in the route: gating on `knownAgent` would hide a STOPPED agent's own
+  conversation, which is the thing the file exists for.
+- **`render-talk.js` is headed by default now**, like `render-thread` and
+  `render-projects`. Its whole output is the class of evidence SwiftShader
+  weakens: contrast, computed backgrounds, geometry, hit tests.
 
-**Its own challenge loop stopped at iteration 10 and never converged.** That is
-this branch's claim about itself, and it is the one instrument above that has
-NOT been re-run. Green on every other check is not the same as converged, and
-tonight has produced six separate cases where an instrument returned a
-believable number about the wrong thing.
+## 🛑 The ordering constraint, unchanged
 
-Overriding a branch's own unconverged verdict at 23:20, with a single pass, is
-precisely what Splinter's ruling names: "a branch with no PR has nobody claiming
-it is finished, so merging it overnight is not 'not waiting on Josh', it is
-deciding on his behalf that unvouched code is done."
-
-**And the stakes here are not a CSS slice.** This branch is PR one of two, and
-PR two DELETES the only surface where a person can see and answer an agent's
-blocking question. Splinter established tonight that this is a safety
-constraint, not a preference: the `pj-question` block, its label and the
+This is PR ONE of two, and PR two DELETES the only surface where a person can
+see and answer an agent's blocking question. Splinter established that as a
+SAFETY constraint rather than a preference: `pj-question`, its label and the
 answer instruction are all nested INSIDE `#pj-thread`, so the delete takes them
-as one unit.
-
-**Nothing is blocked by not shipping it.** The room works today, and this branch
-is deliberately additive so that stays true.
-
-**What it needs:** its challenge loop converged, then a PR. Not a rescue.
+as one unit. **"Talk to one of them" cannot be deleted until the room can carry
+an agent's blocking question.** This branch is deliberately additive so the room
+keeps working until its replacement is live. The diff removes six lines in the
+product and not one of them is a room control: one `pjMsg` signature, split in
+two so the room's row and the agent page's bubble share ONE verdict sentence;
+one `PROJECT_ID` guard that moved into `threadFile` so the DIRECT token can pass
+it; one stale comment; and two export lines that were reflowed. `#pj-thread` and
+`pj-question` are untouched, and 36 references to them survive in the page.

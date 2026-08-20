@@ -6739,12 +6739,19 @@ test('--k-sunk is DEFINED, in both themes, not merely defended with a fallback',
   // on #17191c, which is not a sunk panel, it is a missing one. So the token is
   // defined per theme.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-  const decls = raw.match(/--k-sunk:\s*[^;]+;/g) || [];
+  const decls = raw.match(/--k-sunk:\s*([^;]+);/g) || [];
   assert.ok(decls.length >= 2,
     `--k-sunk is defined ${decls.length} time(s); it needs one per theme or the `
     + 'question box goes transparent in the one it lost');
-  assert.notEqual(decls[0], decls[1],
-    'both --k-sunk definitions are the same value, so one theme is wearing the other’s wash');
+  /* ⚠️ THE VALUES, NOT THE DECLARATION TEXT. Comparing the matched strings
+     compares their indentation too -- the two declarations happen to be
+     indented differently, so the assertion passed on that alone and would
+     have kept passing with both themes set to the SAME colour spaced two
+     ways. The property this test names is about the wash, so it measures the
+     wash. */
+  const values = decls.map((d) => d.replace(/^--k-sunk:\s*/, '').replace(/;$/, '').trim());
+  assert.notEqual(values[0], values[1],
+    `both --k-sunk definitions are the same value (${values[0]}), so one theme is wearing the other’s wash`);
 });
 
 test('a composer that cannot send looks like it cannot send', () => {

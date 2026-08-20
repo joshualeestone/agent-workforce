@@ -6106,7 +6106,13 @@ function setThread(el, html, count) {
 function talkKey(body) {
   if (!body.asking || !Array.isArray(body.options) || !body.question) return null;
   const lines = String(body.question.text || '').split('\n');
-  const first = lines.findIndex((l) => /^[\s│|]*(?:❯\s*)?\d+[.)]\s+\S/.test(l));
+  /* ⚠️ ONLY THE BOX-DRAWING `│` IS FRAME, which is `optionsIn`'s own rule in
+     engine/chat.js. This class also carried an ASCII `|`, a second derivation
+     of "where the option run starts" disagreeing with the first by one
+     character -- and it can only ever disagree DOWNWARD: a prose line like
+     "| 1. see the lease" earlier in the capture matched here, moved `first`
+     up, and shortened the `above` that gives the hold its identity. */
+  const first = lines.findIndex((l) => /^[\s│]*(?:❯\s*)?\d+[.)]\s+\S/.test(l));
   const above = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
   return JSON.stringify(body.options) + '\u0000' + above;
 }
