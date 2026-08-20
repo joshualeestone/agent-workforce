@@ -6226,6 +6226,14 @@ async function paintTalk(sessionName, agentName) {
   } catch (err) {
     if (mine !== TALK_LOAD) return;
     if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    /* ⚠️ WHERE THE PERSON IS STANDING, READ BEFORE ANYTHING HIDES OR DISABLES.
+       Disabling a focused control blurs it synchronously, so asking afterwards
+       always answers BODY. The success path carries four rescues for exactly
+       this and this arm carried none: one failed poll -- a restart, a 500 --
+       while a keyboard user stood on an option button, inside the question
+       region or in the composer dropped them onto the document, and it
+       recurred on every five-second tick that failed. */
+    const stoodInside = box.contains(document.activeElement) && document.activeElement !== box;
     /* ⚠️ COULD-NOT-LOOK, never a blank box that reads as no-conversation --
        and never an empty composer either: a box that accepts text over a
        thread we could not read is the two-state lie the pack's own rule is
@@ -6235,9 +6243,20 @@ async function paintTalk(sessionName, agentName) {
        time, and telling somebody to try again is telling them to wait for
        something that will not change. A transient read failure keeps the
        time phrase, because there it is true. */
+    /* ⚠️ THE SERVER'S OWN SENTENCE IS NOT PAINTED HERE, and the window box
+       twenty lines up refuses the identical 404 for the identical reason: its
+       body is "no agent by that name", and putting that inside the open panel
+       of an agent the person is looking at, beside a card carrying that name,
+       is the screen contradicting itself. A standing 404 is only ever a
+       borrowed name (`borrowedName` is the route's gate), and the panel
+       already carries `#d-untied` saying WHY that name is not this agent. So
+       this sentence states the consequence and claims no cause of its own --
+       a cause this arm did not compute. Measured on the fixture fleet: rook's
+       panel read "We cannot show this conversation. No agent by that name."
+       over a visible card named rook. */
     setThread(document.getElementById('d-dmthread'), '<p class="dmnone">'
       + (standing
-        ? 'We cannot show this conversation. ' + esc(pjSentence((err && err.message) || 'no detail'))
+        ? 'We cannot show a conversation for this name.'
         : 'We could not read this conversation just now. ('
           + esc((err && err.message) || 'no detail') + ')')
       + '</p>', null);
@@ -6249,6 +6268,11 @@ async function paintTalk(sessionName, agentName) {
     document.getElementById('d-talk-older').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
+    /* The section itself, never the composer this arm just closed: the
+       success path's own rule, that a rescue must not hand focus to a
+       control the same paint disables. `#d-talk-box` carries tabindex="-1"
+       for this. */
+    if (stoodInside) box.focus();
     return;
   }
   if (mine !== TALK_LOAD) return;
@@ -12004,7 +12028,15 @@ async function pjSend() {
 /* --- the agent page's own composer, and the answers above it -------------- */
 document.getElementById('d-send').addEventListener('click', () => {
   const say = document.getElementById('d-say');
-  if (say.value.trim()) sendTalk(say.value);
+  /* ⚠️ THE TRIMMED TEXT IS WHAT IS SENT, matching pjSend's `box.value.trim()`
+     at the room's own composer. Sending the raw value while `clearSent`
+     compares `say.value.trim() === text` meant any message with a leading or
+     trailing space -- a paste, a stray space before Enter -- was delivered and
+     recorded and then cleared NEITHER the box nor the draft, leaving the
+     person's words armed under "Placed into its session": an invitation to
+     send the same line into a live pane twice. */
+  const text = say.value.trim();
+  if (text) sendTalk(text);
 });
 /* The park itself: every keystroke files the draft under the open agent, so no
    navigation order can lose it. */
@@ -12024,7 +12056,15 @@ document.getElementById('d-say').addEventListener('keydown', (e) => {
   if (e.isComposing || e.keyCode === 229) return;
   e.preventDefault();
   const say = document.getElementById('d-say');
-  if (say.value.trim()) sendTalk(say.value);
+  /* ⚠️ THE TRIMMED TEXT IS WHAT IS SENT, matching pjSend's `box.value.trim()`
+     at the room's own composer. Sending the raw value while `clearSent`
+     compares `say.value.trim() === text` meant any message with a leading or
+     trailing space -- a paste, a stray space before Enter -- was delivered and
+     recorded and then cleared NEITHER the box nor the draft, leaving the
+     person's words armed under "Placed into its session": an invitation to
+     send the same line into a live pane twice. */
+  const text = say.value.trim();
+  if (text) sendTalk(text);
 });
 /**
  * An option button.

@@ -2,6 +2,7 @@
 /* The agent page's own thread: the question, the option buttons, the composer,
  * and every state the drawing names, in both themes.
  * Run: NODE_PATH=$HOME/work/pw-runtime/node_modules node docs/browser-checks/render-talk.js
+ *      (HEADED=0 on a machine with no console session)
  *
  * ⚠️ WHAT THIS DOES AND DOES NOT EXERCISE. Unlike its siblings here, it does
  * NOT spawn server.js: it loads the page over file:// and answers the poll from
@@ -144,7 +145,12 @@ const STATES = {
 };
 
 (async () => {
-  const browser = await chromium.launch();
+  /* ⚠️ HEADED by default, like render-thread and render-projects. Headless
+     renders through SwiftShader rather than the real compositor, and this
+     script's whole output is the class of evidence that weakens under it:
+     contrast ratios, computed backgrounds, scrollWidth overflow and
+     elementFromPoint. `HEADED=0` for a machine with no console session. */
+  const browser = await chromium.launch({ headless: process.env.HEADED === '0' });
   const problems = [];
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({
@@ -683,6 +689,71 @@ const STATES = {
       const landed2 = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
       if (landed2 === 'BODY') {
         problems.push(`[${theme}] press: focus was stranded on the document after Send`);
+      }
+
+      /* 4. A message with whitespace around it, which is what a paste is.
+         ⚠️ THE BOX MUST BE EMPTY AFTERWARDS. `clearSent` clears only when the
+         box still holds exactly the text this send took, and the composer was
+         handing `say.value` RAW to a comparison against `say.value.trim()` --
+         so a pasted line was delivered, recorded, and left sitting armed in
+         the box under "Placed into April's session". Two presses of Enter on
+         one paste is a message typed into a live agent twice. The room's own
+         composer trims at the source; this is that, driven. */
+      await page.evaluate(() => {
+        window.__posted = [];
+        delete TALK_ANSWERED.april;
+        document.getElementById('d-say').value = '  14 days  ';
+      });
+      await page.evaluate(() => paintTalk('april', 'April'));
+      await page.click('#d-send');
+      await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
+      const pasted = await page.evaluate(() => ({
+        sent: window.__posted[0],
+        left: document.getElementById('d-say').value,
+        draft: TALK_DRAFTS.april,
+      }));
+      if (!pasted.sent || pasted.sent.text !== '14 days') {
+        problems.push(`[${theme}] paste: the untrimmed value was sent as ${JSON.stringify(pasted.sent)}`);
+      }
+      if (pasted.left !== '') {
+        problems.push(`[${theme}] paste: the composer still holds ${JSON.stringify(pasted.left)} after a placed send`);
+      }
+      if (pasted.draft) {
+        problems.push(`[${theme}] paste: the draft survived a placed send as ${JSON.stringify(pasted.draft)}`);
+      }
+
+      /* 5. A poll that FAILS while the person is standing on an option button.
+         ⚠️ THE ARM WITH NO RESCUE. paintTalk's success path carries four focus
+         rescues and its failure arm carried none: it hides the question region
+         and disables the composer, and disabling a focused control blurs it
+         synchronously, so one failed tick -- a restart, a 500 -- dropped a
+         keyboard user onto the document, every five seconds, for as long as
+         the failure lasted. A picture cannot show this. */
+      await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);
+      await page.evaluate(() => paintTalk('april', 'April'));
+      const stoodOn = await page.evaluate(() => {
+        const b = document.querySelectorAll('#d-qopts .qopt')[1];
+        if (b) b.focus();
+        return document.activeElement.className || document.activeElement.tagName;
+      });
+      if (!/qopt/.test(stoodOn)) {
+        /* CONTROL: without this the check below passes on a page where nobody
+           was standing anywhere, which is the shape that cannot fail. */
+        problems.push(`[${theme}] fail-poll: could not stand on an option button (${stoodOn}), so the rescue is UNCHECKED`);
+      }
+      const landed3 = await page.evaluate(async () => {
+        const real = window.fetch;
+        window.fetch = async () => new Response('{"error":"we could not read this conversation"}',
+          { status: 500, headers: { 'content-type': 'application/json' } });
+        try {
+          await paintTalk('april', 'April');
+        } finally {
+          window.fetch = real;
+        }
+        return document.activeElement.id || document.activeElement.tagName;
+      });
+      if (landed3 !== 'd-talk-box') {
+        problems.push(`[${theme}] fail-poll: a failed poll left focus on ${landed3}, not the section it just closed`);
       }
       }
     }
