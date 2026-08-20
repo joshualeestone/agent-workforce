@@ -84,6 +84,8 @@ last touched 2026-08-19 14:47 at challenge-loop iteration 10, no PR),
 which touches the same answering surface and must be reconciled with
 this plan before either lands.
 
+## ✅ RESOLVED 2026-08-20 00:57 — see the section below; kept for the record
+
 ## Known red in `render-projects.js`, PRE-EXISTING, deliberately not fixed here
 
 `docs/browser-checks/render-projects.js` reports `✖ 4 contrast failures`. All
@@ -277,3 +279,37 @@ computed. Wrong in the worst available direction.
 `.codeb` (structurally safe, because the engine can only emit it when it can
 name the file AND the line -- the same proof `.ref` already requires), and
 `.quoteb` only on an EXPLICIT engine marker, never on inference.
+
+## ✅ The known red is GREEN, and the fixture already existed
+
+`render-projects.js` now reports `✔ 7-contrast (WCAG AA, light and dark)`.
+
+**The finding was smaller than either of us thought.** `.pj-told` only exists
+when an agent's tell comes back `could_not`, and the sweep was looking for it
+on a HEALTHY project. Mona Lisa traced that correctly and said it needed a
+failed-tell fixture she could not confirm existed.
+
+**One does, and this check already creates it.** "Quarter close" is created with
+`claudebot`, which has no folder on this machine, so its tell fails:
+
+    quarterclose / claudebot  told='could_not'
+                              because='this agent has no folder on this computer yet'
+
+Confirmed in the browser before touching the check: the element renders, is
+visible, and carries a real sentence.
+
+**The repair is the same one `.drop` got**: measure it where it renders. It is a
+SEPARATE pass from the missing-folder one on purpose -- a failed tell is "we
+could not write to its instructions", a missing folder is "the folder is gone",
+and neither implies the other, so folding them together would let one state
+stand in for the other's coverage.
+
+⚠️ The new pass ASSERTS rather than finds. An empty `.pj-told` would measure
+perfectly and mean nothing, and the whole point of that element is that it
+speaks, so an empty one is reported as a wrong element rather than a pass.
+
+⚠️ **And the tool refusing was the information, again.** The first version
+clicked `#pj-back` while the page was still on the settings VIEW, and Playwright
+spent its full timeout waiting for an element that was never going to appear.
+Two doors -- `#pj-settings-back` out of settings, `#pj-back` out of the project
+-- and the check has to walk through both.
