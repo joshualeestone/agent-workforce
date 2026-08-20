@@ -298,18 +298,21 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    ⚠️ AND `render-fields.js` CANNOT SEE THIS: it measures FIELDS against their
    container, and a button is not a field. The check written for exactly this
    defect class has a hole shaped like a button. */
-/* ⚠️ `--k-bg` FILL AND `--border-strong`, matching the field treatment. Widening
-   the old `.detail .dbox .btn` rule as written would have made this WORSE, not
-   better: it paints `--k-surface`, which is the `.dbox`'s own colour, so the
-   button went from 1.05:1 to exactly 1:1 against its card, and its border
-   dropped from --border-strong (1.77/2.35) to --k-rule (1.31/1.27). That is the
-   same swap this branch already made and undid on the selects.
-   A button and a field are the same problem: recessed paper on a surface card,
-   with the stronger border. Measured after: 1.10:1 fill AND 1.77/2.35 border,
-   two channels instead of one weak one. */
-.dbox .btn { background: var(--k-bg); border: 0.5px solid var(--border-strong); color: var(--k-ink); }
+/* ⚠️ A BUTTON IS RAISED; A FIELD IS RECESSED. Opposite affordances, and an
+   earlier version of this rule gave buttons the field treatment — recessed
+   `--k-bg` on the card — which improved the contrast numbers and made a button
+   look like somewhere you type. (Mona Lisa, 2026-08-19.) The separation comes
+   from the button's OWN border, which is what `.btn-quiet` already does:
+
+     --gold-deep #b88920 on a --k-surface card    3.16:1 light   5.57:1 dark
+
+   ⚠️ ONE STRONG CHANNEL BEATS TWO WEAK ONES, and this is the only control
+   boundary on the branch that CLEARS WCAG 1.4.11's 3:1 in both schemes. The
+   fields sit at 1.77/2.35 and are recorded for Josh as one decision; this one
+   needed no decision because the pack had already made it. */
+.dbox .btn { background: transparent; border: 1px solid var(--gold-deep); color: var(--k-ink); }
 .dbox .btn:hover { background: rgba(198,154,50,.14); }
-.dbox .btn:disabled:hover { background: var(--k-bg); }
+.dbox .btn:disabled:hover { background: transparent; }
 .detail .dremove { color: var(--k-ink); }
 .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--k-ink-2); }
 .back { background: none; border: 0; color: var(--label-2); cursor: pointer;
