@@ -6109,18 +6109,27 @@ function setThread(el, html, count) {
 function talkKey(body) {
   if (!body.asking || !Array.isArray(body.options) || !body.question) return null;
   const lines = String(body.question.text || '').split('\n');
-  /* ⚠️ THE SAME LINE `optionsIn` ACCEPTS, character for character, because
-     this is the same fact asked a second time: where the option run starts.
-     It had drifted in TWO places, and both could only ever disagree DOWNWARD,
-     moving `first` up and shortening the `above` that gives the answered-hold
-     its identity -- and a shorter `above` is how two different questions
-     collide on one key and a live question gets suppressed.
+  /* ⚠️ `optionsIn`'s LINE HANDLING, transcribed rather than approximated,
+     because this is the same fact asked a second time: where the option run
+     starts. The engine is not reachable from the page, so this is a copy; a
+     copy that is nearly the same is the dangerous kind. Every drift so far
+     could only disagree DOWNWARD, moving `first` up and shortening the
+     `above` that gives the answered-hold its identity -- and a shorter
+     `above` is how two different questions collide on one key and a live
+     question gets suppressed. Four drifts have been found and removed:
        - an ASCII `|` counted as frame, so a prose line "| 1. see the lease"
          matched here and not there;
-       - `\d+` matched any digit count, so a stray "10. leftover" sitting above
-         a genuine menu matched here, while `optionsIn` (one digit, 1-9, so
-         `01.` cannot arrive as option 1) never saw it. */
-  const first = lines.findIndex((l) => /^[\s│]*(?:❯\s*)?[1-9][.)]\s+\S/.test(l));
+       - `\d+` matched any digit count, so a stray "10. leftover" above a
+         genuine menu matched here (`optionsIn` reads one digit, 1-9, so `01.`
+         cannot arrive as option 1);
+       - a RUN of frame characters was stripped rather than one, so `││ 1. x`
+         matched here alone;
+       - the label was only required to start with a non-space, so a
+         frame-only line `│ 1. │` matched here while `optionsIn`, which strips
+         the trailing frame BEFORE requiring a label, produced no option.
+     The three replaces and the pattern below are `optionsIn`'s, verbatim. */
+  const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
+    l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
   const above = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
   return JSON.stringify(body.options) + '\u0000' + above;
 }
@@ -6223,7 +6232,12 @@ async function paintTalk(sessionName, agentName) {
   document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
   document.getElementById('d-talk-hint').textContent =
     'Just between you and ' + name + '. Nothing here belongs to a project.';
-  document.getElementById('d-persist').textContent =
+  const persist = document.getElementById('d-persist');
+  /* Un-hidden HERE, not only in the good arm: the failure arm below hides it,
+     and a panel that recovers (or an agent opened after one that failed) would
+     otherwise stay missing its persistence line with nothing to put it back. */
+  persist.hidden = false;
+  persist.textContent =
     'This stays here after a restart. ' + name + ' will not remember it. '
     + 'Anything that needs to last belongs in their instructions.';
   const say = document.getElementById('d-say');
@@ -6290,6 +6304,13 @@ async function paintTalk(sessionName, agentName) {
        screen asserting a count it just said it could not see. */
     document.getElementById('d-dmoff').hidden = true;
     document.getElementById('d-talk-older').hidden = true;
+    /* ⚠️ AND THE PERSISTENCE LINE, which is the same contradiction and was the
+       one left standing: "This stays here after a restart" is a promise about
+       a conversation, printed directly under the sentence saying there is no
+       conversation to show. It is written before the fetch (with the other
+       four that name the agent) precisely because it does not depend on the
+       answer -- but "there is a box that keeps things" does. */
+    document.getElementById('d-persist').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
     /* The section itself, never the composer this arm just closed: the
@@ -6525,9 +6546,19 @@ async function paintTalk(sessionName, agentName) {
      * up to read history to the bottom on a poll tick is the poll fighting the
      * reader." ⚠️ And its second key is built from post IDS, not a count --
      * which is the stronger shape, because a count cannot tell two different
-     * lists of the same length apart. Recorded rather than copied: this key is
-     * a count, and the case it cannot see is two agents whose threads happen to
-     * be the same length.
+     * lists of the same length apart. Recorded rather than copied, and the
+     * blind spot is narrower than it first reads:
+     *
+     *   - SWITCHING AGENTS is closed, and not by this key. `openDetail`'s
+     *     clear calls `setThread(..., null)`, so `__lastCount` is null on the
+     *     first paint of any agent and the next count always differs. Two
+     *     agents whose threads are the same length cannot collide through any
+     *     path that changes `CURRENT`.
+     *   - WHAT IT CANNOT SEE is a thread whose LENGTH is unchanged while its
+     *     contents are not, within one agent. The route's TAIL of 200 is the
+     *     producer that exists: at the bound, every new message drops the
+     *     oldest, so the count holds at 200 and a new arrival does not bring
+     *     itself into view.
      */
     setThread(thread, rows.map((m) => dmRow(m, name)).join(''), rows.length);
   }
@@ -6737,7 +6768,17 @@ async function sendTalk(text, chose) {
      * store, a held lock, or a name that cannot be filed under at all, which is
      * a STANDING condition for every capitalised or dotted agent — clearing the
      * box left the person's words in NO place. Not in the thread, not in the
-     * box. The box is the only copy when we did not keep it, so it keeps it.
+     * box.
+     *
+     * ⚠️ IT GATES THE TWO UNCERTAIN VERDICTS, NOT THE CERTAIN ONE, and the
+     * `placed` arm below deliberately does not consult it: a message that
+     * reached the agent HAS gone somewhere, so the box is not its only copy,
+     * even when nothing could be written down about it. That is the room's own
+     * rule at `pjSend` ("placed ... Clear it. Even unrecorded, the words
+     * reached the agent"), and the two screens must not disagree about what a
+     * send did. So the rule is "the box is the only copy when we did not keep
+     * it AND we cannot say it arrived", which is `unconfirmed` and, by leaving
+     * the words in place with no clear at all, `could_not`.
      */
     const inThread = body.recorded === true;
     const clearSent = () => {

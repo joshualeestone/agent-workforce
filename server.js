@@ -1694,9 +1694,10 @@ const server = http.createServer((req, res) => {
    * every project the agent is or was on, which is why it is filed under
    * `chat.DIRECT` and carries no project stamp.
    *
-   * ⚠️ THE GATE IS `borrowedName`, NOT `knownAgent`, and the commitments route
-   * learned this first: a record whose purpose is to outlive the conversation
-   * must stay readable when the agent is STOPPED. The danger is narrower than
+   * ⚠️ THE GATE IS `nameRefusal` (the reason `borrowedName` is a wrapper for),
+   * NOT `knownAgent`, and the commitments route learned this first: a record
+   * whose purpose is to outlive the conversation must stay readable when the
+   * agent is STOPPED. The danger is narrower than
    * "is it running" — it is a pane sitting on the board under this name that is
    * not tied to it, which would serve the real agent's private thread beside a
    * stranger's card. If no pane claims the name, there is nobody to confuse it
@@ -1748,7 +1749,7 @@ const server = http.createServer((req, res) => {
      * narrower claim than the one that used to sit here.
      *
      * The earlier comment said "one roster read for the whole request", and
-     * that is false: `borrowedName` five lines up runs `claimantFor` ->
+     * that is false: `nameRefusal` a few lines up runs `claimantFor` ->
      * `paneRoster()`, its own uncached `tmux list-panes`. So a GET makes two,
      * and the 404 gate is decided against a different look from the one the
      * payload describes. The harm the comment warns about is therefore
@@ -1853,7 +1854,7 @@ const server = http.createServer((req, res) => {
      *
      * ⚠️ THREE-VALUED, because "there is nobody there" and "we could not look"
      * are different facts. The `unsure` arm is NOT reachable through today's
-     * producers — a roster read that fails also fails `borrowedName` above,
+     * producers — a roster read that fails also fails `nameRefusal` above,
      * which fails closed at the 404 — so no test here holds it. It stays,
      * recorded rather than quietly kept, because the two reads are separate
      * calls (`snapshot` here, `listPanes` there) and the day they can disagree

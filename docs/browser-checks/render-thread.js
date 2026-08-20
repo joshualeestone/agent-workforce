@@ -479,6 +479,9 @@ async function main() {
     check(!/no agent by that name/i.test(rookTalk.text || ''),
       'and it does not paint the route\u2019s own "no agent by that name" beside a card carrying it',
       JSON.stringify(rookTalk.text));
+    check(!/stays here after a restart/i.test(rookTalk.text || ''),
+      'and it does not promise the conversation is kept, under the sentence saying there is none to show',
+      JSON.stringify(rookTalk.text));
     check(rookTalk.sayDisabled === true && rookTalk.sendDisabled === true,
       'the composer is closed over a conversation we cannot read (a box that accepts text here is the two-state lie)',
       JSON.stringify(rookTalk));

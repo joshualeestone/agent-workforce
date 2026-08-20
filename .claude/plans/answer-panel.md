@@ -171,12 +171,27 @@ SAFETY constraint rather than a preference: `pj-question`, its label and the
 answer instruction are all nested INSIDE `#pj-thread`, so the delete takes them
 as one unit. **"Talk to one of them" cannot be deleted until the room can carry
 an agent's blocking question.** This branch is deliberately additive so the room
-keeps working until its replacement is live. The diff removes six lines in the
-product and not one of them is a room control: one `pjMsg` signature, split in
-two so the room's row and the agent page's bubble share ONE verdict sentence;
-one `PROJECT_ID` guard that moved into `threadFile` so the DIRECT token can pass
-it; one stale comment; and two export lines that were reflowed. `#pj-thread` and
-`pj-question` are untouched, and 36 references to them survive in the page.
+keeps working until its replacement is live.
+
+**The evidence for that is a diff fact, not a count**, because a count is the
+thing that goes stale while the sentence around it keeps reading true. An
+earlier version of this paragraph said "six lines" and "36 references"; both
+had moved three commits later while the conclusion they backed was as sound as
+ever, which is the same failure this file opens with.
+
+    git diff origin/main...HEAD -- web/index.html \
+      | grep -E '^[+-][^+-]' | grep -c 'pj-question\|pj-thread'
+    0
+
+**Zero.** Not one line this branch adds or removes anywhere in the page so much
+as mentions `#pj-thread` or `pj-question`. That does not decay: re-run it on
+any later state of the branch and it is still the whole answer.
+
+The product lines this branch does delete are all refactor: a `pjMsg` signature
+split in two so the room's row and the agent page's bubble share ONE verdict
+sentence, a `PROJECT_ID` guard that moved into `threadFile` so the DIRECT token
+can pass it, the `borrowedName` docblock and body that `nameRefusal` replaced,
+two reflowed export lines, and one stale comment.
 
 
 ## Deferred, with reasoning, so it is a decision rather than an oversight

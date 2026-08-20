@@ -6725,6 +6725,57 @@ test('the option listener is DELEGATED, because the buttons are rebuilt by every
     'the delegated listener stopped matching the button it is delegating for');
 });
 
+test('talkKey reads the option run exactly where optionsIn does, decoys included', () => {
+  /**
+   * ⚠️ TWO DERIVATIONS OF ONE FACT, and the engine is not reachable from the
+   * page, so the page carries a COPY of `optionsIn`'s line handling. A copy
+   * that is nearly the same is the dangerous kind: four separate drifts have
+   * been found in it, and every one could only disagree DOWNWARD -- matching a
+   * line the engine refuses, moving `first` up, and shortening the `above`
+   * that gives the answered-hold its identity. A shorter `above` is how two
+   * different questions collide on one key and a live question is suppressed.
+   *
+   * So this asks BOTH sides about the same text: the engine must see exactly
+   * the real menu, and the page must leave every decoy in `above`.
+   */
+  const talkKey = pageFunction('talkKey');
+  const chatEngine = require('./engine/chat');
+  const MENU = '❯ 1. Yes\n  2. No';
+  const above = (text) => {
+    const key = talkKey({
+      asking: true,
+      options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+      question: { text },
+    });
+    assert.ok(key, 'talkKey refused a body it should key');
+    return key.split('\u0000')[1];
+  };
+
+  // CONTROL: with no decoy at all, `above` is the preamble and the menu is not
+  // in it. Without this the decoy cases below pass on a function that returns
+  // the whole capture every time.
+  const plain = above('Which one?\n' + MENU);
+  assert.equal(plain, 'Which one?');
+
+  for (const decoy of [
+    '10. leftover from the last prompt',   // two digits: never an option
+    '││ 1. doubled frame',                 // a RUN of frame characters
+    '│ 1. │',                              // a label that is only frame
+    '| 1. see the lease',                  // an ASCII pipe is not frame
+  ]) {
+    const text = 'Which one?\n' + decoy + '\n' + MENU;
+    // The ENGINE's half: the decoy produces no option, so the menu it parses
+    // is the two real ones.
+    const parsed = chatEngine.optionsIn(text);
+    assert.deepEqual(parsed, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+      'the engine read the decoy as part of the menu: ' + JSON.stringify(decoy));
+    // The PAGE's half: the decoy is above the run, so it stays in the identity.
+    assert.ok(above(text).includes(decoy),
+      'the page started the run at the decoy, shortening the hold\u2019s identity: '
+      + JSON.stringify(decoy) + ' -> ' + JSON.stringify(above(text)));
+  }
+});
+
 test('--k-sunk is DEFINED, in both themes, not merely defended with a fallback', () => {
   // ⚠️ THE DEFECT THIS PINS was found in Mona Lisa's drawings on 2026-08-19:
   // the pack writes `var(--k-sunk, rgba(20,22,26,.05))` everywhere and defines

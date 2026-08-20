@@ -653,6 +653,15 @@ const STATES = {
         delete TALK_ANSWERED.april; delete TALK_FAILED.april;
         await paintTalk('april', 'April');
       }, menu);
+      /* ⚠️ GUARDED LIKE 2b, and for the reason this file states twice: a
+         regression that empties the option row turns a bare click into a
+         four-second timeout that REJECTS the run, so the whole problem list
+         goes unprinted and a real defect is reported as the check being
+         broken. The guard makes it a finding instead. */
+      const preHold = await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt').length);
+      if (preHold === 0) {
+        problems.push(`[${theme}] hold: no option buttons to answer, so the hold is UNCHECKED`);
+      } else {
       await page.click('#d-qopts .qopt');
       await page.waitForFunction(() => window.__posted.length > 0 && !TALK_SENDING, null, { timeout: 4000 });
       const held = await page.evaluate(async (f) => {
@@ -689,6 +698,7 @@ const STATES = {
       }
       if (held.afterSameLabelsNewQuestion === 0) {
         problems.push(`[${theme}] hold: a NEW question with the same option words was suppressed`);
+      }
       }
       await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);
       await page.evaluate(() => paintTalk('april', 'April'));
@@ -857,6 +867,40 @@ const STATES = {
       }
       if (/no agent by that name/i.test(both.borrowed || '')) {
         problems.push(`[${theme}] refusal: the route's own sentence reached the panel: ${JSON.stringify(both.borrowed)}`);
+      }
+
+      /* 8. THE PERSISTENCE LINE, on both sides of a refusal.
+         ⚠️ "This stays here after a restart" is a promise about a conversation
+         and it was printed under the sentence saying there is none to show --
+         the same contradiction the arm already clears two other sentences for.
+         Hiding it is only half: it must come BACK, or the next agent opened
+         after a failed one has a box that quietly stopped saying what it does.
+         The good-state read is the CONTROL: without it, a regex typo below
+         passes on a line the check never saw in the first place. */
+      const persistence = await page.evaluate(async (f) => {
+        const line = () => {
+          const el = document.getElementById('d-persist');
+          return { hidden: el.hidden, text: el.textContent.trim() };
+        };
+        window.__fx = f;
+        await paintTalk('april', 'April');
+        const good = line();
+        const real = window.fetch;
+        window.fetch = async () => new Response('{"error":"no agent by that name","because":"borrowed"}',
+          { status: 404, headers: { 'content-type': 'application/json' } });
+        try { await paintTalk('april', 'April'); } finally { window.fetch = real; }
+        const refused = line();
+        await paintTalk('april', 'April');
+        return { good, refused, recovered: line() };
+      }, menu);
+      if (persistence.good.hidden || !/stays here after a restart/.test(persistence.good.text)) {
+        problems.push(`[${theme}] persist: CONTROL FAILED, the line is not on a good paint: ${JSON.stringify(persistence.good)}`);
+      }
+      if (!persistence.refused.hidden) {
+        problems.push(`[${theme}] persist: the box promises it keeps things, under the sentence saying it cannot show them`);
+      }
+      if (persistence.recovered.hidden) {
+        problems.push(`[${theme}] persist: the line never came back after a refusal`);
       }
       }
     }
