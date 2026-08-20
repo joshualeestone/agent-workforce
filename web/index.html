@@ -1250,8 +1250,17 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    It used to restate width and appearance both, in the page-ground colour
    rather than the field colour, which is why it and #create-model looked like
    two different controls. */
-.pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+/* ⚠️ `align-items: center` and NOT `baseline` now that the row has a face.
+   A 34px disc baseline-aligned against a 15px name sits low and drags the row
+   with it; the pack's member row centres them. `flex-wrap` stays, so a long
+   because-sentence still wraps under rather than squeezing the name. */
+.pj-member { display: flex; align-items: center; gap: var(--space-4); flex-wrap: nowrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
+/* The text half: everything that was directly in the row before the face
+   arrived. Column, because the name, the state and the told line were three
+   siblings of a wrapping flex row and are now one block beside the disc. */
+.pj-member-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pj-face { flex: 0 0 34px; }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
 /* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
@@ -1716,6 +1725,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
             font-size: 10px; font-weight: 700; color: var(--label); }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
 .tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
+/* ⚠️ A DIFFERENT APPEARANCE, not just different words. `.tksay` carries what
+   the AGENT said; this carries what WE could not establish, which is a
+   different kind of statement and the app says so everywhere else it has an
+   unknown. Dotted underline rather than a colour change alone: the four states
+   must be distinguishable without relying on hue, and two of them already sit
+   at `--label-2`. */
+.tkunk { font-style: normal; color: var(--label-2); margin-left: 4px;
+         text-decoration: underline dotted; text-underline-offset: 2px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
 /* ⚠️ Used on an input, a textarea AND a select, so it must not restate the
    select appearance: the shared `select` rule handles that one, and a padding
@@ -2494,7 +2511,17 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   </div>
   <div class="field" style="margin-top:18px;">
     <label class="flabel" for="d-role">What they do</label>
-    <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
+    <!-- ⚠️ FOUR WORDS DOING THE JOB OF A SENTENCE. This read "Your words.
+         Nothing on this computer records it, so it is blank until you say."
+         Mona Lisa's three objections, all right: it is a MECHANISM sentence
+         told to someone who only needs the outcome, the same shape the pack
+         has now fixed twice in the composer; it stops being true after the
+         first save, because the profile record does hold it; and "blank until
+         you say" never says until you say WHAT. The half worth keeping is that
+         this is free text rather than a picked role, since a role catalogue
+         exists and would make a reader expect a list. The placeholder beside
+         it already carries the examples. -->
+    <div class="fhint">Your words, not a fixed list.</div>
     <div class="frow">
       <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
     </div>
@@ -2599,6 +2626,8 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <h2 class="rm-title" id="tk-title"></h2>
     <p class="rm-small" id="tk-meta"></p>
     <p class="rm-small" id="tk-detail" hidden></p>
+    <!-- The unknown's reason, too long for the card that reports the state. -->
+    <p class="rm-small" id="tk-why" hidden></p>
     <p class="rm-small" id="tk-note" hidden></p>
     <div class="rm-acts">
       <button class="btn" id="tk-back" type="button">Back</button>
@@ -8498,7 +8527,26 @@ function pjMember(m, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
+  /* ⚠️ THE FACE, and it is the SAME disc as everywhere else. Josh circled the
+     blank rings on this column in his 2026-08-19 markup; the pack draws a
+     `.lav` chip here and every other member surface in this app already draws
+     one. Reused rather than re-derived: the photograph when the agent has one,
+     otherwise the tinted initials from `discTint`/`discInk`, so an agent's
+     mark is one identity on the card, the list, the room and here.
+     `hasAvatar` is gated on TIED in the engine, and that gate is the whole
+     point: a stranger's pane borrowing the name must not lend this row a
+     photograph of somebody it is not. A face is the strongest identity claim
+     on a screen, so it is the one that must not be guessed.
+     aria-hidden, because the name is right beside it in <b> and a screen
+     reader announcing initials as well would say the agent twice. */
+  const face = m.hasAvatar
+    ? '<span class="lav pj-face" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(m.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav pj-face" aria-hidden="true" style="background:' + discTint(m.name)
+      + ';color:' + discInk(m.name) + '">' + esc(initials(m.name)) + '</span>';
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+    + face
+    + '<span class="pj-member-b">'
     + '<b>' + esc(m.name) + '</b>'
     // ⚠️ An `unknown` state carries its REASON here (historical origin: a
     // bare "Can't tell" once sat beside the now-retired told sentence and
@@ -8514,6 +8562,7 @@ function pjMember(m, suppressTold) {
        scoped actions, the escalation gradient member < archive <
        remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + '</span>'
     + '</div>';
 }
 
@@ -8910,13 +8959,35 @@ function paintProjectTasks(p) {
     const who = t.who
       ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
         + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who))
-        /* The join, rendered ONLY as the agent's own words (the pack's
-           phrase for the commitments source: "says it is on this").
-           claimed false is NOT "not started" and renders nothing, and
-           claimed null (could-not-read) renders nothing here -- Mona
-           Lisa's chip-is-the-status ruling stands for both. */
-        + (t.claim && t.claim.claimed === true
-          ? '<em class="tksay">· says it is on this</em>'
+        /* ⚠️ FOUR STATES, FOUR APPEARANCES. Two of these used to render as
+           NOTHING, and Josh wrote "Add Task Status" on a card whose status was
+           deliberately blank -- which is the whole finding: a state that
+           renders as nothing is indistinguishable from a feature nobody built.
+
+           Mona Lisa's ruling (2026-08-19) RETIRED her earlier chip-is-the-
+           status rule rather than reversing it: she had attached the condition
+           "no second word until the commitments join can support one", the
+           join shipped in #52, and the rule expired on its own terms.
+
+           ⚠️ "says it is not on this", NOT the pack's "Not started". Nothing
+           here knows whether the WORK started. commitments.js is explicit that
+           an empty list only counts when it is an ASSERTION rather than an
+           absence -- the agent has to have said, recently, that it is holding
+           nothing. So claimed:false is a statement the agent made, and
+           mirroring the positive exactly (same verb, opposite polarity) keeps
+           the subject on the agent's report where it belongs. "Not started"
+           would be a claim about the work that nobody computed, and "has not
+           said it is on this" describes a silence and invites "so it is
+           slacking".
+
+           claimed:null is OURS rather than the agent's, so it gets its own
+           class and its own voice. The engine's `because` runs 30-50 words and
+           belongs where the task opens, not on a card: the card carries
+           signals, the panel carries explanation. */
+        + (t.claim
+          ? (t.claim.claimed === true ? '<em class="tksay">· says it is on this</em>'
+            : t.claim.claimed === false ? '<em class="tksay">· says it is not on this</em>'
+              : '<em class="tkunk">· we could not check</em>')
           : '')
         + '</span>'
       : '<span class="tkcard-who">Nobody yet</span>';
@@ -8968,6 +9039,19 @@ function openTaskModal(n) {
   const det = document.getElementById('tk-detail');
   det.textContent = t.detail || '';
   det.hidden = !t.detail;
+  /* ⚠️ THE UNKNOWN'S REASON LIVES HERE, not on the card. The card says "we
+     could not check" in three words; the engine's own sentence explaining WHY
+     runs to fifty ("we cannot tie the pane holding this name to the agent, so
+     we will not speak for what that name is holding") and would set the width
+     of every card in the column. The card carries the signal, the panel
+     carries the explanation.
+     Only for the unknown: `claimed` true and false are complete statements and
+     have no because to give. */
+  const why = document.getElementById('tk-why');
+  const unknownBecause = (t.claim && t.claim.claimed === null && t.claim.because) ? t.claim.because : '';
+  why.textContent = unknownBecause ? 'We could not check whether ' + (who || 'it')
+    + ' is on this: ' + unknownBecause + '.' : '';
+  why.hidden = !unknownBecause;
   /* The close-note, Mona Lisa's blessed v1 wording: both clauses are about
      what KOSMOS does not do, verifiable tonight, and needed MORE before the
      commitments join exists, because tonight is when someone will assume

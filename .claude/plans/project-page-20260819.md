@@ -161,3 +161,44 @@ panel's section wrappers into inline-flex chips with circles in them. Found by
 Mona Lisa. This is the second instance tonight of a class name meaning
 different things in the two files; the first was `.panel`, where the pack's
 wears `--page-*` mock-chrome tokens and the build's is a real surface.
+
+## ⚠️ Project documents has TWO possible sources and they are not the same set
+
+Found by Mona Lisa re-verifying her spec against 0.2.3, and it needs Josh
+rather than either of us.
+
+    built    GET /api/project/:id/documents reads the PROJECT FOLDER
+    specced  engine/projects.js:9 -- "everything this module writes lives in
+             app data, NEVER in the project folder (§7b)"
+
+So a file attached through the composer's `+` would land in app data and would
+NOT appear in the documents list. The attach chunk and the documents list,
+which we have both been treating as one feature, are today two lists of two
+different things.
+
+**Neither of us was careless. Josh said both, sixteen seconds apart:**
+
+    21:23  "all files, files i dropped in and agent files"
+    21:23  "it would be files from the conversation"
+
+My route comment cites the first, her spec cites the second.
+
+- **folder only** misses everything attached in chat, which is exactly what the
+  `+` will create.
+- **conversation only** misses everything an agent WRITES while working, which
+  is most of what a project produces, and is his "agent files".
+- **both, merged** is what the first sentence asks for, and the only option
+  that neither breaks §7b nor hides a category the person watched arrive.
+
+Recommendation: merge. Recorded rather than built, because the disagreement is
+between two of his sentences, not between two of our readings.
+
+⚠️ **A merged list changes a copy ruling.** Mona Lisa ruled that "These are
+Kosmos's copies. Your originals have not changed" sits once under the list.
+That is true of a conversation-only list, where every row is a copy, and FALSE
+on a merged one: a folder file IS the original, and editing it edits the real
+thing. On a merged list the line has to be per row and only on the copies.
+
+**Nothing shipped tonight is wrong under either answer.** The folder list is
+true about the folder and says so; it is only incomplete under the merged
+answer, and the `+` that would expose the gap is deliberately not built.
