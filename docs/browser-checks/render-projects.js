@@ -999,9 +999,25 @@ async function main() {
       // `.pj-folder-state.bad` in the `badFolderEls` pass below, while the
       // project whose folder is missing is open. This list is the one-project
       // view of a HEALTHY project, so it cannot carry either.
+      // ⚠️ `.drop` LEFT THIS LIST 2026-08-19 and is measured in the settings pass
+      // below instead. It renders in exactly one place, paintSettingsMembers,
+      // which is the settings view — #87 moved removal there. Traced by Mona
+      // Lisa, whose ruling the move was.
+      //
+      // ⚠️ `.pj-told` STAYS HERE AND STAYS RED, deliberately. It did NOT move to
+      // another screen; it moved to a STATE. pjToldLine returns a non-empty
+      // string only when told.state === 'could_not' ("success says nothing",
+      // ruled 2026-08-18), and this fixture is a HEALTHY project, so the element
+      // cannot render here. Measuring it needs a fixture with a FAILED TELL,
+      // which is NOT the missing-folder fixture below: a failed tell is "we
+      // could not write to its instructions", and a missing folder does not
+      // necessarily produce one. No such fixture exists yet.
+      // Not deleted, because this check's own rule is that a miss is RECORDED
+      // rather than skipped. A red saying "this failure state is unmeasured" is
+      // worth more than a green saying nothing.
       for (const sel of ['#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
-        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel',
+        '#pj-one-view .fhint', '#pj-one-view .flabel',
         '#pj-one-view #pj-one-desc']) {
         const el = document.querySelector(sel);
         // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
@@ -1021,7 +1037,9 @@ async function main() {
     const settingsEls = await page.evaluate(() => {
       const bgOf = window.__kbg;
       const out = [];
-      for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where']) {
+      // `.drop` measured HERE, on the screen it actually renders on.
+      for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where',
+                         '#pj-settings-view .pj-member .drop']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
