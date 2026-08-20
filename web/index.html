@@ -1098,7 +1098,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pjhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
           padding: 0 2px; margin-bottom: 16px; }
 .pjtitle { min-width: 0; }
-.pj3 { display: grid; grid-template-columns: minmax(0, 22%) minmax(0, 1fr) minmax(0, 22%); gap: 16px; align-items: start; }
+/* The pack holds .dname DOWN to 1.375rem for this one heading (its
+   pjhead h2): the project name is the biggest thing on the page and
+   still smaller than an agent's name on the detail screen, which is
+   1.5rem. Josh 2026-08-19: "Header should be larger" — it carried no
+   size rule at all before this and fell to the base h2. */
+.pjtitle h2 { font-size: 1.375rem; margin: 0; }
+.pj3 { display: grid; grid-template-columns: minmax(0, 20%) minmax(0, 1fr) minmax(0, 20%); gap: 16px; align-items: start; }
 @media (max-width: 68rem) { .pj3 { grid-template-columns: minmax(0, 1fr); } }
 .pjcol { border: 1px solid var(--k-rule); border-radius: 12px; background: var(--k-surface); padding: 14px 16px 16px; }
 .pjcol > .flabel { display: block; margin-bottom: 10px; }
@@ -1108,9 +1114,28 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pjcol .field + .field { margin-top: var(--space-6); }
 .pjmid { display: flex; flex-direction: column; min-width: 0; }
 .pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+/* ⚠️ THE MESSAGES GET A BOX OF THEIR OWN, matching Project members and Tasks:
+   without it the middle column is the only one whose content floats, and the
+   three columns read as two panels and a gap. The pack puts the box on the
+   COMPOUND selector `.pjmid .thread` (FROZEN-2026-08-19:446) and leaves its
+   bare `.thread` undressed. This file has exactly ONE element wearing
+   `.thread` (#pj-room), so the split would be structure with nothing on the
+   other side of it; the declarations live here until a second thread exists.
+   `background` was missing entirely until 2026-08-19 — found by Mona Lisa, and
+   found only because she read the compound rule while I read the bare one.
+   Radius takes the pack's 10px; the build had drifted to 12px and neither of
+   us had an argument for the drift.
+
+   ⚠️ HEIGHT: Josh, 2026-08-19, "make the box much taller to fill the page
+   height". The pack's flat `max-height: 26rem` is now a FLOOR of 26rem and a
+   ceiling of `min(62vh, 44rem)`, so the box fills the page on a real screen
+   and still cannot set the page height on a month-old project — which is what
+   the original bound existed to prevent, and the reason it changed shape
+   rather than being deleted. The two smaller columns keep their own scroll. */
 .thread { padding: 14px 16px; display: flex; flex-direction: column; gap: 18px;
-          max-height: 26rem; overflow-y: auto;
-          border: 1px solid var(--k-rule); border-radius: 12px; }
+          min-height: 26rem; max-height: min(62vh, 44rem); overflow-y: auto;
+          border: 1px solid var(--k-rule); border-radius: 10px;
+          background: var(--k-bg); }
 .msg { display: flex; gap: 14px; }
 .msg-av { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: grid;
           place-items: center; background: rgba(20,22,26,.06); font-size: .875rem;
@@ -1155,6 +1180,30 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .msg-valve .msg-t { margin-left: .5em; }
 .composer { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 .composer input { flex: 1; min-width: 10rem; }
+/* ⚠️ THE PACK'S COMPOSER (FROZEN-2026-08-19:494-556), ported onto this file's
+   tokens. The shape is the point: the controls live INSIDE a bordered box with
+   the field, rather than sitting beside it as siblings. Josh, 2026-08-19:
+   "Field should be bigger, include the + button for attachments, and the large
+   Post button inside the box. Also missing the text below the input box."
+   The `+` and the drop sentence are DELIBERATELY ABSENT — see the markup. */
+.pjmid .composer { margin-top: 12px; padding: 0; background: none; border-top: 0;
+  flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 6px; }
+.composerbox { display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--k-rule); border-radius: 12px; background: var(--k-surface);
+  padding: 6px 6px 6px 4px; }
+.composerbox:focus-within { border-color: var(--k-ink-2); box-shadow: 0 0 0 1px var(--k-ink-2); }
+/* ⚠️ THE TEXTAREA GROWS, IT DOES NOT SCROLL SIDEWAYS. A single-line input hides
+   what you already wrote the moment a post runs past the field, which is the
+   one thing a person re-reads before sending. Bounded at 9rem so a long post
+   cannot push the thread off the screen it belongs under. */
+.cinput { flex: 1 1 auto; min-width: 0; min-height: 2.5rem; border: 0; background: none;
+  resize: none; font: inherit; font-size: .9375rem; line-height: 1.5; color: var(--k-ink);
+  padding: 9px 4px; max-height: 9rem; overflow-y: auto; }
+.cinput:focus { outline: none; }
+.cinput::placeholder { color: var(--k-ink-2); }
+.cpost { flex: 0 0 auto; padding: .5em 1.05em; font-size: .9375rem; }
+.composerhint { margin: 0; font-size: .75rem; color: var(--k-ink-2); }
+.composerhint b { font-family: var(--font-mono); font-weight: 700; color: var(--k-ink); }
 @media (prefers-color-scheme: dark) {
   .msg-av { background: rgba(245,245,244,.10); }
 }
@@ -1280,13 +1329,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   padding: var(--space-4) var(--space-5); margin: 0; }
 .pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
 .pj-advanced { margin: var(--space-5) 0; }
-/* A real <button>, styled as a link. ⚠️ NOT an <a> without an href: that is not
+/* ⚠️ A real <button>, styled as a link. NOT an <a> without an href: that is not
    focusable and not announced as a control, so the whole advanced route would
    be unreachable from the keyboard — and this is the ONLY way to a project
-   whose work lives somewhere else. 24px minimum, WCAG 2.2 SC 2.5.8. */
-.linkish { background: none; border: 0; cursor: pointer; padding: var(--space-3) 0;
-  min-height: 24px; font: var(--text-callout) var(--font-ui); color: var(--label-2);
-  text-decoration: underline; }
+   whose work lives somewhere else. The 24px floor (WCAG 2.2 SC 2.5.8) and the
+   whole appearance now live in the ONE `.linkish` rule further down this file.
+   A second declaration sat here until 2026-08-19 and set background, border,
+   cursor, padding, min-height, font, color and text-decoration — every one of
+   which the later rule re-set at equal specificity, so not a single line of it
+   survived the cascade. Found by Mona Lisa, verified property by property.
+   Removed rather than kept-and-commented, per this codebase's own rule about
+   `.pjthread` and `.fr-back`: a rule that parses green and renders never is
+   worse than no rule, because the next reader takes it for true. */
 .pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
@@ -1336,7 +1390,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   gap: var(--space-2) var(--space-5);
   width: 100%; text-align: left; font: inherit; color: var(--label); cursor: pointer;
   background: var(--bg-elevated); border: 1px solid var(--separator);
-  border-radius: var(--radius-card); padding: 11px 14px;
+  border-radius: var(--radius-control); padding: 11px 14px;
 }
 .pick2:hover { border-color: var(--border-strong); }
 .pick2:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
@@ -1385,7 +1439,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 /* ---- the details form (pack pane 2, 2026-08-16) ------------------------ */
 .sform-sec { margin: var(--space-6) 0; max-width: 36rem; }
 .sform-h { font: 600 var(--text-title-3) var(--font-ui); margin: 0 0 var(--space-3); }
-.savrow { display: flex; align-items: center; gap: var(--space-6); }
+.savrow { display: flex; align-items: center; gap: var(--space-5); }
 .genav { width: 62px; height: 62px; flex: 0 0 62px; display: block; border-radius: 50%; }
 /* The deliberate pre-name state: an even ring, not a question mark -- this
    app spends "?" on "we could not check", and an unnamed agent is not an
@@ -1437,7 +1491,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
-        padding: var(--space-3) 0; display: flex; gap: var(--space-4); align-items: baseline; }
+        padding: var(--space-3) 0; display: flex; gap: var(--space-5); align-items: baseline; }
 .tick .mark { font-weight: 600; width: 14px; flex: none; }
 .tick.done { color: var(--label); }
 .tick.fail { color: var(--label); }
@@ -2948,7 +3002,7 @@ svg { display: block; }
     <button class="back" id="pj-back" type="button">← All projects</button>
     <div class="pjhead">
       <div class="pjtitle">
-        <h2 id="pj-one-name"></h2>
+        <h2 class="dname" id="pj-one-name"></h2>
         <!-- What this project IS, in the person's own words, directly under
              the title per the design (PIN-2026-08-14-1913CDT): the pair is
              one statement. Hidden entirely when there is none: an empty grey
@@ -2963,10 +3017,7 @@ svg { display: block; }
 
     <div class="pj3">
     <aside class="pjcol">
-      <span class="flabel">Project members</span>
-      <p class="fhint">Putting an agent here tells it where this project's folder
-         is. It does not stop it reaching anything else, and it is not a
-         permission.</p>
+      <h3 class="dlab">Project members</h3>
       <div id="pj-one-agents" class="pj-members"></div>
       <!-- ⚠️ The picker hides behind the button, not the other way round: the
            resting state of the box is the members, and "+ Add Member" (the
@@ -2980,7 +3031,7 @@ svg { display: block; }
     </aside>
 
     <section class="pjcol pjmid">
-      <div class="pjmidhead"><span class="flabel">Conversation</span>
+      <div class="pjmidhead"><h3 class="dlab">Conversation</h3>
         <div class="tsearch">
           <span class="tsearch-i" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -2996,11 +3047,24 @@ svg { display: block; }
            real delivery state -- a post to three that reaches two must
            never render as sent. -->
       <div class="thread" id="pj-room"></div>
+      <!-- ⚠️ NO `+` BUTTON AND NO "drop a file anywhere" SENTENCE, and their
+           absence is the decision rather than an omission. The pack draws both
+           (.attachbtn, and a composerhint whose first half promises drop-to-
+           attach). Neither is true of this build yet: there is no attachment
+           path and no Project Documents surface for a file to land in. A `+`
+           that opens nothing and a sentence promising a behaviour that does not
+           exist are both claims, and 0.2.1 shipped on "screens say what is
+           true". They arrive together with the attachment work, along with the
+           pack's drop-target affordance (`.pjmid .thread.dragging`, :515).
+           The `@` half of the hint IS true today and ships now. -->
       <div class="composer">
-        <input type="text" id="pj-post" maxlength="2000"
-               placeholder="Post to everyone on this project (@name to address someone)"
-               aria-label="Post to everyone on this project">
-        <button class="btn" id="pj-post-go" type="button">Post</button>
+        <div class="composerbox">
+          <textarea class="cinput" id="pj-post" rows="1" maxlength="2000"
+                    placeholder="Post to everyone on this project (@name to address someone)"
+                    aria-label="Post to everyone on this project"></textarea>
+          <button class="btn cpost" id="pj-post-go" type="button">Post</button>
+        </div>
+        <p class="composerhint"><b>@</b> an agent to ask them directly.</p>
       </div>
       <p class="fmsg" id="pj-room-msg"></p>
       <p class="vh" id="pj-room-say" role="status" aria-live="polite"></p>
@@ -3097,7 +3161,7 @@ svg { display: block; }
          list (Josh 2026-08-15: at the bottom it was the one thing you had
          to scroll to find). -->
     <div class="field" id="pj-tasks-field">
-      <span class="flabel">Tasks</span>
+      <h3 class="dlab">Tasks</h3>
       <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
       <div class="tkcards" id="pj-tasklist"></div>
       <!-- The door, pack rule: the column is a task with somebody on it that
@@ -9190,6 +9254,9 @@ function openProject(id) {
     /* The room, same switching rules: this project's draft back, the
        previous project's thread never painted under the new name. */
     document.getElementById('pj-post').value = PJ_ROOM_DRAFTS[id] || '';
+    /* A parked draft comes back at the height it was written at: the grow
+       runs on `input`, and setting `.value` in code fires no such event. */
+    pjGrowComposer(document.getElementById('pj-post'));
     document.getElementById('pj-room-msg').textContent = '';
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
@@ -9507,14 +9574,30 @@ function pjRoomAnnounce(text) {
 }
 
 document.getElementById('pj-post-go').addEventListener('click', pjPostSend);
+/* ⚠️ `!e.shiftKey` ARRIVED WITH THE TEXTAREA. As an <input> this element could
+   not hold a newline, so catching every Enter cost nothing. A textarea can, and
+   a growing field whose only Enter posts is a field you can never write a
+   second line in. Enter still posts — that behaviour is unchanged and is what
+   people already have in their fingers — and Shift+Enter now does what it does
+   in every other composer. */
 document.getElementById('pj-post').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); pjPostSend(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pjPostSend(); }
 });
 /* Parked as TYPED (the round-34 rule): a switch or repaint must not eat
    the words. */
 document.getElementById('pj-post').addEventListener('input', (e) => {
   if (PJ_CURRENT) PJ_ROOM_DRAFTS[PJ_CURRENT] = e.target.value;
+  pjGrowComposer(e.target);
 });
+/* The height is reset to auto FIRST: scrollHeight of a tall box reports the box,
+   not the text, so growing without the reset is a ratchet that never shrinks
+   when you delete a line. The 9rem ceiling lives in `.cinput`, and `overflow-y:
+   auto` there is what takes over once the content passes it. */
+function pjGrowComposer(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
 
 /* --- the thread ---------------------------------------------------------- *
  *

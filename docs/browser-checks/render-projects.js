@@ -999,9 +999,25 @@ async function main() {
       // `.pj-folder-state.bad` in the `badFolderEls` pass below, while the
       // project whose folder is missing is open. This list is the one-project
       // view of a HEALTHY project, so it cannot carry either.
+      // ⚠️ `.drop` LEFT THIS LIST 2026-08-19 and is measured in the settings pass
+      // below instead. It renders in exactly one place, paintSettingsMembers,
+      // which is the settings view — #87 moved removal there. Traced by Mona
+      // Lisa, whose ruling the move was.
+      //
+      // ⚠️ `.pj-told` STAYS HERE AND STAYS RED, deliberately. It did NOT move to
+      // another screen; it moved to a STATE. pjToldLine returns a non-empty
+      // string only when told.state === 'could_not' ("success says nothing",
+      // ruled 2026-08-18), and this fixture is a HEALTHY project, so the element
+      // cannot render here. Measuring it needs a fixture with a FAILED TELL,
+      // which is NOT the missing-folder fixture below: a failed tell is "we
+      // could not write to its instructions", and a missing folder does not
+      // necessarily produce one. No such fixture exists yet.
+      // Not deleted, because this check's own rule is that a miss is RECORDED
+      // rather than skipped. A red saying "this failure state is unmeasured" is
+      // worth more than a green saying nothing.
       for (const sel of ['#panel-projects .pj-member b',
         '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
-        '#panel-projects .pj-member .drop', '#pj-one-view .fhint', '#pj-one-view .flabel',
+        '#pj-one-view .fhint', '#pj-one-view .flabel',
         '#pj-one-view #pj-one-desc']) {
         const el = document.querySelector(sel);
         // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
@@ -1021,7 +1037,9 @@ async function main() {
     const settingsEls = await page.evaluate(() => {
       const bgOf = window.__kbg;
       const out = [];
-      for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where']) {
+      // `.drop` measured HERE, on the screen it actually renders on.
+      for (const sel of ['#pj-settings-view #pjs-folder-name', '#pj-settings-view #pjs-folder-where',
+                         '#pj-settings-view .pj-member .drop']) {
         const el = document.querySelector(sel);
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
         const cs = getComputedStyle(el);
@@ -1261,12 +1279,27 @@ async function main() {
       // reveal puts the keyboard on the choice.
       await page.click('[data-project="hendersonlease"]');
       await page.waitForTimeout(300);
-      const members = await page.evaluate(() => ({
-        heading: (document.querySelector('#pj-one-view .flabel') || {}).textContent,
-        btnShown: !document.getElementById('pj-add-member').hidden,
-        rowHidden: document.getElementById('pj-one-add-row').hidden,
-      }));
+      // ⚠️ FOUND BY STRUCTURE, NOT BY CLASS. This read `#pj-one-view .flabel`
+      // and so pointed at whatever wore that class FIRST. When the three
+      // project column headers moved to the pack's `.dlab` (2026-08-19) the
+      // selector silently walked down the page to "Talk to one of them" and
+      // reported the members heading had been renamed. The heading is the
+      // element immediately before the members list, and that relationship is
+      // what the screen actually promises; the class is decoration and has
+      // changed once already.
+      const members = await page.evaluate(() => {
+        const list = document.getElementById('pj-one-agents');
+        const h = list && list.previousElementSibling;
+        return {
+          heading: h ? h.textContent : null,
+          headingTag: h ? h.tagName : null,
+          btnShown: !document.getElementById('pj-add-member').hidden,
+          rowHidden: document.getElementById('pj-one-add-row').hidden,
+        };
+      });
       if (members.heading !== 'Project members') throw new Error('the members heading reads "' + members.heading + '", not the pinned words');
+      // A column header is a heading. The pack draws all three as h3.
+      if (members.headingTag !== 'H3') throw new Error('the members heading is a ' + members.headingTag + ', not a heading element');
       if (!members.btnShown || !members.rowHidden) throw new Error('the picker is not resting behind + Add Member: ' + JSON.stringify(members));
       await page.click('#pj-add-member');
       const revealed = await page.evaluate(() => ({
