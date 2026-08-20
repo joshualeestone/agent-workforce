@@ -1281,7 +1281,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 /* The pack's external link. It keeps the ink colour rather than taking a link
    blue: in a room where most of what is written is local, the ONE thing that
    leaves the machine should not also be the one thing that shouts. */
-.xlink { color: var(--k-ink); text-underline-offset: 3px; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+.xlink { color: var(--k-ink); text-underline-offset: 3px; }
+/* The pack's quoted block, on this file's tokens. No figcaption rule: nothing
+   can produce a source yet, so there is no caption to style. */
+.codeb { margin: 10px 0 0; border: 1px solid var(--k-rule); border-radius: 10px;
+         overflow: hidden; background: var(--k-surface); }
+.codeb pre { margin: 0; padding: 11px 12px; font: 12.5px/1.6 var(--font-mono);
+             overflow-x: auto; white-space: pre; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
    floor this project holds as a hard rule. "It is only a scannable caption"
    was the recorded defence, and the floor does not have a caption exemption. */
@@ -9641,6 +9647,40 @@ function pjLinkPaths(text, names) {
  * product where a click leaves the machine, and the page it lands on should
  * learn nothing about where it came from.
  */
+/**
+ * The whole body: fenced blocks drawn as blocks, everything else as prose.
+ *
+ * ⚠️ THE FENCE IS A DELIMITER, NOT AN INFERENCE, which is the same test
+ * `https://` passes and "looks like a path" failed. A line either is ``` at its
+ * start or it is not. There is no judgement in between that could be wrong.
+ *
+ * ⚠️ AN UNCLOSED FENCE IS NOT A BLOCK. A body with an odd number of fences is
+ * returned as prose, whole. Half a block is a guess about where the author
+ * meant it to end, and this file's rule everywhere else is that an uncertain
+ * reading stays the flat paragraph it already was.
+ *
+ * ⚠️ AND NOTHING INSIDE A FENCE IS LINKED. A path in a quoted block is CONTENT
+ * an agent is showing you, not a citation it is making, and dressing it with a
+ * "Show me" would offer to open a file the message was only quoting. Same for
+ * URLs. Inside the fence the only treatment is `esc()`.
+ *
+ * 📌 NO figcaption YET, and its absence is the honest half. The pack draws
+ * `.codeb` with a caption naming the source ("docs/trial.md, line 12"), and
+ * nothing in this product can produce that: an agent has no way to say which
+ * file and which line a block came from. A caption we invented would be the
+ * first thing on this screen asserting something nobody computed. The box
+ * ships; the caption waits for a mechanism.
+ */
+function pjBody(text, names) {
+  const raw = String(text == null ? '' : text);
+  const parts = raw.split(/^```[^\n]*$/m);
+  /* Even count of segments means an odd number of fences: one is unclosed. */
+  if (parts.length < 3 || parts.length % 2 === 0) return pjLinkPaths(raw, names);
+  return parts.map((seg, i) => (i % 2
+    ? '<figure class="codeb"><pre>' + esc(seg.replace(/^\n|\n$/g, '')) + '</pre></figure>'
+    : pjLinkPaths(seg, names))).join('');
+}
+
 function pjInline(text) {
   const raw = String(text == null ? '' : text);
   if (raw.indexOf('http://') === -1 && raw.indexOf('https://') === -1) return esc(raw);
@@ -9907,7 +9947,7 @@ function pjRoomRow(m, p) {
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
-    + '<p>' + pjLinkPaths(m.text, PJ_DOC_NAMES) + '</p>' + receipt + '</div></div>';
+    + '<p>' + pjBody(m.text, PJ_DOC_NAMES) + '</p>' + receipt + '</div></div>';
 }
 
 /**

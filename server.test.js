@@ -7674,3 +7674,61 @@ test('a URL inside a message that also cites a file gets both treatments', () =>
   assert.match(out, /<span class="ref">brief\.md/, 'the citation was lost when a URL was present');
   assert.match(out, /<a class="xlink"/, 'the URL was lost when a citation was present');
 });
+
+/* ===========================================================================
+   FENCED BLOCKS IN MESSAGE BODIES
+   ---------------------------------------------------------------------------
+   The third and last place a message body becomes markup without an explicit
+   engine marker. The fence is a DELIMITER; everything below tests that an
+   uncertain reading falls back to the flat paragraph rather than guessing.
+   =========================================================================== */
+
+function bodyFn() {
+  return pageFunction('pjBody', pageFnSource('esc') + '\n'
+    + pageFnSource('pjInline') + '\n' + pageFnSource('pjLinkPaths') + '\n');
+}
+
+test('a closed fence becomes a block and its contents are escaped, not linked', () => {
+  const body = bodyFn();
+  const out = body('before\n```\n<script>alert(1)</script>\nbrief.md\nhttps://example.test\n```\nafter',
+    new Set(['brief.md']));
+  assert.match(out, /<figure class="codeb"><pre>/, 'the fenced block did not become a block');
+  assert.ok(out.includes('&lt;script&gt;'), 'a script tag inside a block was not escaped');
+  assert.ok(!out.includes('<script>'), 'RAW SCRIPT TAG survived inside a block');
+  // ⚠️ The important half: quoted content is not a citation.
+  const inBlock = out.slice(out.indexOf('<pre>'), out.indexOf('</pre>'));
+  assert.ok(!inBlock.includes('refgo'), 'a path INSIDE a quoted block was offered as a citation');
+  assert.ok(!inBlock.includes('xlink'), 'a URL INSIDE a quoted block was turned into a link');
+});
+
+test('an UNCLOSED fence is prose, not half a block', () => {
+  const body = bodyFn();
+  const out = body('here is the start\n```\nsome lines that never close', new Set());
+  assert.ok(!out.includes('codeb'), 'an unclosed fence was rendered as a block');
+  assert.ok(out.includes('```'), 'the fence characters vanished from a body that was left as prose');
+});
+
+test('outside the fence, citations and links still work', () => {
+  const body = bodyFn();
+  const out = body('see brief.md\n```\nquoted\n```\nand https://example.test', new Set(['brief.md']));
+  assert.match(out, /<span class="ref">brief\.md/, 'a citation before the block was lost');
+  assert.match(out, /<a class="xlink"/, 'a URL after the block was lost');
+});
+
+test('a body with no fence is exactly what it was before pjBody existed', () => {
+  const body = bodyFn();
+  const link = pageFunction('pjLinkPaths', pageFnSource('esc') + '\n' + pageFnSource('pjInline') + '\n');
+  for (const t of ['plain', 'brief.md here', '<script>alert(1)</script>', 'https://example.test']) {
+    assert.equal(body(t, new Set(['brief.md'])), link(t, new Set(['brief.md'])),
+      JSON.stringify(t) + ' changed when it contains no fence');
+  }
+});
+
+test('no figcaption is emitted, because nothing can name a source yet', () => {
+  const body = bodyFn();
+  const out = body('```\nx\n```', new Set());
+  assert.ok(out.includes('<figure class="codeb">'), 'CONTROL: the block did not render at all');
+  assert.ok(!out.includes('figcaption'),
+    'a caption was invented; the pack draws one naming file and line, and nothing in this '
+    + 'product can produce that, so shipping it would assert what nobody computed');
+});
