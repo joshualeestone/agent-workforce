@@ -666,7 +666,7 @@ function deliver(sessionName, raw, roster) {
     // tmux never started, so no keystroke exists. Also safe to re-send.
     return {
       state: DELIVERY.COULD_NOT,
-      because: refusalReason(typed, 'we could not get the message to it'),
+      because: refusalReason(typed, 'we could not get to its window, so we did not type anything'),
       at, paneState, paneNote: noteFor(DELIVERY.COULD_NOT),
     };
   }

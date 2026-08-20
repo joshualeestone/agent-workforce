@@ -159,9 +159,19 @@ function tellAgent(sessionName, roster) {
     if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName && a.isNamedOurs === true)) {
       return {
         state: projects.TOLD.COULD_NOT,
-        because: Array.isArray(roster)
-          ? 'we could not find an agent with exactly this name on this computer, so nothing was written'
-          : 'we could not check which agents are running, so nothing was written',
+        /**
+         * ⚠️ TWO WORLDS FALL THROUGH THIS GATE and only one of them is "not
+         * there". `isNamedOurs !== true` means something IS running under
+         * exactly this name and we will not vouch that it is this agent --
+         * which is the case the gate was written for. One sentence covering
+         * both said the name was not found, which is false on that half.
+         * Split, in `addressable`'s words, so each arm is true of its world.
+         */
+        because: !Array.isArray(roster)
+          ? 'we could not check which agents are running, so nothing was written'
+          : roster.some((a) => a && a.sessionName === sessionName)
+            ? 'something is running under this name, but we cannot tell that it is this agent, so nothing was written'
+            : 'we could not find an agent with exactly this name on this computer, so nothing was written',
       };
     }
     const current = instructions.read(sessionName);

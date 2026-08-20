@@ -618,7 +618,7 @@ function plan(name) {
      * reassurance was describing an undo that does not exist.
      */
     hint: jobFor(clean)
-      ? 'Removing it takes it off this board and stops it starting again. '
+      ? 'Removing it takes it off Kosmos and stops it starting again. '
         + 'Nothing on your computer is deleted, and you can put it back.'
       : 'Removing it takes it off Kosmos and stops it running. '
         + 'It is not set to start on its own, so Kosmos cannot start it again for you. '
@@ -698,7 +698,7 @@ function removeInner(name, { tmuxBin } = {}) {
    */
   function recoveryRoute() {
     return job
-      ? `It is set to start on its own as ${job.label}, and turning that back on is what undoes this.`
+      ? `It was set to start on its own as ${job.label}, and turning that back on is what undoes this.`
       : 'Nothing will start it again on its own. Its folder and everything in it is untouched.';
   }
 
@@ -855,14 +855,14 @@ function removeInner(name, { tmuxBin } = {}) {
     return {
       outcome: OUTCOME.PARTIAL,
       because: `${didToJob} something called ${found.session} is still running `
-        + 'that we cannot confirm is this agent, so we have left it alone. It may still be going. '
+        + 'that we cannot confirm is this agent, so we have left it alone. '
         + recordAndSay(false),
       steps,
     };
   }
   const session = found.session;
   if (found.kind === FOUND.OURS) {
-    const ended = step('stopped it', () => {
+    const ended = step('closed its window', () => {
       const r = run(tmux, ['kill-session', '-t', `=${session}`]);
       if (!(r && (r.ok !== false || r.code === 1))) return false;
       // ⚠️ Look again. The kill's own answer is not evidence the session has
@@ -874,13 +874,13 @@ function removeInner(name, { tmuxBin } = {}) {
     if (!ended) {
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `${didToJob} we could not stop it, so it is still going. `
+        because: `${didToJob} we could not shut it down, so it is still going. `
           + recordAndSay(false),
         steps,
       };
     }
   } else {
-    steps.push({ label: 'stopped it', ok: true, note: 'it was not running' });
+    steps.push({ label: 'closed its window', ok: true, note: 'it was not running' });
   }
 
   // Only now is it true that this agent is stopped and will stay stopped.

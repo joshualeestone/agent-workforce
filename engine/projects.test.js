@@ -1576,6 +1576,8 @@ test('every singular could_not because the engine authors has a plural sibling',
       'none of them has an instructions file yet, and we will not create them',
     'we could not find an agent with exactly this name on this computer, so nothing was written':
       'we could not find any of them by exactly these names on this computer, so nothing was written',
+    'something is running under this name, but we cannot tell that it is this agent, so nothing was written':
+      'something is running under some of these names, but we cannot tell they are those agents, so nothing was written',
     'this agent keeps its instructions somewhere we cannot safely change':
       'they keep their instructions somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':
@@ -1634,6 +1636,46 @@ test('every singular could_not because the engine authors has a plural sibling',
     assert.ok(sources[file].includes(singular),
       'a mapped singular no longer appears in its feeding author module ' + file
       + ' (edited without its row?): ' + singular);
+  }
+});
+
+test('the map is checked in BOTH directions: a new engine sentence cannot skip it', () => {
+  /**
+   * ⚠️ THE SOURCE PIN ABOVE RUNS MAP -> SOURCE, so it catches a row edited
+   * without its author site and CANNOT catch the opposite: a NEW because
+   * authored beside the mapped ones, inheriting nothing. That is how this
+   * gap was found -- splitting the untied refusal out of the not-there one
+   * added a sentence the map had never heard of, and every group line
+   * carrying it would have degraded to the reasonless form with the whole
+   * suite green.
+   *
+   * So: every `so nothing was written` verdict tellAgent authors must map.
+   * The map declaration is stripped for the same reason it is stripped
+   * above -- scanning it would hand this pin a copy of its own answer.
+   */
+  const projSrc = fs.readFileSync(path.join(__dirname, 'projects.js'), 'utf8');
+  const mapStart = projSrc.indexOf('const GROUP_BECAUSE = new Map([');
+  const mapEnd = projSrc.indexOf(']);', mapStart);
+  assert.ok(mapStart > -1 && mapEnd > mapStart, 'could not locate GROUP_BECAUSE; re-point this pin');
+  const stripped = projSrc.slice(0, mapStart) + projSrc.slice(mapEnd);
+  const authored = [...stripped.matchAll(/'([^'\n]*so nothing was written)'/g)].map((m) => m[1]);
+  // CONTROL: the scan actually found sentences. An expression that matches
+  // nothing would satisfy the loop below vacuously, which is the failure
+  // this whole test exists to prevent, one level down.
+  assert.ok(authored.length >= 3,
+    'CONTROL: found ' + authored.length + ' authored verdicts; the scan is not looking at the right text');
+  for (const singular of authored) {
+    assert.ok(projects.groupBecause(singular),
+      'a verdict authored in projects.js has no plural row, so its group line loses its reason: ' + singular);
+  }
+  // And the twin file authors the same set, so it is held to the same rule.
+  const youSrc = fs.readFileSync(path.join(__dirname, 'you.js'), 'utf8');
+  const youAuthored = [...youSrc.matchAll(/'([^'\n]*so nothing was written)'/g)].map((m) => m[1]);
+  assert.ok(youAuthored.length >= 3,
+    'CONTROL: found ' + youAuthored.length + ' verdicts in you.js; the scan is not looking at the right text');
+  for (const singular of youAuthored) {
+    assert.ok(projects.groupBecause(singular),
+      'a verdict authored in you.js has no plural row: ' + singular);
   }
 });
 

@@ -980,7 +980,7 @@ test('an agent stopped but never recorded is told where its way back is', () => 
     // ⚠️ CONTROL: it really did get all the way to the record, or this is one
     // of the earlier partials wearing the same outcome.
     const labels = gone.steps.map((s) => s.label);
-    assert.ok(labels.includes('stopped it'),
+    assert.ok(labels.includes('closed its window'),
       'it never reached the session step, so this is an earlier partial and proves nothing');
     assert.equal(gone.outcome, remove.OUTCOME.PARTIAL, gone.because);
 
@@ -1248,7 +1248,7 @@ test('a kill that reports success over a session that is STILL THERE is not a re
 
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
     'a session that outlived a successful-looking kill was reported as removed');
-  assert.match(r.because, /could not stop it, so it is still going/);
+  assert.match(r.because, /could not shut it down, so it is still going/);
   assert.equal(remove.isHidden(name), false,
     'the agent was hidden from the board while still running, which is the one thing it must never do');
   assert.equal(remove.isRemoved(name), true,
