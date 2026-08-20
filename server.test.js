@@ -7393,3 +7393,111 @@ test('a stopped agent with a readable model still gets the model its job will st
     fs.rmSync(create.plistPath('fixturestopped'), { force: true });
   }
 });
+
+/* ===========================================================================
+   A PROJECT'S DOCUMENTS, AND OPENING ONE
+   ---------------------------------------------------------------------------
+   🛑 `open` LAUNCHES THINGS, so the route tests that matter here are the
+   refusals, not the happy path. The engine's own gates are tested in
+   engine/projects.test.js; these pin the HTTP surface around them.
+   =========================================================================== */
+
+test('the documents list reads, and opening one is a POST behind the cross-site guard', async () => {
+  const projects = require('./engine/projects');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-docs-'));
+  const away = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-docs-away-'));
+  fs.writeFileSync(nodePath.join(dir, 'brief.md'), 'x');
+  fs.writeFileSync(nodePath.join(away, 'secret.txt'), 'x');
+  fs.symlinkSync(nodePath.join(away, 'secret.txt'), nodePath.join(dir, 'escape.txt'));
+
+  const made = await req('/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Docs Fixture', folder: dir, agents: [] }),
+  });
+  assert.equal(made.status, 200, 'the fixture project was not created');
+  const id = JSON.parse(made.body).project.id;
+
+  // --- the list ---
+  const listed = await req('/api/project/' + encodeURIComponent(id) + '/documents');
+  assert.equal(listed.status, 200);
+  const list = JSON.parse(listed.body);
+  assert.equal(list.ok, true);
+  const names = list.files.map((f) => f.name);
+  assert.ok(names.includes('brief.md'), 'CONTROL: the real file was not listed');
+  assert.ok(!names.includes('escape.txt'), 'the list offered a symlink out of the project');
+
+  // --- the list is read-only ---
+  const posted = await req('/api/project/' + encodeURIComponent(id) + '/documents', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.equal(posted.status, 405);
+
+  const calls = [];
+  projects.setRevealRunner((file, args) => { calls.push([file, args]); return { ok: true }; });
+  try {
+    // --- 🛑 THE GUARD, and it is the reason this route is a POST at all. A
+    //     page on another site must not be able to make this machine open a
+    //     file by embedding a form.
+    for (const [label, headers] of [
+      ['a form content type', { 'content-type': 'text/plain' }],
+      ['a form post', { 'content-type': 'application/x-www-form-urlencoded' }],
+      ['another site as its origin', { 'content-type': 'application/json', origin: 'https://evil.example' }],
+      ['a sandboxed page', { 'content-type': 'application/json', origin: 'null' }],
+    ]) {
+      const res = await req('/api/project/' + encodeURIComponent(id) + '/open-file', {
+        method: 'POST', headers, body: JSON.stringify({ name: 'brief.md' }),
+      });
+      assert.equal(res.status, 403, `${label}: the open was accepted`);
+      assert.equal(calls.length, 0, `${label}: a file opened for a request from another website`);
+    }
+
+    // --- the escape, same-origin, still refused by the engine's third gate ---
+    const escaped = await req('/api/project/' + encodeURIComponent(id) + '/open-file', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'escape.txt' }),
+    });
+    assert.equal(escaped.status, 409);
+    assert.match(JSON.parse(escaped.body).error, /outside this project/);
+    assert.equal(calls.length, 0, 'a symlink out of the project reached the opener');
+
+    // --- CONTROL: the same runner, same route, a legitimate file. Without
+    //     this every assertion above could be passing because nothing was
+    //     ever wired up.
+    const ok = await req('/api/project/' + encodeURIComponent(id) + '/open-file', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'brief.md' }),
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(calls.length, 1, 'the legitimate open never reached the opener');
+    assert.equal(calls[0][1].length, 1, 'reveal-style -R leaked into the open path');
+  } finally {
+    projects.setRevealRunner(null);
+  }
+});
+
+test('a project with no folder any more still answers the documents list, with a reason', async () => {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-docs-gone-'));
+  const made = await req('/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Docs Gone', folder: dir, agents: [] }),
+  });
+  const id = JSON.parse(made.body).project.id;
+  fs.rmSync(dir, { recursive: true, force: true });
+
+  const listed = await req('/api/project/' + encodeURIComponent(id) + '/documents');
+  // ⚠️ 200, NOT a 4xx. A missing folder is a state this screen must DRAW.
+  // A 4xx would render as a failed request rather than as "we could not look",
+  // and those are different sentences: one is about the project, one is about us.
+  assert.equal(listed.status, 200);
+  const body = JSON.parse(listed.body);
+  assert.equal(body.ok, false);
+  assert.ok(body.because && body.because.length > 0, 'no sentence explained the empty list');
+  assert.deepEqual(body.files, []);
+});
+
+test('the documents list of a project that does not exist is a 404', async () => {
+  const listed = await req('/api/project/no-such-project/documents');
+  assert.equal(listed.status, 404);
+});

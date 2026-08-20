@@ -3152,9 +3152,32 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            The `@` half of the hint IS true today and ships now. -->
       <div class="composer">
         <div class="composerbox">
+          <!-- ⚠️ THE PLACEHOLDER NAMES THE OUTCOME, THE HINT NAMES THE
+               MECHANISM, AND THE ARIA-LABEL IS NOT THE PLACEHOLDER. Shipping
+               only the true half of the pack's hint left "@name to address
+               someone" stated TWICE, in the placeholder and the hint — and the
+               pack had already ruled that parenthetical out of the box for the
+               reason its own comment gives: "Both times I wrote copy describing
+               the MECHANISM to a person who only needs the OUTCOME." So the
+               mechanism is stated once, in the position the pack ruled for it.
+               The aria-label deliberately does NOT follow: a screen-reader user
+               hearing "Write to the project" has none of the context a sighted
+               reader gets from the members column beside it, so it keeps the
+               plain outcome. Found by Mona Lisa. -->
           <textarea class="cinput" id="pj-post" rows="1" maxlength="2000"
-                    placeholder="Post to everyone on this project (@name to address someone)"
+                    placeholder="Write to the project&hellip;"
                     aria-label="Post to everyone on this project"></textarea>
+          <!-- ⚠️ QUIET, NOT GOLD, AND THAT IS A RULING RATHER THAN AN
+               ARTEFACT. The pack has `btn-gold cpost`; this build has no
+               `.btn-gold` at all, and its gold primary is `.btn.uprime`, worn
+               by #uc-go, #nt-go and #role-next. Every one of those ADVANCES a
+               flow. A project room is a place you live in rather than move
+               through, and its Post is an ambient, repeated action — making a
+               permanently-on-screen control gold spends the signal that
+               currently means "this is the step that moves you on", everywhere
+               it is used. Raised as a question by Mona Lisa, who named this
+               counter-argument herself; ruled here and recorded in the pack
+               against `btn-gold` so the two files stop disagreeing. -->
           <button class="btn cpost" id="pj-post-go" type="button">Post</button>
         </div>
         <p class="composerhint"><b>@</b> an agent to ask them directly.</p>
