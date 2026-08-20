@@ -104,24 +104,38 @@ const TOLD = {
  * The one entry mapping to itself has no singular referent to begin with.
  */
 const GROUP_BECAUSE = new Map([
+  /**
+   * ⚠️ THE VALUES CARRY NO OUTCOME AND NO NOUN, because the FRAME carries
+   * both. Composed against `pjToldGroupLine`, a value ending "so nothing was
+   * written" said the outcome twice, and one saying "their instructions" said
+   * the frame's own noun back to it. Ruled 2026-08-20 §9 after all nine were
+   * rendered through the frame rather than read: eight of the nine were
+   * defective and only one had been looked at.
+   *
+   * 🛑 EDIT THE FRAME AND YOU MUST RE-RENDER THESE. They are written to sit
+   * after "Their instructions were not updated for this folder: " and nowhere
+   * else. The KEYS are the engine's verbatim singulars and still carry their
+   * own outcome clauses, because the singular frame does not state one; that
+   * asymmetry is deliberate and is why the two halves are not the same string.
+   */
   ['this agent has no folder on this computer yet',
     'none of them has a folder on this computer yet'],
   ['this agent has no instructions file yet, and we will not create one for it',
-    'none of them has an instructions file yet, and we will not create them'],
+    'none of them has one yet, and we will not create them'],
   ['we could not find an agent with exactly this name on this computer, so nothing was written',
-    'we could not find any of them by exactly these names on this computer, so nothing was written'],
+    'we could not find any of them by exactly these names on this computer'],
   ['something is running under this name, but we cannot tell that it is this agent, so nothing was written',
-    'something is running under some of these names, but we cannot tell they are those agents, so nothing was written'],
+    'something is running under some of these names, but we cannot tell they are those agents'],
   ['we could not check which agents are running, so nothing was written',
-    'we could not check which agents are running, so nothing was written'],
+    'we could not check which agents are running'],
   ['this agent keeps its instructions somewhere we cannot safely change',
-    'they keep their instructions somewhere we cannot safely change'],
+    'they keep them somewhere we cannot safely change'],
   ['taking this out would leave its instructions almost empty, so we left them alone',
-    'taking this out would leave their instructions almost empty, so we left them alone'],
+    'taking this out would leave them almost empty'],
   ['its instructions are already at the size limit, so we left them alone',
-    'their instructions are already at the size limit, so we left them alone'],
+    'they are already at the size limit'],
   ['we could not write to this agent’s instructions',
-    'we could not write to their instructions'],
+    'we could not write to them'],
 ]);
 
 /** The plural form for a singular because, or null. NEVER invents. */

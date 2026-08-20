@@ -8496,7 +8496,7 @@ function pjToldLine(told) {
   // FAILURE still speaks below -- interim until the project notice is
   // drawn (exit dependency tracked on Splinter's board).
   if (told.state === 'could_not') {
-    return 'We could not tell it where this folder is; ' + esc(told.because || 'we could not write to its instructions') + '.';
+    return 'Its instructions were not updated for this folder: ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
   return '';
 }
@@ -8544,9 +8544,9 @@ function pjToldGroupLine(told) {
   // (her ruling), because the singular because is written for a one-agent
   // context and does not survive being quoted inside a plural frame.
   if (told.becauseGroup) {
-    return 'This folder was not added to their instructions: ' + esc(told.becauseGroup) + '.';
+    return 'Their instructions were not updated for this folder: ' + esc(told.becauseGroup) + '.';
   }
-  return 'This folder was not added to their instructions.';
+  return 'Their instructions were not updated for this folder.';
 }
 
 /**

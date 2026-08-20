@@ -1573,27 +1573,31 @@ test('every singular could_not because the engine authors has a plural sibling',
     'this agent has no folder on this computer yet':
       'none of them has a folder on this computer yet',
     'this agent has no instructions file yet, and we will not create one for it':
-      'none of them has an instructions file yet, and we will not create them',
+      'none of them has one yet, and we will not create them',
     'we could not find an agent with exactly this name on this computer, so nothing was written':
-      'we could not find any of them by exactly these names on this computer, so nothing was written',
+      'we could not find any of them by exactly these names on this computer',
     'something is running under this name, but we cannot tell that it is this agent, so nothing was written':
-      'something is running under some of these names, but we cannot tell they are those agents, so nothing was written',
+      'something is running under some of these names, but we cannot tell they are those agents',
     'this agent keeps its instructions somewhere we cannot safely change':
-      'they keep their instructions somewhere we cannot safely change',
+      'they keep them somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':
-      'taking this out would leave their instructions almost empty, so we left them alone',
+      'taking this out would leave them almost empty',
     'its instructions are already at the size limit, so we left them alone':
-      'their instructions are already at the size limit, so we left them alone',
+      'they are already at the size limit',
     'we could not write to this agent’s instructions':
-      'we could not write to their instructions',
+      'we could not write to them',
   };
   for (const [singular, plural] of Object.entries(expectPlural)) {
     assert.equal(projects.groupBecause(singular), plural,
       'no or wrong plural sibling for: ' + singular);
   }
-  // The one sentence with no singular referent maps to itself.
+  // ⚠️ NO LONGER AN IDENTITY MAP. This row used to map to itself, which is why
+  // it was described as "the one sentence with no singular referent". Now that
+  // the frame carries the outcome, its plural drops the tail like every other,
+  // so the value differs from the key and the identity assertion would pass
+  // only if the trim had been missed here.
   const neutral = 'we could not check which agents are running, so nothing was written';
-  assert.equal(projects.groupBecause(neutral), neutral);
+  assert.equal(projects.groupBecause(neutral), 'we could not check which agents are running');
 
   // THE SOURCE PIN: every mapped singular must still exist verbatim in the
   // modules that author these sentences. When this fails, someone edited a
@@ -1626,7 +1630,7 @@ test('every singular could_not because the engine authors has a plural sibling',
   // would still remove the first entry while later keys survive.
   assert.ok(!stripped.includes('none of them has a folder on this computer yet'),
     'CONTROL: the map\'s FIRST plural survived the strip; the pin is scanning its own copy');
-  assert.ok(!stripped.includes('we could not write to their instructions'),
+  assert.ok(!stripped.includes('we could not write to them'),
     'CONTROL: the map\'s LAST plural survived the strip; the window truncated early');
   const authorOf = {
     'this agent has no folder on this computer yet': 'workerfile.js',

@@ -6010,7 +6010,7 @@ test('identical roster verdicts collapse to one group line, and only then', () =
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
     cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet')]);
-  assert.ok(g.startsWith('This folder was not added to their instructions'),
+  assert.ok(g.startsWith('Their instructions were not updated for this folder'),
     'three identical could_not verdicts did not collapse: ' + g);
   assert.ok(g.includes('none of them has a folder on this computer yet'),
     'the group sentence did not carry the plural sibling: ' + g);
@@ -6029,8 +6029,55 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // arm for a razed could_not (no because at all) reached directly.
   const gline = pageFunction('pjToldGroupLine', TOLD_PRELUDE);
   assert.equal(gline({ state: 'could_not' }),
-    'This folder was not added to their instructions.',
+    'Their instructions were not updated for this folder.',
     'the defensive reasonless arm changed or vanished');
+
+  /**
+   * 🛑 EVERY PLURAL COMPOSED THROUGH THE FRAME, not one of them. The frame
+   * carries the outcome and the noun, so a value that carries either says it
+   * twice -- and one value is a REMOVE reason, so a frame naming ADD made it
+   * false outright. Eight of the nine were defective when only one had been
+   * rendered, which is why this asserts the whole set rather than a sample.
+   *
+   * The two properties are the frame's own words: "instructions" appears once
+   * (the frame's), and no value re-states the outcome. Both fail if somebody
+   * edits the frame to be more specific again, or trims it and leaves the
+   * values bare.
+   */
+  /* ⚠️ THE PAIRS COME FROM THE ENGINE'S MAP, read out of its source, not from
+     a list written here. A copy of the map in this file would compose the
+     copy through the frame and pass while the real map said something else
+     (a check containing a copy cannot fail). The keys are parsed and the
+     values come back from `groupBecause` itself. */
+  const projSrc = fs.readFileSync(nodePath.join(__dirname, 'engine', 'projects.js'), 'utf8');
+  const mapBody = projSrc.slice(projSrc.indexOf('const GROUP_BECAUSE = new Map(['),
+    projSrc.indexOf(']);', projSrc.indexOf('const GROUP_BECAUSE = new Map([')));
+  const singulars = [...mapBody.matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  const FRAME_NOUN = /instructions/g;
+  for (const singular of singulars) {
+    const plural = require('./engine/projects').groupBecause(singular);
+    assert.ok(plural, 'a key parsed out of GROUP_BECAUSE does not map: ' + singular);
+    const line = shared([cn(singular, plural), cn(singular, plural)]);
+    assert.ok(line, 'two identical verdicts did not collapse for: ' + singular);
+    assert.equal((line.match(FRAME_NOUN) || []).length, 1,
+      'the group line says "instructions" more than once, frame and tail: ' + line);
+    assert.doesNotMatch(line, /so nothing was written|we left them alone/,
+      'the value re-states an outcome the frame already carries: ' + line);
+    /* ⚠️ AIMED AT THE VALUE, NOT THE LINE. Against the line this could never
+       fail: the `startsWith` above pins the frame verbatim, so a frame naming
+       ADD is already caught before this runs. Measured by putting the old
+       frame back -- the startsWith fired and this did not. Against the VALUE
+       it holds something nothing else does: a reason that names the operation
+       it belongs to, when one of them is a removal and the frame cannot know
+       which. */
+    assert.doesNotMatch(plural, /was not added|were not added|added to/,
+      'a plural reason names ADD, and the reason set spans add and remove: ' + plural);
+  }
+  // CONTROL: the loop above ran over a non-empty set. An empty expectPlural
+  // would satisfy all three assertions vacuously, which is the failure this
+  // whole test exists to prevent, one level down.
+  assert.ok(singulars.length >= 9,
+    'CONTROL: only ' + singulars.length + ' pairs parsed out of GROUP_BECAUSE; the scan is not seeing the whole map');
 
   // The group line lands in the page as raw HTML (paintOneProject), so a
   // markup-carrying plural form must arrive ESCAPED, not verbatim-dangerous.

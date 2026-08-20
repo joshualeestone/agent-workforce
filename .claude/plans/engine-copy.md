@@ -211,6 +211,68 @@ than in the code**, and it is the reason the check was worth doing anyway: the
 other seven cells all read correctly, which is a measurement rather than an
 assumption.
 
+### 🛑 The group frame: a frame may not name an operation it cannot know
+
+Applying the designer's frame fix and then RENDERING all nine plural pairs
+through it (rather than reading the rule) found that eight of the nine were
+defective, and one was not a wording problem at all.
+
+| # | what the frame did to it |
+|---|---|
+| 1 | clean |
+| 2, 6, 9 | said `instructions` twice, frame and tail |
+| 3, 4, 5 | said the outcome twice |
+| 7 | 🛑 both, **and a REMOVE reason under an ADD frame** |
+| 8 | both |
+
+**Row 7 is `projects.js:1701`, the untell path.** Its own comment says *"Taking
+our block back out can push a file under the editor's minimum"*, and it returns
+`TOLD.COULD_NOT`, so the screen said *"This folder was not added to their
+instructions: taking this out would leave their instructions almost empty."*
+
+🔑 **The old frame was vaguer and therefore could not contradict.** Making a
+frame more specific is what turned a shared reason set into a false sentence.
+
+⚠️ **And the singular had the same contradiction, predating all of this.** I had
+called the singular fine, and it was: **for repetition, which is what I
+checked.** *A check aimed at one defect is blind to the other one in the same
+sentence.*
+
+Ruled: both frames state the STATE rather than the operation, because `updated`
+is true in both directions.
+
+| | |
+|---|---|
+| plural | `Their instructions were not updated for this folder: ` |
+| singular | `Its instructions were not updated for this folder: ` |
+
+**Staged deliberately.** The plural VALUES touch nothing else, so all nine are
+trimmed here. The singular strings are the map's KEYS and are authored at engine
+call sites, so only the singular FRAME changes: that removes the contradiction
+and leaves a redundant tail, which is **weight rather than a lie**. Trimming the
+keys is a follow-up and does not ride this PR.
+
+📌 **Left for that follow-up, measured here so it is not re-derived:** singular
+row 1 reads *"Its instructions were not updated for this folder: this agent has
+no folder..."*, shifting from pronoun to noun phrase inside one sentence; rows
+6 to 9 still repeat `instructions`; and `web/index.html`'s own fallback
+(`'we could not write to its instructions'`) is a page literal rather than an
+engine key, so it is cheaper to trim than the rest.
+
+### The guard that came with it, and what it does NOT hold
+
+`server.test.js` now composes **every** pair through the frame, reading the
+singular keys out of `projects.js`'s map source and asking `groupBecause` for
+each value, so it cannot be a copy of the thing it checks. Three properties:
+the line says `instructions` exactly once, no value re-states the outcome, and
+no value names an operation.
+
+⚠️ **The third assertion was aimed at the whole LINE first, where it could never
+fail** -- the `startsWith` above it already pins the frame verbatim, so a frame
+naming ADD is caught before it runs. Measured by putting the old frame back: the
+`startsWith` fired and mine did not. Re-aimed at the VALUE, where it holds
+something nothing else does. All three proven by breaking them one at a time.
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and
