@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: 30d4a55bc5c192cbacb4b7fc1f849c92b77109a7169dd30784a24695346f1be1
+diff_hash: b2e914ba6f175fd7b9fa2724f862c05667b93ba191d00ee7930638c9ce064bca
 subdir_audit: passed
-timestamp: 2026-08-20T04:04:36Z
+timestamp: 2026-08-20T04:37:34Z
 iterations: 1
 converged: true
 ---
@@ -134,3 +134,59 @@ with the screen recorded as a later slice.
 | 8 | 1 | BLOCKER | server.js open-file | FIXED | readBody returns a Buffer, not JSON |
 | 9 | 1 | BLOCKER | render-projects.js contrast sweep | FIXED | selector asserted with `expect` |
 | 10 | 1 | NIT | documents view-all | DEFERRED | by design: screen is a later slice |
+
+## Third slice on the same branch (2026-08-19, after #93)
+
+Member faces, task status, and the role-hint copy fix. Same review shape:
+single pass, explicit override, every visual change rendered rather than read.
+
+[STRENGTH] **The version regression was caught a SECOND time, the same way.**
+Branch at 0.2.2, main at 0.2.3; merging as-is would have set it backwards and
+every board on 0.2.3 would read that as "no update available", silently. The
+suite pins no version to a number, so nothing would have failed. This is now a
+known trap with a known check, and the check is "compare both sides before
+merging", not a test.
+
+[STRENGTH] The plan-file conflict was resolved toward this branch only AFTER
+proving ours is a SUPERSET: every heading on main's side was confirmed present
+here first. "Take ours" on a file both sides edited is otherwise a silent
+deletion.
+
+[STRENGTH] **Two real defects in the test harness, both fixed rather than
+worked around.** `pageConstSource` matched only object consts, so lifting an
+array asserted "DISC_TINTS vanished from the page" about a const sitting right
+there; and after that was widened, `DISC_INKS` still "vanished" because it is
+written with two spaces before its `=`. Both failures said the same untrue
+sentence about different causes. Now a whitespace-tolerant regex over either
+opener.
+
+[STRENGTH] The pjMember test lifts the REAL disc helpers rather than stubs. It
+went red with "discTint is not defined", which is the extraction harness working
+as designed; stubbing would have kept it green while no longer exercising the
+face branch.
+
+[WARNING -> RESOLVED] **The first verification of task status was worthless and
+reported 4 of 4.** It measured `.tkcard-who`, the WRAPPER, so it read
+textDecoration 'none' for every state including the one whose point is a
+decoration -- and still counted four distinct signatures because the TEXT was in
+the signature. Re-measured on the mark elements: `.tkunk` is underline/dotted
+in both schemes, `.tksay` is none. Second time tonight a check of mine answered
+confidently about the wrong element.
+
+[NIT] `claimed` true and false deliberately share `.tksay`: same kind of
+statement, same voice, opposite polarity. Distinguished by their words, which is
+the distinction that is real.
+
+[NIT] Project documents reads the project FOLDER while the attach path would
+write to app data (§7b), so the two would disagree once the `+` lands.
+Recorded in the plan with Mona Lisa's merge recommendation; it needs Josh,
+because it is two of HIS sentences that disagree.
+
+### Third-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 11 | 1 | BLOCKER | package.json | FIXED | version regression caught pre-PR, second time |
+| 12 | 1 | BLOCKER | server.test.js pageConstSource | FIXED | arrays + whitespace-tolerant matcher |
+| 13 | 1 | WARNING | task-status verification | FIXED | re-measured on the mark, not the wrapper |
+| 14 | 1 | NIT | documents source | DEFERRED | needs Josh; recorded with options |
