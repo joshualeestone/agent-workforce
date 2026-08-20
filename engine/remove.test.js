@@ -988,7 +988,7 @@ test('an agent stopped but never recorded is told where its way back is', () => 
       'it says the agent is still on the board, and the board is built from sessions it just killed');
     assert.match(gone.because, /com\.kosmos\.agent\.stopped-unrecorded/,
       'the one path where the person has nothing else to go on does not name the startup job');
-    assert.match(gone.because, /re-enabling that is what undoes this/,
+    assert.match(gone.because, /turning that back on is what undoes this/,
       'it names the job without saying what to do with it');
   } finally {
     fs.chmodSync(dir, 0o700);
@@ -1248,7 +1248,7 @@ test('a kill that reports success over a session that is STILL THERE is not a re
 
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
     'a session that outlived a successful-looking kill was reported as removed');
-  assert.match(r.because, /could not end the session/);
+  assert.match(r.because, /could not stop it, so it is still going/);
   assert.equal(remove.isHidden(name), false,
     'the agent was hidden from the board while still running, which is the one thing it must never do');
   assert.equal(remove.isRemoved(name), true,
@@ -1300,7 +1300,7 @@ test('what the detail screen is told about removing an agent comes from here, an
 
   boardShows(jobless, jobless);
   const b = remove.plan(jobless);
-  assert.match(b.hint, /did not set this one up|nothing running to stop/,
+  assert.match(b.hint, /not set to start on its own/,
     'it promises to stop something starting again for an agent that nothing was going to start');
   assert.doesNotMatch(b.hint, /stops it starting again/,
     'the jobless hint still describes work that will not happen');
@@ -1325,7 +1325,7 @@ test('a partial about an agent with no startup job does not claim one was turned
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
   assert.doesNotMatch(r.because, /we stopped .* from starting again/,
     'it reported stopping a startup job that does not exist');
-  assert.match(r.because, /has no startup job to turn off/,
+  assert.match(r.because, /was not set to start on its own/,
     'it does not say what was actually true of the job');
 });
 
@@ -1381,7 +1381,7 @@ test('the two partials a person actually hits still record, so Restore is there'
   });
   const r1 = remove.remove(a);
   assert.equal(r1.outcome, remove.OUTCOME.PARTIAL, r1.because);
-  assert.match(r1.because, /could not ask tmux/, 'this is a different partial than the one under test');
+  assert.match(r1.because, /could not check whether it is still running/, 'this is a different partial than the one under test');
   assert.equal(remove.isRemoved(a), true,
     'it disabled and stopped the job and then filed no record, so there is no Restore button');
   assert.equal(remove.isHidden(a), false,
@@ -1506,7 +1506,7 @@ test('the steps report what was done, including when nothing was', () => {
   /* Back to naming the JOB, which is what this assertion's own message says it
      checks. The alternation that briefly replaced it matched a label about the
      SESSION, so the test certified a step list that contradicted itself. */
-  assert.ok(labels.some((l) => /no startup job/.test(l)),
+  assert.ok(labels.some((l) => /not set to start on its own/.test(l)),
     'it does not say what was actually true of the job');
 });
 

@@ -19,47 +19,39 @@ No behaviour changes: every edit is a string.
 
 ## The verification, and its polarity
 
-    python3 Projects/kosmos-design/jargon.py --engine
+    KOSMOS_REPO=<worktree> python3 Projects/kosmos-design/jargon.py --engine
 
-- **kind:** guard · **pass:** `== 6` · **before:** 44 · **after:** 6
+- **kind:** guard · **pass:** `== 8` · **before (fixed counter):** 57 · **after:** 8
 
-⚠️ **SIX IS THE PASS, AND FEWER IS A FAILURE**, which is the opposite of how a
-count usually reads. Five of the six are false positives the checker cannot
-distinguish (`stderr` twice in a code fragment, `directory` in two developer
-errors and one internal message), and the sixth is `messages.js:141`, which is
-correct as it stands:
+🛑 **THE NUMBERS IN THE FIRST VERSION OF THIS PLAN WERE BOTH WRONG, and the
+counter was wrong with them.** It said 44 → 6 and that six was the pass. Mona
+Lisa then found two defects in `jargon.py` itself:
 
-> we cannot tell which agent is sending this: `kosmos msg` takes the sender from
-> TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.
+- it read only single- and double-quoted literals, so **every sentence assembled
+  from a template literal was invisible** — and `remove.js` composes several
+  that way. Its own docstring said it could not see runtime-assembled sentences,
+  and the issue's done-condition was set on the number anyway;
+- it held a **hardcoded path**, so it could only ever measure `main`. It could
+  not have verified this branch before merge. It honours `KOSMOS_REPO` now.
 
-**That one names a variable on purpose.** Measured: `web/index.html` contains
-zero references to `/api/msg`, the page does not fetch `/api/messages` either,
-and the only producers of `from_pane` are `kosmos msg` and `kosmos post` in
-`install/kosmos`. So a person using Kosmos cannot reach that sentence at all;
-its only reader is whoever typed the command into a shell, and for that reader
-naming the variable is the one useful thing it can say.
+On the fixed counter: `main` is **57**, not 44, and this branch is **8**.
 
-⚠️ **The checker cannot see reachability**, so it flags that line forever. It is
-recorded as an EXPECTED hit rather than an unfixed one, so nobody fixes correct
-copy to make a number go down.
+⚠️ **So the sweep is better than "44 to 6" in absolute terms and less complete in
+relative ones**, and the honest form of both numbers is the command above rather
+than either figure.
 
-🛑 **AND SIX IS A FLOOR, NOT A CEILING.** `jargon.py`'s `engine_strings` reads
-QUOTED LITERALS of 15+ characters. Template literals are structurally invisible
-to it, and `engine/remove.js` composes several of its sentences that way -- so
-these are live engine copy the count cannot see:
+### What the remaining eight are
 
-    remove.js:733   `${shown} has no startup job to turn off, and`
-    remove.js:828   `${didToJob} we could not ask tmux whether it is still running`
-    remove.js:865   `${didToJob} we could not end the session it is running in`
-    remove.js:1078  `${shown} is no longer removed from Kosmos. It has no startup job`
-    remove.js:537   `something is running in a session called ${clean}`
+| count | what | why it stays |
+|---|---|---|
+| 2 | `connect.js:146,147` — `stderr` in an object literal | a FIELD NAME, not copy. It was briefly renamed here and reverted: four call sites read `.stderr`, so renaming it is a behaviour change wearing a copy branch. |
+| 4 | `create.js:708,715,722,761` — the README pointer | ruled ("say what to do in the sentence, never name a document") but the words are **not written yet**. Mona Lisa's. |
+| 1 | `messages.js:141` | reachable only from a shell, by measurement. Expected, not unfixed. |
+| 1 | `remove.js:857` — `${found.session}` | the checker matches the word inside an **identifier**; the sentence itself says "something called X is still running". |
 
-So "44 to 6" is true of what the tool can read, and the sweep is incomplete by
-an amount the tool cannot report. `remove.test.js:1384` still pins
-`/could not ask tmux/` and still PASSES, which is the proof: a live sentence
-carrying the jargon, held by a live pin, invisible to the count.
-
-Recorded rather than swept, because these are Mona Lisa's rewrites to write.
+**Eight is the pass and fewer is a failure**, for the same reason six was: four of
+these are waiting on words, and the other four are things the checker cannot
+distinguish from copy.
 
 ## Two defects the patch introduced, found by applying it
 

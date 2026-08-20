@@ -1128,7 +1128,7 @@ test('a name whose startup job is loaded with nothing on disk is refused by name
 
   const r = create.createAgent({ ...BINS, name: 'ghost-job', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a name whose service is loaded was accepted');
-  assert.match(r.because, /already running as a startup job/);
+  assert.match(r.because, /already set to start on this computer/);
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'), 'it tried to load a second job');
   assert.ok(!fs.existsSync(create.workerDir('ghost-job')), 'it made a folder for a name it refused');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootout'),

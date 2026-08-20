@@ -534,7 +534,7 @@ function plan(name) {
   if (tie && tie.isNamedOurs !== true) {
     return {
       ok: false,
-      because: `something is running in a session called ${clean}, and we cannot confirm it is this agent. `
+      because: `something called ${clean} is already running, and we cannot confirm it is this agent. `
         + 'Kosmos will not stop it, because doing so could stop the wrong thing.',
     };
   }
@@ -621,7 +621,7 @@ function plan(name) {
       ? 'Removing it takes it off this board and stops it starting again. '
         + 'Nothing on your computer is deleted, and you can put it back.'
       : 'Removing it takes it off Kosmos and stops it running. '
-        + 'Kosmos did not set this one up, so it cannot start it again for you. '
+        + 'It is not set to start on its own, so Kosmos cannot start it again for you. '
         + 'You would start it the same way you did the first time. '
         + 'Nothing on your computer is deleted.',
   };
@@ -698,7 +698,7 @@ function removeInner(name, { tmuxBin } = {}) {
    */
   function recoveryRoute() {
     return job
-      ? `Its startup job is ${job.label}, and re-enabling that is what undoes this.`
+      ? `It is set to start on its own as ${job.label}, and turning that back on is what undoes this.`
       : 'Nothing will start it again on its own. Its folder and everything in it is untouched.';
   }
 
@@ -730,7 +730,7 @@ function removeInner(name, { tmuxBin } = {}) {
    */
   const didToJob = job
     ? `we stopped ${shown} from starting again, but`
-    : `${shown} has no startup job to turn off, and`;
+    : `${shown} was not set to start on its own, and`;
 
   function step(label, fn) {
     try {
@@ -804,7 +804,7 @@ function removeInner(name, { tmuxBin } = {}) {
     // ignores `steps` -- but the route ships them, so it is a sentence on the
     // wire asserting a job was stopped when there was none.
     /* ⚠️ ONE ROW OF THE COPY PATCH REVERTED, and flagged rather than shipped.
-       The patch rewrote this label from "it had no startup job to stop" to
+       The patch rewrote this label from "it was not set to start on its own, so there was nothing to turn off" to
        "there was nothing running to stop", which drops the referent (the JOB)
        and picks up the SESSION's. The step immediately after this one is
        labelled "stopped it", so for a jobless agent with a live session the
@@ -815,7 +815,7 @@ function removeInner(name, { tmuxBin } = {}) {
        The old wording is jargon and the new wording is a contradiction; the
        replacement needs to lose "startup job" WITHOUT borrowing the session's
        words, which is a copy decision rather than an application detail. */
-    steps.push({ label: 'it had no startup job to stop', ok: true });
+    steps.push({ label: 'it was not set to start on its own, so there was nothing to turn off', ok: true });
   }
 
   /**
@@ -837,7 +837,7 @@ function removeInner(name, { tmuxBin } = {}) {
     // hits, because an unreachable tmux and an untied session are ordinary.
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${didToJob} we could not ask tmux whether it is still running, so it may still be going. `
+      because: `${didToJob} we could not check whether it is still running, so it may still be going. `
         + recordAndSay(false),
       steps,
     };
@@ -854,7 +854,7 @@ function removeInner(name, { tmuxBin } = {}) {
   if (found.kind === FOUND.UNTIED) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${didToJob} something is running in a session called ${found.session} `
+      because: `${didToJob} something called ${found.session} is still running `
         + 'that we cannot confirm is this agent, so we have left it alone. It may still be going. '
         + recordAndSay(false),
       steps,
@@ -874,7 +874,7 @@ function removeInner(name, { tmuxBin } = {}) {
     if (!ended) {
       return {
         outcome: OUTCOME.PARTIAL,
-        because: `${didToJob} we could not end the session it is running in, so it is still going. `
+        because: `${didToJob} we could not stop it, so it is still going. `
           + recordAndSay(false),
         steps,
       };
@@ -1087,7 +1087,7 @@ function restoreInner(name) {
       if (!record.label) {
         // ⚠️ Not "is back on the board" -- there is no card until something
         // starts it, and Kosmos has no job to start. Says what it did do.
-        return `${shown} is no longer removed from Kosmos. It has no startup job, so there was nothing `
+        return `${shown} is no longer removed from Kosmos. It was not set to start on its own, so there was nothing `
           + 'to turn back on: it will reappear once you start it again the way you did before.';
       }
       if (plistGone) {

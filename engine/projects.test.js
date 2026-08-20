@@ -1575,7 +1575,7 @@ test('every singular could_not because the engine authors has a plural sibling',
     'this agent has no instructions file yet, and we will not create one for it':
       'none of them has an instructions file yet, and we will not create them',
     'we could not find an agent with exactly this name on this computer, so nothing was written':
-      'we could not find any of them on this computer, so nothing was written',
+      'we could not find any of them by exactly these names on this computer, so nothing was written',
     'this agent keeps its instructions somewhere we cannot safely change':
       'they keep their instructions somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':

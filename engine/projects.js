@@ -109,7 +109,7 @@ const GROUP_BECAUSE = new Map([
   ['this agent has no instructions file yet, and we will not create one for it',
     'none of them has an instructions file yet, and we will not create them'],
   ['we could not find an agent with exactly this name on this computer, so nothing was written',
-    'we could not find any of them on this computer, so nothing was written'],
+    'we could not find any of them by exactly these names on this computer, so nothing was written'],
   ['we could not check which agents are running, so nothing was written',
     'we could not check which agents are running, so nothing was written'],
   ['this agent keeps its instructions somewhere we cannot safely change',

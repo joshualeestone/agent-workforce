@@ -1841,7 +1841,7 @@ test('an agent whose pane we do not know is refused on BOTH paths, send and scre
     const blind = board.agents.map((a) => (a.sessionName === 'casey' ? { ...a, target: null } : a));
     const sent = chat.deliver('casey', 'hi', blind);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
-    assert.match(sent.because, /cannot tell where this agent is running/);
+    assert.match(sent.because, /do not know where to reach this agent/);
     // paneNote is null HERE by design: this refusal happens at the
     // addressable gate, before the send was authorised against any card,
     // and a pane claim on an unauthorised refusal would be a note about a
@@ -1850,7 +1850,7 @@ test('an agent whose pane we do not know is refused on BOTH paths, send and scre
     assert.equal(sent.paneNote, null);
     const seen = chat.viewport('casey', blind);
     assert.equal(seen.text, null);
-    assert.match(seen.because, /cannot tell where this agent is running/);
+    assert.match(seen.because, /do not know where to reach this agent/);
   });
 });
 

@@ -666,7 +666,7 @@ function createAgent(opts) {
     // newline when the input lacks one), or an input of exactly MAX_BYTES
     // would validate and then land on disk one byte over the read limit.
     if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
-      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be a boot file, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
+      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be its instructions, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
     }
   }
   let modelArg = null;
@@ -758,7 +758,7 @@ function createAgent(opts) {
   if (loaded) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is already running as a startup job on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${name} is already set to start on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
       steps,
     };
   }

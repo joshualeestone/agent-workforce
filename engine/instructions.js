@@ -495,7 +495,7 @@ function write(agent, text, expectedVersion, exactSession) {
   // worker directory while the read followed it.
   if (dirEscapes(file)) throw new Error('there is no agent by that name to write to');
   try {
-    if (!fs.statSync(path.dirname(file)).isDirectory()) throw new Error('not a directory');
+    if (!fs.statSync(path.dirname(file)).isDirectory()) throw new Error('that is not a folder');
   } catch {
     throw new Error('there is no agent by that name to write to');
   }

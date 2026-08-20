@@ -711,11 +711,11 @@ test('the app-location check looks in both folders and answers all four states',
   fs.rmSync(path.join(home, 'Kosmos.app'), { recursive: true, force: true });
 
   // A malformed override THROWS rather than silently probing the real machine.
-  assert.throws(() => machine.appLocationCheck({ appDirs: [] }), /non-empty array/);
-  assert.throws(() => machine.appLocationCheck({ appDirs: sys }), /non-empty array/);
+  assert.throws(() => machine.appLocationCheck({ appDirs: [] }), /non-empty list of folders/);
+  assert.throws(() => machine.appLocationCheck({ appDirs: sys }), /non-empty list of folders/);
   // A non-string ELEMENT is the half that matters: path.join would TypeError
   // inside the look and fabricate a could-not-look no test would question.
-  assert.throws(() => machine.appLocationCheck({ appDirs: [123] }), /non-empty array/);
+  assert.throws(() => machine.appLocationCheck({ appDirs: [123] }), /non-empty list of folders/);
 
   fs.rmSync(sb, { recursive: true, force: true });
 });
@@ -849,7 +849,7 @@ test('revealApp opens Finder at the icon it re-derives, and refuses honestly whe
     assert.equal(args, null, 'a refusal ran the opener anyway');
 
     // The same malformed-override guard as the check.
-    assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty array/);
+    assert.throws(() => machine.revealApp({ appDirs: [] }), /non-empty list of folders/);
 
     // Errored is NOT not-found: a folder we cannot read refuses with the
     // could-not-look sentence, never the not-there one. (Mode 000 does not

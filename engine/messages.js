@@ -125,7 +125,7 @@ function paneSession(paneId) {
         { encoding: 'utf8', timeout: 5000 }).trim(),
     };
   } catch (e) {
-    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'we could not check whether it arrived') };
+    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'we could not work out which agent you are') };
   }
 }
 
@@ -138,7 +138,7 @@ function paneSession(paneId) {
 function resolveSender(fromPane, roster) {
   const pane = String(fromPane == null ? '' : fromPane).trim();
   if (!pane) {
-    return { ok: false, because: 'we cannot tell which agent is sending this: `kosmos msg` takes the sender from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
+    return { ok: false, because: 'we cannot tell which agent is sending this (run it inside the session that agent runs in)' };
   }
   // A pane id is %N; a session:w.p target is also accepted, and a bare
   // session name prefix-matches in tmux (aim leo, hit leo-discord) --
@@ -148,7 +148,7 @@ function resolveSender(fromPane, roster) {
   // the argv slot AFTER -t -- the positioning is the operative guard, the
   // regex just keeps the value boring.
   if (!/^[%$@a-zA-Z0-9_.:-]+$/.test(pane)) {
-    return { ok: false, because: 'we cannot tell where this agent is running' };
+    return { ok: false, because: 'that does not look like something we can identify you by' };
   }
   const who = paneSession(pane);
   if (!who.ok) {
