@@ -331,11 +331,33 @@ async function main() {
      fails the run. The exemption is why the block below also ASSERTS
      what the refusal draws: a tolerated request that draws nothing is
      how a check turns into permission. */
+  /* 🛑 THE 400 EXEMPTION IS KEYED ON SCOPE, NOT ON TIMING, and it had to be.
+     It was armed around the block that opens the untied panel and disarmed
+     after it, which cannot work: the probe's console error is ASYNCHRONOUS
+     and lands after the disarm. Measured on this branch AND on origin/main,
+     four runs out of four, always
+     `[url=/api/agent/rook/removal] [armed=false]`. So the check failed for
+     everybody, on a product behaviour that is correct, and the failure says
+     "console error" rather than "your window closed too early".
+
+     A window defined by synchronous code position cannot contain an event
+     that arrives later. Keyed on the untied agent's NAME instead, which is a
+     property of the fixture rather than of the clock. `rook` is the only
+     borrowed name this server serves, and the block below asserts that it
+     really does arrive untied before relying on it.
+
+     ⚠️ The property the armed version existed for SURVIVES: a TIED agent's
+     removal probe 400ing still fails the run, because the exemption names
+     rook and nobody else. `exempt400` is a function so that can be asserted
+     rather than asserted about. */
+  const UNTIED_NAME = 'rook';
+  const exempt400 = (text, url) => /Failed to load resource.*400/.test(text)
+    && new RegExp('/api/agent/' + UNTIED_NAME + '/removal(\\?|$)').test(url);
   let expectUntiedRefusals = false;
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const url = m.location().url || '';
-    if (expectUntiedRefusals && /Failed to load resource.*400/.test(m.text()) && /removal/.test(url)) return;
+    if (exempt400(m.text(), url)) return;
     if (expectUntiedRefusals && /Failed to load resource.*404/.test(m.text()) && /\/thread$/.test(url)) return;
     pageErrors.push(m.text());
   });
@@ -444,6 +466,19 @@ async function main() {
     // deletable-green otherwise): opening the borrowed-name panel with
     // Engineering mode ON must hide the box, and never paint a refusal
     // sentence into it about an agent the person is looking at.
+    /* ⚠️ THE EXEMPTION IS ASSERTED, NOT TRUSTED. A tolerated request that is
+       tolerated too widely is how a check turns into permission, and the
+       failure mode is silent: every 400 anywhere would pass. Both directions,
+       against the same predicate the handler uses. */
+    check(exempt400('Failed to load resource: the server responded with a status of 400 (Bad Request)',
+      'http://127.0.0.1/api/agent/' + UNTIED_NAME + '/removal'),
+      'CONTROL: the 400 exemption does not cover the untied removal probe it was written for');
+    check(!exempt400('Failed to load resource: the server responded with a status of 400 (Bad Request)',
+      'http://127.0.0.1/api/agent/casey/removal'),
+      'CONTROL: the 400 exemption swallows a TIED agent\'s removal refusal, which is not by design');
+    check(!exempt400('Failed to load resource: the server responded with a status of 500 (Server Error)',
+      'http://127.0.0.1/api/agent/' + UNTIED_NAME + '/removal'),
+      'CONTROL: the exemption swallows statuses other than 400 on that route');
     expectUntiedRefusals = true;
     await rookCard.click();
     await page.waitForSelector('#panel-detail:not([hidden])', { timeout: 10000 });
