@@ -356,10 +356,10 @@ main-side commit touching the shared files is this branch's own squash.
 
 ## Eighth slice (2026-08-20): the last known red goes green
 
-[STRENGTH] **Measured where it renders, not deleted.**  only exists
+[STRENGTH] **Measured where it renders, not deleted.** `.pj-told` only exists
 when a tell comes back could_not, and the sweep looked for it on a HEALTHY
 project. The failed-tell fixture already existed: "Quarter close" is created
-with , which has no folder on this machine. Confirmed in the browser
+with `claudebot`, which has no folder on this machine. Confirmed in the browser
 before touching the check.
 
 [STRENGTH] A SEPARATE pass from the missing-folder one, deliberately. A failed
@@ -372,11 +372,19 @@ to SPEAK cannot be measured for contrast while empty, because empty measures
 perfectly. The assertion is not a nicety on top of the measurement, it is what
 makes the measurement mean anything.
 
-[WARNING -> RESOLVED] The first version clicked `#pj-back` on the settings
-VIEW and Playwright spent its full timeout on an element that was never going to
+[WARNING -> RESOLVED] The first version clicked `#pj-back` on the settings VIEW
+and Playwright spent its full timeout on an element that was never going to
 appear. Two doors. Diagnosed the refusal rather than routing around it -- second
 time tonight that rule paid, and both times the workaround would have "worked",
 which is what makes it dangerous: it converts a signal into a pass.
+
+[WARNING -> RESOLVED] ⚠️ AND THIS FILE WAS DAMAGED BY THE SHELL ON ITS FIRST
+WRITE. An UNQUOTED heredoc (`<<PY`) expands backticks, so every `.pj-told` and
+`claudebot` in the prose above was executed as a command and replaced with
+nothing -- leaving "**Measured where it renders, not deleted.**  only exists",
+a sentence with its subject missing. `<<'PY'` does not expand. Third time
+tonight a shell interpreted content I meant to store; recorded in memory with
+the mechanism named rather than as "be careful with quoting".
 
 [NIT] ⚠️ NO VERSION BUMP RIDES WITH THIS. It changes a browser check, not the
 app; nothing a person can see is different. A release whose note has nothing
@@ -388,4 +396,5 @@ true to say would devalue the eight tonight that did.
 |---|------|----------|-----------|--------|------------|
 | 29 | 1 | BLOCKER | render-projects.js .pj-told | FIXED | measured on a failed-tell project |
 | 30 | 1 | WARNING | check navigation | FIXED | walk out of settings before going back |
-| 31 | 1 | NIT | version bump | DEFERRED | deliberately none; check-only change |
+| 31 | 1 | WARNING | this proof file | FIXED | unquoted heredoc ate the backticked terms |
+| 32 | 1 | NIT | version bump | DEFERRED | deliberately none; check-only change |
