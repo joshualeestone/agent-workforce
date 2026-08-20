@@ -1229,6 +1229,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
+/* The documents list: rows that read as one tappable thing, in the members
+   column's own rhythm. A row is a BUTTON because it acts — `open` launches a
+   file — and a div with a click handler is not reachable from the keyboard. */
+.pj-docs { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); }
+.pj-doc { display: flex; align-items: baseline; gap: var(--space-4); width: 100%;
+          text-align: left; background: none; border: 0; cursor: pointer;
+          padding: var(--space-3) var(--space-3); border-radius: var(--radius-control);
+          font: var(--text-callout) var(--font-ui); color: var(--k-ink); min-height: 24px; }
+.pj-doc:hover { background: var(--k-bg); }
+.pj-doc:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.pj-doc-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-doc-w { flex: 0 0 auto; font: var(--text-caption) var(--font-ui); color: var(--k-ink-2); }
 /* #pj-one-add sits in a `.frow`, so the shared `select` rule dresses it and
    the named width rule above widths it. ⚠️ NOT `.frow select` — this comment
    said so and that selector does not exist: it was deliberately replaced by an
@@ -1597,6 +1609,44 @@ svg { display: block; }
    Mouse print got smaller in IMPORTANCE, not in legibility. Only two elements
    carry this class, both in this panel, so the blast radius is the panel. */
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+/* ⚠️ TWO CLASSES THAT WERE WORN AND NEVER DEFINED. Project settings renders the
+   folder NAME — the answer to the question that screen exists to answer — as
+   `<p class="shint"><code class="t">`, and neither class had a rule anywhere in
+   this file. It was arriving as a browser-default paragraph around a
+   browser-default `code`: default face, default size, default colour, and a
+   default bottom margin the element's inline `margin-top` does not cancel.
+   Found by Mona Lisa comparing structure against the pack; nothing that reads
+   this file for text could see it, because the markup looks completely correct.
+
+   `.shint` takes the pack's values verbatim (FROZEN-2026-08-19:1880, verified
+   top-level rather than inside the narrow-screen block above it — the brace
+   depth was computed, because the rule is indented and reads as if it were
+   nested).
+
+   ⚠️ `code.t` DOES NOT take the pack's, and this is the trap. The pack's
+   `code.t` (:100) is built on `--page-ink`, which is the MOCK-CHROME token
+   family: the surface a mock sits on inside the design document, not an app
+   surface. Mona Lisa established that distinction earlier tonight when the same
+   family made a `.panel` comparison look like a missing radius step. So this
+   keeps the pack's SHAPE — small mono, a faint ground, a little padding — on
+   this app's own tokens. Porting the declaration verbatim would import the
+   design document's furniture into the product. */
+/* ⚠️ AND IT HAD TO BE `.panel p.shint`, WHICH I FOUND BY MEASURING AND WOULD
+   NOT HAVE FOUND BY READING. `.panel p` (0,1,1) sets font, colour, line-height
+   AND margin-bottom, and it BEATS a bare `.shint` (0,1,0) on every one of them.
+   A bare rule here contributes nothing inside a panel — the `.linkish` shape
+   again, one day later.
+   What hid it: in LIGHT, `--text-body` is 13px and `.8125rem` is 13px, and
+   `--label-2` and `--k-ink-2` are both #4a4f57. Identical numbers from two
+   different rules, so the computed style could not say which one won. In DARK
+   they diverge (rgba(255,255,255,.62) against #a9adb3), which is the third time
+   tonight that a defect was invisible in light and only the second instrument
+   could see it. The margin was the tell: 12px where the rule asked for 0. */
+.panel p.shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45;
+                 color: var(--k-ink-2); }
+.shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2); }
+code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
+         background: color-mix(in srgb, var(--k-ink) 7%, transparent); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
    and it is still right when the file was edited outside this app entirely. */
@@ -2407,15 +2457,54 @@ svg { display: block; }
     </div>
     <div class="fmsg" id="d-msg"></div>
   </div>
+  <!-- 🛑 THE ID IS `d-rename`, NOT `d-name`, AND THAT COST A REAL CATCH.
+       `d-name` was ALREADY TAKEN by the heading at the top of this page
+       (`<span class="dname" id="d-name">`). The first version of this field
+       reused it, and every symptom pointed the wrong way:
+       `getElementById('d-name')` returned the SPAN, so populating it set an
+       expando `.value` on a span, the browser check then read that expando
+       back and reported `nameValue: "angel"` — a confident pass measuring an
+       element that is not a control. The PUT would have sent `undefined` and
+       the server would have dropped it, and the untied-disable list would have
+       been disabling a heading. The tell was geometry: 59x16, which is text,
+       not a field. Never reuse an id; and when a check passes, confirm it
+       measured the element you meant.
+
+       ⚠️ RENAMING WAS UNREACHABLE UNTIL NOW, and the route was already there.
+       `PUT /api/agent/:name/profile` has accepted `displayName` since round 32,
+       written specifically so a Kosmos-created agent would stop having a
+       permanently unchangeable name — and no screen ever sent one. The comment
+       that removed the card's edit pencil said editing "lives on the detail
+       page (the pack's avedit/nameedit)"; the picture landed there and the role
+       landed there and the name never did, so the comment authorising the
+       removal is the comment that was wrong, in two places, since the rebuild.
+       Found by Mona Lisa.
+
+       ⚠️ NOT THE PACK'S MODAL, deliberately. The pack draws "Edit April" over
+       picture and name together. Josh's own rule from taking the pencils off
+       the project head applies here: renaming is rare, reading the name is
+       constant, so the rare thing goes behind a door and the constant thing
+       gets to be just words. The detail page already IS that door. -->
+  <div class="field" style="margin-top:18px;">
+    <label class="flabel" for="d-rename">Name</label>
+    <div class="fhint">What you call them here. It does not change where they live on this computer, or the name other agents use to reach them.</div>
+    <div class="frow">
+      <input type="text" id="d-rename" maxlength="80" placeholder="What you call them">
+    </div>
+  </div>
   <div class="field" style="margin-top:18px;">
     <label class="flabel" for="d-role">What they do</label>
     <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
     <div class="frow">
       <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
-      <button class="btn" id="d-save" type="button">Save</button>
     </div>
-    <div class="fmsg" id="d-role-msg"></div>
   </div>
+  <!-- ONE Save for the box, because it now writes two fields. A button sitting
+       inside the role row while also saving the name would misdescribe itself. -->
+  <div class="frow" style="margin-top:14px;">
+    <button class="btn" id="d-save" type="button">Save</button>
+  </div>
+  <div class="fmsg" id="d-role-msg"></div>
   </section>
   </div>
 
@@ -2720,17 +2809,23 @@ svg { display: block; }
 <section class="panel" id="panel-create" hidden>
   <button class="back" id="create-back">&#8592; All agents</button>
 
-  <div class="cstep" id="cstep-role">
+  <div id="cstep-role">
     <h2>What should this agent do?</h2>
 
     <!-- ⚠️ THREE CHOICES IN THE PACK, TWO SHIPPED HERE. The pack's rule
          (2026-08-15): a radio for the recommended role and a radio that
          opens the rest as a grouped menu -- twenty-six cards is a wall, and
          twenty-six options in a menu nobody opens is a wall with a lid on
-         it. The pack's third radio, "Describe it yourself", ships with the
-         details-step slice: it needs the Role label field from that screen
-         to be truthful, and a radio that creates agents labelled wrong is
-         worse than a radio that arrives one slice later.
+         it. ⚠️ THE THIRD RADIO HAS SHIPPED and this comment used to say it
+         had not. "Describe it yourself" is `#pick-own` thirty-one lines
+         below, revealed by `OWN_ROLE`, and engine/roles.js serves it as
+         `key: 'own'`. It was held back until the Role label field existed,
+         because a radio that creates agents labelled wrong is worse than a
+         radio that arrives one slice later; that condition was met and the
+         sentence was never updated. A second comment inside this same block
+         already said "three equivalent options", so the block carried the
+         correction AND the thing it corrected, and the stale half was the
+         one a reader meets first. Found by Mona Lisa.
          The rows are FILLED FROM /api/roles, never hardcoded: the copy a
          person reads while choosing has to be the copy the agent is created
          from (the rule the old flat list already followed). -->
@@ -2788,7 +2883,7 @@ svg { display: block; }
     </div>
   </div>
 
-  <div class="cstep" id="cstep-name" hidden>
+  <div id="cstep-name" hidden>
     <h2 id="create-meet">Set up your agent</h2>
     <p id="create-blurb"></p>
 
@@ -2912,12 +3007,22 @@ svg { display: block; }
        fields, and the pack puts a form on the paper ground", which was never
        true of this one. A justification that covered two of three was allowed
        to cover all three.
-       ⚠️ `cstep` is a dead marker: these three are addressed by ID
-       (`getElementById('cstep-' + s)`), and no rule or selector reads the class.
-       Left in place because the pack styles it and the build does not -- a
-       PORTING GAP wearing the appearance of dead code, and deleting it would
-       remove the hook the missing rule attaches to. -->
-  <div class="cstep dbox" id="cstep-made" hidden>
+       🛑 `cstep` IS GONE FROM THESE THREE, AND THE PACK'S `.cstep` MUST NEVER
+       BE PORTED HERE. This comment used to keep the class on the grounds that
+       "the pack styles it and the build does not -- a porting gap wearing the
+       appearance of dead code". That was wrong, and wrong in the direction that
+       invites the port. The pack DOES style `.cstep`, and it styles a different
+       object: a tab BUTTON inside `<div class="csteps cprev" role="tablist">`,
+       under the pack's own label "Preview only -- jump between the three
+       screens. Not part of the app." Seven rules, all for an inline-flex chip
+       with a 22px circle for its `<b>`.
+       So porting them would turn these three section CONTAINERS into chips.
+       There was no missing rule and the hook attached to nothing: the steps are
+       addressed by ID (`getElementById('cstep-' + s)`), and nothing reads the
+       class. Found by Mona Lisa; recorded in CURRENT-FREEZE against the class
+       rather than the file, because a warning that names a file protects that
+       file and not the defect. -->
+  <div class="dbox" id="cstep-made" hidden>
     <h2 id="made-head">Making it</h2>
     <!-- ⚠️ Every line here is either something the engine reported or something
          this page watched happen. Nothing is asserted on a timer. -->
@@ -3028,6 +3133,34 @@ svg { display: block; }
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
+
+      <!-- ⚠️ PROJECT DOCUMENTS IS NET NEW: the pack's project page has three
+           columns (members, conversation, tasks) and no documents section, so
+           there is nothing here to match. Josh asked for it in ink across four
+           messages on 2026-08-19: "a list of the files and if i click them they
+           open", covering "if i upload a document here, or you make a document
+           to share with me", catalogued, and explicitly NO add control in the
+           section itself because "they do that from the conversation dialogue
+           box".
+           Built in the pack's OWN idiom rather than an invented look — the same
+           `h3.dlab` heading and the same column this file already uses — so
+           Mona Lisa is blessing or replacing something that already sits in the
+           system rather than something I made up.
+           ⚠️ The list is the project's FOLDER, top level, newest first. That is
+           what exists today: agents write into the project folder, so their
+           documents are already here. Files from the conversation join it when
+           the attachment path lands, which is the same chunk that brings the
+           composer's `+`. -->
+      <div class="field" style="margin-top: var(--space-6)">
+        <h3 class="dlab">Project documents</h3>
+        <div id="pj-docs" class="pj-docs"></div>
+        <p class="fmsg" id="pj-docs-msg" aria-live="polite"></p>
+        <!-- ⚠️ "Show them all in Finder", NOT "see all files". Josh asked for a
+             view-all that opens a SCREEN listing everything. That screen is a
+             later slice; this control does something real and says exactly what
+             it does instead of wearing the label of the thing not built yet. -->
+        <button class="linkish" id="pj-docs-all" type="button" hidden>Show them all in Finder</button>
+      </div>
     </aside>
 
     <section class="pjcol pjmid">
@@ -3059,9 +3192,32 @@ svg { display: block; }
            The `@` half of the hint IS true today and ships now. -->
       <div class="composer">
         <div class="composerbox">
+          <!-- ⚠️ THE PLACEHOLDER NAMES THE OUTCOME, THE HINT NAMES THE
+               MECHANISM, AND THE ARIA-LABEL IS NOT THE PLACEHOLDER. Shipping
+               only the true half of the pack's hint left "@name to address
+               someone" stated TWICE, in the placeholder and the hint — and the
+               pack had already ruled that parenthetical out of the box for the
+               reason its own comment gives: "Both times I wrote copy describing
+               the MECHANISM to a person who only needs the OUTCOME." So the
+               mechanism is stated once, in the position the pack ruled for it.
+               The aria-label deliberately does NOT follow: a screen-reader user
+               hearing "Write to the project" has none of the context a sighted
+               reader gets from the members column beside it, so it keeps the
+               plain outcome. Found by Mona Lisa. -->
           <textarea class="cinput" id="pj-post" rows="1" maxlength="2000"
-                    placeholder="Post to everyone on this project (@name to address someone)"
+                    placeholder="Write to the project&hellip;"
                     aria-label="Post to everyone on this project"></textarea>
+          <!-- ⚠️ QUIET, NOT GOLD, AND THAT IS A RULING RATHER THAN AN
+               ARTEFACT. The pack has `btn-gold cpost`; this build has no
+               `.btn-gold` at all, and its gold primary is `.btn.uprime`, worn
+               by #uc-go, #nt-go and #role-next. Every one of those ADVANCES a
+               flow. A project room is a place you live in rather than move
+               through, and its Post is an ambient, repeated action — making a
+               permanently-on-screen control gold spends the signal that
+               currently means "this is the step that moves you on", everywhere
+               it is used. Raised as a question by Mona Lisa, who named this
+               counter-argument herself; ruled here and recorded in the pack
+               against `btn-gold` so the two files stop disagreeing. -->
           <button class="btn cpost" id="pj-post-go" type="button">Post</button>
         </div>
         <p class="composerhint"><b>@</b> an agent to ask them directly.</p>
@@ -4575,7 +4731,7 @@ async function tick() {
      * The honest thing to say here is smaller: this agent is not on the board
      * any more, so nothing on this screen should offer to change it.
      */
-    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-rename', 'd-instr', 'd-instr-save']) {
       const el = document.getElementById(id);
       if (el) el.disabled = true;
     }
@@ -5748,6 +5904,10 @@ function openDetail(sessionName) {
     document.getElementById('d-window-box').hidden = true;
   }
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
+  /* `a.name` is the DISPLAY name readIdentity already resolved (record wins
+     over the instruction file); `a.sessionName` is where it lives, and is not
+     what this field edits. */
+  document.getElementById('d-rename').value = a.name || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
   renderAvatar(a);
@@ -5874,7 +6034,7 @@ function setWritesOffered(a, tied) {
   //
   // Skipping the LOAD was never enough: nothing clears what the previous card
   // left behind.
-  const controls = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save'];
+  const controls = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-rename', 'd-instr', 'd-instr-save'];
   for (const id of controls) {
     const el = document.getElementById(id);
     if (el) el.disabled = !tied;
@@ -7104,12 +7264,29 @@ document.getElementById('d-save').addEventListener('click', async () => {
   const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
+    const renameTo = document.getElementById('d-rename').value.trim().slice(0, 80);
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/profile',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: document.getElementById('d-role').value.trim() }) });
+        body: JSON.stringify({ role: document.getElementById('d-role').value.trim(),
+                               displayName: renameTo }) });
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     if (!res.ok) throw new Error('that did not save');
     msg.textContent = 'Saved.';
+    /* ⚠️ THE HEADING IS UPDATED HERE RATHER THAN LEFT TO THE POLL. Measured:
+       after a successful save the heading still read the OLD name ~1.8s later,
+       and only came right on the next full paint. The whole reason this field
+       exists is that renaming used to "silently do nothing with no sentence
+       saying why"; a rename that visibly does nothing for a poll cycle is a
+       quieter version of the same complaint.
+       It writes the TRIMMED value actually sent, not the raw field, because the
+       route trims and caps at 80 — showing the untrimmed text would claim a
+       name the record does not hold. An empty-after-trim name is dropped by the
+       route (deliberately, so nobody blanks an agent into anonymity), so the
+       heading is left alone in that case rather than being emptied. */
+    if (renameTo) {
+      const h = document.getElementById('d-name');
+      if (h) h.textContent = renameTo;
+    }
     await tick();
   } catch (err) {
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
@@ -9197,6 +9374,121 @@ function paintOneProject() {
   document.getElementById('pj-one-add-go').disabled = !free.length;
 }
 
+/* ---- a project's documents ------------------------------------------------
+ *
+ * ⚠️ WHAT THIS SCREEN MAY CLAIM, the same discipline chat.js carries about a
+ * keystroke. "These are the files in this project's folder, a moment ago" is
+ * ours to say. "This is everything for this project" is NOT, and the list does
+ * not say it: the folder is the top level only, and files that arrive through
+ * the conversation are not there until the attachment path lands.
+ *
+ * A folder we cannot read produces a SENTENCE rather than an empty list,
+ * because "no documents yet" and "we could not look" are different facts and
+ * only one of them is about the project. The route answers 200 with a reason
+ * for exactly this reason.
+ */
+async function pjLoadDocs(id) {
+  const box = document.getElementById('pj-docs');
+  const msg = document.getElementById('pj-docs-msg');
+  const all = document.getElementById('pj-docs-all');
+  let body;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(id) + '/documents');
+    body = await res.json();
+  } catch {
+    /* ⚠️ Only if this project is still the open one. Same capture-and-recheck
+       every other async painter here carries: an answer that arrives after a
+       switch would paint one project's failure under another's name. */
+    if (PJ_CURRENT === id) msg.textContent = 'We could not read this project\u2019s folder just now.';
+    return;
+  }
+  if (PJ_CURRENT !== id) return;
+  box.textContent = '';
+  if (!body || body.ok !== true) {
+    msg.textContent = (body && body.because) || 'We could not read this project\u2019s folder just now.';
+    all.hidden = true;
+    return;
+  }
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (!files.length) {
+    msg.textContent = 'Nothing here yet. Files you or your agents put in this project\u2019s folder show up here.';
+    all.hidden = true;
+    return;
+  }
+  msg.textContent = '';
+  for (const f of files) {
+    /* A BUTTON, not a div with a handler: this opens a file, and an action
+       that cannot be reached from the keyboard is not an action for everyone. */
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pj-doc';
+    b.dataset.doc = f.name;
+    const n = document.createElement('span');
+    n.className = 'pj-doc-n';
+    n.textContent = f.name;
+    const w = document.createElement('span');
+    w.className = 'pj-doc-w';
+    w.textContent = pjSize(f.size);
+    b.append(n, w);
+    box.append(b);
+  }
+  /* ⚠️ The COUNT comes from the route's own total, never from files.length:
+     the list is capped at ten, so deriving "and N more" from what was returned
+     would report ten every time a project had more than ten. */
+  const more = Number(body.total || 0) - files.length;
+  all.hidden = false;
+  all.textContent = more > 0
+    ? 'Show all ' + body.total + ' in Finder'
+    : 'Show them all in Finder';
+}
+
+function pjSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+document.getElementById('pj-docs').addEventListener('click', async (e) => {
+  const row = e.target && e.target.closest ? e.target.closest('.pj-doc') : null;
+  if (!row || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-docs-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/open-file',
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: row.dataset.doc }) });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
+    /* The refusal is the ENGINE's sentence, shown verbatim. It already says
+       what happened in words a person can act on ("that file lives outside
+       this project"), and rewriting it here would be a second, weaker copy. */
+    let because = 'That file did not open.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'That file did not open.';
+  }
+});
+
+document.getElementById('pj-docs-all').addEventListener('click', async () => {
+  if (!PJ_CURRENT) return;
+  const msg = document.getElementById('pj-docs-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/reveal-folder',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
+    let because = 'We could not show that folder.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'We could not show that folder.';
+  }
+});
+
 function openProject(id) {
   // ⚠️ Only opens a project we actually HAVE. `paintOneProject` bails back to
   // the list when the id is not in `PROJECTS`, and showing the panel
@@ -9258,6 +9550,14 @@ function openProject(id) {
        runs on `input`, and setting `.value` in code fires no such event. */
     pjGrowComposer(document.getElementById('pj-post'));
     document.getElementById('pj-room-msg').textContent = '';
+    /* The documents list belongs to the project, so it is cleared and re-asked
+       on every switch. Left standing it would show the PREVIOUS project's files
+       under the new name for as long as the fetch takes, which is the same
+       misattribution the room's own reset above exists to prevent. */
+    document.getElementById('pj-docs').textContent = '';
+    document.getElementById('pj-docs-msg').textContent = '';
+    document.getElementById('pj-docs-all').hidden = true;
+    pjLoadDocs(id);
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
     roomBox.__lastBody = undefined;

@@ -1808,3 +1808,138 @@ test('an ambiguous colleagues pair declines the heal rather than guessing', () =
   assert.ok(!text.includes(' msg <their-name>'),
     'CONTROL inverse: the heal ran despite ambiguity');
 });
+
+/* ===========================================================================
+   THE OPEN-A-LOCAL-FILE ROUTE (engine half)
+   ---------------------------------------------------------------------------
+   Josh, 2026-08-19: a project's documents are "a list of the files and if I
+   click them they open". Mona Lisa's sequencing point: the same route serves
+   the pack's `.ref/.refgo` path citations, which are dead text in every message
+   today, so it is priced once rather than twice.
+
+   🛑 `open` LAUNCHES THINGS. These tests exist because this is the most
+   dangerous primitive in the module, and because the gate that matters is NOT
+   the one that is easy to test.
+   =========================================================================== */
+
+test('listFiles: newest first, and a folder is not a document', () => {
+  reset();
+  const dir = folder('docs-list');
+  fs.writeFileSync(path.join(dir, 'old.txt'), 'a');
+  fs.writeFileSync(path.join(dir, 'new.txt'), 'b');
+  fs.utimesSync(path.join(dir, 'old.txt'), new Date(1), new Date(1));
+  fs.mkdirSync(path.join(dir, 'a-subfolder'));
+  fs.writeFileSync(path.join(dir, '.hidden'), 'c');
+  const out = projects.listFiles(dir);
+  assert.equal(out.ok, true);
+  const names = out.files.map((f) => f.name);
+  // CONTROL: prove the list is non-empty before asserting what is absent, or
+  // "the subfolder is not here" passes on an empty array.
+  assert.ok(names.includes('new.txt') && names.includes('old.txt'), 'the real files were not listed');
+  assert.deepEqual(names, ['new.txt', 'old.txt'], 'newest first');
+  assert.ok(!names.includes('a-subfolder'), 'a folder was listed as a document');
+  assert.ok(!names.includes('.hidden'), 'a dotfile was listed as a document');
+});
+
+test('listFiles: a folder it cannot read gives a REASON, not an empty list', () => {
+  reset();
+  const out = projects.listFiles(path.join(WORK, 'never-made'));
+  assert.equal(out.ok, false);
+  assert.ok(out.because && out.because.length > 0, 'no sentence explained the empty list');
+  // "this project has no documents" and "we could not look" are different
+  // sentences and only one of them is about the project.
+  assert.deepEqual(out.files, []);
+});
+
+test('listFiles: the cap is a cap, and the true total still comes back', () => {
+  reset();
+  const dir = folder('docs-cap');
+  for (let i = 0; i < 15; i += 1) fs.writeFileSync(path.join(dir, `f${i}.txt`), 'x');
+  const out = projects.listFiles(dir, 10);
+  assert.equal(out.files.length, 10);
+  assert.equal(out.total, 15, 'the view-all count cannot be derived from a capped list');
+});
+
+test('openFile: a bare filename in the folder opens', () => {
+  reset();
+  const dir = folder('open-ok');
+  fs.writeFileSync(path.join(dir, 'brief.md'), 'x');
+  let ran = null;
+  projects.setRevealRunner((bin, args) => { ran = { bin, args }; return { ok: true }; });
+  const out = projects.openFile(dir, 'brief.md');
+  assert.equal(out.ok, true);
+  assert.equal(ran.bin, '/usr/bin/open');
+  assert.equal(ran.args.length, 1, 'reveal-style -R leaked into the open path');
+  assert.equal(ran.args[0], fs.realpathSync(path.join(dir, 'brief.md')));
+  projects.setRevealRunner(null);
+});
+
+test('openFile: every name that is not a bare filename is refused', () => {
+  reset();
+  const dir = folder('open-names');
+  fs.writeFileSync(path.join(dir, 'ok.txt'), 'x');
+  let ran = false;
+  projects.setRevealRunner(() => { ran = true; return { ok: true }; });
+  for (const bad of ['../ok.txt', 'sub/ok.txt', '/etc/hosts', '..', '.', '']) {
+    const out = projects.openFile(dir, bad);
+    assert.equal(out.ok, false, `${JSON.stringify(bad)} was accepted`);
+  }
+  assert.equal(ran, false, 'a refused name still reached the opener');
+  // CONTROL: the same runner opens a legitimate name, so the assertion above
+  // is not passing because the runner was never wired.
+  assert.equal(projects.openFile(dir, 'ok.txt').ok, true);
+  assert.equal(ran, true);
+  projects.setRevealRunner(null);
+});
+
+test('openFile: a SYMLINK inside the folder pointing out of it is refused', () => {
+  reset();
+  const dir = folder('open-link');
+  const outside = folder('open-link-elsewhere');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'x');
+  // ⚠️ THIS IS THE GATE A NAME CHECK CANNOT DO. "escape.txt" is a bare
+  // filename: no separator, no `..`, nothing to strip. It passes every
+  // string test untouched and resolves outside the project.
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'escape.txt'));
+  let ran = false;
+  projects.setRevealRunner(() => { ran = true; return { ok: true }; });
+  const out = projects.openFile(dir, 'escape.txt');
+  assert.equal(out.ok, false, 'a symlink out of the project was opened');
+  assert.match(out.because, /outside this project/);
+  assert.equal(ran, false);
+  projects.setRevealRunner(null);
+});
+
+test('openFile: a symlink is not listed either, so the list cannot offer the escape', () => {
+  reset();
+  const dir = folder('list-link');
+  const outside = folder('list-link-elsewhere');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'x');
+  fs.writeFileSync(path.join(dir, 'real.txt'), 'x');
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'escape.txt'));
+  const names = projects.listFiles(dir).files.map((f) => f.name);
+  assert.ok(names.includes('real.txt'), 'CONTROL: the ordinary file was not listed');
+  assert.ok(!names.includes('escape.txt'), 'the list offered a link out of the project');
+});
+
+test('openFile: a directory and a missing file are both refused', () => {
+  reset();
+  const dir = folder('open-kind');
+  fs.mkdirSync(path.join(dir, 'notes'));
+  let ran = false;
+  projects.setRevealRunner(() => { ran = true; return { ok: true }; });
+  assert.equal(projects.openFile(dir, 'notes').ok, false, 'a directory was opened');
+  assert.equal(projects.openFile(dir, 'gone.txt').ok, false, 'a missing file was opened');
+  assert.equal(ran, false);
+  projects.setRevealRunner(null);
+});
+
+test('openFile: an unreadable project folder refuses before it names a file', () => {
+  reset();
+  let ran = false;
+  projects.setRevealRunner(() => { ran = true; return { ok: true }; });
+  const out = projects.openFile(path.join(WORK, 'never-made'), 'anything.txt');
+  assert.equal(out.ok, false);
+  assert.equal(ran, false);
+  projects.setRevealRunner(null);
+});

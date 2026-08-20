@@ -2296,6 +2296,80 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* --- a project's documents ----------------------------------------------
+   *
+   * Josh, 2026-08-19: "i only want a list of the files and if i click them they
+   * open", covering both what he drops in and what an agent writes to share.
+   *
+   * ⚠️ THE LIST IS A GET AND THE OPEN IS A POST, and that split is the guard
+   * rather than a REST habit. Reading a folder's names is a read. `open` LAUNCHES
+   * things, so it inherits the cross-site guard every other POST here has, and a
+   * page on another site cannot make this machine open a file by embedding a
+   * form. Same reasoning as reveal-folder below it.
+   */
+  const docs = pathname.match(/^\/api\/project\/([^/]+)\/documents$/);
+  if (docs && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(docs[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let record;
+    try {
+      record = projects.readAll().find((x) => x.id === id) || null;
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we cannot read your projects right now') });
+      return;
+    }
+    if (!record) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    // ⚠️ 200 WITH A REASON, not an error status: a project whose folder has
+    // gone is a state this screen must DRAW, and a 4xx would make the list
+    // render as a failed request rather than as "we could not look".
+    sendJson(res, 200, projects.listFiles(record.folder, 10));
+    return;
+  }
+
+  if (docs && req.method === 'POST') {
+    sendJson(res, 405, { error: 'the documents list is read-only; use open-file to open one' });
+    return;
+  }
+
+  const openOne = pathname.match(/^\/api\/project\/([^/]+)\/open-file$/);
+  if (openOne && req.method === 'POST') {
+    const id = decodeSegment(openOne[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        /* ⚠️ `readBody` RESOLVES A BUFFER, not parsed JSON. The first version of
+         * this route named the parameter `body` and read `body.name` off it,
+         * which is always undefined — so every open refused with "no file was
+         * named" and the route never saw a filename at all.
+         * The route test caught it, and only because it asserted the SENTENCE
+         * rather than the status: the escape case still returned 409, so a test
+         * checking the code alone would have gone green on a route that could
+         * not open anything and could not refuse anything for the right reason. */
+        let named;
+        try { named = JSON.parse(buf.toString('utf8') || '{}').name; }
+        catch { sendJson(res, 400, { error: 'we could not read that' }); return; }
+        let record;
+        try {
+          record = projects.readAll().find((x) => x.id === id) || null;
+        } catch (err) {
+          sendJson(res, 500, { error: String((err && err.message) || 'we cannot read your projects right now') });
+          return;
+        }
+        if (!record) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+        /* ⚠️ THE NAME IS NOT VALIDATED HERE, deliberately. Every gate lives in
+         * `projects.openFile`, including the one a name check cannot do
+         * (resolve both sides and compare, which is what catches a symlink
+         * planted inside the folder). A second, weaker copy of the rules at
+         * this layer is how two validators drift and the looser one wins. */
+        const opened = projects.openFile(record.folder, named);
+        if (opened.ok) { sendJson(res, 200, { ok: true }); return; }
+        sendJson(res, 409, { error: opened.because });
+      })
+      .catch((err) => sendJson(res, 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
   const reveal = pathname.match(/^\/api\/project\/([^/]+)\/reveal-folder$/);
   if (reveal && req.method === 'POST') {
     const id = decodeSegment(reveal[1]);
