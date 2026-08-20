@@ -963,10 +963,17 @@ function questionAbove(questionText) {
   const lines = String(questionText == null ? '' : questionText).split('\n');
   const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
     l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
-  /* The whole slice when the run starts at the top, for the reason `talkKey`
-     records: nothing above is not the same as no identity, and an empty string
-     would make every same-labelled menu one question. */
-  return (first > 0 ? lines.slice(0, first).join('\n') : lines.join('\n')).trim();
+  /* ⚠️ THE RESULT, NOT THE INDEX. `first > 0` says there are lines above the
+     run; it does not say they contain anything. A capture whose run-up window
+     is all blank -- an ordinary pane right after `/clear`, where tmux pads and
+     `viewport` trims only the trailing end -- takes the `first > 0` branch and
+     returns ''. That is precisely the empty string the paragraph above says
+     must never be returned, produced by the guard written to prevent it.
+     Measured: a "Welcome back." nine lines above a Yes/No menu slices to six
+     blank lines and an empty above, and an empty above is FALSY, so the
+     server's screen-check skips itself with no error and no log. */
+  const above = (first > 0 ? lines.slice(0, first).join('\n') : '').trim();
+  return above || lines.join('\n').trim();
 }
 
 function optionsIn(questionText) {

@@ -956,6 +956,26 @@ function unreachableStates() {
       if (sent.text !== '1' || sent.chose !== '14 days') {
         problems.push(`[${theme}] press: the option sent ${JSON.stringify(sent)}, not the digit plus the words`);
       }
+      /* ⚠️ AND WHICH QUESTION IT ANSWERS, which nothing asserted at all. The
+         server's screen-check skips itself SILENTLY on a missing or empty
+         `asked` -- by design, so an older client is no worse off than before --
+         so deleting the field from `sendTalk` left every test green and the
+         guard dead. The route half was pinned and the agreement half was
+         pinned; the wire between them, the only new thing on it, had no
+         control. Compared against what `talkKey` computes for this very
+         fixture rather than a literal, so a change to the key moves both. */
+      const wantAsked = await page.evaluate((f) => {
+        const key = talkKey({ asking: true, options: f.options, question: f.question });
+        return key ? key.split('\u0000').slice(1).join('\u0000') : null;
+      }, menu);
+      if (!wantAsked) {
+        problems.push(`[${theme}] press: talkKey produced no identity for the menu fixture, so the `
+          + 'wire check below is UNCHECKED');
+      } else if (sent.asked !== wantAsked) {
+        problems.push(`[${theme}] press: the button send carried asked=${JSON.stringify(sent.asked)}, `
+          + `not the question it was answering (${JSON.stringify(wantAsked)}) -- the server's `
+          + 'screen-check skips silently without it');
+      }
       const landed = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
       if (landed === 'BODY') {
         problems.push(`[${theme}] press: focus was stranded on the document after answering`);

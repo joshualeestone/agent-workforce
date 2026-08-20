@@ -2036,9 +2036,42 @@ const server = http.createServer((req, res) => {
            * Optional on the wire: a client that does not send it is no worse
            * off than before, and a button send from this page always does.
            */
-          const askedAbove = typeof body.asked === 'string' ? chat.cleanMessage(body.asked) : null;
+          /* ⚠️ SAME GATE AS EVERY OTHER FIELD OFF THE WIRE. `chose` carries a
+             docblock arguing that a wire field goes through `messageProblem`
+             rather than a hand-rolled condition, and this one was taking only
+             `cleanMessage`. It is compare-only and never stored, so the
+             exposure was bounded -- and "bounded" is what the rule exists to
+             stop being the reason. */
+          const askedAbove = (typeof body.asked === 'string' && !chat.messageProblem(body.asked))
+            ? chat.cleanMessage(body.asked) : null;
           const nowAbove = asked ? chat.questionAbove(asked.text) : null;
-          if (askedAbove && nowAbove && chat.cleanMessage(nowAbove) !== askedAbove) {
+          const nowClean = nowAbove ? chat.cleanMessage(nowAbove) : null;
+          /**
+           * ⚠️ CONTAINMENT, NOT EQUALITY, and equality refused correct sends.
+           *
+           * `questionIn` anchors on the LAST needs-you marker, and `❯ 1. Yes`
+           * is itself one -- so on a Yes-first menu the anchor is the option
+           * line while the cursor sits on 1, and the prose marker above it the
+           * moment the person arrows to 2. The six-line run-up window shifts
+           * with the anchor, so `above` changes while the question, the options
+           * and the labels are all identical. MEASURED: the same "Do you want
+           * to proceed?" prompt gives "Do you want to proceed?" with the cursor
+           * on 1 and "I will run the test suite now.\nDo you want to proceed?"
+           * with it on 2. Equality 409s that, and the sentence it shows -- "its
+           * screen is asking something else now" -- is false. The trigger is a
+           * person arrowing in their own pane, which nothing here can prevent.
+           *
+           * One window is always a prefix of the other when only the anchor
+           * moved, so containment accepts exactly that case and still refuses
+           * the one this guard is for: "Edit file src/a.js?" and "Edit file
+           * src/b.js?" contain neither.
+           *
+           * ⚠️ A guard that refuses correct sends is worse than the hole it
+           * closes, because the hole is rare and the refusal is not.
+           */
+          const sameQuestion = !!askedAbove && !!nowClean
+            && (nowClean.includes(askedAbove) || askedAbove.includes(nowClean));
+          if (askedAbove && nowClean && !sameQuestion) {
             const moved = new Error('its screen is asking something else now, so we did not send that '
               + 'answer. The question on this page is the current one.');
             moved.status = 409;

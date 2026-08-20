@@ -6247,9 +6247,12 @@ function talkKey(body) {
      live question leaves the person unable to answer at all, while a second
      press requires them to press again over a question they can see they have
      answered -- but it is a choice between two harms and not a free one. */
-  const above = first > 0
-    ? lines.slice(0, first).join('\n').trim()
-    : lines.join('\n').trim();
+  /* ⚠️ THE RESULT, NOT THE INDEX, and `chat.questionAbove` carries the same
+     correction. `first > 0` says there are lines above the run; it does not say
+     they contain anything, and a run-up window of blank lines (an ordinary pane
+     after `/clear`) returned '' from the branch written to avoid ''. */
+  const trimmedAbove = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
+  const above = trimmedAbove || lines.join('\n').trim();
   return JSON.stringify(body.options) + '\u0000' + above;
 }
 
@@ -7006,8 +7009,15 @@ async function sendTalk(text, chose) {
          edit-permission prompt has for every file. Holding it and not sending
          it left the server's own screen-check unable to make the distinction
          its comment claims. */
+      /* ⚠️ `slice(1).join`, not `[1]`, and no `|| ''`. The key is
+         options + NUL + above, and an above that itself contains a NUL would be
+         truncated by `[1]` -- the page would then send a prefix, the server
+         would compute the whole string, and a legitimate send would be refused.
+         `|| ''` had its own version of the same: an above of exactly "0" is
+         falsy, and the server skips its check on a falsy value, so one
+         particular screen turned the guard off. */
       body: JSON.stringify(chose
-        ? { text, chose, asked: (askedAbout || '').split('\u0000')[1] || '' }
+        ? { text, chose, asked: askedAbout == null ? '' : askedAbout.split('\u0000').slice(1).join('\u0000') }
         : { text }),
     });
     const body = await res.json();

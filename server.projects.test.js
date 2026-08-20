@@ -2193,6 +2193,30 @@ test('the same question still on screen is sent, so the check above is not refus
     });
 });
 
+test('the cursor moving inside the SAME question is not "asking something else"', async () => {
+  reset();
+  /**
+   * ⚠️ THE FALSE REFUSAL THE FIRST VERSION OF THIS GUARD SHIPPED WITH, and a
+   * guard that refuses correct sends is worse than the hole it closes.
+   *
+   * `questionIn` anchors on the LAST needs-you marker and `❯ 1. Yes` is itself
+   * one, so the anchor is the option line while the cursor sits on 1 and the
+   * prose line above it once the person arrows to 2. The run-up window shifts
+   * with the anchor, so `above` changes while the question, the options and
+   * the labels do not. Equality refused that send and told the person their
+   * screen was asking something else. Containment accepts it, because one
+   * window is a prefix of the other whenever only the anchor moved.
+   */
+  const moved = 'I will run the test suite now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(moved), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread',
+        { text: '1', chose: 'Yes', asked: 'Do you want to proceed?' });
+      assert.equal(res.status, 200, 'the same question with the cursor moved is not a different question');
+      assert.equal(calls.sends().length > 0, true, 'and the answer reached the pane');
+    });
+});
+
 test('words on a button are not kept when nothing is being asked', async () => {
   reset();
   // ⚠️ `chose` is a claim that these words were on a button. If the board does

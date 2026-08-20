@@ -1931,6 +1931,41 @@ test('a direct thread carries a time on every message and no project stamp', () 
   assert.match(got.messages[0].at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
+test('questionAbove is the identity of a question, and never an empty one', () => {
+  /**
+   * ⚠️ THE ENGINE'S OWN SUITE HAD NONE OF THESE. `questionAbove` shipped with
+   * its only coverage in `server.test.js` (agreement with the page's copy) and
+   * two route tests, while `optionsIn` -- the function it wraps -- carries a
+   * large refusal suite in this file. A new export with no tests beside its
+   * sibling is the gap this closes.
+   */
+  assert.equal(chat.questionAbove('Would you like to say more?'), null,
+    'no confident run means there is nothing to be the identity of');
+  assert.equal(chat.questionAbove('Edit file src/a.js?\n❯ 1. Yes\n  2. No'), 'Edit file src/a.js?');
+  assert.equal(chat.questionAbove('│ boxed?\n│ ❯ 1. Yes\n│   2. No'), '│ boxed?',
+    'the frame is what the pane drew, and stripping it here would disagree with the page');
+  assert.notEqual(chat.questionAbove('Edit file src/a.js?\n❯ 1. Yes\n  2. No'),
+    chat.questionAbove('Edit file src/b.js?\n❯ 1. Yes\n  2. No'),
+    'two files with identical labels must not share an identity');
+
+  /* ⚠️ NEVER EMPTY, which is the whole point and was the defect. A run-up
+     window of blank lines -- an ordinary pane after `/clear`, where tmux pads
+     and only the trailing end is trimmed -- returned '' from the branch
+     written to avoid ''. Empty is FALSY, and the route skips its check on a
+     falsy value, so the guard turned itself off on exactly the screens
+     carrying the least identifying text. */
+  const padded = chat.questionIn('Welcome back.' + '\n'.repeat(9) + '❯ 1. Yes\n  2. No\n\n> ');
+  assert.ok(padded, 'CONTROL: the padded capture is still a question');
+  assert.deepEqual(chat.optionsIn(padded.text), [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+    'CONTROL: and still a confident menu, so an identity is required for it');
+  assert.ok(chat.questionAbove(padded.text),
+    'a run-up window of blank lines produced an empty identity, which disables the check that reads it');
+
+  /* And the run at the very top, the case the fallback was written for. */
+  assert.ok(chat.questionAbove('❯ 1. Yes\n  2. No'),
+    'nothing above the run is not the same as no identity');
+});
+
 test('optionsIn reads a real menu, both the two-option prompt and a long one', () => {
   // The shapes are the captures this repo already holds: engine/chat.test.js's
   // own permission prompt above, and connect.test.js's theme screen, taken

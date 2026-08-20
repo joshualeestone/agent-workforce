@@ -60,7 +60,8 @@ thread, and the answer panel; only then can the room box die.
   `options` = asking && question ? chat.optionsIn(question.text) : null.
   Engineering-mode gates the served viewport only. presence for the composer:
   'on' (card tied), 'off' (no session by that name), 'unsure' (roster null).
-- **POST**: messageProblem gate first; body {text, chose?}. `chose` (option
+- **POST**: messageProblem gate first; body {text, chose?, asked?} (the third
+  field arrived two weeks after this line was written; see the drift list). `chose` (option
   label, <= MAX_TEXT) rides only on button sends. Deliver first
   (chat.deliver(name, text, roster)), then record even a failure:
   appendMessage(DIRECT, name, {text: chose || text, wire: chose ? text : null,
@@ -199,6 +200,17 @@ request, and the suite reads text.
   and, until now, nowhere else.
 - **The route tests live in `server.projects.test.js`, not `server.test.js`**
   as the plan says, next to the project-thread suite whose shape they mirror.
+- **The POST carries a THIRD field, `asked`, which the shape above does not
+  list**, and a second 409 beside the first. The page sends the identity of the
+  question it was answering (`talkKey`'s `above` half); the route compares it
+  against `chat.questionAbove` of a fresh capture and refuses when the screen
+  has moved on. The first 409 checks WHICH WORDS; this one checks WHICH
+  QUESTION, and without it the same labels on a different file passed
+  verification -- which is the shape Claude's edit-permission prompt has for
+  every file.
+- **`engine/chat.js` exports `questionAbove`**, which the Engine section above
+  does not mention. It is the engine twin of the page's identity rule, so both
+  sides of that comparison read the same fact rather than two spellings of it.
 - **`optionsIn` is materially stricter than the "iff" written above**, and this
   is the largest drift on the branch rather than the smallest. The spec says
   confident iff the numbers are contiguous ascending from 1, the count is in
@@ -267,7 +279,7 @@ same thing only when the container holds nothing else.
 **The visible edge SHIPPED HERE, and it is not the fade it started as.** I told
 her the fade needed logic -- an edge always drawn lies in the two states where
 nothing is cut, and lies again once the box is scrolled to its end -- and she
-came back with something that needs none: style the scrollbar. Four rules on
+came back with something that needs none: style the scrollbar. Three rules on
 `#d-qask-text` opt this one box out of macOS overlay behaviour and back to a
 persistent bar. The BROWSER owns the condition, so neither lie is reachable, no
 per-paint measurement exists to test, and the thumb's length says how much more
@@ -336,9 +348,22 @@ ever, which is the same failure this file opens with.
       | grep -E '^[+-][^+-]' | grep -c 'pj-question\|pj-thread'
     0
 
-**Zero.** Not one line this branch adds or removes anywhere in the page so much
-as mentions `#pj-thread` or `pj-question`. That does not decay: re-run it on
-any later state of the branch and it is still the whole answer.
+**Zero, and zero is the PASS here** -- stated because a number has no direction,
+and a command lifted onto a board that reads zero as work-not-done would invert
+this silently.
+
+⚠️ **It is a BRANCH-lifetime guard, not a durable one**, which is the second
+thing a bare command does not say. `origin/main...HEAD` goes empty the moment
+this branch merges, `grep -c` then prints `0` for the wrong reason, and the
+guard passes because there is nothing left to check. The durable twin, which
+holds whatever has merged, is on kosmos#111:
+
+    grep -c 'pj-question\|pj-thread' web/index.html      # guard, pass != 0
+
+Today it is 36 on both `main` and this branch. Zero there means the room's
+question box is gone from the page: either PR two landed with its prerequisites
+met, or the delete happened without them, and the second is what the gate
+exists to prevent.
 
 The product lines this branch does delete are all refactor: a `pjMsg` signature
 split in two so the room's row and the agent page's bubble share ONE verdict
