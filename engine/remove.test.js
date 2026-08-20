@@ -1441,8 +1441,8 @@ test('a partial for an agent with no startup job does not name a job that is not
   /**
    * ⚠️ `recoveryRoute`'s no-job branch was unheld. Replacing the whole function
    * with the unconditional job sentence left the suite at 346 green -- so the
-   * suite could not see the product telling somebody *"Its startup job is null,
-   * and re-enabling that is what undoes this."*
+   * suite could not see the product telling somebody *"It was set to start on
+   * its own as null, and turning that back on is what undoes this."*
    *
    * Its three named siblings (`hint`, `didToJob`, restore's endings) are all
    * held. This one is the same family and was not on the plan's list of
@@ -1470,7 +1470,13 @@ test('a partial for an agent with no startup job does not name a job that is not
     // ⚠️ CONTROL: it really is the recovery sentence being rendered.
     assert.match(r.because, /will not appear there/, 'the record succeeded, so no recovery route is offered');
 
-    assert.doesNotMatch(r.because, /Its startup job is/,
+    // ⚠️ RE-AIMED. This read /Its startup job is/ after the copy sweep
+    // renamed that sentence, so it was matching a string that exists
+    // nowhere in the source -- a guard that cannot fail. The mutation its
+    // docblock describes now prints "It was set to start on its own as
+    // null". The presence half is pinned at the job-carrying partial above,
+    // which asserts this same phrase DOES appear when there is a job.
+    assert.doesNotMatch(r.because, /set to start on its own as/,
       'it named a startup job for an agent that has none');
     assert.doesNotMatch(r.because, /null|undefined/,
       'it printed a missing value straight onto the screen');

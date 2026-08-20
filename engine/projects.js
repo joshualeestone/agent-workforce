@@ -527,7 +527,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we could not check which agents are running, so we will not speak for what this name is holding',
+          because: 'we could not check which agents are running, so we will not say what it is doing',
         },
       };
     }

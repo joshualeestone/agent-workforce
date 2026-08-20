@@ -125,7 +125,7 @@ function paneSession(paneId) {
         { encoding: 'utf8', timeout: 5000 }).trim(),
     };
   } catch (e) {
-    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'we could not work out which agent you are') };
+    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'nothing came back to explain why') };
   }
 }
 
@@ -138,7 +138,7 @@ function paneSession(paneId) {
 function resolveSender(fromPane, roster) {
   const pane = String(fromPane == null ? '' : fromPane).trim();
   if (!pane) {
-    return { ok: false, because: 'we cannot tell which agent is sending this (run it inside the session that agent runs in)' };
+    return { ok: false, because: 'we cannot tell which agent is sending this: `kosmos msg` takes the sender from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
   }
   // A pane id is %N; a session:w.p target is also accepted, and a bare
   // session name prefix-matches in tmux (aim leo, hit leo-discord) --
@@ -316,7 +316,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
      name breaks the envelope must be refused, not smuggled -- the born
      block teaches recipients to trust this marker. */
   if (!/^[A-Za-z0-9._ -]+$/.test(from) || from.includes(']')) {
-    return refuse(String(to == null ? '' : to).trim() || '(nobody named)', 'this agent\u2019s own session name contains characters that would break the message envelope, so we will not send under it');
+    return refuse(String(to == null ? '' : to).trim() || '(nobody named)', 'this agent\u2019s own name contains characters that would break the message envelope, so we will not send under it');
   }
   const toName = String(to == null ? '' : to).trim();
   if (!toName) return refuse('(nobody named)', 'say which agent this is for');
@@ -535,7 +535,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
   };
 
   if (!/^[A-Za-z0-9._ -]+$/.test(from) || from.includes(']')) {
-    return refuse('this agent\u2019s own session name contains characters that would break the message envelope, so we will not send under it');
+    return refuse('this agent\u2019s own name contains characters that would break the message envelope, so we will not send under it');
   }
   /* The project id rides inside the bracket grammar like the sender's
      name, and is validated the same way rather than trusted. */
@@ -684,7 +684,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
     if (cleaned.length > SPILL_AT) {
       try { fs.rmSync(path.join(SPILL_DIR, id + '.txt'), { force: true }); } catch { /* best effort */ }
     }
-    const failed = refuse('the post reached nobody on ' + projectId + '; every member\u2019s pane refused it');
+    const failed = refuse('the post reached nobody on ' + projectId + '; every member refused it');
     failed.outcomes = outcomes;
     return failed;
   }

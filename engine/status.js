@@ -601,7 +601,7 @@ function listPanes() {
    * go through here.
    */
   if (out === null || out === undefined) {
-    throw new Error('we could not check what it is doing on this computer');
+    throw new Error('we could not check what is running on this computer');
   }
   const { panes, rejected } = readPanes(out);
 
@@ -1004,7 +1004,7 @@ function classify(pane, paneText) {
   const tail = paneText.split('\n').slice(-25).join('\n');
 
   if (RATE_LIMIT_MARKERS.some((re) => re.test(tail))) {
-    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'its screen mentions a usage limit' };
+    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'it says it has hit a usage limit' };
   }
   if (NEEDS_YOU_MARKERS.some((re) => re.test(tail))) {
     return { state: STATE.NEEDS_YOU, confidence: CONFIDENCE.SCRAPED, because: 'it is asking you something' };
@@ -1667,7 +1667,7 @@ function snapshot() {
     const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
       ? readContext(pane.name, model, pane.session)
-      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tie this pane to an agent by name, so we will not read another agent\u2019s transcript for it' };
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tell which agent this is, so we will not read another agent\u2019s transcript for it' };
     const identity = tied
       ? readIdentity(pane.name)
       : { displayName: pane.name, role: null, derived: false };

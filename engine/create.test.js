@@ -1227,7 +1227,7 @@ test('a supervisor that cannot be installed stops the creation', () => {
     fs.copyFileSync = () => { throw new Error('read-only'); };
     const r = create.createAgent({ ...BINS, name: 'no-supervisor', role: 'pm' });
     assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'it created an agent with no supervisor to run it');
-    assert.ok(r.steps.some((s) => /startup script/.test(s.label) && !s.ok),
+    assert.ok(r.steps.some((s) => /script that starts agents/.test(s.label) && !s.ok),
       'the failing step is not visible in the record');
     // ⚠️ The SENTENCE, which is the only thing this branch adds to the failure
     // path beyond a step label, and was the one thing unpinned. A transient

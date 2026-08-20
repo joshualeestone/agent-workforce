@@ -666,7 +666,7 @@ function createAgent(opts) {
     // newline when the input lacks one), or an input of exactly MAX_BYTES
     // would validate and then land on disk one byte over the read limit.
     if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
-      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be its instructions, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
+      return { outcome: OUTCOME.REFUSED, because: `these instructions are too long, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
     }
   }
   let modelArg = null;
@@ -1002,7 +1002,7 @@ function createAgent(opts) {
   // exist, which is the respawn loop. The gate below stops before the job is
   // written at all.
   let supervisorMissing = false;
-  const installedSupervisor = step('put the startup script in place', () => {
+  const installedSupervisor = step('put the script that starts agents in place', () => {
     if (DRY_RUN) return true;
     const done = installSupervisor();
     supervisorMissing = done.missing === true;

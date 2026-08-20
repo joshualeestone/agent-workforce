@@ -359,7 +359,7 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
        Lisa rather than rewritten here; asserted separately so the test says
        what is true today instead of one regex quietly matching neither. */
     assert.throws(() => status.paneRoster(), /could not see what is running on this computer/);
-    assert.throws(() => status.snapshot(), /could not check what it is doing on this computer/);
+    assert.throws(() => status.snapshot(), /could not check what is running on this computer/);
   } finally {
     blind.restore();
   }

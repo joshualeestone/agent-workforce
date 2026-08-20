@@ -376,7 +376,7 @@ function addressable(sessionName, roster) {
     return { ok: false, because: 'something is running under this name, but we cannot tell that it is this agent, so we did not type into it' };
   }
   if (!card.target) {
-    return { ok: false, because: 'we do not know where to reach this agent' };
+    return { ok: false, because: 'we cannot tell where this agent is running' };
   }
   if (card.isAgentPane !== true) {
     // Two reasons, and they are worth telling apart on screen: a pane with no
@@ -791,7 +791,7 @@ function viewport(sessionName, roster) {
     return { text: null, because: 'something is running under this name, but we cannot tell that it is this agent, so we are not showing you its screen' };
   }
   if (!card.target) {
-    return { text: null, because: 'we do not know where to reach this agent' };
+    return { text: null, because: 'we cannot tell where this agent is running' };
   }
   // One depth for every caller: a `lines` parameter used to ride here with
   // a bound no caller ever exercised (round 16), which was API surface
