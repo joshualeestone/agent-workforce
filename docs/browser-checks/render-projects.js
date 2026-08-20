@@ -1015,14 +1015,38 @@ async function main() {
       // Not deleted, because this check's own rule is that a miss is RECORDED
       // rather than skipped. A red saying "this failure state is unmeasured" is
       // worth more than a green saying nothing.
-      for (const sel of ['#panel-projects .pj-member b',
-        '#panel-projects .pj-member small', '#panel-projects .pj-member .pj-told',
-        '#pj-one-view .fhint', '#pj-one-view .flabel',
-        '#pj-one-view #pj-one-desc']) {
+      // 🛑 `#pj-one-view .flabel` USED TO BE IN THIS LIST AND IT WAS THE SAME
+      // BUG AS THE HEADING ONE, one loop lower and considerably worse. When the
+      // three column headers moved from `.flabel` to the pack's `.dlab`, this
+      // entry did not go missing — it walked down the page to the next `.flabel`
+      // and reported a CONTRAST MEASUREMENT OF THE WRONG ELEMENT. A wrong name
+      // shows up in a log; a wrong contrast number does not. Found by Mona Lisa,
+      // whose own "what keys on this class" tool reported one dependency when
+      // there were two, because it could only see selectors named at the call
+      // site and this one is a bare string resolved later by `querySelector(sel)`.
+      //
+      // The replacement does not just swap the class. Each entry may carry an
+      // `expect` — text the matched element must actually contain — so a
+      // selector that walks to a different element becomes a LOUD failure
+      // instead of a plausible number. That is the general repair for this
+      // whole family: assert what you found, not just that you found something.
+      const wanted = [
+        { sel: '#panel-projects .pj-member b' },
+        { sel: '#panel-projects .pj-member small' },
+        { sel: '#panel-projects .pj-member .pj-told' },
+        { sel: '#pj-one-view .fhint' },
+        { sel: '#pj-one-view h3.dlab', expect: 'Project members' },
+        { sel: '#pj-one-view #pj-one-desc' },
+      ];
+      for (const { sel, expect } of wanted) {
         const el = document.querySelector(sel);
         // ⚠️ A MISS IS RECORDED, not skipped. Skipping is how four selectors
         // went unmeasured under a printed pass.
         if (!el || !el.offsetParent) { out.push({ sel, missing: true }); continue; }
+        if (expect && !(el.textContent || '').includes(expect)) {
+          out.push({ sel, wrongElement: (el.textContent || '').trim().slice(0, 40), expected: expect });
+          continue;
+        }
         const cs = getComputedStyle(el);
         out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
       }
@@ -1051,6 +1075,17 @@ async function main() {
       if (e.missing) {
         contrastFails += 1;
         console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);
+        continue;
+      }
+      // ⚠️ LOUDER THAN A MISS, because it is more dangerous. A selector that
+      // finds NOTHING is reported above and cannot mislead. A selector that
+      // finds the WRONG element returns a perfectly plausible number, and a
+      // wrong contrast reading is invisible in a log in a way a wrong name is
+      // not. This is the class swap that walked `#pj-one-view .flabel` down to
+      // "Talk to one of them" while every number it printed stayed believable.
+      if (e.wrongElement !== undefined) {
+        contrastFails += 1;
+        console.log(`  🛑 ${e.sel} matched the wrong element (${scheme}): expected text containing ${JSON.stringify(e.expected)}, found ${JSON.stringify(e.wrongElement)}`);
         continue;
       }
       const cr = contrast(e.fg, e.bg);
