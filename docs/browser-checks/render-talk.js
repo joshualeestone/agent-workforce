@@ -56,10 +56,28 @@ function realCard() {
 const PAGE = 'file://' + path.join(path.resolve(__dirname, '..', '..'), 'web', 'index.html');
 const OUT = process.env.SHOT_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'talk-shots-'));
 
+/**
+ * ⚠️ IT CARRIES A NEEDS-YOU MARKER, and the version without one described a
+ * payload the route cannot serve.
+ *
+ * `questionIn` returns null unless some LINE matches `NEEDS_YOU_MARKERS`, and
+ * it slices from six lines above the last match through to the end -- so every
+ * real `question.text` contains a marker line by construction. The first
+ * version of this fixture ended "Which is right?", which matches none of the
+ * five (the `❯ 1.` marker wants the literal `Yes`), so the server could never
+ * produce `{asking: true, question: <this>}` at all. Ten of the twenty-two
+ * committed screenshots were drawn from it.
+ *
+ * That is the same class this file corrected twice already -- the `6-off`
+ * no-Claude pairing and the borrowed menu -- caught the third time only
+ * because a reviewer traced the PRODUCER rather than reading the fixture. The
+ * check below now asserts it for every state, so the class is closed rather
+ * than the instance.
+ */
 const QUESTION = {
   text: [
     '│ Two of the help docs disagree about the trial. One says 14 days, the',
-    '│ other says 30. Which is right?',
+    '│ other says 30. Would you like to go with one of them?',
     '│',
     '│ ❯ 1. 14 days',
     '│   2. 30 days',
@@ -116,7 +134,9 @@ const STATES = {
     // not show the one sentence that distinguishes state 4 in the drawing.
     __failed: true,
   },
-  '5-no-parse': { ...base, asking: true, question: { text: '│ One I cannot answer from the docs: when somebody adds a second\n│ person, does that person get their own trial, or join the existing one?' } },
+  /* The marker is on its own line, because `questionIn` tests them LINE BY
+     LINE: "Would you like to" split across a wrap matches nothing. */
+  '5-no-parse': { ...base, asking: true, question: { text: '│ One I cannot answer from the docs: when somebody adds a second person,\n│ does that person get their own trial, or join the existing one?\n│ Would you like to tell me which?' } },
   /* ⚠️ THE COPY-MODE ARM, and the other one is a world the producers cannot
      make. `addressable` picks its sentence on `card.isAgentSession`: false
      gives "there is no Claude running in its window", and `classify` returns
@@ -153,6 +173,31 @@ const STATES = {
     messages: [placed('14 days', '1')],
     __answered: true,
   },
+  /* ⚠️ A QUESTION THAT FITS, which is the arm nothing else exercises. Ten of
+     the twelve question-bearing states cut horizontally, and the only state
+     that did not was the answered-hold -- whose question region is
+     `display:none`, so the "a scrollbar is drawn over a question that fits"
+     check was measuring a 0x0 element and could not fail for the reason it
+     names. */
+  '12-short-question': {
+    ...base, asking: true,
+    question: { text: '│ Would you like to keep going?\n│\n│ ❯ 1. Yes\n│   2. No' },
+    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+  },
+  /* ⚠️ AND ONE THAT SCROLLS DOWNWARD, which is the ORDINARY shape of a real
+     capture: `chat.viewport` reads 60 lines and this box is capped at 200px.
+     Every other fixture here is six lines or fewer, so no committed screenshot
+     had ever shown a vertically-scrolling question and the horizontal-bar
+     assertion was blind to the axis. */
+  '13-tall-question': {
+    ...base, asking: true,
+    question: {
+      text: ['│ Would you like to review what I changed before I carry on?', '│']
+        .concat(Array.from({ length: 24 }, (_, i) => '│ line ' + (i + 1) + ' of the capture above the menu'))
+        .concat(['│', '│ ❯ 1. Yes', '│   2. No']).join('\n'),
+    },
+    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+  },
   /* ⚠️ ITS OWN QUESTION, not `QUESTION`. This state used to borrow the two-option
      "14 days / 30 days" menu and draw THREE unrelated buttons under it, so the
      committed screenshot showed a panel whose buttons contradict the question
@@ -181,6 +226,43 @@ const STATES = {
   },
 };
 
+/**
+ * ⚠️ EVERY FIXTURE MUST BE A WORLD THE PRODUCERS CAN MAKE, asserted against
+ * the producer itself rather than against a story about it.
+ *
+ * Three separate fixtures on this branch described states the server cannot
+ * serve: `asking` beside "there is no Claude running" (twice), and a question
+ * carrying no needs-you marker (ten screenshots). Each was plausible, which is
+ * exactly why READING them did not catch it -- all three were found by tracing
+ * the producer. A screenshot of an unreachable state is worse than no
+ * screenshot, because it is the artifact somebody checks the design against
+ * later.
+ *
+ * This asks `status.NEEDS_YOU_MARKERS`, the same list `questionIn` uses, so it
+ * cannot drift from the producer the way a transcribed copy would.
+ */
+function unreachableStates() {
+  let markers;
+  try {
+    markers = require(path.join(__dirname, '..', '..', 'engine', 'status.js')).NEEDS_YOU_MARKERS;
+  } catch (err) {
+    return ['could not load NEEDS_YOU_MARKERS (' + err.message + '), so fixture reachability is UNCHECKED'];
+  }
+  if (!Array.isArray(markers) || !markers.length) {
+    return ['NEEDS_YOU_MARKERS is empty or not an array, so fixture reachability is UNCHECKED'];
+  }
+  const bad = [];
+  for (const [name, fx] of Object.entries(STATES)) {
+    if (!fx.asking || !fx.question || typeof fx.question.text !== 'string') continue;
+    const lines = fx.question.text.split('\n');
+    if (!markers.some((re) => lines.some((l) => re.test(l)))) {
+      bad.push(name + ': its question carries no NEEDS_YOU marker, so `questionIn` would return null '
+        + 'and the route could never serve this state');
+    }
+  }
+  return bad;
+}
+
 (async () => {
   /* ⚠️ HEADED by default, like render-thread and render-projects. Headless
      renders through SwiftShader rather than the real compositor, and this
@@ -201,7 +283,7 @@ const STATES = {
     headless: process.env.HEADED === '0',
     ignoreDefaultArgs: ['--hide-scrollbars'],
   });
-  const problems = [];
+  const problems = unreachableStates();
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({
       viewport: { width: 1100, height: 900 },
@@ -224,11 +306,14 @@ const STATES = {
     await page.addInitScript(() => {
       window.__fx = null;
       const enc = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
-      /* ⚠️ THE APP'S OWN 5s TICK IS REFUSED, and this is not tidiness. `tick`
-         has no `document.hidden` guard, so from the moment `CURRENT` is set and
-         the detail panel is unhidden it fires a background `paintTalk` every
-         five seconds for the whole multi-minute run, racing every paint driven
-         by hand. It matters most in the mid-flight block below, whose entire
+      /* ⚠️ THE APP'S OWN 5s TICK IS REFUSED, and this is not tidiness. A
+         Playwright page is VISIBLE, so `tick`'s `document.hidden` guards (two
+         of them, one added by this branch) do not stop it here: from the moment
+         `CURRENT` is set and the detail panel is unhidden it fires a background
+         `paintTalk` every five seconds for the whole multi-minute run, racing
+         every paint driven by hand. (An earlier version of this comment said
+         `tick` has no such guard at all, which was true when it was written and
+         stopped being true two commits later.) It matters most in the mid-flight block below, whose entire
          premise is exclusive ownership of the in-flight window: a tick landing
          inside the 120ms sample bumps `TALK_LOAD`, the paint under test returns
          at its own stale-load guard, and the measurement describes the
@@ -283,6 +368,10 @@ const STATES = {
        -- a wider box, `pre-wrap`, a shorter fixture -- the guarantee the plan
        claims per state stops being asserted and nothing says so. */
     let measuredCut = 0;
+    /* Both arms of both axes have to be exercised by SOME state, or an
+       assertion is passing because nothing reached it. */
+    let measuredFits = 0;
+    let measuredTall = 0;
     for (const [name, fx] of Object.entries(STATES)) {
       await page.evaluate((f) => {
         window.__fx = f;
@@ -394,7 +483,12 @@ const STATES = {
              day it stops being reachable is a failure. */
           qtext: (() => {
             const q = el('d-qask-text');
-            if (!q || q.hidden) return null;
+            /* ⚠️ `vis()`, NOT `.hidden`. `paintTalk` un-hides this element
+               whenever the payload carries a question, even when it then hides
+               the whole `#d-qask` block for the answered-hold -- so `.hidden`
+               said "visible" for an element inside `display:none` and every
+               measurement below was taken off a 0x0 box. */
+            if (!q || !vis(q)) return null;
             return {
               cut: q.scrollWidth > q.clientWidth + 1,
               scrollable: getComputedStyle(q).overflowX !== 'visible',
@@ -403,6 +497,10 @@ const STATES = {
                  only because `::-webkit-scrollbar` opts this box out of macOS
                  overlay behaviour. Borders included; the arms differ by 6. */
               chrome: q.offsetHeight - q.clientHeight,
+              // The other axis, which the first version of this rule left at
+              // the engine's default thickness.
+              tall: q.scrollHeight > q.clientHeight + 1,
+              chromeX: q.offsetWidth - q.clientWidth,
               /* ⚠️ THE CAPABILITY, PROBED, not the render mode inferred from a
                  user-agent string. Whether this engine reserves space for a
                  styled scrollbar is a question with a direct answer: ask for a
@@ -537,17 +635,22 @@ const STATES = {
           + 'so the good news is drawn as a fault inside the question box');
       }
       if (m.qtext && m.qtext.cut) measuredCut += 1;
+      if (m.qtext && !m.qtext.cut) measuredFits += 1;
+      if (m.qtext && m.qtext.tall) measuredTall += 1;
       if (m.qtext && m.qtext.cut && !(m.qtext.scrollable && m.qtext.focusable)) {
         problems.push(`${tag}: the question is cut off and what is left cannot be reached `
           + `(${JSON.stringify(m.qtext)})`);
       }
-      /* ⚠️ THE BAR IS ONLY REAL IN A HEADED RUN, and this is measured rather
-         than assumed: with a deliberately 24px-high rule injected at runtime,
-         headless Chromium's layout does not move ONE pixel, while headed moves
-         by exactly 24. So `::-webkit-scrollbar` is not honoured headless at
-         all, and a headless run asserting its absence would report a correct
-         fix as broken. The states still say which arm they are in; the
-         assertion holds only where the engine can answer. */
+      /* ⚠️ ASSERTED WHERE THE ENGINE RESERVES SPACE FOR A STYLED SCROLLBAR, and
+         that is a probe rather than a guess about the render mode. An earlier
+         version of this comment said the bar "is only real in a headed run"
+         and that `::-webkit-scrollbar` is not honoured headless at all. Both
+         were false, and so was the correction offered for them ("it is the
+         binary, not the mode"): the cause is `--hide-scrollbars`, which
+         Playwright passes by default in headless and which this file now drops
+         at launch. Measured across four launches, bundled Chromium and system
+         Chrome both honour the rule headless once the flag is gone. The probe
+         above asks THIS engine and so cannot inherit either mistake. */
       if (m.qtext && m.qtext.honoursBar) {
         const bar = m.qtext.chrome - 2;   // the box's own 0.5px borders
         if (m.qtext.cut && bar < 5) {
@@ -555,6 +658,18 @@ const STATES = {
         }
         if (!m.qtext.cut && bar > 2) {
           problems.push(`${tag}: a scrollbar is drawn over a question that fits (chrome ${m.qtext.chrome}px)`);
+        }
+        /* The OTHER axis. A 60-line viewport in a 200px box scrolls downward as
+           a matter of course, and the first version of the rule sized only the
+           horizontal bar -- leaving the vertical one at the engine's default
+           thickness, a different width from its sibling. */
+        const barX = m.qtext.chromeX - 2;
+        if (m.qtext.tall && (barX < 5 || barX > 7)) {
+          problems.push(`${tag}: a question that scrolls DOWNWARD has a ${barX}px vertical bar, `
+            + 'which is not the 6px its horizontal sibling is drawn at');
+        }
+        if (!m.qtext.tall && barX > 2) {
+          problems.push(`${tag}: a vertical scrollbar is drawn over a question that fits (chromeX ${m.qtext.chromeX}px)`);
         }
       } else if (m.qtext && !m.qtext.honoursBar && !headlessNoted) {
         headlessNoted = true;
@@ -603,6 +718,14 @@ const STATES = {
       measured[name] = m;
     }
 
+    if (!measuredFits) {
+      problems.push(`[${theme}] question: every state's question overflowed, so "no scrollbar over a `
+        + 'question that fits" is UNCHECKED');
+    }
+    if (!measuredTall) {
+      problems.push(`[${theme}] question: no state's question scrolled downward, so the vertical bar `
+        + 'is UNCHECKED -- which is the ordinary shape of a real 60-line capture');
+    }
     if (!measuredCut) {
       problems.push(`[${theme}] question: no state rendered a question wider than its box, so the `
         + 'reachability of a cut question is UNCHECKED (the fixtures, the box width, or the treatment changed)');

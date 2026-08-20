@@ -1,8 +1,16 @@
 # answer-panel -- the agent page gains its composer and the answer panel
 
 Spec: `~/work/Josh-Brain/Projects/kosmos-design/kosmos-answer-panel-agentpage-2026-08-19.html`
-(Mona Lisa, five states, both themes) over pack freeze FROZEN-2026-08-18e
-(sha c69afdb2513c1ee557176f2242e4c4f1fa9f0ba32f1d10cda6b8a643803c9006).
+(Mona Lisa, five states, both themes) over pack freeze **FROZEN-2026-08-19**,
+sha256 `27a18327525f13524d4fd6b1b27c34edb62d7fbefd86a4a2cc31d2e2561c5b84`, which
+is what `CURRENT-FREEZE` names.
+
+⚠️ **This line used to cite FROZEN-2026-08-18e at sha
+`c69afdb2513c1ee5…`, and that sha names NOTHING.** Measured: 18e hashes to
+`afc620443a7eb390…`, and `c69afdb…` appears nowhere under `~/work/Josh-Brain/`.
+So the branch's one unverifiable citation was its first line, while every other
+design citation in this file checks out exactly. Corrected to the freeze the
+later rulings on this branch were actually taken against.
 
 This is PR ONE of two. PR two (separate branch, after this merges) deletes the
 project room's second box, picker, and in-room question panel, and repoints the
@@ -256,13 +264,25 @@ persistent bar. The BROWSER owns the condition, so neither lie is reachable, no
 per-paint measurement exists to test, and the thumb's length says how much more
 there is, which a fade cannot say at all.
 
-⚠️ **It is invisible headless, measured rather than assumed.** With a
-deliberately 24px-high rule injected at runtime, headless Chromium's layout does
-not move one pixel while headed moves by exactly 24: the pseudo-element is
-ignored entirely headless. So the check asserts the bar only in a headed run and
-says UNCHECKED once per theme otherwise. A headless run asserting its absence
-would have reported a correct fix as broken -- and my own first probe of this
-change ran headless and said the fix did nothing.
+⚠️ **What hid it was a launch flag, and TWO wrong causes were published before
+that was found.** My first probe ran headless and reported the fix did nothing,
+from which I concluded that `::-webkit-scrollbar` is not honoured headless. Mona
+Lisa ran the same control against system Chrome, got it honoured in both headless
+modes, and concluded the cause was the BINARY. Both were correlates rather than
+causes. Measured across four launches:
+
+    bundled chromium  headless                                   not honoured
+    bundled chromium  headed                                     honoured
+    system chrome     headless, launched by Playwright           not honoured
+    bundled           headless, ignoreDefaultArgs --hide-scrollbars   honoured
+    system chrome     headless, same                                  honoured
+
+Playwright passes `--hide-scrollbars` by default in headless mode. The check
+drops it, so the assertion is live in BOTH modes rather than skipped on any
+headless machine, and it is gated on a CAPABILITY PROBE -- ask this engine for a
+24px scrollbar and see whether layout moves by 24 -- rather than on an inference
+about the environment. An inference about the environment can be wrong; a probe
+of it cannot, because it is not making a claim.
 
 **Still to come, and it is what remains of the question-width pass:** `.dspan`
 ported from the pack, `#d-window-box` spanning the grid, and the scrollbar

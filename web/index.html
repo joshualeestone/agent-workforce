@@ -1284,7 +1284,16 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    surface. `-webkit-` is not a gamble here -- Kosmos opens the default
    browser, which on a stock Mac is Safari, and both engines this product
    meets are WebKit or Chromium. */
-#d-qask-text::-webkit-scrollbar { height: 6px; -webkit-appearance: none; }
+/* ⚠️ BOTH AXES. `.pj-screen` is `overflow: auto`, not `overflow-x`, and the
+   question box is capped at 200px against a viewport `chat.js` reads 60 lines
+   of -- so a question that scrolls VERTICALLY is the ordinary case, not the
+   exotic one. Styling only `height` opted the element out of overlay
+   behaviour on both axes while sizing one of them, which left the vertical bar
+   at the engine's default thickness: a different width from its horizontal
+   sibling, eating layout width the box never reserved before. The cut this
+   fix was written for was horizontal; the rule reaches an axis nobody had
+   looked at. */
+#d-qask-text::-webkit-scrollbar { height: 6px; width: 6px; -webkit-appearance: none; }
 #d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2, rgba(20,22,26,.4)); border-radius: 3px; }
 #d-qask-text::-webkit-scrollbar-track { background: var(--k-sunk, rgba(20,22,26,.08)); border-radius: 3px; }
 .qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
