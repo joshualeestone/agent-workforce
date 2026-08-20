@@ -214,10 +214,12 @@ request, and the suite reads text.
 
 `.pj-screen` is `white-space: pre`, which is the room's treatment and is
 deliberate -- a captured line is what the agent's screen showed, and wrapping it
-makes it something else. The consequence, measured on 2026-08-20: **10 of the
-12 question-bearing states in `render-talk.js` render a question wider than its
+makes it something else. The consequence, measured on 2026-08-20: **most of the
+question-bearing states in `render-talk.js` render a question wider than its
 box**, cut at the right edge, and macOS hides the overlay scrollbar until
-somebody scrolls. `talk-5-no-parse-{light,dark}.png` is the pair that matters most,
+somebody scrolls. (This paragraph said "10 of the 12" in three places until the
+commit that added two more states made all three wrong at once, which is the
+lesson at the top of this file arriving on the file itself for the second time.) `talk-5-no-parse-{light,dark}.png` is the pair that matters most,
 because state 5 exists precisely so a person can read the question and type the
 answer, and its committed screenshot ends mid-word at "or join the existi".
 

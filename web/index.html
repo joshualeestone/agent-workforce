@@ -1205,7 +1205,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .delivery.failed { border-color: rgba(179,38,30,.5); }
 .delivery.unsure { border-style: dashed; }
 
-/* ---- the person's own thread with one agent (pack FROZEN-2026-08-18e) ----
+/* ---- the person's own thread with one agent (pack FROZEN-2026-08-19) ----
    Ported from the freeze's `.dbox` chat, values verbatim. The composer is the
    BUILD's control pair (`.frow` + `<input>` + `.btn`), NOT the pack's
    `.inp`/`.btn-gold`: neither of those classes exists in this app, and
@@ -1266,8 +1266,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    what the agent's screen showed, and wrapping a permission prompt destroys
    the column alignment its options are drawn in -- so a line wider than the
    box is CUT. Measured 2026-08-20: the box shows 100 characters of a session
-   `connect.js` creates at `-x 220`, and 10 of the 12 question-bearing states
-   in `render-talk.js` cut. macOS hides the OVERLAY scrollbar until somebody
+   `connect.js` creates at `-x 220`, and MOST of the question-bearing states in
+   `render-talk.js` cut -- the count is not quoted because it moved the moment
+   two states were added, in the same commit that wrote the third copy of it.
+   macOS hides the OVERLAY scrollbar until somebody
    scrolls, so there was no affordance saying anything was missing, on the one
    screen whose whole job is that a person READS the question.
 
@@ -6304,15 +6306,34 @@ function dmRow(m, name) {
      sends the digit the agent's prompt is waiting for and shows the option's
      own words; the record keeps both, so the screen says both. Without this the
      thread would describe a mechanism that did not happen. (Copy is provisional
-     -- flagged to Mona Lisa; the FACT is not optional, the wording is hers.) */
-  const wire = m.wire ? ' &middot; sent as ' + esc(m.wire) : '';
+     -- flagged to Mona Lisa; the FACT is not optional, the wording is hers.)
+     ⚠️ AND NOT ON A SEND THAT NEVER HAPPENED. `could_not` is documented in
+     engine/chat.js as "NOTHING of the person's text reached the pane", so "sent
+     as 1" beside "Could not deliver just now" is the screen contradicting
+     itself in the one place this file keeps saying the record must not lie
+     about the mechanism. It was in both committed screenshots of state 4.
+     `unconfirmed` KEEPS the phrase: there the text was typed and only the
+     submit could not be confirmed, so "sent as" is what happened. The record
+     still holds `wire` either way -- this is what the SCREEN says, not what is
+     kept. */
+  const reached = ((m && m.delivery && m.delivery.state) || '') !== 'could_not';
+  const wire = (m.wire && reached) ? ' &middot; sent as ' + esc(m.wire) : '';
   /* ⚠️ NO SEPARATOR BEFORE THE PILL. `.delivery` is an inline-block, so a
      verdict long enough to wrap took the whole pill to the next line and left
      the middot stranded at the end of the one above: "You · sent as 1 ·",
      which reads as a sentence that stopped. The pill carries a border and its
      own ground, so it needs no character to separate it. Closed by
      construction rather than by a check: there is no separator left to
-     strand. */
+     strand.
+     ⚠️ HALF OF THE ORIGINAL DEFECT IS STILL DRAWN, and saying so is the point.
+     The receipt used to sit at the far LEFT under a right-aligned bubble AND
+     the pill used to span nearly the whole box; `.dm.mine .dm-w` fixed the
+     first. The second remains: `.delivery` is an inline-block, so a verdict
+     long enough to wrap is as wide as the line box, and a wrapped one still
+     reads more like a panel-level alert than a receipt for one message. That
+     is a design question about how a long verdict should look, which is Mona
+     Lisa's, and the alignment check cannot see it -- it reads `text-align`.
+     Flagged rather than quietly left. */
   return '<div class="dm mine"><div class="dm-b">' + esc(m.text) + '</div>'
     + '<span class="dm-w">You' + wire + ' '
     + '<span class="delivery' + (v.mark || ' placed') + '">' + v.said + '</span></span></div>';
@@ -6950,11 +6971,16 @@ async function sendTalk(text, chose) {
        whether or not the flight moved: it is keyed on the agent, and coming
        back to that agent must not re-offer an answer already given. */
     /**
-     * ⚠️ ANY SEND MADE WHILE A QUESTION WAS UP IS AN ANSWER TO IT, not only a
+     * ⚠️ ANY SEND MADE WHILE A MENU WAS UP IS AN ANSWER TO IT, not only a
      * button press. The panel's own line invites the other path — "Or write
      * your own answer below" — and gating this on `chose` meant a typed answer
      * left the buttons live over a question it had just answered. That is the
      * second-press harm arriving on the route the pack recommends.
+     * ⚠️ A MENU, not a question: `talkKey` returns null when `options` is null,
+     * so the no-parseable-menu screen records no hold. That is correct rather
+     * than a gap -- there are no buttons there to leave live, and the sentence
+     * this comment cites only exists beside buttons -- but the rule is narrower
+     * than "any question" and said so wrongly for two commits.
      *
      * The delivery states split two ways, not three: placed and unconfirmed
      * both mean the words may be in that session, so neither may be offered
@@ -11579,6 +11605,22 @@ function pjAnnounce(text) {
 }
 
 /** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
+/**
+ * ⚠️ THE READER'S POSITION SURVIVES THE REWRITE, AND NOT BECAUSE OF ANYTHING
+ * HERE. `question.text` is `questionIn`'s slice through to the END of the
+ * capture, so it changes whenever the pane prints anything -- this file records
+ * a context percentage ticking from 42% to 41% doing it. Replacing
+ * `textContent` on a five-second poll therefore looked certain to drag a person
+ * who had scrolled RIGHT to read a cut line back to the start of it, which is
+ * the "poll fighting the reader" class named at the room's posts box.
+ *
+ * Measured 2026-08-20, Chromium, and it does not happen: with the offset at 33
+ * and the capture gaining a line, `scrollLeft` reads 33 after the rewrite. A
+ * save-and-restore was written here first and then removed, because it changed
+ * nothing and would have been code whose comment claimed a fix it was not
+ * making. `render-talk.js` block 9 asserts the property anyway, so the day this
+ * stops being true is a failure rather than a discovery.
+ */
 function pjSetScreen(el, text) {
   if (el.textContent !== text) el.textContent = text;
 }

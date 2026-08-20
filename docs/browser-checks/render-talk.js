@@ -173,8 +173,8 @@ const STATES = {
     messages: [placed('14 days', '1')],
     __answered: true,
   },
-  /* ⚠️ A QUESTION THAT FITS, which is the arm nothing else exercises. Ten of
-     the twelve question-bearing states cut horizontally, and the only state
+  /* ⚠️ A QUESTION THAT FITS, which is the arm nothing else exercises. Nearly all
+     the question-bearing states cut horizontally, and the only state
      that did not was the answered-hold -- whose question region is
      `display:none`, so the "a scrollbar is drawn over a question that fits"
      check was measuring a 0x0 element and could not fail for the reason it
@@ -191,12 +191,19 @@ const STATES = {
      assertion was blind to the axis. */
   '13-tall-question': {
     ...base, asking: true,
+    /* ⚠️ THE MARKER IS AT THE TOP AND THE BULK IS BELOW IT, which is the only
+       shape a tall question can have. `questionIn` slices from six lines above
+       the LAST marker to the end, so a menu at the BOTTOM of a long capture
+       makes the route serve only the last eight lines -- the first version of
+       this fixture put `❯ 1. Yes` on line 27 and asserted all 29, which is a
+       payload the producers cannot make. Marker first, output after, and no
+       parseable menu, which is what a long question with accumulated output
+       under it actually looks like. */
     question: {
       text: ['│ Would you like to review what I changed before I carry on?', '│']
-        .concat(Array.from({ length: 24 }, (_, i) => '│ line ' + (i + 1) + ' of the capture above the menu'))
-        .concat(['│', '│ ❯ 1. Yes', '│   2. No']).join('\n'),
+        .concat(Array.from({ length: 25 }, (_, i) => '│ line ' + (i + 1) + ' of the output below the question'))
+        .join('\n'),
     },
-    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
   },
   /* ⚠️ ITS OWN QUESTION, not `QUESTION`. This state used to borrow the two-option
      "14 days / 30 days" menu and draw THREE unrelated buttons under it, so the
@@ -242,22 +249,51 @@ const STATES = {
  * cannot drift from the producer the way a transcribed copy would.
  */
 function unreachableStates() {
-  let markers;
+  let chat;
   try {
-    markers = require(path.join(__dirname, '..', '..', 'engine', 'status.js')).NEEDS_YOU_MARKERS;
+    chat = require(path.join(__dirname, '..', '..', 'engine', 'chat.js'));
   } catch (err) {
-    return ['could not load NEEDS_YOU_MARKERS (' + err.message + '), so fixture reachability is UNCHECKED'];
+    return ['could not load engine/chat.js (' + err.message + '), so fixture reachability is UNCHECKED'];
   }
-  if (!Array.isArray(markers) || !markers.length) {
-    return ['NEEDS_YOU_MARKERS is empty or not an array, so fixture reachability is UNCHECKED'];
+  if (typeof chat.questionIn !== 'function' || typeof chat.optionsIn !== 'function') {
+    return ['engine/chat.js exports no questionIn/optionsIn, so fixture reachability is UNCHECKED'];
+  }
+  /* CONTROL: the producer really does refuse something, so a run of PASSes is
+     this function agreeing with the engine rather than the engine agreeing with
+     everything. */
+  if (chat.questionIn('nothing here is a question') !== null) {
+    return ['CONTROL FAILED: questionIn accepted a marker-less string, so it cannot be refusing anything'];
   }
   const bad = [];
   for (const [name, fx] of Object.entries(STATES)) {
     if (!fx.asking || !fx.question || typeof fx.question.text !== 'string') continue;
-    const lines = fx.question.text.split('\n');
-    if (!markers.some((re) => lines.some((l) => re.test(l)))) {
-      bad.push(name + ': its question carries no NEEDS_YOU marker, so `questionIn` would return null '
-        + 'and the route could never serve this state');
+    /* ⚠️ THE PRODUCER ITSELF, ASKED FOR THIS EXACT PAYLOAD, and the first
+       version of this check asked something weaker: whether a marker exists
+       ANYWHERE in the text. The constraint is not existence, it is POSITION.
+       `questionIn` slices from six lines above the LAST marker through to the
+       end, so a fixture whose last marker sits deep in the text describes a
+       payload the route would have truncated. The check shipped alongside a
+       fixture that failed exactly that way and did not notice -- a control that
+       could not fail for the reason it named, with its own counter-example in
+       the same commit. Comparing questionIn's output to the fixture cannot make
+       that mistake, because it is not a restatement of the rule, it IS the
+       rule. */
+    const served = chat.questionIn(fx.question.text);
+    if (served === null) {
+      bad.push(name + ': `questionIn` returns null for this question, so the route could never serve it '
+        + '(no line matches NEEDS_YOU_MARKERS)');
+    } else if (served.text !== fx.question.text) {
+      const kept = served.text.split('\n').length;
+      const had = fx.question.text.split('\n').length;
+      bad.push(name + ': the route would serve ' + kept + ' of these ' + had + ' lines. `questionIn` slices '
+        + 'from six lines above the LAST marker, so this payload is not one the producers can make');
+    }
+    /* And the options beside it: the route derives them from the SAME text. */
+    const derived = chat.optionsIn((served && served.text) || fx.question.text);
+    const declared = fx.options || null;
+    if (JSON.stringify(derived) !== JSON.stringify(declared)) {
+      bad.push(name + ': its options are ' + JSON.stringify(declared) + ' but the route derives '
+        + JSON.stringify(derived) + ' from this very question, so no payload holds this pair');
     }
   }
   return bad;
@@ -630,6 +666,14 @@ function unreachableStates() {
       /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
          a state that keeps things is as wrong as one standing over a state that
          does not, and only the second half was ever the bug. */
+      /* ⚠️ THE RECEIPT AGAINST THE VERDICT, on the same row. "sent as 1" beside
+         "Could not deliver" is two sentences contradicting each other, and it
+         shipped in both themes because nothing here read one against the
+         other. */
+      if (/could not (deliver|get)/i.test(m.threadText || '') && /sent as/i.test(m.threadText || '')) {
+        problems.push(`${tag}: the receipt says a message was sent on a row whose verdict says nothing `
+          + `reached the agent: ${JSON.stringify(m.threadText.slice(0, 150))}`);
+      }
       if (m.qfail && m.qfailBorder && m.qfailBorder !== '0px') {
         problems.push(`${tag}: the reassurance "${m.qfail}" is wearing a ${m.qfailBorder} border, `
           + 'so the good news is drawn as a fault inside the question box');
@@ -1074,10 +1118,17 @@ function unreachableStates() {
            menu draws identical labels for every file, so a key made of the
            options alone hid the next question entirely -- panel gone, no
            buttons, while the board card still said the person was needed. */
-        window.__fx = { ...f, question: { text: 'Edit file src/a.js?\n❯ 1. Yes\n  2. No' } };
+        /* ⚠️ THE OPTIONS MOVE WITH THE QUESTION. `f` carries the 14/30 menu, and
+           overriding only `question` left a payload pairing "Edit file
+           src/a.js?" with options the route would never derive from it -- the
+           unreachable-fixture class again, one level down where
+           `unreachableStates()` cannot see it (it walks STATES, not the
+           overrides written inline in this pass). */
+        const yesNo = [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }];
+        window.__fx = { ...f, options: yesNo, question: { text: 'Edit file src/a.js?\n❯ 1. Yes\n  2. No' } };
         await paintTalk('april', 'April');
         TALK_ANSWERED.april = { question: talkKey(window.__fx), at: Date.now() };
-        window.__fx = { ...f, question: { text: 'Edit file src/b.js?\n❯ 1. Yes\n  2. No' } };
+        window.__fx = { ...f, options: yesNo, question: { text: 'Edit file src/b.js?\n❯ 1. Yes\n  2. No' } };
         await paintTalk('april', 'April');
         out.afterSameLabelsNewQuestion = count();
         return out;
@@ -1339,6 +1390,45 @@ function unreachableStates() {
       if (midFlight.settled !== true || midFlight.after !== true) {
         problems.push(`[${theme}] persist: CONTROL FAILED, a refusal did not hide the line at all `
           + `(settled ${midFlight.settled}, after ${midFlight.after}), so the mid-flight read proves nothing`);
+      }
+
+      /* 9. THE QUESTION BOX ON A POLL, with a reader standing inside it.
+         ⚠️ `question.text` runs to the END of the capture, so it changes
+         whenever the pane prints anything -- and the box is `white-space: pre`,
+         cut at the right edge, which is exactly why somebody scrolls it. A
+         rewrite that reset `scrollLeft` would drag them back to the start of
+         the line they were reading, every five seconds.
+         ⚠️ IT DOES NOT, AND THIS BLOCK PASSES WITH OR WITHOUT A FIX. Measured:
+         a save-and-restore added to `pjSetScreen` changed nothing, because
+         Chromium keeps the offset across a `textContent` replacement while the
+         content is still long enough to hold it. So the restore was removed
+         rather than shipped as code whose comment claimed a fix it was not
+         making. What stays is this assertion: the property is worth holding
+         even when the browser is currently providing it, and if that changes
+         the day it changes is a failure rather than a discovery. Same posture
+         as the thread box's clock-only block above. */
+      const qhold = await page.evaluate(async (f) => {
+        window.__fx = f;
+        await paintTalk('april', 'April');
+        const q = document.getElementById('d-qask-text');
+        const scrolls = q.scrollWidth > q.clientWidth + 1;
+        q.scrollLeft = q.scrollWidth;               // the far end of a cut line
+        const stood = Math.round(q.scrollLeft);
+        const before = q.textContent;
+        // The pane prints one more line: a real change, not a re-render.
+        window.__fx = { ...f, question: { text: f.question.text + '\n│ ✳ Thinking… (3s · 41% context left)' } };
+        await paintTalk('april', 'April');
+        return { scrolls, stood, after: Math.round(q.scrollLeft), rewrote: q.textContent !== before };
+      }, menu);
+      if (!qhold.scrolls) {
+        problems.push(`[${theme}] qhold: the question box did not overflow, so the scroll-hold is UNCHECKED`);
+      }
+      if (!qhold.rewrote) {
+        problems.push(`[${theme}] qhold: the capture did not change, so no rewrite happened and the hold is UNCHECKED`);
+      }
+      if (qhold.scrolls && qhold.rewrote && qhold.after !== qhold.stood) {
+        problems.push(`[${theme}] qhold: a poll took the reader from ${qhold.stood} back to ${qhold.after} `
+          + 'inside the question they were reading');
       }
       }
     }

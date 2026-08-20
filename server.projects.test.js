@@ -1843,6 +1843,35 @@ test('a pane holding the name untied is refused, on the read as well as the writ
   });
 });
 
+test('a button answer that never reached the pane is still recorded, wire and all', async () => {
+  reset();
+  /**
+   * ⚠️ THE GAP THIS FILLS WAS FOUND ON A SCREEN, not here: the thread drew
+   * "sent as 1" beside "Could not deliver", because the row's wire suffix was
+   * unconditional. The PAGE is fixed; this pins the half that belongs to the
+   * record, which is the opposite half. `could_not` means nothing reached the
+   * pane, and the record still keeps BOTH the words chosen and the digit that
+   * would have been typed -- a thread that remembers only the successes
+   * rewrites its own history. The screen decides what to SAY about it; the
+   * store decides what is KEPT, and they are not the same decision.
+   */
+  /* TWO runner entries, because a `chose` send captures the pane FIRST to check
+     the words against the visible menu and only then types. One entry was
+     eaten by the capture and the send got a default success -- which the
+     control below caught, on its first run. */
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(), { ran: true, spawnFailed: false, status: 1, out: '', err: 'no such pane' }],
+    async () => {
+      const res = json(await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' }));
+      assert.notEqual(res.delivery.state, 'placed', 'CONTROL: this send was supposed to fail');
+      assert.equal(res.recorded, true);
+      const back = json(await req('/api/agent/zeta/thread'));
+      assert.equal(back.messages[0].text, '14 days', 'the bubble keeps the words the person chose');
+      assert.equal(back.messages[0].wire, '1', 'and the digit that would have been typed');
+      assert.equal(back.messages[0].delivery.state, res.delivery.state);
+    });
+});
+
 test('a name NO pane runs at all reads as an empty conversation and refuses the send', async () => {
   reset();
   /**
