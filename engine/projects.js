@@ -870,6 +870,103 @@ function revealFolder(folder) {
   }
 }
 
+/**
+ * The files in a project's folder, newest first.
+ *
+ * ⚠️ TOP LEVEL ONLY, AND FILES ONLY. A project folder is a place a person and
+ * their agents both write into, so it will contain subfolders, and walking them
+ * would turn "the last ten documents" into a crawl of somebody's whole working
+ * tree. Directories, dotfiles and anything that is not a regular file are left
+ * out — a symlink is not listed, because the thing it points at is what would
+ * open and this list would be naming the wrong file.
+ *
+ * Returns a REASON rather than an empty array when it cannot read, because
+ * "this project has no documents" and "we could not look" are different
+ * sentences and only one of them is about the project.
+ */
+function listFiles(folder, limit) {
+  const state = folderState(folder);
+  if (!state || state.state !== FOLDER.READABLE) {
+    return { ok: false, because: (state && state.because) || 'we cannot read that folder right now', files: [] };
+  }
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 10;
+  let names;
+  try {
+    names = fs.readdirSync(state.real, { withFileTypes: true });
+  } catch (err) {
+    return { ok: false, because: 'we could not read what is in that folder', files: [] };
+  }
+  const files = [];
+  for (const ent of names) {
+    if (ent.name.startsWith('.')) continue;
+    // ⚠️ isFile() on the DIRENT, so a symlink is excluded without a second
+    // stat: withFileTypes reports the link itself, which is what we want here.
+    if (!ent.isFile()) continue;
+    let st;
+    try { st = fs.statSync(path.join(state.real, ent.name)); } catch { continue; }
+    files.push({ name: ent.name, size: st.size, modified: st.mtime.toISOString() });
+  }
+  files.sort((a, b) => (a.modified < b.modified ? 1 : a.modified > b.modified ? -1 : 0));
+  return { ok: true, total: files.length, files: files.slice(0, cap) };
+}
+
+/**
+ * Open ONE file from a project's folder with the system opener.
+ *
+ * 🛑 THIS IS THE MOST DANGEROUS PRIMITIVE IN THIS MODULE and it is written to
+ * refuse rather than to sanitise, the same rule `folderNameFor` follows and for
+ * the same reason: this string becomes a path, and a path quietly changed into
+ * a different path opens something nobody asked for. `open` will happily launch
+ * an application or a script.
+ *
+ * Three independent gates, and the third is the one a name check cannot do:
+ *
+ *   1. The name must be a BARE FILENAME. Any separator, any `..`, any absolute
+ *      path is refused outright rather than trimmed. The documents list is flat,
+ *      so a bare name is all a caller ever legitimately has.
+ *   2. The project's folder must be READABLE, by the same folderState every
+ *      other folder-touching route already goes through.
+ *   3. The RESOLVED target must still sit inside the RESOLVED folder, and must
+ *      be a regular file. A symlink planted inside the folder passes gate 1
+ *      untouched and points wherever it likes; only resolving both sides and
+ *      comparing can see that, which is why this gate exists separately from
+ *      the first rather than being folded into it.
+ */
+function openFile(folder, name) {
+  const given = String(name == null ? '' : name);
+  if (!given) return { ok: false, because: 'no file was named' };
+  if (given.includes('/') || given.includes('\\') || given === '.' || given === '..'
+      || path.isAbsolute(given) || path.basename(given) !== given) {
+    return { ok: false, because: 'that is not a file in this project' };
+  }
+  const state = folderState(folder);
+  if (!state || state.state !== FOLDER.READABLE) {
+    return { ok: false, because: (state && state.because) || 'we cannot find that folder right now, so there is nothing to open' };
+  }
+  let target;
+  try {
+    target = resolveReal(path.join(state.real, given));
+  } catch {
+    return { ok: false, because: 'that file is not there any more, or it was moved' };
+  }
+  const root = state.real.endsWith(path.sep) ? state.real : state.real + path.sep;
+  if (!target.startsWith(root)) {
+    return { ok: false, because: 'that file lives outside this project, so we will not open it' };
+  }
+  let st;
+  try { st = fs.statSync(target); } catch { return { ok: false, because: 'that file is not there any more, or it was moved' }; }
+  if (!st.isFile()) return { ok: false, because: 'that is not a file we can open' };
+  try {
+    if (revealRunner) return revealRunner('/usr/bin/open', [target]);
+    execFileSync('/usr/bin/open', [target], { timeout: 5000, stdio: 'ignore' });
+    return { ok: true };
+  } catch (err) {
+    // Same rule as revealFolder: ours throws loud, theirs reports.
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
+    return { ok: false, because: 'that file did not open' };
+  }
+}
+
 function projectsRoot() {
   return process.env.AGENT_WORKFORCE_PROJECTS
     || path.join(os.homedir(), 'Kosmos', 'Projects');
@@ -1639,5 +1736,5 @@ module.exports = {
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause, healColleagues,
   projectsRoot, folderNameProblem, folderNameFor, folderPathFor,
-  folderPathPreview, makeFolder, revealFolder, setRevealRunner,
+  folderPathPreview, makeFolder, revealFolder, setRevealRunner, listFiles, openFile,
 };
