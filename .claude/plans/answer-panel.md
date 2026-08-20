@@ -112,3 +112,49 @@ Paint (new, from the GET; poll like siblings):
 Room second-box removal (#pj-thread), the in-room question panel, board
 needs-you click repointing, and the room's "answer somewhere else" sentence
 deletion.
+
+---
+
+## State as of 2026-08-19 23:20, measured rather than remembered
+
+Written because the next person to open this branch will otherwise have to
+re-derive whether it is alive. It is.
+
+**Merged with main at 0.2.3** (commit above). Two conflicts, both resolved by
+keeping BOTH sides; see that commit for why taking either side alone would have
+deleted shipped work.
+
+**Every instrument available to this branch is green:**
+
+    yarn test                975 tests, 0 failing
+    render-talk.js           11 states x 2 themes, "=== problems === none"
+
+The browser check measures what text cannot: page/box/options overflow all 0,
+the question panel visible in exactly the states that should show it, the
+composer disabled in `6-off` and enabled in `7-unsure`, and the long-label
+state (an unbroken 100-character URL) producing no horizontal overflow.
+
+## 🛑 WHY IT IS STILL NOT SHIPPED, and this is a decision rather than a pause
+
+**Its own challenge loop stopped at iteration 10 and never converged.** That is
+this branch's claim about itself, and it is the one instrument above that has
+NOT been re-run. Green on every other check is not the same as converged, and
+tonight has produced six separate cases where an instrument returned a
+believable number about the wrong thing.
+
+Overriding a branch's own unconverged verdict at 23:20, with a single pass, is
+precisely what Splinter's ruling names: "a branch with no PR has nobody claiming
+it is finished, so merging it overnight is not 'not waiting on Josh', it is
+deciding on his behalf that unvouched code is done."
+
+**And the stakes here are not a CSS slice.** This branch is PR one of two, and
+PR two DELETES the only surface where a person can see and answer an agent's
+blocking question. Splinter established tonight that this is a safety
+constraint, not a preference: the `pj-question` block, its label and the
+answer instruction are all nested INSIDE `#pj-thread`, so the delete takes them
+as one unit.
+
+**Nothing is blocked by not shipping it.** The room works today, and this branch
+is deliberately additive so that stays true.
+
+**What it needs:** its challenge loop converged, then a PR. Not a rescue.
