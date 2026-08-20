@@ -379,9 +379,12 @@ snaps the reader from the newest message to the oldest, every minute.
 with the markup genuinely rewritten (both proven by controls in the check), the
 reader's `scrollTop` is unchanged across a same-height rewrite. The reasoning
 was sound and the browser does not behave the way it assumes. What was TRUE in
-the finding is that no check covered the case at all: every fixture in
-`render-talk.js` is dated January 2026, so its repaints are byte-identical and
-the product's whole first hour with a thread was untested. That case is now a
+the finding is that no check covered the case at all: the fixtures in that
+block are dated January 2026, so their repaints are byte-identical, and the
+product's whole first hour with a thread was untested. (This sentence claimed
+EVERY fixture in the file until a reviewer checked: `placed()` and
+`3-unconfirmed` both render relative phrases. Only the scroll block's inline
+fixtures are January-dated, which is all the argument needed.) That case is now a
 block with two controls, and the measured behaviour is written down with its
 date, so the day it stops holding is a failure rather than a discovery.
 

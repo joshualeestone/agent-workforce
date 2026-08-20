@@ -1162,10 +1162,23 @@ function unreachableStates() {
            pane-moved case now carries `options: null`, which is what the route
            would actually serve. That matters: with the reachable payload this
            case exercises the unkeyable path rather than key equality. */
-        window.__fx = { ...f, options: null,
-          question: { text: f.question.text + '\n\n  ✳ Thinking… (3s · 41% context left)' } };
+        /* ⚠️ AN UNINDENTED LINE, and the indentation is the whole point twice
+           over. Indented, `optionsIn` refuses the menu (it sits at the option
+           indent), so `options` would be null, `#d-qopts` empty whatever the
+           hold does, and this assertion vacuous -- it would read 0 with the
+           hold deleted entirely. Unindented is what a real pane draws under
+           the box, it keeps the menu parseable, and it is therefore the only
+           shape in which "the pane moving on does not spend the hold" is a
+           question with an answer. Verified against the producers: this text
+           round-trips `questionIn` and derives exactly these two options. */
+        window.__fx = { ...f,
+          question: { text: f.question.text + '\n\n✳ Thinking… (3s · 41% context left)' } };
         await paintTalk('april', 'April');
         out.afterPaneMoved = count();
+        /* Re-seeded, because the step above may legitimately have spent the
+           hold and this one is about the release rather than about surviving.
+           Without it this assertion passes with no hold in force at all. */
+        TALK_ANSWERED.april = { question: talkKey(window.__fx), at: Date.now() };
         // A genuinely different menu DOES spend it -- question and options together.
         window.__fx = { ...f,
           options: [{ n: 1, label: 'Something else' }, { n: 2, label: 'No' }],
@@ -1202,6 +1215,19 @@ function unreachableStates() {
         await paintTalk('april', 'April');
         out.freeTextQaskHidden = document.getElementById('d-qask').hidden;
         out.freeTextShown = document.getElementById('d-qask-text').textContent;
+        /* ⚠️ AND THE UNKEYABLE TICK MUST NOT FORGET THE ANSWER. Showing the
+           panel and spending the hold are two different acts, and the first
+           version of that fix did both with one boolean: one indented line
+           under the menu deleted the hold, and the tick after -- with the line
+           gone and the same menu re-parsed -- put the buttons back live over
+           the prompt just answered. So: answer, go unkeyable, come back. */
+        const menuKey = talkKey({ ...f, options: f.options, question: f.question });
+        TALK_ANSWERED.april = { question: menuKey, at: Date.now() };
+        window.__fx = { ...f, options: null, question: { text: f.question.text + '\n\n  ✳ Thinking…' } };
+        await paintTalk('april', 'April');
+        window.__fx = f;
+        await paintTalk('april', 'April');
+        out.afterUnkeyableTick = count();
         return out;
       }, menu);
       if (held.afterAnswer !== 0) {
@@ -1215,6 +1241,10 @@ function unreachableStates() {
       }
       if (held.afterSameLabelsNewQuestion === 0) {
         problems.push(`[${theme}] hold: a NEW question with the same option words was suppressed`);
+      }
+      if (held.afterUnkeyableTick !== 0) {
+        problems.push(`[${theme}] hold: one unkeyable tick forgot the answer, so ${held.afterUnkeyableTick} `
+          + 'buttons came back live over the prompt that was just answered');
       }
       if (held.freeTextQaskHidden !== false) {
         problems.push(`[${theme}] hold: a NEW question with no parseable menu was suppressed entirely `
@@ -1310,9 +1340,14 @@ function unreachableStates() {
 
       /* 6. A REPAINT WHERE ONLY THE CLOCK MOVED, on a thread long enough to
          scroll and new enough to say "a minute ago".
-         ⚠️ EVERY OTHER FIXTURE IN THIS FILE IS DATED January 2026, so its
+         ⚠️ THE FIXTURES THIS BLOCK USES ARE DATED January 2026, so their
          verdict lines render a fixed "at 9:00 on Jan 1" and a repaint is
-         byte-identical. That makes the scroll block above an honest test of
+         byte-identical. (This said "every fixture in this file" until a
+         reviewer checked: `placed()` uses `Date.now() - 4 * 60000` and
+         `3-unconfirmed` uses `new Date()`, both of which render RELATIVE
+         phrases. Only this block's inline fixtures are January-dated, which is
+         all the argument needs -- the wider claim was a confident absolute
+         about the file's own contents that the file contradicts.) That makes the scroll block above an honest test of
          "an unchanged list does not move", and NO test at all of the case the
          product actually spends its first hour in: `pjWhen` returns a RELATIVE
          phrase under an hour, so the markup changes once a minute on a thread

@@ -6548,9 +6548,33 @@ async function paintTalk(sessionName, agentName) {
    * payload with no options renders no buttons to press twice.
    */
   const cannotKey = !TALK_QUESTION[sessionName] && !!(body.asking && body.question);
-  const different = !!(answered && (cannotKey
-    || (TALK_QUESTION[sessionName] && answered.question !== TALK_QUESTION[sessionName])));
-  const stillTheSame = held && !different;
+  const different = !!(answered && TALK_QUESTION[sessionName]
+    && answered.question !== TALK_QUESTION[sessionName]);
+  /**
+   * ⚠️ UNKEYABLE RELAXES THE HIDE AND DOES NOT SPEND THE HOLD, and the first
+   * version of this fix conflated them because one boolean fed both.
+   *
+   * Feeding `cannotKey` into `different` also deleted `TALK_ANSWERED`, and that
+   * re-opened the exact defect the hold was built for: answer a menu, let the
+   * pane print ONE indented line under the run (which `optionsIn` refuses by
+   * design, and which this branch's own example -- "✳ Thinking… (41% context
+   * left)" -- is), and the hold was forgotten. One tick later the line clears,
+   * the same menu re-parses, and the buttons are back LIVE over the prompt just
+   * answered. The 409 screen-check cannot catch that one: the visible menu
+   * still matches the label, so the send is consistent and wrong.
+   *
+   * Nothing was gained by the deletion. `opts` is null on an unkeyable tick
+   * anyway, so no buttons render whether the hold stands or not; the only thing
+   * the deletion changed was what happens on the tick AFTER.
+   *
+   * So they are separated: the panel is SHOWN (a question we can see must not
+   * be hidden while the board says Needs you) and the answer is REMEMBERED (the
+   * next keyable tick decides by equality, as it always did). The cost is that
+   * the question text can appear for a tick and go again when the menu
+   * re-parses, which is the honest price of not being able to tell one
+   * unkeyable question from another.
+   */
+  const stillTheSame = held && !different && !cannotKey;
   if (answered && (!held || different)) delete TALK_ANSWERED[sessionName];
   /* --- the question, and the answers to it --- */
   const qask = document.getElementById('d-qask');
@@ -6723,7 +6747,7 @@ async function paintTalk(sessionName, agentName) {
     // nothing was said, and silence here would render "we could not look" as
     // "there is nothing".
     /* ⚠️ AND THIS ARM DELIBERATELY KEEPS THE PERSISTENCE LINE, where the
-       unfilable arm below and the refusal arm above both hide it. The three
+       unfilable arm and the refusal arm, both above, hide it. The three
        are not the same fact and answering them alike would be the error:
          unfilable      nothing IS kept under this name -> the promise is false
          borrowed name  this box is not this agent's    -> the promise is false
