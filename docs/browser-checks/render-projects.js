@@ -1261,12 +1261,27 @@ async function main() {
       // reveal puts the keyboard on the choice.
       await page.click('[data-project="hendersonlease"]');
       await page.waitForTimeout(300);
-      const members = await page.evaluate(() => ({
-        heading: (document.querySelector('#pj-one-view .flabel') || {}).textContent,
-        btnShown: !document.getElementById('pj-add-member').hidden,
-        rowHidden: document.getElementById('pj-one-add-row').hidden,
-      }));
+      // ⚠️ FOUND BY STRUCTURE, NOT BY CLASS. This read `#pj-one-view .flabel`
+      // and so pointed at whatever wore that class FIRST. When the three
+      // project column headers moved to the pack's `.dlab` (2026-08-19) the
+      // selector silently walked down the page to "Talk to one of them" and
+      // reported the members heading had been renamed. The heading is the
+      // element immediately before the members list, and that relationship is
+      // what the screen actually promises; the class is decoration and has
+      // changed once already.
+      const members = await page.evaluate(() => {
+        const list = document.getElementById('pj-one-agents');
+        const h = list && list.previousElementSibling;
+        return {
+          heading: h ? h.textContent : null,
+          headingTag: h ? h.tagName : null,
+          btnShown: !document.getElementById('pj-add-member').hidden,
+          rowHidden: document.getElementById('pj-one-add-row').hidden,
+        };
+      });
       if (members.heading !== 'Project members') throw new Error('the members heading reads "' + members.heading + '", not the pinned words');
+      // A column header is a heading. The pack draws all three as h3.
+      if (members.headingTag !== 'H3') throw new Error('the members heading is a ' + members.headingTag + ', not a heading element');
       if (!members.btnShown || !members.rowHidden) throw new Error('the picker is not resting behind + Add Member: ' + JSON.stringify(members));
       await page.click('#pj-add-member');
       const revealed = await page.evaluate(() => ({

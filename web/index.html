@@ -1104,7 +1104,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    1.5rem. Josh 2026-08-19: "Header should be larger" — it carried no
    size rule at all before this and fell to the base h2. */
 .pjtitle h2 { font-size: 1.375rem; margin: 0; }
-.pj3 { display: grid; grid-template-columns: minmax(0, 22%) minmax(0, 1fr) minmax(0, 22%); gap: 16px; align-items: start; }
+.pj3 { display: grid; grid-template-columns: minmax(0, 20%) minmax(0, 1fr) minmax(0, 20%); gap: 16px; align-items: start; }
 @media (max-width: 68rem) { .pj3 { grid-template-columns: minmax(0, 1fr); } }
 .pjcol { border: 1px solid var(--k-rule); border-radius: 12px; background: var(--k-surface); padding: 14px 16px 16px; }
 .pjcol > .flabel { display: block; margin-bottom: 10px; }
@@ -1286,13 +1286,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   padding: var(--space-4) var(--space-5); margin: 0; }
 .pj-chosen { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: var(--space-4); word-break: break-all; }
 .pj-advanced { margin: var(--space-5) 0; }
-/* A real <button>, styled as a link. ⚠️ NOT an <a> without an href: that is not
+/* ⚠️ A real <button>, styled as a link. NOT an <a> without an href: that is not
    focusable and not announced as a control, so the whole advanced route would
    be unreachable from the keyboard — and this is the ONLY way to a project
-   whose work lives somewhere else. 24px minimum, WCAG 2.2 SC 2.5.8. */
-.linkish { background: none; border: 0; cursor: pointer; padding: var(--space-3) 0;
-  min-height: 24px; font: var(--text-callout) var(--font-ui); color: var(--label-2);
-  text-decoration: underline; }
+   whose work lives somewhere else. The 24px floor (WCAG 2.2 SC 2.5.8) and the
+   whole appearance now live in the ONE `.linkish` rule further down this file.
+   A second declaration sat here until 2026-08-19 and set background, border,
+   cursor, padding, min-height, font, color and text-decoration — every one of
+   which the later rule re-set at equal specificity, so not a single line of it
+   survived the cascade. Found by Mona Lisa, verified property by property.
+   Removed rather than kept-and-commented, per this codebase's own rule about
+   `.pjthread` and `.fr-back`: a rule that parses green and renders never is
+   worse than no rule, because the next reader takes it for true. */
 .pj-projects { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .pj-tag { font: var(--text-caption) var(--font-ui); color: var(--label-2);
   border: 0.5px solid var(--separator); border-radius: var(--radius-pill);
@@ -2969,7 +2974,7 @@ svg { display: block; }
 
     <div class="pj3">
     <aside class="pjcol">
-      <span class="flabel">Project members</span>
+      <h3 class="dlab">Project members</h3>
       <div id="pj-one-agents" class="pj-members"></div>
       <!-- ⚠️ The picker hides behind the button, not the other way round: the
            resting state of the box is the members, and "+ Add Member" (the
@@ -2983,7 +2988,7 @@ svg { display: block; }
     </aside>
 
     <section class="pjcol pjmid">
-      <div class="pjmidhead"><span class="flabel">Conversation</span>
+      <div class="pjmidhead"><h3 class="dlab">Conversation</h3>
         <div class="tsearch">
           <span class="tsearch-i" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -3100,7 +3105,7 @@ svg { display: block; }
          list (Josh 2026-08-15: at the bottom it was the one thing you had
          to scroll to find). -->
     <div class="field" id="pj-tasks-field">
-      <span class="flabel">Tasks</span>
+      <h3 class="dlab">Tasks</h3>
       <button class="btn" id="pj-newtask" type="button" style="margin-bottom: var(--space-5)"><span aria-hidden="true">+</span> New task</button>
       <div class="tkcards" id="pj-tasklist"></div>
       <!-- The door, pack rule: the column is a task with somebody on it that

@@ -83,3 +83,36 @@ The six nits deferred on #89. The `answer-panel` branch (14 commits,
 last touched 2026-08-19 14:47 at challenge-loop iteration 10, no PR),
 which touches the same answering surface and must be reconciled with
 this plan before either lands.
+
+## Known red in `render-projects.js`, PRE-EXISTING, deliberately not fixed here
+
+`docs/browser-checks/render-projects.js` reports `✖ 4 contrast failures`. All
+four are the same two selectors in both schemes:
+
+    #panel-projects .pj-member .pj-told
+    #panel-projects .pj-member .drop
+
+They are not contrast failures. They are the check's own honest refusal to
+pass on a selector it never found ("A MISS IS RECORDED, not skipped. Skipping
+is how four selectors went unmeasured under a printed pass"). Both elements
+LEFT the one-project view in #87, which moved removal to Project settings and
+stopped the members column saying the folder was told. The check was never
+updated, so it has been red since #87 merged.
+
+Evidence it is not this branch's: `git diff origin/main -- web/index.html`
+touches neither selector, and both strings are still present in the file, just
+rendered on a different screen.
+
+**Not repaired here, on purpose.** The honest repair relocates the coverage to
+`render-pjsettings.js`, which today has no contrast pass at all (87 lines), so
+it is new checking code rather than a moved line. Writing that inside an
+unrelated branch at speed is the shape this codebase already has a lesson
+about: a fix for a coverage problem that quietly makes the suite greener while
+covering less. It gets its own chunk.
+
+**Do not "fix" it by deleting the two selectors.** That turns a visible red
+into an invisible gap, which is strictly worse.
+
+⚠️ One more will join it: `#pj-one-view .flabel` in the same list resolves
+today only because "Talk to one of them" still wears that class. When that box
+is deleted the selector goes unmeasurable too, and the same repair covers both.
