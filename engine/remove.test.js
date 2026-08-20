@@ -990,6 +990,12 @@ test('an agent stopped but never recorded is told where its way back is', () => 
       'the one path where the person has nothing else to go on does not name the startup job');
     assert.match(gone.because, /turning that back on is what undoes this/,
       'it names the job without saying what to do with it');
+    // ⚠️ THE PRESENCE HALF of the no-job test's `doesNotMatch(/set to start on
+    // its own as/)`. Absence proves nothing unless the same phrase is shown to
+    // appear when it should, and this pin used to assert only the TAIL, so the
+    // two tests were about different strings while a comment said otherwise.
+    assert.match(gone.because, /set to start on its own as/,
+      'the job-carrying recovery route no longer names the job at all');
   } finally {
     fs.chmodSync(dir, 0o700);
     fs.rmSync(remove.REMOVED_FILE, { force: true });

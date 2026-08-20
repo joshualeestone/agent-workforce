@@ -149,6 +149,29 @@ test('the tell refuses what its siblings refuse: untied names, missing files, un
   } finally {
     fleet.restore();
   }
+  /**
+   * ⚠️ THE THIRD ARM OF THE SPLIT, which had no test at all. The refusal has
+   * three worlds now (unreadable roster, a name held by something untied, and
+   * a name that is simply NOT THERE) and only the first two were pinned. A
+   * comment of mine said this one was "pinned separately below"; it was not,
+   * which is the same class this branch keeps finding, written by me into a
+   * fix for it.
+   *
+   * The roster is READABLE and holds a different agent, so `Array.isArray` is
+   * true and no entry carries this name: exactly the arm that should say the
+   * name was not found.
+   */
+  const others = fleet.install([fleet.agent('somebody-else', { state: 'idle' })]).agents;
+  try {
+    const r4 = you.tellAgent('nobody-by-this-name', others);
+    assert.equal(r4.state, projects.TOLD.COULD_NOT);
+    assert.match(r4.because, /could not find an agent with exactly this name/,
+      'a name nothing on this computer holds did not get the not-there sentence');
+    assert.doesNotMatch(r4.because, /something is running under this name/,
+      'it says something is running under a name no pane holds');
+  } finally {
+    fleet.restore();
+  }
   const r3 = you.tellAgent('casey', null);
   assert.equal(r3.state, projects.TOLD.COULD_NOT);
   assert.match(r3.because, /could not check which agents are running/);
