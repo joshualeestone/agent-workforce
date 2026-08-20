@@ -202,3 +202,20 @@ thing. On a merged list the line has to be per row and only on the copies.
 **Nothing shipped tonight is wrong under either answer.** The folder list is
 true about the folder and says so; it is only incomplete under the merged
 answer, and the `+` that would expose the gap is deliberately not built.
+
+## The revealed add-member row has NO pack reference, and that is why it is not "restyled"
+
+Josh's markup highlights the Sponsor picker and circles "Put it on this
+project". Both live in the REVEALED state of the add-member control, and the
+pack does not draw that state at all: its members column ends at a single
+`btn-quiet` "+ Add member", because the picker hides behind the button.
+
+So "restyle to the pack" is not an executable instruction for those two
+controls. What IS executable, and is done: the pack's treatment of the BUTTON
+itself, which the build had as a solid primary in title case.
+
+⚠️ Recorded rather than guessed. Reading intent off a circle is what produced
+the avatar decision, which is still flagged as possibly wrong. Two circles on
+one screen, one of which had a pack answer and one of which did not, is exactly
+the case where inventing the second would be indistinguishable from having
+matched something.

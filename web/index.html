@@ -1261,6 +1261,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    siblings of a wrapping flex row and are now one block beside the disc. */
 .pj-member-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pj-face { flex: 0 0 34px; }
+/* The pack's inline sizing for this one button, as a rule rather than a style
+   attribute: full column width, its own smaller type and tighter padding. The
+   pack carries these inline because a mock has nowhere else to put them. */
+.pj-addmem { margin-top: 14px; width: 100%; font-size: .875rem;
+             padding: calc(.5em - 1px) calc(1.05em - 1px); }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
 /* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
@@ -3156,7 +3161,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <!-- ⚠️ The picker hides behind the button, not the other way round: the
            resting state of the box is the members, and "+ Add Member" (the
            pinned words) is the one control that opens the choosing row. -->
-      <button class="btn" id="pj-add-member" type="button" style="margin-top: var(--space-5)"><span aria-hidden="true">+</span> Add Member</button>
+      <!-- ⚠️ THE PACK'S TREATMENT, VERBATIM (FROZEN-2026-08-19:3022): quiet
+           rather than primary, full width of the column, .875rem, and its own
+           padding. It is the resting state of this box, not an action anybody
+           came here to take, and a solid primary button sitting permanently
+           under the member list reads as the thing to do next.
+           Sentence case too: the pack writes "Add member". This file had
+           "Add Member", and title case on a control makes it read as a proper
+           noun rather than an instruction. -->
+      <button class="btn-quiet pj-addmem" id="pj-add-member" type="button"><span aria-hidden="true">+</span> Add member</button>
       <div class="frow" id="pj-one-add-row" hidden style="margin-top: var(--space-5)">
         <select id="pj-one-add" aria-label="An agent to add to this project"></select>
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
