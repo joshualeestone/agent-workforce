@@ -2741,7 +2741,7 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   // The REAL modelLine, because the meta line routes through it: a stub
   // here would reconstruct the derivation this line exists to share.
-  const modelLine = pageFunction('modelLine');
+  const modelLine = pageFunction('modelLine', pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
   // ⚠️ THE REAL roleLine TOO, and for a stronger reason than modelLine's. This
   // line used to inline `a.profile && a.profile.role || a.role`, which was
   // roleLine's body BEFORE roleLine learned to sentence-case a parsed role — so
@@ -6853,9 +6853,9 @@ test('the tab click handler actually calls the top-level reset, before showTab',
  * about an agent that has never started.
  */
 test('a card names a planned model plainly, while the detail panel keeps its tense', () => {
-  const modelLine = pageFunction('modelLine');
-  const runsOnLine = pageFunction('runsOnLine',
-    pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
+  const tbl = pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
+  const modelLine = pageFunction('modelLine', tbl);
+  const runsOnLine = pageFunction('runsOnLine', pageFnSource('modelLine') + '\n' + tbl);
 
   assert.equal(modelLine({ plannedModelName: 'Claude Sonnet 5' }), 'Claude Sonnet 5',
     'a card said "Unknown Model" about an agent whose model is in its own job file');
@@ -7003,7 +7003,15 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
  * confirmation into a trapdoor.
  */
 test('a removed-agents section that could not be read says so, and only before it has ever been read', () => {
-  const src = pageFnSource('removedUnreadable');
+  const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // The sentence is read out of the page, not restated here: the retraction
+  // below compares against it exactly, and a test carrying its own copy could
+  // not catch the two drifting apart.
+  const sayAt = script.indexOf('const REMOVED_UNREADABLE_SAY');
+  assert.ok(sayAt > -1, 'the could-not-check sentence lost its sentinel');
+  const saySrc = script.slice(sayAt, script.indexOf(';', script.indexOf("having been.'", sayAt)) + 1);
+  const src = saySrc + '\n' + pageFnSource('removedUnreadable');
   const make = (everRead, existing, onBoard = true) => {
     const msg = { textContent: existing || '' };
     // eslint-disable-next-line no-new-func
@@ -7012,6 +7020,8 @@ test('a removed-agents section that could not be read says so, and only before i
     fn();
     return msg.textContent;
   };
+  // eslint-disable-next-line no-new-func
+  const SAY = new Function(saySrc + '\nreturn REMOVED_UNREADABLE_SAY;')();
 
   assert.match(make(false, ''), /could not check/,
     'a first load that could not reach /api/removed showed the same empty screen '
@@ -7039,6 +7049,37 @@ test('a removed-agents section that could not be read says so, and only before i
   assert.equal(make(false, '', false), '',
     'the could-not-check line leaked onto another tab, describing a list that '
     + 'screen does not show');
+
+  /**
+   * ⚠️ AND IT MUST COME DOWN when a read finally succeeds. It was written on a
+   * first-load failure and never retracted, so one transient failure left "we
+   * could not check" standing indefinitely UNDER a correctly painted list — the
+   * same could-not-look versus is-not-there inversion, pointed the other way.
+   * ⚠️ The previous test asserted only that the sentence is not written TWICE.
+   * That passes with the defect live: silence on the second call is not the same
+   * as taking the first one down.
+   */
+  const script2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8')
+    .match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script2.indexOf('REMOVED_EVER_READ = true;');
+  assert.ok(at > -1, 'the success path lost its ever-read flag');
+  const retraction = script2.slice(at, at + 900);
+  assert.match(retraction, /removed-msg/,
+    'the success path never touches #removed-msg, so a stale "we could not '
+    + 'check" sentence outlives the answer that disproves it');
+  assert.match(retraction, /REMOVED_UNREADABLE_SAY/,
+    'the retraction does not compare against the sentinel, so it either clears '
+    + 'the wrong message or fails to recognise its own');
+
+  // ⚠️ AND ONLY OURS. #removed-msg also carries what a partial removal could not
+  // reach, which is the more specific fact and must survive a later success.
+  const clearOurs = new Function('text', 'SAY',
+    'const stale = { textContent: text };'
+    + 'if (stale && stale.textContent === SAY) stale.textContent = "";'
+    + 'return stale.textContent;');
+  assert.equal(clearOurs(SAY, SAY), '', 'the retraction did not recognise its own sentence');
+  assert.equal(clearOurs('Kosmos could not stop it.', SAY), 'Kosmos could not stop it.',
+    'the retraction cleared a partial-removal message that had nothing to do with it');
 });
 
 /**
@@ -7059,65 +7100,85 @@ test('a removed-agents section that could not be read says so, and only before i
 test('every CSS declaration in the page sits inside a selector', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const style = raw.slice(raw.indexOf('<style>') + 7, raw.indexOf('</style>'));
-  // Comment-stripped, newline-preserving: prose about a rule is not a rule, and
-  // the line numbers have to stay true to be worth reporting.
-  const src = style.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''));
 
-  let depth = 0;            // 0 = top level, 1 = inside @media, 2+ = inside a rule
-  let atRuleDepth = -1;
-  const stray = [];
-  src.split('\n').forEach((line, i) => {
-    const t = line.trim();
-    if (!t) return;
-    if (/^@media[^{]*\{/.test(t)) { atRuleDepth = depth; depth += 1; return; }
-    const opens = (t.match(/\{/g) || []).length;
-    const closes = (t.match(/\}/g) || []).length;
-    // A declaration is `prop: value` with no brace on the line.
-    // ⚠️ DIGITS. The first version was /^[-a-z]+\s*:/ , which matches
-    // `background:` and NOT `--label-2:`, `--k-ink-2:` or `--space-5:` — the
-    // majority of declarations in this stylesheet, and precisely the ones
-    // surrounding the real blocker this guard exists for. Had the orphan been
-    // `--label-2:` the guard would have been silent, and its control used the
-    // same non-digit case so it could not expose the gap.
-    // ⚠️ THIS IS THE SAME REGEX BUG AS THE DARK-MODE SWEEP EARLIER THE SAME
-    // DAY, in a new guard, hours later.
-    if (!opens && !closes && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t)) {
-      // Legal only when we are inside a RULE, i.e. deeper than any @media.
-      if (depth <= Math.max(atRuleDepth + 1, 0) && depth <= 1) {
-        stray.push(`${i + 1}: ${t.slice(0, 60)}`);
+  /**
+   * ⚠️ ONE WALK, USED BY BOTH THE FILE SCAN AND THE CONTROL. The first version
+   * hand-copied the algorithm into its control, so the control could not see the
+   * scanner drift — and it did drift: the `@media` branch returned BEFORE
+   * counting the braces on its own line, so every single-line
+   * `@media (…) { .x { … } }` inflated the depth permanently. This stylesheet
+   * has six of them, the walk ended at depth 6 instead of 0, and the flag
+   * condition was unreachable after line 453. The guard written for the
+   * orphaned-declaration blocker was silent over four fifths of the file,
+   * including the region the blocker was in.
+   *
+   * A check containing a copy of the thing it checks cannot fail.
+   */
+  const scan = (css) => {
+    const src = css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''));
+    let depth = 0;
+    let atRuleDepth = -1;
+    const stray = [];
+    src.split('\n').forEach((line, i) => {
+      const t = line.trim();
+      if (!t) return;
+      const opens = (t.match(/\{/g) || []).length;
+      const closes = (t.match(/\}/g) || []).length;
+      if (/^@[a-z-]+[^{]*\{/.test(t)) {
+        atRuleDepth = depth;
+        depth += opens - closes;      // ⚠️ NOT `depth += 1; return;`
+        if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
+        return;
       }
-    }
-    depth += opens - closes;
-    if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
-  });
+      // A declaration is `prop: value` with no brace on the line. Custom
+      // properties contain digits (`--label-2`), which an earlier `[-a-z]+`
+      // filter silently rejected — most of this stylesheet.
+      if (!opens && !closes && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t)) {
+        if (depth <= Math.max(atRuleDepth + 1, 0) && depth <= 1) {
+          stray.push(`${i + 1}: ${t.slice(0, 60)}`);
+        }
+      }
+      depth += opens - closes;
+      if (atRuleDepth >= 0 && depth <= atRuleDepth) atRuleDepth = -1;
+    });
+    return { stray, depth };
+  };
 
-  assert.deepEqual(stray, [],
+  const real = scan(style);
+  // ⚠️ THE WALK MUST BALANCE. A drifting depth is how the first version went
+  // silent, and it reported nothing while doing so — so the imbalance is
+  // asserted directly rather than inferred from an empty result.
+  assert.equal(real.depth, 0,
+    `the brace walk ended at depth ${real.depth}, so it lost track of nesting and `
+    + 'every verdict below it is over the wrong scope');
+  assert.deepEqual(real.stray, [],
     'declaration(s) outside any selector — the browser discards these silently, '
-    + 'so the rule they belonged to lost that property:\n  ' + stray.join('\n  '));
+    + 'so the rule they belonged to lost that property:\n  ' + real.stray.join('\n  '));
 
-  // ⚠️ THE CONTROL. Without it a scanner that never flags anything passes, and
-  // this whole test becomes a comment. Feeds the exact shape of the real defect.
-  // ⚠️ TWO ORPHANS, and the SECOND one carries a digit. A control that only
-  // feeds `background:` cannot expose a property filter that rejects
-  // `--label-2:` — which is exactly the hole this control missed the first
-  // time, because it shared the scanner's blind spot.
-  const broken = '#x {\n  color: red;\n}\n@media (prefers-color-scheme: dark) {\n  #x { --a: 1; }\n  background: var(--k-bg);\n  --label-2: #4a4f57;\n}\n';
-  let d = 0; let ad = -1; const found = [];
-  broken.split('\n').forEach((line) => {
-    const t = line.trim();
-    if (!t) return;
-    if (/^@media[^{]*\{/.test(t)) { ad = d; d += 1; return; }
-    const o = (t.match(/\{/g) || []).length;
-    const c = (t.match(/\}/g) || []).length;
-    if (!o && !c && /^-{0,2}[a-z][-a-z0-9]*\s*:/i.test(t) && d <= Math.max(ad + 1, 0) && d <= 1) found.push(t);
-    d += o - c;
-    if (ad >= 0 && d <= ad) ad = -1;
-  });
-  assert.deepEqual(found, ['background: var(--k-bg);', '--label-2: #4a4f57;'],
+  // ⚠️ THE CONTROL, run through THE SAME `scan`. Two orphans: one ordinary
+  // property and one custom property carrying a digit. And a single-line
+  // `@media` above them, which is what defeated the first version.
+  const broken = [
+    '@media (max-width: 720px) { html { scroll-padding-top: 165px; } }',
+    '#x {',
+    '  color: red;',
+    '}',
+    '@media (prefers-color-scheme: dark) {',
+    '  #x { --a: 1; }',
+    '  background: var(--k-bg);',
+    '  --label-2: #4a4f57;',
+    '}',
+  ].join('\n');
+  const ctl = scan(broken);
+  assert.equal(ctl.depth, 0, 'the control fixture is unbalanced, so it tests the wrong thing');
+  assert.deepEqual(ctl.stray.map((x) => x.split(': ').slice(1).join(': ')),
+    ['background: var(--k-bg);', '--label-2: #4a4f57;'],
     'the scanner cannot see the defect it exists for, so its silence above '
-    + 'proves nothing — and if only the first is found, its property filter '
-    + 'rejects custom properties containing a digit, which is most of them');
+    + 'proves nothing. If neither is found, a single-line @media has broken the '
+    + 'depth count; if only the first, the property filter rejects custom '
+    + 'properties containing a digit.');
 });
+
 
 /**
  * Every surface names the SAME model for one agent.
@@ -7136,7 +7197,7 @@ test('every CSS declaration in the page sits inside a selector', () => {
  */
 test('the card, the list row and the detail meta line never name two different models', () => {
   const tables = pageFnSource('modelLine') + '\n' + pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf');
-  const modelLine = pageFunction('modelLine');
+  const modelLine = pageFunction('modelLine', pageConstSource('CARD_ST') + '\n' + pageFnSource('cardStOf'));
   const runsOnLine = pageFunction('runsOnLine', tables);
 
   // A stopped agent whose transcript and job disagree: it RAN as Haiku, its job
@@ -7162,6 +7223,21 @@ test('the card, the list row and the detail meta line never name two different m
   const noJob = { state: 'stopped', modelName: 'Claude Haiku 4.5' };
   assert.equal(modelLine(noJob), 'Claude Haiku 4.5');
   assert.equal(runsOnLine(noJob).name, 'Claude Haiku 4.5');
+
+  /**
+   * ⚠️ EVERY STATE, not just `stopped`. Both functions answer "is this agent
+   * running" and they used to answer it two ways — `modelLine` from the literal
+   * `state === 'stopped'`, `runsOnLine` from `cardStOf(a).pres`. They agreed
+   * only because `stopped` is currently the single CARD_ST entry mapping to
+   * `pres: 'off'`; adding another would have split them, and a test that
+   * exercises one state cannot see that.
+   */
+  const CARD_ST = new Function(pageConstSource('CARD_ST') + '\nreturn CARD_ST;')();
+  for (const state of [...Object.keys(CARD_ST), 'martian']) {
+    const both = { state, modelName: 'Claude Haiku 4.5', plannedModelName: 'Claude Opus 5' };
+    assert.equal(modelLine(both), runsOnLine(both).name,
+      `the card and the detail panel name different models for a "${state}" agent`);
+  }
 });
 
 /**

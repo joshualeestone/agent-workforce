@@ -683,7 +683,14 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* ⚠️ No dimming for stopped (the pack retired it: "Not running" at 72% while
    "Can't tell" sat full-strength was backwards on honesty grounds). Only the
    STATE is off; the name, role and face are true either way. */
-.acard.off .astate, .acard.off .atask { color: var(--k-ink-2); }
+/* ⚠️ THE BADGE DIM IS SCOPED TO THE BADGE, not to the card. `.acard.off .astate`
+   dimmed it on the board while the detail panel — same badge, no `.acard.off`
+   ancestor — kept `--k-ink`: the same "one badge, two inks" this branch removed
+   the `.detail-state` colour to fix, surviving for `stopped`, the one state the
+   rest of the branch cares most about. `.atask` stays card-scoped: that IS a
+   card treatment, and the panel has its own task element. */
+.astate.st-stopped { color: var(--k-ink-2); }
+.acard.off .atask { color: var(--k-ink-2); }
 .agauge { width: 82px; margin: 0 auto 14px; position: relative; }
 .agauge svg { width: 82px; height: 82px; display: block; }
 .gt { stroke: rgba(20,22,26,.10); }
@@ -3592,7 +3599,15 @@ function modelLine(a) {
      5". The identical shape as the role-line divergence below, and the server
      now populates both readings deliberately for exactly this case. One rule,
      every surface: what it will start on, when it is not running. */
-  const name = (a.state === 'stopped' && a.plannedModelName) || a.modelName || a.plannedModelName;
+  /* ⚠️ `pres`, NOT the literal 'stopped'. `runsOnLine` decides the same
+     question — is this agent running — from `cardStOf(a).pres`, and this
+     decided it from the state string. They agree today ONLY because `stopped`
+     happens to be the single CARD_ST entry mapping to `pres: 'off'`. Add one
+     more and the card would name the transcript model while the detail panel
+     named the job's, reopening the card-vs-meta disagreement this branch
+     closed. One question, one derivation. */
+  const notRunning = cardStOf(a).pres === 'off';
+  const name = (notRunning && a.plannedModelName) || a.modelName || a.plannedModelName;
   if (!name) return 'Unknown Model';
   return /^claude/i.test(name) ? name : 'Claude ' + name;
 }
@@ -6668,6 +6683,17 @@ let REMOVED_EVER_READ = false;
  * measured rather than one we could not check, and a later failed poll must
  * not overwrite a list that is on screen and correct.
  */
+/**
+ * The exact sentence `removedUnreadable` writes, so the success path can take
+ * down THAT message and only that one.
+ *
+ * ⚠️ A SENTINEL RATHER THAN A BLANKET CLEAR. `#removed-msg` is shared: a partial
+ * removal reports what it could not reach there, and that is the more specific
+ * fact. Clearing the element on success would erase it.
+ */
+const REMOVED_UNREADABLE_SAY = 'We could not check whether any agents have been '
+  + 'removed. That is not the same as none having been.';
+
 function removedUnreadable() {
   if (REMOVED_EVER_READ) return;
   /* ⚠️ AND ONLY WHILE THE BOARD IS ON SCREEN. This is called from all three
@@ -6681,10 +6707,7 @@ function removedUnreadable() {
      gate and the note that exists for it. */
   if (!onAgentsTab()) return;
   const msg = document.getElementById('removed-msg');
-  if (msg && !msg.textContent) {
-    msg.textContent = 'We could not check whether any agents have been removed. '
-      + 'That is not the same as none having been.';
-  }
+  if (msg && !msg.textContent) msg.textContent = REMOVED_UNREADABLE_SAY;
 }
 
 async function paintRemoved() {
@@ -6710,6 +6733,19 @@ async function paintRemoved() {
     if (!body || !Array.isArray(body.agents)) return removedUnreadable();
     gone = body.agents;
     REMOVED_EVER_READ = true;
+    /* ⚠️ AND TAKE THE SENTENCE DOWN. Written on a first-load failure, it was
+       never retracted: one transient /api/removed failure left "we could not
+       check" standing indefinitely UNDER a correctly painted list, or under a
+       correctly measured absence. That is the same could-not-look versus
+       is-not-there inversion this section exists to fix, pointed the other way —
+       and the test only asserted the message is not written twice, never that a
+       stale one comes down, so it passed with the defect live.
+       ⚠️ Only OUR sentence: `#removed-msg` also carries what a partial removal
+       could not reach, which is the more specific fact and must survive. */
+    {
+      const stale = document.getElementById('removed-msg');
+      if (stale && stale.textContent === REMOVED_UNREADABLE_SAY) stale.textContent = '';
+    }
   } catch {
     // ⚠️ Leave whatever is on screen alone. Emptying the list because one poll
     // failed would tell somebody their removed agents are gone, which is the
