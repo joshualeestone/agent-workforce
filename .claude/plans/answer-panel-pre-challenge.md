@@ -4,9 +4,8 @@ method: challenge-loop
 branch: answer-panel
 diff_hash: 2faf3a48a6afa8b49dba05fb709cda4db3f3a9b05b404c72800b3a9725b8601a
 diff_hash_certifies: the diff at 99f3e19, the iteration-10 fix, which is the tree the gate verified when PR #119 was created
-head_now: eeee5f4
-code_diff_hash_now: b930406b7b650e81cf0ca768e613b8e90b0515bf4707dc364351d8c3d5e1cb83
 code_diff_hash_at_round_10: 35bd501e0e3d4e676376903f47551812eeaee27cf7f5d391de4e2187499313bd
+recompute_current: "git diff origin/main...HEAD -- . ':(exclude).claude/plans' | shasum -a 256"
 subdir_audit: passed
 timestamp: 2026-08-20T14:00:57Z
 iterations: 16
@@ -22,7 +21,9 @@ converged: false
 
 ### 🛑 The two hashes above are the point of this block, not bookkeeping
 
-`diff_hash` is what the gate verified at PR creation, and it is **not** the diff that exists now. Six rounds landed after it, so the certified tree and the current tree are different trees. Recomputing that field would make this file claim a converged loop covered code no blind pass has seen. It is left alone and the current tree is recorded beside it, code-only (excluding `.claude/plans/`, so that editing this very file cannot move its own hash).
+`diff_hash` is what the gate verified at PR creation, and it is **not** the diff that exists now. Rounds landed after it, so the certified tree and the current tree are different trees. Recomputing that field would make this file claim a converged loop covered code no blind pass has seen, so it is left alone.
+
+⚠️ **The current hash is a COMMAND, not a number, and the first version of this block got that wrong.** I wrote the then-current hash in as a literal, and it went stale two commits later, which is the exact defect this block exists to describe. Run `recompute_current` from the frontmatter: if it does not equal `code_diff_hash_at_round_10`, code has landed since the last converged-or-not blind pass, and the gap is how much.
 
 > 🔑 **A proof file is a timestamp, not a property.** The value of the pair is that anyone can see at a glance that the two differ and by how much.
 
