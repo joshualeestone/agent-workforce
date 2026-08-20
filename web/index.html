@@ -2797,17 +2797,23 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
 <section class="panel" id="panel-create" hidden>
   <button class="back" id="create-back">&#8592; All agents</button>
 
-  <div class="cstep" id="cstep-role">
+  <div id="cstep-role">
     <h2>What should this agent do?</h2>
 
     <!-- ⚠️ THREE CHOICES IN THE PACK, TWO SHIPPED HERE. The pack's rule
          (2026-08-15): a radio for the recommended role and a radio that
          opens the rest as a grouped menu -- twenty-six cards is a wall, and
          twenty-six options in a menu nobody opens is a wall with a lid on
-         it. The pack's third radio, "Describe it yourself", ships with the
-         details-step slice: it needs the Role label field from that screen
-         to be truthful, and a radio that creates agents labelled wrong is
-         worse than a radio that arrives one slice later.
+         it. ⚠️ THE THIRD RADIO HAS SHIPPED and this comment used to say it
+         had not. "Describe it yourself" is `#pick-own` thirty-one lines
+         below, revealed by `OWN_ROLE`, and engine/roles.js serves it as
+         `key: 'own'`. It was held back until the Role label field existed,
+         because a radio that creates agents labelled wrong is worse than a
+         radio that arrives one slice later; that condition was met and the
+         sentence was never updated. A second comment inside this same block
+         already said "three equivalent options", so the block carried the
+         correction AND the thing it corrected, and the stale half was the
+         one a reader meets first. Found by Mona Lisa.
          The rows are FILLED FROM /api/roles, never hardcoded: the copy a
          person reads while choosing has to be the copy the agent is created
          from (the rule the old flat list already followed). -->
@@ -2865,7 +2871,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     </div>
   </div>
 
-  <div class="cstep" id="cstep-name" hidden>
+  <div id="cstep-name" hidden>
     <h2 id="create-meet">Set up your agent</h2>
     <p id="create-blurb"></p>
 
@@ -2989,12 +2995,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
        fields, and the pack puts a form on the paper ground", which was never
        true of this one. A justification that covered two of three was allowed
        to cover all three.
-       ⚠️ `cstep` is a dead marker: these three are addressed by ID
-       (`getElementById('cstep-' + s)`), and no rule or selector reads the class.
-       Left in place because the pack styles it and the build does not -- a
-       PORTING GAP wearing the appearance of dead code, and deleting it would
-       remove the hook the missing rule attaches to. -->
-  <div class="cstep dbox" id="cstep-made" hidden>
+       🛑 `cstep` IS GONE FROM THESE THREE, AND THE PACK'S `.cstep` MUST NEVER
+       BE PORTED HERE. This comment used to keep the class on the grounds that
+       "the pack styles it and the build does not -- a porting gap wearing the
+       appearance of dead code". That was wrong, and wrong in the direction that
+       invites the port. The pack DOES style `.cstep`, and it styles a different
+       object: a tab BUTTON inside `<div class="csteps cprev" role="tablist">`,
+       under the pack's own label "Preview only -- jump between the three
+       screens. Not part of the app." Seven rules, all for an inline-flex chip
+       with a 22px circle for its `<b>`.
+       So porting them would turn these three section CONTAINERS into chips.
+       There was no missing rule and the hook attached to nothing: the steps are
+       addressed by ID (`getElementById('cstep-' + s)`), and nothing reads the
+       class. Found by Mona Lisa; recorded in CURRENT-FREEZE against the class
+       rather than the file, because a warning that names a file protects that
+       file and not the defect. -->
+  <div class="dbox" id="cstep-made" hidden>
     <h2 id="made-head">Making it</h2>
     <!-- ⚠️ Every line here is either something the engine reported or something
          this page watched happen. Nothing is asserted on a timer. -->
