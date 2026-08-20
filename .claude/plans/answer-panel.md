@@ -162,6 +162,19 @@ request, and the suite reads text.
 - **`render-talk.js` is headed by default now**, like `render-thread` and
   `render-projects`. Its whole output is the class of evidence SwiftShader
   weakens: contrast, computed backgrounds, geometry, hit tests.
+- **`optionsIn` is materially stricter than the "iff" written above**, and this
+  is the largest drift on the branch rather than the smallest. The spec says
+  confident iff the numbers are contiguous ascending from 1, the count is in
+  [2..9], and every label is non-empty. The shipped parser also requires the
+  option lines to be CONSECUTIVE in the capture, requires one of them to carry
+  the selection marker, refuses when a newer needs-you marker appears below the
+  run, refuses any label that fails `messageProblem`, and dropped the
+  empty-label check as unreachable. Every one of those is a refusal the spec
+  would have ACCEPTED, each closes a measured false positive rather than a
+  hypothetical one, and each is documented at the code and pinned by a test
+  with its own positive control. The spec above is left as written rather than
+  edited, because what it records is what was believed on 2026-08-19 before the
+  captures were read.
 
 ## 🛑 The ordering constraint, unchanged
 

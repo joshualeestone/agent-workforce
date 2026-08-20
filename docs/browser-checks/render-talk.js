@@ -133,8 +133,25 @@ const STATES = {
     messages: [placed('14 days', '1')],
     __answered: true,
   },
+  /* ⚠️ ITS OWN QUESTION, not `QUESTION`. This state used to borrow the two-option
+     "14 days / 30 days" menu and draw THREE unrelated buttons under it, so the
+     committed screenshot showed a panel whose buttons contradict the question
+     printed two inches above them. In a directory whose stated rule is that a
+     screenshot is evidence, that picture taught the opposite of the product's
+     own rule that a button carries the option's own words. */
   '8-long-labels': {
-    ...base, asking: true, question: QUESTION,
+    ...base,
+    asking: true,
+    question: {
+      text: [
+        '│ src/report.md already exists and this would overwrite it. Do you',
+        '│ want me to go ahead?',
+        '│',
+        '│ ❯ 1. Yes, and do not ask me again for anything in this project',
+        '│   2. No, stop and let me look at the file myself first',
+        '│   3. Yes',
+      ].join('\n'),
+    },
     options: [
       { n: 1, label: 'Yes, and do not ask me again for anything in this project' },
       { n: 2, label: 'No, stop and let me look at the file myself first' },
@@ -174,6 +191,18 @@ const STATES = {
     await page.addInitScript(() => {
       window.__fx = null;
       const enc = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+      /* ⚠️ THE APP'S OWN 5s TICK IS REFUSED, and this is not tidiness. `tick`
+         has no `document.hidden` guard, so from the moment `CURRENT` is set and
+         the detail panel is unhidden it fires a background `paintTalk` every
+         five seconds for the whole multi-minute run, racing every paint driven
+         by hand. It matters most in the mid-flight block below, whose entire
+         premise is exclusive ownership of the in-flight window: a tick landing
+         inside the 120ms sample bumps `TALK_LOAD`, the paint under test returns
+         at its own stale-load guard, and the measurement describes the
+         BACKGROUND paint. Recorded rather than merely refused, so a run can
+         assert the page really did try to install it. */
+      window.__intervals = [];
+      window.setInterval = (fn, ms, ...rest) => { window.__intervals.push(ms); return 0; };
       window.__posted = [];
       window.fetch = async (url, opts) => {
         const u = String(url);
@@ -190,6 +219,14 @@ const STATES = {
       };
     });
     await page.goto(PAGE);
+    /* CONTROL: the stub is only meaningful if the page actually asked for the
+       tick. If the app stops using setInterval this reports rather than going
+       quietly unnecessary. */
+    const asked = await page.evaluate(() => (window.__intervals || []).slice());
+    if (!asked.includes(5000)) {
+      problems.push(`[${theme}] tick: the page installed no 5s interval (${JSON.stringify(asked)}), `
+        + 'so the stub below is guarding nothing');
+    }
     /* Kept so two states can be compared to each other AFTER the loop, which
        is the only way to make "these two render the same" a claim. */
     const measured = {};
@@ -273,6 +310,12 @@ const STATES = {
           sayDisabled: el('d-say').disabled,
           threadText: el('d-dmthread').textContent.trim().slice(0, 220),
           sendDisabled: el('d-send').disabled,
+          /* ⚠️ THE PROMISE, PER STATE. The persistence line was read by nothing
+             in this sweep, and one state contradicts it outright: with
+             `historyUnfilable` the thread says "Nothing said here is kept for
+             April." and the line under it said "This stays here after a
+             restart." Both were in the committed screenshot for two days. */
+          persistVisible: vis(el('d-persist')),
           label: el('d-talk-label').textContent,
           qlab: el('d-qask-lab').textContent,
           qfail: el('d-qask-fail').hidden ? '' : el('d-qask-fail').textContent,
@@ -361,6 +404,14 @@ const STATES = {
       }
       if (m.optEdge !== null && m.optEdge < 3) {
         problems.push(`${tag}: the option button's edge is ${m.optEdge}:1 against the panel, under the 3:1 floor`);
+      }
+      /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
+         a state that keeps things is as wrong as one standing over a state that
+         does not, and only the second half was ever the bug. */
+      const keepsNothing = fx.historyUnfilable === true;
+      if (m.persistVisible === keepsNothing) {
+        problems.push(`${tag}: the persistence promise is ${m.persistVisible ? 'standing over' : 'missing from'} `
+          + `a thread that ${keepsNothing ? 'keeps nothing' : 'is kept'}`);
       }
       if (m.onTop !== 'the box') problems.push(`${tag}: something else is painted over the box: ${m.onTop}`);
       if (m.pageOverflow > 0) problems.push(`${tag}: the PAGE scrolls sideways by ${m.pageOverflow}px`);
@@ -549,7 +600,7 @@ const STATES = {
       await page.evaluate(() => paintTalk('april', 'April'));
       const preFail = await page.evaluate(() => ({
         // Actionable, not merely present: see the note on `preHold` below.
-        n: document.querySelectorAll('#d-qopts:not([hidden]) .qopt').length,
+        n: document.querySelectorAll('#d-qopts:not([hidden]) .qopt:not([disabled])').length,
         qaskHidden: document.getElementById('d-qask').hidden,
         answered: !!TALK_ANSWERED.april,
         sending: TALK_SENDING,
@@ -692,10 +743,14 @@ const STATES = {
          `page.click` needs an ACTIONABLE element, and the regression this file
          documents most specifically -- a stale `__lastOpts` leaving buttons in
          the markup under a hidden row, which is why `openDetail` clears it --
-         produces a healthy count and a click that still times out. Counting
-         through `:not([hidden])` is the difference between a guard and a
-         guard-shaped line. */
-      const preHold = await page.evaluate(() => document.querySelectorAll('#d-qopts:not([hidden]) .qopt').length);
+         produces a healthy count and a click that still times out.
+         ⚠️ AND ENABLED, not only visible. `page.click` waits for actionability,
+         which includes not being disabled, and "both buttons stayed grey and
+         inert forever" is the other regression this file was written for. A
+         guard that counts disabled buttons as clickable is a guard-shaped
+         line. */
+      const preHold = await page.evaluate(
+        () => document.querySelectorAll('#d-qopts:not([hidden]) .qopt:not([disabled])').length);
       if (preHold === 0) {
         problems.push(`[${theme}] hold: no option buttons to answer, so the hold is UNCHECKED`);
       } else {

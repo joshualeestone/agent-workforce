@@ -1268,7 +1268,14 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .qopt[disabled] { opacity: .5; cursor: not-allowed; }
 /* The out. One line, and it points DOWN at the composer this page already has
    rather than away to another screen. */
-.qout { margin: 10px 0 0; font-size: .8125rem; color: var(--k-ink-2); }
+/* ⚠️ `.qask p.qout`, NOT `.qout`. `.qask p` above is (0,1,1) and beat a bare
+   class (0,1,0) on specificity, so every declaration here except `color` was
+   dead and the line rendered at .9375rem/4px -- the same size as the question
+   label two inches above it, which is what the committed screenshot shows.
+   Measured before: 15px/4px. This is the `.pjthread` precedent this stylesheet
+   already cites: a rule that HAS its element and is silently outranked reads
+   in the diff exactly like a rule that works. */
+.qask p.qout { margin: 10px 0 0; font-size: .8125rem; color: var(--k-ink-2); }
 .dmbar { margin-top: 14px; }
 #d-say { flex: 1 1 auto; }
 /* ⚠️ A CLOSED BOX HAS TO LOOK CLOSED. The pack dims its disabled composer
@@ -6199,8 +6206,15 @@ function dmRow(m, name) {
      thread would describe a mechanism that did not happen. (Copy is provisional
      -- flagged to Mona Lisa; the FACT is not optional, the wording is hers.) */
   const wire = m.wire ? ' &middot; sent as ' + esc(m.wire) : '';
+  /* ⚠️ NO SEPARATOR BEFORE THE PILL. `.delivery` is an inline-block, so a
+     verdict long enough to wrap took the whole pill to the next line and left
+     the middot stranded at the end of the one above: "You · sent as 1 ·",
+     which reads as a sentence that stopped. The pill carries a border and its
+     own ground, so it needs no character to separate it. Closed by
+     construction rather than by a check: there is no separator left to
+     strand. */
   return '<div class="dm mine"><div class="dm-b">' + esc(m.text) + '</div>'
-    + '<span class="dm-w">You' + wire + ' &middot; '
+    + '<span class="dm-w">You' + wire + ' '
     + '<span class="delivery' + (v.mark || ' placed') + '">' + v.said + '</span></span></div>';
 }
 
@@ -6449,10 +6463,16 @@ async function paintTalk(sessionName, agentName) {
   // ordinary message. The whole block goes, not just its buttons.
   qask.hidden = nowHidden;
   /* The persistence line's other half (its text is written before the fetch):
-     shown only once an answer is in hand, and unconditionally, so a panel that
-     recovers from a refusal -- or an agent opened after one that failed -- has
-     it back. */
-  document.getElementById('d-persist').hidden = false;
+     shown once an answer is in hand, so a panel that recovers from a refusal
+     -- or an agent opened after one that failed -- has it back.
+     ⚠️ EXCEPT WHERE IT IS FALSE. `historyUnfilable` means we cannot keep a
+     conversation under this agent's name at all, and the thread arm says so in
+     as many words ("Nothing said here is kept for April."). "This stays here
+     after a restart" printed underneath that is the two sentences
+     contradicting each other on one screen, and the committed screenshot
+     talk-9-unfilable shows it happening. The thread arm already splits on this
+     fact; the promise splits with it. */
+  document.getElementById('d-persist').hidden = body.historyUnfilable === true;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as
