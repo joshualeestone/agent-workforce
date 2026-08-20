@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: b2e914ba6f175fd7b9fa2724f862c05667b93ba191d00ee7930638c9ce064bca
+diff_hash: c3f35dd7e945c7c70881db6269b1ebdc4de79243ab94f3bc69a82066bba69acc
 subdir_audit: passed
-timestamp: 2026-08-20T04:37:34Z
+timestamp: 2026-08-20T04:48:55Z
 iterations: 1
 converged: true
 ---
@@ -190,3 +190,40 @@ because it is two of HIS sentences that disagree.
 | 12 | 1 | BLOCKER | server.test.js pageConstSource | FIXED | arrays + whitespace-tolerant matcher |
 | 13 | 1 | WARNING | task-status verification | FIXED | re-measured on the mark, not the wrapper |
 | 14 | 1 | NIT | documents source | DEFERRED | needs Josh; recorded with options |
+
+## Fourth slice (2026-08-19, after #95)
+
+The pack's treatment of the "+ Add member" button, and a recorded NON-answer.
+
+[STRENGTH] ⚠️ THE VERSION TRAP APPEARED A THIRD TIME AND WAS CAUGHT A THIRD
+TIME. Branch 0.2.3, main 0.2.4. Same silent failure, same defence: compare both
+sides before merging.
+
+[STRENGTH] ⚠️ THE MERGE COMMIT FAILED LOUDLY AND THAT WAS THE POINT. One
+conflict was reported in the tail I read; a SECOND (the plan file) was not, and
+`git commit` refused with "you have unmerged files" rather than committing a
+half-resolved tree. Resolved only after confirming again that this branch's plan
+is a superset of main's, heading by heading.
+
+[STRENGTH] The button is FROZEN-2026-08-19:3022 verbatim: quiet, full column
+width, .875rem, the pack's padding, sentence case.
+
+[STRENGTH] ⚠️ AND THE TWO CONTROLS JOSH ACTUALLY CIRCLED ARE RECORDED AS
+UNANSWERABLE rather than invented. The Sponsor picker and "Put it on this
+project" live in the revealed state of that control, which the pack does not
+draw at all. Two circles on one screen, one with a pack answer and one without,
+is exactly where inventing the second is indistinguishable from having matched
+something.
+
+[WARNING -> RESOLVED] My first measurement reported `fullWidth:false` on a
+full-width button: it subtracted the column's padding and forgot its 1px border.
+Re-measured against clientWidth minus padding, 212 = 212. Third probe of mine
+tonight that measured a NEIGHBOUR of the thing I meant.
+
+### Fourth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 15 | 1 | BLOCKER | package.json | FIXED | version regression, caught third time |
+| 16 | 1 | WARNING | full-width probe | FIXED | measured the content box, not the border box |
+| 17 | 1 | NIT | Sponsor picker / confirm button | DEFERRED | no pack drawing exists; recorded |
