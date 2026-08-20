@@ -16,6 +16,20 @@
  * clientWidth for overflow, computed backgrounds for the transparent-panel
  * class, and elementFromPoint for what is actually on top.
  *
+ * ⚠️ THE SCREENSHOTS ONLY REPRODUCE IN THE MODE THEY WERE MADE IN, and the
+ * failure looks exactly like a visual regression. Measured 2026-08-20 against
+ * the 26 committed under docs/screenshots:
+ *
+ *   headed    26 of 26 byte-identical
+ *   headless  26 of 26 differ
+ *
+ * Both runs report `problems: none`, because the ASSERTIONS pass either way --
+ * they measure in the page, which is mode-independent. The pixels are not:
+ * headless is SwiftShader software rendering and headed is the Metal
+ * compositor. So regenerating these with HEADED=0 produces a 26-file diff
+ * that reads as "something changed on screen" and means "I rendered on a
+ * different GPU". Regenerate HEADED, or expect to throw the diff away.
+ *
  * ⚠️ TWO THINGS IT LEARNED THE HARD WAY, both of which look like success:
  *   - Its first run screenshotted the FIRST-RUN OVERLAY with all eight states
  *     laid out correctly underneath it, every measurement green. A clip
