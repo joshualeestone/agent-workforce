@@ -99,9 +99,19 @@ LEFT the one-project view in #87, which moved removal to Project settings and
 stopped the members column saying the folder was told. The check was never
 updated, so it has been red since #87 merged.
 
-Evidence it is not this branch's: `git diff origin/main -- web/index.html`
-touches neither selector, and both strings are still present in the file, just
-rendered on a different screen.
+**MEASURED, not inferred (2026-08-19 21:59).** Splinter's challenge was that a
+branch cannot tell "pre-existing red" from "red I introduced" by looking at
+itself, and he was right. So the control was run: `origin/main` at 973866b,
+clean worktree, main's OWN copy of the checker (sha c4088cce4401), against a
+second sandboxed board on port 4742.
+
+    main:        ✖ 4 contrast failures — .pj-told and .drop, light and dark
+    this branch: ✖ 4 contrast failures — the same two, the same schemes
+
+Identical. This branch introduces no new failure, and every other step is green
+on both. The weaker static evidence still holds and is kept because it is cheap
+to re-run: `git diff origin/main -- web/index.html` touches neither selector,
+and both strings are still in the file, just rendered on a different screen.
 
 **Not repaired here, on purpose.** The honest repair relocates the coverage to
 `render-pjsettings.js`, which today has no contrast pass at all (87 lines), so
