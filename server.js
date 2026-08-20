@@ -659,11 +659,14 @@ const server = http.createServer((req, res) => {
        * precedence lives, and that half IS pinned.
        * (The line also said "only when `modelName` is absent", which the
        * stopped-agent clause contradicts. A header is what a later reader
-       * trusts, so it is the one that has to be right.) A live transcript reading is what the agent IS running and must
-       * never be second-guessed by a job file that may have been edited since;
-       * and this route polls every five seconds for every agent, so a disk read
-       * per agent per poll to answer a question already answered would be the
-       * same waste the instruction-text note above refuses.
+       * trusts, so it is the one that has to be right.) The cost half stands on its own: this route polls every
+       * five seconds for every agent, so a disk read per agent per poll to
+       * answer a question already answered is the waste the instruction-text
+       * note above refuses. ⚠️ The correctness half USED to be here too — "a
+       * live reading must never be second-guessed by a job file" — and it was
+       * left standing after the header above retracted it. Two claims about one
+       * fact in one comment, which is what this block's own last line warns
+       * against.
        *
        * ⚠️ GATED ON `isNamedOurs` LIKE EVERY OTHER NAME-KEYED READ IN THIS
        * BLOCK. The plist is keyed on the NAME, so without the gate an untied

@@ -340,6 +340,9 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .field { border-top: 0.5px solid var(--separator); padding-top: var(--space-6); margin-top: var(--space-6); }
 .flabel { font: 600 var(--text-body) var(--font-ui); display: block; margin-bottom: 2px; }
 .fhint { font: var(--text-callout) var(--font-ui); color: var(--label-3); margin-bottom: var(--space-4); }
+/* An empty hint keeps its margin box and leaves a band where a deleted sentence
+   used to be. Same idiom this file already uses for `.removed-msg`. */
+.fhint:empty { display: none; }
 /* ⚠️ The PROJECTS panel's hints carry load-bearing sentences ("nothing sent
    here is kept", "it is not a transcript"), and --label-3 at this size is
    3.04:1 on the light ground -- under the 4.5 AA floor (round 20). Scoped
@@ -719,6 +722,12 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    rest of the branch cares most about. `.atask` stays card-scoped: that IS a
    card treatment, and the panel has its own task element. */
 .astate.st-stopped { color: var(--k-ink-2); }
+/* ⚠️ `.acard.off` NO LONGER HAS A RULE, and that is deliberate rather than a
+   leftover: the dim moved onto the badge itself so the detail panel gets it too.
+   `boardMods` still emits the class and `.lrow.off` still uses it, so it is a
+   live hook on one layout and inert on the other — NOT dead, and not to be
+   swept up by a dead-class pass. (The `.llm-m` lesson: a class with no rule is
+   a question, not a verdict.) */
 /* ⚠️ NO `.acard.off .atask` RULE. An earlier version added one and it was a
    NO-OP: `.atask` already declares exactly `--k-ink-2`, in both schemes, with no
    dark override — so the rule restated a value and its comment claimed a dim it
@@ -5644,9 +5653,16 @@ function openDetail(sessionName) {
   /* The pack's header badge and the two reading boxes, all off the same
      shared derivations the board uses (memBand/pctOf/modelLine). */
   const dpct = pctOf(a.context);
+  /* ⚠️ THE FOURTH SURFACE OF ONE FACT. `card()`, `lrow()` and `memoryBox()` all
+     say "Unknown" at `pct === null`; this stayed a two-state slot (percent or
+     nothing) while the card's `.membadge` became a three-state one. The fact is
+     still stated on this screen by the Memory box, so it was never an honesty
+     failure — but "three surfaces, one fact, and the third left on the old
+     treatment" was this branch's own note, and this was the fourth. */
   const dbadge = document.getElementById('d-membadge');
-  dbadge.textContent = dpct === null ? '' : dpct + '%';
-  dbadge.hidden = !(dpct !== null && dpct >= NEARLY_FULL);
+  dbadge.className = 'membadge' + (dpct === null ? ' unk' : '');
+  dbadge.textContent = dpct === null ? 'Unknown' : dpct + '%';
+  dbadge.hidden = !(dpct === null || dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
   drun.innerHTML = esc(runs.lead) + '<b>' + esc(runs.name) + '</b>';

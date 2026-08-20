@@ -110,13 +110,23 @@ badge with the task beside it.
 - The edit pencils and their modal, the avatar context ring, the ASSIGNED TO
   chips, Fresh Start, and the Runs On provider/account controls are catalogued.
 - ⚠️ **Field boundary contrast.** Measured with the alpha composited: 1.77:1
-  light, 2.35:1 dark, against WCAG 1.4.11's 3:1. `--border-strong` at `0.5`
-  clears both. Ruled by Josh to land as **its own change** with a visible
-  before-and-after, not folded in here.
+  light, 2.35:1 dark, against WCAG 1.4.11's 3:1. Ruled by Josh to land as **its
+  own change** with a visible before-and-after, not folded in here.
+  📌 **One control boundary DID move on this branch and it is worth naming
+  rather than leaving for a reviewer to catch:** `.dbox .btn` went from
+  `--k-rule` (1.31/1.27) to `--gold-deep` (3.16/5.57). That was not a decision
+  about the boundary level — it was a **defect fix**: restoring the card on
+  `#cstep-made` left its buttons at 1.05:1 against their own card, and the pack
+  had already ruled the treatment (`.btn-quiet`, raised rather than recessed).
+  **The deferred question is the FIELD level, which is untouched.**
+  🔑 **And the deferred item is bigger than "the fields":** measured across the
+  build, ~46 of 55 outlined controls sit under 3:1, and the cause is that
+  neither artifact has a neutral token between `--k-rule` (1.31) and ink (8.24).
+  The build has the value already, as `--label-3` (3.23), under a text name.
 
 ## How it was verified
 
-- `npm test`: **924 tests**, 0 failing, three consecutive clean runs.
+- `npm test`: **926 tests**, 0 failing, three consecutive clean runs.
 - **Rendered in WebKit and Chromium, light and dark.** Dark is not optional: the
   two token systems are equal in light and divergent in dark, and every defect of
   that class on this branch was invisible in light.

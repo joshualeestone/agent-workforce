@@ -43,9 +43,18 @@ const parse = (s) => {
 };
 const over = (f, b) => ({ r: f.r * f.a + b.r * (1 - f.a), g: f.g * f.a + b.g * (1 - f.a), b: f.b * f.a + b.b * (1 - f.a), a: 1 });
 const L = (c) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
-const ratio = (fgStr, bgStr) => {
-  const bg = parse(bgStr); let fg = parse(fgStr);
+/* ⚠️ `bgOn` IS NOT OPTIONAL FOR A TRANSPARENT BACKGROUND. This composited only
+   the FOREGROUND, so `ratio(border, 'rgba(0,0,0,0)')` measured the border
+   against opaque BLACK — and `.dbox .btn` computes exactly that background
+   today, so the new button path fed it that input on every run. It happened not
+   to misfire (gold-deep against black is nowhere near 1:1), which is the worst
+   kind of not-misfiring. A transparent background means "whatever is behind
+   it", so the caller passes what that is. */
+const ratio = (fgStr, bgStr, bgOn) => {
+  let bg = parse(bgStr); let fg = parse(fgStr);
   if (!fg || !bg) return null;
+  if (bg.a === 0 && bgOn) { const under = parse(bgOn); if (under) bg = under; }
+  else if (bg.a < 1 && bgOn) { const under = parse(bgOn); if (under) bg = over(bg, under); }
   if (fg.a < 1) fg = over(fg, bg);
   const la = L(fg), lb = L(bg);
   const [hi, lo] = la > lb ? [la, lb] : [lb, la];
@@ -65,12 +74,20 @@ function selfCheck() {
     ['rgba(0,0,0,1)', 'rgb(255,255,255)', 21],     // opaque == solid
     ['rgba(20,22,26,0.26)', 'rgb(255,255,255)', 1.78],
   ];
-  const bad = cases.filter(([f, b, want]) => Math.abs(ratio(f, b) - want) > 0.02);
+  // ⚠️ AND THE TRANSPARENT-BACKGROUND CASE, which the new button path actually
+  // feeds and which the list above never exercised: a check validated only on
+  // the inputs it does not use is validated on the wrong thing.
+  const bgCases = [
+    ['rgb(0,0,0)', 'rgba(0,0,0,0)', 'rgb(255,255,255)', 21],   // transparent resolves to what is behind
+    ['rgb(255,255,255)', 'rgba(0,0,0,0)', 'rgb(255,255,255)', 1],
+  ];
+  const bad = cases.filter(([f, b, want]) => Math.abs(ratio(f, b) - want) > 0.02)
+    .concat(bgCases.filter(([f, b, on, want]) => Math.abs(ratio(f, b, on) - want) > 0.02));
   if (bad.length) {
     console.log('INSTRUMENT FAILED SELF-CHECK on ' + bad.length + ' known pairs; no result below means anything');
     process.exit(1);
   }
-  console.log('  contrast function validated on ' + cases.length + ' known pairs');
+  console.log('  contrast function validated on ' + (cases.length + bgCases.length) + ' known pairs, including transparent backgrounds');
 }
 
 /* Everything a person types into. ⚠️ ASKED, NOT LISTED: an earlier version
@@ -270,8 +287,16 @@ async function measure(engine, scheme) {
       console.log(`\n== ${engine} / ${scheme} ==  fields ${r.fields.length}, page errors ${r.errs.length}`);
       for (const e of r.errs) fail(`${engine}/${scheme} ${e}`);
 
+      /* ⚠️ A DENOMINATOR THAT ONLY PRINTS IS NOT A DENOMINATOR. Containers,
+         buttons and both fixtures already fail when their count is zero; fields
+         and selects only printed theirs — so a renamed control, a new input
+         type or a page that rendered nothing would run every loop below over an
+         empty array and the script would say OK. The exact silent-skip shape
+         this file rejects one screen down. */
+      if (!r.fields.length) fail(`${engine}/${scheme} no fields were found, so every field verdict below is over an empty set`);
       const selects = r.fields.filter((f) => f.tag === 'select');
       console.log(`  selects ${selects.length}`);
+      if (!selects.length) fail(`${engine}/${scheme} no selects were found, so the appearance and arrow checks ran over nothing`);
       for (const s of selects) {
         if (s.appearance !== 'none') fail(`${engine}/${scheme} select #${s.id} renders the browser's own control (appearance: ${s.appearance})`);
         if (s.arrows !== 2) fail(`${engine}/${scheme} select #${s.id} lost its drawn arrow (${s.arrows} gradients)`);
@@ -310,12 +335,22 @@ async function measure(engine, scheme) {
       let faint = 0;
       for (const b of (r.buttons || [])) {
         if (!b.box) continue;
-        const hasBorder = b.borderW !== '0px' && ratio(b.border, b.fill) !== 1;
-        const f = ratio(b.fill, b.box);
-        const declaresFill = f !== null && f !== 1;
+        /* ⚠️ READ OFF THE COMPUTED VALUE, NOT OFF THE RATIO. `declaresFill` was
+           `f !== 1`, which conflates "declares no fill" with "declares a fill
+           IDENTICAL to its container" — and the second is precisely the
+           invisible-control defect this block exists to catch. A button painted
+           the same colour as its card was being filed as a text affordance and
+           skipped. (That is the shape of the very rule this check was written
+           after: `.dbox .btn { background: var(--k-surface) }` on a
+           `--k-surface` card, which stayed in scope only because it happened to
+           carry a border.) */
+        const fillParsed = parse(b.fill);
+        const declaresFill = Boolean(fillParsed && fillParsed.a > 0);
+        const hasBorder = b.borderW !== '0px' && ratio(b.border, b.fill, b.box) !== 1;
+        const f = ratio(b.fill, b.box, b.box);
         if (!hasBorder && !declaresFill) { textual += 1; continue; }
         bordered += 1;
-        const bd = hasBorder ? ratio(b.border, b.box) : null;
+        const bd = hasBorder ? ratio(b.border, b.box, b.box) : null;
         const best = Math.max(f === null ? 0 : f, bd === null ? 0 : bd);
         /* ⚠️ 1.1, NOT 1.5, AND THE DIFFERENCE IS THE CHECK'S HONESTY. The comment
            above says this asks "is there any separation at all", and 1.5 asked
