@@ -125,7 +125,7 @@ function paneSession(paneId) {
         { encoding: 'utf8', timeout: 5000 }).trim(),
     };
   } catch (e) {
-    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'tmux could not answer') };
+    return { ok: false, because: String((e && e.stderr && e.stderr.toString().trim()) || (e && e.message) || 'we could not check whether it arrived') };
   }
 }
 
@@ -138,7 +138,7 @@ function paneSession(paneId) {
 function resolveSender(fromPane, roster) {
   const pane = String(fromPane == null ? '' : fromPane).trim();
   if (!pane) {
-    return { ok: false, because: 'we cannot tell which agent is sending this (run it inside your own session, where TMUX_PANE is set)' };
+    return { ok: false, because: 'we cannot tell which agent is sending this: `kosmos msg` takes the sender from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
   }
   // A pane id is %N; a session:w.p target is also accepted, and a bare
   // session name prefix-matches in tmux (aim leo, hit leo-discord) --
@@ -148,17 +148,17 @@ function resolveSender(fromPane, roster) {
   // the argv slot AFTER -t -- the positioning is the operative guard, the
   // regex just keeps the value boring.
   if (!/^[%$@a-zA-Z0-9_.:-]+$/.test(pane)) {
-    return { ok: false, because: 'that does not look like a pane we can ask tmux about' };
+    return { ok: false, because: 'we cannot tell where this agent is running' };
   }
   const who = paneSession(pane);
   if (!who.ok) {
-    return { ok: false, because: 'we could not ask tmux whose pane that is (' + who.because + ')' };
+    return { ok: false, because: 'we could not tell which agent that was (' + who.because + ')' };
   }
   const card = Array.isArray(roster)
     ? roster.find((a) => a && a.session === who.session && a.isNamedOurs === true)
     : null;
   if (!card) {
-    return { ok: false, because: 'the pane this ran in is not a Kosmos agent we can name, so we will not deliver an anonymous message' };
+    return { ok: false, because: 'we cannot tell which agent this is from, and we will not deliver a message with no sender.' };
   }
   return { ok: true, card };
 }

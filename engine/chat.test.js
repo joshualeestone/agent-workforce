@@ -770,7 +770,7 @@ test('the verdict carries what the agent was doing, taken from the board’s own
     assert.equal(verdict.paneState, board.card('casey').state);
     assert.equal(verdict.paneState, 'working');
     assert.match(verdict.paneNote, /mid-task/);
-    assert.match(verdict.paneNote, /sits in its composer until it finishes/);
+    assert.match(verdict.paneNote, /will not read this until it finishes/);
   });
 });
 
@@ -1558,7 +1558,7 @@ test('an unconfirmed send does not also assert WHERE the message is sitting', ()
   // statement about where the message IS — and the one verdict that cannot make
   // it is the one that exists because we do not know whether it arrived. The
   // two were printed side by side in a single sentence.
-  assert.match(chat.waitingNote('working', chat.DELIVERY.PLACED), /sits in its composer/);
+  assert.match(chat.waitingNote('working', chat.DELIVERY.PLACED), /will not read this until it finishes/);
   assert.equal(chat.waitingNote('working', chat.DELIVERY.UNCONFIRMED), 'it was mid-task');
   assert.match(chat.waitingNote('rate_limited', chat.DELIVERY.PLACED), /may not act on this/);
   assert.equal(chat.waitingNote('rate_limited', chat.DELIVERY.UNCONFIRMED), 'it was paused on a usage limit');
@@ -1841,7 +1841,7 @@ test('an agent whose pane we do not know is refused on BOTH paths, send and scre
     const blind = board.agents.map((a) => (a.sessionName === 'casey' ? { ...a, target: null } : a));
     const sent = chat.deliver('casey', 'hi', blind);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
-    assert.match(sent.because, /do not know which pane/);
+    assert.match(sent.because, /cannot tell where this agent is running/);
     // paneNote is null HERE by design: this refusal happens at the
     // addressable gate, before the send was authorised against any card,
     // and a pane claim on an unauthorised refusal would be a note about a
@@ -1850,7 +1850,7 @@ test('an agent whose pane we do not know is refused on BOTH paths, send and scre
     assert.equal(sent.paneNote, null);
     const seen = chat.viewport('casey', blind);
     assert.equal(seen.text, null);
-    assert.match(seen.because, /do not know which pane/);
+    assert.match(seen.because, /cannot tell where this agent is running/);
   });
 });
 

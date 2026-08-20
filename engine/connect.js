@@ -796,7 +796,7 @@ async function launchSignin(owner) {
   const made = await tmux(['new-session', '-d', '-s', SESSION, '-x', '220', '-y', '50', ...cmd]);
   if (!made.ok) {
     becomeStuck(owner, 'we could not open the window Claude signs in through',
-      tailOf(`${made.stdout || ''}\n${made.stderr || ''}`) || 'tmux would not start');
+      tailOf(`${made.stdout || ''}\n${made.stderr || ''}`) || 'nothing came back to explain why');
     return;
   }
   if (driver !== owner) { await killSession(); return; }

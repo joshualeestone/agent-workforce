@@ -349,15 +349,27 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
     // no-answer-at-all in the same round the comment was written, so the
     // sentence outlived the behaviour it described. This is the assertion that
     // keeps the pair honest rather than a paragraph asserting it.
-    assert.throws(() => status.paneRoster(), /could not ask tmux/);
-    assert.throws(() => status.snapshot(), /could not ask tmux/);
+    /* ⚠️ TWO PHRASES NOW, WHERE ONE COVERED BOTH. The engine copy sweep gave
+       these siblings different words: `paneRoster` says "we could not see what
+       is running on this computer" and `snapshot` says "we could not check what
+       it is doing on this computer". The PROPERTY this test holds is that both
+       refuse rather than answering "nothing is running", and that still holds
+       -- but the pair no longer reads alike, and `snapshot`'s "it" has no
+       referent when the thing being read is the whole machine. Flagged to Mona
+       Lisa rather than rewritten here; asserted separately so the test says
+       what is true today instead of one regex quietly matching neither. */
+    assert.throws(() => status.paneRoster(), /could not see what is running on this computer/);
+    assert.throws(() => status.snapshot(), /could not check what it is doing on this computer/);
   } finally {
     blind.restore();
   }
 
   const garbled = fleet.unreadable();
   try {
-    assert.throws(() => status.paneRoster(), /could not read/);
+    /* The copy sweep replaced "tmux answered with something we could not read"
+       with "we could not make sense of what came back". Same refusal, same
+       property: an unreadable answer is not an empty fleet. */
+    assert.throws(() => status.paneRoster(), /could not make sense of what came back/);
   } finally {
     garbled.restore();
   }

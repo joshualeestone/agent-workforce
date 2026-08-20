@@ -601,7 +601,7 @@ function listPanes() {
    * go through here.
    */
   if (out === null || out === undefined) {
-    throw new Error('we could not ask tmux what is running');
+    throw new Error('we could not check what it is doing on this computer');
   }
   const { panes, rejected } = readPanes(out);
 
@@ -616,7 +616,7 @@ function listPanes() {
    * running, because a mangled answer and no answer were indistinguishable.
    */
   if (rejected > 0 && panes.length === 0) {
-    throw new Error('tmux answered with something we could not read');
+    throw new Error('we could not make sense of what came back');
   }
   // Some read, some did not: the fleet is shown, and the gap is RETURNED
   // alongside it rather than quietly closed, so `snapshot` can put it in the
@@ -965,7 +965,7 @@ const RATE_LIMIT_MARKERS = [
  */
 function classify(pane, paneText) {
   // ⚠️ A MISSING command is not evidence of anything. A truncated tmux line
-  // gave `command: ''`, which fell through to "no Claude process in this pane"
+  // gave `command: ''`, which fell through to "Claude is not running for this one"
   // — `stopped` at STRUCTURED confidence, i.e. a confident structural claim
   // built from a field that was not there. `unknown` is the honest answer, and
   // it is the rule the rest of this module runs on.
@@ -973,7 +973,7 @@ function classify(pane, paneText) {
     return {
       state: STATE.UNKNOWN,
       confidence: CONFIDENCE.NONE,
-      because: 'tmux did not tell us what is running in this pane',
+      because: 'we could not tell what it is doing',
     };
   }
   // ⚠️ FIRST, before the screen is read at all. `classify` consulted only
@@ -991,23 +991,23 @@ function classify(pane, paneText) {
     return {
       state: STATE.UNKNOWN,
       confidence: CONFIDENCE.NONE,
-      because: 'this is not one of your agent sessions, so we cannot say what it is doing',
+      because: 'this is not one of your agents, so we cannot say what it is doing',
     };
   }
   if (!isClaudeRunning(pane.command)) {
-    return { state: STATE.STOPPED, confidence: CONFIDENCE.STRUCTURED, because: 'no Claude process in this pane' };
+    return { state: STATE.STOPPED, confidence: CONFIDENCE.STRUCTURED, because: 'Claude is not running for this one' };
   }
   if (paneText === null) {
-    return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'could not read this pane' };
+    return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'we could not read its screen' };
   }
 
   const tail = paneText.split('\n').slice(-25).join('\n');
 
   if (RATE_LIMIT_MARKERS.some((re) => re.test(tail))) {
-    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'the pane mentions a usage limit' };
+    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'it says it has hit a usage limit' };
   }
   if (NEEDS_YOU_MARKERS.some((re) => re.test(tail))) {
-    return { state: STATE.NEEDS_YOU, confidence: CONFIDENCE.SCRAPED, because: 'the pane is showing a question' };
+    return { state: STATE.NEEDS_YOU, confidence: CONFIDENCE.SCRAPED, because: 'it is asking you something' };
   }
   if (SPINNER.test(pane.title)) {
     return { state: STATE.WORKING, confidence: CONFIDENCE.SCRAPED, because: 'it is producing output right now' };
@@ -1057,7 +1057,7 @@ function classify(pane, paneText) {
     return { state: STATE.IDLE, confidence: CONFIDENCE.SCRAPED, because: 'it is sitting at its prompt' };
   }
 
-  return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'nothing in the pane says what it is doing' };
+  return { state: STATE.UNKNOWN, confidence: CONFIDENCE.NONE, because: 'nothing on its screen says what it is doing' };
 }
 
 /** The task line Claude Code keeps in the pane title, stripped of glyphs. */
@@ -1598,7 +1598,7 @@ function paneRoster() {
   // stricter about a PARTIAL answer: see the note below.
   const out = paneSource ? paneSource() : tmuxPanes();
   if (out === null || out === undefined) {
-    throw new Error('could not ask tmux which panes exist');
+    throw new Error('we could not see what is running on this computer');
   }
   /**
    * ⚠️ AND THE SAME POSTURE FOR AN ANSWER WE CANNOT READ.
@@ -1629,7 +1629,7 @@ function paneRoster() {
    */
   const { panes, rejected } = readPanes(out);
   if (rejected > 0 && panes.length === 0) {
-    throw new Error('tmux answered with something we could not read');
+    throw new Error('we could not make sense of what came back');
   }
   return onePanePerSession(panes).map((pane) => ({
     sessionName: pane.name,

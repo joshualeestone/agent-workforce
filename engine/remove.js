@@ -620,9 +620,9 @@ function plan(name) {
     hint: jobFor(clean)
       ? 'Removing it takes it off this board and stops it starting again. '
         + 'Nothing on your computer is deleted, and you can put it back.'
-      : 'Removing it takes it off this board and ends its session. '
-        + 'It has no startup job, so Kosmos cannot start it again for you -- '
-        + 'you would start it the same way you did the first time. '
+      : 'Removing it takes it off Kosmos and stops it running. '
+        + 'Kosmos did not set this one up, so it cannot start it again for you. '
+        + 'You would start it the same way you did the first time. '
         + 'Nothing on your computer is deleted.',
   };
 }
@@ -699,7 +699,7 @@ function removeInner(name, { tmuxBin } = {}) {
   function recoveryRoute() {
     return job
       ? `Its startup job is ${job.label}, and re-enabling that is what undoes this.`
-      : 'It has no startup job, so nothing will restart it -- its folder and everything in it is untouched.';
+      : 'Nothing will start it again on its own. Its folder and everything in it is untouched.';
   }
 
   function recordAndSay(stopped) {
@@ -803,7 +803,7 @@ function removeInner(name, { tmuxBin } = {}) {
     // reason and this one was missed. Not visible in the browser today, which
     // ignores `steps` -- but the route ships them, so it is a sentence on the
     // wire asserting a job was stopped when there was none.
-    steps.push({ label: 'it had no startup job to stop', ok: true });
+    steps.push({ label: 'there was nothing running to stop', ok: true });
   }
 
   /**
@@ -850,7 +850,7 @@ function removeInner(name, { tmuxBin } = {}) {
   }
   const session = found.session;
   if (found.kind === FOUND.OURS) {
-    const ended = step('ended its session', () => {
+    const ended = step('stopped it', () => {
       const r = run(tmux, ['kill-session', '-t', `=${session}`]);
       if (!(r && (r.ok !== false || r.code === 1))) return false;
       // ⚠️ Look again. The kill's own answer is not evidence the session has
@@ -868,7 +868,7 @@ function removeInner(name, { tmuxBin } = {}) {
       };
     }
   } else {
-    steps.push({ label: 'ended its session', ok: true, note: 'it was not running' });
+    steps.push({ label: 'stopped it', ok: true, note: 'it was not running' });
   }
 
   // Only now is it true that this agent is stopped and will stay stopped.

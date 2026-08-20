@@ -1574,8 +1574,8 @@ test('every singular could_not because the engine authors has a plural sibling',
       'none of them has a folder on this computer yet',
     'this agent has no instructions file yet, and we will not create one for it':
       'none of them has an instructions file yet, and we will not create them',
-    'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything':
-      'we cannot match any of their names exactly to a session on this computer, so we did not write to anything',
+    'we could not find an agent with exactly this name on this computer, so nothing was written':
+      'we could not find any of them on this computer, so nothing was written',
     'this agent keeps its instructions somewhere we cannot safely change':
       'they keep their instructions somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':
@@ -1590,7 +1590,7 @@ test('every singular could_not because the engine authors has a plural sibling',
       'no or wrong plural sibling for: ' + singular);
   }
   // The one sentence with no singular referent maps to itself.
-  const neutral = 'we could not check which agents are running, so we did not write to anything';
+  const neutral = 'we could not check which agents are running, so nothing was written';
   assert.equal(projects.groupBecause(neutral), neutral);
 
   // THE SOURCE PIN: every mapped singular must still exist verbatim in the

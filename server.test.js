@@ -2266,7 +2266,7 @@ test('the create route answers a real creation with the record the screen is bui
       assert.equal(typeof s.label, 'string', 'a step with no label would draw as a blank line');
       assert.equal(typeof s.ok, 'boolean', 'a step with no verdict cannot be drawn as done or failed');
     }
-    assert.ok(body.steps.some((s) => /startup job/.test(s.label)), 'the job step is missing from the record');
+    assert.ok(body.steps.some((s) => /keep running/.test(s.label)), 'the job step is missing from the record');
 
     // ⚠️ And the first action is the ROLE's own words, not something the screen
     // invented — the whole point of serving it from the same library the agent

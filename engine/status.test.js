@@ -1387,7 +1387,7 @@ test('a line with no separator is not an agent, and losing the whole answer is n
   setPaneCapture(() => '');
   try {
     // The GATE, which decides whether a write reaches an agent.
-    assert.throws(() => require('./status').paneRoster(), /could not read/,
+    assert.throws(() => require('./status').paneRoster(), /could not make sense of what came back/,
       'the gate read an unreadable answer as "nobody is claiming this name"');
 
     // ⚠️ AND THE BOARD. This one was missing, and a mutation run found it:
@@ -1395,7 +1395,7 @@ test('a line with no separator is not an agent, and losing the whole answer is n
     // the board went back to showing an empty machine -- the exact fourteen-hour
     // state this test is named after. A guarantee claimed in a comment and
     // pinned nowhere is the shape this codebase keeps paying for.
-    assert.throws(() => snapshot(), /could not read/,
+    assert.throws(() => snapshot(), /could not make sense of what came back/,
       'the board was handed an empty fleet for an answer nothing in it could be read from');
   } finally {
     setPaneSource(null);
@@ -1460,7 +1460,7 @@ test('one unreadable line does not take the gate away from the whole fleet', () 
     // so this leniency is scoped to the partial case rather than having quietly
     // removed the refusal altogether.
     setPaneSource(() => 'mikey-discord_0.0_2.1.223_0__ mangled');
-    assert.throws(() => require('./status').paneRoster(), /could not read/,
+    assert.throws(() => require('./status').paneRoster(), /could not make sense of what came back/,
       'the gate now accepts an answer it could read nothing from');
   } finally {
     setPaneSource(null);

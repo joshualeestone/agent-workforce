@@ -108,10 +108,10 @@ const GROUP_BECAUSE = new Map([
     'none of them has a folder on this computer yet'],
   ['this agent has no instructions file yet, and we will not create one for it',
     'none of them has an instructions file yet, and we will not create them'],
-  ['we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything',
-    'we cannot match any of their names exactly to a session on this computer, so we did not write to anything'],
-  ['we could not check which agents are running, so we did not write to anything',
-    'we could not check which agents are running, so we did not write to anything'],
+  ['we could not find an agent with exactly this name on this computer, so nothing was written',
+    'we could not find any of them on this computer, so nothing was written'],
+  ['we could not check which agents are running, so nothing was written',
+    'we could not check which agents are running, so nothing was written'],
   ['this agent keeps its instructions somewhere we cannot safely change',
     'they keep their instructions somewhere we cannot safely change'],
   ['taking this out would leave its instructions almost empty, so we left them alone',
@@ -534,7 +534,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we cannot tie the pane holding this name to the agent, so we will not speak for what that name is holding',
+          because: 'we cannot tell whether this is the same agent, so we will not say what it is doing',
         },
       };
     }
@@ -1623,8 +1623,8 @@ function tellAgent(sessionName, projects, roster) {
       return {
         state: TOLD.COULD_NOT,
         because: Array.isArray(roster)
-          ? 'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything'
-          : 'we could not check which agents are running, so we did not write to anything',
+          ? 'we could not find an agent with exactly this name on this computer, so nothing was written'
+          : 'we could not check which agents are running, so nothing was written',
       };
     }
     const current = instructions.read(sessionName);

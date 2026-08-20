@@ -980,7 +980,7 @@ test('an agent stopped but never recorded is told where its way back is', () => 
     // ⚠️ CONTROL: it really did get all the way to the record, or this is one
     // of the earlier partials wearing the same outcome.
     const labels = gone.steps.map((s) => s.label);
-    assert.ok(labels.includes('ended its session'),
+    assert.ok(labels.includes('stopped it'),
       'it never reached the session step, so this is an earlier partial and proves nothing');
     assert.equal(gone.outcome, remove.OUTCOME.PARTIAL, gone.because);
 
@@ -1300,7 +1300,7 @@ test('what the detail screen is told about removing an agent comes from here, an
 
   boardShows(jobless, jobless);
   const b = remove.plan(jobless);
-  assert.match(b.hint, /no startup job/,
+  assert.match(b.hint, /did not set this one up|nothing running to stop/,
     'it promises to stop something starting again for an agent that nothing was going to start');
   assert.doesNotMatch(b.hint, /stops it starting again/,
     'the jobless hint still describes work that will not happen');
@@ -1474,7 +1474,7 @@ test('a partial for an agent with no startup job does not name a job that is not
       'it named a startup job for an agent that has none');
     assert.doesNotMatch(r.because, /null|undefined/,
       'it printed a missing value straight onto the screen');
-    assert.match(r.because, /no startup job, so nothing will restart it/,
+    assert.match(r.because, /Nothing will start it again on its own/,
       'it does not say what is actually true, which is that nothing will bring it back');
   } finally {
     fs.chmodSync(dir, 0o700);
@@ -1503,7 +1503,7 @@ test('the steps report what was done, including when nothing was', () => {
   assert.ok(labels.length > 0, 'no steps were reported at all, so this asserts nothing');
   assert.ok(!labels.includes('stopped it starting again'),
     'it reported stopping a startup job for an agent that never had one');
-  assert.ok(labels.some((l) => /no startup job/.test(l)),
+  assert.ok(labels.some((l) => /did not set this one up|nothing running to stop/.test(l)),
     'it does not say what was actually true of the job');
 });
 

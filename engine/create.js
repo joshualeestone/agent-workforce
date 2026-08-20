@@ -1025,7 +1025,7 @@ function createAgent(opts) {
    * then permanently refused by the leftover-job branch above, so the person
    * cannot even retry from the screen.
    */
-  const wroteJob = (wroteInstructions && installedSupervisor) && step('wrote its startup job', () => {
+  const wroteJob = (wroteInstructions && installedSupervisor) && step('set it up to keep running', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin, modelArg), 'utf8');

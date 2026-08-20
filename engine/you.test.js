@@ -126,7 +126,7 @@ test('the tell refuses what its siblings refuse: untied names, missing files, un
   try {
     const r1 = you.tellAgent('borrowed', untied);
     assert.equal(r1.state, projects.TOLD.COULD_NOT);
-    assert.match(r1.because, /cannot tie/);
+    assert.match(r1.because, /could not find an agent with exactly this name/);
   } finally {
     fleet.restore();
   }

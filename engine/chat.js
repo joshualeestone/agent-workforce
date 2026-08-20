@@ -4,7 +4,7 @@
  * Talking to ONE agent, about ONE project.
  *
  * The gap this closes, in the words of the person who hit it: a card said
- * "Needs you — the pane is showing a question", and there was nowhere to see
+ * "Needs you — it is asking you something", and there was nowhere to see
  * the question or answer it. The board could observe an agent and could not
  * reach one.
  *
@@ -376,7 +376,7 @@ function addressable(sessionName, roster) {
     return { ok: false, because: 'something is running under this name, but we cannot tell that it is this agent, so we did not type into it' };
   }
   if (!card.target) {
-    return { ok: false, because: 'we do not know which pane this agent is in' };
+    return { ok: false, because: 'we cannot tell where this agent is running' };
   }
   if (card.isAgentPane !== true) {
     // Two reasons, and they are worth telling apart on screen: a pane with no
@@ -569,7 +569,7 @@ function waitingNote(state, outcome) {
     case status.STATE.WORKING:
       return unsure
         ? 'it was mid-task'
-        : 'it was mid-task, so this sits in its composer until it finishes';
+        : 'it was mid-task, so it will not read this until it finishes';
     case status.STATE.NEEDS_YOU:
       // Deliberately weaker than "this answered its question". We observed a
       // question on its screen; what its interface did with the keystroke is
@@ -666,7 +666,7 @@ function deliver(sessionName, raw, roster) {
     // tmux never started, so no keystroke exists. Also safe to re-send.
     return {
       state: DELIVERY.COULD_NOT,
-      because: refusalReason(typed, 'we could not reach tmux to type it'),
+      because: refusalReason(typed, 'we could not get the message to it'),
       at, paneState, paneNote: noteFor(DELIVERY.COULD_NOT),
     };
   }
@@ -742,7 +742,7 @@ function refusalReason(got, fallback) {
     // ⚠️ Same weight-bearing rule as the timeout arm above (round 20): the
     // caller's fallback clause is what tells the reader nothing was typed,
     // so the spawn-failed sentence keeps it too instead of replacing it.
-    const why = (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach tmux on this computer';
+    const why = (got && got.err) ? String(got.err).trim().split('\n')[0] : 'we could not reach the agents on this computer';
     return fallback ? `${fallback} (${why})` : why;
   }
   const said = String((got && got.err) || '').trim().split('\n')[0];
@@ -791,7 +791,7 @@ function viewport(sessionName, roster) {
     return { text: null, because: 'something is running under this name, but we cannot tell that it is this agent, so we are not showing you its screen' };
   }
   if (!card.target) {
-    return { text: null, because: 'we do not know which pane this agent is in' };
+    return { text: null, because: 'we cannot tell where this agent is running' };
   }
   // One depth for every caller: a `lines` parameter used to ride here with
   // a bound no caller ever exercised (round 16), which was API surface

@@ -160,8 +160,8 @@ function tellAgent(sessionName, roster) {
       return {
         state: projects.TOLD.COULD_NOT,
         because: Array.isArray(roster)
-          ? 'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything'
-          : 'we could not check which agents are running, so we did not write to anything',
+          ? 'we could not find an agent with exactly this name on this computer, so nothing was written'
+          : 'we could not check which agents are running, so nothing was written',
       };
     }
     const current = instructions.read(sessionName);
@@ -216,7 +216,7 @@ function tellAgent(sessionName, roster) {
  */
 function syncEveryone(roster) {
   if (!Array.isArray(roster)) {
-    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running, so we did not write to anything' }];
+    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running, so nothing was written' }];
   }
   const told = [];
   for (const a of roster) {
