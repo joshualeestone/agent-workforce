@@ -2018,6 +2018,32 @@ const server = http.createServer((req, res) => {
             moved.status = 409;
             throw moved;
           }
+          /**
+           * ⚠️ AND WHICH QUESTION, not only which words. The check above
+           * verifies the label for the pressed digit and nothing about the
+           * question it belongs to -- and this product's most common menu draws
+           * the SAME labels every time. Measured: "Edit file src/a.js? / ❯ 1.
+           * Yes / 2. No" and the same prompt for `src/b.js` produce identical
+           * options, so a pane that redrew between the paint and the POST
+           * passed verification and `1` approved a file nobody chose. The guard
+           * was weaker than the sentence describing it.
+           *
+           * The page has held the discriminator since the answered-hold was
+           * written; it just never sent it. `asked` is that text, and
+           * `questionAbove` is the engine's twin of the rule that computes it,
+           * so both sides compare the same fact rather than two spellings.
+           *
+           * Optional on the wire: a client that does not send it is no worse
+           * off than before, and a button send from this page always does.
+           */
+          const askedAbove = typeof body.asked === 'string' ? chat.cleanMessage(body.asked) : null;
+          const nowAbove = asked ? chat.questionAbove(asked.text) : null;
+          if (askedAbove && nowAbove && chat.cleanMessage(nowAbove) !== askedAbove) {
+            const moved = new Error('its screen is asking something else now, so we did not send that '
+              + 'answer. The question on this page is the current one.');
+            moved.status = 409;
+            throw moved;
+          }
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.

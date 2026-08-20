@@ -6779,6 +6779,29 @@ test('talkKey reads the option run exactly where optionsIn does, decoys included
   const plain = above('Which one?\n' + MENU);
   assert.equal(plain, 'Which one?');
 
+  /* ⚠️ AND THE `above` HALF AGREES WITH THE ENGINE'S TWIN, which is now a
+     THIRD place this one fact is computed: `talkKey` on the page, and
+     `chat.questionAbove` on the server, which the 409 screen-check compares
+     against what the client sends. Two spellings of "which question is this"
+     that can disagree is how a button answers a prompt nobody saw, so they are
+     asked the same thing here rather than trusted to match. */
+  const engineAbove = chatEngine.questionAbove;
+  for (const text of [
+    'Which one?\n' + MENU,
+    'Edit file src/a.js?\n❯ 1. Yes\n  2. No',
+    '│ boxed and framed\n│ ❯ 1. Yes\n│   2. No',
+    MENU,
+  ]) {
+    const key = talkKey({
+      asking: true,
+      options: chatEngine.optionsIn(text),
+      question: { text },
+    });
+    assert.ok(key, 'talkKey refused a body the engine parses: ' + JSON.stringify(text));
+    assert.equal(key.split('\u0000')[1], engineAbove(text),
+      'the page and the engine disagree about which question this is: ' + JSON.stringify(text));
+  }
+
   for (const decoy of [
     '10. leftover from the last prompt',   // two digits: never an option
     '││ 1. doubled frame',                 // a RUN of frame characters

@@ -2154,6 +2154,45 @@ test('a button whose digit the visible menu does not offer is refused, not sent'
   });
 });
 
+test('a menu that redrew into a DIFFERENT question with the SAME labels is refused', async () => {
+  reset();
+  /**
+   * ⚠️ THE CASE THE LABEL CHECK CANNOT SEE, and it is this product's most
+   * common menu. Claude's edit-permission prompt draws "❯ 1. Yes / 2. No" for
+   * EVERY file, so verifying the words for the pressed digit verifies nothing
+   * about which question they answered. A pane that redrew between the paint
+   * and the POST passed every existing guard, and `1` approved a file the
+   * person never chose.
+   *
+   * The page has held the discriminating half since the answered-hold was
+   * written (`talkKey`'s `above`); it simply never sent it. `asked` is that
+   * text and `chat.questionAbove` is the engine's twin of the rule.
+   */
+  const bPrompt = 'Edit file src/b.js?\n❯ 1. Yes\n  2. No\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(bPrompt), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread',
+        { text: '1', chose: 'Yes', asked: 'Edit file src/a.js?' });
+      assert.equal(res.status, 409, 'the screen is asking about a different file now');
+      assert.equal(calls.sends().length, 0, 'and nothing was typed into the pane');
+    });
+});
+
+test('the same question still on screen is sent, so the check above is not refusing everything', async () => {
+  reset();
+  /* ⚠️ THE CONTROL FOR IT. Without this, the refusal above passes for a server
+     that 409s every button send, which would be worse than the hole it closes:
+     the buttons are the pack's whole point. */
+  const aPrompt = 'Edit file src/a.js?\n❯ 1. Yes\n  2. No\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(aPrompt), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread',
+        { text: '1', chose: 'Yes', asked: 'Edit file src/a.js?' });
+      assert.equal(res.status, 200, 'the question it was answering is the one on screen');
+      assert.equal(calls.sends().length > 0, true, 'and the digit reached the pane');
+    });
+});
+
 test('words on a button are not kept when nothing is being asked', async () => {
   reset();
   // ⚠️ `chose` is a claim that these words were on a button. If the board does

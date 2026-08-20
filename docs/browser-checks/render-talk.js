@@ -1340,14 +1340,19 @@ function unreachableStates() {
 
       /* 6. A REPAINT WHERE ONLY THE CLOCK MOVED, on a thread long enough to
          scroll and new enough to say "a minute ago".
-         ⚠️ THE FIXTURES THIS BLOCK USES ARE DATED January 2026, so their
-         verdict lines render a fixed "at 9:00 on Jan 1" and a repaint is
-         byte-identical. (This said "every fixture in this file" until a
-         reviewer checked: `placed()` uses `Date.now() - 4 * 60000` and
-         `3-unconfirmed` uses `new Date()`, both of which render RELATIVE
-         phrases. Only this block's inline fixtures are January-dated, which is
-         all the argument needs -- the wider claim was a confident absolute
-         about the file's own contents that the file contradicts.) That makes the scroll block above an honest test of
+         ⚠️ THE SCROLL BLOCK'S OWN FIXTURES, 2c above, ARE DATED January 2026,
+         so their verdict lines render a fixed "at 9:00 on Jan 1" and a repaint
+         there is byte-identical. THIS block is the opposite on purpose: its
+         thread is 65 seconds old so the phrase moves, which is the whole point
+         of it.
+         (Twice corrected and worth recording as one lesson. The sentence first
+         said "every fixture in this file", which was a confident absolute the
+         file contradicts -- `placed()` and `3-unconfirmed` both render relative
+         phrases. The correction then said "the fixtures THIS block uses", which
+         moved the claim onto the block that deliberately does the opposite. A
+         wrong absolute replaced by a wrong referent: the fix for an
+         over-general claim is a precise one, not a smaller general one.)
+         That makes the scroll block above an honest test of
          "an unchanged list does not move", and NO test at all of the case the
          product actually spends its first hour in: `pjWhen` returns a RELATIVE
          phrase under an hour, so the markup changes once a minute on a thread

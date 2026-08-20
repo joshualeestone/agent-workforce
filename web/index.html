@@ -6999,7 +6999,16 @@ async function sendTalk(text, chose) {
     const res = await fetch('/api/agent/' + encodeURIComponent(sentName) + '/thread', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(chose ? { text, chose } : { text }),
+      /* ⚠️ WHICH QUESTION THIS ANSWERS, sent so the server can refuse a pane
+         that has moved on. `askedAbout` is the key this page already keeps for
+         the answered-hold, and its `above` half is the only thing that tells
+         two menus with identical labels apart -- which is the shape Claude's
+         edit-permission prompt has for every file. Holding it and not sending
+         it left the server's own screen-check unable to make the distinction
+         its comment claims. */
+      body: JSON.stringify(chose
+        ? { text, chose, asked: (askedAbout || '').split('\u0000')[1] || '' }
+        : { text }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'we could not send that');

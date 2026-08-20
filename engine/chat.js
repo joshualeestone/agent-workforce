@@ -937,6 +937,38 @@ const OPTION_LINE = /^(❯\s*)?([1-9])[.)]\s+(\S.*)$/;
 // longer than we can read is refused rather than served as its first nine.
 const ANY_NUMBERED = /^(?:❯\s*)?\d+[.)]\s+\S/;
 
+/**
+ * The text ABOVE a confident option run, which is what tells two menus with the
+ * same labels apart.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE 409 SCREEN-CHECK WAS WEAKER THAN ITS OWN COMMENT.
+ * That guard says it stops "sending an answer to a question they never saw",
+ * and it compared only the LABEL for the pressed digit. Claude's
+ * edit-permission menu draws the same labels for every file -- this codebase
+ * says so in two places -- so a pane that redrew from "Edit file src/a.js?" to
+ * "Edit file src/b.js?" between the paint and the POST passed verification, and
+ * `1` approved a file the person never chose.
+ *
+ * The page has carried this discriminator since the hold was written
+ * (`talkKey`'s `above` half). It simply never sent it, and the server never
+ * asked. This is the engine's twin of that rule, so the comparison is made
+ * against the same fact on both sides rather than two spellings of it.
+ *
+ * Returns null when there is no confident run at all -- there is then nothing
+ * to disagree about, and `optionsIn` has already refused.
+ */
+function questionAbove(questionText) {
+  const opts = optionsIn(questionText);
+  if (!opts) return null;
+  const lines = String(questionText == null ? '' : questionText).split('\n');
+  const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
+    l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
+  /* The whole slice when the run starts at the top, for the reason `talkKey`
+     records: nothing above is not the same as no identity, and an empty string
+     would make every same-labelled menu one question. */
+  return (first > 0 ? lines.slice(0, first).join('\n') : lines.join('\n')).trim();
+}
+
 function optionsIn(questionText) {
   const whole = String(questionText == null ? '' : questionText);
   if (!whole.trim()) return null;
@@ -1761,7 +1793,7 @@ function looksLikeManager(role) {
 module.exports = {
   DELIVERY, DIRECT, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget, wireText,
-  deliver, viewport, questionIn, optionsIn, waitingNote, spawnFailure, verifyAtSend,
+  deliver, viewport, questionIn, optionsIn, questionAbove, waitingNote, spawnFailure, verifyAtSend,
   threadFile, readThread, appendMessage, supersede, withThreadLock,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,
