@@ -1098,6 +1098,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pjhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
           padding: 0 2px; margin-bottom: 16px; }
 .pjtitle { min-width: 0; }
+/* The pack holds .dname DOWN to 1.375rem for this one heading (its
+   pjhead h2): the project name is the biggest thing on the page and
+   still smaller than an agent's name on the detail screen, which is
+   1.5rem. Josh 2026-08-19: "Header should be larger" — it carried no
+   size rule at all before this and fell to the base h2. */
+.pjtitle h2 { font-size: 1.375rem; margin: 0; }
 .pj3 { display: grid; grid-template-columns: minmax(0, 22%) minmax(0, 1fr) minmax(0, 22%); gap: 16px; align-items: start; }
 @media (max-width: 68rem) { .pj3 { grid-template-columns: minmax(0, 1fr); } }
 .pjcol { border: 1px solid var(--k-rule); border-radius: 12px; background: var(--k-surface); padding: 14px 16px 16px; }
@@ -2948,7 +2954,7 @@ svg { display: block; }
     <button class="back" id="pj-back" type="button">← All projects</button>
     <div class="pjhead">
       <div class="pjtitle">
-        <h2 id="pj-one-name"></h2>
+        <h2 class="dname" id="pj-one-name"></h2>
         <!-- What this project IS, in the person's own words, directly under
              the title per the design (PIN-2026-08-14-1913CDT): the pair is
              one statement. Hidden entirely when there is none: an empty grey
@@ -2964,9 +2970,6 @@ svg { display: block; }
     <div class="pj3">
     <aside class="pjcol">
       <span class="flabel">Project members</span>
-      <p class="fhint">Putting an agent here tells it where this project's folder
-         is. It does not stop it reaching anything else, and it is not a
-         permission.</p>
       <div id="pj-one-agents" class="pj-members"></div>
       <!-- ⚠️ The picker hides behind the button, not the other way round: the
            resting state of the box is the members, and "+ Add Member" (the
