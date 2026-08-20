@@ -7294,3 +7294,65 @@ test('a visible caption is never a substring of the hidden text beside it', () =
   assert.equal(wouldClash.length, 1,
     'the substring comparison cannot detect the defect it exists for');
 });
+
+/**
+ * The client and the server answer "is this agent running" separately, and the
+ * only thing keeping them in step is that `stopped` is the single `CARD_ST`
+ * entry mapping to `pres: 'off'`.
+ *
+ * ⚠️ THEY CANNOT SHARE THE DERIVATION: `web/index.html` cannot import `STATE`
+ * and `server.js` cannot import `CARD_ST`. So the coincidence is pinned here.
+ * Add a second state mapping to `off` and the page would prefer the job's model
+ * for it while `/api/status` never populated `plannedModelName`, so "Will start
+ * on …" would silently stop appearing — a degradation with nothing to catch it.
+ */
+test('exactly one agent state means "not running", and both sides name the same one', () => {
+  const CARD_ST = new Function(pageConstSource('CARD_ST') + '\nreturn CARD_ST;')();
+  const off = Object.entries(CARD_ST).filter(([, v]) => v.pres === 'off').map(([k]) => k);
+  assert.deepEqual(off, ['stopped'],
+    'the client now treats ' + JSON.stringify(off) + ' as not-running, but '
+    + 'server.js gates plannedModelName on `a.state !== STATE.STOPPED` alone. '
+    + 'Either give the server the same set or share one derivation — as it '
+    + 'stands the new state gets no plannedModelName and its "Will start on" '
+    + 'line silently disappears');
+
+  const status = require('./engine/status');
+  assert.equal(status.STATE.STOPPED, 'stopped',
+    'the server’s STATE.STOPPED and the client’s CARD_ST key have drifted apart');
+});
+
+/**
+ * ⚠️ THE STOPPED-AGENT CLAUSE HAD NO ROUTE-LEVEL TEST. Both existing
+ * `/api/status` tests run with no `modelName`, so the branch that says "a
+ * stopped agent needs this EVEN THOUGH it has a modelName" was asserted only by
+ * its own comment — and a mutation deleting `&& a.state !== STATE.STOPPED`
+ * passed the whole suite.
+ */
+test('a stopped agent with a readable model still gets the model its job will start it on', async () => {
+  const status = require('./engine/status');
+  const create = require('./engine/create');
+  fs.writeFileSync(create.plistPath('fixturestopped'),
+    create.plistFor('fixturestopped', '/bin/echo', '/opt/homebrew/bin/tmux', 'claude-opus-5'), 'utf8');
+  // A pane whose Claude process is gone: `classify` returns STOPPED, and the
+  // transcript (if any) is what it RAN as.
+  // ⚠️ `command: 'zsh'` is what makes this STOPPED. `classify` decides it from
+  // the pane's COMMAND (no Claude process), not from its text — the first
+  // version of this fixture set the capture and got `unknown`, which the
+  // precondition below caught. A fixture in a state the product never produces
+  // proves nothing, and that is the failure this whole suite keeps finding.
+  status.setPaneSource(() => fleet.line({ session: 'fixturestopped-discord', title: 'fixturestopped', command: 'zsh' }));
+  status.setPaneCapture(() => '');
+  try {
+    const board = JSON.parse((await req('/api/status')).body);
+    const card = (board.agents || []).find((a) => a.sessionName === 'fixturestopped');
+    assert.ok(card, 'the fixture did not produce a card');
+    assert.equal(card.state, 'stopped', 'the fixture is not exercising the stopped case');
+    assert.equal(card.plannedModelName, 'Claude Opus 5',
+      'a stopped agent was not given the model its job will start it on, so the '
+      + 'panel would quote a transcript from a session that has ended');
+  } finally {
+    status.setPaneSource(null);
+    status.setPaneCapture(null);
+    fs.rmSync(create.plistPath('fixturestopped'), { force: true });
+  }
+});

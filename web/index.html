@@ -245,7 +245,12 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    the quieter half of the pair: the badge is the state, this is the subject. */
 /* `min-width: 0` WITH the overflow pair, or it does nothing: on its own the
    element neither shrinks nor truncates, it just wraps the flex row. */
-.dtask { font: var(--text-body) var(--font-ui); color: var(--label-2);
+/* ⚠️ `--k-ink-2`, matching `.atask`, its card counterpart. This took `--label-2`
+   inside `.detail`, which sets `color: var(--k-ink)` — the two tokens are
+   byte-identical in light (`--label-2` IS the pack's k-ink-2) and diverge in
+   dark and again under prefers-contrast. The `.dhead` hazard this file records,
+   in code this branch added. */
+.dtask { font: var(--text-body) var(--font-ui); color: var(--k-ink-2);
          min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dname { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; color: var(--k-ink); }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -284,9 +289,27 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    schemes. */
 .detail .dbox input[type=text], .detail .dbox textarea {
   background: var(--field-fill); border: 1px solid var(--border-strong); color: var(--k-ink); }
-.detail .dbox .btn { background: var(--k-surface); border: 1px solid var(--k-rule); color: var(--k-ink); }
-.detail .dbox .btn:hover { background: rgba(198,154,50,.14); }
-.detail .dbox .btn:disabled:hover { background: var(--k-surface); }
+/* ⚠️ ANY `.dbox`, NOT ONLY THE DETAIL PAGE'S. This is the rule that reconciles a
+   `--label`-system button with a `--k-surface` container, and scoping it to
+   `.detail` meant the moment another screen gained a `.dbox` — the create flow's
+   outcome step — its buttons fell back to `.btn { background: var(--bg) }` and
+   sat at 1.05:1 light / 1.035:1 dark against their own card, held up by a
+   0.26-alpha border alone.
+   ⚠️ AND `render-fields.js` CANNOT SEE THIS: it measures FIELDS against their
+   container, and a button is not a field. The check written for exactly this
+   defect class has a hole shaped like a button. */
+/* ⚠️ `--k-bg` FILL AND `--border-strong`, matching the field treatment. Widening
+   the old `.detail .dbox .btn` rule as written would have made this WORSE, not
+   better: it paints `--k-surface`, which is the `.dbox`'s own colour, so the
+   button went from 1.05:1 to exactly 1:1 against its card, and its border
+   dropped from --border-strong (1.77/2.35) to --k-rule (1.31/1.27). That is the
+   same swap this branch already made and undid on the selects.
+   A button and a field are the same problem: recessed paper on a surface card,
+   with the stronger border. Measured after: 1.10:1 fill AND 1.77/2.35 border,
+   two channels instead of one weak one. */
+.dbox .btn { background: var(--k-bg); border: 0.5px solid var(--border-strong); color: var(--k-ink); }
+.dbox .btn:hover { background: rgba(198,154,50,.14); }
+.dbox .btn:disabled:hover { background: var(--k-bg); }
 .detail .dremove { color: var(--k-ink); }
 .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--k-ink-2); }
 .back { background: none; border: 0; color: var(--label-2); cursor: pointer;
@@ -404,6 +427,9 @@ select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
    channel for a recessed fill worth 1.10:1, which is a hint and not a boundary.
    `--border-strong` is alpha-based, so it composites correctly on any ground and
    is consistent across schemes, which is the property that matters. */
+/* Only the ink and the arrow: the FILL comes from `--field-fill`, which these
+   containers already declare, and restating it here was a second statement of
+   one fact. */
 .dbox select, .pjcol select {
   background-image: linear-gradient(45deg, transparent 50%, var(--k-ink-2) 50%),
                     linear-gradient(135deg, var(--k-ink-2) 50%, transparent 50%);
@@ -690,7 +716,11 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    rest of the branch cares most about. `.atask` stays card-scoped: that IS a
    card treatment, and the panel has its own task element. */
 .astate.st-stopped { color: var(--k-ink-2); }
-.acard.off .atask { color: var(--k-ink-2); }
+/* ⚠️ NO `.acard.off .atask` RULE. An earlier version added one and it was a
+   NO-OP: `.atask` already declares exactly `--k-ink-2`, in both schemes, with no
+   dark override — so the rule restated a value and its comment claimed a dim it
+   did not produce. Same class as the `.agauge` 14px margin this branch caught by
+   re-measuring and seeing an unchanged gap. */
 .agauge { width: 82px; margin: 0 auto 14px; position: relative; }
 .agauge svg { width: 82px; height: 82px; display: block; }
 .gt { stroke: rgba(20,22,26,.10); }
@@ -1840,10 +1870,14 @@ svg { display: block; }
 .fr-youfield { margin-top: var(--space-5); }
 .fr-youfield label { display: block; font: var(--text-callout) var(--font-ui);
                      color: var(--label-2); margin-bottom: var(--space-2); }
-.fr-youfield input[type=text], .fr-youfield textarea {
-  width: 100%; box-sizing: border-box; font: var(--text-body) var(--font-ui);
-  padding: var(--space-4) var(--space-5); border-radius: var(--radius-control);
-  border: 0.5px solid var(--border-strong); background: var(--field-fill); color: var(--label); }
+/* ⚠️ NO `.fr-youfield input[type=text]` RULE. There was one, declaring nine
+   properties, and it rendered NEVER: every element it targets carries
+   `class="inp"`, and `#firstrun .inp` (1,1,0) beats it (0,2,1) on all nine. The
+   `--field-fill` edit made to it read in the diff as if it did something.
+   Removed on the same ground this branch removed `.fr-back`'s background: a rule
+   that parses green and renders never is worse than no rule, because the next
+   reader takes it for true — and this branch has now been caught by that twice
+   in one file. The wizard's fields are dressed by `#firstrun .inp`. */
 .fr-youfine { font: var(--text-caption) var(--font-ui); color: var(--label-3);
               margin-top: var(--space-5); }
 .fr-msg { font: var(--text-callout) var(--font-ui); color: var(--label);

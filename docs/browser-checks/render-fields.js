@@ -137,9 +137,13 @@ async function measure(engine, scheme) {
       const out = new Set();
       /* ⚠️ IDs AS WELL AS CLASSES, and rules INSIDE @media too. The first
          derivation matched only `.class` at the top level, so it silently
-         dropped `#firstrun`, `#pj-settings-view` and `#pj-add-view` — and
-         `#firstrun` is precisely the declarer whose lost background is the
-         blocker this whole mechanism cites in its header. An instrument that
+         dropped `#firstrun`, `#pj-settings-view` and `#pj-add-view`.
+         ⚠️ THIS DOES NOT MAKE THE `#firstrun` BLOCKER VISIBLE TO THIS SCRIPT,
+         and an earlier version of this comment claimed it did. The wizard is
+         hidden here on purpose, so no field ever walks through it and
+         `seenContainers` never records it. That defect is covered by the
+         brace-aware scan in the suite, not by this. The derivation is right; the
+         claim about what it buys was not. An instrument that
          quotes a defect as its reason and cannot see that defect is the shape
          this file exists to reject, and it took three versions to stop making
          it: enumerate-from-memory, then class-only, then this. */

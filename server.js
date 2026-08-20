@@ -675,6 +675,14 @@ const server = http.createServer((req, res) => {
         // agent created before the picker existed) it stated a specific future
         // model we had no basis for. The cost gate still holds: a RUNNING agent
         // whose model we could read never reaches the disk.
+        // ⚠️ THIS AND `modelLine`'s `cardStOf(a).pres === 'off'` ARE THE SAME
+        // QUESTION ACROSS A BOUNDARY. The client cannot import STATE and the
+        // server cannot import CARD_ST, so they cannot literally share the
+        // derivation — they agree because `stopped` is the only CARD_ST entry
+        // mapping to `pres: 'off'`. That coincidence is pinned by a test rather
+        // than left to be discovered: add a second `off` state and the client
+        // would prefer the job for it while this never populated the field, so
+        // "Will start on" would silently stop appearing.
         if (a.modelName && a.state !== STATE.STOPPED) return null;
         const arg = create.plannedModelArg(a.sessionName);
         return arg ? modelDisplayName(arg) : null;
