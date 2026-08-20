@@ -9538,6 +9538,65 @@ async function pjLoadDocs(id) {
     : 'Show them all in Finder';
 }
 
+/**
+ * Turn a message body into HTML, with the file paths it cites rendered as the
+ * pack's `.ref` chip and everything else escaped exactly as before.
+ *
+ * 🛑 THE ESCAPE IS NOT RELAXED. Every span of this function's output is either
+ * `esc()`d text or markup this function built from a filename that was matched
+ * against a list the SERVER produced. A message body never reaches innerHTML
+ * unescaped, on any path, including the no-match path which returns exactly
+ * what the old `esc(m.text)` returned.
+ *
+ * ⚠️ THE CLIENT DOES NOT SNIFF, AND THAT IS THE WHOLE DESIGN. A regex that
+ * decides what "looks like a path" will be wrong, and a mis-detected path
+ * renders as a control that appears broken, where plain text merely appears
+ * plain. The failure modes are not symmetric. So a token becomes a chip ONLY
+ * when it matches, exactly, the name of a file the project's folder actually
+ * contains right now. Anything we cannot prove stays a paragraph, which is the
+ * honest default we already ship.
+ *
+ * That rule is also what makes the chip's promise keepable: "Show me" opens
+ * through the same route the documents list uses, with the same three gates,
+ * so a chip is never offered for something the opener would refuse.
+ */
+function pjLinkPaths(text, names) {
+  const raw = String(text == null ? '' : text);
+  if (!names || !names.size) return esc(raw);
+  /* Split on whitespace RUNS but keep them, so the reassembled body preserves
+     the spacing the person typed. A body is not a sentence: agents paste
+     columns and indentation, and collapsing it would edit what they said. */
+  const parts = raw.split(/(\s+)/);
+  let hit = false;
+  const out = parts.map((tok) => {
+    if (!tok || /^\s+$/.test(tok)) return esc(tok);
+    /* Trailing punctuation is stripped for the LOOKUP and put back after, so
+       "see notes.md." matches while the sentence keeps its full stop. Only
+       characters that cannot start a filename on this platform are stripped,
+       and never from the middle. */
+    const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
+    const core = m[1];
+    const tail = m[2];
+    if (!core) return esc(tok);
+    /* A cited path may be written with folders in front of it. The FILE is
+       what we can open, so the last segment is what is matched -- but only
+       when the whole token has no `..` in it, because a token that walks up
+       is not describing a file in this project and should not be dressed as
+       one even if its basename collides. */
+    if (core.includes('..')) return esc(tok);
+    const base = core.split('/').pop();
+    if (!names.has(base)) return esc(tok);
+    hit = true;
+    return '<span class="ref">' + esc(core)
+      + '<button class="refgo" type="button" data-ref="' + esc(base)
+      + '" aria-label="Show me ' + esc(base) + '">Show me</button></span>' + esc(tail);
+  }).join('');
+  /* ⚠️ Identical output to the old path when nothing matched, byte for byte:
+     the reassembly above escapes every token and every whitespace run, so a
+     body with no citation is unchanged rather than merely equivalent. */
+  return hit ? out : esc(raw);
+}
+
 function pjSize(bytes) {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n < 0) return '';
