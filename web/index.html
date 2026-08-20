@@ -2596,7 +2596,21 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
              role="region" aria-labelledby="d-qask-lab"></pre>
         <div class="qopts" id="d-qopts" hidden></div>
         <p class="qout" id="d-qout" hidden>Or write your own answer below.</p>
-        <span class="delivery failed" id="d-qask-fail" hidden></span>
+        <!-- ⚠️ A HINT, NOT A VERDICT PILL, ruled by Mona Lisa 2026-08-20 after a
+             reviewer read the picture. This line is a RECOVERY INSTRUCTION and
+             its whole job is to say the buttons still work; the failure
+             sentence lives on the message row above, deliberately. It wore
+             `.delivery.failed`, which put a red pill on the good news INSIDE
+             the question's own box -- and the stylesheet's own rule is that a
+             question must not look like a fault, because "making an ordinary
+             question look like a fault is how people start ignoring red". The
+             send failed; the question is fine.
+             `.delivery` is also the message row's grammar ("this is what
+             happened to a message I sent"), which is true one container up and
+             false of a line about buttons: borrowing a class across containers
+             inherits a claim written for the other container. The plan
+             specified `.delivery.failed` here and the plan was wrong. -->
+        <p class="qout" id="d-qask-fail" hidden></p>
       </div>
     </div>
     <div class="dmthread" id="d-dmthread"></div>

@@ -187,7 +187,20 @@ const STATES = {
      script's whole output is the class of evidence that weakens under it:
      contrast ratios, computed backgrounds, scrollWidth overflow and
      elementFromPoint. `HEADED=0` for a machine with no console session. */
-  const browser = await chromium.launch({ headless: process.env.HEADED === '0' });
+  /* ⚠️ `--hide-scrollbars` IS REMOVED, and it is the whole reason this check
+     could not see a scrollbar headless. Playwright passes that flag by default
+     in headless mode, which suppresses scrollbars whatever the CSS says. Two
+     wrong conclusions were drawn before the flag was found: "headless does not
+     honour ::-webkit-scrollbar" (mine) and "Playwright's bundled Chromium
+     differs from system Chrome" (Mona Lisa's, from a command-line Chrome that
+     honoured it in both headless modes). Measured across four launches: the
+     bundled Chromium AND system Chrome both honour the rule headless once the
+     flag is gone, and layout moves by exactly the height the rule asks for.
+     Neither the mode nor the binary was the cause. */
+  const browser = await chromium.launch({
+    headless: process.env.HEADED === '0',
+    ignoreDefaultArgs: ['--hide-scrollbars'],
+  });
   const problems = [];
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({
@@ -390,7 +403,28 @@ const STATES = {
                  only because `::-webkit-scrollbar` opts this box out of macOS
                  overlay behaviour. Borders included; the arms differ by 6. */
               chrome: q.offsetHeight - q.clientHeight,
-              headless: /HeadlessChrome/.test(navigator.userAgent),
+              /* ⚠️ THE CAPABILITY, PROBED, not the render mode inferred from a
+                 user-agent string. Whether this engine reserves space for a
+                 styled scrollbar is a question with a direct answer: ask for a
+                 24px one on a throwaway box and see whether layout moves by 24.
+                 An inference from `HeadlessChrome` was wrong twice over -- it
+                 is neither the mode nor the binary that decides, it is a launch
+                 flag -- and a probe cannot be wrong about its own engine. */
+              honoursBar: (() => {
+                const box = document.createElement('pre');
+                box.id = '__barprobe';
+                box.style.cssText = 'width:60px;overflow-x:auto;white-space:pre;border:0;position:absolute;left:-9999px';
+                box.textContent = 'x'.repeat(200);
+                const rule = document.createElement('style');
+                rule.textContent = '#__barprobe::-webkit-scrollbar { height: 24px; -webkit-appearance: none; }';
+                document.body.appendChild(box);
+                const bare = box.offsetHeight - box.clientHeight;
+                document.head.appendChild(rule);
+                void box.offsetHeight;
+                const styled = box.offsetHeight - box.clientHeight;
+                box.remove(); rule.remove();
+                return styled - bare === 24 || styled === 24;
+              })(),
             };
           })(),
           metaAlign: (() => {
@@ -401,6 +435,14 @@ const STATES = {
           label: el('d-talk-label').textContent,
           qlab: el('d-qask-lab').textContent,
           qfail: el('d-qask-fail').hidden ? '' : el('d-qask-fail').textContent,
+          /* ⚠️ AND WHAT IT IS WEARING. This line is a recovery instruction --
+             its whole job is to say the buttons still work -- and it shipped in
+             `.delivery.failed`, a red pill, INSIDE the question's own box. The
+             stylesheet's rule is that a question must not look like a fault.
+             The swap to a hint was pinned by nothing, so a later "tidy-up" that
+             put the pill back would have been invisible to the whole suite. */
+          qfailBorder: el('d-qask-fail').hidden ? null
+            : getComputedStyle(el('d-qask-fail')).borderTopWidth,
           // ⚠️ THE CONTROL'S BOUNDARY, measured in the page. WCAG SC 1.4.11
           // asks 3:1 of whatever identifies a control, and a screenshot cannot
           // tell you a border is invisible -- it looks tasteful.
@@ -490,6 +532,10 @@ const STATES = {
       /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
          a state that keeps things is as wrong as one standing over a state that
          does not, and only the second half was ever the bug. */
+      if (m.qfail && m.qfailBorder && m.qfailBorder !== '0px') {
+        problems.push(`${tag}: the reassurance "${m.qfail}" is wearing a ${m.qfailBorder} border, `
+          + 'so the good news is drawn as a fault inside the question box');
+      }
       if (m.qtext && m.qtext.cut) measuredCut += 1;
       if (m.qtext && m.qtext.cut && !(m.qtext.scrollable && m.qtext.focusable)) {
         problems.push(`${tag}: the question is cut off and what is left cannot be reached `
@@ -502,7 +548,7 @@ const STATES = {
          all, and a headless run asserting its absence would report a correct
          fix as broken. The states still say which arm they are in; the
          assertion holds only where the engine can answer. */
-      if (m.qtext && !m.qtext.headless) {
+      if (m.qtext && m.qtext.honoursBar) {
         const bar = m.qtext.chrome - 2;   // the box's own 0.5px borders
         if (m.qtext.cut && bar < 5) {
           problems.push(`${tag}: the question is cut and no scrollbar says so (chrome ${m.qtext.chrome}px)`);
@@ -510,10 +556,11 @@ const STATES = {
         if (!m.qtext.cut && bar > 2) {
           problems.push(`${tag}: a scrollbar is drawn over a question that fits (chrome ${m.qtext.chrome}px)`);
         }
-      } else if (m.qtext && m.qtext.headless && !headlessNoted) {
+      } else if (m.qtext && !m.qtext.honoursBar && !headlessNoted) {
         headlessNoted = true;
-        problems.push(`[${theme}] scrollbar: this run is HEADLESS, where ::-webkit-scrollbar is ignored `
-          + 'entirely, so the question box\u2019s affordance is UNCHECKED (run headed, which is the default)');
+        problems.push(`[${theme}] scrollbar: this engine reserves no space for a styled scrollbar `
+          + '(probed with a 24px rule and layout did not move), so the question box\u2019s affordance '
+          + 'is UNCHECKED here -- the usual cause is a launcher passing --hide-scrollbars');
       }
       if (m.metaAlign !== null) {
         measuredMeta += 1;
