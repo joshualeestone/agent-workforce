@@ -6253,7 +6253,12 @@ function talkKey(body) {
      version: the window's TOP moves with the cursor, a newly accumulated
      question inserts its lines NEAREST the menu, and the options alone are
      what two different questions share. */
-  const aboveLines = lines.slice(0, first)
+  /* `first` can be -1 when no line matches, and `slice(0, -1)` would silently
+     drop the last line rather than falling back. Unreachable through the route
+     (a non-null `options` implies a match) and guarded anyway, because this
+     copy exists precisely because a nearly-the-same copy is the dangerous
+     kind. */
+  const aboveLines = (first < 0 ? [] : lines.slice(0, first))
     .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
   /* ⚠️ AND HERE THE FALLBACK STAYS, WHERE THE ENGINE'S TWIN RETURNS NULL. The
      two functions compute the same `above` and then diverge ON PURPOSE, because
@@ -6266,7 +6271,7 @@ function talkKey(body) {
        and the route falls back to the label check it had before.
      Same rule, different answer to "what if the rule yields nothing", and the
      agreement test asserts both halves rather than pretending they match. */
-  const above = aboveLines.slice(-3).join('\n').trim() || lines.join('\n').trim();
+  const above = aboveLines.join('\n').trim() || lines.join('\n').trim();
   return JSON.stringify(body.options) + '\u0000' + above;
 }
 

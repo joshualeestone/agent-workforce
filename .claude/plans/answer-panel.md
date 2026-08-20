@@ -211,6 +211,17 @@ request, and the suite reads text.
 - **`engine/chat.js` exports `questionAbove`**, which the Engine section above
   does not mention. It is the engine twin of the page's identity rule, so both
   sides of that comparison read the same fact rather than two spellings of it.
+  ⚠️ **The identity rule has had FOUR shapes and this is a chosen trade, not a
+  settled answer.** Equality on the whole window refuses a send when the cursor
+  moves; containment accepted a pane that had accumulated a new question;
+  last-three-lines dropped the discriminator whenever it sat higher than three
+  lines, which is Claude's own edit-permission prompt (a path above a diff
+  hunk). The first fails CLOSED and the other two fail OPEN, so the branch
+  ships the first. Measured cost: a false refusal needs a capture DEEPER than
+  `questionIn`'s six-line run-up window, because a shallower one clamps to the
+  same slice at either cursor position -- so the ordinary permission prompt is
+  unaffected. The proper fix is a cursor-independent anchor, which is its own
+  change with its own blind pass.
   ⚠️ **And they diverge in exactly one place, deliberately.** When the rule
   yields nothing -- a menu with only blanks or frame above it -- the engine
   returns `null` and the page falls back to the whole slice. The costs are not

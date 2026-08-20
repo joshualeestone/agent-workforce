@@ -2072,8 +2072,16 @@ const server = http.createServer((req, res) => {
            */
           const sameQuestion = askedAbove !== null && nowClean !== null && nowClean === askedAbove;
           if (askedAbove && nowClean && !sameQuestion) {
-            const moved = new Error('its screen is asking something else now, so we did not send that '
-              + 'answer. The question on this page is the current one.');
+            /* ⚠️ TRUE OF BOTH CAUSES. This fires when the screen genuinely moved
+               on AND when only the cursor moved inside the same question -- see
+               `questionAbove` for why the second is a known cost rather than an
+               oversight. "It is asking something else now" is false in the
+               second case, and a sentence that is false half the time it is
+               shown teaches people to ignore it. This one says what we know
+               (the screen moved since the press) and what to do about it. */
+            const moved = new Error('its screen moved between drawing that button and sending it, '
+              + 'so we did not send the answer. What is on this page now is current: press again '
+              + 'if it is still the one you want.');
             moved.status = 409;
             throw moved;
           }

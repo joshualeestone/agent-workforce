@@ -964,39 +964,48 @@ function questionAbove(questionText) {
   const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
     l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
   /**
-   * ⚠️ THE LAST THREE MEANINGFUL LINES ABOVE THE RUN, and every other shape
-   * tried here was wrong in a way that mattered.
+   * ⚠️ EVERY MEANINGFUL LINE ABOVE THE RUN, and this rule has had three shapes.
+   * Each earlier one was broken by a blind pass, and the reason to stop here is
+   * not that this one is perfect -- it is that its failure is on the SAFE side.
    *
-   *   the WHOLE window   moves with the cursor. `questionIn` anchors on the
-   *                      LAST needs-you marker and the marked option line is
-   *                      itself one, so arrowing from 1 to 2 moves the anchor
-   *                      UP and the window gains lines at the TOP. Equality
-   *                      then refused a send answering the question actually on
-   *                      screen.
-   *   CONTAINMENT        was the fix for that and it opened a hole: a pane
-   *                      accumulates, so a NEW question's window legitimately
-   *                      CONTAINS the answered one's. Measured end to end, "1"
-   *                      went through against `rm -rf` after being drawn for
-   *                      "Do you want to proceed?".
-   *   the WHOLE SLICE    as an empty-window fallback is the options themselves,
-   *                      which two different questions share by definition.
+   *   CONTAINMENT   accepted a pane that had ACCUMULATED a new question above
+   *                 the answered one, because the new window contains the old.
+   *                 Measured end to end: "1" went through against `rm -rf`.
+   *                 Fails OPEN.
+   *   LAST THREE    dropped the discriminating text whenever it sits more than
+   *                 three meaningful lines above the menu. Measured on Claude's
+   *                 own edit-permission prompt: a path line above a two-line
+   *                 diff hunk, so `src/alpha/index.js` and `src/beta/index.js`
+   *                 produced the SAME identity and "1" approved an edit to a
+   *                 file nobody chose. Fails OPEN, on the shape this function's
+   *                 own docblock cites as its reason to exist.
+   *   EVERY LINE    refuses a send when the window's TOP moves, which happens
+   *                 when the cursor leaves the marked option: `questionIn`
+   *                 anchors on the last needs-you marker and `❯ 1. Yes` is one,
+   *                 so arrowing to 2 re-anchors on the prose above and the
+   *                 window gains lines. Fails CLOSED.
    *
-   * Lines adjacent to the run do not move when the window's top does, and a
-   * newly accumulated question inserts its own lines NEAREST the menu. So the
-   * last three carry the discriminating text in both directions, and equality
-   * over them is tight rather than loose.
+   * 🛑 A FALSE REFUSAL COSTS ONE MORE PRESS. A false ACCEPT types a digit into
+   * somebody's terminal answering a question they never read. Those are not
+   * comparable, and an earlier comment of mine that called a false refusal
+   * "worse than the hole it closes" had the emphasis backwards: it is worse
+   * than a guard that is RIGHT, not worse than a guard that is wrong the other
+   * way.
    *
-   * ⚠️ NULL WHEN NOTHING IDENTIFIES IT. A run-up window of only blanks or frame
-   * means the screen carries no text that could tell one question from another,
-   * and inventing an identity from the options is exactly the collision this
-   * function exists to prevent. Null leaves the caller with the label check it
-   * had before this existed, which is the state of the world this mechanism was
-   * added to improve on rather than a new hole.
+   * The cursor case is a KNOWN, MEASURED cost, not an oversight: the person
+   * presses again and the second press carries the new identity. The route's
+   * sentence is written to be true of both causes. Narrowing it further wants a
+   * cursor-independent anchor, which is its own change with its own blind pass.
+   *
+   * ⚠️ NULL WHEN NOTHING IDENTIFIES IT. A window of only blanks or frame means
+   * the screen carries nothing that could tell one question from another, and
+   * inventing an identity from the options is the collision this exists to
+   * prevent. Null leaves the caller with the label check it had before.
    */
   const above = lines.slice(0, first)
     .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
   if (!above.length) return null;
-  return above.slice(-3).join('\n').trim() || null;
+  return above.join('\n').trim() || null;
 }
 
 function optionsIn(questionText) {

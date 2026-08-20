@@ -2226,7 +2226,7 @@ test('a pane that ACCUMULATED a new question above the same menu is refused', as
     });
 });
 
-test('the cursor moving inside the SAME question is not "asking something else"', async () => {
+test('the cursor moving inside a SHORT prompt still sends, because the window clamps', async () => {
   reset();
   /**
    * ⚠️ THE FALSE REFUSAL THE FIRST VERSION OF THIS GUARD SHIPPED WITH, and a
@@ -2253,7 +2253,15 @@ test('the cursor moving inside the SAME question is not "asking something else"'
   await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
     [said(moved), said(), said()], async ({ calls }) => {
       const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
-      assert.equal(res.status, 200, 'the same question with the cursor moved is not a different question');
+      /* ⚠️ AND THE COST IS NARROWER THAN IT LOOKS, which this fixture measures.
+         The identity is every meaningful line above the menu, and the window
+         gains lines at the top when the cursor leaves the marked option -- but
+         `questionIn` slices from `max(0, at - 6)`, so a prompt with SIX OR
+         FEWER lines above the menu clamps to zero at both cursor positions and
+         the identity does not move at all. That is the ordinary permission
+         prompt. The false refusal needs a capture DEEPER than the run-up
+         window, and `engine/chat.test.js` holds that case. */
+      assert.equal(res.status, 200, 'a short prompt clamps to the same window at either cursor position');
       assert.equal(calls.sends().length > 0, true, 'and the answer reached the pane');
     });
 });

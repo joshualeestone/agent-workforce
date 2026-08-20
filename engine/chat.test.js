@@ -1988,8 +1988,39 @@ test('questionAbove is the identity of a question, and never an empty one', () =
   const onTwo = chat.questionIn('L2\nL3\nL4\nL5\nL6\nsixth\nI will run the tests now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No');
   assert.ok(onOne && onTwo, 'CONTROL: both cursor positions are questions the route can serve');
   assert.notEqual(onOne.text, onTwo.text, 'CONTROL: the two captures really do differ');
-  assert.equal(chat.questionAbove(onOne.text), chat.questionAbove(onTwo.text),
-    'the cursor moving is not a different question, and refusing that send is worse than the hole it closes');
+  /* ⚠️ THIS ASSERTS THE KNOWN COST, not the behaviour anyone wants. The window
+     gains lines at the top when the anchor moves, so the identities differ and
+     the route refuses a send answering the question actually on screen. It is
+     recorded as a test rather than a comment because the day somebody makes the
+     anchor cursor-independent, THIS is the assertion that should start failing
+     and tell them the cost is gone. The alternative shapes all failed OPEN --
+     see `questionAbove` -- and a false refusal costs one more press where a
+     false accept types a digit at a question nobody read. */
+  assert.notEqual(chat.questionAbove(onOne.text), chat.questionAbove(onTwo.text),
+    'the cursor case is stable now, so the false refusal it causes is gone and this test should be rewritten');
+  /* ⚠️ AND THE COST IS BOUNDED BY THE RUN-UP WINDOW. `questionIn` slices from
+     `max(0, at - 6)`, so a prompt with six or fewer lines above its menu clamps
+     to zero at BOTH cursor positions and the identity does not move. That is
+     the ordinary permission prompt, which is why this cost is narrow rather
+     than everyday -- and it is measured here rather than asserted in prose. */
+  const shortOne = chat.questionIn('I will run the tests now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  const shortTwo = chat.questionIn('I will run the tests now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No');
+  assert.equal(chat.questionAbove(shortOne.text), chat.questionAbove(shortTwo.text),
+    'a prompt shallower than the run-up window clamps to the same slice, so the cursor cannot move it');
+
+  /* ⚠️ THE DISCRIMINATOR CAN SIT WELL ABOVE THE MENU, which is what broke the
+     last-three-lines rule. Claude's own edit-permission prompt puts the PATH
+     above a diff hunk, so two files with the same basename and the same hunk
+     collided and "1" approved an edit to a file nobody chose. Driven through
+     `questionIn` rather than handed a slice, because the slice is the thing
+     that was dropping it. */
+  const alpha = chat.questionIn('src/alpha/index.js\n\n12 - import { z } from "./z"\n12 + import { z } from "./zz"\n\nDo you want to make this edit to index.js?\n❯ 1. Yes\n  2. No');
+  const beta = chat.questionIn('src/beta/index.js\n\n12 - import { z } from "./z"\n12 + import { z } from "./zz"\n\nDo you want to make this edit to index.js?\n❯ 1. Yes\n  2. No');
+  assert.ok(alpha && beta, 'CONTROL: both edit prompts are questions the route can serve');
+  assert.deepEqual(chat.optionsIn(alpha.text), chat.optionsIn(beta.text),
+    'CONTROL: the labels are identical, which is why the label gate cannot tell these apart');
+  assert.notEqual(chat.questionAbove(alpha.text), chat.questionAbove(beta.text),
+    'two files with the same basename and the same hunk share an identity, so a press approves the wrong one');
 
   /* ⚠️ AND AN ACCUMULATED NEW QUESTION IS NOT THE SAME ONE, which is what
      containment got wrong: a pane accumulates, so the new window CONTAINS the
