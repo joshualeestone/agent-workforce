@@ -6696,8 +6696,11 @@ test("the removal announcement is her sentence, on both verdict arms", () => {
 /* ---------------------------------------------------------------------------
  * answer-panel: the agent page's own thread, its composer, and the buttons
  * above it. Text pins only -- these catch a DELETION, not a rendering. The
- * render itself is checked by drawing all eight states in both themes and
- * measuring in the page (scrollWidth/clientWidth for overflow, computed
+ * render itself is checked by `docs/browser-checks/render-talk.js`, which draws
+ * every state this branch defines in both themes and measures in the page
+ * (the count is deliberately not quoted here: it said "eight" while the file
+ * drew eleven and then thirteen, which is one moving fact written in two
+ * places, and this directory's own README explains why not to) (scrollWidth/clientWidth for overflow, computed
  * background for the transparent-panel class, elementFromPoint for what is
  * actually on top). Checks were green through three broken layouts on 18e;
  * text cannot see that class of defect and these do not claim to.

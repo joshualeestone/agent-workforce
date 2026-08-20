@@ -6740,7 +6740,14 @@ async function paintTalk(sessionName, agentName) {
        would be run as a command) from one scrolled back (it would go to the
        scrollback). Both mean not delivered; only one of them could execute
        something. */
-    off.textContent = name + ' cannot be handed a message right now: '
+    /* ⚠️ NO "right now" HERE. Both of `addressable`'s reachable reasons end
+       with one of their own ("its window is scrolled back RIGHT NOW", "there
+       is no Claude running in its window RIGHT NOW"), so the wrapper's copy
+       made every real sentence say it twice: "cannot be handed a message right
+       now: Its window is scrolled back right now". The time phrase belongs to
+       the reason, which is where it is true; the wrapper states the
+       consequence. */
+    off.textContent = name + ' cannot be handed a message: '
       + pjSentence(body.presenceBecause || 'we cannot reach its window');
     off.hidden = false;
   } else if (body.presence === 'unsure') {
