@@ -144,3 +144,20 @@ reading it wrong.
 Every other check in that run is green, including the members-wording step that
 this branch broke and repaired, so the red is exactly four measurements wide and
 its boundary is known.
+
+## 🛑 `.cstep` is a NAME COLLISION — do not port the pack's rules for it
+
+Recorded against the CLASS rather than a file, because a warning that names a
+file protects that file and not the defect.
+
+- **Build** (web/index.html:2723, 2791): `<div class="cstep" id="cstep-role">`
+  wrapping an `<h2>`. A section CONTAINER in the create panel. It has no rule
+  and renders as a plain div, which is what it wants. Nothing is wrong today.
+- **Pack**: `.cstep` is an inline-flex CHIP, with `.cstep b` as a 22px circle,
+  plus `:hover` and a `.csteps.cprev` dashed variant. Seven rules.
+
+Same word, two different objects. Porting the pack's `.cstep` turns the create
+panel's section wrappers into inline-flex chips with circles in them. Found by
+Mona Lisa. This is the second instance tonight of a class name meaning
+different things in the two files; the first was `.panel`, where the pack's
+wears `--page-*` mock-chrome tokens and the build's is a real surface.

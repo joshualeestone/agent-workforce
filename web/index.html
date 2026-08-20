@@ -1597,6 +1597,44 @@ svg { display: block; }
    Mouse print got smaller in IMPORTANCE, not in legibility. Only two elements
    carry this class, both in this panel, so the blast radius is the panel. */
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+/* ⚠️ TWO CLASSES THAT WERE WORN AND NEVER DEFINED. Project settings renders the
+   folder NAME — the answer to the question that screen exists to answer — as
+   `<p class="shint"><code class="t">`, and neither class had a rule anywhere in
+   this file. It was arriving as a browser-default paragraph around a
+   browser-default `code`: default face, default size, default colour, and a
+   default bottom margin the element's inline `margin-top` does not cancel.
+   Found by Mona Lisa comparing structure against the pack; nothing that reads
+   this file for text could see it, because the markup looks completely correct.
+
+   `.shint` takes the pack's values verbatim (FROZEN-2026-08-19:1880, verified
+   top-level rather than inside the narrow-screen block above it — the brace
+   depth was computed, because the rule is indented and reads as if it were
+   nested).
+
+   ⚠️ `code.t` DOES NOT take the pack's, and this is the trap. The pack's
+   `code.t` (:100) is built on `--page-ink`, which is the MOCK-CHROME token
+   family: the surface a mock sits on inside the design document, not an app
+   surface. Mona Lisa established that distinction earlier tonight when the same
+   family made a `.panel` comparison look like a missing radius step. So this
+   keeps the pack's SHAPE — small mono, a faint ground, a little padding — on
+   this app's own tokens. Porting the declaration verbatim would import the
+   design document's furniture into the product. */
+/* ⚠️ AND IT HAD TO BE `.panel p.shint`, WHICH I FOUND BY MEASURING AND WOULD
+   NOT HAVE FOUND BY READING. `.panel p` (0,1,1) sets font, colour, line-height
+   AND margin-bottom, and it BEATS a bare `.shint` (0,1,0) on every one of them.
+   A bare rule here contributes nothing inside a panel — the `.linkish` shape
+   again, one day later.
+   What hid it: in LIGHT, `--text-body` is 13px and `.8125rem` is 13px, and
+   `--label-2` and `--k-ink-2` are both #4a4f57. Identical numbers from two
+   different rules, so the computed style could not say which one won. In DARK
+   they diverge (rgba(255,255,255,.62) against #a9adb3), which is the third time
+   tonight that a defect was invisible in light and only the second instrument
+   could see it. The margin was the tell: 12px where the rule asked for 0. */
+.panel p.shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45;
+                 color: var(--k-ink-2); }
+.shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2); }
+code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
+         background: color-mix(in srgb, var(--k-ink) 7%, transparent); }
 
 /* Running on older instructions. A STATE, not a toast: it survives a reload,
    and it is still right when the file was edited outside this app entirely. */
