@@ -1250,8 +1250,17 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    It used to restate width and appearance both, in the page-ground colour
    rather than the field colour, which is why it and #create-model looked like
    two different controls. */
-.pj-member { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+/* ⚠️ `align-items: center` and NOT `baseline` now that the row has a face.
+   A 34px disc baseline-aligned against a 15px name sits low and drags the row
+   with it; the pack's member row centres them. `flex-wrap` stays, so a long
+   because-sentence still wraps under rather than squeezing the name. */
+.pj-member { display: flex; align-items: center; gap: var(--space-4); flex-wrap: nowrap;
   padding: var(--space-4); border: 0.5px solid var(--separator); border-radius: var(--radius-control); }
+/* The text half: everything that was directly in the row before the face
+   arrived. Column, because the name, the state and the told line were three
+   siblings of a wrapping flex row and are now one block beside the disc. */
+.pj-member-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pj-face { flex: 0 0 34px; }
 .pj-member b { font: 600 var(--text-body) var(--font-ui); }
 /* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
@@ -8508,7 +8517,26 @@ function pjMember(m, suppressTold) {
   // suppressTold: the roster's identical verdicts are being said ONCE below
   // the list (pjSharedTold), so the per-member span would triple-state it.
   const toldLine = suppressTold ? '' : pjToldLine(m.told || {});
+  /* ⚠️ THE FACE, and it is the SAME disc as everywhere else. Josh circled the
+     blank rings on this column in his 2026-08-19 markup; the pack draws a
+     `.lav` chip here and every other member surface in this app already draws
+     one. Reused rather than re-derived: the photograph when the agent has one,
+     otherwise the tinted initials from `discTint`/`discInk`, so an agent's
+     mark is one identity on the card, the list, the room and here.
+     `hasAvatar` is gated on TIED in the engine, and that gate is the whole
+     point: a stranger's pane borrowing the name must not lend this row a
+     photograph of somebody it is not. A face is the strongest identity claim
+     on a screen, so it is the one that must not be guessed.
+     aria-hidden, because the name is right beside it in <b> and a screen
+     reader announcing initials as well would say the agent twice. */
+  const face = m.hasAvatar
+    ? '<span class="lav pj-face" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(m.sessionName) + '/avatar" alt=""></span>'
+    : '<span class="lav pj-face" aria-hidden="true" style="background:' + discTint(m.name)
+      + ';color:' + discInk(m.name) + '">' + esc(initials(m.name)) + '</span>';
   return '<div class="pj-member' + (m.present ? '' : ' unseen') + '">'
+    + face
+    + '<span class="pj-member-b">'
     + '<b>' + esc(m.name) + '</b>'
     // ⚠️ An `unknown` state carries its REASON here (historical origin: a
     // bare "Can't tell" once sat beside the now-retired told sentence and
@@ -8524,6 +8552,7 @@ function pjMember(m, suppressTold) {
        scoped actions, the escalation gradient member < archive <
        remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + '</span>'
     + '</div>';
 }
 

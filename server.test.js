@@ -1973,15 +1973,30 @@ function pageFnSource(name) {
  * `STATE_COPY`, `GLYPH`) as well as in functions, and a test that restated one
  * of those tables would be asserting its own copy rather than the product's.
  */
+/* ⚠️ OBJECT **OR** ARRAY. This only matched `const NAME = {`, so lifting
+   `DISC_TINTS` (an array) failed with "DISC_TINTS vanished from the page" --
+   a message that describes a deletion when the const was sitting right there.
+   Widened rather than worked around, because the misleading sentence was the
+   real defect: the previous behaviour on an array const was to assert an
+   untruth. Purely additive; every caller that worked before still matches the
+   object arm first. */
 function pageConstSource(name) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const start = script.indexOf('const ' + name + ' = {');
-  assert.ok(start > -1, name + ' vanished from the page');
+  /* ⚠️ A REGEX, NOT indexOf, AND THAT IS THE SECOND HALF OF THE SAME BUG.
+     After the array arm was added, `DISC_INKS` still "vanished" -- because it
+     is written `const DISC_INKS  = [` with TWO spaces, and a fixed string
+     cannot see that. A matcher that depends on incidental whitespace reports a
+     deletion when the thing is sitting on the line it names. */
+  const m = new RegExp('const\\s+' + name + '\\s*=\\s*([{\\[])').exec(script);
+  assert.ok(m, name + ' was not found on the page as an object or array const');
+  const start = m.index;
+  const open = m[1];
+  const close = open === '{' ? '}' : ']';
   let depth = 0; let end = -1;
-  for (let k = script.indexOf('{', start); k < script.length; k += 1) {
-    if (script[k] === '{') depth += 1;
-    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  for (let k = script.indexOf(open, start); k < script.length; k += 1) {
+    if (script[k] === open) depth += 1;
+    else if (script[k] === close) { depth -= 1; if (depth === 0) { end = k + 1; break; } }
   }
   assert.ok(end > -1, 'could not find the end of ' + name);
   return script.slice(start, end) + ';';
@@ -6046,8 +6061,20 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
   // STATE_COPY here is a DELIBERATELY partial stand-in (two of six keys):
   // it only feeds the state caption, which no assertion below reads, and
   // the real const is not a `function` pageFnSource can lift.
+  // ⚠️ `discTint`, `discInk` and `initials` are lifted from the REAL page
+  // rather than stubbed. pjMember grew a face on 2026-08-19 and this test went
+  // red with "discTint is not defined" -- which is the extraction harness
+  // working exactly as intended: it runs the real function, so a new
+  // dependency has to be a real one. Stubbing them would keep the test green
+  // while quietly no longer exercising the branch that draws the face.
   const prelude = TOLD_PRELUDE
     + 'const STATE_COPY = { idle: { label: "Idle" }, unknown: { label: "Can\'t tell" } };\n'
+    + pageConstSource('DISC_TINTS') + '\n'
+    + pageConstSource('DISC_INKS') + '\n'
+    + pageFnSource('discIndex') + '\n'
+    + pageFnSource('discTint') + '\n'
+    + pageFnSource('discInk') + '\n'
+    + pageFnSource('initials') + '\n'
     + pageFnSource('pjToldLine') + '\n';
   const member = pageFunction('pjMember', prelude);
   const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
