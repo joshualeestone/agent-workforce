@@ -24,7 +24,7 @@ const path = require('node:path');
 // `STATE` travels with them: the thread route compares a member's state, and a
 // literal there is a comparison that silently stops matching the day the engine
 // renames one.
-const { snapshot, paneRoster, countAgents, STATE } = require('./engine/status');
+const { snapshot, paneRoster, countAgents, STATE, modelDisplayName } = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -645,8 +645,63 @@ const server = http.createServer((req, res) => {
       // every five-second poll. `stopped !== false` is `isHidden`'s own test;
       // if the two ever diverge this is the copy that is wrong.
       const gone = new Set(removal.removedAgents().filter((r) => r.stopped !== false).map((r) => r.name));
+      /**
+       * What an agent's job will START it on, for the agents whose live model
+       * we could not read.
+       *
+       * ⚠️ WHEN NO LIVE MODEL WAS READ, PLUS EVERY STOPPED AGENT.
+       * ⚠️ THIS GATE IS COST, NOT CORRECTNESS, and an earlier version of this
+       * line claimed both. Which reading WINS is decided on the page, by
+       * `modelLine` and `runsOnLine`; populating this field for a running agent
+       * would change nothing on screen, only add a disk read per agent per
+       * five-second poll. Measured: mutating the gate to always consult the job
+       * fails no test, and correctly so — the display layer is where the
+       * precedence lives, and that half IS pinned.
+       * (The line also said "only when `modelName` is absent", which the
+       * stopped-agent clause contradicts. A header is what a later reader
+       * trusts, so it is the one that has to be right.) The cost half stands on its own: this route polls every
+       * five seconds for every agent, so a disk read per agent per poll to
+       * answer a question already answered is the waste the instruction-text
+       * note above refuses. ⚠️ The correctness half USED to be here too — "a
+       * live reading must never be second-guessed by a job file" — and it was
+       * left standing after the header above retracted it. Two claims about one
+       * fact in one comment, which is what this block's own last line warns
+       * against.
+       *
+       * ⚠️ GATED ON `isNamedOurs` LIKE EVERY OTHER NAME-KEYED READ IN THIS
+       * BLOCK. The plist is keyed on the NAME, so without the gate an untied
+       * stranger's pane reports the REAL agent's planned model — the precise
+       * leak this block's other three fields already close, and a new field
+       * does not inherit that guard by being written next to them.
+       */
+      const plannedFor = (a) => {
+        if (!a.isNamedOurs) return null;
+        // ⚠️ A STOPPED AGENT NEEDS THIS EVEN THOUGH IT HAS A modelName. The
+        // transcript says what it RAN as; only the job says what it will START
+        // on, and the panel makes a future-tense claim for stopped agents. With
+        // the old `|| a.modelName` gate that claim was sourced from a session
+        // that has ended -- and for a job carrying no --model at all (every
+        // agent created before the picker existed) it stated a specific future
+        // model we had no basis for. The cost gate still holds: a RUNNING agent
+        // whose model we could read never reaches the disk.
+        // ⚠️ THIS AND `modelLine`'s `cardStOf(a).pres === 'off'` ARE THE SAME
+        // QUESTION ACROSS A BOUNDARY. The client cannot import STATE and the
+        // server cannot import CARD_ST, so they cannot literally share the
+        // derivation — they agree because `stopped` is the only CARD_ST entry
+        // mapping to `pres: 'off'`. That coincidence is pinned by a test rather
+        // than left to be discovered: add a second `off` state and the client
+        // would prefer the job for it while this never populated the field, so
+        // "Will start on" would silently stop appearing.
+        if (a.modelName && a.state !== STATE.STOPPED) return null;
+        const arg = create.plannedModelArg(a.sessionName);
+        return arg ? modelDisplayName(arg) : null;
+      };
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
+        // The name only. `plannedModelArg` returns null for "we do not know",
+        // and null travels as null: the screen must not be able to tell a
+        // missing job from a default.
+        plannedModelName: plannedFor(a),
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
           : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
@@ -2592,6 +2647,80 @@ const server = http.createServer((req, res) => {
         sendJson(res, 200, { delivery });
       })
       .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  /* --- a project's documents ----------------------------------------------
+   *
+   * Josh, 2026-08-19: "i only want a list of the files and if i click them they
+   * open", covering both what he drops in and what an agent writes to share.
+   *
+   * ⚠️ THE LIST IS A GET AND THE OPEN IS A POST, and that split is the guard
+   * rather than a REST habit. Reading a folder's names is a read. `open` LAUNCHES
+   * things, so it inherits the cross-site guard every other POST here has, and a
+   * page on another site cannot make this machine open a file by embedding a
+   * form. Same reasoning as reveal-folder below it.
+   */
+  const docs = pathname.match(/^\/api\/project\/([^/]+)\/documents$/);
+  if (docs && (req.method === 'GET' || req.method === 'HEAD')) {
+    const id = decodeSegment(docs[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let record;
+    try {
+      record = projects.readAll().find((x) => x.id === id) || null;
+    } catch (err) {
+      sendJson(res, 500, { error: String((err && err.message) || 'we cannot read your projects right now') });
+      return;
+    }
+    if (!record) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+    // ⚠️ 200 WITH A REASON, not an error status: a project whose folder has
+    // gone is a state this screen must DRAW, and a 4xx would make the list
+    // render as a failed request rather than as "we could not look".
+    sendJson(res, 200, projects.listFiles(record.folder, 10));
+    return;
+  }
+
+  if (docs && req.method === 'POST') {
+    sendJson(res, 405, { error: 'the documents list is read-only; use open-file to open one' });
+    return;
+  }
+
+  const openOne = pathname.match(/^\/api\/project\/([^/]+)\/open-file$/);
+  if (openOne && req.method === 'POST') {
+    const id = decodeSegment(openOne[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        /* ⚠️ `readBody` RESOLVES A BUFFER, not parsed JSON. The first version of
+         * this route named the parameter `body` and read `body.name` off it,
+         * which is always undefined — so every open refused with "no file was
+         * named" and the route never saw a filename at all.
+         * The route test caught it, and only because it asserted the SENTENCE
+         * rather than the status: the escape case still returned 409, so a test
+         * checking the code alone would have gone green on a route that could
+         * not open anything and could not refuse anything for the right reason. */
+        let named;
+        try { named = JSON.parse(buf.toString('utf8') || '{}').name; }
+        catch { sendJson(res, 400, { error: 'we could not read that' }); return; }
+        let record;
+        try {
+          record = projects.readAll().find((x) => x.id === id) || null;
+        } catch (err) {
+          sendJson(res, 500, { error: String((err && err.message) || 'we cannot read your projects right now') });
+          return;
+        }
+        if (!record) { sendJson(res, 404, { error: 'there is no project by that name' }); return; }
+        /* ⚠️ THE NAME IS NOT VALIDATED HERE, deliberately. Every gate lives in
+         * `projects.openFile`, including the one a name check cannot do
+         * (resolve both sides and compare, which is what catches a symlink
+         * planted inside the folder). A second, weaker copy of the rules at
+         * this layer is how two validators drift and the looser one wins. */
+        const opened = projects.openFile(record.folder, named);
+        if (opened.ok) { sendJson(res, 200, { ok: true }); return; }
+        sendJson(res, 409, { error: opened.because });
+      })
+      .catch((err) => sendJson(res, 400,
         { error: String((err && err.message) || 'we could not read that request') }));
     return;
   }
