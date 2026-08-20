@@ -1033,7 +1033,6 @@ async function main() {
       const wanted = [
         { sel: '#panel-projects .pj-member b' },
         { sel: '#panel-projects .pj-member small' },
-        { sel: '#panel-projects .pj-member .pj-told' },
         { sel: '#pj-one-view .fhint' },
         { sel: '#pj-one-view h3.dlab', expect: 'Project members' },
         { sel: '#pj-one-view #pj-one-desc' },
@@ -1071,7 +1070,47 @@ async function main() {
       }
       return out;
     });
-    for (const e of [...listEls, ...badFolderEls, ...els, ...settingsEls]) {
+    /* ⚠️ `.pj-told` MEASURED WHERE IT RENDERS, which is a project whose tell
+       FAILED. It sat in the healthy-project list above and was red for two
+       reasons at once: the element only exists when `told.state` is
+       `could_not`, and this fixture's healthy project has no such member.
+       Mona Lisa traced it and could not confirm a failed-tell fixture existed.
+       One does, and this check already makes it: "Quarter close" is created
+       with `claudebot`, which has no folder on this machine, so its tell comes
+       back could_not and the member row carries the sentence.
+       ⚠️ It is a DIFFERENT failure from the missing-folder pass below. A failed
+       tell is "we could not write to its instructions"; a missing folder is
+       "the folder is gone". One does not imply the other, which is why this is
+       its own pass rather than folded into that one. */
+    /* ⚠️ OUT OF SETTINGS FIRST. The pass above leaves the page on the settings
+       VIEW, where `#pj-back` is not on screen -- the first version of this
+       clicked it anyway and Playwright spent its whole timeout waiting for an
+       element that was never going to appear. `#pj-settings-back` is the door
+       out of settings and `#pj-back` is the door out of the project; they are
+       two doors and the check has to walk through both. */
+    await page.click('#pj-settings-back');
+    await page.waitForTimeout(200);
+    await page.click('#pj-back');
+    await page.waitForTimeout(200);
+    await page.click('[data-project="quarterclose"]');
+    await page.waitForTimeout(400);
+    const toldEls = await page.evaluate(() => {
+      const bgOf = window.__kbg;
+      const out = [];
+      const sel = '#pj-one-view .pj-told';
+      const el = document.querySelector(sel);
+      if (!el || !el.offsetParent) { out.push({ sel, missing: true }); return out; }
+      /* Asserted, not merely found: an empty `.pj-told` would measure fine and
+         mean nothing, and the whole point of this element is that it SPEAKS. */
+      if (!(el.textContent || '').trim()) {
+        out.push({ sel, wrongElement: '(empty)', expected: 'a reason' });
+        return out;
+      }
+      const cs = getComputedStyle(el);
+      out.push({ sel, fg: cs.color, bg: bgOf(el), size: parseFloat(cs.fontSize), weight: cs.fontWeight });
+      return out;
+    });
+    for (const e of [...listEls, ...badFolderEls, ...els, ...settingsEls, ...toldEls]) {
       if (e.missing) {
         contrastFails += 1;
         console.log(`  ⚠️ ${e.sel} was not on screen to measure (${scheme}) — the check cannot pass on a selector it never found`);
