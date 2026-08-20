@@ -77,6 +77,16 @@ function selfCheck() {
    named `input[type=text], textarea, select` and was silently blind to
    `type=search`. Name what it is NOT rather than enumerating what it is. */
 const FIELDS = 'input:not([type=button]):not([type=file]):not([type=checkbox]):not([type=radio]):not([type=submit]), textarea, select';
+/* ⚠️ BUTTONS TOO, and their absence was a hole shaped exactly like the defect
+   this branch shipped: `#cstep-made`'s buttons sat at 1.05:1 against their own
+   card and this script reported OK, because it measured FIELDS and a button is
+   not one. Mona Lisa widened the equivalent check on the pack and coverage went
+   26 -> 229 controls, from one word in a selector.
+   ⚠️ THE INVARIANT IS NOT THE SAME FOR BOTH. A field is RECESSED and a button is
+   RAISED, so "same fill as its container" is a defect for one and normal for the
+   other. What holds for both is weaker and truer: a control must be
+   distinguishable from its container by AT LEAST ONE channel — fill or border. */
+const BUTTONS = 'button, input[type=button], input[type=submit]';
 
 async function measure(engine, scheme) {
   const browser = await pw[engine].launch();
@@ -227,7 +237,16 @@ async function measure(engine, scheme) {
         listCell = vis.textContent.trim();
       }
     }
-    return { fields, badgeHit, listCell, seenContainers: [...seenContainers], containers: CONTAINERS };
+    const buttons = [...document.querySelectorAll('button, input[type=button], input[type=submit]')]
+      .filter((el) => el.getClientRects().length)
+      .map((el) => {
+        const c = getComputedStyle(el);
+        const g = ground(el);
+        return { id: el.id || (el.textContent || '').trim().slice(0, 18) || 'button',
+          fill: c.backgroundColor, border: c.borderTopColor, borderW: c.borderTopWidth,
+          box: g.bg, boxName: g.name };
+      });
+    return { fields, buttons, badgeHit, listCell, seenContainers: [...seenContainers], containers: CONTAINERS };
   }, FIELDS);
   } finally {
     // ⚠️ Without this a throw inside the evaluate leaks the browser and the
@@ -271,6 +290,51 @@ async function measure(engine, scheme) {
         }
       }
       console.log(`  fields level with their container: ${level}`);
+
+      /* ⚠️ EVERY CONTROL, BY EITHER CHANNEL. A button whose fill matches its
+         container is fine — that is what raised-with-a-border looks like — and a
+         button that matches on BOTH fill and border is invisible. The threshold
+         is deliberately low (1.5): this asks "is there any separation at all",
+         not "does it clear WCAG", which is a separate and recorded question. */
+      /* ⚠️ ONLY BUTTONS THAT CLAIM A BOUNDARY. The first version checked every
+         `<button>` and fired on the tabs, the logo and the back links — text
+         affordances whose legibility is TEXT contrast, not boundary contrast.
+         Over-scoping, in the fix for an under-scoping hole.
+         The rule that holds: if a button DECLARES a border or a fill, that
+         declaration has to actually separate it from its container. A button
+         declaring neither is a text affordance and out of scope — counted
+         separately so the split is visible rather than assumed. */
+      let invisible = 0;
+      let bordered = 0;
+      let textual = 0;
+      let faint = 0;
+      for (const b of (r.buttons || [])) {
+        if (!b.box) continue;
+        const hasBorder = b.borderW !== '0px' && ratio(b.border, b.fill) !== 1;
+        const f = ratio(b.fill, b.box);
+        const declaresFill = f !== null && f !== 1;
+        if (!hasBorder && !declaresFill) { textual += 1; continue; }
+        bordered += 1;
+        const bd = hasBorder ? ratio(b.border, b.box) : null;
+        const best = Math.max(f === null ? 0 : f, bd === null ? 0 : bd);
+        /* ⚠️ 1.1, NOT 1.5, AND THE DIFFERENCE IS THE CHECK'S HONESTY. The comment
+           above says this asks "is there any separation at all", and 1.5 asked
+           something closer to "does it clear WCAG" — which failed six
+           pre-existing controls (the role-picker cards, the toggles, the burger)
+           that are instances of the product-wide faint-boundary question already
+           recorded for Josh as ONE decision. A standing check that fails on a
+           recorded open design question is a check people switch off.
+           So: fail only on no separation at all, and PRINT how many sit under
+           3:1 so the recorded question stays visible without blocking. */
+        if (best < 1.1) {
+          invisible += 1;
+          fail(`${engine}/${scheme} button ${b.id} claims a boundary that does not separate it from ${b.boxName}: fill ${f}:1, border ${bd === null ? 'none' : bd + ':1'}`);
+        }
+        if (best < 3) faint += 1;
+      }
+      console.log(`  buttons: ${(r.buttons || []).length} total, ${bordered} claiming a boundary, ${textual} text-only, ${invisible} with no separation`);
+      console.log(`  boundaries under WCAG 1.4.11's 3:1 (recorded for Josh, not a failure here): ${faint}`);
+      if (!bordered) fail(`${engine}/${scheme} no button claims a boundary, so the button check ran over nothing`);
 
       /* ⚠️ A CONTAINER THAT STOPPED PAINTING. Without this the check reads a
          lost background as an improvement, because the field is then compared
