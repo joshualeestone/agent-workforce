@@ -179,6 +179,13 @@ request, and the suite reads text.
   (`cleanMessage(row.label) !== chose`), and refuses the whole send with a 409
   rather than stripping the words, because a label that no longer matches is
   evidence the digit is stale too.
+- **`presence: 'off'` is wider than the plan defines it.** The plan says `'off'`
+  means "no session by that name". The route derives presence from
+  `chat.addressable`, so `'off'` also covers a STOPPED agent, a pane in
+  copy-mode, and a name something else is holding -- and that wider fact is the
+  one the composer's sentence is built on, which is why the route takes the send
+  gate's own answer rather than deriving a second one. Documented at the code
+  and, until now, nowhere else.
 - **The route tests live in `server.projects.test.js`, not `server.test.js`**
   as the plan says, next to the project-thread suite whose shape they mirror.
 - **`optionsIn` is materially stricter than the "iff" written above**, and this
@@ -202,7 +209,7 @@ deliberate -- a captured line is what the agent's screen showed, and wrapping it
 makes it something else. The consequence, measured on 2026-08-20: **10 of the
 12 question-bearing states in `render-talk.js` render a question wider than its
 box**, cut at the right edge, and macOS hides the overlay scrollbar until
-somebody scrolls. `talk-5-no-confident-parse` is the one that matters most,
+somebody scrolls. `talk-5-no-parse-{light,dark}.png` is the pair that matters most,
 because state 5 exists precisely so a person can read the question and type the
 answer, and its committed screenshot ends mid-word at "or join the existi".
 

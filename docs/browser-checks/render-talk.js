@@ -134,6 +134,16 @@ const STATES = {
     presenceBecause: 'its window is scrolled back right now, so anything we typed would go to the scrollback instead of to the agent',
     messages: [placed('are you there')],
   },
+  /* ⚠️ DRAWN ON PURPOSE FOR A STATE TODAY'S PRODUCERS ALMOST CANNOT SERVE, and
+     recorded rather than quietly kept, which is the route's own posture for the
+     same arm: a roster read that fails also fails `nameRefusal`, which fails
+     closed at the 404, so `unsure` survives only in the race between that gate's
+     `paneRoster()` and the later `safeRoster()`. Unlike the state-6 pairing this
+     file corrected, nothing here CONTRADICTS anything -- the composer stays open
+     and says we could not check -- so the picture is honest about a state the
+     product can be in, however rarely. The day the two reads can disagree
+     routinely is the day this arm is the difference between "your agent is off"
+     and the truth. */
   '7-unsure': { ...base, presence: 'unsure', presenceBecause: 'we could not check which agents are running, so we did not type anything anywhere', messages: [placed('are you there')] },
   '9-unfilable': { ...base, historyUnfilable: true, historyBecause: 'we cannot keep a conversation under this agent’s name' },
   '10-history-unreadable': { ...base, historyBecause: 'we cannot read what you have sent this agent' },
@@ -255,6 +265,11 @@ const STATES = {
     /* Said once per theme rather than per state: a headless run cannot see the
        scrollbar at all, and eleven identical lines would bury the rest. */
     let headlessNoted = false;
+    /* CONTROL for the question-reachability assertion, mirroring `measuredMeta`:
+       that check only fires on a CUT question, so if the text stops overflowing
+       -- a wider box, `pre-wrap`, a shorter fixture -- the guarantee the plan
+       claims per state stops being asserted and nothing says so. */
+    let measuredCut = 0;
     for (const [name, fx] of Object.entries(STATES)) {
       await page.evaluate((f) => {
         window.__fx = f;
@@ -475,6 +490,7 @@ const STATES = {
       /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
          a state that keeps things is as wrong as one standing over a state that
          does not, and only the second half was ever the bug. */
+      if (m.qtext && m.qtext.cut) measuredCut += 1;
       if (m.qtext && m.qtext.cut && !(m.qtext.scrollable && m.qtext.focusable)) {
         problems.push(`${tag}: the question is cut off and what is left cannot be reached `
           + `(${JSON.stringify(m.qtext)})`);
@@ -540,6 +556,10 @@ const STATES = {
       measured[name] = m;
     }
 
+    if (!measuredCut) {
+      problems.push(`[${theme}] question: no state rendered a question wider than its box, so the `
+        + 'reachability of a cut question is UNCHECKED (the fixtures, the box width, or the treatment changed)');
+    }
     if (!measuredMeta) {
       problems.push(`[${theme}] receipt: no state produced a .dm.mine receipt, so its alignment is UNCHECKED`);
     }
@@ -774,8 +794,19 @@ const STATES = {
          INSIDE the question region, on a screen where the composer is closed,
          at the moment the region is hidden. */
       const rescue = await page.evaluate(async (f) => {
+        /* ⚠️ COPY-MODE, because `f` is the MENU state and `asking` is true.
+           "There is no Claude running in its window" is `addressable`'s
+           `isAgentSession === false` arm, and `classify` returns STOPPED for
+           exactly that pane before it reaches the needs-you scan, so the pair
+           is a world the producers cannot make. The state-6 fixture carried
+           the same pairing and was corrected because it had a SCREENSHOT; this
+           one has no picture, which is precisely why the correction had to be
+           to the class rather than to the state somebody could see.
+           (The transition block below keeps the no-Claude sentence, correctly:
+           it sets `asking: false` in the same breath, which is the agent's
+           Claude exiting.) */
         window.__fx = { ...f, presence: 'off',
-          presenceBecause: 'there is no Claude running in its window right now' };
+          presenceBecause: 'its window is scrolled back right now, so anything we typed would go to the scrollback instead of to the agent' };
         delete TALK_ANSWERED.april;
         await paintTalk('april', 'April');
         document.getElementById('d-qask-text').focus();

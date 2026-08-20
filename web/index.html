@@ -4979,7 +4979,12 @@ async function tick() {
           && !document.getElementById('panel-detail').hidden) {
         paintTalk(CURRENT.sessionName, CURRENT.name);
       }
-      if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
+      /* The same tab gate as the poll above, for the same reason: this is a
+         capture-pane every five seconds. Engineering mode is off by default so
+         the exposure is narrower, but the rule the comment above states does
+         not get to apply selectively inside one tick. */
+      if (ENG_ON && !WINDOW_OPENING && !document.hidden
+          && !document.getElementById('panel-detail').hidden) {
         if (fresh && fresh.isNamedOurs === true) {
           paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
         } else {
@@ -6194,11 +6199,19 @@ function talkKey(body) {
      the same three labels for every file, so two different questions become
      one key and the second is suppressed for the whole hold -- panel gone, no
      buttons, while the board card still says the person is needed.
-     Falling back to the WHOLE slice costs the other direction, and it is the
-     cheaper one: text accumulating below the menu spends the hold early, so
-     the buttons come back over a question that was already answered, which the
-     server's own 409 screen-check then refuses. A suppressed live question has
-     no such second line of defence. */
+     Falling back to the WHOLE slice costs the other direction: text
+     accumulating below the menu spends the hold early, so the buttons come
+     back over a question that was already answered and a second press types
+     the digit into the live pane again.
+     ⚠️ AN EARLIER VERSION OF THIS COMMENT CLAIMED THE 409 SCREEN-CHECK CATCHES
+     THAT, AND IT DOES NOT. The 409 fires when the visible menu DISAGREES with
+     the words that were chosen; this case is the SAME menu still on screen
+     with text changing underneath it, so the label matches, nothing is
+     refused, and the send goes through. There is no second line of defence in
+     either direction. The fallback is still the better arm -- a suppressed
+     live question leaves the person unable to answer at all, while a second
+     press requires them to press again over a question they can see they have
+     answered -- but it is a choice between two harms and not a free one. */
   const above = first > 0
     ? lines.slice(0, first).join('\n').trim()
     : lines.join('\n').trim();
