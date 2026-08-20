@@ -6232,12 +6232,17 @@ async function paintTalk(sessionName, agentName) {
   document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
   document.getElementById('d-talk-hint').textContent =
     'Just between you and ' + name + '. Nothing here belongs to a project.';
-  const persist = document.getElementById('d-persist');
-  /* Un-hidden HERE, not only in the good arm: the failure arm below hides it,
-     and a panel that recovers (or an agent opened after one that failed) would
-     otherwise stay missing its persistence line with nothing to put it back. */
-  persist.hidden = false;
-  persist.textContent =
+  /* ⚠️ THE TEXT HERE, THE VISIBILITY ON THE SUCCESS PATH, and the first
+     version of this fix got that backwards. Whether the line says the right
+     agent's name does not depend on the fetch, so it is written with the other
+     four; whether the box may PROMISE it keeps things does depend on it. Set
+     `hidden = false` here and a standing refusal re-shows "This stays here
+     after a restart" for the whole of every poll's round trip -- two uncached
+     `list-panes` plus a capture per agent, easily hundreds of milliseconds --
+     and hides it again on arrival: the contradiction this fix removed, back on
+     a five-second cadence and only visible mid-flight, where a check that
+     awaits each paint cannot see it. */
+  document.getElementById('d-persist').textContent =
     'This stays here after a restart. ' + name + ' will not remember it. '
     + 'Anything that needs to last belongs in their instructions.';
   const say = document.getElementById('d-say');
@@ -6443,6 +6448,11 @@ async function paintTalk(sessionName, agentName) {
   // waiting on you, and the answer takes its place in the thread below as an
   // ordinary message. The whole block goes, not just its buttons.
   qask.hidden = nowHidden;
+  /* The persistence line's other half (its text is written before the fetch):
+     shown only once an answer is in hand, and unconditionally, so a panel that
+     recovers from a refusal -- or an agent opened after one that failed -- has
+     it back. */
+  document.getElementById('d-persist').hidden = false;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as

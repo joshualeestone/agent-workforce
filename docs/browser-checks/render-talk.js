@@ -190,6 +190,9 @@ const STATES = {
       };
     });
     await page.goto(PAGE);
+    /* Kept so two states can be compared to each other AFTER the loop, which
+       is the only way to make "these two render the same" a claim. */
+    const measured = {};
     for (const [name, fx] of Object.entries(STATES)) {
       await page.evaluate((f) => {
         window.__fx = f;
@@ -385,6 +388,31 @@ const STATES = {
         problems.push(`${tag}: a message bubble is not the person's own colour: ${m.bubbleBg}`);
       }
       console.log(tag, JSON.stringify(m));
+      measured[name] = m;
+    }
+
+    /* ⚠️ TWO STATES, ONE PICTURE, SAID OUT LOUD. `11-answered-hold` and
+       `2-answered-placed` screenshot byte-identically, and that is correct:
+       the hold takes the WHOLE qask block, so a held question renders as an
+       ordinary answered one. Left unstated, two files committed under two
+       state names read as two pieces of evidence when they are one. Asserted
+       on the MEASUREMENTS rather than on the PNG bytes, because a byte
+       comparison of two headed captures is a flakiness this file does not
+       need -- what matters is that the panel is in the same visible state,
+       and the hold's own behaviour is driven in the press pass below. */
+    {
+      const hold = measured['11-answered-hold'];
+      const placed = measured['2-answered-placed'];
+      const face = (m) => m && JSON.stringify({
+        qask: m.qaskVisible, opts: m.optsVisible, n: m.optCount,
+        out: m.qoutVisible, off: m.offVisible, thread: m.threadText,
+      });
+      if (!hold || !placed) {
+        problems.push(`[${theme}] hold-face: a state did not render, so the two-names-one-picture claim is UNCHECKED`);
+      } else if (face(hold) !== face(placed)) {
+        problems.push(`[${theme}] hold-face: the held question no longer renders as an answered one `
+          + `(${face(hold)} vs ${face(placed)}), so the two screenshots are now two different claims`);
+      }
     }
     /**
      * WARNING: THE STATE SWEEP ABOVE ONLY LOOKS. Both of the worst defects this
@@ -520,7 +548,8 @@ const STATES = {
       }, menu);
       await page.evaluate(() => paintTalk('april', 'April'));
       const preFail = await page.evaluate(() => ({
-        n: document.querySelectorAll('#d-qopts .qopt').length,
+        // Actionable, not merely present: see the note on `preHold` below.
+        n: document.querySelectorAll('#d-qopts:not([hidden]) .qopt').length,
         qaskHidden: document.getElementById('d-qask').hidden,
         answered: !!TALK_ANSWERED.april,
         sending: TALK_SENDING,
@@ -654,11 +683,19 @@ const STATES = {
         await paintTalk('april', 'April');
       }, menu);
       /* ⚠️ GUARDED LIKE 2b, and for the reason this file states twice: a
-         regression that empties the option row turns a bare click into a
-         four-second timeout that REJECTS the run, so the whole problem list
-         goes unprinted and a real defect is reported as the check being
-         broken. The guard makes it a finding instead. */
-      const preHold = await page.evaluate(() => document.querySelectorAll('#d-qopts .qopt').length);
+         regression that leaves nothing clickable turns a bare click into a
+         timeout that REJECTS the run (Playwright's own 30s default; nothing
+         here shortens it), so the whole problem list goes unprinted and a real
+         defect is reported as the check being broken. The guard makes it a
+         finding instead.
+         ⚠️ AND IT COUNTS WHAT CAN BE CLICKED, not what is in the DOM.
+         `page.click` needs an ACTIONABLE element, and the regression this file
+         documents most specifically -- a stale `__lastOpts` leaving buttons in
+         the markup under a hidden row, which is why `openDetail` clears it --
+         produces a healthy count and a click that still times out. Counting
+         through `:not([hidden])` is the difference between a guard and a
+         guard-shaped line. */
+      const preHold = await page.evaluate(() => document.querySelectorAll('#d-qopts:not([hidden]) .qopt').length);
       if (preHold === 0) {
         problems.push(`[${theme}] hold: no option buttons to answer, so the hold is UNCHECKED`);
       } else {
@@ -699,7 +736,7 @@ const STATES = {
       if (held.afterSameLabelsNewQuestion === 0) {
         problems.push(`[${theme}] hold: a NEW question with the same option words was suppressed`);
       }
-      }
+      } // end of the preHold guard: everything above needs a clickable button
       await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);
       await page.evaluate(() => paintTalk('april', 'April'));
 
@@ -901,6 +938,49 @@ const STATES = {
       }
       if (persistence.recovered.hidden) {
         problems.push(`[${theme}] persist: the line never came back after a refusal`);
+      }
+
+      /* 8b. AND MID-FLIGHT, which is the only place the first version of this
+         fix was wrong. Writing `hidden = false` with the five sentences that
+         run BEFORE the fetch re-showed the promise for the whole of every
+         poll's round trip on a standing refusal, then hid it again on arrival:
+         the same contradiction, on a five-second cadence, in a window no check
+         that awaits its paints can see. So this one deliberately does not
+         await -- it samples the DOM while the fetch is still out. */
+      const midFlight = await page.evaluate(async () => {
+        const el = document.getElementById('d-persist');
+        const real = window.fetch;
+        window.fetch = async () => {
+          await new Promise((r) => setTimeout(r, 300));
+          return new Response('{"error":"no agent by that name","because":"borrowed"}',
+            { status: 404, headers: { 'content-type': 'application/json' } });
+        };
+        try {
+          /* ⚠️ THE SECOND REFUSED POLL, NOT THE FIRST. A standing refusal is
+             refused on EVERY tick, so the state this is about is "already
+             refused, refusing again". Sampling the first one instead measures
+             the last good paint still being on screen during the round trip,
+             which is not a contradiction: the whole box is still showing what
+             it last knew. Getting this wrong is how the check reported a
+             defect the fix had already closed. */
+          await paintTalk('april', 'April');
+          const settled = el.hidden;
+          const settling = paintTalk('april', 'April');
+          await new Promise((r) => setTimeout(r, 120));
+          const during = { hidden: el.hidden };
+          await settling;
+          return { settled, during, after: el.hidden };
+        } finally {
+          window.fetch = real;
+        }
+      });
+      if (midFlight.during.hidden === false) {
+        problems.push(`[${theme}] persist: the promise is back on screen for the whole of every poll `
+          + 'on a standing refusal, and hidden again only when the answer lands');
+      }
+      if (midFlight.settled !== true || midFlight.after !== true) {
+        problems.push(`[${theme}] persist: CONTROL FAILED, a refusal did not hide the line at all `
+          + `(settled ${midFlight.settled}, after ${midFlight.after}), so the mid-flight read proves nothing`);
       }
       }
     }

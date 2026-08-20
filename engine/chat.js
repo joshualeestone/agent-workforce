@@ -1562,7 +1562,13 @@ function appendLocked(projectId, agent, entry, bornAt) {
        * button send. (It said "every message today" when written, which stopped
        * being true in the same branch that wrote it.)
        */
-      wire: (entry && typeof entry.wire === 'string' && entry.wire) ? entry.wire : null,
+      /* ⚠️ THROUGH `cleanMessage`, LIKE `text` ONE FIELD UP. This module's
+         contract is that what was CHECKED is what gets KEPT, and for `wire`
+         the checking lived entirely in the one caller: an engine that claims
+         the guarantee was taking this field on trust. A no-op for every value
+         produced today (the digit), which is exactly when to move a guarantee
+         back inside the thing that promises it. */
+      wire: (entry && typeof entry.wire === 'string' && cleanMessage(entry.wire)) || null,
       delivery: {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
