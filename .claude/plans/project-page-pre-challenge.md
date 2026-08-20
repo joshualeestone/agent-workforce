@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: f9abf91f0cf53fd50ef164ef8e382926278543a702ff4c3b11f9588ba5785a27
+diff_hash: 30d4a55bc5c192cbacb4b7fc1f849c92b77109a7169dd30784a24695346f1be1
 subdir_audit: passed
-timestamp: 2026-08-20T03:10:34Z
+timestamp: 2026-08-20T04:04:36Z
 iterations: 1
 converged: true
 ---
@@ -86,3 +86,51 @@ in this branch (recorded in the plan).
 | 3 | 1 | BLOCKER | render-projects.js members heading | FIXED | located by structure, not class |
 | 4 | 1 | (inherited) | render-projects.js .pj-told | DEFERRED | red on main too, measured; needs a failed-tell fixture that does not exist |
 | 5 | 1 | NIT | class-system reconciliation | DEFERRED | by design: out of this branch's scope, in the plan |
+
+## Second slice on the same branch (2026-08-19, after #91)
+
+#91 shipped the restore-to-pack half. This adds the rename, Project documents,
+the open-a-local-file route, two backwards create-flow comments, and the second
+`.flabel` dependency. Reviewed the same way: single pass, explicit override,
+every visual change rendered rather than read.
+
+[STRENGTH] **A version REGRESSION was caught before the PR, not by a test.**
+This branch was cut when main was 0.2.1 and main is now 0.2.2, so merging it
+as-is would have set `package.json` BACK to 0.2.1 — which every board already
+on 0.2.2 reads as "no update available", silently. Nothing in the suite pins the
+version to a number, so nothing would have failed. Fixed by merging main in
+first, and the conflicts resolved toward this branch only after confirming that
+the only main-side commits touching those files were this branch's own squash
+(#91) and the bump (#92).
+
+[STRENGTH] The merge was verified by CONTENT, not by the merge exiting 0: spot
+probes for five distinct pieces of #91's shipped work and four of tonight's, all
+present, then 938 tests and both browser checks re-run on the merged tree.
+
+[STRENGTH] The open-file gate that matters is proven: deleting the containment
+check turns the suite red with "a symlink out of the project was opened".
+
+[STRENGTH] The route test caught a defect **because it asserted the sentence**.
+`readBody` resolves a Buffer; the first version read `.name` off it and
+refused every open with "no file was named", while the escape case still
+returned 409. A status-only assertion would have passed on a route that could
+neither open nor properly refuse.
+
+[WARNING -> RESOLVED] The `d-rename` field first reused `id="d-name"`, which
+was already the page heading. Caught by geometry (59x16 is text, not a field)
+after Playwright's `fill` refused to act — the refusal was the only honest
+signal in the run.
+
+[NIT] The documents "view all" reveals the folder in Finder rather than opening
+a dedicated screen. Labelled for what it does rather than what Josh asked for,
+with the screen recorded as a later slice.
+
+### Second-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 6 | 1 | BLOCKER | package.json | FIXED | merged main; version regression caught pre-PR |
+| 7 | 1 | BLOCKER | web/index.html d-name | FIXED | renamed to d-rename; id collision |
+| 8 | 1 | BLOCKER | server.js open-file | FIXED | readBody returns a Buffer, not JSON |
+| 9 | 1 | BLOCKER | render-projects.js contrast sweep | FIXED | selector asserted with `expect` |
+| 10 | 1 | NIT | documents view-all | DEFERRED | by design: screen is a later slice |
