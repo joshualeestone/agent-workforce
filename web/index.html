@@ -2445,15 +2445,54 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     </div>
     <div class="fmsg" id="d-msg"></div>
   </div>
+  <!-- 🛑 THE ID IS `d-rename`, NOT `d-name`, AND THAT COST A REAL CATCH.
+       `d-name` was ALREADY TAKEN by the heading at the top of this page
+       (`<span class="dname" id="d-name">`). The first version of this field
+       reused it, and every symptom pointed the wrong way:
+       `getElementById('d-name')` returned the SPAN, so populating it set an
+       expando `.value` on a span, the browser check then read that expando
+       back and reported `nameValue: "angel"` — a confident pass measuring an
+       element that is not a control. The PUT would have sent `undefined` and
+       the server would have dropped it, and the untied-disable list would have
+       been disabling a heading. The tell was geometry: 59x16, which is text,
+       not a field. Never reuse an id; and when a check passes, confirm it
+       measured the element you meant.
+
+       ⚠️ RENAMING WAS UNREACHABLE UNTIL NOW, and the route was already there.
+       `PUT /api/agent/:name/profile` has accepted `displayName` since round 32,
+       written specifically so a Kosmos-created agent would stop having a
+       permanently unchangeable name — and no screen ever sent one. The comment
+       that removed the card's edit pencil said editing "lives on the detail
+       page (the pack's avedit/nameedit)"; the picture landed there and the role
+       landed there and the name never did, so the comment authorising the
+       removal is the comment that was wrong, in two places, since the rebuild.
+       Found by Mona Lisa.
+
+       ⚠️ NOT THE PACK'S MODAL, deliberately. The pack draws "Edit April" over
+       picture and name together. Josh's own rule from taking the pencils off
+       the project head applies here: renaming is rare, reading the name is
+       constant, so the rare thing goes behind a door and the constant thing
+       gets to be just words. The detail page already IS that door. -->
+  <div class="field" style="margin-top:18px;">
+    <label class="flabel" for="d-rename">Name</label>
+    <div class="fhint">What you call them here. It does not change where they live on this computer, or the name other agents use to reach them.</div>
+    <div class="frow">
+      <input type="text" id="d-rename" maxlength="80" placeholder="What you call them">
+    </div>
+  </div>
   <div class="field" style="margin-top:18px;">
     <label class="flabel" for="d-role">What they do</label>
     <div class="fhint">Your words. Nothing on this computer records it, so it is blank until you say.</div>
     <div class="frow">
       <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
-      <button class="btn" id="d-save" type="button">Save</button>
     </div>
-    <div class="fmsg" id="d-role-msg"></div>
   </div>
+  <!-- ONE Save for the box, because it now writes two fields. A button sitting
+       inside the role row while also saving the name would misdescribe itself. -->
+  <div class="frow" style="margin-top:14px;">
+    <button class="btn" id="d-save" type="button">Save</button>
+  </div>
+  <div class="fmsg" id="d-role-msg"></div>
   </section>
   </div>
 
@@ -4613,7 +4652,7 @@ async function tick() {
      * The honest thing to say here is smaller: this agent is not on the board
      * any more, so nothing on this screen should offer to change it.
      */
-    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save']) {
+    for (const id of ['d-file', 'd-remove', 'd-save', 'd-role', 'd-rename', 'd-instr', 'd-instr-save']) {
       const el = document.getElementById(id);
       if (el) el.disabled = true;
     }
@@ -5786,6 +5825,10 @@ function openDetail(sessionName) {
     document.getElementById('d-window-box').hidden = true;
   }
   document.getElementById('d-role').value = (a.profile && a.profile.role) || '';
+  /* `a.name` is the DISPLAY name readIdentity already resolved (record wins
+     over the instruction file); `a.sessionName` is where it lives, and is not
+     what this field edits. */
+  document.getElementById('d-rename').value = a.name || '';
   document.getElementById('d-initials').textContent = initials(a.name);
 
   renderAvatar(a);
@@ -5912,7 +5955,7 @@ function setWritesOffered(a, tied) {
   //
   // Skipping the LOAD was never enough: nothing clears what the previous card
   // left behind.
-  const controls = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-instr', 'd-instr-save'];
+  const controls = ['d-file', 'd-remove', 'd-save', 'd-role', 'd-rename', 'd-instr', 'd-instr-save'];
   for (const id of controls) {
     const el = document.getElementById(id);
     if (el) el.disabled = !tied;
@@ -7142,12 +7185,29 @@ document.getElementById('d-save').addEventListener('click', async () => {
   const forAgent = CURRENT.sessionName;
   msg.textContent = 'Saving…';
   try {
+    const renameTo = document.getElementById('d-rename').value.trim().slice(0, 80);
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/profile',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: document.getElementById('d-role').value.trim() }) });
+        body: JSON.stringify({ role: document.getElementById('d-role').value.trim(),
+                               displayName: renameTo }) });
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     if (!res.ok) throw new Error('that did not save');
     msg.textContent = 'Saved.';
+    /* ⚠️ THE HEADING IS UPDATED HERE RATHER THAN LEFT TO THE POLL. Measured:
+       after a successful save the heading still read the OLD name ~1.8s later,
+       and only came right on the next full paint. The whole reason this field
+       exists is that renaming used to "silently do nothing with no sentence
+       saying why"; a rename that visibly does nothing for a poll cycle is a
+       quieter version of the same complaint.
+       It writes the TRIMMED value actually sent, not the raw field, because the
+       route trims and caps at 80 — showing the untrimmed text would claim a
+       name the record does not hold. An empty-after-trim name is dropped by the
+       route (deliberately, so nobody blanks an agent into anonymity), so the
+       heading is left alone in that case rather than being emptied. */
+    if (renameTo) {
+      const h = document.getElementById('d-name');
+      if (h) h.textContent = renameTo;
+    }
     await tick();
   } catch (err) {
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
