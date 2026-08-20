@@ -3,17 +3,28 @@ pre_challenge: true
 method: challenge-loop
 branch: answer-panel
 diff_hash: 2faf3a48a6afa8b49dba05fb709cda4db3f3a9b05b404c72800b3a9725b8601a
+diff_hash_certifies: the diff at 99f3e19, the iteration-10 fix, which is the tree the gate verified when PR #119 was created
+head_now: eeee5f4
+code_diff_hash_now: b930406b7b650e81cf0ca768e613b8e90b0515bf4707dc364351d8c3d5e1cb83
+code_diff_hash_at_round_10: 35bd501e0e3d4e676376903f47551812eeaee27cf7f5d391de4e2187499313bd
 subdir_audit: passed
 timestamp: 2026-08-20T14:00:57Z
-iterations: 10
+iterations: 16
 converged: false
 ---
 
 ## [CHALLENGE-LOOP] Summary
 
-**Iterations:** 10
-**Total findings:** 72 across nine reporting rounds (3 BLOCKERs, 30 WARNINGs, 3 CONVENTIONs, the rest NITs and orchestrator-found defects)
+**Iterations:** 16 -- ten before PR #119 opened, six against the open PR
+**Findings through iteration 10:** 72 across nine reporting rounds (3 BLOCKERs, 30 WARNINGs, 3 CONVENTIONs, the rest NITs and orchestrator-found defects)
 **Fixed:** 68 | **Deferred with reasoning:** 2 | **Open and recorded:** 2
+**Iterations 11 to 16:** 8 further BLOCKERs, recorded below. **Seven of the eight were inside the previous round's own fix.**
+
+### 🛑 The two hashes above are the point of this block, not bookkeeping
+
+`diff_hash` is what the gate verified at PR creation, and it is **not** the diff that exists now. Six rounds landed after it, so the certified tree and the current tree are different trees. Recomputing that field would make this file claim a converged loop covered code no blind pass has seen. It is left alone and the current tree is recorded beside it, code-only (excluding `.claude/plans/`, so that editing this very file cannot move its own hash).
+
+> 🔑 **A proof file is a timestamp, not a property.** The value of the pair is that anyone can see at a glance that the two differ and by how much.
 
 ### The shape of it, which matters more than the count
 
@@ -25,7 +36,7 @@ converged: false
 
 **Six consecutive rounds found a comment documenting behaviour the code does not have, and every one was inside the previous round's own fix.** Round 7's was a "second line of defence" that does not exist. Round 8's was a headed-only claim the very next commit disproved. That is the single strongest pattern in this loop and it is the reason the last three briefs named it explicitly.
 
-**Reading the screenshots out-earned reading the code from round 5 on.** Two sentences contradicting each other on one screen (`talk-9-unfilable`), a CSS rule that had its element and lost on specificity, a receipt sitting on the opposite side of the panel from its message, three fixtures describing states the product cannot be in, and "sent as 1" on a message that was never typed — all found by looking.
+**Reading the screenshots out-earned reading the code from round 5 on.** Two sentences contradicting each other on one screen (`talk-9-unfilable`), a CSS rule that had its element and lost on specificity, a receipt sitting on the opposite side of the panel from its message, three fixtures describing states the product cannot be in, and "sent as 1" on a message that was never typed: all found by looking.
 
 ### Every new guard was proven by breaking it
 
@@ -35,33 +46,58 @@ Fourteen deliberate breaks, each reverted after the check was watched to fail wi
 
 ### Per-iteration breakdown
 
-**Iteration 1** — 4 WARNINGs, 1 CONVENTION, 3 NITs. A panel that said "No agent by that name" beside a card carrying that name; a pasted message that could be sent into a live agent twice; a failure arm with no focus rescue; a documented route asymmetry no test held.
+**Iteration 1** -- 4 WARNINGs, 1 CONVENTION, 3 NITs. A panel that said "No agent by that name" beside a card carrying that name; a pasted message that could be sent into a live agent twice; a failure arm with no focus rescue; a documented route asymmetry no test held.
 
-**Iteration 2** — 2 BLOCKERs, 4 WARNINGs, 2 NITs. One BLOCKER measured false and deferred; the other was that no fixture could see the case at all. `borrowedName` fails closed, so the standing-vs-transient split written one round earlier rested on a false premise.
+**Iteration 2** -- 2 BLOCKERs, 4 WARNINGs, 2 NITs. One BLOCKER measured false and deferred; the other was that no fixture could see the case at all. `borrowedName` fails closed, so the standing-vs-transient split written one round earlier rested on a false premise.
 
-**Iteration 3** — 3 WARNINGs, 4 NITs. A promise that a conversation is kept, printed under the sentence saying there is none. `talkKey`'s comment claimed "character for character" with two divergences live.
+**Iteration 3** -- 3 WARNINGs, 4 NITs. A promise that a conversation is kept, printed under the sentence saying there is none. `talkKey`'s comment claimed "character for character" with two divergences live.
 
-**Iteration 4** — 3 WARNINGs, 3 NITs. Iteration 3's own fix re-showed the promise for the whole of every poll. A guard that counted buttons `page.click` could not click.
+**Iteration 4** -- 3 WARNINGs, 3 NITs. Iteration 3's own fix re-showed the promise for the whole of every poll. A guard that counted buttons `page.click` could not click.
 
-**Iteration 5** — 4 WARNINGs, 2 NITs, 1 CONVENTION. A CSS rule that had its element and lost on specificity. The app's own 5s tick racing every hand-driven paint.
+**Iteration 5** -- 4 WARNINGs, 2 NITs, 1 CONVENTION. A CSS rule that had its element and lost on specificity. The app's own 5s tick racing every hand-driven paint.
 
-**Iteration 6** — 5 WARNINGs, 2 NITs. A fixture pairing `asking` with "there is no Claude running", which the producers cannot make. The receipt still stranded; only the separator had moved.
+**Iteration 6** -- 5 WARNINGs, 2 NITs. A fixture pairing `asking` with "there is no Claude running", which the producers cannot make. The receipt still stranded; only the separator had moved.
 
-**Iteration 7** — 4 WARNINGs, 4 NITs. A "second line of defence" that does not exist. The previous round's fix applied to the state that had a screenshot rather than to the class.
+**Iteration 7** -- 4 WARNINGs, 4 NITs. A "second line of defence" that does not exist. The previous round's fix applied to the state that had a screenshot rather than to the class.
 
-**Iteration 8** — 1 BLOCKER, 6 WARNINGs, 2 NITs. Ten of twenty-two screenshots drawn from a payload the route cannot produce. Three comments falsified by the very next commit.
+**Iteration 8** -- 1 BLOCKER, 6 WARNINGs, 2 NITs. Ten of twenty-two screenshots drawn from a payload the route cannot produce. Three comments falsified by the very next commit.
 
-**Iteration 9** — 2 BLOCKERs, 5 WARNINGs, 3 NITs. The reachability guard from iteration 8 asked the wrong question and shipped with its own counter-example. "sent as 1" on a message that was never typed.
+**Iteration 9** -- 2 BLOCKERs, 5 WARNINGs, 3 NITs. The reachability guard from iteration 8 asked the wrong question and shipped with its own counter-example. "sent as 1" on a message that was never typed.
 
-**Iteration 10** — 2 BLOCKERs, 6 WARNINGs, 3 NITs. A menu of ten returning nine buttons, found by RUNNING the parser. A third derivation of "did it reach the pane" that disagreed with the other two.
+**Iteration 10** -- 2 BLOCKERs, 6 WARNINGs, 3 NITs. A menu of ten returning nine buttons, found by RUNNING the parser. A third derivation of "did it reach the pane" that disagreed with the other two.
 
-**Iteration 11** — running when this PR was opened, per the orchestrator's ruling that a PR is not a merge and that review by a person is a second instrument sharing no step with this loop.
+**Iteration 11** -- 1 BLOCKER. `talkKey` returns null whenever options is null, and the hold guard read a null key as "no question to compare", the arm written for a question that is ABSENT. Answer a menu, and within the thirty-second hold the agent asks anything the parser will not vouch for, and the whole question block hid, question text included, while the board card said Needs you. Verbatim the harm this file names two hundred lines up, arriving through the other door. **Unkeyable is not absent.**
+
+**Iteration 12** -- 2 BLOCKERs, both in iteration 11's fix, and the first traded the harm it removed for the harm it was removing. The unkeyable release un-hid the panel (right) and also DELETED the hold (wrong), re-opening the defect the hold exists for. My commit message had defended the deletion with "no double-answer risk, a payload with no options renders no buttons to press twice" -- true of the tick where options is null, and the deletion is about every tick after it. The check could not have caught it either: the previous round's reachability fix had made the assertion vacuous. ✅ **Its proof arrived by accident and is better for it** -- the new assertion fired against the unfixed code because an unrelated edit failed silently, so it was not shaped by knowing what I wanted it to say.
+
+**Iteration 13** -- no BLOCKERs. The finding worth the work: the 409 guard that exists to stop "answering a question they never saw" could not tell two questions apart. It compared the LABEL for the pressed digit and nothing about the question it belonged to, and Claude's edit-permission menu draws identical labels for every file. Measured through the producers: a redraw from `src/a.js` to `src/b.js` passed every check. The page had held the discriminating half since the hold was written and simply never sent it, while the route never asked.
+
+**Iteration 14** -- 2 BLOCKERs, both in iteration 13's mechanism, and one of them is the guard turning itself off. `first > 0` says there are lines above the run; it does not say they contain anything. An ordinary pane after `/clear` returned an empty identity, which is falsy, and the route skips its check on a falsy value with **no error and no log** -- so the guard disabled itself on exactly the screens carrying the least identifying text. Also: nothing anywhere asserted the page puts `asked` on the wire at all. Delete the field and the node suite stays green (999 pass, measured) while the guard is dead.
+
+**Iteration 15** -- 2 BLOCKERs, and both were my round-14 fixes, both failing in the direction that matters most. Equality was replaced with containment to stop a false refusal; a pane ACCUMULATES, so a genuinely new question is drawn above the answered one and legitimately CONTAINS it. Simulated end to end: buttons drawn for "Do you want to proceed?", the pane redrew to `rm -rf /Users/josh/build` above the same Yes/No menu, both gates passed, and the digit went through. The empty-identity fallback returned the whole slice, which IS the options, so two different questions gave byte-identical identities.
+
+**Iteration 16** -- 1 BLOCKER: the identity rule failed open again, on the shape its own docblock cites as the reason it exists. Last-three-meaningful-lines drops the discriminating text whenever it sits higher than three lines above the menu, and the edit-permission prompt puts the PATH above a diff hunk. The path line WAS in the slice; `slice(-3)` threw it away.
+
+#### 🛑 One rule, four shapes, three of them mine
+
+| shape | what it did | direction |
+|---|---|---|
+| equality on the whole window | refuses when the cursor moves | **fails closed** |
+| containment | accepted an accumulated question | fails open |
+| last three meaningful lines | dropped a high discriminator | fails open |
+| equality on the whole window | back to the first, deliberately | **fails closed** |
+
+**A false refusal costs one more press. A false accept types a digit into somebody's terminal answering a question they never read.** Those are not comparable, and an earlier comment of mine calling a false refusal "worse than the hole it closes" had the emphasis backwards: it is worse than a guard that is RIGHT, not worse than a guard that is wrong the other way.
+
+✅ **And the cost of the closed shape is narrower than the round that found it implied**, measured rather than argued: `questionIn` slices from `max(0, at - 6)`, so a prompt with six or fewer lines above its menu clamps to the same window at either cursor position and the identity does not move at all. That is the ordinary permission prompt. A false refusal needs a capture deeper than the run-up window. Both cases are tests.
+
+**Where iteration 16 leaves the branch:** the guard is in its fails-closed shape, which is the safe one, and the loop has not been run against that shape. Iteration 17 has not started.
 
 ### Why this says `converged: false`
 
 The pre-registered rule: converged means a blind pass with zero new BLOCKERs, WARNINGs or CONVENTIONs. It was written down **before** iteration 10 reported, so the result could not shape it. Iteration 10 did not meet it.
 
-🔑 **The reason it may never meet it is worth more than the number.** Seven consecutive rounds found a comment describing behaviour the code does not have, and **every one was inside the previous round's own fix**. That is not a loop failing to converge; it is a loop generating its own findings — each fix writes a narrative comment, the comment is wrong or goes wrong, the next round finds it. Round twelve would find round eleven's comment. The class needs a mechanism, not another iteration, and it has been taken out of the loop and made a card.
+🔑 **The reason it may never meet it is worth more than the number.** Seven consecutive rounds found a comment describing behaviour the code does not have, and **every one was inside the previous round's own fix**. That is not a loop failing to converge; it is a loop generating its own findings, because each fix writes a narrative comment, the comment is wrong or goes wrong, the next round finds it. Round twelve would find round eleven's comment. The class needs a mechanism, not another iteration, and it has been taken out of the loop and made a card.
 
 ### One correction to a severity claim made during this loop
 
@@ -138,8 +174,8 @@ The menu-of-ten defect was described to the orchestrator as a live safety exposu
 | 51 | 7 | NIT | web/index.html:4982 | the tab gate went on one poll and not its neighbour three lines down | FIXED | 55de6aa |
 | 52 | 7 | NIT | docs/browser-checks/render-talk.js:132 | `7-unsure` draws a state the route says its producers almost cannot serve | FIXED (recorded on the fixture; nothing on it contradicts) | 55de6aa |
 | 53 | 7 | NIT | web/index.html:2570 | state 4's reassurance wears the failure pill | FIXED | 6ab68af, ruled by Mona Lisa |
-| 54 | — | WARNING | docs/browser-checks/render-talk.js scrollbar gate | orchestrator-found: the headed-only gate rested on a false cause. Playwright passes `--hide-scrollbars` in headless; neither the mode nor the binary decided it | FIXED | 6ab68af |
-| 55 | — | WARNING | web/index.html #d-qask-fail | orchestrator-found: the class swap was pinned by nothing in 994 tests | FIXED | 6ab68af |
+| 54 | - | WARNING | docs/browser-checks/render-talk.js scrollbar gate | orchestrator-found: the headed-only gate rested on a false cause. Playwright passes `--hide-scrollbars` in headless; neither the mode nor the binary decided it | FIXED | 6ab68af |
+| 55 | - | WARNING | web/index.html #d-qask-fail | orchestrator-found: the class swap was pinned by nothing in 994 tests | FIXED | 6ab68af |
 | 56 | 8 | BLOCKER | docs/browser-checks/render-talk.js QUESTION, 5-no-parse | the question fixtures carried no NEEDS_YOU marker, so `questionIn` returns null and the route can never serve them: ten of twenty-two screenshots drawn from an unproducible payload | FIXED | d9be567 (and the CLASS closed with a producer-checked assertion) |
 | 57 | 8 | WARNING | docs/browser-checks/render-talk.js:601 | the scrollbar gate's comment still asserted the behaviour the very next commit disproved | FIXED | d9be567 |
 | 58 | 8 | WARNING | .claude/plans/answer-panel.md | the plan repeated the same falsified headed-only claim | FIXED | d9be567 |
@@ -162,7 +198,7 @@ The menu-of-ten defect was described to the orchestrator as a live safety exposu
 
 - `optionsIn` refuses far more than it accepts, and every refusal closes a **measured** false positive rather than a hypothetical one. The sharp case: `Would you like to review the plan? / 1. Delete the old build folder` is itself a needs-you marker, so the page would have drawn a button that types `1` into a live pane and recorded a choice nobody made.
 - Every refusal test carries a positive control, including the two that would otherwise pass vacuously.
-- The new write route inherits the CSRF guard by construction — `crossSiteWrite` runs before route dispatch — rather than by the author remembering.
+- The new write route inherits the CSRF guard by construction (`crossSiteWrite` runs before route dispatch) rather than by the author remembering.
 - The 409 screen-verification of `chose` re-captures the pane, drops the words unless the board says the agent is asking, and compares the label **as it will be stored**, refusing rather than stripping.
 - `threadFile`'s two-dot `direct..<key>.json` makes a collision with a real project named "Direct" impossible rather than unlikely, and the test writes and reads back **both** files rather than comparing two ENOENTs.
 - The check gets **louder** when the thing it watches breaks: five coverage controls report UNCHECKED rather than passing silently, and all five were proven able to fire.
