@@ -1725,6 +1725,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
             font-size: 10px; font-weight: 700; color: var(--label); }
 .tkcard.closed .tkcard-t { text-decoration: line-through; color: var(--label-2); }
 .tksay { font-style: normal; color: var(--label-2); margin-left: 4px; }
+/* ⚠️ A DIFFERENT APPEARANCE, not just different words. `.tksay` carries what
+   the AGENT said; this carries what WE could not establish, which is a
+   different kind of statement and the app says so everywhere else it has an
+   unknown. Dotted underline rather than a colour change alone: the four states
+   must be distinguishable without relying on hue, and two of them already sit
+   at `--label-2`. */
+.tkunk { font-style: normal; color: var(--label-2); margin-left: 4px;
+         text-decoration: underline dotted; text-underline-offset: 2px; }
 .tk-lab { display: block; margin-top: var(--space-5); }
 /* ⚠️ Used on an input, a textarea AND a select, so it must not restate the
    select appearance: the shared `select` rule handles that one, and a padding
@@ -2618,6 +2626,8 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <h2 class="rm-title" id="tk-title"></h2>
     <p class="rm-small" id="tk-meta"></p>
     <p class="rm-small" id="tk-detail" hidden></p>
+    <!-- The unknown's reason, too long for the card that reports the state. -->
+    <p class="rm-small" id="tk-why" hidden></p>
     <p class="rm-small" id="tk-note" hidden></p>
     <div class="rm-acts">
       <button class="btn" id="tk-back" type="button">Back</button>
@@ -8949,13 +8959,35 @@ function paintProjectTasks(p) {
     const who = t.who
       ? '<span class="tkcard-who"><span class="tkchip" aria-hidden="true">'
         + esc((Array.from(tkMemberName(p, t.who))[0] || '?').toUpperCase()) + '</span>' + esc(tkMemberName(p, t.who))
-        /* The join, rendered ONLY as the agent's own words (the pack's
-           phrase for the commitments source: "says it is on this").
-           claimed false is NOT "not started" and renders nothing, and
-           claimed null (could-not-read) renders nothing here -- Mona
-           Lisa's chip-is-the-status ruling stands for both. */
-        + (t.claim && t.claim.claimed === true
-          ? '<em class="tksay">· says it is on this</em>'
+        /* ⚠️ FOUR STATES, FOUR APPEARANCES. Two of these used to render as
+           NOTHING, and Josh wrote "Add Task Status" on a card whose status was
+           deliberately blank -- which is the whole finding: a state that
+           renders as nothing is indistinguishable from a feature nobody built.
+
+           Mona Lisa's ruling (2026-08-19) RETIRED her earlier chip-is-the-
+           status rule rather than reversing it: she had attached the condition
+           "no second word until the commitments join can support one", the
+           join shipped in #52, and the rule expired on its own terms.
+
+           ⚠️ "says it is not on this", NOT the pack's "Not started". Nothing
+           here knows whether the WORK started. commitments.js is explicit that
+           an empty list only counts when it is an ASSERTION rather than an
+           absence -- the agent has to have said, recently, that it is holding
+           nothing. So claimed:false is a statement the agent made, and
+           mirroring the positive exactly (same verb, opposite polarity) keeps
+           the subject on the agent's report where it belongs. "Not started"
+           would be a claim about the work that nobody computed, and "has not
+           said it is on this" describes a silence and invites "so it is
+           slacking".
+
+           claimed:null is OURS rather than the agent's, so it gets its own
+           class and its own voice. The engine's `because` runs 30-50 words and
+           belongs where the task opens, not on a card: the card carries
+           signals, the panel carries explanation. */
+        + (t.claim
+          ? (t.claim.claimed === true ? '<em class="tksay">· says it is on this</em>'
+            : t.claim.claimed === false ? '<em class="tksay">· says it is not on this</em>'
+              : '<em class="tkunk">· we could not check</em>')
           : '')
         + '</span>'
       : '<span class="tkcard-who">Nobody yet</span>';
@@ -9007,6 +9039,19 @@ function openTaskModal(n) {
   const det = document.getElementById('tk-detail');
   det.textContent = t.detail || '';
   det.hidden = !t.detail;
+  /* ⚠️ THE UNKNOWN'S REASON LIVES HERE, not on the card. The card says "we
+     could not check" in three words; the engine's own sentence explaining WHY
+     runs to fifty ("we cannot tie the pane holding this name to the agent, so
+     we will not speak for what that name is holding") and would set the width
+     of every card in the column. The card carries the signal, the panel
+     carries the explanation.
+     Only for the unknown: `claimed` true and false are complete statements and
+     have no because to give. */
+  const why = document.getElementById('tk-why');
+  const unknownBecause = (t.claim && t.claim.claimed === null && t.claim.because) ? t.claim.because : '';
+  why.textContent = unknownBecause ? 'We could not check whether ' + (who || 'it')
+    + ' is on this: ' + unknownBecause + '.' : '';
+  why.hidden = !unknownBecause;
   /* The close-note, Mona Lisa's blessed v1 wording: both clauses are about
      what KOSMOS does not do, verifiable tonight, and needed MORE before the
      commitments join exists, because tonight is when someone will assume
