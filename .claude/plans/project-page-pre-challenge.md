@@ -3,9 +3,9 @@ pre_challenge: true
 method: pre-challenge
 explicit_override: true
 branch: project-page
-diff_hash: c3f35dd7e945c7c70881db6269b1ebdc4de79243ab94f3bc69a82066bba69acc
+diff_hash: a7448ab40f4845a97ae9c0160956cfbd51a67dfc27157da3ff48a673ea343427
 subdir_audit: passed
-timestamp: 2026-08-20T04:48:55Z
+timestamp: 2026-08-20T05:09:28Z
 iterations: 1
 converged: true
 ---
@@ -227,3 +227,51 @@ tonight that measured a NEIGHBOUR of the thing I meant.
 | 15 | 1 | BLOCKER | package.json | FIXED | version regression, caught third time |
 | 16 | 1 | WARNING | full-width probe | FIXED | measured the content box, not the border box |
 | 17 | 1 | NIT | Sponsor picker / confirm button | DEFERRED | no pack drawing exists; recorded |
+
+## Fifth slice (2026-08-20): path citations
+
+[STRENGTH] **The escape is not relaxed, and the guard is PROVEN.** Deleting the
+per-token escapes turns the suite red with "a script tag beside a citation was
+not escaped". Verified in a real browser on a body containing all four cases at
+once: two chips for the two files that exist, a path shown as written with the
+basename in `data-ref`, a non-existent file left as plain text, and
+`<script>alert(1)</script>` rendered escaped with no raw tag in the markup.
+
+[STRENGTH] **The client does not sniff.** A token becomes a chip only when it
+matches a file the folder contains right now, which is also what makes the
+chip's promise keepable: "Show me" goes through the same route with the same
+three gates, so a chip is never offered for something the opener would refuse.
+
+[STRENGTH] The two escape tests cover DIFFERENT escapes, measured by
+perturbation rather than assumed: the byte-for-byte test stays GREEN when the
+per-token escapes are deleted, because its bodies never reach that path. The
+test file says so where someone would otherwise delete one as a duplicate.
+
+[STRENGTH] `names` comes from the SAME folder read as the capped list. Behind
+a second route, a file past the cap would render as dead text while its
+neighbour rendered as a chip: one file, two appearances, decided by sort order.
+
+[BLOCKER -> FIXED] ⚠️ **A previous commit on this branch shipped CONFLICT
+MARKERS.** A resolve script asserted and died; the `git add` and `git commit`
+on the following lines ran anyway, and `git add` does not care about markers.
+Caught by "every CSS declaration in the page sits inside a selector" failing
+with "the brace walk ended at depth -1" -- a CSS-structure test doing a merge
+check's job, because `<<<<<<<` is not valid CSS. The resolve is now gated on a
+proven zero-marker count, and this branch is pushed only after the same check.
+
+[NIT] The per-agent thread (`pj-msg-text`) still escapes plainly and does not
+link. The pack draws `.ref` in the room; that surface is part of the
+answer-panel chunk and will get it there rather than by a drive-by.
+
+[NIT] ⚠️ Sandboxing DATA/WORKERS/LAUNCH/PROJECTS does NOT sandbox tmux: a test
+post into a sandboxed room typed into a live agent's session. Recorded in the
+plan.
+
+### Fifth-slice ledger
+
+| # | Iter | Category | File:Line | Status | Resolution |
+|---|------|----------|-----------|--------|------------|
+| 18 | 1 | BLOCKER | web/index.html | FIXED | conflict markers committed; resolve now gated |
+| 19 | 1 | BLOCKER | package.json | FIXED | version regression, caught a FOURTH time |
+| 20 | 1 | NIT | pj-msg-text | DEFERRED | belongs to the answer-panel chunk |
+| 21 | 1 | NIT | tmux not sandboxed | DEFERRED | recorded; needs a fixture, not a flag |
