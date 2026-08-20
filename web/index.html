@@ -1277,7 +1277,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
          border-radius: 4px; background: var(--k-bg); color: var(--k-ink-2);
          cursor: pointer; padding: 2px 6px; min-height: 24px; }
 .refgo:hover { color: var(--k-ink); }
-.refgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
+.refgo:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+/* The pack's external link. It keeps the ink colour rather than taking a link
+   blue: in a room where most of what is written is local, the ONE thing that
+   leaves the machine should not also be the one thing that shouts. */
+.xlink { color: var(--k-ink); text-underline-offset: 3px; }.pj-member b { font: 600 var(--text-body) var(--font-ui); }/* ⚠️ `--label-2`, measured (round 37): `--label-3` at this 10px caption size
    reads 3.04:1 light / 3.76:1 dark on the page ground -- under the 4.5:1 AA
    floor this project holds as a hard rule. "It is only a scannable caption"
    was the recorded defence, and the floor does not have a caption exemption. */
@@ -9584,7 +9588,7 @@ async function pjLoadDocs(id) {
  */
 function pjLinkPaths(text, names) {
   const raw = String(text == null ? '' : text);
-  if (!names || !names.size) return esc(raw);
+  if (!names || !names.size) return pjInline(raw);
   /* Split on whitespace RUNS but keep them, so the reassembled body preserves
      the spacing the person typed. A body is not a sentence: agents paste
      columns and indentation, and collapsing it would edit what they said. */
@@ -9599,15 +9603,15 @@ function pjLinkPaths(text, names) {
     const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
     const core = m[1];
     const tail = m[2];
-    if (!core) return esc(tok);
+    if (!core) return pjInline(tok);
     /* A cited path may be written with folders in front of it. The FILE is
        what we can open, so the last segment is what is matched -- but only
        when the whole token has no `..` in it, because a token that walks up
        is not describing a file in this project and should not be dressed as
        one even if its basename collides. */
-    if (core.includes('..')) return esc(tok);
+    if (core.includes('..')) return pjInline(tok);
     const base = core.split('/').pop();
-    if (!names.has(base)) return esc(tok);
+    if (!names.has(base)) return pjInline(tok);
     hit = true;
     return '<span class="ref">' + esc(core)
       + '<button class="refgo" type="button" data-ref="' + esc(base)
@@ -9616,7 +9620,40 @@ function pjLinkPaths(text, names) {
   /* ⚠️ Identical output to the old path when nothing matched, byte for byte:
      the reassembly above escapes every token and every whitespace run, so a
      body with no citation is unchanged rather than merely equivalent. */
-  return hit ? out : esc(raw);
+  return hit ? out : pjInline(raw);
+}
+
+/**
+ * Inline treatments that need no lookup: an external link.
+ *
+ * 🛑 STILL NOT A SNIFFER, and the distinction is the same one the path rule
+ * rests on. `https://` is a DELIMITER, not an inference: a token either starts
+ * with it or does not, and there is no judgement in between that could be
+ * wrong. "Looks like a path" was a guess; this is a prefix.
+ *
+ * ⚠️ AND THE ESCAPE STILL HOLDS. The href is built from the escaped token, the
+ * text is the escaped token, and anything that is not an http(s) token comes
+ * back through `esc()` unchanged. A `javascript:` or `data:` token is not
+ * matched at all -- the test is a literal prefix, not a URL parse, so there is
+ * no scheme for it to be tricked about.
+ *
+ * `rel="noreferrer noopener"` because this is the ONE place in a local-first
+ * product where a click leaves the machine, and the page it lands on should
+ * learn nothing about where it came from.
+ */
+function pjInline(text) {
+  const raw = String(text == null ? '' : text);
+  if (raw.indexOf('http://') === -1 && raw.indexOf('https://') === -1) return esc(raw);
+  return raw.split(/(\s+)/).map((tok) => {
+    if (!tok || /^\s+$/.test(tok)) return esc(tok);
+    if (!/^https?:\/\/[^\s]+$/.test(tok)) return esc(tok);
+    /* Trailing punctuation is not part of the link: "see https://x.test." */
+    const m = /^(.*?)([.,;:!?)\]]*)$/.exec(tok);
+    const url = m[1];
+    if (!/^https?:\/\/[^\s]+$/.test(url)) return esc(tok);
+    return '<a class="xlink" href="' + esc(url) + '" target="_blank" rel="noreferrer noopener">'
+      + esc(url) + '</a>' + esc(m[2]);
+  }).join('');
 }
 
 function pjSize(bytes) {
