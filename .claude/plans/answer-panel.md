@@ -162,6 +162,25 @@ request, and the suite reads text.
 - **`render-talk.js` is headed by default now**, like `render-thread` and
   `render-projects`. Its whole output is the class of evidence SwiftShader
   weakens: contrast, computed backgrounds, geometry, hit tests.
+- **The plan says "Capture always runs"; the code does not.** `const view =
+  asking ? chat.viewport(name, roster) : null`. This route rides the 5s tick on
+  the most-visited screen, `safeRoster()` is already one `list-panes` plus a
+  capture PER AGENT, and an unconditional second capture here added another one
+  every tick, for an idle agent, to feed a `questionIn` that has nothing to
+  find. Argued at length at the code; the plan sentence was never corrected.
+- **The POST response drops `agentsUnreadable`**, which the plan lists in its
+  response shape. Nothing on this screen reads it, and the GET on the same
+  route deleted the identical field for the identical reason. One rule, both
+  halves.
+- **The 409 screen-verification of `chose` is not in the plan at all**, and it
+  is the largest thing on the branch the plan does not mention: the server
+  re-captures the pane, drops the words entirely unless the board says the
+  agent is asking, compares the label AS IT WILL BE STORED
+  (`cleanMessage(row.label) !== chose`), and refuses the whole send with a 409
+  rather than stripping the words, because a label that no longer matches is
+  evidence the digit is stale too.
+- **The route tests live in `server.projects.test.js`, not `server.test.js`**
+  as the plan says, next to the project-thread suite whose shape they mirror.
 - **`optionsIn` is materially stricter than the "iff" written above**, and this
   is the largest drift on the branch rather than the smallest. The spec says
   confident iff the numbers are contiguous ascending from 1, the count is in
@@ -175,6 +194,24 @@ request, and the suite reads text.
   with its own positive control. The spec above is left as written rather than
   edited, because what it records is what was believed on 2026-08-19 before the
   captures were read.
+
+## Open, and NOT settled by this branch: the question that does not fit
+
+`.pj-screen` is `white-space: pre`, which is the room's treatment and is
+deliberate -- a captured line is what the agent's screen showed, and wrapping it
+makes it something else. The consequence, measured on 2026-08-20: **10 of the
+12 question-bearing states in `render-talk.js` render a question wider than its
+box**, cut at the right edge, and macOS hides the overlay scrollbar until
+somebody scrolls. `talk-5-no-confident-parse` is the one that matters most,
+because state 5 exists precisely so a person can read the question and type the
+answer, and its committed screenshot ends mid-word at "or join the existi".
+
+What this branch guarantees, and now asserts per state: the rest is REACHABLE.
+The box is scrollable and carries `tabindex="0"`, so it can be reached from the
+keyboard rather than by trackpad alone. Whether "reachable" is good enough for
+the screen whose job is reading a question is a design decision and it is Mona
+Lisa's, not mine. Flagged to her rather than resolved here, because the
+alternative (`pre-wrap`) changes what the box CLAIMS to be showing.
 
 ## 🛑 The ordering constraint, unchanged
 

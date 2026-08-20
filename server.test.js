@@ -6751,6 +6751,25 @@ test('talkKey reads the option run exactly where optionsIn does, decoys included
     return key.split('\u0000')[1];
   };
 
+  /* ⚠️ AND WHEN THE RUN STARTS AT LINE 0. A short capture leaves nothing above
+     the menu, and an empty `above` keys the hold on the OPTIONS ALONE --
+     which is the collision this key exists to prevent, because the
+     edit-permission menu draws the same labels for every file. Two different
+     questions, same buttons, no preamble: the keys must still differ. */
+  const menuFirstA = talkKey({
+    asking: true,
+    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+    question: { text: MENU + '\nEdit src/a.js?' },
+  });
+  const menuFirstB = talkKey({
+    asking: true,
+    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+    question: { text: MENU + '\nEdit src/b.js?' },
+  });
+  assert.ok(menuFirstA && menuFirstB, 'talkKey refused a body it should key');
+  assert.notEqual(menuFirstA, menuFirstB,
+    'two different questions with identical buttons collapsed to one key, so the second is suppressed');
+
   // CONTROL: with no decoy at all, `above` is the preamble and the menu is not
   // in it. Without this the decoy cases below pass on a function that returns
   // the whole capture every time.

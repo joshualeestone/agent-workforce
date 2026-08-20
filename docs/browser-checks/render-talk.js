@@ -117,11 +117,21 @@ const STATES = {
     __failed: true,
   },
   '5-no-parse': { ...base, asking: true, question: { text: '│ One I cannot answer from the docs: when somebody adds a second\n│ person, does that person get their own trial, or join the existing one?' } },
+  /* ⚠️ THE COPY-MODE ARM, and the other one is a world the producers cannot
+     make. `addressable` picks its sentence on `card.isAgentSession`: false
+     gives "there is no Claude running in its window", and `classify` returns
+     STOPPED for exactly that pane BEFORE it ever reaches the needs-you check.
+     So `asking: true` beside that sentence cannot happen, and the fixture that
+     paired them drew "April is waiting on an answer." directly above "there is
+     no Claude running in its window right now" -- two sentences contradicting
+     each other, committed as evidence in both themes. Copy-mode is the arm
+     that IS reachable while an agent is asking: Claude is running, the pane is
+     scrolled back, and the question is on the screen we captured. */
   '6-off': {
     ...base, asking: true, question: QUESTION,
     options: [{ n: 1, label: '14 days' }, { n: 2, label: '30 days' }],
     presence: 'off',
-    presenceBecause: 'there is no Claude running in its window right now, so anything we typed would be run as a command instead of read',
+    presenceBecause: 'its window is scrolled back right now, so anything we typed would go to the scrollback instead of to the agent',
     messages: [placed('are you there')],
   },
   '7-unsure': { ...base, presence: 'unsure', presenceBecause: 'we could not check which agents are running, so we did not type anything anywhere', messages: [placed('are you there')] },
@@ -202,7 +212,15 @@ const STATES = {
          BACKGROUND paint. Recorded rather than merely refused, so a run can
          assert the page really did try to install it. */
       window.__intervals = [];
-      window.setInterval = (fn, ms, ...rest) => { window.__intervals.push(ms); return 0; };
+      /* ⚠️ THE NAME AS WELL AS THE DELAY. The page installs TWO top-level 5s
+         intervals (the projects poll and `tick`), so a control that asks only
+         whether some 5000 exists stays true when the one this stub is for is
+         deleted or re-delayed -- a control that cannot fail for the reason it
+         names. */
+      window.setInterval = (fn, ms) => {
+        window.__intervals.push({ ms, name: (fn && fn.name) || '(anonymous)' });
+        return 0;
+      };
       window.__posted = [];
       window.fetch = async (url, opts) => {
         const u = String(url);
@@ -223,13 +241,17 @@ const STATES = {
        tick. If the app stops using setInterval this reports rather than going
        quietly unnecessary. */
     const asked = await page.evaluate(() => (window.__intervals || []).slice());
-    if (!asked.includes(5000)) {
-      problems.push(`[${theme}] tick: the page installed no 5s interval (${JSON.stringify(asked)}), `
-        + 'so the stub below is guarding nothing');
+    if (!asked.some((a) => a.ms === 5000 && a.name === 'tick')) {
+      problems.push(`[${theme}] tick: the page installed no 5s \`tick\` interval (${JSON.stringify(asked)}), `
+        + 'so the stub below is guarding nothing -- or the poll this check neutralises has been renamed');
     }
     /* Kept so two states can be compared to each other AFTER the loop, which
        is the only way to make "these two render the same" a claim. */
     const measured = {};
+    /* CONTROL for the receipt geometry below: several states have no bubble at
+       all, so the per-state check skips. If it skipped EVERY state the selector
+       has moved and the whole assertion went quiet. */
+    let measuredMeta = 0;
     for (const [name, fx] of Object.entries(STATES)) {
       await page.evaluate((f) => {
         window.__fx = f;
@@ -316,6 +338,43 @@ const STATES = {
              April." and the line under it said "This stays here after a
              restart." Both were in the committed screenshot for two days. */
           persistVisible: vis(el('d-persist')),
+          /* ⚠️ THE RESOLVED ALIGNMENT OF THE RECEIPT, which is the property
+             and not a proxy for it. `.dm.mine` is `align-items: flex-end`, so
+             it right-aligns the SPAN -- and that stops being the same thing as
+             right-aligning its TEXT the moment a long verdict makes the span
+             full width, at which point the receipt jumps to the opposite side
+             of the panel from the message it belongs to. Four committed
+             screenshots carried it.
+             ⚠️ Measured as COMPUTED style rather than by geometry, after a
+             geometry version of this check produced false positives on
+             single-line receipts (a Range's first rect ends where the pill
+             begins, which is nowhere near the row's edge and is perfectly
+             correct). Computed style is also what catches the failure this
+             stylesheet keeps having: a rule that HAS its element and loses on
+             specificity. */
+          /* ⚠️ THE QUESTION THAT DOES NOT FIT. `.pj-screen` is `white-space: pre`,
+             so a captured line wider than the box is CUT, and state 5 -- the
+             one whose whole job is "read the question and type the answer" --
+             ships a screenshot ending mid-word at "…or join the existi". The
+             treatment is the room's and changing it is a design decision, not
+             this branch's to make. What IS this branch's to guarantee is that
+             the rest is REACHABLE: scrollable, and reachable from the keyboard
+             rather than by trackpad alone. Recorded as a measurement so the
+             day it stops being reachable is a failure. */
+          qtext: (() => {
+            const q = el('d-qask-text');
+            if (!q || q.hidden) return null;
+            return {
+              cut: q.scrollWidth > q.clientWidth + 1,
+              scrollable: getComputedStyle(q).overflowX !== 'visible',
+              focusable: q.tabIndex >= 0,
+            };
+          })(),
+          metaAlign: (() => {
+            const row = document.querySelector('#d-dmthread .dm.mine');
+            const w = row && row.querySelector('.dm-w');
+            return w ? getComputedStyle(w).textAlign : null;
+          })(),
           label: el('d-talk-label').textContent,
           qlab: el('d-qask-lab').textContent,
           qfail: el('d-qask-fail').hidden ? '' : el('d-qask-fail').textContent,
@@ -408,6 +467,17 @@ const STATES = {
       /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
          a state that keeps things is as wrong as one standing over a state that
          does not, and only the second half was ever the bug. */
+      if (m.qtext && m.qtext.cut && !(m.qtext.scrollable && m.qtext.focusable)) {
+        problems.push(`${tag}: the question is cut off and what is left cannot be reached `
+          + `(${JSON.stringify(m.qtext)})`);
+      }
+      if (m.metaAlign !== null) {
+        measuredMeta += 1;
+        if (m.metaAlign !== 'right') {
+          problems.push(`${tag}: the receipt under the person's own bubble aligns ${m.metaAlign}, `
+            + 'so a verdict long enough to wrap leaves its message behind');
+        }
+      }
       const keepsNothing = fx.historyUnfilable === true;
       if (m.persistVisible === keepsNothing) {
         problems.push(`${tag}: the persistence promise is ${m.persistVisible ? 'standing over' : 'missing from'} `
@@ -440,6 +510,10 @@ const STATES = {
       }
       console.log(tag, JSON.stringify(m));
       measured[name] = m;
+    }
+
+    if (!measuredMeta) {
+      problems.push(`[${theme}] receipt: no state produced a .dm.mine receipt, so its alignment is UNCHECKED`);
     }
 
     /* ⚠️ TWO STATES, ONE PICTURE, SAID OUT LOUD. `11-answered-hold` and

@@ -1233,6 +1233,17 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   overflow-wrap: anywhere; }
 .dm.mine .dm-b { background: rgba(214,166,46,.14); }
 .dm-w { font-size: .75rem; color: var(--k-ink-2); }
+/* ⚠️ THE META LINE FOLLOWS ITS BUBBLE. `.dm.mine` is `align-items: flex-end`,
+   which right-aligns the SPAN while it is narrower than the row -- and a
+   verdict long enough to wrap makes the span full width, at which point its
+   text left-aligns and the receipt jumps to the opposite side of the panel
+   from the message it belongs to. Committed screenshots showed it in
+   talk-3-unconfirmed and talk-4-failed: "You · sent as 1" at the far left with
+   its bubble at the far right, and the pill spanning nearly the whole box,
+   which reads as an alert about the panel rather than a receipt for one
+   message. Removing the stranded separator (the previous round) fixed the
+   symptom above the fold and not this. */
+.dm.mine .dm-w { text-align: right; }
 .dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
 .dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
   border-left: 3px solid var(--k-rule); padding-left: 12px; }
@@ -4926,7 +4937,19 @@ async function tick() {
          is sending and B's screen stops updating for reasons that have nothing
          to do with B. `TALK_FLIGHT` is the same term `paintTalk` already uses
          to decide whose controls to disable. */
+      /* ⚠️ THE TAB AS WELL AS THE PANEL, which the gate below used to conflate.
+         `panel-detail` being open says the surface is on screen IN THIS PAGE;
+         it says nothing about whether the page is the front tab. This route is
+         the most expensive poll the app has -- `nameRefusal`'s uncached
+         list-panes, then `safeRoster`'s list-panes plus a capture per agent,
+         then a second capture when the agent is asking -- on a single-threaded
+         server whose tmux calls block. An agent panel left open in a
+         background tab paid all of that every five seconds, forever. The
+         projects poll settled this exact question in round 33 and its comment
+         is three hundred lines below; this is that rule, applied to the poll
+         that costs the most. */
       if (!(TALK_SENDING && TALK_FLIGHT === CURRENT.sessionName)
+          && !document.hidden
           && !document.getElementById('panel-detail').hidden) {
         paintTalk(CURRENT.sessionName, CURRENT.name);
       }
@@ -6137,7 +6160,22 @@ function talkKey(body) {
      The three replaces and the pattern below are `optionsIn`'s, verbatim. */
   const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
     l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
-  const above = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
+  /* ⚠️ NOTHING ABOVE THE RUN IS NOT THE SAME AS NO IDENTITY. `questionIn`
+     normally hands over six lines above the marker, so `first` is normally
+     positive -- but a SHORT capture clamps that slice to 0, and then an
+     `above` of '' keys the hold on the options alone. That is exactly the
+     collision this key exists to prevent: Claude's edit-permission menu draws
+     the same three labels for every file, so two different questions become
+     one key and the second is suppressed for the whole hold -- panel gone, no
+     buttons, while the board card still says the person is needed.
+     Falling back to the WHOLE slice costs the other direction, and it is the
+     cheaper one: text accumulating below the menu spends the hold early, so
+     the buttons come back over a question that was already answered, which the
+     server's own 409 screen-check then refuses. A suppressed live question has
+     no such second line of defence. */
+  const above = first > 0
+    ? lines.slice(0, first).join('\n').trim()
+    : lines.join('\n').trim();
   return JSON.stringify(body.options) + '\u0000' + above;
 }
 
