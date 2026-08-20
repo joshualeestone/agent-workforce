@@ -1229,6 +1229,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
+/* The documents list: rows that read as one tappable thing, in the members
+   column's own rhythm. A row is a BUTTON because it acts — `open` launches a
+   file — and a div with a click handler is not reachable from the keyboard. */
+.pj-docs { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); }
+.pj-doc { display: flex; align-items: baseline; gap: var(--space-4); width: 100%;
+          text-align: left; background: none; border: 0; cursor: pointer;
+          padding: var(--space-3) var(--space-3); border-radius: var(--radius-control);
+          font: var(--text-callout) var(--font-ui); color: var(--k-ink); min-height: 24px; }
+.pj-doc:hover { background: var(--k-bg); }
+.pj-doc:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.pj-doc-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-doc-w { flex: 0 0 auto; font: var(--text-caption) var(--font-ui); color: var(--k-ink-2); }
 /* #pj-one-add sits in a `.frow`, so the shared `select` rule dresses it and
    the named width rule above widths it. ⚠️ NOT `.frow select` — this comment
    said so and that selector does not exist: it was deliberately replaced by an
@@ -3121,6 +3133,34 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
+
+      <!-- ⚠️ PROJECT DOCUMENTS IS NET NEW: the pack's project page has three
+           columns (members, conversation, tasks) and no documents section, so
+           there is nothing here to match. Josh asked for it in ink across four
+           messages on 2026-08-19: "a list of the files and if i click them they
+           open", covering "if i upload a document here, or you make a document
+           to share with me", catalogued, and explicitly NO add control in the
+           section itself because "they do that from the conversation dialogue
+           box".
+           Built in the pack's OWN idiom rather than an invented look — the same
+           `h3.dlab` heading and the same column this file already uses — so
+           Mona Lisa is blessing or replacing something that already sits in the
+           system rather than something I made up.
+           ⚠️ The list is the project's FOLDER, top level, newest first. That is
+           what exists today: agents write into the project folder, so their
+           documents are already here. Files from the conversation join it when
+           the attachment path lands, which is the same chunk that brings the
+           composer's `+`. -->
+      <div class="field" style="margin-top: var(--space-6)">
+        <h3 class="dlab">Project documents</h3>
+        <div id="pj-docs" class="pj-docs"></div>
+        <p class="fmsg" id="pj-docs-msg" aria-live="polite"></p>
+        <!-- ⚠️ "Show them all in Finder", NOT "see all files". Josh asked for a
+             view-all that opens a SCREEN listing everything. That screen is a
+             later slice; this control does something real and says exactly what
+             it does instead of wearing the label of the thing not built yet. -->
+        <button class="linkish" id="pj-docs-all" type="button" hidden>Show them all in Finder</button>
+      </div>
     </aside>
 
     <section class="pjcol pjmid">
@@ -9334,6 +9374,121 @@ function paintOneProject() {
   document.getElementById('pj-one-add-go').disabled = !free.length;
 }
 
+/* ---- a project's documents ------------------------------------------------
+ *
+ * ⚠️ WHAT THIS SCREEN MAY CLAIM, the same discipline chat.js carries about a
+ * keystroke. "These are the files in this project's folder, a moment ago" is
+ * ours to say. "This is everything for this project" is NOT, and the list does
+ * not say it: the folder is the top level only, and files that arrive through
+ * the conversation are not there until the attachment path lands.
+ *
+ * A folder we cannot read produces a SENTENCE rather than an empty list,
+ * because "no documents yet" and "we could not look" are different facts and
+ * only one of them is about the project. The route answers 200 with a reason
+ * for exactly this reason.
+ */
+async function pjLoadDocs(id) {
+  const box = document.getElementById('pj-docs');
+  const msg = document.getElementById('pj-docs-msg');
+  const all = document.getElementById('pj-docs-all');
+  let body;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(id) + '/documents');
+    body = await res.json();
+  } catch {
+    /* ⚠️ Only if this project is still the open one. Same capture-and-recheck
+       every other async painter here carries: an answer that arrives after a
+       switch would paint one project's failure under another's name. */
+    if (PJ_CURRENT === id) msg.textContent = 'We could not read this project\u2019s folder just now.';
+    return;
+  }
+  if (PJ_CURRENT !== id) return;
+  box.textContent = '';
+  if (!body || body.ok !== true) {
+    msg.textContent = (body && body.because) || 'We could not read this project\u2019s folder just now.';
+    all.hidden = true;
+    return;
+  }
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (!files.length) {
+    msg.textContent = 'Nothing here yet. Files you or your agents put in this project\u2019s folder show up here.';
+    all.hidden = true;
+    return;
+  }
+  msg.textContent = '';
+  for (const f of files) {
+    /* A BUTTON, not a div with a handler: this opens a file, and an action
+       that cannot be reached from the keyboard is not an action for everyone. */
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pj-doc';
+    b.dataset.doc = f.name;
+    const n = document.createElement('span');
+    n.className = 'pj-doc-n';
+    n.textContent = f.name;
+    const w = document.createElement('span');
+    w.className = 'pj-doc-w';
+    w.textContent = pjSize(f.size);
+    b.append(n, w);
+    box.append(b);
+  }
+  /* ⚠️ The COUNT comes from the route's own total, never from files.length:
+     the list is capped at ten, so deriving "and N more" from what was returned
+     would report ten every time a project had more than ten. */
+  const more = Number(body.total || 0) - files.length;
+  all.hidden = false;
+  all.textContent = more > 0
+    ? 'Show all ' + body.total + ' in Finder'
+    : 'Show them all in Finder';
+}
+
+function pjSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+document.getElementById('pj-docs').addEventListener('click', async (e) => {
+  const row = e.target && e.target.closest ? e.target.closest('.pj-doc') : null;
+  if (!row || !PJ_CURRENT) return;
+  const msg = document.getElementById('pj-docs-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/open-file',
+      { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: row.dataset.doc }) });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
+    /* The refusal is the ENGINE's sentence, shown verbatim. It already says
+       what happened in words a person can act on ("that file lives outside
+       this project"), and rewriting it here would be a second, weaker copy. */
+    let because = 'That file did not open.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'That file did not open.';
+  }
+});
+
+document.getElementById('pj-docs-all').addEventListener('click', async () => {
+  if (!PJ_CURRENT) return;
+  const msg = document.getElementById('pj-docs-msg');
+  const forProject = PJ_CURRENT;
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(forProject) + '/reveal-folder',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (PJ_CURRENT !== forProject) return;
+    if (res.ok) { msg.textContent = ''; return; }
+    let because = 'We could not show that folder.';
+    try { because = (await res.json()).error || because; } catch { /* keep the fallback */ }
+    msg.textContent = because;
+  } catch {
+    if (PJ_CURRENT === forProject) msg.textContent = 'We could not show that folder.';
+  }
+});
+
 function openProject(id) {
   // ⚠️ Only opens a project we actually HAVE. `paintOneProject` bails back to
   // the list when the id is not in `PROJECTS`, and showing the panel
@@ -9395,6 +9550,14 @@ function openProject(id) {
        runs on `input`, and setting `.value` in code fires no such event. */
     pjGrowComposer(document.getElementById('pj-post'));
     document.getElementById('pj-room-msg').textContent = '';
+    /* The documents list belongs to the project, so it is cleared and re-asked
+       on every switch. Left standing it would show the PREVIOUS project's files
+       under the new name for as long as the fetch takes, which is the same
+       misattribution the room's own reset above exists to prevent. */
+    document.getElementById('pj-docs').textContent = '';
+    document.getElementById('pj-docs-msg').textContent = '';
+    document.getElementById('pj-docs-all').hidden = true;
+    pjLoadDocs(id);
     const roomBox = document.getElementById('pj-room');
     roomBox.__lastRoom = undefined;
     roomBox.__lastBody = undefined;
