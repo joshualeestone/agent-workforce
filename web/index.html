@@ -47,12 +47,15 @@
   /* ⚠️ THE OPTION BUTTON'S BOUNDARY IS A CONTRAST FLOOR, not a preference.
      `--k-rule` measures 1.18:1 against the question panel in light and 1.10:1
      in dark, and WCAG SC 1.4.11 asks 3:1 of anything that identifies a control.
-     A button whose edge nobody can see is a button nobody can find. Measured:
-     3.27:1 light and 3.13:1 dark, which is what `docs/browser-checks/
-     render-talk.js` reports on every state that has buttons, and it is the
-     instrument that checks this rather than the arithmetic that chose it.
-     (An earlier version of this comment carried 3.26 and 3.14, from a
-     hand calculation, which is two numbers nothing measures.) They are the
+     A button whose edge nobody can see is a button nobody can find. What
+     `docs/browser-checks/render-talk.js` PINS is the 3:1 floor, on every state
+     that has buttons, in both themes; the numbers it last printed were 3.27:1
+     light and 3.13:1 dark (2026-08-20, headed). Those two decimals are a
+     reading, not a guard -- nothing fails if they move, only if they fall
+     under three -- and they are written here with their date so the next
+     person does not read them as pinned. (An earlier version carried 3.26 and
+     3.14, from a hand calculation, which is two numbers nothing measures at
+     all.) They are the
      lightest values that clear the floor, deliberately, so the pack's quiet
      treatment survives.
      ⚠️ The app's OTHER buttons have the same problem (`.btn` measures 1.31:1
@@ -6106,13 +6109,18 @@ function setThread(el, html, count) {
 function talkKey(body) {
   if (!body.asking || !Array.isArray(body.options) || !body.question) return null;
   const lines = String(body.question.text || '').split('\n');
-  /* ⚠️ ONLY THE BOX-DRAWING `│` IS FRAME, which is `optionsIn`'s own rule in
-     engine/chat.js. This class also carried an ASCII `|`, a second derivation
-     of "where the option run starts" disagreeing with the first by one
-     character -- and it can only ever disagree DOWNWARD: a prose line like
-     "| 1. see the lease" earlier in the capture matched here, moved `first`
-     up, and shortened the `above` that gives the hold its identity. */
-  const first = lines.findIndex((l) => /^[\s│]*(?:❯\s*)?\d+[.)]\s+\S/.test(l));
+  /* ⚠️ THE SAME LINE `optionsIn` ACCEPTS, character for character, because
+     this is the same fact asked a second time: where the option run starts.
+     It had drifted in TWO places, and both could only ever disagree DOWNWARD,
+     moving `first` up and shortening the `above` that gives the answered-hold
+     its identity -- and a shorter `above` is how two different questions
+     collide on one key and a live question gets suppressed.
+       - an ASCII `|` counted as frame, so a prose line "| 1. see the lease"
+         matched here and not there;
+       - `\d+` matched any digit count, so a stray "10. leftover" sitting above
+         a genuine menu matched here, while `optionsIn` (one digit, 1-9, so
+         `01.` cannot arrive as option 1) never saw it. */
+  const first = lines.findIndex((l) => /^[\s│]*(?:❯\s*)?[1-9][.)]\s+\S/.test(l));
   const above = first > 0 ? lines.slice(0, first).join('\n').trim() : '';
   return JSON.stringify(body.options) + '\u0000' + above;
 }
@@ -6228,7 +6236,15 @@ async function paintTalk(sessionName, agentName) {
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', { cache: 'no-store' });
     body = await res.json();
-    if (!res.ok) { standing = res.status === 404; throw new Error(body.error || 'we could not read this conversation'); }
+    /* ⚠️ THE ROUTE'S OWN REASON, not the status. A 404 here has two causes and
+       only one of them is standing: a pane holding this name untied answers
+       404 forever, while tmux failing to answer once does not (`borrowedName`
+       fails closed, so a five-second hiccup on an ordinary TIED agent lands
+       here too). Reading permanence off the status alone described a blip as
+       forever, on a panel where nothing else says why -- `#d-untied` is hidden
+       for a tied card. An older server that does not send `because` reads as
+       transient, which is the arm that keeps its time phrase and its detail. */
+    if (!res.ok) { standing = body.because === 'borrowed'; throw new Error(body.error || 'we could not read this conversation'); }
   } catch (err) {
     if (mine !== TALK_LOAD) return;
     if (!CURRENT || CURRENT.sessionName !== sessionName) return;
@@ -6253,13 +6269,15 @@ async function paintTalk(sessionName, agentName) {
        twenty lines up refuses the identical 404 for the identical reason: its
        body is "no agent by that name", and putting that inside the open panel
        of an agent the person is looking at, beside a card carrying that name,
-       is the screen contradicting itself. A standing 404 is only ever a
-       borrowed name (`borrowedName` is the route's gate), and the panel
-       already carries `#d-untied` saying WHY that name is not this agent. So
-       this sentence states the consequence and claims no cause of its own --
-       a cause this arm did not compute. Measured on the fixture fleet: rook's
-       panel read "We cannot show this conversation. No agent by that name."
-       over a visible card named rook. */
+       is the screen contradicting itself. The standing arm is reached only for
+       `because: 'borrowed'`, which is a card on the board under this name that
+       is not tied to it -- so `#d-untied` is showing directly above this box,
+       saying WHY. This sentence therefore states the consequence and claims no
+       cause of its own, a cause this arm did not compute. Measured on the
+       fixture fleet: `#d-untied` visible at y=243 with the full explanation,
+       this box at y=454; and before the fix rook's panel read "We cannot show
+       this conversation. No agent by that name." over a visible card named
+       rook. */
     setThread(document.getElementById('d-dmthread'), '<p class="dmnone">'
       + (standing
         ? 'We cannot show a conversation for this name.'

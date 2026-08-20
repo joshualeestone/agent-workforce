@@ -9,8 +9,12 @@ exactly what was run, rather than re-deriving it.
 
 ## Why they exist
 
-Everything in this directory is here because of defects that the 389 tests in
-`node --test` passed over, and could not have caught:
+Everything in this directory is here because of defects that `node --test`
+passed over, and could not have caught. (The suite's size is deliberately not
+quoted here: it was "389 tests" in this sentence while the bullets below said
+316 and 931 and the suite itself was past 975, which is one moving fact written
+down in four places.) Each bullet keeps the count it was MEASURED at, because
+there the number is part of the finding:
 
 - A modal that rendered **fully transparent**. 316 tests and two blind reviews
   went past it, because nothing had ever put the page on a screen.

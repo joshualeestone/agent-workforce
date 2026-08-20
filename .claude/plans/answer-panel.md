@@ -177,3 +177,49 @@ two so the room's row and the agent page's bubble share ONE verdict sentence;
 one `PROJECT_ID` guard that moved into `threadFile` so the DIRECT token can pass
 it; one stale comment; and two export lines that were reflowed. `#pj-thread` and
 `pj-question` are untouched, and 36 references to them survive in the page.
+
+
+## Deferred, with reasoning, so it is a decision rather than an oversight
+
+**The GET makes two roster reads, and `paintTalk` now rides the 5s tick.** The
+route's own comment already says this: `nameRefusal` runs `claimantFor` ->
+`paneRoster()` (an uncached `tmux list-panes`) and then `safeRoster()` takes a
+full snapshot, on top of the snapshot `/api/status` took on the same tick. So
+opening an agent's panel roughly doubles the per-tick tmux fan-out for as long
+as it stays open (the poll is gated on `#panel-detail` being visible, so it
+costs nothing when it is closed).
+
+Collapsing the two reads is the right fix and it is NOT a late edit inside a
+review loop: `nameRefusal` is the gate that stops a stranger's pane serving a
+person's private thread, it fails CLOSED by construction (`paneRoster` throws;
+`safeRoster` returns null), and it is shared by three routes. Re-plumbing it to
+take a roster it did not read itself changes the failure semantics of all three
+at once. That deserves its own branch, its own fail-closed tests, and its own
+blind pass. Recorded here, dated 2026-08-20, so the cost is a known one.
+
+## What iteration 2 changed, and one thing it did NOT
+
+Its two BLOCKERs were about the same seam and only one of them survived
+measurement.
+
+**Claimed:** `setThread` rewrites `innerHTML` whenever the markup changes, the
+relative time phrase changes once a minute for the first hour, and the
+scroll-to-bottom arm is keyed on the message COUNT -- so an untouched thread
+snaps the reader from the newest message to the oldest, every minute.
+
+**Measured:** it does not. On a thread that genuinely overflows the 15rem box,
+with the markup genuinely rewritten (both proven by controls in the check), the
+reader's `scrollTop` is unchanged across a same-height rewrite. The reasoning
+was sound and the browser does not behave the way it assumes. What was TRUE in
+the finding is that no check covered the case at all: every fixture in
+`render-talk.js` is dated January 2026, so its repaints are byte-identical and
+the product's whole first hour with a thread was untested. That case is now a
+block with two controls, and the measured behaviour is written down with its
+date, so the day it stops holding is a failure rather than a discovery.
+
+**And the finding against this branch's own fix landed.** The standing-vs-
+transient split was built on "a standing 404 is only ever a borrowed name",
+which is false: `borrowedName` fails closed, so a tmux hiccup on an ordinary
+TIED agent answers 404 too, and the page then drew the written-for-forever
+sentence with no cause anywhere on the panel. The route now sends WHY, the page
+branches on the reason rather than the status, and both arms are asserted.

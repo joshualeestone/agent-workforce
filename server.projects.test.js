@@ -1836,6 +1836,8 @@ test('a pane holding the name untied is refused, on the read as well as the writ
     const res = await req('/api/agent/zeta/thread');
     assert.equal(res.status, 404, 'a stranger’s pane must not serve this agent’s private thread');
     assert.match(json(res).error, /no agent by that name/);
+    // The STANDING half of the pair above: this name answers 404 every time.
+    assert.equal(json(res).because, 'borrowed');
     const sent = await post('/api/agent/zeta/thread', { text: 'are you there' });
     assert.equal(sent.status, 404);
   });
@@ -1943,6 +1945,12 @@ test('a roster we could not read closes this route rather than serving a private
       // test: the roster read that would produce it fails this gate first.
       // It is recorded in the route rather than removed.
       assert.equal(res.status, 404, 'a thread must not be served off a roster we could not read');
+      /* ⚠️ AND THE REASON, which is the half the SCREEN reads. Both causes of
+         this 404 used to arrive at the page as one boolean, so a tmux hiccup
+         on an ordinary tied agent drew the sentence written for a name that
+         will refuse forever -- permanent-sounding, with no cause anywhere on
+         the panel. 'unreadable' is what makes the page keep its time phrase. */
+      assert.equal(json(res).because, 'unreadable');
     } finally {
       if (blind) blind.restore();
     }

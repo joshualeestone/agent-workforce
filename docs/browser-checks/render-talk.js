@@ -433,7 +433,15 @@ const STATES = {
          cache. The stranded box needs a thread that renders rows and a repaint
          that produces byte-identical markup, which is every thread whose newest
          message is over an hour old. */
-      const threadAfterReopen = await page.evaluate(async (f) => {
+      /* ⚠️ GATED ON THE CARD, like the block above it. `window.__card` is only
+         assigned when `realCard()` found one, and this block read it
+         unconditionally: on a machine running no agent of ours, `LAST` became
+         `[undefined]` and `openDetail` threw a TypeError INSIDE the evaluate,
+         which rejects the top-level IIFE -- so the run died before printing
+         the problem list at all. That is the same "a check that dies instead
+         of reporting" failure the press pass documents forty lines down, and
+         it would have hit whoever ran this on a quiet machine. */
+      const threadAfterReopen = card ? await page.evaluate(async (f) => {
         window.__fx = f;
         await paintTalk('april', 'April');
         const before = document.getElementById('d-dmthread').textContent.slice(0, 40);
@@ -441,8 +449,10 @@ const STATES = {
         openDetail('april');
         await paintTalk('april', 'April');
         return { before, after: document.getElementById('d-dmthread').textContent.slice(0, 40) };
-      }, STATES['2-answered-placed']);
-      if (threadAfterReopen.after !== threadAfterReopen.before) {
+      }, STATES['2-answered-placed']) : null;
+      if (!threadAfterReopen) {
+        problems.push(`[${theme}] reopen: no real agent card on this machine, so the STRANDED-BOX path is UNCHECKED`);
+      } else if (threadAfterReopen.after !== threadAfterReopen.before) {
         problems.push(`[${theme}] reopen: the thread box is stranded after a reopen `
           + `(${JSON.stringify(threadAfterReopen.before)} -> ${JSON.stringify(threadAfterReopen.after)})`);
       }
@@ -761,6 +771,92 @@ const STATES = {
       });
       if (landed3 !== 'd-talk-box') {
         problems.push(`[${theme}] fail-poll: a failed poll left focus on ${landed3}, not the section it just closed`);
+      }
+
+      /* 6. A REPAINT WHERE ONLY THE CLOCK MOVED, on a thread long enough to
+         scroll and new enough to say "a minute ago".
+         ⚠️ EVERY OTHER FIXTURE IN THIS FILE IS DATED January 2026, so its
+         verdict lines render a fixed "at 9:00 on Jan 1" and a repaint is
+         byte-identical. That makes the scroll block above an honest test of
+         "an unchanged list does not move", and NO test at all of the case the
+         product actually spends its first hour in: `pjWhen` returns a RELATIVE
+         phrase under an hour, so the markup changes once a minute on a thread
+         nobody touched, `setThread` rewrites `innerHTML`, and the count key is
+         unchanged so the jump-to-bottom arm does not fire. Whether that moves
+         a reader is a question about the browser, not about this code, and the
+         answer measured here (2026-08-20, Chromium, headed) is that it does
+         not: a same-height rewrite keeps `scrollTop`. This block exists so the
+         day that stops being true is a failure rather than a discovery. */
+      const clockOnly = await page.evaluate(async () => {
+        const at = new Date(Date.now() - 65 * 1000).toISOString();
+        window.__fx = {
+          messages: Array.from({ length: 8 }, (_, i) => ({
+            text: 'message number ' + (i + 1) + ' with enough words in it to take a line or two of the box',
+            at, delivery: { state: 'placed', because: null, at, paneNote: null },
+          })),
+          olderCount: 0, historyBecause: null, historyUnfilable: false,
+          presence: 'on', presenceBecause: null, asking: false, question: null,
+          questionBecause: null, options: null,
+        };
+        await paintTalk('april', 'April');
+        const t = document.getElementById('d-dmthread');
+        t.scrollTop = t.scrollHeight;
+        const before = { top: Math.round(t.scrollTop), key: t.__lastThread,
+          scrolls: t.scrollHeight > t.clientHeight };
+        const real = Date.now;
+        Date.now = () => real() + 120000;
+        try { await paintTalk('april', 'April'); } finally { Date.now = real; }
+        return { ...before, after: Math.round(t.scrollTop), rewrote: t.__lastThread !== before.key };
+      });
+      if (!clockOnly.scrolls) {
+        /* CONTROL: with nothing to scroll, `scrollTop` is 0 both times and the
+           check below passes on a box that cannot demonstrate anything. */
+        problems.push(`[${theme}] clock: the thread box did not overflow, so the scroll-hold is UNCHECKED`);
+      }
+      if (!clockOnly.rewrote) {
+        /* CONTROL: and if the markup did NOT change, no rewrite happened and
+           the check below is measuring the wrong thing entirely. */
+        problems.push(`[${theme}] clock: a minute passing did not change the markup, so the rewrite is UNCHECKED`);
+      }
+      if (clockOnly.scrolls && clockOnly.rewrote && clockOnly.after !== clockOnly.top) {
+        problems.push(`[${theme}] clock: a repaint where only the time phrase moved took the reader `
+          + `from ${clockOnly.top} to ${clockOnly.after}`);
+      }
+
+      /* 7. THE TWO 404s, which are one status and two different facts.
+         ⚠️ THE PAGE MUST NOT READ PERMANENCE OFF THE STATUS. A pane holding
+         this name untied answers 404 on every poll forever ('borrowed'); a
+         tmux read that failed once answers 404 too, because the gate fails
+         closed ('unreadable'), and it clears by itself. Told apart only by the
+         status, a five-second hiccup on an ordinary tied agent drew the
+         written-for-forever sentence with no cause anywhere on the panel --
+         `#d-untied` is hidden for a tied card. So the route sends the reason
+         and this asserts BOTH arms off it. */
+      const both = await page.evaluate(async () => {
+        const out = {};
+        const real = window.fetch;
+        const four04 = (body) => async () => new Response(JSON.stringify(body),
+          { status: 404, headers: { 'content-type': 'application/json' } });
+        try {
+          window.fetch = four04({ error: 'no agent by that name', because: 'borrowed' });
+          await paintTalk('april', 'April');
+          out.borrowed = document.getElementById('d-dmthread').innerText.trim();
+          window.fetch = four04({ error: 'we could not check which agents are running', because: 'unreadable' });
+          await paintTalk('april', 'April');
+          out.unreadable = document.getElementById('d-dmthread').innerText.trim();
+        } finally {
+          window.fetch = real;
+        }
+        return out;
+      });
+      if (both.borrowed !== 'We cannot show a conversation for this name.') {
+        problems.push(`[${theme}] refusal: the standing 404 drew ${JSON.stringify(both.borrowed)}`);
+      }
+      if (!/just now/.test(both.unreadable || '')) {
+        problems.push(`[${theme}] refusal: a 404 we may recover from lost its time phrase: ${JSON.stringify(both.unreadable)}`);
+      }
+      if (/no agent by that name/i.test(both.borrowed || '')) {
+        problems.push(`[${theme}] refusal: the route's own sentence reached the panel: ${JSON.stringify(both.borrowed)}`);
       }
       }
     }

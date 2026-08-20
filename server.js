@@ -199,20 +199,38 @@ function claimantFor(name) {
 }
 
 /**
- * Is this spelling answered by a card we cannot tie to the name it is filed
- * under? The question for a READ.
+ * WHY a read of this name is refused, or null when it is not.
  *
- * ⚠️ Fails CLOSED. `paneRoster` throws when tmux cannot be asked, rather than
- * answering "nothing" — the realistic failure used to arrive here as an empty
- * roster and serve the record.
+ * ⚠️ TWO REASONS, AND THEY ARE NOT THE SAME FACT. `borrowedName` collapses
+ * both into one boolean, which is correct for the GATE and wrong for the
+ * SENTENCE: a pane holding this name untied is a STANDING condition that will
+ * answer 404 on every poll forever, while tmux failing to answer is a blip
+ * that clears by itself. The page said "we cannot show this" without a time
+ * phrase for both, so a five-second hiccup on a perfectly ordinary agent read
+ * as permanent, with no cause anywhere on the panel (`#d-untied` is hidden for
+ * a TIED card). Nothing can tell the two apart downstream of the boolean, so
+ * the reason is decided here, where it is known, and carried on the 404.
+ *
+ * ⚠️ Fails CLOSED either way. `paneRoster` throws when tmux cannot be asked,
+ * rather than answering "nothing" — the realistic failure used to arrive here
+ * as an empty roster and serve the record.
  */
-function borrowedName(name) {
+function nameRefusal(name) {
   try {
     const card = claimantFor(name);
-    return Boolean(card) && card.isNamedOurs !== true;
+    return (Boolean(card) && card.isNamedOurs !== true) ? 'borrowed' : null;
   } catch {
-    return true;
+    return 'unreadable';
   }
+}
+
+/**
+ * Is this spelling answered by a card we cannot tie to the name it is filed
+ * under? The question for a READ. ONE derivation: the reason above decides,
+ * this only forgets which one it was.
+ */
+function borrowedName(name) {
+  return nameRefusal(name) !== null;
 }
 
 /**
@@ -1712,7 +1730,19 @@ const server = http.createServer((req, res) => {
      * what it is rather than defended: the route tells you whether a name is
      * running, and so does every other route on this port.
      */
-    if (borrowedName(name)) { sendJson(res, 404, { error: 'no agent by that name' }); return; }
+    /* ⚠️ THE REASON RIDES THE 404, because the page draws two different
+       sentences off it and cannot derive which from the status. See
+       `nameRefusal`: 'borrowed' is standing and 'unreadable' is a blip. */
+    const refusal = nameRefusal(name);
+    if (refusal) {
+      sendJson(res, 404, {
+        error: refusal === 'borrowed'
+          ? 'no agent by that name'
+          : 'we could not check which agents are running',
+        because: refusal,
+      });
+      return;
+    }
     /**
      * ⚠️ ONE roster read for everything DERIVED BELOW THIS LINE, which is a
      * narrower claim than the one that used to sit here.
