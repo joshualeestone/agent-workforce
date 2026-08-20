@@ -164,7 +164,10 @@ request, and the suite reads text.
   won: a screenshot is evidence only if the next person can regenerate it, so
   the check now emits exactly the committed filenames. The first committed set
   was a hand-renamed subset of shorter names, which is the drift this replaces.
-- **The GET gate is `borrowedName`, not the 404-unknown the plan asked for.**
+- **The GET gate is `nameRefusal`, not the 404-unknown the plan asked for.**
+  (It was `borrowedName` when this bullet was written; the route calls
+  `nameRefusal` directly now, precisely because the boolean loses the reason the
+  page needs, and this bullet did not move with it.)
   Recorded in the route: gating on `knownAgent` would hide a STOPPED agent's own
   conversation, which is the thing the file exists for.
 - **`render-talk.js` is headed by default now**, like `render-thread` and

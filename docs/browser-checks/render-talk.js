@@ -245,8 +245,14 @@ const STATES = {
  * screenshot, because it is the artifact somebody checks the design against
  * later.
  *
- * This asks `status.NEEDS_YOU_MARKERS`, the same list `questionIn` uses, so it
- * cannot drift from the producer the way a transcribed copy would.
+ * It asks the PRODUCERS THEMSELVES -- `questionIn` and `optionsIn` -- rather
+ * than restating their rules here, so it cannot drift from them at all.
+ *
+ * ⚠️ This paragraph used to recommend asking `status.NEEDS_YOU_MARKERS`, which
+ * is what the FIRST version of this function did and what the comment 30 lines
+ * below now describes as the weaker thing that shipped with its own
+ * counter-example. The body was rewritten and its own header was left
+ * recommending the design it had just abandoned.
  */
 function unreachableStates() {
   let chat;
@@ -399,6 +405,9 @@ function unreachableStates() {
     /* Said once per theme rather than per state: a headless run cannot see the
        scrollbar at all, and eleven identical lines would bury the rest. */
     let headlessNoted = false;
+    /* The positive half of the receipt check: some row somewhere must actually
+       carry "sent as", or its absence proves nothing. */
+    let sawWire = 0;
     /* CONTROL for the question-reachability assertion, mirroring `measuredMeta`:
        that check only fires on a CUT question, so if the text stops overflowing
        -- a wider box, `pre-wrap`, a shorter fixture -- the guarantee the plan
@@ -487,6 +496,10 @@ function unreachableStates() {
           offText: el('d-dmoff').textContent,
           sayDisabled: el('d-say').disabled,
           threadText: el('d-dmthread').textContent.trim().slice(0, 220),
+          // Per ROW, because a verdict belongs to one message and the thread's
+          // whole textContent cannot say which.
+          rows: Array.from(document.querySelectorAll('#d-dmthread .dm'))
+            .map((r) => r.textContent.replace(/\s+/g, ' ').trim()),
           sendDisabled: el('d-send').disabled,
           /* ⚠️ THE PROMISE, PER STATE. The persistence line was read by nothing
              in this sweep, and one state contradicts it outright: with
@@ -663,17 +676,23 @@ function unreachableStates() {
       if (m.optEdge !== null && m.optEdge < 3) {
         problems.push(`${tag}: the option button's edge is ${m.optEdge}:1 against the panel, under the 3:1 floor`);
       }
-      /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
-         a state that keeps things is as wrong as one standing over a state that
-         does not, and only the second half was ever the bug. */
-      /* ⚠️ THE RECEIPT AGAINST THE VERDICT, on the same row. "sent as 1" beside
-         "Could not deliver" is two sentences contradicting each other, and it
-         shipped in both themes because nothing here read one against the
-         other. */
-      if (/could not (deliver|get)/i.test(m.threadText || '') && /sent as/i.test(m.threadText || '')) {
-        problems.push(`${tag}: the receipt says a message was sent on a row whose verdict says nothing `
-          + `reached the agent: ${JSON.stringify(m.threadText.slice(0, 150))}`);
+      /* ⚠️ THE RECEIPT AGAINST THE VERDICT, PER ROW. "sent as 1" beside "Could
+         not deliver" is two sentences contradicting each other, and it shipped
+         in both themes because nothing read one against the other.
+         ⚠️ AND PER ROW IS THE POINT: the first version tested the thread's whole
+         truncated textContent, so a placed row above a failed one would have
+         fired it falsely and a failed row past 220 characters would have
+         silenced it. `rows` below is measured element by element.
+         ⚠️ WITH ITS POSITIVE CONTROL. Asserting only the absence would stay
+         green if `wire` were dropped everywhere or the suffix inverted, so a
+         delivered row is required to CARRY the phrase. */
+      for (const row of (m.rows || [])) {
+        if (/could not deliver/i.test(row) && /sent as/i.test(row)) {
+          problems.push(`${tag}: the receipt says a message was sent on a row whose verdict says nothing `
+            + `reached the agent: ${JSON.stringify(row.slice(0, 150))}`);
+        }
       }
+      if ((m.rows || []).some((r) => /sent as/i.test(r))) sawWire += 1;
       if (m.qfail && m.qfailBorder && m.qfailBorder !== '0px') {
         problems.push(`${tag}: the reassurance "${m.qfail}" is wearing a ${m.qfailBorder} border, `
           + 'so the good news is drawn as a fault inside the question box');
@@ -728,6 +747,11 @@ function unreachableStates() {
             + 'so a verdict long enough to wrap leaves its message behind');
         }
       }
+      /* Hidden in exactly one state, and SAID BOTH WAYS: a promise missing from
+         a state that keeps things is as wrong as one standing over a state that
+         does not, and only the second half was ever the bug. (This comment had
+         drifted sixty lines up from the check it describes, over two blocks
+         about something else entirely.) */
       const keepsNothing = fx.historyUnfilable === true;
       if (m.persistVisible === keepsNothing) {
         problems.push(`${tag}: the persistence promise is ${m.persistVisible ? 'standing over' : 'missing from'} `
@@ -762,6 +786,10 @@ function unreachableStates() {
       measured[name] = m;
     }
 
+    if (!sawWire) {
+      problems.push(`[${theme}] receipt: no row carried a "sent as" suffix at all, so the check that it `
+        + 'never appears on a failed send is UNCHECKED');
+    }
     if (!measuredFits) {
       problems.push(`[${theme}] question: every state's question overflowed, so "no scrollbar over a `
         + 'question that fits" is UNCHECKED');

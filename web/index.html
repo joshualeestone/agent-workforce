@@ -1237,11 +1237,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    which right-aligns the SPAN while it is narrower than the row -- and a
    verdict long enough to wrap makes the span full width, at which point its
    text left-aligns and the receipt jumps to the opposite side of the panel
-   from the message it belongs to. Committed screenshots showed it in
-   talk-3-unconfirmed and talk-4-failed: "You · sent as 1" at the far left with
-   its bubble at the far right, and the pill spanning nearly the whole box,
-   which reads as an alert about the panel rather than a receipt for one
-   message. Removing the stranded separator (the previous round) fixed the
+   from the message it belongs to. Both committed screenshots of a wrapped
+   verdict showed it: "You · sent as 1" at the far left with its bubble at the
+   far right, and the pill spanning nearly the whole box, which reads as an
+   alert about the panel rather than a receipt for one message. (Named by shape
+   rather than by filename on purpose: this sentence cited talk-4-failed until a
+   LATER fix removed the wire suffix from failed rows, and the citation went
+   false with nobody editing it.) Removing the stranded separator (the previous round) fixed the
    symptom above the fold and not this. */
 .dm.mine .dm-w { text-align: right; }
 .dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
@@ -1297,7 +1299,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    looked at. */
 #d-qask-text::-webkit-scrollbar { height: 6px; width: 6px; -webkit-appearance: none; }
 #d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2, rgba(20,22,26,.4)); border-radius: 3px; }
-#d-qask-text::-webkit-scrollbar-track { background: var(--k-sunk, rgba(20,22,26,.08)); border-radius: 3px; }
+/* No fallback on the track: `--k-sunk` is defined unconditionally at `:root`
+   and per theme, so a fallback here can never render -- and the one written
+   first was `.08`, a deliberately stronger wash than the token's `.05`, which
+   made it a value nobody would ever see rather than a defence. */
+#d-qask-text::-webkit-scrollbar-track { background: var(--k-sunk); border-radius: 3px; }
 .qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 /* An option. Deliberately NOT the page's commit styling: a question with two
    equal answers has no primary, and emphasising one would recommend it.
@@ -6316,7 +6322,15 @@ function dmRow(m, name) {
      submit could not be confirmed, so "sent as" is what happened. The record
      still holds `wire` either way -- this is what the SCREEN says, not what is
      kept. */
-  const reached = ((m && m.delivery && m.delivery.state) || '') !== 'could_not';
+  /* ⚠️ THE SAME SPLIT `pjVerdict` AND `sendTalk` USE, not a third derivation of
+     it. Asking `!== 'could_not'` answers TRUE for a record whose delivery is
+     missing or carries a state nothing recognises, while `pjVerdict` prints
+     "Could not deliver" for exactly those -- so the row would have said "sent
+     as 1" beside it again, for the class this time rather than the instance.
+     `readThread` validates only that `text` is a string, so an unrecognised
+     state is a shape the store can hold. */
+  const reached = ((m && m.delivery && m.delivery.state) || '') === 'placed'
+    || ((m && m.delivery && m.delivery.state) || '') === 'unconfirmed';
   const wire = (m.wire && reached) ? ' &middot; sent as ' + esc(m.wire) : '';
   /* ⚠️ NO SEPARATOR BEFORE THE PILL. `.delivery` is an inline-block, so a
      verdict long enough to wrap took the whole pill to the next line and left
@@ -6761,13 +6775,21 @@ async function paintTalk(sessionName, agentName) {
        would be run as a command) from one scrolled back (it would go to the
        scrollback). Both mean not delivered; only one of them could execute
        something. */
-    /* ⚠️ NO "right now" HERE. Both of `addressable`'s reachable reasons end
-       with one of their own ("its window is scrolled back RIGHT NOW", "there
-       is no Claude running in its window RIGHT NOW"), so the wrapper's copy
-       made every real sentence say it twice: "cannot be handed a message right
-       now: Its window is scrolled back right now". The time phrase belongs to
-       the reason, which is where it is true; the wrapper states the
-       consequence. */
+    /* ⚠️ NO "right now" HERE, and the count matters. `addressable` has six
+       refusals; four reach this arm (the empty-name one cannot, and the
+       untied-card one is 404'd by `nameRefusal` before the page sees it).
+       THREE of those four end with a "right now" of their own -- "we cannot see
+       an agent by exactly this name on this computer RIGHT NOW", "its window is
+       scrolled back RIGHT NOW", "there is no Claude running in its window RIGHT
+       NOW" -- so the wrapper's copy made each of them say it twice: "cannot be
+       handed a message right now: Its window is scrolled back right now".
+       The fourth, "we do not know which pane this agent is in", carries no time
+       phrase and needs none: it states a present fact rather than a duration,
+       which is the opposite of the standing-versus-transient problem the 404
+       sentence had. So the phrase belongs to the reason, where it is true when
+       it is there, and the wrapper states the consequence.
+       ⚠️ Only the copy-mode arm has a fixture (`6-off`), so the other three are
+       drawn by nothing in the render check. */
     off.textContent = name + ' cannot be handed a message: '
       + pjSentence(body.presenceBecause || 'we cannot reach its window');
     off.hidden = false;

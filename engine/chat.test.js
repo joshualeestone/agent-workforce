@@ -2143,4 +2143,38 @@ test('what may follow the run, and the reference is the option indent the cursor
   // made the case above pass for any reason at all. Nine options IS readable,
   // so the refusal above is about the tenth and nothing else.
   assert.equal(chat.optionsIn(nine).length, 9, 'the control: nine alone reads as nine');
+  /**
+   * ⚠️ AND A COMPOSER LINE DOES NOT MAKE ONE DISAPPEAR EITHER, which is the
+   * generalisation the blank-line case stopped one short of.
+   *
+   * The scan below the run breaks at the first UNINDENTED line on purpose: a
+   * live pane always has its composer under the menu, so a rule refusing
+   * everything below would refuse every real screen. That left the guard's
+   * entire purpose reachable by walking around it. MEASURED on the shipped
+   * parser before this fix: a tenth option below "Press esc to cancel" came
+   * back as NINE BUTTONS -- the exact "nine over a ten-option prompt reads as
+   * the whole choice" harm, one line further down than the previous fix looked.
+   *
+   * The previous correction generalised from "the line straight after the run"
+   * to "skip blanks". This one generalises from "skip blanks" to "the
+   * continuation is refused wherever it is", which is a property of the MENU
+   * rather than of what happens to sit between its rows.
+   */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n  10. j'), null,
+    'a composer line is not an ending either');
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n\n  10. j'), null,
+    'nor a composer line and a gap together');
+  /* ⚠️ THE CONTROL FOR THE CONTROL: the same capture WITHOUT the tenth option
+     still reads as nine. Without this, the two refusals above would pass on a
+     parser that simply refused anything with a composer line in it, which is
+     every real screen. */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel').length, 9,
+    'the control: a composer line alone does not refuse a readable menu');
+  /* ⚠️ AND NOT ANY NUMBER, only the continuation. `questionIn` slices to the
+     end of the capture, so output below a composer routinely contains a "1."
+     that has nothing to do with the menu. Refusing on those would refuse real
+     menus for unrelated text. Nine options with an ELEVENTH-numbered line
+     below is not evidence this list was truncated at nine. */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n  11. j').length, 9,
+    'a number that is not the continuation is not evidence of truncation');
 });

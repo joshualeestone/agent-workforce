@@ -967,8 +967,7 @@ function optionsIn(questionText) {
     if (i > 0 && found[i].at !== found[i - 1].at + 1) return null;
   }
   /**
-   * WARNING: NOTHING MAY HANG BELOW THE RUN, and there are three shapes it
-   * could be. All three are refusals.
+   * WHY ANYTHING BELOW THE RUN MATTERS AT ALL.
    *
    * A NUMBERED line is a menu longer than the single-digit pattern can read.
    * Nine buttons over a ten-option prompt is worse than none, because it reads
@@ -978,6 +977,12 @@ function optionsIn(questionText) {
    * An INDENTED line is either a wrapped label, which we have decided not to
    * guess at, or pane furniture. See the note above the scan for why those two
    * cannot be told apart from a capture alone.
+   *
+   * ⚠️ THIS BLOCK USED TO OPEN "NOTHING MAY HANG BELOW THE RUN … three shapes,
+   * all three refusals", named two, and was contradicted by the docblock
+   * directly beneath it. The correction was written and the sentence it
+   * corrected was left standing, so a reader going top-down was told an
+   * absolute the code deliberately does not have. Deleted rather than softened.
    */
   const lastRun = found[found.length - 1];
   /**
@@ -1023,6 +1028,30 @@ function optionsIn(questionText) {
     const indent = body.length - bare.length;
     if (indent >= optIndent) return null;
     break;
+  }
+  /**
+   * ⚠️ AND PAST THE COMPOSER, FOR THE CONTINUATION ONLY.
+   *
+   * The loop above stops at the first unindented line, deliberately, because a
+   * live pane always has its composer under the menu. That left the guard's
+   * whole purpose reachable around it: MEASURED on the shipped parser, a menu
+   * of ten whose tenth option sits below any unindented line ("Press esc to
+   * cancel") returned NINE buttons -- exactly the "nine over a ten-option
+   * prompt reads as the whole choice" harm the block above names, arrived at
+   * by walking around the check rather than through it.
+   *
+   * So the scan continues past that line, but only for the CONTINUATION: a
+   * line numbered exactly one past the run. Not for any numbered line, because
+   * `questionIn` slices to the end of the capture and unrelated output below a
+   * composer routinely contains "1." or "2." -- refusing on those would refuse
+   * real menus for text that has nothing to do with them. A line numbered
+   * `found.length + 1` is the signature of a list this pattern truncated, and
+   * almost nothing else.
+   */
+  const CONTINUATION = new RegExp('^(?:❯\\s*)?0*' + (found.length + 1) + '[.)]\\s+\\S');
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
+    const bare = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '');
+    if (CONTINUATION.test(bare)) return null;
   }
   // Somebody's TUI drew this. Prose does not carry a selection marker.
   if (!marked) return null;

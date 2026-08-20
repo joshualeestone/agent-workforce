@@ -1863,7 +1863,12 @@ test('a button answer that never reached the pane is still recorded, wire and al
     [said(), { ran: true, spawnFailed: false, status: 1, out: '', err: 'no such pane' }],
     async () => {
       const res = json(await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' }));
-      assert.notEqual(res.delivery.state, 'placed', 'CONTROL: this send was supposed to fail');
+      /* ⚠️ THE EXACT STATE, not "not placed". `unconfirmed` is also not placed and
+       it is the state where the text DID reach the pane -- so a control that
+       only excludes `placed` is blind to the one distinction this test exists
+       beside, in the same commit whose whole subject is that the two must be
+       treated differently on screen. */
+    assert.equal(res.delivery.state, 'could_not', 'CONTROL: this send was supposed to reach nothing');
       assert.equal(res.recorded, true);
       const back = json(await req('/api/agent/zeta/thread'));
       assert.equal(back.messages[0].text, '14 days', 'the bubble keeps the words the person chose');
