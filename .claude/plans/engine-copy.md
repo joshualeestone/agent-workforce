@@ -125,6 +125,32 @@ re-pointed at the ruling doc because that doc's tables are prose in three
 different shapes, and a mechanical check over them would be a guess wearing a
 number.
 
+### Where the two documents conflicted, and how it resolved
+
+Three rows had a **patch** ruling and a later **ruling-doc** ruling that
+disagreed. I applied neither and asked, having been burned once already choosing
+between them. **All three resolved the same way: the patch was right and the
+ruling doc was wrong**, so the tree stands as it is.
+
+| site | resolution |
+|---|---|
+| `messages.js` lookup fallback | **mine stands.** `:155` composes `'we could not tell which agent that was (' + who.because + ')'`, so the ruling's sentence restated its own wrapper and flipped person. `nothing came back to explain why` is also measurably precise: it is the last fallback after `stderr` and `e.message`, so it fires exactly when nothing came back. |
+| `messages.js:141` | **keep `TMUX_PANE`.** The patch had measured that the only reader ran `kosmos msg` in a shell, and the terminology sheet scopes the vocabulary rule to in-app copy. The ruling applied the rule without the audience check the patch had already done. |
+| `connect.js:146,147`, `instructions.js:498`, `machine.js:550,624` | **withdrawn, do not touch.** `stderr` there is a field name with six readers across three modules, so renaming it is a refactor wearing a copy branch. The other two are developer errors that never reach a screen. |
+
+🔑 **Her diagnosis of the common cause is worth more than the four fixes**, and it
+generalises past copy:
+
+> A list generated from a tool's output **presents itself as complete**, so she
+> wrote a ruling for every row instead of asking which rows she had already
+> examined and deliberately left alone. **Coverage of the checker's output is not
+> coverage of the question**, and it let the instrument set the agenda.
+
+📌 That is the same shape as the retired guard above, one level up: the guard
+measured conformance to an artifact without stating that it was the artifact,
+and the section titled "the rest of the 20" measured coverage of a tool's
+output without stating that it was a tool's output.
+
 ## The second blind pass, run against the post-ruling tree
 
 ⚠️ **The first pass reviewed a version that no longer existed.** Mona Lisa's
