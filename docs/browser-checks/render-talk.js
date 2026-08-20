@@ -408,6 +408,7 @@ function unreachableStates() {
     /* The positive half of the receipt check: some row somewhere must actually
        carry "sent as", or its absence proves nothing. */
     let sawWire = 0;
+    let sawFailedWire = 0;
     /* CONTROL for the question-reachability assertion, mirroring `measuredMeta`:
        that check only fires on a CUT question, so if the text stops overflowing
        -- a wider box, `pre-wrap`, a shorter fixture -- the guarantee the plan
@@ -524,7 +525,10 @@ function unreachableStates() {
           /* ⚠️ THE QUESTION THAT DOES NOT FIT. `.pj-screen` is `white-space: pre`,
              so a captured line wider than the box is CUT, and state 5 -- the
              one whose whole job is "read the question and type the answer" --
-             ships a screenshot ending mid-word at "…or join the existi". The
+             ships a screenshot whose FIRST line is cut mid-word (the longest
+             line of the three; the quote that used to sit here named a
+             different one, and went false when the fixture was rewritten to
+             carry a marker -- cite the shape, not the characters). The
              treatment is the room's and changing it is a design decision, not
              this branch's to make. What IS this branch's to guarantee is that
              the rest is REACHABLE: scrollable, and reachable from the keyboard
@@ -693,6 +697,16 @@ function unreachableStates() {
         }
       }
       if ((m.rows || []).some((r) => /sent as/i.test(r))) sawWire += 1;
+      /* ⚠️ THE INPUT THE NEGATIVE ARM ACTUALLY NEEDS, which "some row says
+         sent as" is not. That counter is satisfied by states 2, 3 and 11, none
+         of which can ever exercise "the suffix must not appear on a FAILED
+         row". The only fixture that can is one whose record carries a `wire`
+         AND whose delivery could not reach the pane -- and it exists today only
+         because `4-failed` happens to set `wire: '1'`, which renders as nothing
+         and so reads as dead. Delete that one field and the loop above goes
+         vacuous while the old control stayed green. */
+      if ((fx.messages || []).some((msg) => msg && msg.wire
+        && msg.delivery && msg.delivery.state === 'could_not')) sawFailedWire += 1;
       if (m.qfail && m.qfailBorder && m.qfailBorder !== '0px') {
         problems.push(`${tag}: the reassurance "${m.qfail}" is wearing a ${m.qfailBorder} border, `
           + 'so the good news is drawn as a fault inside the question box');
@@ -789,6 +803,10 @@ function unreachableStates() {
     if (!sawWire) {
       problems.push(`[${theme}] receipt: no row carried a "sent as" suffix at all, so the check that it `
         + 'never appears on a failed send is UNCHECKED');
+    }
+    if (!sawFailedWire) {
+      problems.push(`[${theme}] receipt: no fixture pairs a recorded wire with a delivery that never `
+        + 'reached the pane, so "the suffix is absent on a failed row" is asserted against nothing');
     }
     if (!measuredFits) {
       problems.push(`[${theme}] question: every state's question overflowed, so "no scrollbar over a `
@@ -1135,11 +1153,23 @@ function unreachableStates() {
         const count = () => document.querySelectorAll('#d-qopts .qopt').length;
         const out = { afterAnswer: count() };
         // The SAME menu, with the pane having moved on underneath it.
-        window.__fx = { ...f, question: { text: f.question.text + '\n\n  ✳ Thinking… (3s · 41% context left)' } };
+        /* ⚠️ REACHABLE PAYLOADS, and both of these were not. The route derives
+           `options` from `optionsIn(question.text)`, so overriding one without
+           the other describes a payload no server can send -- the class the
+           check at the top of this file closes for `STATES` and cannot see
+           here. Measured: appending an indented "Thinking" line to the menu
+           makes `optionsIn` return NULL (it sits at the option indent), so the
+           pane-moved case now carries `options: null`, which is what the route
+           would actually serve. That matters: with the reachable payload this
+           case exercises the unkeyable path rather than key equality. */
+        window.__fx = { ...f, options: null,
+          question: { text: f.question.text + '\n\n  ✳ Thinking… (3s · 41% context left)' } };
         await paintTalk('april', 'April');
         out.afterPaneMoved = count();
-        // A genuinely different menu DOES spend it.
-        window.__fx = { ...f, options: [{ n: 1, label: 'Something else' }, { n: 2, label: 'No' }] };
+        // A genuinely different menu DOES spend it -- question and options together.
+        window.__fx = { ...f,
+          options: [{ n: 1, label: 'Something else' }, { n: 2, label: 'No' }],
+          question: { text: '│ Would you like to pick one?\n│\n│ ❯ 1. Something else\n│   2. No' } };
         await paintTalk('april', 'April');
         out.afterNewMenu = count();
         /* ⚠️ AND A NEW QUESTION WITH THE SAME LABELS. Claude's edit-permission
@@ -1159,6 +1189,19 @@ function unreachableStates() {
         window.__fx = { ...f, options: yesNo, question: { text: 'Edit file src/b.js?\n❯ 1. Yes\n  2. No' } };
         await paintTalk('april', 'April');
         out.afterSameLabelsNewQuestion = count();
+        /* ⚠️ AND A NEW QUESTION THE PARSER WILL NOT VOUCH FOR, which is the case
+           every release above misses because every one of them passes options.
+           `talkKey` returns null when options is null, and a null key used to
+           read as "the same question": the whole panel hid, question text and
+           all, for the rest of the hold, while the board card said Needs you.
+           A free-text question is the ordinary way this happens; a new menu
+           whose labels wrap is the other. */
+        TALK_ANSWERED.april = { question: talkKey(window.__fx), at: Date.now() };
+        window.__fx = { ...f, options: null,
+          question: { text: 'Would you like me to update the README too?' } };
+        await paintTalk('april', 'April');
+        out.freeTextQaskHidden = document.getElementById('d-qask').hidden;
+        out.freeTextShown = document.getElementById('d-qask-text').textContent;
         return out;
       }, menu);
       if (held.afterAnswer !== 0) {
@@ -1172,6 +1215,14 @@ function unreachableStates() {
       }
       if (held.afterSameLabelsNewQuestion === 0) {
         problems.push(`[${theme}] hold: a NEW question with the same option words was suppressed`);
+      }
+      if (held.freeTextQaskHidden !== false) {
+        problems.push(`[${theme}] hold: a NEW question with no parseable menu was suppressed entirely `
+          + '(panel gone, question text and all, while the board card says the person is needed)');
+      }
+      if (!/update the README/.test(held.freeTextShown || '')) {
+        problems.push(`[${theme}] hold: the free-text question was not drawn `
+          + `(${JSON.stringify((held.freeTextShown || '').slice(0, 60))})`);
       }
       } // end of the preHold guard: everything above needs a clickable button
       await page.evaluate((f) => { window.__fx = f; delete TALK_ANSWERED.april; }, menu);

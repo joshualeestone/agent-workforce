@@ -224,7 +224,11 @@ somebody scrolls. (This paragraph said "10 of the 12" in three places until the
 commit that added two more states made all three wrong at once, which is the
 lesson at the top of this file arriving on the file itself for the second time.) `talk-5-no-parse-{light,dark}.png` is the pair that matters most,
 because state 5 exists precisely so a person can read the question and type the
-answer, and its committed screenshot ends mid-word at "or join the existi".
+answer, and its committed screenshot cuts its longest line mid-word. (This
+sentence quoted the cut characters until the fixture was rewritten to carry a
+needs-you marker, at which point the quote named a line that is no longer the
+one being cut -- the same "cite the shape, not the characters" lesson this
+branch learned one file over, applied here a round later.)
 
 **RULED by Mona Lisa, 2026-08-20 07:42, then NARROWED by her at 07:44 after
 reading the pack.** The first ruling was that both `#d-talk-box` and

@@ -1298,7 +1298,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    fix was written for was horizontal; the rule reaches an axis nobody had
    looked at. */
 #d-qask-text::-webkit-scrollbar { height: 6px; width: 6px; -webkit-appearance: none; }
-#d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2, rgba(20,22,26,.4)); border-radius: 3px; }
+/* No fallback on the thumb either, and this one was worse than the track's:
+   `--k-ink-2` is defined at `:root` and in the dark block, so it could never
+   render -- and `rgba(20,22,26,.4)` matches NEITHER theme's value, where the
+   pack-verbatim fallbacks elsewhere in this file at least equal their token. */
+#d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2); border-radius: 3px; }
 /* No fallback on the track: `--k-sunk` is defined unconditionally at `:root`
    and per theme, so a fallback here can never render -- and the one written
    first was `.08`, a deliberately stronger wash than the token's `.05`, which
@@ -6519,8 +6523,33 @@ async function paintTalk(sessionName, agentName) {
    * So the hold is spent by exactly two things: TIME, and a question we can
    * actually see that is a DIFFERENT one. Not by an absent one.
    */
-  const different = !!(answered && TALK_QUESTION[sessionName]
-    && answered.question !== TALK_QUESTION[sessionName]);
+  /**
+   * ⚠️ A QUESTION WE CAN SEE BUT CANNOT KEY IS NOT "the same question".
+   *
+   * `talkKey` returns null whenever `options` is null, and the first version of
+   * this guard read a null key as "no question to compare", which is the arm
+   * written for a question that is ABSENT. So: answer a menu, and within the
+   * thirty-second hold the agent asks anything the parser will not vouch for --
+   * a free-text question, or a new menu whose labels wrap, which `optionsIn`
+   * refuses by design -- and `different` stayed false, `stillTheSame` stayed
+   * true, and the WHOLE `#d-qask` block hid, question text included, while the
+   * board card said Needs you.
+   *
+   * That is verbatim the harm this file names two hundred lines up: "panel
+   * gone, no buttons, while the board card still said the person was needed."
+   * It is the same failure as the line-0 identity collapse fixed earlier on
+   * this branch, arriving through the other door: there the key was too weak to
+   * tell two questions apart, here it does not exist at all.
+   *
+   * The rule the comment above states is the right one and this is what
+   * implementing it looks like: spent by TIME, and by a question we can
+   * actually see that is not the one that was answered. Unkeyable is not
+   * absent. There is no double-answer risk in spending it here, because a
+   * payload with no options renders no buttons to press twice.
+   */
+  const cannotKey = !TALK_QUESTION[sessionName] && !!(body.asking && body.question);
+  const different = !!(answered && (cannotKey
+    || (TALK_QUESTION[sessionName] && answered.question !== TALK_QUESTION[sessionName])));
   const stillTheSame = held && !different;
   if (answered && (!held || different)) delete TALK_ANSWERED[sessionName];
   /* --- the question, and the answers to it --- */
@@ -6693,6 +6722,16 @@ async function paintTalk(sessionName, agentName) {
     // second sentence rides along: an unreadable file is not evidence that
     // nothing was said, and silence here would render "we could not look" as
     // "there is nothing".
+    /* ⚠️ AND THIS ARM DELIBERATELY KEEPS THE PERSISTENCE LINE, where the
+       unfilable arm below and the refusal arm above both hide it. The three
+       are not the same fact and answering them alike would be the error:
+         unfilable      nothing IS kept under this name -> the promise is false
+         borrowed name  this box is not this agent's    -> the promise is false
+         unreadable     things ARE kept, we cannot READ them right now -> the
+                        promise is still true, and hiding it would say the
+                        opposite of what we know.
+       `talk-10-history-unreadable` shows the line standing under "we cannot
+       read what you have sent this agent", and that pairing is correct. */
     setThread(thread, '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
       + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>', null);
   } else if (!rows.length) {
@@ -6778,7 +6817,7 @@ async function paintTalk(sessionName, agentName) {
     /* ⚠️ NO "right now" HERE, and the count matters. `addressable` has six
        refusals; four reach this arm (the empty-name one cannot, and the
        untied-card one is 404'd by `nameRefusal` before the page sees it).
-       THREE of those four end with a "right now" of their own -- "we cannot see
+       THREE of those four CARRY a "right now" of their own -- "we cannot see
        an agent by exactly this name on this computer RIGHT NOW", "its window is
        scrolled back RIGHT NOW", "there is no Claude running in its window RIGHT
        NOW" -- so the wrapper's copy made each of them say it twice: "cannot be
