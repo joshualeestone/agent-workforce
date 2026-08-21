@@ -126,7 +126,15 @@ test('the tell refuses what its siblings refuse: untied names, missing files, un
   try {
     const r1 = you.tellAgent('borrowed', untied);
     assert.equal(r1.state, projects.TOLD.COULD_NOT);
-    assert.match(r1.because, /cannot tie/);
+    // ⚠️ THE FIXTURE IS `stranger`, so something IS running under this name.
+    // The pin used to read /could not find an agent with exactly this name/,
+    // which is the sentence for a name that is NOT THERE -- so it certified
+    // the one wording that is false of this test's own fixture. It asserts the
+    // untied sentence now, and the not-there one is pinned separately below.
+    assert.match(r1.because, /something is running under this name, but we cannot tell that it is this agent/,
+      'the untied refusal denied the existence of the thing the roster just showed it');
+    assert.doesNotMatch(r1.because, /could not find an agent/,
+      'it says the name was not found, and the fixture is a pane holding exactly that name');
   } finally {
     fleet.restore();
   }
@@ -138,6 +146,29 @@ test('the tell refuses what its siblings refuse: untied names, missing files, un
     const r2 = you.tellAgent('bootless', tied);
     assert.equal(r2.state, projects.TOLD.COULD_NOT);
     assert.match(r2.because, /no instructions file/);
+  } finally {
+    fleet.restore();
+  }
+  /**
+   * ⚠️ THE THIRD ARM OF THE SPLIT, which had no test at all. The refusal has
+   * three worlds now (unreadable roster, a name held by something untied, and
+   * a name that is simply NOT THERE) and only the first two were pinned. A
+   * comment of mine said this one was "pinned separately below"; it was not,
+   * which is the same class this branch keeps finding, written by me into a
+   * fix for it.
+   *
+   * The roster is READABLE and holds a different agent, so `Array.isArray` is
+   * true and no entry carries this name: exactly the arm that should say the
+   * name was not found.
+   */
+  const others = fleet.install([fleet.agent('somebody-else', { state: 'idle' })]).agents;
+  try {
+    const r4 = you.tellAgent('nobody-by-this-name', others);
+    assert.equal(r4.state, projects.TOLD.COULD_NOT);
+    assert.match(r4.because, /could not find an agent with exactly this name/,
+      'a name nothing on this computer holds did not get the not-there sentence');
+    assert.doesNotMatch(r4.because, /something is running under this name/,
+      'it says something is running under a name no pane holds');
   } finally {
     fleet.restore();
   }

@@ -101,24 +101,57 @@ const TOLD = {
  * ⚠️ Keyed on the EXACT singular string, so an edited engine sentence
  * silently falls back to the reasonless group line instead of pairing
  * with a stale plural. Edit the singular, edit its row here.
- * The one entry mapping to itself has no singular referent to begin with.
+ * ⚠️ NOTHING MAPS TO ITSELF ANY MORE. One row used to, and this line said so;
+ * the trim that moved the outcome clause into the frame gave it a distinct
+ * plural like every other row. I updated the TEST's comment about that in the
+ * same commit and left this one standing, which is the class this file keeps
+ * producing: the newest sentence is the least examined one.
  */
 const GROUP_BECAUSE = new Map([
-  ['this agent has no folder on this computer yet',
-    'none of them has a folder on this computer yet'],
-  ['this agent has no instructions file yet, and we will not create one for it',
-    'none of them has an instructions file yet, and we will not create them'],
-  ['we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything',
-    'we cannot match any of their names exactly to a session on this computer, so we did not write to anything'],
-  ['we could not check which agents are running, so we did not write to anything',
-    'we could not check which agents are running, so we did not write to anything'],
-  ['this agent keeps its instructions somewhere we cannot safely change',
+  /**
+   * ⚠️ THE FRAME NAMES THE AGENTS, so these values carry `instructions`
+   * themselves. An earlier frame named `instructions`, which made it the
+   * antecedent for every pronoun after it AND asserted an object some of
+   * these reasons deny exists ("...were not updated: none of them has one
+   * yet"). Trimming the noun out of the values to stop it appearing twice
+   * removed the only thing telling a reader what `them` meant, so the
+   * property was real and optimising for it made the copy worse.
+   *
+   * 🛑 EDIT THE FRAME AND YOU MUST RE-RENDER ALL NINE. They are written to
+   * sit after "We could not update these agents about this folder: " and
+   * nowhere else. The KEYS are the engine's verbatim singulars and are
+   * authored at call sites in this file, `you.js` and `workerfile.js`.
+   *
+   * ⚠️ AND "ALL NINE" IS AN INSTRUCTION, NOT A CLAIM ABOUT WHAT WAS DONE.
+   * When the frame changed, the row below said "we cannot tell they are THOSE
+   * agents" and read as a second, different set under a frame saying THESE
+   * agents. Nothing about that value looked edited, because nothing about it
+   * WAS edited, which is the trap:
+   *
+   * 🔑 CHANGING A FRAME SILENTLY RE-POINTS EVERY DEICTIC IN EVERY VALUE UNDER
+   * IT. A frame edit is a change to all nine sentences and only the frame
+   * appears in the diff.
+   *
+   * All eighteen were checked against the new frame afterwards and only that
+   * one row carried it.
+   */
+  ['it has no folder of its own on this computer yet',
+    'none of them has a folder of its own on this computer yet'],
+  ['it has no instructions file yet, and we will not create one',
+    'none of them has an instructions file yet, and we will not create any'],
+  ['we could not find an agent with exactly this name on this computer',
+    'we could not find any of them by exactly these names on this computer'],
+  ['something is running under this name, but we cannot tell that it is this agent',
+    'something is running under these names, but we cannot tell they are these agents'],
+  ['we could not check which agents are running',
+    'we could not check which agents are running'],
+  ['it keeps its instructions somewhere we cannot safely change',
     'they keep their instructions somewhere we cannot safely change'],
-  ['taking this out would leave its instructions almost empty, so we left them alone',
-    'taking this out would leave their instructions almost empty, so we left them alone'],
-  ['its instructions are already at the size limit, so we left them alone',
-    'their instructions are already at the size limit, so we left them alone'],
-  ['we could not write to this agent’s instructions',
+  ['taking this out would leave its instructions almost empty',
+    'taking this out would leave their instructions almost empty'],
+  ['its instructions are already at the size limit',
+    'their instructions are already at the size limit'],
+  ['we could not write to its instructions',
     'we could not write to their instructions'],
 ]);
 
@@ -525,7 +558,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we could not check which agents are running, so we will not speak for what this name is holding',
+          because: 'we could not check which agents are running, so we cannot say who holds this task',
         },
       };
     }
@@ -534,7 +567,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we cannot tie the pane holding this name to the agent, so we will not speak for what that name is holding',
+          because: 'we cannot tell whether this is the same agent, so we cannot say whether it holds this task',
         },
       };
     }
@@ -1622,9 +1655,20 @@ function tellAgent(sessionName, projects, roster) {
     if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName && a.isNamedOurs === true)) {
       return {
         state: TOLD.COULD_NOT,
-        because: Array.isArray(roster)
-          ? 'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything'
-          : 'we could not check which agents are running, so we did not write to anything',
+        /**
+         * ⚠️ THREE WORLDS REACH THIS RETURN, and only one of them is "not
+         * there": an unreadable roster, a name held by something we will not
+         * vouch for, and a name nothing holds. `isNamedOurs !== true` is the
+         * second one, and it is the case the gate was written for. One
+         * sentence covering all three said the name was not found, which is
+         * false on that half. Split, in `addressable`'s words, so each arm is
+         * true of its world.
+         */
+        because: !Array.isArray(roster)
+          ? 'we could not check which agents are running'
+          : roster.some((a) => a && a.sessionName === sessionName)
+            ? 'something is running under this name, but we cannot tell that it is this agent'
+            : 'we could not find an agent with exactly this name on this computer',
       };
     }
     const current = instructions.read(sessionName);
@@ -1637,7 +1681,7 @@ function tellAgent(sessionName, projects, roster) {
     // means the refusal arrives as a reportable verdict instead of an exception
     // that has to be pattern-matched.
     if (!current.exists && !current.editable) {
-      return { state: TOLD.COULD_NOT, because: current.because || 'this agent keeps its instructions somewhere we cannot safely change' };
+      return { state: TOLD.COULD_NOT, because: current.because || 'it keeps its instructions somewhere we cannot safely change' };
     }
     // ⚠️ We do not INVENT a boot file. An agent with no instruction file got
     // one containing nothing but our block -- so it booted from a file this
@@ -1648,7 +1692,7 @@ function tellAgent(sessionName, projects, roster) {
     if (!current.exists) {
       return {
         state: TOLD.COULD_NOT,
-        because: 'this agent has no instructions file yet, and we will not create one for it',
+        because: 'it has no instructions file yet, and we will not create one',
       };
     }
     // ⚠️ Two complete blocks in one file: we cannot tell which is ours, so we
@@ -1686,13 +1730,13 @@ function tellAgent(sessionName, projects, roster) {
     return {
       state: TOLD.COULD_NOT,
       because: /cannot be this short/.test(raw)
-        ? 'taking this out would leave its instructions almost empty, so we left them alone'
+        ? 'taking this out would leave its instructions almost empty'
         : (/larger than an instruction file should be/.test(raw)
           // Same reason as the length case above: the file was already at the
           // limit, and telling somebody their file is too big for a write they
           // did not ask for aims the complaint at the wrong person.
-          ? 'its instructions are already at the size limit, so we left them alone'
-          : (raw || 'we could not write to this agent’s instructions')),
+          ? 'its instructions are already at the size limit'
+          : (raw || 'we could not write to its instructions')),
     };
   }
 }

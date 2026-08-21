@@ -159,17 +159,28 @@ function tellAgent(sessionName, roster) {
     if (!Array.isArray(roster) || !roster.some((a) => a && a.sessionName === sessionName && a.isNamedOurs === true)) {
       return {
         state: projects.TOLD.COULD_NOT,
-        because: Array.isArray(roster)
-          ? 'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything'
-          : 'we could not check which agents are running, so we did not write to anything',
+        /**
+         * ⚠️ THREE WORLDS REACH THIS RETURN, and only one of them is "not
+         * there": an unreadable roster, a name held by something we will not
+         * vouch for, and a name nothing holds. `isNamedOurs !== true` is the
+         * second one, and it is the case the gate was written for. One
+         * sentence covering all three said the name was not found, which is
+         * false on that half. Split, in `addressable`'s words, so each arm is
+         * true of its world.
+         */
+        because: !Array.isArray(roster)
+          ? 'we could not check which agents are running'
+          : roster.some((a) => a && a.sessionName === sessionName)
+            ? 'something is running under this name, but we cannot tell that it is this agent'
+            : 'we could not find an agent with exactly this name on this computer',
       };
     }
     const current = instructions.read(sessionName);
     if (!current.exists && !current.editable) {
-      return { state: projects.TOLD.COULD_NOT, because: current.because || 'this agent keeps its instructions somewhere we cannot safely change' };
+      return { state: projects.TOLD.COULD_NOT, because: current.because || 'it keeps its instructions somewhere we cannot safely change' };
     }
     if (!current.exists) {
-      return { state: projects.TOLD.COULD_NOT, because: 'this agent has no instructions file yet, and we will not create one for it' };
+      return { state: projects.TOLD.COULD_NOT, because: 'it has no instructions file yet, and we will not create one' };
     }
     const found = projects.findBlock(current.text || '', START, END);
     if (found && found.ambiguous) {
@@ -198,10 +209,10 @@ function tellAgent(sessionName, roster) {
     return {
       state: projects.TOLD.COULD_NOT,
       because: /cannot be this short/.test(raw)
-        ? 'taking this out would leave its instructions almost empty, so we left them alone'
+        ? 'taking this out would leave its instructions almost empty'
         : (/larger than an instruction file should be/.test(raw)
-          ? 'its instructions are already at the size limit, so we left them alone'
-          : (raw || 'we could not write to this agent’s instructions')),
+          ? 'its instructions are already at the size limit'
+          : (raw || 'we could not write to its instructions')),
     };
   }
 }
@@ -216,7 +227,7 @@ function tellAgent(sessionName, roster) {
  */
 function syncEveryone(roster) {
   if (!Array.isArray(roster)) {
-    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running, so we did not write to anything' }];
+    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running' }];
   }
   const told = [];
   for (const a of roster) {

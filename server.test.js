@@ -2266,7 +2266,7 @@ test('the create route answers a real creation with the record the screen is bui
       assert.equal(typeof s.label, 'string', 'a step with no label would draw as a blank line');
       assert.equal(typeof s.ok, 'boolean', 'a step with no verdict cannot be drawn as done or failed');
     }
-    assert.ok(body.steps.some((s) => /startup job/.test(s.label)), 'the job step is missing from the record');
+    assert.ok(body.steps.some((s) => /keep running/.test(s.label)), 'the job step is missing from the record');
 
     // ⚠️ And the first action is the ROLE's own words, not something the screen
     // invented — the whole point of serving it from the same library the agent
@@ -5995,6 +5995,49 @@ test('a borrowed-name pane cannot lend a project card its photograph', () => {
 // first cut of this line copied esc and got the null-handling wrong).
 const TOLD_PRELUDE = pageFnSource('esc') + '\n';
 
+test('the SINGULAR frame is pinned too, and composes every reason cleanly', () => {
+  /**
+   * 🛑 THE SINGULAR FRAME WAS PINNED BY NOTHING. Its plural twin got a verbatim
+   * frame pin and a "must not name `instructions`" assertion; this one appeared
+   * only in `web/index.html`, so restoring the withdrawn frame would have left
+   * the whole suite green while all nine singulars composed against exactly the
+   * wording the ruling exists to remove.
+   *
+   * ⚠️ And the singular is the COMMON path: the group line needs two or more
+   * members with identical verdicts, so the hardened arm was the rarer one.
+   *
+   * The frame must not name `instructions`, because naming it makes that word
+   * the antecedent for every pronoun after it and asserts a file some of these
+   * reasons say does not exist.
+   */
+  const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
+  const line = (because) => toldLine({ state: 'could_not', because });
+
+  const frame = line('a reason');
+  assert.match(frame, /^We could not update this agent about this folder: /,
+    'the singular frame changed; re-render all nine reasons against it before trusting this test');
+  assert.doesNotMatch(frame.split(': ')[0], /instructions/,
+    'the frame names `instructions` again, which makes it the antecedent for every pronoun after it');
+
+  // Every mapped singular composed through it, read out of the engine's own
+  // map rather than restated here.
+  const projSrc2 = fs.readFileSync(nodePath.join(__dirname, 'engine', 'projects.js'), 'utf8');
+  const ms = projSrc2.indexOf('const GROUP_BECAUSE = new Map([');
+  const me = projSrc2.indexOf(']);', ms);
+  const singulars2 = [...projSrc2.slice(ms, me).matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  assert.ok(singulars2.length >= 9,
+    'CONTROL: parsed ' + singulars2.length + ' singulars; the scan is not reading the map');
+  for (const because of singulars2) {
+    const composed = line(because);
+    assert.ok((composed.match(/instructions/g) || []).length <= 1,
+      'the singular line says "instructions" more than once: ' + composed);
+    assert.doesNotMatch(composed, /so nothing was written|we left them alone/,
+      'the reason re-states an outcome the frame already carries: ' + composed);
+    assert.doesNotMatch(composed, /was not added|were not added/,
+      'the frame or the reason names ADD, and the reason set spans add and remove: ' + composed);
+  }
+});
+
 test('identical roster verdicts collapse to one group line, and only then', () => {
   const shared = pageFunction('pjSharedTold',
     TOLD_PRELUDE + pageFnSource('pjToldLine') + '\n' + pageFnSource('pjToldGroupLine'));
@@ -6007,14 +6050,18 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // singular spliced into a plural frame -- "any of them … this agent"
   // read as a contradiction (her ruling).
   const g = shared([
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet')]);
-  assert.ok(g.startsWith('We could not tell any of them where this folder is'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet')]);
+  assert.ok(g.startsWith('We could not update these agents about this folder'),
     'three identical could_not verdicts did not collapse: ' + g);
-  assert.ok(g.includes('none of them has a folder on this computer yet'),
+  assert.ok(g.includes('none of them has a folder of its own on this computer yet'),
     'the group sentence did not carry the plural sibling: ' + g);
-  assert.ok(!g.includes('this agent has no folder'),
+  /* ⚠️ RE-POINTED. This read /this agent has no folder/, which the frame
+     ruling deleted from the tree, so it could not have failed even if the
+     singular did leak. Its two neighbours above were re-pointed in that commit
+     and this one was not. The singular for this row is the literal below. */
+  assert.ok(!g.includes('it has no folder of its own on this computer yet'),
     'the singular because leaked into the plural frame: ' + g);
 
   // No plural sibling (unmapped because): NO collapse at all. Collapsing
@@ -6029,8 +6076,69 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // arm for a razed could_not (no because at all) reached directly.
   const gline = pageFunction('pjToldGroupLine', TOLD_PRELUDE);
   assert.equal(gline({ state: 'could_not' }),
-    'We could not tell any of them where this folder is.',
+    'We could not update these agents about this folder.',
     'the defensive reasonless arm changed or vanished');
+
+  /**
+   * 🛑 EVERY PLURAL COMPOSED THROUGH THE FRAME, not one of them. Eight of the
+   * nine were defective when only one had been rendered, which is why this
+   * asserts the whole set rather than a sample: a frame naming ADD made a
+   * REMOVE reason false outright, and a frame naming a noun made every value
+   * carrying that noun say it twice.
+   *
+   * ⚠️ The rule INVERTED when the frame changed, and an earlier version of
+   * this comment survived the inversion and sat directly above the new one
+   * stating the opposite. See the block below for what the properties are
+   * now; there is one comment here, not two, on purpose.
+   */
+  /* ⚠️ THE PAIRS COME FROM THE ENGINE'S MAP, read out of its source, not from
+     a list written here. A copy of the map in this file would compose the
+     copy through the frame and pass while the real map said something else
+     (a check containing a copy cannot fail). The keys are parsed and the
+     values come back from `groupBecause` itself. */
+  const projSrc = fs.readFileSync(nodePath.join(__dirname, 'engine', 'projects.js'), 'utf8');
+  const mapBody = projSrc.slice(projSrc.indexOf('const GROUP_BECAUSE = new Map(['),
+    projSrc.indexOf(']);', projSrc.indexOf('const GROUP_BECAUSE = new Map([')));
+  const singulars = [...mapBody.matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  /* ⚠️ THE PROPERTY INVERTED WHEN THE FRAME CHANGED, and the inversion is the
+     lesson. The frame used to name `instructions`, so the rule was "exactly
+     once" and the values were trimmed to satisfy it. That trim removed the
+     only noun telling a reader what `them` meant, and the frame ALSO asserted
+     a file some reasons deny exists. The frame names the AGENTS now, which is
+     the one thing true in every arm, and `instructions` lives in the values
+     where it has a referent. So the rule is AT MOST once, and the frame itself
+     is pinned, because "at most once" alone would pass a frame that named the
+     noun again while every value happened to omit it. */
+  const FRAME_NOUN = /instructions/g;
+  const frame = shared([cn('x', 'a plural'), cn('x', 'a plural')]);
+  assert.match(frame, /^We could not update these agents about this folder: /,
+    'the group frame changed; re-render all nine values against it before trusting this test');
+  assert.doesNotMatch(frame.split(': ')[0], /instructions/,
+    'the frame names `instructions` again, which makes it the antecedent for every pronoun after it');
+  for (const singular of singulars) {
+    const plural = require('./engine/projects').groupBecause(singular);
+    assert.ok(plural, 'a key parsed out of GROUP_BECAUSE does not map: ' + singular);
+    const line = shared([cn(singular, plural), cn(singular, plural)]);
+    assert.ok(line, 'two identical verdicts did not collapse for: ' + singular);
+    assert.ok((line.match(FRAME_NOUN) || []).length <= 1,
+      'the group line says "instructions" more than once: ' + line);
+    assert.doesNotMatch(line, /so nothing was written|we left them alone/,
+      'the value re-states an outcome the frame already carries: ' + line);
+    /* ⚠️ AIMED AT THE VALUE, NOT THE LINE. Against the line this could never
+       fail: the `startsWith` above pins the frame verbatim, so a frame naming
+       ADD is already caught before this runs. Measured by putting the old
+       frame back -- the startsWith fired and this did not. Against the VALUE
+       it holds something nothing else does: a reason that names the operation
+       it belongs to, when one of them is a removal and the frame cannot know
+       which. */
+    assert.doesNotMatch(plural, /was not added|were not added|added to/,
+      'a plural reason names ADD, and the reason set spans add and remove: ' + plural);
+  }
+  // CONTROL: the loop above ran over a non-empty set. An empty expectPlural
+  // would satisfy all three assertions vacuously, which is the failure this
+  // whole test exists to prevent, one level down.
+  assert.ok(singulars.length >= 9,
+    'CONTROL: only ' + singulars.length + ' pairs parsed out of GROUP_BECAUSE; the scan is not seeing the whole map');
 
   // The group line lands in the page as raw HTML (paintOneProject), so a
   // markup-carrying plural form must arrive ESCAPED, not verbatim-dangerous.

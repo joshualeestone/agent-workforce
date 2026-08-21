@@ -387,7 +387,7 @@ function installedCheck(opts) {
   if (unusable.length) {
     parts_.push('The path set for '
       + unusable.map((u) => `${u.label} is ${u.bin}`).join(', and the one for ')
-      + ' — a quote, a backslash or a line break in a path is something we will not pass on to '
+      + '. A quote, a backslash or a line break in a path is something we will not pass on to '
       + 'the parts of macOS that start an agent, whatever is at the end of it.');
   }
   if (unreadable.length) {
@@ -547,7 +547,7 @@ function appLocationCheck(opts) {
       // Non-string elements included: path.join would TypeError inside the
       // look's try, read as errored, and answer a fabricated could-not-look
       // -- the one state this guard exists to keep honest.
-      throw new Error('appDirs override must be a non-empty array of directory paths');
+      throw new Error('appDirs override must be a non-empty list of folders');
     }
     dirs = opts.appDirs;
   } else {
@@ -621,7 +621,7 @@ function revealApp(opts) {
   if (opts && opts.appDirs !== undefined) {
     if (!Array.isArray(opts.appDirs) || opts.appDirs.length === 0
         || !opts.appDirs.every((d) => typeof d === 'string' && d.length > 0)) {
-      throw new Error('appDirs override must be a non-empty array of directory paths');
+      throw new Error('appDirs override must be a non-empty list of folders');
     }
     dirs = opts.appDirs;
   } else {

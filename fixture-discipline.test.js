@@ -349,15 +349,31 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
     // no-answer-at-all in the same round the comment was written, so the
     // sentence outlived the behaviour it described. This is the assertion that
     // keeps the pair honest rather than a paragraph asserting it.
-    assert.throws(() => status.paneRoster(), /could not ask tmux/);
-    assert.throws(() => status.snapshot(), /could not ask tmux/);
+    /* ⚠️ ONE CONDITION, ONE SENTENCE AGAIN. These briefly said "see" and
+       "check" for the same failure, and a reader who hit both routes got two
+       sentences for one thing. The adjacent unreadable-answer arms
+       (engine/status.js:619 and :1632) were harmonised to a single sentence in the same sweep, which is
+       the shape this pair should have had. Still asserted separately, because
+       the call is what discriminates them, not the words.
+
+       📌 An earlier version of this comment quoted `snapshot` as saying "what
+       IT IS DOING on this computer" and argued at length that its "it" had no
+       referent. That sentence had already been fixed in the same branch and
+       exists nowhere in the tree; the comment outlived it by two commits and
+       contradicted the assertion two lines below it. Same failure as the one
+       the comment above this block describes, which is why both are kept. */
+    assert.throws(() => status.paneRoster(), /could not see what is running on this computer/);
+    assert.throws(() => status.snapshot(), /could not see what is running on this computer/);
   } finally {
     blind.restore();
   }
 
   const garbled = fleet.unreadable();
   try {
-    assert.throws(() => status.paneRoster(), /could not read/);
+    /* The copy sweep replaced "tmux answered with something we could not read"
+       with "we could not make sense of what came back". Same refusal, same
+       property: an unreadable answer is not an empty fleet. */
+    assert.throws(() => status.paneRoster(), /could not make sense of what came back/);
   } finally {
     garbled.restore();
   }

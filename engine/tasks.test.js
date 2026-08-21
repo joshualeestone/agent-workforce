@@ -213,7 +213,8 @@ test('a name held by an untied pane is not spoken for', () => {
   const untied = fleet.install([fleet.stranger('borrowed-name')]).agents;
   const got = projects.get(p.id, untied).tasks[0];
   assert.equal(got.claim.claimed, null, 'a borrowed name was spoken for');
-  assert.match(got.claim.because, /will not speak/);
+  assert.match(got.claim.because, /cannot tell whether this is the same agent/,
+    'the borrowed-name arm no longer says WHY it refuses; both sibling arms end alike, so the trailing clause cannot tell them apart');
   // And the gate fails CLOSED like its siblings: a roster we could not
   // read is not "we looked and no pane holds the name".
   const gotNull = projects.get(p.id, null).tasks[0];

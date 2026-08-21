@@ -391,7 +391,8 @@ test('the untied check is still made at the session step, for a roster that chan
   assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
     'it killed a session that stopped being this agent between the two checks');
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
-  assert.match(r.because, /cannot confirm is this agent/);
+  assert.match(r.because, /cannot confirm it is this agent/,
+    'the untied partial no longer says why it left the session alone');
 });
 
 test('dry-run cannot be left without a runner, and is not the default', () => {
@@ -980,7 +981,7 @@ test('an agent stopped but never recorded is told where its way back is', () => 
     // ⚠️ CONTROL: it really did get all the way to the record, or this is one
     // of the earlier partials wearing the same outcome.
     const labels = gone.steps.map((s) => s.label);
-    assert.ok(labels.includes('ended its session'),
+    assert.ok(labels.includes('closed its window'),
       'it never reached the session step, so this is an earlier partial and proves nothing');
     assert.equal(gone.outcome, remove.OUTCOME.PARTIAL, gone.because);
 
@@ -988,8 +989,14 @@ test('an agent stopped but never recorded is told where its way back is', () => 
       'it says the agent is still on the board, and the board is built from sessions it just killed');
     assert.match(gone.because, /com\.kosmos\.agent\.stopped-unrecorded/,
       'the one path where the person has nothing else to go on does not name the startup job');
-    assert.match(gone.because, /re-enabling that is what undoes this/,
+    assert.match(gone.because, /turning that back on is what undoes this/,
       'it names the job without saying what to do with it');
+    // ⚠️ THE PRESENCE HALF of the no-job test's `doesNotMatch(/set to start on
+    // its own as/)`. Absence proves nothing unless the same phrase is shown to
+    // appear when it should, and this pin used to assert only the TAIL, so the
+    // two tests were about different strings while a comment said otherwise.
+    assert.match(gone.because, /set to start on its own as/,
+      'the job-carrying recovery route no longer names the job at all');
   } finally {
     fs.chmodSync(dir, 0o700);
     fs.rmSync(remove.REMOVED_FILE, { force: true });
@@ -1248,7 +1255,7 @@ test('a kill that reports success over a session that is STILL THERE is not a re
 
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL,
     'a session that outlived a successful-looking kill was reported as removed');
-  assert.match(r.because, /could not end the session/);
+  assert.match(r.because, /could not shut it down, so it is still going/);
   assert.equal(remove.isHidden(name), false,
     'the agent was hidden from the board while still running, which is the one thing it must never do');
   assert.equal(remove.isRemoved(name), true,
@@ -1300,7 +1307,7 @@ test('what the detail screen is told about removing an agent comes from here, an
 
   boardShows(jobless, jobless);
   const b = remove.plan(jobless);
-  assert.match(b.hint, /no startup job/,
+  assert.match(b.hint, /not set to start on its own/,
     'it promises to stop something starting again for an agent that nothing was going to start');
   assert.doesNotMatch(b.hint, /stops it starting again/,
     'the jobless hint still describes work that will not happen');
@@ -1325,7 +1332,7 @@ test('a partial about an agent with no startup job does not claim one was turned
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
   assert.doesNotMatch(r.because, /we stopped .* from starting again/,
     'it reported stopping a startup job that does not exist');
-  assert.match(r.because, /has no startup job to turn off/,
+  assert.match(r.because, /was not set to start on its own/,
     'it does not say what was actually true of the job');
 });
 
@@ -1381,7 +1388,7 @@ test('the two partials a person actually hits still record, so Restore is there'
   });
   const r1 = remove.remove(a);
   assert.equal(r1.outcome, remove.OUTCOME.PARTIAL, r1.because);
-  assert.match(r1.because, /could not ask tmux/, 'this is a different partial than the one under test');
+  assert.match(r1.because, /could not check whether it is still running/, 'this is a different partial than the one under test');
   assert.equal(remove.isRemoved(a), true,
     'it disabled and stopped the job and then filed no record, so there is no Restore button');
   assert.equal(remove.isHidden(a), false,
@@ -1403,7 +1410,7 @@ test('the two partials a person actually hits still record, so Restore is there'
   remove.setDryRun(false);
   const r2 = remove.remove(b);
   assert.equal(r2.outcome, remove.OUTCOME.PARTIAL, r2.because);
-  assert.match(r2.because, /cannot confirm is this agent/, 'this is a different partial than the one under test');
+  assert.match(r2.because, /cannot confirm it is this agent/, 'this is a different partial than the one under test');
   assert.equal(remove.isRemoved(b), true,
     'it disabled and stopped the job and then filed no record, so there is no Restore button');
   assert.equal(remove.isHidden(b), false, 'it hid an agent that may still be running');
@@ -1441,8 +1448,8 @@ test('a partial for an agent with no startup job does not name a job that is not
   /**
    * ⚠️ `recoveryRoute`'s no-job branch was unheld. Replacing the whole function
    * with the unconditional job sentence left the suite at 346 green -- so the
-   * suite could not see the product telling somebody *"Its startup job is null,
-   * and re-enabling that is what undoes this."*
+   * suite could not see the product telling somebody *"It was set to start on
+   * its own as null, and turning that back on is what undoes this."*
    *
    * Its three named siblings (`hint`, `didToJob`, restore's endings) are all
    * held. This one is the same family and was not on the plan's list of
@@ -1470,11 +1477,17 @@ test('a partial for an agent with no startup job does not name a job that is not
     // ⚠️ CONTROL: it really is the recovery sentence being rendered.
     assert.match(r.because, /will not appear there/, 'the record succeeded, so no recovery route is offered');
 
-    assert.doesNotMatch(r.because, /Its startup job is/,
+    // ⚠️ RE-AIMED. This read /Its startup job is/ after the copy sweep
+    // renamed that sentence, so it was matching a string that exists
+    // nowhere in the source -- a guard that cannot fail. The mutation its
+    // docblock describes now prints "It was set to start on its own as
+    // null". The presence half is pinned at the job-carrying partial above,
+    // which asserts this same phrase DOES appear when there is a job.
+    assert.doesNotMatch(r.because, /set to start on its own as/,
       'it named a startup job for an agent that has none');
     assert.doesNotMatch(r.because, /null|undefined/,
       'it printed a missing value straight onto the screen');
-    assert.match(r.because, /no startup job, so nothing will restart it/,
+    assert.match(r.because, /Nothing will start it again on its own/,
       'it does not say what is actually true, which is that nothing will bring it back');
   } finally {
     fs.chmodSync(dir, 0o700);
@@ -1503,7 +1516,10 @@ test('the steps report what was done, including when nothing was', () => {
   assert.ok(labels.length > 0, 'no steps were reported at all, so this asserts nothing');
   assert.ok(!labels.includes('stopped it starting again'),
     'it reported stopping a startup job for an agent that never had one');
-  assert.ok(labels.some((l) => /no startup job/.test(l)),
+  /* Back to naming the JOB, which is what this assertion's own message says it
+     checks. The alternation that briefly replaced it matched a label about the
+     SESSION, so the test certified a step list that contradicted itself. */
+  assert.ok(labels.some((l) => /not set to start on its own/.test(l)),
     'it does not say what was actually true of the job');
 });
 

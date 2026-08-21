@@ -106,13 +106,14 @@ test('the sender is derived from the pane, and the delivered envelope names them
   });
 });
 
-test('a pane we cannot tie to an agent is refused as anonymous, and nothing is typed', () => {
+test('a pane we cannot match to one of your agents is refused, and nothing is typed', () => {
   withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
     armSender('somebody-elses-session');
     const tmux = arm([ok(), ok()]);
     const sent = messages.send({ fromPane: '%7', to: 'mara', text: 'hello' }, board.agents);
     assert.equal(sent.state, chat.DELIVERY.COULD_NOT);
-    assert.match(sent.because, /anonymous/, 'the refusal does not say why the sender was rejected');
+    assert.match(sent.because, /could not match that to one of your agents/,
+      'the refusal does not say why the sender was rejected');
     assert.equal(tmux.sends().length, 0, 'a refused sender still reached a pane');
     assert.equal(messages.list().length, 0, 'a refused send was written into the record');
   });

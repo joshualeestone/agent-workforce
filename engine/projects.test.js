@@ -1570,28 +1570,34 @@ test('every singular could_not because the engine authors has a plural sibling',
   // affected group line silently degrades to the reasonless sentence, and
   // a copy-only test stays green (a check containing a copy cannot fail).
   const expectPlural = {
-    'this agent has no folder on this computer yet':
-      'none of them has a folder on this computer yet',
-    'this agent has no instructions file yet, and we will not create one for it':
-      'none of them has an instructions file yet, and we will not create them',
-    'we cannot tie an agent by exactly this name to a session on this computer, so we did not write to anything':
-      'we cannot match any of their names exactly to a session on this computer, so we did not write to anything',
-    'this agent keeps its instructions somewhere we cannot safely change':
+    'it has no folder of its own on this computer yet':
+      'none of them has a folder of its own on this computer yet',
+    'it has no instructions file yet, and we will not create one':
+      'none of them has an instructions file yet, and we will not create any',
+    'we could not find an agent with exactly this name on this computer':
+      'we could not find any of them by exactly these names on this computer',
+    'something is running under this name, but we cannot tell that it is this agent':
+      'something is running under these names, but we cannot tell they are these agents',
+    'it keeps its instructions somewhere we cannot safely change':
       'they keep their instructions somewhere we cannot safely change',
-    'taking this out would leave its instructions almost empty, so we left them alone':
-      'taking this out would leave their instructions almost empty, so we left them alone',
-    'its instructions are already at the size limit, so we left them alone':
-      'their instructions are already at the size limit, so we left them alone',
-    'we could not write to this agent’s instructions':
+    'taking this out would leave its instructions almost empty':
+      'taking this out would leave their instructions almost empty',
+    'its instructions are already at the size limit':
+      'their instructions are already at the size limit',
+    'we could not write to its instructions':
       'we could not write to their instructions',
   };
   for (const [singular, plural] of Object.entries(expectPlural)) {
     assert.equal(projects.groupBecause(singular), plural,
       'no or wrong plural sibling for: ' + singular);
   }
-  // The one sentence with no singular referent maps to itself.
-  const neutral = 'we could not check which agents are running, so we did not write to anything';
-  assert.equal(projects.groupBecause(neutral), neutral);
+  // ⚠️ NO LONGER AN IDENTITY MAP. This row used to map to itself, which is why
+  // it was described as "the one sentence with no singular referent". Now that
+  // the frame carries the outcome, its plural drops the tail like every other,
+  // so the value differs from the key and the identity assertion would pass
+  // only if the trim had been missed here.
+  const neutral = 'we could not check which agents are running';
+  assert.equal(projects.groupBecause(neutral), 'we could not check which agents are running');
 
   // THE SOURCE PIN: every mapped singular must still exist verbatim in the
   // modules that author these sentences. When this fails, someone edited a
@@ -1622,12 +1628,12 @@ test('every singular could_not because the engine authors has a plural sibling',
   // text, or the pin is scanning the copy again. BOTH ends of the window:
   // an early-truncated strip (a `]);` landing mid-map after a reformat)
   // would still remove the first entry while later keys survive.
-  assert.ok(!stripped.includes('none of them has a folder on this computer yet'),
+  assert.ok(!stripped.includes('none of them has a folder of its own on this computer yet'),
     'CONTROL: the map\'s FIRST plural survived the strip; the pin is scanning its own copy');
   assert.ok(!stripped.includes('we could not write to their instructions'),
     'CONTROL: the map\'s LAST plural survived the strip; the window truncated early');
   const authorOf = {
-    'this agent has no folder on this computer yet': 'workerfile.js',
+    'it has no folder of its own on this computer yet': 'workerfile.js',
   };
   for (const singular of [...Object.keys(expectPlural), neutral]) {
     const file = authorOf[singular] || 'projects.js';
@@ -1637,6 +1643,94 @@ test('every singular could_not because the engine authors has a plural sibling',
   }
 });
 
+test('the map is checked in BOTH directions: a new engine sentence cannot skip it', () => {
+  /**
+   * ⚠️ THE SOURCE PIN ABOVE RUNS MAP -> SOURCE, so it catches a row edited
+   * without its author site and CANNOT catch the opposite: a NEW because
+   * authored beside the mapped ones, inheriting nothing. That is how this
+   * gap was found -- splitting the untied refusal out of the not-there one
+   * added a sentence the map had never heard of, and every group line
+   * carrying it would have degraded to the reasonless form with the whole
+   * suite green.
+   *
+   * So: every `COULD_NOT` verdict these modules author must map.
+   *
+   * ⚠️ ANCHORED ON THE STATE, NOT ON A SUFFIX. The first version scanned for
+   * literals ending "so nothing was written", which every verdict happened to
+   * share. A later ruling moved the outcome clause into the frame and the
+   * suffix vanished from all of them, so the scan matched NOTHING and its own
+   * CONTROL was the only thing that failed. A pin keyed on a phrase dies when
+   * the phrase is the thing being edited, which on a copy branch is always.
+   * The map declaration is stripped for the same reason it is stripped above:
+   * scanning it would hand this pin a copy of its own answer.
+   */
+  /* ⚠️ COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The first
+     version of this scan took a fixed 600-character window after each
+     `TOLD.COULD_NOT` and a ten-line docblock sat inside one of those windows,
+     so it ate the space before the strings and the scan found 5 of 9 in one
+     file and 6 of 9 in the other. Its CONTROL asserted `>= 3` and passed.
+     I had rewritten this scan an hour earlier to stop it being keyed on a
+     PHRASE, and keyed it on COMMENT LENGTH instead. */
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, ' ');
+  const verdictsIn = (src) => {
+    const out = [];
+    for (const part of stripComments(src).split('TOLD.COULD_NOT').slice(1)) {
+      for (const m of part.slice(0, 600).matchAll(/'([^'\n]{15,})'/g)) {
+        if (/ /.test(m[1]) && !/\$\{/.test(m[1])) out.push(m[1]);
+      }
+    }
+    return out;
+  };
+  const projSrc = fs.readFileSync(path.join(__dirname, 'projects.js'), 'utf8');
+  const mapStart = projSrc.indexOf('const GROUP_BECAUSE = new Map([');
+  const mapEnd = projSrc.indexOf(']);', mapStart);
+  assert.ok(mapStart > -1 && mapEnd > mapStart, 'could not locate GROUP_BECAUSE; re-point this pin');
+  const stripped = projSrc.slice(0, mapStart) + projSrc.slice(mapEnd);
+  const mapBody = projSrc.slice(mapStart, mapEnd);
+  const youSrc = fs.readFileSync(path.join(__dirname, 'you.js'), 'utf8');
+  const wfSrc = fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8');
+  const seen = new Set();
+  for (const [where, src] of [['projects.js', stripped], ['you.js', youSrc]]) {
+    const authored = verdictsIn(src);
+    // CONTROL: the scan found sentences at all. A scan matching nothing
+    // satisfies the loop vacuously, which is the failure this test exists to
+    // prevent one level down, and it is what caught the previous version
+    // dying.
+    assert.ok(authored.length >= 1,
+      'CONTROL: found ' + authored.length + ' authored verdicts in ' + where
+      + '; the scan is not looking at the right text');
+    for (const singular of authored) {
+      seen.add(singular);
+      assert.ok(projects.groupBecause(singular),
+        'a verdict authored in ' + where + ' has no plural row, so its group line loses its reason: ' + singular);
+    }
+  }
+  /* 🛑 THE COVERAGE CONTROL, and the reason it is exact rather than a floor.
+     A `>= 3` control passes while the scan quietly loses half the set, which is
+     exactly what happened: 5 of 9 in one file, 6 in the other, green. Every key
+     the map holds is authored SOMEWHERE in these two modules, so the union of
+     what the scan found must contain all of them. If the scan degrades again,
+     for any reason, this is what says so and names the ones it dropped. */
+  const keys = [...mapBody.matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 9, 'CONTROL: parsed ' + keys.length + ' map keys; the key scan is broken too');
+  /* ⚠️ ONE NAMED EXCEPTION, AND IT CARRIES ITS OWN PROOF. `workerfile.js`
+     authors the folder verdict, and it is not scanned above because its
+     verdicts are not `TOLD.COULD_NOT` returns: it has ten `because:` literals
+     and only this one is a told-verdict, so scanning it would fail nine times
+     for the wrong reason. The forward pin knows the same thing (`authorOf`).
+     The exception is asserted rather than assumed, so it fails if that
+     sentence moves out of workerfile. */
+  const FOLDER = 'it has no folder of its own on this computer yet';
+  assert.ok(wfSrc.includes(FOLDER),
+    'the folder verdict is no longer authored in workerfile.js; re-point this exception');
+  assert.ok(projects.groupBecause(FOLDER), 'the folder verdict has no plural row');
+  const missed = keys.filter((k) => !seen.has(k) && k !== FOLDER);
+  assert.deepEqual(missed, [],
+    'the verdict scan never saw these mapped singulars, so nothing checks whether they map: ' + missed.join(' | '));
+});
+
 test('groupBecause NEVER invents: unmapped, null, and non-string yield null', () => {
   assert.equal(projects.groupBecause('a sentence nobody wrote'), null);
   assert.equal(projects.groupBecause(null), null);
@@ -1644,7 +1738,7 @@ test('groupBecause NEVER invents: unmapped, null, and non-string yield null', ()
   assert.equal(projects.groupBecause(42), null);
   // CONTROL: the mapper does answer for a known key, so the nulls above
   // are refusals, not a broken lookup.
-  assert.ok(projects.groupBecause('this agent has no folder on this computer yet'),
+  assert.ok(projects.groupBecause('it has no folder of its own on this computer yet'),
     'CONTROL: a known singular no longer maps; the null assertions prove nothing');
 });
 
@@ -1655,9 +1749,9 @@ test('list() derives becauseGroup at read time, beside the stored verdict', () =
   // Store a could_not verdict whose because has a known plural sibling,
   // shaped exactly as syncAgent stores one.
   projects.mutate(made.id, (p) => (
-    { ...p, told: { mara: { state: 'could_not', because: 'this agent has no folder on this computer yet', at: new Date().toISOString() } } }));
+    { ...p, told: { mara: { state: 'could_not', because: 'it has no folder of its own on this computer yet', at: new Date().toISOString() } } }));
   const row = projects.list(cards([fleet.agent('mara')])).find((p) => p.name === 'Group Reasons');
-  assert.equal(row.agents[0].told.becauseGroup, 'none of them has a folder on this computer yet',
+  assert.equal(row.agents[0].told.becauseGroup, 'none of them has a folder of its own on this computer yet',
     'the plural sibling was not derived at read time');
   // An unmapped because yields null, and the stored record is untouched
   // (derived, never written back).

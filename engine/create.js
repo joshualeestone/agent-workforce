@@ -666,7 +666,7 @@ function createAgent(opts) {
     // newline when the input lacks one), or an input of exactly MAX_BYTES
     // would validate and then land on disk one byte over the read limit.
     if (Buffer.byteLength(wantInstructions.replace(/\n?$/, '\n'), 'utf8') > instructions.MAX_BYTES) {
-      return { outcome: OUTCOME.REFUSED, because: `those instructions are too long to be a boot file, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
+      return { outcome: OUTCOME.REFUSED, because: `these instructions are too long, trim them to under ${Math.floor(instructions.MAX_BYTES / 1024)}KB`, steps };
     }
   }
   let modelArg = null;
@@ -705,21 +705,21 @@ function createAgent(opts) {
   if (hasFolder && hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already an agent called ${shown}. If it never came up, it is half made rather than missing, and the README says how to clear one out.`,
+      because: `there is already an agent called ${shown}. If it never came up, it is half made rather than missing. Pick another name. If you can see it under Agents, you can remove it there instead.`,
       steps,
     };
   }
   if (hasJob) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${shown} is still set to start on this computer, even though there is no folder for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${shown} is still set to start on this computer, though there is no folder for it. Pick another name. If you can see it under Agents, you can remove it there instead.`,
       steps,
     };
   }
   if (hasFolder) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `there is already a folder for an agent called ${shown}. If you removed that agent, its folder is still there; the README says how to clear one out.`,
+      because: `there is already a folder for an agent called ${shown}. If you removed that agent, its folder was left behind. Pick another name. If you can see it under Agents, you can remove it there instead.`,
       steps,
     };
   }
@@ -758,7 +758,7 @@ function createAgent(opts) {
   if (loaded) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is already running as a startup job on this computer, even though there is nothing on disk for it. It has to be removed before the name can be used again, and the README says how.`,
+      because: `something called ${shown} is already set to start on this computer, though there is nothing else left of it. Pick another name. If you can see it under Agents, you can remove it there instead.`,
       steps,
     };
   }
@@ -1002,7 +1002,7 @@ function createAgent(opts) {
   // exist, which is the respawn loop. The gate below stops before the job is
   // written at all.
   let supervisorMissing = false;
-  const installedSupervisor = step('put the startup script in place', () => {
+  const installedSupervisor = step('put the script that starts agents in place', () => {
     if (DRY_RUN) return true;
     const done = installSupervisor();
     supervisorMissing = done.missing === true;
@@ -1025,7 +1025,7 @@ function createAgent(opts) {
    * then permanently refused by the leftover-job branch above, so the person
    * cannot even retry from the screen.
    */
-  const wroteJob = (wroteInstructions && installedSupervisor) && step('wrote its startup job', () => {
+  const wroteJob = (wroteInstructions && installedSupervisor) && step('set it up to keep running', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin, modelArg), 'utf8');

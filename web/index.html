@@ -3330,7 +3330,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <div class="stale-note" id="made-bg" hidden></div>
     <div class="first-action" id="made-first" hidden></div>
     <div class="frow" style="margin-top: var(--space-7);">
-      <button class="btn" id="made-done" type="button" hidden>See it on the board</button>
+      <button class="btn" id="made-done" type="button" hidden>See it under Agents</button>
       <button class="btn" id="made-retry" type="button" hidden>Start over</button>
     </div>
   </div>
@@ -5068,7 +5068,7 @@ async function tick() {
     if (start) start.hidden = true;
     const gone = document.getElementById('d-remove-hint');
     if (gone) {
-      gone.textContent = 'This agent is no longer on the board. It may have been removed somewhere else, '
+      gone.textContent = 'This agent is no longer under Agents. It may have been removed somewhere else, '
         + 'or it may have stopped. Nothing here can change it until it is back.';
     }
     PANEL_WITHDRAWN = true;
@@ -9689,20 +9689,31 @@ async function watchForAgent(name, result, attempt) {
   } else {
     warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
       + 'The folder and the instructions are on your computer either way. It may still '
-      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
+      + 'appear under Agents on its own: this screen stopped waiting, it did not stop it.'
       // ⚠️ This is the screen where somebody is most likely to want an agent
       // gone, and saying "it is set to keep trying" without saying where is how
-      // a person ends up with a job they cannot find. (This used to add "because
-      // removing an agent is still a manual job" -- Remove exists now. What is
-      // still manual is DELETE, which is why the README recipe stays.)
+      // a person ends up with a job they cannot find.
+      //
+      // Remove exists. DELETE is still manual, and there is no route to it from
+      // here at all: the board is built from live panes, so an agent that never
+      // came up has no card and the Remove control lives on the card. That is
+      // why the offer below is CONDITIONAL ("if it appears under Agents") and
+      // why the other arm says we cannot clear it out yet rather than naming a
+      // recipe. The gap itself is kosmos#127.
+      //
+      // 📌 This comment used to end "which is why the README recipe stays". The
+      // recipe went in the same commit that rewrote the lines below it, so the
+      // comment explained a decision that had been reversed directly above the
+      // lines reversing it. The FACT in it was still true and only the
+      // CONCLUSION had died, which is why this keeps the fact.
       // ⚠️ The folder comes from the ANSWER, not from a path built here. This
       // page guessed `~/work/workers/<name>`, which is wrong on any machine
       // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a
       // folder that does not exist.
       + (result.folder
         ? '<br>It is set to keep trying at every login. Its folder is <code>' + esc(result.folder)
-          + '</code>, and removing it for good is written up in the README.'
-        : '<br>It is set to keep trying at every login, and removing it for good is written up in the README.');
+          + '</code>. If it appears under Agents, you can remove it there. If it never appears, we cannot clear it out for you yet.'
+        : '<br>It is set to keep trying at every login. If it appears under Agents, you can remove it there. If it never appears, we cannot clear it out for you yet.');
   }
   warn.hidden = false;
   document.getElementById('made-done').hidden = false;
@@ -9815,7 +9826,7 @@ function pjToldLine(told) {
   // FAILURE still speaks below -- interim until the project notice is
   // drawn (exit dependency tracked on Splinter's board).
   if (told.state === 'could_not') {
-    return 'We could not tell it where this folder is; ' + esc(told.because || 'we could not write to its instructions') + '.';
+    return 'We could not update this agent about this folder: ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
   return '';
 }
@@ -9863,9 +9874,9 @@ function pjToldGroupLine(told) {
   // (her ruling), because the singular because is written for a one-agent
   // context and does not survive being quoted inside a plural frame.
   if (told.becauseGroup) {
-    return 'We could not tell any of them where this folder is; ' + esc(told.becauseGroup) + '.';
+    return 'We could not update these agents about this folder: ' + esc(told.becauseGroup) + '.';
   }
-  return 'We could not tell any of them where this folder is.';
+  return 'We could not update these agents about this folder.';
 }
 
 /**

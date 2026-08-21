@@ -1128,7 +1128,17 @@ test('a name whose startup job is loaded with nothing on disk is refused by name
 
   const r = create.createAgent({ ...BINS, name: 'ghost-job', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a name whose service is loaded was accepted');
-  assert.match(r.because, /already running as a startup job/);
+  /* ⚠️ THE ADVERB IS NOT THE DISCRIMINATOR. Two refusals now share this
+     clause and differ only by still/already: :715 is a plist FILE on disk with
+     no folder, :761 (this one) is a LOADED service with nothing on disk. One
+     harmonised adverb and this pin would match the wrong arm in silence. The
+     tail is what names the state, so the pin asserts that and refuses the
+     sibling's. */
+  assert.match(r.because, /already set to start on this computer/);
+  assert.match(r.because, /though there is nothing else left of it/,
+    'the loaded-service refusal no longer says what state it found');
+  assert.doesNotMatch(r.because, /though there is no folder for it/,
+    'it gave the plist-on-disk sentence for a name whose only trace is a loaded service');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootstrap'), 'it tried to load a second job');
   assert.ok(!fs.existsSync(create.workerDir('ghost-job')), 'it made a folder for a name it refused');
   assert.ok(!calls.some(([, a]) => a && a[0] === 'bootout'),
@@ -1227,7 +1237,7 @@ test('a supervisor that cannot be installed stops the creation', () => {
     fs.copyFileSync = () => { throw new Error('read-only'); };
     const r = create.createAgent({ ...BINS, name: 'no-supervisor', role: 'pm' });
     assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'it created an agent with no supervisor to run it');
-    assert.ok(r.steps.some((s) => /startup script/.test(s.label) && !s.ok),
+    assert.ok(r.steps.some((s) => /script that starts agents/.test(s.label) && !s.ok),
       'the failing step is not visible in the record');
     // ⚠️ The SENTENCE, which is the only thing this branch adds to the failure
     // path beyond a step label, and was the one thing unpinned. A transient
