@@ -911,6 +911,23 @@ uninstall() {
     printf '  ~/.claude/settings.json (agents skip per-action permission prompts).\n'
     printf '  Delete that line there if you want the question back.\n\n'
   fi
+  # ⚠️ AND THE SECOND THING WE LEFT IN THAT TOOL'S CONFIG, named for exactly the
+  # same reason. Creating an agent records that Claude Code trusts the folder
+  # Kosmos made for it, and an uninstaller cannot tell those lines from ones the
+  # person accepted themselves at the same paths. Deleting them would overstep;
+  # leaving them SILENTLY would break the header's rule that anything not
+  # removed is left alone and NAMED — which is the rule this whole block exists
+  # to honour, and which a new leftover quietly opts out of.
+  #
+  # ⚠️ `grep`, not a JSON read, and the sentence is written to what grep can
+  # actually prove: the file MENTIONS the key. By this point the bundled Node is
+  # gone, so there is nothing here that can parse the file, and a sentence that
+  # counted entries would be a claim this code cannot support.
+  if [ -f "$HOME/.claude.json" ] && grep -q 'hasTrustDialogAccepted' "$HOME/.claude.json" 2>/dev/null; then
+    printf '  Claude Code'\''s own file ~/.claude.json still records which folders it\n'
+    printf '  trusts, including any Kosmos made for your agents. Those lines were left\n'
+    printf '  alone: we cannot tell them apart from folders you trusted yourself.\n\n'
+  fi
   exit 0
 }
 

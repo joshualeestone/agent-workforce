@@ -129,6 +129,21 @@ first occurrence, so a break aimed at the rollback's key hit a truthiness check
 instead and the suite stayed green — reported as "this guard has no test" until
 the replacement was aimed at the call. It has one.
 
+## The uninstaller's contract, which this change quietly opted out of
+
+The uninstall header states a rule: **anything not removed is left alone and
+NAMED.** It already honours it for the installer's `skipDangerousModePermissionPrompt`
+— left in place, because an uninstaller cannot tell that key from one the person
+set themselves, and named so they can undo it.
+
+This change adds a **second** thing to that tool's config and said nothing. The
+notice now names it too, in the words `grep` can actually support (the file
+*mentions* the key) rather than a count, because by that point in the uninstall
+the bundled Node is gone and nothing there can parse JSON.
+
+Proven by probe rather than by reading: fires with a trust entry present, silent
+without one, silent on an empty file, silent when the file does not exist.
+
 ## Not in this change
 
 - The `Unknown` memory badge on a brand-new agent's card. Separate, ruled by
