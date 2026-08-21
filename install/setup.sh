@@ -923,10 +923,21 @@ uninstall() {
   # actually prove: the file MENTIONS the key. By this point the bundled Node is
   # gone, so there is nothing here that can parse the file, and a sentence that
   # counted entries would be a claim this code cannot support.
+  # ⚠️ AND THE SENTENCE THAT MAKES IT USEFUL IS "SO THE MARKS STILL APPLY".
+  # The block above has already told them their agents' FOLDERS were left alone,
+  # which means these entries are not stale: open one of those folders in Claude
+  # Code later and it will not ask. The naive reading is that uninstalling made
+  # them inert, and it did not. (Mona Lisa, 2026-08-21; she checked the folder
+  # fact against the notice above rather than assuming the two shapes matched.)
+  #
+  # ⚠️ THE PARENTHETICAL IS LOAD-BEARING, per the precedent above: a key name
+  # shouted at somebody who has just removed the only thing that could explain
+  # it is not a disclosure. Name it, translate it, say the undo.
   if [ -f "$HOME/.claude.json" ] && grep -q 'hasTrustDialogAccepted' "$HOME/.claude.json" 2>/dev/null; then
-    printf '  Claude Code'\''s own file ~/.claude.json still records which folders it\n'
-    printf '  trusts, including any Kosmos made for your agents. Those lines were left\n'
-    printf '  alone: we cannot tell them apart from folders you trusted yourself.\n\n'
+    printf '  Trust marks were left in place: your agents'\'' folders are recorded as\n'
+    printf '  trusted in ~/.claude.json (Claude Code will not ask before working in\n'
+    printf '  them). Those folders are still on your machine, so the marks still\n'
+    printf '  apply. Remove those entries if you want the question back.\n\n'
   fi
   exit 0
 }
