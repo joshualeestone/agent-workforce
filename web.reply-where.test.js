@@ -1,7 +1,23 @@
 'use strict';
 
 /**
- * The line that stops the direct box implying a reply it cannot carry.
+ * 🛑 THE LINE THIS FILE WAS WRITTEN FOR IS GONE, and its removal is the point.
+ *
+ * 0.2.12 shipped "Replies come back there rather than here, for now" because an
+ * agent had nowhere to write. The reply path gave it somewhere, so the sentence
+ * became false four hours after it shipped — and leaving it would have told
+ * somebody not to look at the box the answer had just landed in.
+ *
+ * ⚠️ AND THE LABEL DID NOT WORK EVEN WHILE IT WAS TRUE. Josh read it, waited,
+ * apologised to his agent and asked again, with the sentence directly above the
+ * box he typed into. A sentence explaining why a box does not do the thing it
+ * looks like it does loses to the box looking like it does that thing. The
+ * remedy was never better copy.
+ *
+ * What survives here are the checks that outlived it: the Settings row, and the
+ * box's own two standing sentences.
+ *
+ * The line that stopped the direct box implying a reply it could not carry.
  *
  * 🛑 WHY IT EXISTS. An agent cannot write into a direct thread: the stored
  * record has no field for a sender, so every entry is the person's message to
@@ -20,51 +36,6 @@ const fs = require('node:fs');
 const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-
-test('the line is written before the fetch, like the other lines that name the agent', () => {
-  /**
-   * ⚠️ The neighbouring comment in the page makes this rule explicit: whether a
-   * line names the right agent does not depend on the fetch, and one set on the
-   * success path carries the PREVIOUS agent's name on a borrowed-name pane,
-   * because that arm returns early.
-   *
-   * 🛑 THIS USED TO MEASURE SOURCE PROXIMITY — 700 characters from the label's
-   * assignment — and a longer COMMENT broke it while the code was unchanged. A
-   * check a documentation edit can fail is measuring the wrong thing. It pins
-   * the ORDER against the fetch instead, which is the actual property.
-   */
-  const label = PAGE.indexOf("document.getElementById('d-talk-hint').textContent");
-  const line = PAGE.indexOf("document.getElementById('d-reply-where').textContent");
-  assert.notEqual(label, -1, 'the hint the box heads itself with has moved');
-  assert.notEqual(line, -1, 'the reply-location line is no longer written anywhere');
-
-  /* The first `await` after the label is where the fetch begins; both lines
-     must be written above it. */
-  const gate = PAGE.indexOf('await', label);
-  assert.notEqual(gate, -1, 'no fetch follows the label, so this test is aimed at nothing');
-  assert.ok(line > label && line < gate,
-    'the reply-location line is written after the fetch, so a refusal leaves it carrying the previous agent’s name');
-});
-
-test('it names the agent, says where the answer goes, and does not promise a fix', () => {
-  const at = PAGE.indexOf("document.getElementById('d-reply-where').textContent");
-  assert.notEqual(at, -1);
-  const src = PAGE.slice(at, at + 320);
-
-  assert.match(src, /name \+/, 'the line does not name the agent, so it reads as a general notice');
-  assert.match(src, /their own window/, 'the line no longer says where the reply is');
-  /* 🛑 THE NEGATIVE, which nothing pinned. MEASURED: replacing the copy with
-     "Replies come back HERE, for now" — the exact inversion this change exists
-     to prevent — passed every other assertion in this file. Both
-     /their own window/ and /for now/ survive it. The sentence's whole job is
-     the word "rather", and nothing was watching it. */
-  assert.match(src, /rather\s*'?\s*\+?\s*'?than here/,
-    'the line no longer says the reply does NOT come back here, which is its only job');
-  assert.match(src, /for now/,
-    'the "for now" is gone: without it the sentence reads as a design decision rather than a known limit');
-  assert.doesNotMatch(src, /soon|shortly|will be able|coming/,
-    'the line promises a fix, which is a claim about a schedule nobody has made');
-});
 
 test('the element sits above the persistence note, not below it', () => {
   /**
@@ -176,48 +147,6 @@ test('it is painted on open AND on the poll, off the poll’s existing lookup', 
     'opening the page no longer paints it');
 });
 
-test('the element sits under the thread and above the composer', () => {
-  const thread = PAGE.indexOf('id="d-dmthread"');
-  const busy = PAGE.indexOf('id="d-busy"');
-  const send = PAGE.indexOf('id="d-send"');
-  assert.ok(thread > 0 && busy > thread, 'the line is not under the conversation');
-  assert.ok(busy < send, 'the line is below the composer, where it is not next to what it describes');
-});
-
-test('the line is hidden in the two states where it would be false', () => {
-  /**
-   * 🛑 THE TWO BLOCKERS THIS PINS, both found by a blind pass and neither
-   * caught by anything here before:
-   *
-   *   a name the box cannot resolve — the panel says "we cannot show a
-   *   conversation for this name" while this line said "<name> will see this
-   *   in their own window", eight pixels apart
-   *
-   *   presence 'off' — every reason that arm prints is about the WINDOW ("its
-   *   window is scrolled back", "we cannot reach its window") and this line
-   *   says the answer arrives in that window
-   *
-   * ⚠️ AND A HIDE NEEDS AN UN-HIDE. The element is reused across agents, so a
-   * branch that hides without a matching reset silences the line for the rest
-   * of the session — and absent is indistinguishable from "we decided not to
-   * say it".
-   *
-   * ⚠️ THIS IS A SOURCE ASSERTION AND CANNOT SEE A RENDER, said plainly: it
-   * pins that the decision exists and what it keys on. Whether the element is
-   * actually invisible in those states is a browser question, and the check in
-   * docs/browser-checks/ is where that belongs.
-   */
-  assert.match(PAGE, /d-reply-where'\)\.hidden = body\.presence === 'off'/,
-    'nothing decides whether the line shows, or it no longer keys on the unreachable window');
-  assert.match(PAGE, /d-reply-where'\)\.hidden = false/,
-    'the hide has no matching reset, so one unresolvable name silences the line for every agent after it');
-
-  const refusal = PAGE.indexOf("document.getElementById('d-persist').hidden = true;");
-  assert.notEqual(refusal, -1, 'the refusal arm no longer hides the persistence line, so this is aimed at nothing');
-  assert.match(PAGE.slice(refusal, refusal + 700), /d-reply-where'\)\.hidden = true/,
-    'the refusal arm hides the persistence promise and leaves this one standing, which is the defect the comment beside it records fixing');
-});
-
 test('Settings no longer claims the chat carries what an agent says', () => {
   /**
    * 🛑 THE FALSE CLAIM STATED OUTRIGHT. The Engineering-mode row read "Off by
@@ -241,4 +170,38 @@ test('Settings no longer claims the chat carries what an agent says', () => {
     'the row claims the chat carries what an agent says, which is false of the direct box');
   assert.match(rendered, /Off by default/, 'the row no longer says the toggle is off by default');
   assert.match(rendered, /raw session/, 'the row no longer says what the toggle actually shows');
+});
+
+test('the reply-location line is gone, and gone rather than reworded', () => {
+  /**
+   * 🛑 IT SAID "Replies come back there rather than here", which this branch
+   * makes false. A reworded version would be a new apology for a box that no
+   * longer needs one, and the element is kept only so nothing else that touches
+   * it throws.
+   */
+  assert.doesNotMatch(PAGE, /Replies come back there rather/,
+    'the box still tells the person the reply is somewhere else');
+  assert.doesNotMatch(PAGE, /will see this in their own window. Replies/,
+    'a reworded version of the same apology came back');
+
+  const at = PAGE.indexOf("document.getElementById('d-reply-where').hidden = true;");
+  assert.notEqual(at, -1, 'the element is no longer hidden, so an empty line may take space');
+});
+
+test('the Settings row can say what the chat holds again, and still does not overclaim', () => {
+  /**
+   * ⚠️ THE SENTENCE DROPPED THIS AFTERNOON — "Your chat shows what an agent says
+   * to you" — became TRUE with this branch. It is deliberately NOT restored: it
+   * was doing a reassurance job on a screen that cannot know which surface you
+   * mean, and it is true of the direct box and still false of nothing else that
+   * matters. Mona Lisa's ruling was to drop rather than correct, and the reason
+   * she gave (the row's job is what the toggle does) did not depend on the
+   * sentence being false.
+   */
+  const row = PAGE.indexOf('id="eng-row"');
+  const end = PAGE.indexOf('</div>', PAGE.indexOf('<p class="dhint"', row));
+  const rendered = PAGE.slice(row, end).replace(/<!--[\s\S]*?-->/g, ' ');
+  assert.match(rendered, /raw session/, 'the row no longer says what the toggle shows');
+  assert.doesNotMatch(rendered, /chat shows what an agent says/,
+    'the row went back to explaining the chat instead of the toggle');
 });
