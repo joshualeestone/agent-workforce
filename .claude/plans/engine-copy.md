@@ -311,6 +311,25 @@ somebody to do a thing that leaves the blocker in place.
 no session is invisible and unremovable, so its **name is permanently unusable**.
 The sentence a person reads is not kept as a placeholder for that roadmap.
 
+### 🛑 The stopping rule, written down BEFORE the next pass reports
+
+**Pre-registered 2026-08-20 19:15, at `20dbacc`, so the result cannot shape it.**
+
+One more blind pass runs against this tree. **Whatever it returns, the PR opens
+after it.** Converged means a pass with zero new BLOCKERs, WARNINGs or
+CONVENTIONs; if it does not meet that, the proof file says `converged: false`
+with the count, and the loop continues against the open PR under the
+orchestrator's standing ruling that a PR is not a merge and that a person
+reading it is a second instrument sharing no step with this loop.
+
+🔑 **The reason it may never converge is worth more than the number.** Two
+delivered passes, and each found its BLOCKER inside the previous pass's own fix:
+a doc comment that went false in the commit range that made it false, then a
+docblock left standing while I edited its twin thirty lines away. **Neither was
+a code defect.** Both were sentences about the code, written in the last hour,
+which is kosmos#120's class arriving on a branch that is nothing but sentences.
+Iteration cannot exhaust a generator.
+
 ### Recorded, not fixed, from the passes on the current tree
 
 | what | why it stays |
