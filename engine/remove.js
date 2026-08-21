@@ -803,18 +803,25 @@ function removeInner(name, { tmuxBin } = {}) {
     // reason and this one was missed. Not visible in the browser today, which
     // ignores `steps` -- but the route ships them, so it is a sentence on the
     // wire asserting a job was stopped when there was none.
-    /* ⚠️ ONE ROW OF THE COPY PATCH REVERTED, and flagged rather than shipped.
-       The patch rewrote this label from "it was not set to start on its own, so there was nothing to turn off" to
+    /* ⚠️ ONE ROW OF THE COPY PATCH REVERTED, AND THEN SETTLED. Recorded
+       because the reverted wording is a trap somebody will propose again.
+       The patch rewrote this label from "it had no startup job to stop" to
        "there was nothing running to stop", which drops the referent (the JOB)
        and picks up the SESSION's. The step immediately after this one is
-       labelled "stopped it", so for a jobless agent with a live session the
-       list read:
+       labelled "closed its window", so for a jobless agent with a live session
+       the list read:
            there was nothing running to stop   ok
-           stopped it                          ok
+           closed its window                   ok
        Two labels in one list stating opposite facts, on a wire the route ships.
-       The old wording is jargon and the new wording is a contradiction; the
-       replacement needs to lose "startup job" WITHOUT borrowing the session's
-       words, which is a copy decision rather than an application detail. */
+       The old wording was jargon and that replacement was a contradiction. The
+       wording below is the settled one: it loses "startup job" WITHOUT
+       borrowing the session's words.
+
+       📌 An earlier version of this comment survived that fix. Its "from"
+       quote had been updated to the sentence that now ships while its
+       "reverted, still needs a copy decision" framing stayed, so it told a
+       reader that a settled row was still open and misquoted its own subject
+       to do it. */
     steps.push({ label: 'it was not set to start on its own, so there was nothing to turn off', ok: true });
   }
 

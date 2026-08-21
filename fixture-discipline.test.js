@@ -351,8 +351,8 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
     // keeps the pair honest rather than a paragraph asserting it.
     /* ⚠️ ONE CONDITION, ONE SENTENCE AGAIN. These briefly said "see" and
        "check" for the same failure, and a reader who hit both routes got two
-       sentences for one thing. The adjacent unreadable-answer arms (:619 and
-       :1632) were harmonised to a single sentence in the same sweep, which is
+       sentences for one thing. The adjacent unreadable-answer arms
+       (engine/status.js:619 and :1632) were harmonised to a single sentence in the same sweep, which is
        the shape this pair should have had. Still asserted separately, because
        the call is what discriminates them, not the words.
 

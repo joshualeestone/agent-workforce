@@ -339,6 +339,48 @@ Iteration cannot exhaust a generator.
 | `chat.js:572` "it will not read this until it finishes" implicates that it WILL read it, which `PLACED` cannot know | Ruled copy. `PLACED` knows a keystroke was typed; the `UNCONFIRMED` arm correctly stops earlier. Flagged, not changed. |
 | `create.js:761` offers "you can remove it there instead" on the arm whose premise is that nothing is left | The conditional ("**If** you can see it under Agents") keeps it from being false, and it is deliberate: the four conditions do not guarantee the agent is absent, which is the whole reason removal is offered conditionally. |
 
+### 🛑 Four copy findings raised and NOT fixed, because the words are the designer's
+
+The third pass found four that are hers to rule. All four are recorded with the
+rendered evidence rather than an argument.
+
+**1. The frame presupposes the thing one of its reasons denies exists.**
+Composed with `projects.js:132`, the singular renders:
+
+> *"Its instructions were not updated for this folder: this agent has no
+> instructions file yet, and we will not create one for it."*
+
+The frame asserts `Its instructions` as an existing object; the reason says there
+is no file. Same in the plural. ⚠️ **This is not the doubling the plan already
+records as accepted weight**, and the guard cannot see it: it counts occurrences
+of a word, and a presupposition failure is not a count.
+
+**2. The frame removed the anchor that fixed what "them" meant.**
+The old plural frame named the agents (*"We could not tell any of them where this
+folder is"*) before any value ran, so every value inherited a referent. The new
+frame's only plural noun is *instructions*, and the values now use `them` for
+both: *"none of them has a folder"* (agents), *"we could not write to them"*
+(instructions), and in one clause *"they keep them somewhere we cannot safely
+change"* (agents, then instructions). 📌 **The trim that removed the noun is what
+took the disambiguator with it**, so the guard asserting `instructions` appears
+exactly once is the property that made this worse.
+
+**3. The task-claim reasons answer a different question than the column asks.**
+`claim.claimed` is null because we will not say **who holds this task**; the
+ruled sentence says *"so we will not say what it is doing"*, which is about an
+agent's activity. Its sibling arms kept the right subject. ⚠️ **And my own
+harmonisation propagated it**: I changed the roster-unreadable arm to end alike
+for consistency, so both arms now answer the wrong question, and the failure
+message I wrote on `tasks.test.js:216` concedes the collision in its own words.
+
+**4. `web/index.html:8385` still sends a person to a README**, twice, on the
+create-failure screen that its own comment calls *"the screen where somebody is
+most likely to want an agent gone"*. This is the exact class the sweep removed
+from `create.js`, and `web/index.html` is not declared out of scope anywhere.
+**The branch's own objection to the `create.js` pointers applies to it.** Its
+replacement is a different situation from the four (the agent exists and its
+supervisor keeps retrying), so it needs its own words.
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and

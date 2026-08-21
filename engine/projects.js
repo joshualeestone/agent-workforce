@@ -1648,12 +1648,13 @@ function tellAgent(sessionName, projects, roster) {
       return {
         state: TOLD.COULD_NOT,
         /**
-         * ⚠️ TWO WORLDS FALL THROUGH THIS GATE and only one of them is "not
-         * there". `isNamedOurs !== true` means something IS running under
-         * exactly this name and we will not vouch that it is this agent --
-         * which is the case the gate was written for. One sentence covering
-         * both said the name was not found, which is false on that half.
-         * Split, in `addressable`'s words, so each arm is true of its world.
+         * ⚠️ THREE WORLDS REACH THIS RETURN, and only one of them is "not
+         * there": an unreadable roster, a name held by something we will not
+         * vouch for, and a name nothing holds. `isNamedOurs !== true` is the
+         * second one, and it is the case the gate was written for. One
+         * sentence covering all three said the name was not found, which is
+         * false on that half. Split, in `addressable`'s words, so each arm is
+         * true of its world.
          */
         because: !Array.isArray(roster)
           ? 'we could not check which agents are running, so nothing was written'

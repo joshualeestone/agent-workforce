@@ -758,7 +758,7 @@ function createAgent(opts) {
   if (loaded) {
     return {
       outcome: OUTCOME.REFUSED,
-      because: `something called ${name} is already set to start on this computer, though there is nothing else left of it. Pick another name. If you can see it under Agents, you can remove it there instead.`,
+      because: `something called ${shown} is already set to start on this computer, though there is nothing else left of it. Pick another name. If you can see it under Agents, you can remove it there instead.`,
       steps,
     };
   }
