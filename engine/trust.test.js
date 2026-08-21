@@ -573,17 +573,24 @@ test('an entry that held ONLY a false is not swept away by the undo', () => {
   assert.equal(e[KEY], false);
 });
 
-test('the temp name differs BETWEEN processes, which is the property it exists for', () => {
+test('two processes never choose the same temp path', () => {
   /**
-   * ⚠️ THE UNIQUENESS TEST ABOVE COLLECTS THREE WRITES IN ONE PROCESS, and
-   * `process.pid` plus a counter already make those distinct — so deleting the
-   * start-time from the name leaves it green. The reason the start time is in
-   * there is entirely CROSS-process: a run that died between create and rename
-   * leaves `…-<pid>-1.new` behind, and the next run to draw that pid refuses at
-   * seq 1 forever.
+   * ⚠️ THE UNIQUENESS TEST ABOVE COLLECTS THREE WRITES IN ONE PROCESS, which
+   * `process.pid` plus a counter would satisfy on their own. This one asks a
+   * SECOND process, which is the case that matters at all.
    *
-   * ⚠️ So this asks a SECOND process for its first temp path and compares it to
-   * this one's. Nothing else can see the property.
+   * 🛑 AND IT STILL DOES NOT REACH THE REASON THE START TIME IS IN THE NAME,
+   * which is worth writing down rather than implying: that reason is PID REUSE.
+   * A run that dies between create and rename leaves `…-<pid>-1.new` behind,
+   * and a later run that draws the same pid would refuse at seq 1 forever. Two
+   * live processes always have different pids, so removing the start time
+   * leaves this test green — I checked, rather than assuming the mutation
+   * would fire.
+   *
+   * ⚠️ Reproducing pid reuse from a test would mean waiting for the OS to
+   * recycle a pid. So the start time is kept on the argument in trust.js and
+   * this test claims only what it can see. A test named for a property it
+   * cannot observe is the thing this file keeps finding in itself.
    */
   const script = `
     const fs = require('node:fs');
@@ -619,9 +626,8 @@ test('the temp name differs BETWEEN processes, which is the property it exists f
   assert.equal(mine.length, 1, 'this process wrote no temp file, so there is nothing to compare');
   assert.ok(out, 'the second process wrote no temp file');
   assert.notEqual(out, mine[0], `two processes chose the same temp path: ${out}`);
-  // ⚠️ AND THE PID IS NOT WHAT SEPARATES THEM in the case that matters, so the
-  // parts before the sequence number must differ too.
-  const stem = (p) => p.replace(/-\d+\.new$/, '');
-  assert.notEqual(stem(out), stem(mine[0]),
-    'the names differ only by sequence, so a crashed run at seq 1 still blocks the next process');
+  // ⚠️ NOT a stem comparison. An earlier version stripped the sequence number
+  // and compared what was left, claiming that proved the start time was doing
+  // work — it does not, because the pids differ too. Claiming only the
+  // collision.
 });
