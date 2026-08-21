@@ -6165,6 +6165,39 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   assert.equal(shared([{ told: {} }, { told: {} }]), '', 'empty verdicts collapsed');
 });
 
+test('a member row says when the agent has NOT picked the project up yet', () => {
+  /**
+   * 🛑 THE GAP THIS CLOSES, and it is why the row says anything at all. An
+   * agent reads its instructions when it starts and nothing makes it read them
+   * again, so adding it to a project edits a document it already finished
+   * reading. The room's receipt is true about DELIVERY and silent about
+   * whether the agent knows what the project is. Josh, 2026-08-21: an agent
+   * answered him out of a project he had deleted, and every screen he was
+   * looking at knew and none of them said so.
+   *
+   * ⚠️ The row must NOT name the workaround. "Restart it" is true today and
+   * stops being true the moment the agent can be told in-band (#143), and a
+   * sentence naming a workaround outlives the workaround.
+   */
+  const hasIt = pageFunction('pjMemberHasIt', '');
+
+  assert.match(hasIt({ instructions: { state: 'stale' } }), /Has not picked this up yet/,
+    'a member running on instructions from before it was added says nothing about it');
+  assert.match(hasIt({ instructions: { state: 'unknown' } }), /cannot tell whether it has this yet/,
+    'a member we cannot assess renders as fine, which is the one thing the staleness rule forbids');
+  assert.equal(hasIt({ instructions: { state: 'current' } }), '',
+    'the expected case announces itself, which trains people to stop reading the exceptional one');
+  assert.equal(hasIt({}), '',
+    'a member with no instructions verdict at all invented one');
+
+  // 🛑 NEITHER SENTENCE NAMES THE WORKAROUND. The detail panel carries the
+  // full "only a restart re-reads them"; this row carries what is TRUE.
+  for (const st of ['stale', 'unknown']) {
+    assert.doesNotMatch(hasIt({ instructions: { state: st } }), /restart/i,
+      'the ' + st + ' row names a workaround, which outlives the workaround');
+  }
+});
+
 test('pjMember suppressTold removes the per-member verdict span, and only with it', () => {
   // STATE_COPY here is a DELIBERATELY partial stand-in (two of six keys):
   // it only feeds the state caption, which no assertion below reads, and
@@ -6183,7 +6216,8 @@ test('pjMember suppressTold removes the per-member verdict span, and only with i
     + pageFnSource('discTint') + '\n'
     + pageFnSource('discInk') + '\n'
     + pageFnSource('initials') + '\n'
-    + pageFnSource('pjToldLine') + '\n';
+    + pageFnSource('pjToldLine') + '\n'
+    + pageFnSource('pjMemberHasIt') + '\n';
   const member = pageFunction('pjMember', prelude);
   const toldLine = pageFunction('pjToldLine', TOLD_PRELUDE);
 
