@@ -14,7 +14,7 @@ const CONFIG = nodePath.join(SANDBOX, 'claude.json');
 process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = CONFIG;
 process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ } });
 
-const { trustFolder, KEY } = require('./trust');
+const { trustFolder, forgetFolder, KEY } = require('./trust');
 
 let n = 0;
 /** A folder that exists, fresh per test. */
@@ -70,7 +70,10 @@ test('an existing entry keeps everything it had', () => {
    * Claude Code lost their settings rather than like Kosmos took them.
    */
   const d = folder();
-  write({ projects: { [d]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} }, [KEY]: false } } });
+  // ⚠️ NO trust key at all, deliberately. This fixture used to seed
+  // `[KEY]: false` and assert it flipped to true, which pinned the wrong
+  // behaviour — see the test below.
+  write({ projects: { [d]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} } } } });
   assert.equal(trustFolder(d).ok, true);
   const e = read().projects[d];
   assert.deepEqual(e.allowedTools, ['Bash(ls:*)']);
@@ -101,7 +104,14 @@ test('already trusted is a success AND writes nothing at all', () => {
    * pay for it.
    */
   const d = folder();
-  write({ projects: { [d]: { [KEY]: true } } });
+  /* ⚠️ WRITTEN MINIFIED, AND THAT IS THE WHOLE TEST. The `write()` helper
+     serialises with the same two-space indent this module writes, so a fixture
+     built with it is byte-for-byte what a rewrite would produce — the comparison
+     below passed with the short circuit DELETED, leaving only the return value
+     catching it, which is exactly what the docblock says it is not relying on.
+     A fixture the module would never emit makes the bytes load-bearing. */
+  try { fs.rmSync(CONFIG, { force: true }); } catch { /* fine */ }
+  fs.writeFileSync(CONFIG, JSON.stringify({ projects: { [d]: { [KEY]: true } } }), 'utf8');
   const before = raw();
   assert.deepEqual(trustFolder(d), { ok: true, already: true });
   assert.equal(raw(), before, 'byte-identical: no write happened');
@@ -142,10 +152,17 @@ test('no config file means Claude Code has never run here, and we do not invent 
 });
 
 test('an empty config file is refused rather than filled in', () => {
+  /* ⚠️ THE `because` IS THE ASSERTION, not the refusal. Two guards cover this
+     state: delete the size check and an empty file reaches JSON.parse(''),
+     which throws SyntaxError and refuses anyway with the file untouched — so
+     `ok === false` plus "still empty" passed with the guard it names deleted.
+     Naming which refusal fired is what makes it fail. */
   clear();
   fs.writeFileSync(CONFIG, '', 'utf8');
   const d = folder();
-  assert.equal(trustFolder(d).ok, false);
+  const r = trustFolder(d);
+  assert.equal(r.ok, false);
+  assert.match(r.because, /is empty/, 'a different guard refused, so this test is not watching the one it names');
   assert.equal(raw(), '', 'still empty');
 });
 
@@ -174,11 +191,16 @@ test('a tightened config file is not widened by our write', () => {
    * replace that came back at the umask default would be a permission change
    * nobody asked for, hidden inside a feature about a dialog box.
    */
+  /* ⚠️ 0640, NOT 0600, and the difference is whether this test can fail. The
+     real file sits at 600 — which is also what a default write lands at under a
+     umask of 077, so on such a machine the assertion passed with the mode
+     preservation deleted. 0640 is a mode no umask produces from 0666, so only
+     preservation can produce it. */
   const d = folder();
-  write({ projects: {} }, 0o600);
-  fs.chmodSync(CONFIG, 0o600);
+  write({ projects: {} }, 0o640);
+  fs.chmodSync(CONFIG, 0o640);
   assert.equal(trustFolder(d).ok, true);
-  assert.equal(fs.statSync(CONFIG).mode & 0o7777, 0o600);
+  assert.equal(fs.statSync(CONFIG).mode & 0o7777, 0o640);
 });
 
 test('a path we cannot key on is refused before anything is opened', () => {
@@ -245,4 +267,98 @@ test('a DANGLING symlink is refused too, and not turned into a real file', () =>
   assert.equal(fs.existsSync(nodePath.join(SANDBOX, 'nowhere-at-all.json')), false,
     'and nothing was created where it pointed');
   fs.rmSync(CONFIG, { force: true });
+});
+
+test('a recorded NO is respected, not overwritten', () => {
+  /**
+   * 🛑 `false` IS AN ANSWER, NOT AN ABSENCE. Claude Code writes it when
+   * somebody chose "No, exit" with that exact path in front of them, and it is
+   * live rather than vestigial — 19 of 115 entries on this machine carried it
+   * when this was written.
+   *
+   * The earlier version of this module flipped it to true, and the test above
+   * PINNED that by seeding false and asserting true. The case is narrow (only a
+   * name whose folder was removed and remade can reach it) but the direction is
+   * this whole file's argument: we are writing into somebody else's config, so
+   * a decision they made about this path outranks our convenience. The cost of
+   * respecting it is one prompt.
+   */
+  const d = folder();
+  write({ projects: { [d]: { [KEY]: false, allowedTools: ['Bash(ls:*)'] } } });
+  const before = raw();
+
+  const r = trustFolder(d);
+  assert.equal(r.ok, false, 'we overrode an explicit no');
+  assert.match(r.because, /answered no/);
+  assert.equal(raw(), before, 'and we did not touch their file to do it');
+});
+
+test('taking a trust entry back leaves everything else exactly as it was', () => {
+  /**
+   * ⚠️ THE SENTENCE THIS EXISTS FOR. When the job fails to start, creation says
+   * "we have taken it back off your computer rather than leave something half
+   * installed" — and an entry for a folder that no longer exists, sitting in
+   * another tool's config forever, makes that false in exactly the case that
+   * produces it.
+   */
+  const d = folder();
+  const other = folder();
+  write({ theme: 'dark', projects: { [other]: { [KEY]: true, allowedTools: ['Bash(ls:*)'] } } });
+
+  assert.deepEqual(trustFolder(d), { ok: true, already: false });
+  assert.equal(read().projects[d][KEY], true);
+
+  assert.deepEqual(forgetFolder(d), { ok: true, already: false });
+  const after = read();
+  assert.equal(after.projects[d], undefined, 'the entry we wrote is still there after a rollback');
+  assert.equal(after.projects[other][KEY], true, 'somebody else’s entry went with it');
+  assert.deepEqual(after.projects[other].allowedTools, ['Bash(ls:*)']);
+  assert.equal(after.theme, 'dark');
+});
+
+test('taking back an entry that is not there is a success that writes nothing', () => {
+  const d = folder();
+  write({ projects: {} });
+  const before = raw();
+  assert.deepEqual(forgetFolder(d), { ok: true, already: true });
+  assert.equal(raw(), before);
+});
+
+test('taking back never touches a config we would refuse to write', () => {
+  /**
+   * The undo runs on the failure path, which is the worst moment to introduce
+   * a second way to damage somebody's file. It carries the same refusals.
+   */
+  const d = folder();
+  const text = '{ not json';
+  try { fs.rmSync(CONFIG, { force: true }); } catch { /* fine */ }
+  fs.writeFileSync(CONFIG, text, 'utf8');
+  assert.equal(forgetFolder(d).ok, false);
+  assert.equal(raw(), text);
+});
+
+test('a temp file left by a crash makes the write REFUSE rather than follow it', () => {
+  /**
+   * ⚠️ THE SYMLINK ROUTE, closed the way this repo already closed it once in
+   * `engine/instructions.js`. The temp name is predictable, and the default
+   * write flag FOLLOWS a symlink: a link at `<config>.kosmos.new` would receive
+   * the whole config, account details included, at a path somebody else chose,
+   * and the rename would then make the config itself that link.
+   *
+   * The observable consequence of `wx` is this: an existing temp file is not
+   * written through. It refuses once, clears it, and the next attempt works.
+   */
+  const d = folder();
+  write({ projects: {} });
+  const tmp = CONFIG + '.kosmos.new';
+  const elsewhere = nodePath.join(SANDBOX, 'attacker.json');
+  fs.symlinkSync(elsewhere, tmp);
+
+  const first = trustFolder(d);
+  assert.equal(first.ok, false, 'the write followed a symlink at the temp path');
+  assert.equal(fs.existsSync(elsewhere), false, 'the config was written through the link');
+  assert.equal(fs.existsSync(tmp), false, 'the stale temp file was not cleared, so it would block forever');
+
+  // ⚠️ AND THE RECOVERY, because a refusal that never clears is its own bug.
+  assert.equal(trustFolder(d).ok, true, 'the next attempt is still blocked');
 });

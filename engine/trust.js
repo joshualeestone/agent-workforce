@@ -62,9 +62,13 @@ function trustFolder(dir) {
   }
 
   // The key is the path Claude Code will use, and it uses the resolved one:
-  // every one of the 22 entries on this machine is its own realpath. Writing
-  // the unresolved spelling on a Mac where `~/work` is a symlink would leave a
-  // trusted entry nothing ever reads.
+  // ⚠️ measured rather than assumed — every entry on this machine whose folder
+  // still exists equals its own realpath, and NONE differ. (Stated as the
+  // property, not as a count: the first version of this comment said "all 22",
+  // and the number was stale within a day while the claim it supported stayed
+  // true.) Writing the unresolved spelling on a Mac where `~/work` is a symlink
+  // would leave a trusted entry nothing ever reads, and nothing would report a
+  // failure.
   let key;
   try { key = fs.realpathSync(dir); }
   catch { return { ok: false, because: 'that folder is not there' }; }
@@ -76,6 +80,12 @@ function trustFolder(dir) {
   catch { /* absent is handled below, on its own terms */ }
 
   let data;
+  // ⚠️ Never stays null past the try below: every path out of it returns, so
+  // reaching the write means `statSync` succeeded. An earlier version carried
+  // `prevMode !== null` guards at the write, copied from the installer — where
+  // they ARE live, because there an absent file is the clean case that proceeds.
+  // This function refuses on absent, so those guards implied a mode-less path
+  // that does not exist.
   let prevMode = null;
   try {
     const st = fs.statSync(target);
@@ -116,6 +126,16 @@ function trustFolder(dir) {
   // one reading as a failure.
   if (existing && existing[KEY] === true) return { ok: true, already: true };
 
+  // 🛑 AND A RECORDED `false` IS AN ANSWER, NOT AN ABSENCE. Claude Code writes
+  // that value when somebody chose "No, exit" with this exact path in front of
+  // them — it is live, not vestigial: 19 of 115 entries on this machine carry
+  // it. The case is narrow (only a name whose folder was removed and remade can
+  // reach here) but the direction is the whole argument of this file: we are
+  // writing into somebody else's config, so a decision they made about this
+  // path outranks our convenience. Remaking a folder at that path does not
+  // un-say it. The cost of respecting it is the prompt, once.
+  if (existing && existing[KEY] === false) return { ok: false, because: 'they have already answered no for that folder' };
+
   if (!data.projects) data.projects = {};
   // ⚠️ MERGE INTO the entry rather than replace it. An entry can carry a
   // person's allowedTools and their MCP servers; a fresh object with one key
@@ -128,13 +148,32 @@ function trustFolder(dir) {
   // milliseconds and the rename is atomic, so the file is never half-written —
   // but "never corrupt" is not "never lost", and the honest version of this
   // comment says which one we bought.
+  //
+  // ⚠️ AND IT RUNS THE OTHER WAY TOO, which is the likelier direction and the
+  // one that silently kills the feature: a Claude Code session already holding
+  // its own in-memory copy will, on ITS next whole-file save, drop the entry we
+  // just added. Nothing errors. The write succeeded, the agent asks the prompt
+  // anyway, and the only symptom is the thing this change exists to remove.
+  // Nothing here detects that; it is written down rather than guessed at later.
   const tmp = target + '.kosmos.new';
   try {
     // Born at the preserved mode rather than chmodded into it: this file holds
     // account details and sits at 600. A window where it is world-readable is
     // not acceptable even if the chmod that follows would close it.
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', prevMode !== null ? { mode: prevMode } : {});
-    if (prevMode !== null) fs.chmodSync(tmp, prevMode);
+    // ⚠️ `wx`, and this repo has already paid for learning why. The temp name
+    // is predictable, and the DEFAULT flag FOLLOWS A SYMLINK: a link sitting at
+    // `~/.claude.json.kosmos.new` would receive the whole config — account
+    // details included — at a path somebody else chose, and the rename would
+    // then make the config itself that link. `wx` fails instead of following.
+    // Same fix, same reasoning, as `engine/instructions.js`'s boot-file write.
+    // ⚠️ A stale temp file from a crash therefore refuses ONCE and is cleared by
+    // the catch below, so the next creation succeeds. That is the right way
+    // round: one prompt, versus a write through a link.
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: prevMode });
+    // ⚠️ AND THE CHMOD AFTER STILL RUNS, for umask exactness — `mode` on the
+    // create is masked by the umask, so a file that must come back at 600 on a
+    // machine with a loose umask needs this line. It is not belt and braces.
+    fs.chmodSync(tmp, prevMode);
     fs.renameSync(tmp, target);
   } catch {
     try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
@@ -144,4 +183,58 @@ function trustFolder(dir) {
   return { ok: true, already: false };
 }
 
-module.exports = { trustFolder, KEY };
+/**
+ * Take back a trust entry we wrote, for a folder that is being rolled back.
+ *
+ * ⚠️ IT EXISTS BECAUSE OF A SENTENCE. When `bootstrap` fails, creation tells
+ * the person "we have taken it back off your computer rather than leave
+ * something half installed" — and without this, a `projects[…]` entry for a
+ * folder that no longer exists stays in another tool's config forever, which
+ * makes that sentence false in exactly the case that produces it.
+ *
+ * ⚠️ ONLY EVER CALLED FOR AN ENTRY WE JUST CREATED (the caller keeps the
+ * `already: false` result and passes nothing else), so this cannot delete a
+ * trust decision somebody made themselves.
+ *
+ * Same shape, same refusals, same fail-soft contract as `trustFolder`.
+ */
+function forgetFolder(dir) {
+  const target = CONFIG();
+  if (!dir || !path.isAbsolute(dir)) return { ok: false, because: 'that is not an absolute folder path' };
+
+  // ⚠️ NOT realpath: by the time this runs the folder is gone, so resolving it
+  // would throw and the entry would be stranded. The caller hands back the same
+  // key `trustFolder` returned, which is the resolved one.
+  const key = dir;
+
+  try { if (fs.lstatSync(target).isSymbolicLink()) return { ok: false, because: 'their config file is a symlink' }; }
+  catch { /* handled below */ }
+
+  let data;
+  let prevMode = null;
+  try {
+    const st = fs.statSync(target);
+    prevMode = st.mode & 0o7777;
+    if (st.size === 0) return { ok: false, because: 'their config file is empty' };
+    data = JSON.parse(fs.readFileSync(target, 'utf8'));
+  } catch { return { ok: false, because: 'we could not read their config file' }; }
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, because: 'their config file is not shaped the way we expect' };
+  if (!data.projects || typeof data.projects !== 'object' || Array.isArray(data.projects)) return { ok: true, already: true };
+  if (!(key in data.projects)) return { ok: true, already: true };
+
+  delete data.projects[key];
+
+  const tmp = target + '.kosmos.new';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: prevMode });
+    fs.chmodSync(tmp, prevMode);
+    fs.renameSync(tmp, target);
+  } catch {
+    try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    return { ok: false, because: 'we could not write to their config file' };
+  }
+  return { ok: true, already: false };
+}
+
+module.exports = { trustFolder, forgetFolder, KEY };
