@@ -2656,6 +2656,17 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
              beside it the way the pack draws it. -->
         <span class="dtask" id="d-task" hidden></span>
       </div>
+      <!-- 🛑 MOVED HERE FROM THE INSTRUCTIONS SECTION (Josh, 2026-08-21). The
+           card puts a ⚠️ beside the agent's name; the sentence explaining it was
+           at the BOTTOM of this page, under Instructions, below the conversation
+           and the talk box. He saw the mark, opened the page to find out what it
+           meant, and could not — which is the right thing to do and it did not
+           work. The other copy of the wording is a hover tooltip.
+           ⚠️ THE SAME ELEMENT, NOT A SECOND ONE. Same id, same painter, same
+           derivation; only its position changed. A second rendering of one
+           state is this codebase's named worst habit, and it would be free to
+           disagree with the badge the day the wording moves. -->
+      <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
       <div class="detail-meta" id="d-meta"></div>
       <div class="detail-why" id="d-why" hidden></div>
       <!-- The relationship read from the agent's end, in the header per the
@@ -2820,7 +2831,6 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          simplicity with a small dishonesty. -->
     <label class="flabel" for="d-instr">Instructions</label>
     <div class="fhint">What this agent is for, in your words. It is the first thing they read every time they start.</div>
-    <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
          never calls that function at all and renders a permanently enabled,
