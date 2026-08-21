@@ -620,16 +620,37 @@ test('a post reaching nobody refuses, logs no post row, and logs the refusal', (
   });
 });
 
-test('a sender who is not on the project cannot post into its room, and a sole member has no room', () => {
+test('a sender who is not on the project cannot post into its room, and a sole member posts to the person', () => {
   withFleet(room3(), (board) => {
     armSender('leo-discord');
     const tmux = arm([]);
     const out = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'hi' }, board.agents, ['mara', 'april']);
     assert.equal(out.state, chat.DELIVERY.COULD_NOT);
     assert.match(out.because, /not on that project/);
-    const alone = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'hi' }, board.agents, ['leo']);
-    assert.match(alone.because, /nobody else/);
     assert.equal(tmux.sends().length, 0, 'a refused post still typed into a pane');
+
+    /**
+     * 🛑 THIS HALF USED TO ASSERT THE BUG, TITLE AND ALL ("a sole member has no
+     * room"). An agent alone on a project was told by its own instructions to
+     * answer the room with `kosmos post`, ran exactly that, and was refused
+     * with "nobody else is on that project yet" — while the person who had
+     * asked it the question was sitting in the room reading it. Josh, #172.
+     *
+     * 🔑 RECIPIENTS ARE WHO WE TYPE INTO, and the person is not typed into:
+     * they read the room from the record, which this appends to either way. So
+     * an empty recipient list means "only the person will see this", which is a
+     * normal room. Asserted as BOTH halves, because either alone is the bug:
+     * the post is kept, and no pane was typed into.
+     */
+    const before = messages.record().rows.filter((m) => m.kind === 'post').length;
+    const alone = messages.sendPost({ fromPane: '%7', project: 'henderson-lease', text: 'answering you' }, board.agents, ['leo']);
+    assert.notEqual(alone.state, chat.DELIVERY.COULD_NOT,
+      'the sole member on a project was refused its own answer: ' + alone.because);
+    const rows = messages.record().rows.filter((m) => m.kind === 'post');
+    assert.equal(rows.length, before + 1, 'the sole member’s post reached the person’s record');
+    assert.equal(rows[rows.length - 1].text, 'answering you');
+    assert.equal(tmux.sends().length, 0,
+      'there is nobody else on the project, so nothing should have been typed into a pane');
   });
 });
 
@@ -764,9 +785,17 @@ test('the record shape rule for posts: array to and object outcomes demanded, a 
   fs.appendFileSync(messages.LOG, JSON.stringify({
     kind: 'post', id: 'm3', project: 'p', from: 'leo', to: ['mara'], text: 'no outcomes', at,
   }) + '\n');
+  /* 🛑 AND AN EMPTY `to` IS VALID, pinned because it looks malformed and was
+     dropped for exactly that reason (#172). A sole member's post has no
+     recipients — the person is never typed into — so the row was written, the
+     verdict said `placed`, and this reader threw it away. Nothing reported a
+     failure at any layer. */
+  fs.appendFileSync(messages.LOG, JSON.stringify({
+    kind: 'post', id: 'm4', project: 'p', from: 'leo', to: [], text: 'alone on the project', at, outcomes: {},
+  }) + '\n');
   const rows = messages.record().rows.filter((m) => m.kind === 'post');
-  assert.equal(rows.length, 1, 'a malformed post row reached the record (or the valid one was dropped)');
-  assert.equal(rows[0].id, 'm1');
+  assert.deepEqual(rows.map((r) => r.id), ['m1', 'm4'],
+    'a malformed post row reached the record, or a valid one was dropped');
 });
 
 test('the forgery gate holds on the post path for BOTH markers, and on send for the background marker', () => {
