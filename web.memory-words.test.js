@@ -23,6 +23,18 @@ const nodePath = require('node:path');
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
 /** Pull one top-level function out of the page and make it callable. */
+function sliceFn(name) {
+  const at = PAGE.indexOf(`function ${name}(`);
+  assert.notEqual(at, -1, `${name} is not in the page at all`);
+  let depth = 0;
+  let i = PAGE.indexOf('{', at);
+  for (; i < PAGE.length; i++) {
+    if (PAGE[i] === '{') depth++;
+    else if (PAGE[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  return PAGE.slice(at, i + 1);
+}
+
 function extract(name) {
   const at = PAGE.indexOf(`function ${name}(`);
   assert.notEqual(at, -1, `${name} is not in the page at all`);
@@ -172,28 +184,40 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
   assert.equal(owned.split("'Not yet read'").length - 1, 1, 'the derivation no longer holds the new word either');
 });
 
+/* ⚠️ WITH ITS REAL DEPENDENCIES, sliced from the page like the function itself.
+   `memoryBox` reaches `pctOf`, `memBand`, `memUnknown` and `esc`; stubbing any
+   of them would put a copy back into the test, which is the thing this test was
+   rewritten to stop doing. */
+const memoryBox = (function () {
+  const deps = ['esc', 'memUnknown', 'pctOf', 'memBand', 'memoryBox'];
+  // eslint-disable-next-line no-new-func
+  return new Function(
+    'const NEARLY_FULL = 80, WARM = 60;\n' + deps.map(sliceFn).join('\n') + '; return memoryBox;',
+  )();
+}());
+
 test('the Memory box sentence reads as English after the name it follows', () => {
   /**
    * 🛑 THE BUG THIS CATCHES SHIPPED PAST SIX TESTS AND A BLIND REVIEW OF THE
    * ENGINE, because every one of them checked `word` and `aria` and nothing
-   * ever composed `lead`. The Memory box writes "<name>'s " + lead, and the
-   * new branch read: "Dan's has not written anything to read yet."
+   * ever composed `lead`. The box writes "<name>'s " + lead, and the branch
+   * read: "Dan's has not written anything to read yet."
    *
-   * ⚠️ So this asserts the SENTENCE, built the way the page builds it, rather
-   * than the fragment. A test on the fragment cannot see a grammar bug.
+   * ⚠️ AND IT EXECUTES `memoryBox` RATHER THAN REBUILDING ITS TEMPLATE. The
+   * version before this composed `"Dan’s " + u.lead` itself — a copy of the
+   * thing under test, which passes if the real renderer drops the possessive,
+   * changes the order, or stops calling `memUnknown` at all. The diagnosis in
+   * this very docblock is "nothing ever composed lead", and rebuilding it here
+   * is still nothing composing it.
    */
-  for (const notYet of [true, false]) {
-    const u = memUnknown({ notYet });
-    const sentence = 'Dan\u2019s ' + u.lead;
-    /* ⚠️ THE NOUN, NOT "a lowercase word". The first version read
-       `/^Dan\u2019s (memory|[a-z]+ )/`, and `[a-z]+ ` matches "has " — so the
-       exact string in the docblock above, the bug this test was written for,
-       PASSED it. All the work was being done by a five-verb denylist, which
-       "Dan's shows nothing yet" walks straight past. A possessive needs a noun
-       after it, and the noun here is always the same one. */
-    assert.match(sentence, /^Dan\u2019s memory\b/, `reads wrong after a possessive: "${sentence}"`);
-    assert.match(u.lead, /\.$/, 'the lead is a sentence and must end like one');
-    assert.match(u.note, /\.$/);
+  for (const ctx of [{ notYet: true }, { notYet: false }, { tokens: 1, noCeiling: true }]) {
+    const html = memoryBox({ name: 'Dan', context: { percent: null, ...ctx } });
+    const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    assert.match(text, /Dan\u2019s memory\b/, `reads wrong after a possessive: "${text}"`);
+    assert.doesNotMatch(text, /\u2019s (has|is|does|will|can|was|shows)\b/,
+      `a verb directly after the possessive: "${text}"`);
+    assert.match(text, /\.\s|\.$/, 'the box produced no sentence at all');
   }
 });
 
