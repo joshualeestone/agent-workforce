@@ -1583,6 +1583,9 @@ const server = http.createServer((req, res) => {
         const delivery = messages.sendPost({
           fromPane: body.from_pane,
           project: found.id,
+          // The NAME for the envelope the agent reads, the id for everything a
+          // machine keys on. Both, from the same record, so they cannot drift.
+          projectName: found.name,
           text: body.text,
         }, roster, members);
         sendJson(res, 200, { delivery });
@@ -2741,7 +2744,7 @@ const server = http.createServer((req, res) => {
           return;
         }
         const members = (found.agents || []).map((a) => a.sessionName);
-        const delivery = messages.sendPost({ operator: true, project: found.id, text: body.text }, roster, members);
+        const delivery = messages.sendPost({ operator: true, project: found.id, projectName: found.name, text: body.text }, roster, members);
         sendJson(res, 200, { delivery });
       })
       .catch((err) => sendJson(res, (err && err.status) || 400,
