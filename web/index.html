@@ -1467,6 +1467,17 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    was the recorded defence, and the floor does not have a caption exemption. */
 .pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
+/* The not-yet-told mark. Same size and rhythm as .pj-told beside it; it is a
+   fact about this row rather than an alarm, so it takes the attention colour
+   and not the error one.
+   ⚠️ NOT `.pj-told`, and that is load-bearing rather than tidiness. A shared
+   verdict across the roster suppresses the per-member told lines, because the
+   group line already carries them. It does NOT carry this: staleness is per
+   agent, one member can be running on old instructions while another is not,
+   and there is no group form of it. So it must survive that suppression, and
+   sharing the class would have hidden it exactly when several members were in
+   the same state. */
+.pj-member .pj-notyet { display: block; font: var(--text-caption) var(--font-ui); color: var(--k-ink-2); flex-basis: 100%; }
 /* The one-verdict-for-the-roster line: same voice as .pj-told, but it sits
    as its own flex child below the member cards, not inside one of them. */
 .pj-members .pj-told-group { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); margin: 0; }
@@ -9925,8 +9936,46 @@ function pjMember(m, suppressTold) {
        scoped actions, the escalation gradient member < archive <
        remove-from-Kosmos). */
     + (toldLine ? '<span class="pj-told">' + toldLine + '</span>' : '')
+    + pjMemberHasIt(m)
     + '</span>'
     + '</div>';
+}
+
+/**
+ * Whether this member has actually BEEN TOLD, on the row where you add it.
+ *
+ * ⚠️ THE GAP THIS CLOSES. An agent reads its instructions when it starts and
+ * nothing makes it read them again, so adding it to a project edits a document
+ * it already finished reading. The room's receipt ("Placed with Johnson and
+ * Rick") is true about DELIVERY and says nothing about whether either agent
+ * knows what the project is. Josh spent a morning on 2026-08-21 concluding the
+ * messaging was broken while an agent answered him, correctly, out of a project
+ * he had deleted.
+ *
+ * 📌 The verdict is not computed here and is not new. `instructions.staleness`
+ * has returned exactly this all along, and the AGENT CARD already draws it. It
+ * was on the screen where a PERSON edits the file by hand, which is the one
+ * place they already know something changed, and absent from the screen where
+ * KOSMOS edits it on their behalf.
+ *
+ * 🛑 IT MUST NOT SAY "RESTART IT". That is true today and stops being true the
+ * moment the agent can be told in-band (#143), and a sentence naming a
+ * workaround outlives the workaround. The row says what is TRUE; the detail
+ * panel, which has the room for it, says what to DO. Her ruling, and it is the
+ * reason this is three words rather than a sentence.
+ */
+function pjMemberHasIt(m) {
+  const s = m.instructions || {};
+  if (s.state === 'stale') {
+    return '<span class="pj-notyet">Has not picked this up yet</span>';
+  }
+  if (s.state === 'unknown') {
+    return '<span class="pj-notyet">We cannot tell whether it has this yet</span>';
+  }
+  /* CURRENT says NOTHING. A row that announces the expected case trains people
+     to stop reading the exceptional one, and this column already carries a
+     state, a role and sometimes a verdict. */
+  return '';
 }
 
 function pjFolderLine(p) {

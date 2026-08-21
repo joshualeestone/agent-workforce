@@ -663,6 +663,31 @@ function describe(project, roster, all) {
       // photograph of somebody it is not (the project cards draw member
       // faces, and a face is the strongest identity claim on the screen).
       hasAvatar: Boolean(card && card.isNamedOurs && card.hasAvatar),
+      /**
+       * ⚠️ WHETHER THIS AGENT HAS ACTUALLY BEEN TOLD, which is a different
+       * question from whether we wrote the file. An agent reads its
+       * instructions when it starts and nothing makes it read them again, so
+       * adding it to a project edits a document it finished reading, and the
+       * row said nothing about that.
+       *
+       * Josh, 2026-08-21: he added an agent, the room said "Placed with
+       * Johnson and Rick", and the agent answered out of a project he had
+       * DELETED. The receipt was true about delivery and silent about whether
+       * either agent knew what the project was.
+       *
+       * 📌 NOT A NEW COMPUTATION. `instructions.staleness` already returns
+       * exactly this and the agent card already draws it; it was absent from
+       * the one screen where KOSMOS edits the file on the person's behalf and
+       * present on the screen where the PERSON edits it by hand, which is the
+       * one place they already know something changed.
+       *
+       * Gated on `tied` like every other value taken off a card here: a
+       * staleness verdict read off a pane we cannot tie to this name is
+       * somebody else's.
+       */
+      instructions: (card && card.isNamedOurs)
+        ? instructions.staleness(sessionName, undefined, card.session)
+        : { state: 'unknown', editable: false, version: null, startedAt: null, because: 'we cannot tell whether this is the same agent' },
       // ⚠️ "Never seen" is only said when we have never seen it. The flag is
       // written once at add time, and an agent added while the roster was
       // unreadable was stamped `false` forever -- so a real agent that stopped
