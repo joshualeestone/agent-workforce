@@ -124,6 +124,10 @@ const FIXTURES = [
       if (!pct) continue;
       res.rows.push({
         caption: pct.firstChild ? pct.firstChild.textContent : '',
+        // ⚠️ WHAT A SCREEN READER ACTUALLY SAYS, which is the whole cell, not
+        // the hidden span. The word is not aria-hidden here (unlike the card,
+        // where the ring carries the sentence), so the two are concatenated.
+        spoken: pct.textContent.replace(/\s+/g, ' ').trim(),
         vh: pct.querySelector('.vh') ? pct.querySelector('.vh').textContent : '',
         pctW: Math.round(box(pct).width),
         barW: Math.round(box(bar).width),
@@ -187,7 +191,15 @@ const FIXTURES = [
     // cell grows and the flex bar beside it shrinks.
     if (r.barW < 24) problems.push(`list row "${r.caption}" squeezed the bar to ${r.barW}px`);
     if (!/[a-z]/.test(r.vh)) problems.push(`list row "${r.caption}" has no spoken sentence in its .vh span`);
-    if (r.vh.trim() === 'memory') problems.push(`list row "${r.caption}" speaks as "${r.caption} memory", a phrase built by appending a noun to whichever word arrived`);
+    /* ⚠️ AIMED AT THE COMPOSED STRING. A guard on the suffix alone missed both
+       versions of this defect: " memory" announced as "Not yet read memory",
+       and " memory: Nothing has been recorded…" announced as that plus a
+       sentence restating the fact. The symptom is in what gets SAID. */
+    const words = r.spoken.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    if (new Set(words).size !== words.length) {
+      problems.push(`list row speaks as "${r.spoken}", which repeats itself`);
+    }
+    if (!/[.!?]$/.test(r.spoken)) problems.push(`list row speaks as "${r.spoken}", which is not a sentence`);
   }
 
   const d = out.detail;

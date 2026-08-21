@@ -4338,13 +4338,17 @@ function memUnknown(ctx) {
        code distinguishes, never on how old an agent is (see status.js), so
        "that is normal for an agent this new" asserted something the engine
        deliberately refused to know — and it is reachable for cases that are not
-       new at all. The normality is attributed to the class, which is true,
-       rather than to this agent, which we cannot see. */
+       new at all.
+       ⚠️ THE SECOND ATTEMPT WAS STILL WRONG, AND ONLY IN COMPOSITION: "That is
+       normal for a new agent" reads fine alone, and after "Dan's memory has
+       nothing recorded yet" the word "That" points straight back at Dan. A
+       class claim and an instance claim are the same sentence once something
+       refers backwards. This version refers to nothing. */
     ? { notYet: true,
         word: 'Not yet read',
         aria: 'Nothing has been recorded for it so far.',
         lead: 'memory has nothing recorded yet.',
-        note: 'That is normal for a new agent. Nothing here can tell you how much room is left.' }
+        note: 'Agents that have just started have nothing recorded yet. Nothing here can tell you how much room is left.' }
     : { notYet: false,
         word: 'Unknown',
         aria: 'Memory could not be read.',
@@ -4634,8 +4638,16 @@ function lrow(a) {
      cell and what a screen reader hears could disagree about which unknown
      this is. */
   const memu = memUnknown(a.context);
+  /* ⚠️ THE ACCESSIBLE NAME IS THE WORD PLUS THIS SPAN, CONCATENATED, and the
+     version before this got that wrong twice over. It announced
+     "Not yet read memory" (a noun stuck on whichever word arrived), then
+     "Not yet read memory: Nothing has been recorded for it so far." — the same
+     noun, now followed by a sentence restating the fact.
+     ⚠️ The word is NOT `aria-hidden` here, unlike on the card where the ring
+     carries the sentence. So the spoken half must COMPLETE the visible word
+     rather than restate it. */
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct">${memu.word}<span class="vh"> memory: ${memu.aria}</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct">${memu.word}<span class="vh"> memory for this agent.</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>

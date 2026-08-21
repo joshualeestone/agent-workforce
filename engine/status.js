@@ -1207,9 +1207,14 @@ function registrySafe(value) {
  * and making it out of our own unreadable file is the failure this whole split
  * exists to remove. So the flag says which kind of empty this is.
  */
-let REFUSED_TO_LOOK = false;
 function sessionIdsFor(sessionName, exactSession) {
-  REFUSED_TO_LOOK = false;
+  /* ⚠️ RETURNED, not stashed in a module variable, and the first version of
+     this DID stash it — three functions below, this same file argues against
+     exactly that for `tailBytes`: "one interleaved call away from a verdict
+     computed about a different file. The fact belongs to the read." It was
+     safe here by accident (one synchronous reader, immediately after the
+     call), and safe-by-accident is what the next reader inherits. */
+  let refused = false;
   // ⚠️ When the caller knows the REAL session name, only that spelling is
   // tried. The board's name is the session with `-discord` stripped, so `foo`
   // and `foo-discord` are one name and two sessions — and trying both spellings
@@ -1230,8 +1235,8 @@ function sessionIdsFor(sessionName, exactSession) {
   // ⚠️ A REFUSAL, NOT AN ABSENCE. We can see there is a name and are declining
   // to build a path from it — the same shape as the identity refusal further
   // down, and the opposite of "nothing has ever been registered here".
-  if (exactSession !== undefined && !safeExact) { REFUSED_TO_LOOK = true; return []; }
-  if (!safeName) { REFUSED_TO_LOOK = true; return []; }
+  if (exactSession !== undefined && !safeExact) return { ids: [], refused: true };
+  if (!safeName) return { ids: [], refused: true };
   const candidates = safeExact
     ? [`${safeExact}_0.0.json`]
     : [`${safeName}-discord_0.0.json`, `${safeName}_0.0.json`];
@@ -1253,15 +1258,15 @@ function sessionIdsFor(sessionName, exactSession) {
           : [sessionName, `${sessionName}-discord`];
         // A registry entry that names a DIFFERENT agent is a collision we
         // deliberately refuse to read across. We looked and declined.
-        if (owner && !wanted.includes(owner)) { REFUSED_TO_LOOK = true; continue; }
+        if (owner && !wanted.includes(owner)) { refused = true; continue; }
         if (entry.session_id) found.push(entry.session_id);
-        else REFUSED_TO_LOOK = true;   // an entry exists; it just has no id in it
+        else refused = true;   // an entry exists; it just has no id in it
       } catch (err) {
         // ⚠️ ENOENT is "no entry here", which is a real absence. Anything else —
         // unreadable file, corrupt JSON — is a FAILURE to look, and reporting
         // it as "this agent has never started" is a claim about the agent made
         // out of a problem of ours.
-        if (!err || err.code !== 'ENOENT') REFUSED_TO_LOOK = true;
+        if (!err || err.code !== 'ENOENT') refused = true;
       }
     }
   }
@@ -1271,11 +1276,11 @@ function sessionIdsFor(sessionName, exactSession) {
   // reporting "no transcript" for an agent whose own transcript was sitting
   // under the other spelling. Registry entries outlive their sessions, so the
   // first match is not necessarily the live one.
-  return found;
+  return { ids: found, refused };
 }
 
 function transcriptFor(agentName, exactSession) {
-  const sessionIds = sessionIdsFor(agentName, exactSession);
+  const { ids: sessionIds } = sessionIdsFor(agentName, exactSession);
   if (!sessionIds.length) return null;
 
   for (const sessionId of sessionIds) {
@@ -1360,10 +1365,8 @@ function readContext(agentName, model, exactSession, running) {
     // never been anywhere to look. An entry whose file is GONE is the other
     // thing entirely: it was read once and is not there now, and calling that
     // "not yet" would be false in a specific way rather than merely vague.
-    const registered = sessionIdsFor(agentName, exactSession).length > 0;
-    // ⚠️ AND A LOOK WE COULD NOT COMPLETE IS NOT AN ABSENCE. Read straight after
-    // the call that sets it, before anything else can touch a registry.
-    const blind = REFUSED_TO_LOOK;
+    const { ids, refused: blind } = sessionIdsFor(agentName, exactSession);
+    const registered = ids.length > 0;
     // 🛑 AND A PANE THAT IS RUNNING CLAUDE HAS STARTED A SESSION, whatever the
     // registry says. "No entry" is not the absence it looks like: the registry
     // key is <session>_<window>.<pane> and we only ever build `_0.0`, so an
