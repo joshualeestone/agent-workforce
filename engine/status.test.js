@@ -1866,3 +1866,42 @@ test('THE CONTROL: a transcript that IS there, fully read, with no usage rows, i
   assert.equal(ctx.percent, null);
   assert.equal(ctx.notYet, true, 'the one honest "not yet" case lost its wording');
 });
+
+test('a measured agent whose model size we do not know says so, and carries the flag that says it', () => {
+  /**
+   * 🛑 THE LINK NOTHING TESTED. The engine takes a real reading and cannot turn
+   * it into a percentage, and every surface then said "memory could not be
+   * read" about a reading it had. Removing the engine's own flag broke nothing
+   * in the suite, which is how the wrong sentence stayed live.
+   *
+   * ⚠️ `noCeiling` is a FLAG rather than "tokens present and no percent",
+   * because that shape is also produced by a percent we could not read, and
+   * those are two different things to tell somebody.
+   */
+  const ctx = contextFor('nolimit', ({ transcript, entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({
+      session_name: 'nolimit', session_id: 'sess-nolimit', cwd: '/somewhere',
+    }), 'utf8');
+    fs.writeFileSync(transcript, JSON.stringify({
+      message: { model: 'some-model-nobody-has-measured', usage: { input_tokens: 42000 } },
+    }) + '\n', 'utf8');
+  });
+
+  assert.ok(ctx.tokens > 0, 'no reading was taken, so this tests the wrong branch');
+  assert.equal(ctx.percent, null, 'a percentage appeared for a model with no known size');
+  assert.equal(ctx.noCeiling, true, 'the flag the surfaces read is not set, so they say we failed to read it');
+  assert.equal(ctx.notYet, false);
+
+  // ⚠️ THE CONTROL: a model we HAVE measured must not carry the flag, or it is
+  // set unconditionally and says nothing.
+  const known = contextFor('haslimit', ({ transcript, entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({
+      session_name: 'haslimit', session_id: 'sess-haslimit', cwd: '/somewhere',
+    }), 'utf8');
+    fs.writeFileSync(transcript, JSON.stringify({
+      message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } },
+    }) + '\n', 'utf8');
+  });
+  assert.ok(known.percent !== null, 'the control produced no percentage either');
+  assert.equal(known.noCeiling, undefined);
+});
