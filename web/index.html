@@ -11275,8 +11275,73 @@ function pjJoinNames(list) {
   return list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
 }
 
+/* ⚠️ "OR", NOT "AND", and it is a different list from the one above. The base
+   receipt names who the message was PLACED with, which is an "and" list because
+   all of them got it. The silence clause names who has said nothing, and a
+   person reading "nothing back from Rick and Bob" hears one joint absence
+   rather than two separate ones. */
+function pjJoinOr(list) {
+  if (list.length <= 1) return list.join('');
+  return list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1];
+}
+
+/**
+ * Who this message was placed with and has said NOTHING since.
+ *
+ * 🛑 THE WHOLE REASON #145 EXISTS. Josh posted into a room three times and got
+ * "Placed with Johnson, Rick and Bob." each time, while nothing came back — and
+ * the receipt was TRUE every time. The keystrokes were placed. It just could not
+ * be told apart from the case where they were placed and read. A true sentence
+ * that cannot distinguish working from broken is the same failure as the CLI's
+ * "everyone received it", and it cost him most of a morning.
+ *
+ * 🔑 WHAT "BACK" MEANS, AND WHAT IT DELIBERATELY DOES NOT (Mona Lisa's ruling):
+ * ANY message from that agent in this room after this one. NOT a reply to this
+ * specific message. We cannot see intent and must not pretend to — and the
+ * wording is chosen to match exactly that. "Nothing back from Rick" is true of
+ * "Rick has said nothing since", which is what we can actually observe.
+ *
+ * ⚠️ SO IF THIS IS EVER TIGHTENED TO REPLY-THREADING, THE SENTENCE HAS TO
+ * CHANGE WITH IT, or it becomes a claim about whether somebody chose to answer.
+ *
+ * ⚠️ COMPUTED FROM THE WHOLE ROOM, never the filtered rows. A person typing in
+ * the search box must not change what a receipt claims.
+ *
+ * ⚠️ AND FROM POSITION, not from timestamps. Two messages can land in the same
+ * millisecond, and a clock that steps backwards would otherwise turn an answer
+ * into a silence.
+ */
+function pjSilentSince(m, allRows, idx) {
+  const placed = Object.entries(m.outcomes || {})
+    .filter(([, state]) => state === 'placed')
+    .map(([who]) => who);
+  if (!placed.length) return [];
+  const spoke = new Set();
+  for (let i = idx + 1; i < allRows.length; i++) {
+    const r = allRows[i];
+    if (!r || r.operator === true || r.kind === 'valve') continue;
+    if (r.from) spoke.add(r.from);
+  }
+  return placed.filter((who) => !spoke.has(who));
+}
+
+/* ⚠️ A RENDER CONDITION, NOT A TIMER. Nothing is scheduled and nothing is
+   stored: the sentence appears on the first paint after two minutes and
+   DISAPPEARS on the next paint once the agent speaks. A stored verdict would
+   keep telling somebody nobody answered five minutes after somebody did.
+   ⚠️ Two minutes because under it, silence is the normal shape of a working
+   room -- an agent that is reading takes longer than that. Below the threshold
+   the sentence would fire on every healthy post, which is the CLI overclaim
+   again with the sign flipped. */
+const PJ_SILENCE_AFTER_MS = 2 * 60 * 1000;
+function pjOldEnoughToJudge(at) {
+  const when = Date.parse(at);
+  if (!Number.isFinite(when)) return false;   // no timestamp is not "long ago"
+  return (Date.now() - when) >= PJ_SILENCE_AFTER_MS;
+}
+
 /** The receipt, in the operator's words, one clause per real state. */
-function pjReceiptSentence(outcomes, p) {
+function pjReceiptSentence(outcomes, p, silent) {
   const groups = { placed: [], unconfirmed: [], could_not: [] };
   for (const [who, state] of Object.entries(outcomes || {})) {
     /* An UNKNOWN state lands in the not-confirmed clause: "could not be
@@ -11291,10 +11356,24 @@ function pjReceiptSentence(outcomes, p) {
     bits.push(pjJoinNames(groups.unconfirmed) + ' may have it; not confirmed, so it is not re-sent.');
   }
   if (groups.could_not.length) bits.push(pjJoinNames(groups.could_not) + ' could not be reached.');
+
+  /* ⚠️ ORDERED BY THE LIST ALREADY ON SCREEN, so the two sentences can be
+     matched by eye without re-reading the first one. */
+  if (silent && silent.length && groups.placed.length) {
+    const names = groups.placed.filter((n) => silent.includes(n));
+    if (names.length) {
+      /* ⚠️ "ANY OF THEM" WHEN IT IS ALL OF THEM, deliberately. Repeating the
+         whole list reads as a DIFFERENT set of people; "any of them" points at
+         the list already in front of the person. */
+      bits.push(names.length === groups.placed.length && names.length > 1
+        ? 'Nothing back from any of them.'
+        : 'Nothing back from ' + pjJoinOr(names) + '.');
+    }
+  }
   return bits.join(' ');
 }
 
-function pjRoomRow(m, p) {
+function pjRoomRow(m, p, silent) {
   if (m.kind === 'valve') {
     /* Reassurance, not an error: the valve is the product doing its job.
        The timestamp span only exists when there is a timestamp, so its
@@ -11322,7 +11401,7 @@ function pjRoomRow(m, p) {
   const cls = states.length && states.every((v) => v === 'placed') ? 'placed'
     : (states.some((v) => v === 'could_not') ? 'failed' : 'unsure');
   const receipt = showReceipt && states.length
-    ? '<span class="delivery ' + cls + '">' + esc(pjReceiptSentence(m.outcomes, p)) + '</span>' : '';
+    ? '<span class="delivery ' + cls + '">' + esc(pjReceiptSentence(m.outcomes, p, silent)) + '</span>' : '';
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'
@@ -11370,7 +11449,17 @@ function paintRoom(body) {
   const allRows = body.rows || [];
   const shown = pjRoomFilterRows(allRows, p, PJ_ROOM_QUERY);
   const filtering = PJ_ROOM_QUERY.trim() !== '';
-  const rows = shown.map((m) => pjRoomRow(m, p)).join('');
+  /* ⚠️ INDEXED AGAINST `allRows`, NOT `shown`. The silence verdict is about the
+     room, and a person typing in the search box must not be able to change what
+     a receipt claims — filtering out an agent's reply would otherwise turn a
+     working exchange into "nothing back from Rick". */
+  const silences = new Map();
+  allRows.forEach((m, i) => {
+    if (m && m.outcomes && pjOldEnoughToJudge(m.at)) {
+      silences.set(m, pjSilentSince(m, allRows, i).map((who) => pjNameOf(p, who)));
+    }
+  });
+  const rows = shown.map((m) => pjRoomRow(m, p, silences.get(m))).join('');
   /* An unreadable record is SAID, ahead of whatever could be read --
      no-state-as-silence, the same rule as every list on this app. */
   const note = body.ok === false
