@@ -8160,3 +8160,108 @@ test('no figcaption is emitted, because nothing can name a source yet', () => {
     'a caption was invented; the pack draws one naming file and line, and nothing in this '
     + 'product can produce that, so shipping it would assert what nobody computed');
 });
+
+// ---------------------------------------------------------------------------
+// An agent answering the person (#175)
+// ---------------------------------------------------------------------------
+
+test('the reply route writes as the pane’s agent, whatever the body claims', async () => {
+  /**
+   * 🛑 THE TEST THIS REPLACES CERTIFIED NOTHING. It grepped three substrings out
+   * of `server.js`, and a blind reviewer demonstrated the hole by changing the
+   * route to `const who = body.as || sender.card.sessionName` — letting any
+   * caller name both the sender AND the thread it lands in — with all seven
+   * tests still green, because `resolveSender(...)` and `from: who` were both
+   * still present in the source.
+   *
+   * ⚠️ This drives the real route over HTTP, the way the sibling test above
+   * does for `/api/msg`, and asserts on the RECORD rather than on the file.
+   */
+  const messagesEngine = require('./engine/messages');
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })]);
+  try {
+    messagesEngine.setRunner(() => ({ ok: true, session: 'leo-discord' }));
+
+    const r = await req('/api/reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // Everything a caller could use to claim somebody else's identity.
+      body: JSON.stringify({ text: 'answering you', from_pane: '%3', from: 'mara', as: 'mara', agent: 'mara' }),
+    });
+    assert.equal(r.status, 200, r.body);
+    assert.equal(JSON.parse(r.body).kept, true, 'the reply was not kept: ' + r.body);
+
+    // ⚠️ READ BACK THROUGH THE ROUTE THE PAGE USES, not through the engine: the
+    // question is which thread a person would see it in.
+    const leo = await req('/api/agent/leo/thread');
+    assert.equal(leo.status, 200, leo.body);
+    const rows = JSON.parse(leo.body).messages;
+    assert.equal(rows.length, 1, 'the reply is not in the pane-owner’s thread');
+    assert.equal(rows[0].from, 'leo', 'the row was attributed to the name in the body');
+    assert.equal(rows[0].text, 'answering you');
+
+    // 🛑 AND NOTHING LANDED IN MARA'S. This is the assertion the source-grep
+    // version could not make, and the one the reviewer's mutation broke.
+    const mara = await req('/api/agent/mara/thread');
+    assert.equal(mara.status, 200, mara.body);
+    assert.deepEqual(JSON.parse(mara.body).messages, [],
+      'a caller wrote into another agent’s private conversation by naming it');
+  } finally {
+    messagesEngine.setRunner(null);
+    fleet.restore();
+    void board;
+  }
+});
+
+test('the reply route refuses what it cannot attribute, and says why', async () => {
+  /**
+   * ⚠️ THE THREE ARMS THE SOURCE-GREP VERSION NEVER REACHED: a message the
+   * store would refuse, a pane that ties to nobody, and a missing pane. Each
+   * answers a sentence rather than a silent failure, because an agent that
+   * cannot answer must be able to tell its person why.
+   */
+  const messagesEngine = require('./engine/messages');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  try {
+    /* ⚠️ A RUNNER THAT ANSWERS PER PANE, not one that says "leo" to everything.
+       The first version of this test stubbed `() => ({ok:true, session:
+       'leo-discord'})`, so the pane that was supposed to tie to NOBODY tied to
+       leo and the refusal it was checking could never fire. The stub is
+       `paneSession`, and a real one distinguishes panes — that is its whole
+       job. A fixture that answers the same for every input cannot test a
+       function whose purpose is telling inputs apart. */
+    messagesEngine.setRunner((pane) => (pane === '%3'
+      ? { ok: true, session: 'leo-discord' }
+      : { ok: false, because: "can't find pane " + String(pane) }));
+
+    const empty = await req('/api/reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '   ', from_pane: '%3' }),
+    });
+    assert.equal(empty.status, 400, 'an empty message was kept');
+    assert.match(JSON.parse(empty.body).error, /\w/, 'the refusal carries no reason');
+
+    const nobody = await req('/api/reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello', from_pane: '%999' }),
+    });
+    assert.equal(nobody.status, 200, nobody.body);
+    const said = JSON.parse(nobody.body);
+    assert.equal(said.kept, false, 'a pane that ties to no agent was allowed to write');
+    assert.match(said.because, /\w/, 'the refusal carries no reason');
+
+    const unset = await req('/api/reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello' }),
+    });
+    assert.equal(JSON.parse(unset.body).kept, false, 'a request with no pane at all was allowed to write');
+  } finally {
+    messagesEngine.setRunner(null);
+    fleet.restore();
+    void board;
+  }
+});

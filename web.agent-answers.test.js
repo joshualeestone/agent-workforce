@@ -88,39 +88,57 @@ test('a sender that is not a string is refused, because it reaches the renderer'
     'a non-string sender is passed to the page, where it becomes a TypeError in the renderer');
 });
 
-test('the page renders a reply as theirs, without a delivery verdict', () => {
+test('the instruction block TEACHES the command, asked of the block itself', () => {
   /**
-   * ⚠️ NO VERDICT ON THIS SIDE is not an omission: the person's rows carry one
-   * because a message has to cross into a terminal. Printing "Sent" beside a
-   * reply would invent a mechanism that did not happen.
+   * 🛑 THE VERSION THIS REPLACES READ `engine/messages.js` AS TEXT. A reviewer
+   * commented out the bullet that teaches the command — so no agent is ever
+   * told it exists — and the test passed, because the characters survived on
+   * the commented line.
+   *
+   * ⚠️ `blockBody` is exported, pure and takes no arguments. There was never a
+   * reason to grep the file that produces it.
    */
-  const at = PAGE.indexOf('function dmRow(');
-  assert.notEqual(at, -1);
-  const src = PAGE.slice(at, at + 1600);
-  assert.match(src, /if \(m && m\.from\)/, 'the renderer has no branch for a row the agent wrote');
-  const branch = src.slice(src.indexOf('if (m && m.from)'), src.indexOf('const v = pjVerdict'));
-  assert.match(branch, /dm theirs/, 'a reply is rendered as the person’s own words');
-  assert.doesNotMatch(branch, /pjVerdict|delivery/, 'a reply is given a delivery verdict it cannot have');
+  const messages = require('./engine/messages');
+  const block = messages.blockBody();
+
+  assert.match(block, /reply "your message"/, 'the block does not teach the reply command');
+  assert.match(block, /from a room or from a person/,
+    'the closing rule names one surface, which is how the room rule was learned and the person rule was not');
+  assert.match(block, /post <project-id>/, 'the block stopped teaching the room command');
 });
 
-test('the sender comes from the pane, never from the request body', () => {
+test('a reply is escaped on its way to the screen', () => {
   /**
-   * 🛑 A NAME IN A REQUEST IS A CLAIM BY THE CALLER, and any local process can
-   * make it. `resolveSender` ties the pane to a card on the roster, so an agent
-   * can only ever write as itself.
+   * 🛑 THE ONE ROW IN THIS THREAD WRITTEN BY SOMETHING OTHER THAN THE OPERATOR,
+   * so it is the row where the escape is load-bearing — and the source-grep
+   * version passed with `esc()` deleted from it.
+   *
+   * ⚠️ The renderer is executed here rather than read. `dmRow` needs `esc`,
+   * `pjWhenPart`, `pjWhen` and `dmWho`, so they are sliced with it; `CURRENT`
+   * is a module-level the function reads, so it is supplied.
    */
-  const server = fs.readFileSync(nodePath.join(__dirname, 'server.js'), 'utf8');
-  const at = server.indexOf("pathname === '/api/reply'");
-  assert.notEqual(at, -1, 'the reply route is gone');
-  const src = server.slice(at, at + 2200);
-  assert.match(src, /resolveSender\(body\.from_pane, roster\)/, 'the route no longer identifies the sender by pane');
-  assert.match(src, /from: who/, 'the row is written without a sender');
-  assert.doesNotMatch(src, /from: body\./, 'the route takes the sender from the request, which any process can claim');
-});
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const slice = (name) => {
+    const at = page.indexOf(`function ${name}(`);
+    assert.notEqual(at, -1, `${name} is not in the page`);
+    let d = 0; let i = page.indexOf('{', at);
+    for (; i < page.length; i++) { if (page[i] === '{') d++; else if (page[i] === '}') { d--; if (!d) break; } }
+    return page.slice(at, i + 1);
+  };
+  // eslint-disable-next-line no-new-func
+  const dmRow = new Function(
+    'let CURRENT = { sessionName: "dana", name: "Dana" };\n'
+    + ['esc', 'pjWhen', 'pjWhenPart', 'pjSentence', 'pjVerdict', 'dmWho', 'dmRow'].map(slice).join('\n')
+    + '; return dmRow;',
+  )();
 
-test('agents are told the command exists, and told it names both surfaces', () => {
-  const msgs = fs.readFileSync(nodePath.join(__dirname, 'engine', 'messages.js'), 'utf8');
-  assert.match(msgs, /reply "your message"/, 'the instruction block does not teach the reply command');
-  assert.match(msgs, /from a room or from a person/,
-    'the closing rule names only one surface, which is how the room rule was learned and the person rule was not');
+  const html = dmRow({ from: 'dana', text: '<img src=x onerror=alert(1)>', at: new Date().toISOString() }, 'Dana');
+  assert.doesNotMatch(html, /<img/, 'an agent’s reply reaches the page unescaped');
+  assert.match(html, /&lt;img/, 'the text was dropped rather than escaped');
+  assert.match(html, /dm theirs/, 'the reply is rendered as the person’s own words');
+  assert.doesNotMatch(html, /Sent|Placed|Could not/, 'a reply was given a delivery verdict it cannot have');
+
+  // ⚠️ THE CONTROL: the person's own row still renders, and still as theirs.
+  const mine = dmRow({ text: 'hi', at: new Date().toISOString(), delivery: { state: 'placed' } }, 'Dana');
+  assert.match(mine, /dm mine/, 'the person’s rows stopped rendering as theirs');
 });
