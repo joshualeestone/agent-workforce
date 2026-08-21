@@ -7716,6 +7716,25 @@ function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
   CURRENT = a;
+  /**
+   * 🛑 THE FILE PICKER IS EMPTIED ON EVERY OPEN. It is one <input> reused by
+   * every agent's panel, and nothing cleared it — so choosing a picture for one
+   * agent left that agent's filename and thumbnail sitting in the next one's
+   * Picture row. Josh, 2026-08-21: *"in the picture section, it's showing the
+   * thing that I uploaded for a different agent"*.
+   *
+   * ⚠️ THE UPLOAD ITSELF WAS NEVER WRONG, and that is worth stating so nobody
+   * "fixes" it twice: the PUT fires on this input's `change`, not on Save, so a
+   * stale selection could not be re-uploaded onto the wrong agent by pressing
+   * Save. What was wrong is what the row SAYS.
+   *
+   * 🔑 AND WHAT MADE IT MORE THAN COSMETIC: `#d-remove` sits immediately beside
+   * that filename and is not gated on the agent having a picture at all. A
+   * stale filename with a Remove button next to it reads as "clear this
+   * selection"; pressing it sends DELETE for THIS agent's real avatar. The two
+   * controls were describing different agents, an inch apart.
+   */
+  document.getElementById('d-file').value = '';
   document.getElementById('d-name').textContent = a.name;
   /* ⚠️ ON OPEN AS WELL AS ON THE POLL. Painted only by the poll, the line is
      absent for up to five seconds after somebody opens the page — which is
