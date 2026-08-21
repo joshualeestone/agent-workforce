@@ -218,8 +218,28 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
              text-transform: none; color: var(--k-ink); font-weight: 600; }
 .checked.stale b { text-decoration: underline wavy; }
 .build { max-width: 1320px; margin: 0 auto var(--space-7);   /* the -4px top was tuned for its old spot under the New agent row; at the foot it just pulls against #removed-wrap */
-          font: var(--text-caption) var(--font-ui); color: var(--label-3); }
+          font: var(--text-caption) var(--font-ui); color: var(--label-3);
+          /* The version, its state and its control are ONE line and read left
+             to right: what you are running, whether it is current, what to do
+             about it. Wrapping is allowed because the middle part is a whole
+             sentence on a narrow window. */
+          display: flex; align-items: center; gap: .75em; flex-wrap: wrap; }
   .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
+  /* ⚠️ #upd-line IS A <b> FOR THE LIVE REGION, NOT FOR EMPHASIS, so it opts out
+     of the .build b treatment above: that rule dresses "BETA", and a status
+     sentence in letter-spaced caps reads as a second heading. */
+  .build #upd-line { font-weight: 400; color: var(--label-3); letter-spacing: 0; }
+  .build #upd-line:empty { display: none; }
+  /* 🛑 SIZED TO THE LINE IT SITS ON. .btn-quiet is a 17px control with .9em
+     padding, built for dialogs; dropped into a caption-sized footer unchanged
+     it stood taller than everything around it and read as the loudest thing on
+     the page, which is the opposite of what a footer control should be. */
+  /* ⚠️ THE BORDER IS THE CONTROL'S ONLY EDGE, so it is held to the 3:1
+     non-text minimum with room to spare. Measured at --label-4 it came out at
+     3.01, which passes and is not a margin: any theme nudge, any rounding, and
+     the only thing saying "this is a button" stops meeting AA. */
+  .build .btn-quiet { font-size: inherit; padding: .35em 1em; border-radius: 8px;
+                      border-color: var(--label-3); color: var(--label-1, var(--label-2)); }
   .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
   /* ---- the connection notice ---------------------------------------------
@@ -4016,10 +4036,12 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            spending" while doing no such thing. Fleet-stop is its own
            chunk. -->
       <h3 class="dlab">Updates</h3>
+      <!-- The checking CONTROL moved to the version line at the foot of the
+           page; see the note there. What is left here is the setting, which is
+           what this section is for. -->
       <div class="setrow" id="upd-row">
-        <div><b id="upd-line" role="status">Checking.</b>
-          <p class="dhint" style="margin:2px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p></div>
-        <button class="btn-quiet" type="button" id="upd-btn" hidden>Check now</button>
+        <div><b>Kosmos runs in the background</b>
+          <p class="dhint" style="margin:2px 0 0;">Closing this window does not stop your agents. The version you are running, and a button to check for a new one, are at the foot of this page.</p></div>
       </div>
       <div class="setrow off" style="margin-top:12px;">
         <div><b>Tell me when there is a new version</b>
@@ -4162,7 +4184,21 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      protect exactly that adjacency, and the move stepped through it.
      Kept OUTSIDE `#removed-wrap` for the reason that note gives: the wrap hides
      itself entirely when nothing is removed. -->
-<div class="build" id="build"></div>
+<div class="build">
+  <!-- 🔑 THE VERSION LINE IS THE UPDATE AFFORDANCE (Mona Lisa's ruling, Josh's
+       instinct, 2026-08-21). The control existed in Settings under "Updates"
+       and did everything asked of it; Josh went looking for it here, next to
+       what he was running, and did not find it. A control nobody can find is
+       the same as no control.
+       ⚠️ MOVED, NEVER DUPLICATED. Two controls doing one thing would have to
+       agree about state, and one of them would eventually be wrong.
+       ⚠️ AND THE BUTTON IS A SIBLING OF #build, NOT INSIDE IT. That span's
+       innerHTML is rewritten on every five-second poll, which would destroy
+       this button (and any focus resting on it) twice a minute. -->
+  <span id="build"></span>
+  <b id="upd-line" role="status"></b>
+  <button class="btn-quiet" type="button" id="upd-btn" hidden>Check now</button>
+</div>
 
 <script>
 'use strict';
@@ -4904,7 +4940,13 @@ function paintUpdateCard(running, offer, look) {
   if (UPD_CHECKING) return;
   const line = document.getElementById('upd-line');
   const btn = document.getElementById('upd-btn');
-  const v = running ? 'Kosmos ' + running + '. ' : 'Kosmos. ';
+  /* ⚠️ NO VERSION PREFIX ANY MORE. These sentences read "Kosmos 0.2.13. Up to
+     date." because they lived in Settings, where nothing else said what was
+     running. They now sit immediately after "BETA · version 0.2.13", so the
+     prefix said it twice in one line. `running` is still the argument the
+     states are chosen from; it is only the repetition that went. */
+  const v = '';
+  void running;
   const put = (text) => {
     // The line is a role="status" live region and the poll repaints every
     // five seconds: writing an IDENTICAL text node is still a mutation,
@@ -5157,6 +5199,14 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    /* The restore sentence is retired by the ARRIVAL it predicted, never by a
+       timer: a timeout would clear it while the agent was still coming up, and
+       leave the same silence that made it necessary. */
+    if (RESTORE_WAITING && data.agents.some((a) => a && a.sessionName === RESTORE_WAITING)) {
+      RESTORE_WAITING = null;
+      const done = document.getElementById('removed-msg');
+      if (done) done.textContent = '';
+    }
     BOARD_SEEN = true;
     updateRecPill();
     renderUpdateToast(data.update);
@@ -8830,7 +8880,13 @@ async function paintRemoved() {
     + '<div><span class="who">' + esc(a.shownAs || a.name) + '</span>'
     + '<span class="when">' + esc(whenRemoved(a))
     + (a.stopped === false ? ' · <b>may still be running</b>' : '') + '</span></div>'
-    + '<button class="btn" type="button" data-restore="' + esc(a.name) + '">Restore</button>'
+    /* ⚠️ THE DISPLAY NAME RIDES THE BUTTON TOO, for the rule stated above: act
+       on the session name, SPEAK the display name. The restore handler says
+       "Starting <name> again", and with only `data-restore` to read from it
+       would have said `claudebot` for the agent every other surface calls
+       Splinter — the exact unrecognisability this row was rebuilt to end. */
+    + '<button class="btn" type="button" data-restore="' + esc(a.name) + '"'
+    + ' data-shown-as="' + esc(a.shownAs || a.name) + '">Restore</button>'
     + '</div>').join('')
     /* the hint rides INSIDE the list so it shows exactly when the rows do;
        it restates what makes the light Remove confirmation honest */
@@ -8863,6 +8919,8 @@ async function paintRemoved() {
 // The last markup `paintRemoved` produced. See the note in that function for
 // why the comparison is against this rather than against `list.innerHTML`.
 let REMOVED_HTML = null;
+/* The agent a restore is waiting on, so the poll can retire its sentence. */
+let RESTORE_WAITING = null;
 
 /**
  * ⚠️ Answers "we do not know" rather than inventing a date.
@@ -8975,10 +9033,33 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
        */
       return;
     }
-    // ⚠️ Cleared on the way out, or a message about a restore that has since
-    // been retried successfully sits under a list that no longer shows it.
+    /**
+     * 🛑 A CLEAN RESTORE USED TO SAY NOTHING AT ALL, and the row simply
+     * vanished. Josh, 2026-08-21: *"i tried to restore an agent and he wouldnt
+     * appear until i refreshed the page."*
+     *
+     * ⚠️ THE CARD GENUINELY CANNOT BE THERE YET, so this is not a repaint bug
+     * and a repaint would not have fixed it. `restore` ends in `launchctl
+     * bootstrap`, which returns as soon as launchd has ACCEPTED the job; the
+     * agent then has to start, take a pane, and boot far enough to be
+     * classified as an agent pane before `/api/status` can include it. The
+     * grid is painted from that status on every five-second tick with no
+     * change-guard, so it was already going to appear on its own.
+     *
+     * 🔑 What was missing was any sign that something was happening. An empty
+     * gap after a button reads as a failure, and the person does the one thing
+     * that looks like it might help. Reloading did not fix it either; it just
+     * took long enough that the agent had come up by then, which is worse than
+     * a visible wait because it teaches a remedy that does nothing.
+     *
+     * The sentence clears itself in `tick()` the moment the agent is actually
+     * on the board, so it can never outlive what it describes.
+     */
     const say = document.getElementById('removed-msg');
-    if (say) say.textContent = '';
+    if (say) {
+      RESTORE_WAITING = name;
+      say.textContent = 'Starting ' + (btn.dataset.shownAs || name) + ' again. It takes a few seconds, and its card appears here on its own.';
+    }
     await tick();
     await paintRemoved();
   } catch {

@@ -6565,29 +6565,29 @@ test("the update card's states are mutually exclusive and the line is never blan
     // Newer exists.
     let els = mk();
     paint('0.1.8', { version: '0.1.9' }, { reached: true, readable: true });
-    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.8. Version 0.1.9 is ready.');
+    assert.equal(els['upd-line'].textContent, 'Version 0.1.9 is ready.');
     assert.equal(els['upd-btn'].textContent, 'Update');
     // Current: up-to-date needs BOTH reached and readable.
     els = mk();
     paint('0.1.9', null, { reached: true, readable: true });
-    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.');
+    assert.equal(els['upd-line'].textContent, 'Up to date.');
     assert.equal(els['upd-btn'].textContent, 'Check now');
     // Reached but unreadable (the captive-portal shape): NEVER up-to-date.
     els = mk();
     paint('0.1.9', null, { reached: true, readable: false, looked: true });
-    assert.equal(els['upd-line'].textContent, "Kosmos 0.1.9. Could not read the update server's answer.");
+    assert.equal(els['upd-line'].textContent, "Could not read the update server's answer.");
     assert.equal(els['upd-btn'].textContent, 'Try again');
     // Could not look: NEVER "up to date".
     els = mk();
     paint('0.1.9', null, { reached: false });
-    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Could not reach the update server.');
+    assert.equal(els['upd-line'].textContent, 'Could not reach the update server.');
     assert.equal(els['upd-btn'].textContent, 'Try again');
     // The first look still in flight: Checking, never a failure that has
     // not happened (boot rendered "could not reach" before the first
     // answer landed; measured on the render sandbox).
     els = mk();
     paint('0.1.9', null, { reached: false, looked: false });
-    assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Checking.');
+    assert.equal(els['upd-line'].textContent, 'Checking.');
     assert.equal(els['upd-btn'].disabled, true, 'the button was pressable mid-first-look');
     // The line is never blank, even before the first status.
     els = mk();
@@ -6667,7 +6667,7 @@ test('the check route is POST-only, and Check now clears the Later note before a
   assert.ok(calls.indexOf('clear:kosmos-update-later') > -1, 'Check now never cleared the Later note');
   assert.ok(calls.indexOf('clear:kosmos-update-later') < calls.indexOf('fetch'),
     'the Later note was cleared AFTER the ask, not before (the spec\'s order)');
-  assert.equal(els['upd-line'].textContent, 'Kosmos 0.1.9. Up to date.',
+  assert.equal(els['upd-line'].textContent, 'Up to date.',
     'the answer did not land on the line');
   assert.ok(calls.includes('focus'), 'the keyboard was not returned to the button');
 
@@ -6774,7 +6774,14 @@ test('the centred quiet button is the pack rule, pinned', () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   // 18e:173 -- inline-flex left-packs at full width without this, which
   // is the New task / Add member gap Josh saw.
-  const at = raw.indexOf('.btn-quiet {');
+  /* ⚠️ ANCHORED TO THE START OF A LINE, because a bare indexOf('.btn-quiet {')
+     finds whichever rule comes FIRST in the file, and that stopped being the
+     base rule the moment a scoped one was added above it. The footer's
+     `.build .btn-quiet` sizes the control to a caption line and has no reason
+     to restate centring, so the pin read a rule it was not written for and
+     reported that the base rule had lost its centring — which was false, and
+     is a defect of the check rather than of the page. */
+  const at = raw.indexOf('\n.btn-quiet {');
   assert.ok(at > -1, 'the btn-quiet rule moved; re-point this pin');
   const rule = raw.slice(at, raw.indexOf('}', at));
   assert.ok(rule.includes('justify-content: center'),
