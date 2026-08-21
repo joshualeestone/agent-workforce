@@ -88,7 +88,7 @@ already takes.
 
 ## Evidence
 
-- `yarn test`: **1022 pass, 0 fail** before the last two tests; **1035** after.
+- `yarn test`: **1023 pass, 0 fail**, plus the installer's ten-state permission-acceptance harness and the shell-syntax pass, all green.
 - **Nine deliberate breaks on `trust.js`**, each reverted after the named test
   was watched to fail: realpath key, entry merge, already-true short circuit,
   invent-on-absent, symlink refusal, mode preservation, temp cleanup, the
