@@ -6629,8 +6629,14 @@ async function paintTalk(sessionName, agentName) {
   document.getElementById('d-talk-hint').textContent =
     'Just between you and ' + name + '. Nothing here belongs to a project.';
   /* ⚠️ WRITTEN WITH THE LABEL, not on the fetch's success path, for the reason
-     the comment below gives about the other four: whether this line names the
-     right agent does not depend on the fetch. */
+     the comment below gives: whether a line names the right agent does not
+     depend on the fetch, and one set on the success path carries the PREVIOUS
+     agent's name on a borrowed-name pane, which returns early.
+     ⚠️ THAT COMMENT STATES A TWO-PART RULE — "THE TEXT HERE, THE VISIBILITY ON
+     THE SUCCESS PATH" — and this line now obeys both: the text is written here,
+     and whether it may be SHOWN is decided after the answer arrives, beside the
+     persistence line's own decision. An earlier version did the text half and
+     cited the whole rule. */
   document.getElementById('d-reply-where').textContent =
     name + ' will see this in their own window. Replies come back there rather '
     + 'than here, for now.';
