@@ -5338,8 +5338,18 @@ test('the post route resolves the project, derives the member list, and fans out
       'the member list was not derived off the project record');
     const typed = sends.filter((a) => a[0] === 'send-keys' && typeof a[5] === 'string' && a[5].startsWith('['));
     assert.equal(typed.length, 2);
-    assert.match(typed.map((a) => a[5]).find((t) => t.startsWith('[message')), /project routeroom\]/,
-      'the addressed envelope lost its project');
+    /* 🛑 THE ENVELOPE SAYS THE NAME, THE RECORD KEEPS THE ID. The project is
+       created as "Route room" and stored as `routeroom`; an agent handed the
+       slug looks it up among the projects its instructions list BY NAME, finds
+       nothing, and truthfully reports it is not on that project (Josh,
+       2026-08-21). Both halves asserted here, because either alone is the bug:
+       the slug in the sentence is what confused the agent, and the name in the
+       record would break the log, the pair counter and `kosmos post`. */
+    const addressed = typed.map((a) => a[5]).find((t) => t.startsWith('[message'));
+    assert.match(addressed, /project Route room\]/,
+      'the addressed envelope names the project by its slug, which the agent cannot match');
+    assert.doesNotMatch(addressed, /routeroom/,
+      'the slug reached the sentence an agent reads');
     const rec = messagesEngine.record().rows.filter((m) => m.kind === 'post');
     assert.equal(rec.length, 1);
     assert.equal(rec[0].project, 'routeroom');
@@ -5407,8 +5417,13 @@ test('the room routes: the operator flag is minted only here, and the thread fil
     assert.equal(row.operator, true, 'the operator route did not mint the flag');
     assert.equal(row.from, 'you');
     const typed = sends.filter((a) => a[0] === 'send-keys' && typeof a[5] === 'string' && a[5].startsWith('['));
-    assert.match(typed.map((a) => a[5]).find((t) => t.includes('· project opsroom')) || '', /from your operator/,
+    const opEnv = typed.map((a) => a[5]).find((t) => t.includes('project Ops room')) || '';
+    assert.match(opEnv, /from your operator/,
       'an operator arrival did not carry the operator marker');
+    // The same split as the addressed case above: name in the sentence, id in
+    // the record (asserted at `row.project` a few lines up).
+    assert.doesNotMatch(opEnv, /opsroom/,
+      'the slug reached the sentence an agent reads');
 
     // The THREAD, filtered by project alone: a foreign project's post and
     // a room valve row seeded straight into the record.

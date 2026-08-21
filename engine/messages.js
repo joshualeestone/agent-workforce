@@ -498,7 +498,7 @@ function send({ fromPane, to, text, inReplyTo }, roster) {
  * (the route reads it off the project record): this module stays the
  * mechanism and owns no membership model.
  */
-function sendPost({ fromPane, project, text, operator }, roster, members) {
+function sendPost({ fromPane, project, projectName, text, operator }, roster, members) {
   const at = new Date().toISOString();
   /* The OPERATOR path: no pane to derive (the post comes off the room's
      composer through the server, which is the operator's own surface),
@@ -544,6 +544,28 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
   if (!/^[A-Za-z0-9._ -]+$/.test(projectId) || projectId.includes(']')) {
     return refuse('that project id contains characters that would break the message envelope');
   }
+  /**
+   * 🛑 THE ENVELOPE SAYS THE NAME, THE RECORD KEEPS THE ID, and that split is
+   * the whole of this. The id is the slug: `test project` is stored as
+   * `testproject`. It rides the log, the pair counter and the CLI, where a
+   * machine keys on it. It must not ride the SENTENCE an agent reads.
+   *
+   * Josh, 2026-08-21: he made `test project`, posted to the room, and the
+   * agent answered *"'testproject' isn't listed in my configured projects"*.
+   * That was correct. Its instructions list the project by NAME, the envelope
+   * handed it the SLUG, and nothing anywhere says the two strings are one
+   * project. It compared an argument against an identity and truthfully
+   * reported no match, which read as an agent that had misunderstood him.
+   *
+   * 📌 Falls back to the id, so a caller that has no name is no worse off than
+   * before rather than sending an envelope with a hole in it. Validated the
+   * same way as the id and the sender for the same reason: it rides inside the
+   * bracket grammar.
+   */
+  const rawName = String(projectName == null ? '' : projectName).trim();
+  const shownProject = (rawName && /^[A-Za-z0-9._ -]+$/.test(rawName) && !rawName.includes(']'))
+    ? rawName
+    : projectId;
   if (!Array.isArray(members) || !members.every((m) => typeof m === 'string' && m)) {
     return refuse('we could not read who is on that project, so nothing was posted');
   }
@@ -666,11 +688,11 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
        operator's weight behind it. */
     const envelope = (operator === true
       ? (mentioned.has(name)
-        ? '[message from your operator \u00b7 ' + id + ' \u00b7 project ' + projectId + ']'
-        : '[from your operator in project ' + projectId + ' \u00b7 ' + id + ' \u00b7 for the whole room]')
+        ? '[message from your operator \u00b7 ' + id + ' \u00b7 project ' + shownProject + ']'
+        : '[from your operator in project ' + shownProject + ' \u00b7 ' + id + ' \u00b7 for the whole room]')
       : (mentioned.has(name)
-        ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ']'
-        : '[background from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + projectId + ' \u00b7 not addressed to you]'))
+        ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + shownProject + ']'
+        : '[background from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + shownProject + ' \u00b7 not addressed to you]'))
       + ' ' + body;
     const sent = chat.deliver(name, envelope, roster);
     outcomes[name] = sent.state;
@@ -684,7 +706,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
     if (cleaned.length > SPILL_AT) {
       try { fs.rmSync(path.join(SPILL_DIR, id + '.txt'), { force: true }); } catch { /* best effort */ }
     }
-    const failed = refuse('we could not get this post to anybody on ' + projectId);
+    const failed = refuse('we could not get this post to anybody on ' + shownProject);
     failed.outcomes = outcomes;
     return failed;
   }
