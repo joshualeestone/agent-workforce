@@ -391,7 +391,8 @@ test('the untied check is still made at the session step, for a roster that chan
   assert.ok(!calls.some(([, a]) => a && a[0] === 'kill-session'),
     'it killed a session that stopped being this agent between the two checks');
   assert.equal(r.outcome, remove.OUTCOME.PARTIAL, r.because);
-  assert.match(r.because, /cannot confirm is this agent/);
+  assert.match(r.because, /cannot confirm it is this agent/,
+    'the untied partial no longer says why it left the session alone');
 });
 
 test('dry-run cannot be left without a runner, and is not the default', () => {
@@ -1409,7 +1410,7 @@ test('the two partials a person actually hits still record, so Restore is there'
   remove.setDryRun(false);
   const r2 = remove.remove(b);
   assert.equal(r2.outcome, remove.OUTCOME.PARTIAL, r2.because);
-  assert.match(r2.because, /cannot confirm is this agent/, 'this is a different partial than the one under test');
+  assert.match(r2.because, /cannot confirm it is this agent/, 'this is a different partial than the one under test');
   assert.equal(remove.isRemoved(b), true,
     'it disabled and stopped the job and then filed no record, so there is no Restore button');
   assert.equal(remove.isHidden(b), false, 'it hid an agent that may still be running');

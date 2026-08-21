@@ -349,12 +349,12 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
     // no-answer-at-all in the same round the comment was written, so the
     // sentence outlived the behaviour it described. This is the assertion that
     // keeps the pair honest rather than a paragraph asserting it.
-    /* ⚠️ TWO PHRASES NOW, WHERE ONE COVERED BOTH, and they differ by one verb:
-       `paneRoster` SEES and `snapshot` CHECKS what is running on this computer.
-       The PROPERTY this test holds is that both refuse rather than answering
-       "nothing is running", and that still holds. Asserted separately so the
-       test says what is true today instead of one regex quietly matching
-       neither.
+    /* ⚠️ ONE CONDITION, ONE SENTENCE AGAIN. These briefly said "see" and
+       "check" for the same failure, and a reader who hit both routes got two
+       sentences for one thing. The adjacent unreadable-answer arms (:619 and
+       :1632) were harmonised to a single sentence in the same sweep, which is
+       the shape this pair should have had. Still asserted separately, because
+       the call is what discriminates them, not the words.
 
        📌 An earlier version of this comment quoted `snapshot` as saying "what
        IT IS DOING on this computer" and argued at length that its "it" had no
@@ -363,7 +363,7 @@ test('the could-not-look fleets are the engine’s real refusals, not empty ones
        contradicted the assertion two lines below it. Same failure as the one
        the comment above this block describes, which is why both are kept. */
     assert.throws(() => status.paneRoster(), /could not see what is running on this computer/);
-    assert.throws(() => status.snapshot(), /could not check what is running on this computer/);
+    assert.throws(() => status.snapshot(), /could not see what is running on this computer/);
   } finally {
     blind.restore();
   }

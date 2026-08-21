@@ -101,7 +101,11 @@ const TOLD = {
  * ⚠️ Keyed on the EXACT singular string, so an edited engine sentence
  * silently falls back to the reasonless group line instead of pairing
  * with a stale plural. Edit the singular, edit its row here.
- * The one entry mapping to itself has no singular referent to begin with.
+ * ⚠️ NOTHING MAPS TO ITSELF ANY MORE. One row used to, and this line said so;
+ * the trim that moved the outcome clause into the frame gave it a distinct
+ * plural like every other row. I updated the TEST's comment about that in the
+ * same commit and left this one standing, which is the class this file keeps
+ * producing: the newest sentence is the least examined one.
  */
 const GROUP_BECAUSE = new Map([
   /**
@@ -126,7 +130,7 @@ const GROUP_BECAUSE = new Map([
   ['this agent has no folder on this computer yet',
     'none of them has a folder on this computer yet'],
   ['this agent has no instructions file yet, and we will not create one for it',
-    'none of them has one yet, and we will not create them'],
+    'none of them has one yet, and we will not create any'],
   ['we could not find an agent with exactly this name on this computer, so nothing was written',
     'we could not find any of them by exactly these names on this computer'],
   ['something is running under this name, but we cannot tell that it is this agent, so nothing was written',

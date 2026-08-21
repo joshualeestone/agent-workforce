@@ -311,6 +311,15 @@ somebody to do a thing that leaves the blocker in place.
 no session is invisible and unremovable, so its **name is permanently unusable**.
 The sentence a person reads is not kept as a placeholder for that roadmap.
 
+### Recorded, not fixed, from the passes on the current tree
+
+| what | why it stays |
+|---|---|
+| the singular frame doubles the noun or outcome on **seven of nine** | Ruled as weight rather than a lie: the keys are authored at engine call sites, so trimming them is a wider change staged out of this branch. ⚠️ **The guard covers the group line only, and the group line is the RARER path** (it needs two or more members with identical verdicts), so the hardened arm is the uncommon one. Recorded so the guard is not read as covering both. |
+| `projects.js`'s plural for the folder row says `folder` in the worker-directory sense under a frame saying `folder` in the project sense | Pre-existing in shape; the group-line guard asserts single-occurrence for `instructions` only, so the same collision on `folder` is unguarded. Not widened here because the fix is a wording choice on a row nobody has ruled. |
+| `chat.js:572` "it will not read this until it finishes" implicates that it WILL read it, which `PLACED` cannot know | Ruled copy. `PLACED` knows a keystroke was typed; the `UNCONFIRMED` arm correctly stops earlier. Flagged, not changed. |
+| `create.js:761` offers "you can remove it there instead" on the arm whose premise is that nothing is left | The conditional ("**If** you can see it under Agents") keeps it from being false, and it is deliberate: the four conditions do not guarantee the agent is absent, which is the whole reason removal is offered conditionally. |
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and

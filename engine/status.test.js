@@ -1581,7 +1581,7 @@ test('a machine with tmux and no sessions shows an EMPTY board, not an unreadabl
          was dead -- and it would have failed on a runner without tmux, which is
          the machine the test is named for. A pin inside a
          host-capability branch is invisible to every run on the wrong host. */
-      assert.throws(() => status.snapshot(), /could not check what is running on this computer/,
+      assert.throws(() => status.snapshot(), /could not see what is running on this computer/,
         'tmux is absent here, and the board did not refuse to speak about a machine it cannot see');
       return;
     }

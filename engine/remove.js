@@ -854,8 +854,8 @@ function removeInner(name, { tmuxBin } = {}) {
   if (found.kind === FOUND.UNTIED) {
     return {
       outcome: OUTCOME.PARTIAL,
-      because: `${didToJob} something called ${found.session} is still running `
-        + 'that we cannot confirm is this agent, so we have left it alone. '
+      because: `${didToJob} something called ${found.session} is still running. `
+        + 'We cannot confirm it is this agent, so we have left it alone. '
         + recordAndSay(false),
       steps,
     };

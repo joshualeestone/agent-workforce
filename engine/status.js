@@ -601,7 +601,7 @@ function listPanes() {
    * go through here.
    */
   if (out === null || out === undefined) {
-    throw new Error('we could not check what is running on this computer');
+    throw new Error('we could not see what is running on this computer');
   }
   const { panes, rejected } = readPanes(out);
 

@@ -3,10 +3,13 @@
 /**
  * Talking to ONE agent, about ONE project.
  *
- * The gap this closes, in the words of the person who hit it: a card said
- * "Needs you — it is asking you something", and there was nowhere to see
- * the question or answer it. The board could observe an agent and could not
- * reach one.
+ * The gap this closes: a card could say an agent is asking you something, and
+ * there was nowhere to see the question or answer it. The board could observe
+ * an agent and could not reach one.
+ *
+ * ⚠️ This paragraph used to be framed as a QUOTATION of the person who reported
+ * the gap, around a card sentence the copy sweep then rewrote. An edited
+ * quotation is not a quotation, so the frame went rather than the words.
  *
  * ⚠️ WHAT THIS MODULE MAY CLAIM, and the fourth row is the one that is never
  * ours. `engine/projects.js` has the same table for membership; this is the

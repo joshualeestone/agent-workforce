@@ -106,7 +106,7 @@ test('the sender is derived from the pane, and the delivered envelope names them
   });
 });
 
-test('a pane we cannot tie to an agent is refused as anonymous, and nothing is typed', () => {
+test('a pane we cannot match to one of your agents is refused, and nothing is typed', () => {
   withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
     armSender('somebody-elses-session');
     const tmux = arm([ok(), ok()]);
