@@ -1266,7 +1266,12 @@ function sessionIdsFor(sessionName, exactSession) {
 
 function transcriptFor(agentName, exactSession) {
   const sessionIds = sessionIdsFor(agentName, exactSession);
-  if (!sessionIds.length) return null;
+  /* 🛑 NO EARLY RETURN HERE ANY MORE, and the early return was the whole bug on
+     a clean install. `sessionIdsFor` comes back EMPTY when there is no registry
+     to read — which is every machine that is not the fleet's — so returning
+     null here made `byWorkdir` below unreachable in exactly the case it exists
+     for. Caught by its own test, which is the only reason it is not shipping
+     dead: the fix was wired in behind a guard that skipped it. */
 
   for (const sessionId of sessionIds) {
     for (const root of configRoots()) {
@@ -1285,8 +1290,98 @@ function transcriptFor(agentName, exactSession) {
   }
 
   // No registry entry, or its session has gone. We deliberately do NOT fall
-  // back to guessing by name: a wrong transcript produces confident numbers
+  // back to guessing by NAME: a wrong transcript produces confident numbers
   // about the wrong conversation, which is worse than no numbers at all.
+  // 📌 `byWorkdir` below is not that. It keys on the folder Kosmos itself
+  // launched the agent in, and then VERIFIES the transcript says the same
+  // folder before using it. See its own note.
+  return byWorkdir(agentName);
+}
+
+/**
+ * The transcript found from the folder Kosmos launched the agent in.
+ *
+ * 🛑 THE REGISTRY THIS FILE READS IS NOT WRITTEN BY CLAUDE CODE, AND NOT BY
+ * KOSMOS. On the fleet machine where every one of these code paths was built,
+ * `~/.claude/agent-registry/` is written by `~/.claude/scripts/lib/session-recovery.sh`
+ * — local tooling that has nothing to do with this product. Kosmos only ever
+ * READ that folder; nothing in this repo writes it.
+ *
+ * ⚠️ SO MEMORY HAS NEVER WORKED FOR ANYBODY WHO IS NOT US. Josh, 2026-08-21, on
+ * a clean install: `ls: /Users/cabal/.claude/agent-registry/: No such file or
+ * directory`, and every agent on his board reading "Unknown". Not four agents
+ * misbehaving — the normal case, on a machine without our fleet's scripts. The
+ * development machine had a file the product depended on and did not create,
+ * which is why the gap survived every test: they all ran here.
+ *
+ * 🔑 WHAT THIS USES INSTEAD IS SOMETHING KOSMOS ALREADY KNOWS. Claude Code
+ * writes each transcript to `<root>/projects/<the-launch-directory>/<id>.jsonl`,
+ * with the directory's path flattened — every character that is not a letter or
+ * a digit becomes a dash. MEASURED, not assumed: `/Users/agent1/.openclaw-workspace`
+ * is stored as `-Users-agent1--openclaw-workspace`, and the naive
+ * `[^A-Za-z0-9] -> -` reproduces it exactly, double dash and all. And the
+ * supervisor launches every agent with `-c "$WORKDIR"`, one folder per agent,
+ * created by `create.js`. So the folder is derivable from the agent's name.
+ *
+ * ⚠️ AND THE GUESS IS VERIFIED RATHER THAN TRUSTED, which is what makes this
+ * different from the name-guessing the comment above refuses. Two paths CAN
+ * flatten to one directory (`a.b` and `a-b` both become `a-b`), so the chosen
+ * transcript is opened and its own `cwd` compared against the folder we meant.
+ * A mismatch is refused, not used. A wrong reading is the one outcome worth
+ * more than a missing one.
+ */
+function byWorkdir(agentName) {
+  // Lazily, and from create.js rather than re-derived here: the workers
+  // directory is that module's fact, and a second copy of it would drift the
+  // first time somebody moves it.
+  let dir;
+  try { dir = require('./create').workerDir(agentName); } catch { return null; }
+  if (!dir) return null;
+  const flat = dir.replace(/[^A-Za-z0-9]/g, '-');
+
+  for (const root of configRoots()) {
+    const projects = path.join(root, 'projects', flat);
+    let names;
+    try { names = fs.readdirSync(projects); } catch { continue; }
+    const jsonl = names.filter((n) => n.endsWith('.jsonl'));
+    if (!jsonl.length) continue;
+    // Newest first: a running agent is writing to its current session, and an
+    // agent that has been restarted has older ones beside it.
+    const byNewest = jsonl
+      .map((n) => {
+        const full = path.join(projects, n);
+        let mtime = 0;
+        try { mtime = fs.statSync(full).mtimeMs; } catch { /* skip below */ }
+        return { full, mtime };
+      })
+      .filter((f) => f.mtime > 0)
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const f of byNewest) {
+      if (transcriptCwd(f.full) === dir) return f.full;
+    }
+  }
+  return null;
+}
+
+/**
+ * The working directory a transcript says it belongs to, or null.
+ *
+ * ⚠️ NOT ON THE FIRST LINE. Measured on a real transcript: line 1 carries only
+ * `type`, `mode` and `sessionId`, and the first `cwd` appeared on line 5. So a
+ * few lines are read rather than one, and a file that never says is refused
+ * rather than assumed to match.
+ */
+function transcriptCwd(file) {
+  const text = headBytes(file, 65536);
+  if (text === null) return null;
+  const lines = text.split('\n');
+  // Bounded: this runs per agent per snapshot, and the answer is at the top.
+  for (const line of lines.slice(0, 40)) {
+    if (!line || line.charAt(0) !== '{') continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (row && typeof row.cwd === 'string' && row.cwd) return row.cwd;
+  }
   return null;
 }
 
@@ -1315,6 +1410,30 @@ function tailBytes(file, bytes = 262144) {
     return { text: buf.toString('utf8'), whole: size <= bytes };
   } catch {
     return { text: null, whole: false };
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * The FIRST bytes of a file, which is the opposite of its sibling above.
+ *
+ * ⚠️ `tailBytes` READS THE END, and the first version of `transcriptCwd` used
+ * it and then took `slice(0, 40)` — which on any transcript over 64KB is forty
+ * lines from the middle of the file, not the top, dressed as the top. The
+ * verification would still usually have worked, because `cwd` repeats on most
+ * rows, and "usually works for a reason you did not intend" is how a check
+ * stops being one.
+ */
+function headBytes(file, bytes) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(bytes);
+    const read = fs.readSync(fd, buf, 0, bytes, 0);
+    return buf.slice(0, read).toString('utf8');
+  } catch {
+    return null;
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
   }
