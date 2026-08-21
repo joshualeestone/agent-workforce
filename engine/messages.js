@@ -578,10 +578,31 @@ function sendPost({ fromPane, project, projectName, text, operator }, roster, me
     return refuse('you are not on that project, so this room is not yours to post into');
   }
   const recipients = operator === true ? members.slice() : members.filter((m) => m !== from);
-  if (!recipients.length) {
-    return refuse(operator === true
-      ? 'nobody is on that project yet, so there is no room to post to'
-      : 'nobody else is on that project yet, so there is no room to post to');
+  /**
+   * 🛑 AN AGENT ALONE ON A PROJECT IS NOT POSTING TO AN EMPTY ROOM, and this
+   * refused as though it were. The comment eight lines up already says the
+   * thing that makes it wrong: "THE OPERATOR IS IN EVERY ROOM THEY OWN --
+   * membership lists agents, not the person." Then the recipient list is built
+   * from agents only, so a sole member got "nobody else is on that project
+   * yet" — while the person who asked them a question was sitting in the room
+   * reading it.
+   *
+   * ⚠️ AND THE AGENT WAS TOLD TO DO IT. Its own instruction block says to
+   * answer a room by running `kosmos post`. It ran the command it was given
+   * and was turned away, which is the product inviting a reply it forbids.
+   * Josh hit this on 2026-08-21 with a one-agent project (#172).
+   *
+   * 🔑 RECIPIENTS ARE WHO WE TYPE INTO. The person is not typed into: they read
+   * the room from the record, and this function appends to it either way. So an
+   * empty recipient list means "only the person will see this", which is a
+   * normal room and not a failure.
+   *
+   * ⚠️ THE OPERATOR'S OWN ARM KEEPS ITS REFUSAL, deliberately. A person posting
+   * into a project with no agents on it is talking to nobody — there is no
+   * second party at all, which is a different fact from having one.
+   */
+  if (operator === true && !recipients.length) {
+    return refuse('nobody is on that project yet, so there is no room to post to');
   }
 
   if (text != null && typeof text !== 'string') {
@@ -699,7 +720,14 @@ function sendPost({ fromPane, project, projectName, text, operator }, roster, me
     if (sent.state !== chat.DELIVERY.COULD_NOT) reached += 1;
   }
 
-  if (!reached) {
+  /**
+   * ⚠️ AND `reached` COUNTS PANES, so with nobody to type into it is zero and
+   * this arm refused a post that had nowhere to fail. The guard exists to stop
+   * us claiming delivery when nothing was typed — which is right when there
+   * were recipients and none took it, and wrong when there were none to try.
+   * The person reads the room from the record, and the record is written below.
+   */
+  if (!reached && recipients.length) {
     /* Reaching NOBODY is a failed post, not a quieter success: nothing
        was typed anywhere, so nothing is logged (send()'s typed-only
        rule) and the spill must not wait for the next mint of this id. */
