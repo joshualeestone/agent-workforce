@@ -49,8 +49,33 @@ if git diff --quiet; then
 fi
 git diff --stat | tail -1 | sed 's/^/    changed: /'
 
-node --test "$TESTFILE" 2>&1 | sed -n '/failing tests:/,$p' | grep '^✖' | sed 's/^/    /' | head -4
-red=$?
+# 🛑 THREE OUTCOMES, AND THE THIRD IS THE ONE THIS TOOL GOT WRONG FIRST.
+# Pointed at a test file that does not exist, the original printed "restored"
+# and nothing else — indistinguishable from "the mutation fired no test". The
+# runner never ran and the tool had no way to say so.
+#
+# ⚠️ THAT IS THE SHAPE LEO HIT THE SAME DAY: a harness passed cargo's arguments
+# as one quoted string, cargo errored, the usage error matched no known failure
+# pattern, and all fifteen mutations scored GREEN. Anything classifying outcomes
+# by pattern-match needs an explicit UNRECOGNISED branch, or every unanticipated
+# failure lands on the default — and the default is always success.
+#
+# 🔑 A UNIFORM RESULT IS AN INSTRUMENT SMELL, NOT A FINDING.
+out="$(node --test "$TESTFILE" 2>&1)"
+summary="$(printf '%s' "$out" | grep -E '^ℹ (pass|fail) ' | head -2)"
+failed="$(printf '%s' "$out" | sed -n '/failing tests:/,$p' | grep -c '^✖')"
+
+if [ -z "$summary" ]; then
+  echo "    🛑 THE RUNNER PRODUCED NO SUMMARY, so nothing is proven either way."
+  printf '%s\n' "$out" | head -4 | sed 's/^/      /'
+  git checkout -q -- .
+  exit 1
+elif [ "$failed" -gt 0 ]; then
+  printf '%s' "$out" | sed -n '/failing tests:/,$p' | grep '^✖' | sed 's/^/    /' | head -4
+else
+  echo "    ⚠️  NOTHING WENT RED. The break applied and no test noticed it."
+  printf '%s' "$summary" | sed 's/^/      /'
+fi
 git checkout -q -- .
 [ "$(git rev-parse HEAD)" = "$before" ] || { echo "    HEAD moved; something is wrong"; exit 1; }
 git diff --quiet || { echo "    restore failed"; exit 1; }
