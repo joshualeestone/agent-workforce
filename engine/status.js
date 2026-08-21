@@ -1361,13 +1361,33 @@ function transcriptFor(agentName, exactSession) {
  * more than a missing one.
  */
 function byWorkdir(agentName) {
+  return byWorkdirDetailed(agentName).file;
+}
+
+/**
+ * The same search, keeping WHICH of two worlds it found.
+ *
+ * 🛑 IT RETURNED ONE NULL FOR TWO OPPOSITE FACTS, which is the third instance of
+ * that shape tonight after `because` and `ceilingAssumed`:
+ *
+ *   no folder, or no transcripts in it   Claude Code has never written there
+ *   transcripts, none whose cwd matches  something IS wrong
+ *
+ * The first is an agent that has not started a session. The second is a fault.
+ * Collapsed into `null`, the caller could only ever say the second, so a
+ * brand-new agent that has never spoken was greeted with "could not be read" —
+ * Josh's Ava, minutes old and sitting at her prompt, 2026-08-21.
+ */
+function byWorkdirDetailed(agentName) {
+  const nothing = { file: null, sawTranscripts: false };
   // Lazily, and from create.js rather than re-derived here: the workers
   // directory is that module's fact, and a second copy of it would drift the
   // first time somebody moves it.
   let dir;
-  try { dir = require('./create').workerDir(agentName); } catch { return null; }
-  if (!dir) return null;
+  try { dir = require('./create').workerDir(agentName); } catch { return nothing; }
+  if (!dir) return nothing;
   const flat = dir.replace(/[^A-Za-z0-9]/g, '-');
+  let sawTranscripts = false;
 
   for (const root of configRoots()) {
     const projects = path.join(root, 'projects', flat);
@@ -1375,6 +1395,9 @@ function byWorkdir(agentName) {
     try { names = fs.readdirSync(projects); } catch { continue; }
     const jsonl = names.filter((n) => n.endsWith('.jsonl'));
     if (!jsonl.length) continue;
+    // Something has been written for this agent, whether or not it turns out to
+    // be readable. That fact is what separates "has not started" from "broken".
+    sawTranscripts = true;
     // Newest first: a running agent is writing to its current session, and an
     // agent that has been restarted has older ones beside it.
     const byNewest = jsonl
@@ -1387,10 +1410,10 @@ function byWorkdir(agentName) {
       .filter((f) => f.mtime > 0)
       .sort((a, b) => b.mtime - a.mtime);
     for (const f of byNewest) {
-      if (transcriptCwd(f.full) === dir) return f.full;
+      if (transcriptCwd(f.full) === dir) return { file: f.full, sawTranscripts };
     }
   }
-  return null;
+  return { file: null, sawTranscripts };
 }
 
 /**
@@ -1401,6 +1424,23 @@ function byWorkdir(agentName) {
  * few lines are read rather than one, and a file that never says is refused
  * rather than assumed to match.
  */
+/**
+ * Has Kosmos launched this agent somewhere nothing has yet been written?
+ *
+ * ⚠️ TRUE ONLY WHEN BOTH HALVES HOLD — see the long note at the caller. The
+ * plist is the half that makes the folder's emptiness mean anything: without
+ * it, an empty folder says only that the agent did not run HERE.
+ *
+ * 📌 Any error reading either fact answers FALSE, so an unreadable machine
+ * falls back to the admission rather than to a claim about the agent's life.
+ */
+function notYetStarted(agentName) {
+  let managed = false;
+  try { managed = fs.existsSync(require('./create').plistPath(agentName)); } catch { return false; }
+  if (!managed) return false;
+  try { return byWorkdirDetailed(agentName).sawTranscripts === false; } catch { return false; }
+}
+
 function transcriptCwd(file) {
   const text = headBytes(file, 65536);
   if (text === null) return null;
@@ -1522,6 +1562,44 @@ function readContext(agentName, model, exactSession) {
     // WITHOUT A THRESHOLD resolves to the admission. This one cannot be
     // separated at all, so it resolves there unconditionally, and the two extra
     // registry reads I added to try go with it.
+    /**
+     * 🔑 AND ONE OF THOSE CASES CAN NOW BE SEPARATED, WHICH THE PARAGRAPH ABOVE
+     * COULD NOT DO WHEN IT WAS WRITTEN.
+     *
+     * Every reason it lists is a REGISTRY reason — a key we never build, a
+     * missing agent-registry directory, a rotated entry, an unreadable file —
+     * and it is right that none of them separates "never started" from "running
+     * for hours". 0.2.21 stopped depending on that registry, and the signal it
+     * replaced it with is a different fact: the agent's OWN folder, the one
+     * Kosmos created and launched it in.
+     *
+     * ⚠️ TWO CONDITIONS, AND NEITHER IS SUFFICIENT ALONE:
+     *
+     *   we wrote its plist AND nothing has been written at its folder
+     *       -> Kosmos launched it there, so there is nowhere else it could
+     *          have written. It has not started a session.  -> notYet
+     *   we wrote its plist AND transcripts exist but none match
+     *       -> something IS wrong.                          -> the admission
+     *   we did not write its plist
+     *       -> we cannot say where it ran.                  -> the admission
+     *
+     * 🛑 THE PLIST GATE IS LOAD-BEARING AND THE FOLDER CHECK ALONE IS A LIE.
+     * Rick, 2026-08-21, diagnosed his own case: no plist at all, never launched
+     * by our supervisor, running for hours. His expected folder is empty, so the
+     * folder check on its own would announce that a working agent had never
+     * started — the wrong-claim direction this file refuses. The gate is a fact
+     * about OUR bookkeeping rather than a threshold, which is why it survives
+     * the rule that killed the age heuristic.
+     *
+     * 📌 Mona Lisa ruled this shape and corrected two attempts at the
+     * discriminator on the way, including one that 0.2.21 had invalidated
+     * ninety minutes earlier: `sessionIdsFor` returning nothing used to mean
+     * "never registered" and now means "this is a normal machine".
+     */
+    if (notYetStarted(agentName)) {
+      return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true,
+               because: 'it has not started a session yet' };
+    }
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
              because: 'we cannot find a transcript for it' };
   }

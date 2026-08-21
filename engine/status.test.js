@@ -47,8 +47,23 @@ process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'data');
 // registry entry and a transcript meant writing into the operator's real
 // `~/.claude`. The suite did exactly that and cleaned up nothing.
 process.env.AGENT_WORKFORCE_CONFIG_ROOT = nodePath.join(SANDBOX, 'claude');
+/**
+ * 🛑 A ROOT THIS FILE DID NOT SANDBOX UNTIL STATUS REACHED IT. `create.js` reads
+ * `AGENT_WORKFORCE_LAUNCH` for the LaunchAgents directory, defaulting to the
+ * operator's real `~/Library/LaunchAgents`. Nothing in status.js touched it
+ * before, so the gap was harmless and invisible — and then `notYetStarted`
+ * started asking whether an agent's plist exists, and a fixture writing one
+ * would have written it into the real fleet's launchd directory.
+ *
+ * ⚠️ THE SIBLING ROOTS ABOVE WERE SANDBOXED AFTER A TEST SUITE WROTE INTO A
+ * REAL `~/.claude`. This is the same lesson arriving through a door nobody had
+ * opened yet: sandbox every root the code CAN reach, not the ones it reaches
+ * today.
+ */
+process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'launchagents');
 fs.mkdirSync(process.env.AGENT_WORKFORCE_WORKERS, { recursive: true });
 fs.mkdirSync(process.env.AGENT_WORKFORCE_DATA, { recursive: true });
+fs.mkdirSync(process.env.AGENT_WORKFORCE_LAUNCH, { recursive: true });
 
 /** Give a name a worker file, so `readIdentity` has something real to find. */
 function seedWorker(name, body) {
@@ -2005,6 +2020,70 @@ test('a Haiku agent gets a ceiling of its own, and it is not the 1M the others a
       'the percentage does not match Haiku’s own limit; at 1M this would read 2');
     assert.equal(card.context.ceilingAssumed, true,
       'a published figure is still not a watched one, and the screen has to be able to say so');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
+
+test('an agent Kosmos launched but that has never spoken says so, and one we did not launch does not', () => {
+  /**
+   * 🛑 JOSH'S AVA, 2026-08-21: created minutes earlier, sitting at her prompt,
+   * never spoken to — and the panel read *"Ava's memory could not be read. We
+   * cannot find a transcript for it."* The second clause was true; the first was
+   * a claim about a failure that had not happened. A brand-new agent is the most
+   * common thing a new user sees and it greeted them with a fault.
+   *
+   * ⚠️ THE PLIST GATE IS WHAT THIS TEST IS REALLY FOR. Rick ran for hours,
+   * launched outside our supervisor, so his expected folder is empty too. The
+   * folder check ALONE would tell a working agent it had never started.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const agentsDir = process.env.AGENT_WORKFORCE_LAUNCH;
+  const mk = (name) => {
+    const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+    fs.mkdirSync(dir, { recursive: true });   // create.js makes this AT CREATION
+    return dir;
+  };
+  const show = (name) => {
+    setPaneSource(() => `${name}\t0.0\t2.1.227\t0\t${name}\t✳ Claude Code`);
+    setPaneCapture(() => 'Worked for 1m\n> \n');
+    return snapshot().agents.find((a) => a.sessionName === name);
+  };
+
+  try {
+    // --- ours, launched, nothing written yet: Ava ---------------------------
+    mk('avafresh');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(nodePath.join(agentsDir, 'com.kosmos.agent.avafresh.plist'), '<plist/>', 'utf8');
+    const ava = show('avafresh');
+    assert.ok(ava, 'the fixture did not produce a card at all');
+    assert.equal(ava.context.notYet, true,
+      'an agent that has never spoken is still being told its memory could not be read');
+
+    /**
+     * 🛑 THE CONTROL, AND IT IS THE HALF THAT KEEPS THIS HONEST. Same empty
+     * folder, no plist: an agent we did not launch could have run anywhere, so
+     * we must NOT claim it has not started. Delete the plist check and this is
+     * the assertion that goes red.
+     */
+    mk('rickish');
+    const rick = show('rickish');
+    assert.equal(rick.context.notYet, false,
+      'an agent we never launched was told it had not started, which we cannot know');
+    assert.match(rick.context.because, /cannot find a transcript/);
+
+    /* And ours WITH transcripts that do not match is a fault, not a fresh
+       agent: something was written and we cannot use it. */
+    const dir = mk('brokenish');
+    fs.writeFileSync(nodePath.join(agentsDir, 'com.kosmos.agent.brokenish.plist'), '<plist/>', 'utf8');
+    const projects = nodePath.join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(nodePath.join(projects, 'sess-broken.jsonl'),
+      JSON.stringify({ cwd: '/somewhere/else', message: { usage: { input_tokens: 10 } } }) + '\n', 'utf8');
+    const broken = show('brokenish');
+    assert.equal(broken.context.notYet, false,
+      'a transcript exists and cannot be used, which is a fault rather than a new agent');
   } finally {
     setPaneSource(null);
     setPaneCapture(null);
