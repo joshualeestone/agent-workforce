@@ -165,7 +165,10 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
   const owned = PAGE.slice(at, end);
   /* ⚠️ AND THE CONTROL COVERS BOTH LITERALS, so a zero count for either one is
      provably findable rather than provably absent from a badly-cut slice. */
-  assert.equal(owned.split("'Unknown'").length - 1, 1, 'the derivation no longer holds the word, so the exclusion above is hiding it');
+  /* ⚠️ TWICE, because two branches now share the word: the admission and the
+     read-but-unscalable one. A count of exactly 1 was pinning an implementation
+     detail rather than the property, which is that the word lives HERE. */
+  assert.equal(owned.split("'Unknown'").length - 1, 2, 'the derivation no longer holds the word, so the exclusion above is hiding it');
   assert.equal(owned.split("'Not yet read'").length - 1, 1, 'the derivation no longer holds the new word either');
 });
 
@@ -239,6 +242,12 @@ test('every field belongs to its own branch, so the two cannot be swapped', () =
   for (const k of ['word', 'aria', 'lead', 'note']) {
     assert.notEqual(yet[k], unk[k], `${k} is the same in both branches, so it says nothing`);
   }
+  /* ⚠️ THE THIRD BRANCH IS EXEMPT FROM THE WORD, ON PURPOSE (see the noCeiling
+     test), and pinned on the sentences instead. */
+  const noLimit = memUnknown({ tokens: 1, noCeiling: true });
+  for (const k of ['aria', 'lead', 'note']) {
+    assert.notEqual(noLimit[k], unk[k], `${k} is shared with the admission`);
+  }
 });
 
 test('an agent whose memory we READ is never told we could not read it', () => {
@@ -264,10 +273,16 @@ test('an agent whose memory we READ is never told we could not read it', () => {
   assert.match(measured.lead, /was read/);
   assert.equal(measured.notYet, false);
 
-  // ⚠️ AND IT IS ITS OWN CASE, not a relabelling of one of the other two.
+  /* ⚠️ IT SHARES THE WORD WITH THE ADMISSION AND THAT IS DELIBERATE. At a
+     glance the fact is identical in both: there is no percentage, and "Unknown"
+     says so truthfully. Inventing a third word gave the product its longest
+     caption — 90px on an 82px gauge, squeezing the list bar to 18px — for a
+     distinction the eye does not need. What was false was the SENTENCE, and the
+     sentences are what must differ. */
   const unk = memUnknown({ tokens: null, percent: null, notYet: false });
   const yet = memUnknown({ tokens: null, percent: null, notYet: true });
-  for (const k of ['word', 'aria', 'lead', 'note']) {
+  assert.equal(measured.word, unk.word, 'the third branch grew its own caption again');
+  for (const k of ['aria', 'lead', 'note']) {
     assert.notEqual(measured[k], unk[k], `${k} is the same as the admission`);
     assert.notEqual(measured[k], yet[k], `${k} is the same as the not-yet branch`);
   }
@@ -291,5 +306,8 @@ test('a percent we could not read is not reported as a limit we do not know', ()
   const unreadable = memUnknown({ tokens: 1, percent: null, notYet: false });
   assert.equal(unreadable.word, 'Unknown', 'an unreadable percent was reported as a model we do not know the size of');
   const noLimit = memUnknown({ tokens: 1, percent: null, noCeiling: true, notYet: false });
-  assert.equal(noLimit.word, 'No limit known');
+  // ⚠️ SAME WORD, DIFFERENT SENTENCE. The glance is the same fact; the
+  // explanation is not.
+  assert.equal(noLimit.word, 'Unknown');
+  assert.notEqual(noLimit.lead, unreadable.lead, 'the two share an explanation as well as a word');
 });

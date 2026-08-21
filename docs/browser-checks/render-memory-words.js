@@ -101,6 +101,18 @@ const FIXTURES = [
         && r.width > 0 && r.height > 0;
     };
     const box = (el) => el.getBoundingClientRect();
+    /* Text as an assistive technology would take it: aria-hidden subtrees are
+       not part of the accessible name. */
+    const spoken = (root) => {
+      let out = '';
+      for (const n of root.childNodes) {
+        if (n.nodeType === 3) { out += n.nodeValue; continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.getAttribute('aria-hidden') === 'true') continue;
+        out += spoken(n);
+      }
+      return out.replace(/\s+/g, ' ').trim();
+    };
     const res = { cards: [], rows: [], detail: null, pageOverflow: 0 };
 
     // ---- the card grid -----------------------------------------------------
@@ -132,12 +144,15 @@ const FIXTURES = [
       const pct = el.querySelector('.pct');
       const bar = el.querySelector('.bar');
       if (!pct) continue;
+      const wordEl = pct.querySelector('[aria-hidden="true"]');
       res.rows.push({
-        caption: pct.firstChild ? pct.firstChild.textContent : '',
-        // ⚠️ WHAT A SCREEN READER ACTUALLY SAYS, which is the whole cell, not
-        // the hidden span. The word is not aria-hidden here (unlike the card,
-        // where the ring carries the sentence), so the two are concatenated.
-        spoken: pct.textContent.replace(/\s+/g, ' ').trim(),
+        caption: (wordEl ? wordEl.textContent : (pct.firstChild ? pct.firstChild.textContent : '')).trim(),
+        // ⚠️ WHAT A SCREEN READER ACTUALLY SAYS, WHICH IS NOT `textContent`.
+        // An earlier version used textContent and, the moment the visible word
+        // became `aria-hidden`, reported "Not yet readNothing has been recorded"
+        // — a string no assistive technology produces. The accessible name
+        // skips aria-hidden subtrees, so this does too.
+        spoken: spoken(pct),
         vh: pct.querySelector('.vh') ? pct.querySelector('.vh').textContent : '',
         pctW: Math.round(box(pct).width),
         barW: Math.round(box(bar).width),
@@ -212,11 +227,16 @@ const FIXTURES = [
        juxtaposition, the second appended a whole second sentence. So the rule
        is a length one — the cell is the word and a short noun phrase, nothing
        else — which is checkable and is what was violated. */
-    const extra = r.spoken.toLowerCase().replace(r.caption.toLowerCase(), '').trim();
-    if (extra.split(/\s+/).filter(Boolean).length > 3) {
-      problems.push(`list row speaks as "${r.spoken}", which says more than the word and a noun`);
+    /* ⚠️ THE SPOKEN CELL MUST NOT REPEAT THE VISIBLE WORD. Three attempts at
+       "the word plus a noun" all parsed as a claim about OUR reading — the head
+       of the phrase carried it, so no suffix could fix it. The row now hides
+       the word from assistive technology and speaks the sentence, exactly as
+       the card does, and this is the rule that keeps it that way. */
+    if (r.spoken.toLowerCase().includes(r.caption.toLowerCase())) {
+      problems.push(`list row speaks as "${r.spoken}", which reads the visible word aloud instead of explaining it`);
     }
     if (!/[.!?]$/.test(r.spoken)) problems.push(`list row speaks as "${r.spoken}", which is not a sentence`);
+    if (r.spoken.split(/\s+/).length < 4) problems.push(`list row speaks as "${r.spoken}", which is not a sentence either`);
   }
 
   const d = out.detail;

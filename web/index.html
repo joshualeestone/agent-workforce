@@ -4683,14 +4683,19 @@ function lrow(a) {
      "Not yet read memory" (a noun stuck on whichever word arrived), then
      "Not yet read memory: Nothing has been recorded for it so far." — the same
      noun, now followed by a sentence restating the fact.
-     ⚠️ The word is NOT `aria-hidden` here, unlike on the card where the ring
-     carries the sentence. So the spoken half must COMPLETE the visible word
-     rather than restate it — and it must not ADD A MEANING either. " memory for
-     this agent" turned "Not yet read" into a statement about OUR reading, which
-     is the other branch's meaning, so the list row explained the state
-     differently from the card and the Memory box. It says the noun and stops. */
+     ⚠️ AND THE WORD IS `aria-hidden` HERE NOW, exactly as it is on the card,
+     with the SENTENCE in the visually-hidden span. Three attempts at completing
+     the visible word failed the same way: "Not yet read memory" and
+     "Not yet read memory for this agent" and "Not yet read memory: Nothing has
+     been recorded" all parse as "memory [we have] not yet read" — a statement
+     about OUR reading, which is the other branch's meaning. The head of the
+     phrase carried it; no suffix could fix that.
+     🔑 The card solved this already: shape and word for the eye, sentence for
+     the ear. The list row has no ring, so it carries the sentence itself. Now
+     both halves of the board explain the state the same way, which is what the
+     shared derivation was for. */
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct">${memu.word}<span class="vh"> memory.</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct"><span aria-hidden="true">${memu.word}</span><span class="vh">${memu.aria}</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
