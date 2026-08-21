@@ -597,7 +597,7 @@ function waitingNote(state, outcome) {
  * for the one fact that separates them: whether anything of the person's text
  * could have reached the pane. None of them says the agent knows anything.
  */
-function deliver(sessionName, raw, roster) {
+function deliver(sessionName, raw, roster, envelope) {
   const at = new Date().toISOString();
   const problem = messageProblem(raw);
   if (problem) return { state: DELIVERY.COULD_NOT, because: problem, at, paneState: null, paneNote: null };
@@ -607,7 +607,25 @@ function deliver(sessionName, raw, roster) {
     return { state: DELIVERY.COULD_NOT, because: allowed.because, at, paneState: null, paneNote: null };
   }
 
+  /**
+   * ⚠️ THE ENVELOPE IS PREPENDED AFTER THE LENGTH CHECK, NEVER BEFORE IT, and
+   * that ordering is the whole reason it is a parameter rather than something
+   * the caller concatenates.
+   *
+   * `messageProblem` above measured `raw`. A caller that glued its own prefix
+   * on first would have spent the person's `MAX_TEXT` budget on Kosmos's own
+   * words: a message at exactly the limit would be refused with *"keep it to
+   * 2000 characters or fewer"* — naming a limit the text they typed does not
+   * exceed, which is unfalsifiable from where they are standing. The wire may
+   * exceed MAX_TEXT; the person's message may not.
+   *
+   * 📌 The room path reaches the same place from the other side: it validates
+   * its body against MAX_BODY and spills anything over 700 to a file, so what
+   * it concatenates is already bounded. Both are "check the part the person
+   * wrote"; only this one had no bound of its own.
+   */
   const text = cleanMessage(raw);
+  const wire = (typeof envelope === 'string' && envelope.trim()) ? envelope.trim() + ' ' + text : text;
   const target = paneTarget(allowed.card);
   // Read BEFORE the send, from the card the send was authorised against, so the
   // note describes the pane we typed into rather than whatever it became while
@@ -656,7 +674,7 @@ function deliver(sessionName, raw, roster) {
   // connect.js sends a sign-in code exactly this way for exactly this reason.
   // ⚠️ `wireText`, not `text`: a trailing `;` is tmux's command-list separator
   // and never reaches the pane unescaped. See `wireText` for what was measured.
-  const typed = tmux(['send-keys', '-t', target, '-l', '--', wireText(text)]);
+  const typed = tmux(['send-keys', '-t', target, '-l', '--', wireText(wire)]);
   if (typed.ran && typed.status !== 0) {
     // tmux ran and refused: it did not type anything. Re-sending is safe.
     return {
@@ -1305,7 +1323,12 @@ function readThread(projectId, agent, bornAt) {
   // the one this file's whole damage taxonomy exists to remove, and every
   // OTHER damage mode was already first-class. UNPARSEABLE routes it into
   // the existing set-aside-and-start-again repair, so the file is kept.
-  if (parsed.messages.some((m) => !m || typeof m !== 'object' || typeof m.text !== 'string')) {
+  /* ⚠️ `from` IS NOT CHECKED HERE, deliberately: absent is the operator, and a
+     file written before this field existed is not damaged. What IS checked is
+     that a present one is a string, because a non-string reaches the renderer
+     and the whole point of this gate is that nothing unrenderable gets past. */
+  if (parsed.messages.some((m) => !m || typeof m !== 'object' || typeof m.text !== 'string'
+      || (m.from !== undefined && m.from !== null && typeof m.from !== 'string'))) {
     const damaged = new Error('this conversation is there but we cannot make sense of it');
     damaged.code = 'UNPARSEABLE';
     throw damaged;
@@ -1657,6 +1680,25 @@ function appendLocked(projectId, agent, entry, bornAt) {
       at: (entry && entry.at) || new Date().toISOString(),
       text: cleanMessage(entry && entry.text),
       /**
+       * 🛑 WHO SPOKE, AND THE ABSENCE OF THIS FIELD IS WHY AN AGENT COULD NOT
+       * ANSWER AT ALL. Every row in a thread was the operator's by definition
+       * — the readers stamp `kind: 'operator'` on the way out — so the format
+       * had no way to represent a reply, and there was nothing for a command
+       * to write into. A person said hello, watched the answer appear in the
+       * agent's terminal, and waited (#175).
+       *
+       * ⚠️ ABSENT MEANS THE OPERATOR, and that is load-bearing rather than
+       * tidy: every thread file already on a person's disk was written without
+       * this field, and they must go on rendering exactly as they do now. A
+       * required field would have made the change a migration.
+       *
+       * ⚠️ AND IT IS THE SESSION NAME, never a display name. The log holds what
+       * the wire holds; display-name resolution happens at the surface, which
+       * is the same rule `send` follows.
+       */
+      from: (entry && typeof entry.from === 'string' && entry.from.trim())
+        ? entry.from.trim() : null,
+      /**
        * ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered
        * answer sends the digit the agent's prompt is waiting for and shows the
        * option's own words, so `text` alone would either read as a bare "1" a
@@ -1672,7 +1714,22 @@ function appendLocked(projectId, agent, entry, bornAt) {
          produced today (the digit), which is exactly when to move a guarantee
          back inside the thing that promises it. */
       wire: (entry && typeof entry.wire === 'string' && cleanMessage(entry.wire)) || null,
-      delivery: {
+      /**
+       * 🛑 A ROW WITH A SENDER HAS NO DELIVERY, and the default here was
+       * claiming one. `state` falls back to COULD_NOT — which is right for the
+       * person's messages, where the fallback means "we have no evidence it
+       * arrived" — and an agent's reply is written straight into this record.
+       * There is no crossing to fail, so COULD_NOT is a claim about a mechanism
+       * that never ran.
+       *
+       * ⚠️ IT WAS NOT VISIBLE ON THE SCREEN, which is why this is worth
+       * spelling out: `dmRow` skips the verdict for these rows, so the box
+       * looked correct. The CONVERSATION view does not — it reads
+       * `m.delivery.state` straight out, and would have printed "Not sent."
+       * under a reply that arrived. Found by running an append and reading the
+       * record back, not by looking at the page.
+       */
+      delivery: (entry && typeof entry.from === 'string' && entry.from.trim()) ? null : {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
         /**

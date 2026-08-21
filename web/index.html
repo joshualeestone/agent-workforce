@@ -1230,7 +1230,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   max-height: 15rem; overflow-y: auto; padding-right: 4px; }
 .dm { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .dm.mine { align-items: flex-end; }
-/* ⚠️ THE INCOMING BUBBLE HAS NO PRODUCER, and that is worth stating rather
+/* ⚠️ THIS BRANCH IS THE PRODUCER THE NOTE BELOW SAID DID NOT EXIST, and the note
+   is kept rather than deleted because its reasoning is what the shape of the
+   record had to change to satisfy. An agent's side IS kept now: it is a row in
+   the same thread, carrying `from`. The sentence that follows was true until
+   #175 and is not any more.
+   ⚠️ THE INCOMING BUBBLE HAD NO PRODUCER, and that is worth stating rather
    than leaving as a rule nobody can reach. The pack's dbox draws both sides of
    this conversation; the build stores only the person's side, because there is
    no record anywhere of an agent saying something to the person -- its side is
@@ -1246,6 +1251,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
   overflow-wrap: anywhere; }
 .dm.mine .dm-b { background: rgba(214,166,46,.14); }
+/* 🛑 THERE IS NO RULE FOR `.theirs`, AND ADDING ONE MADE IT WORSE. The first
+   version set `background: var(--k-surface); border: 1px solid var(--k-rule)`
+   — byte-identical to `.dbox`, which is the container it sits in — so the
+   agent's bubble had no bubble at all, only a hairline the same colour as the
+   panel's own edge. It was LESS visible than the default it overrode.
+   ⚠️ THIS FILE ALREADY RECORDS THAT EXACT DEFECT, four hundred lines up: three
+   controls "dissolved into their own containers with only a 0.5px border"
+   because they took the surface colour on a surface. I read the note and
+   repeated the mistake in the same file.
+   ✅ `.dm-b`'s default is `--k-sunk`, a real tint, and `.mine` overrides it
+   with the amber one. So the two sides were already distinguished and the
+   honest change was no change. */
 .dm-w { font-size: .75rem; color: var(--k-ink-2); }
 /* ⚠️ THE META LINE FOLLOWS ITS BUBBLE. `.dm.mine` is `align-items: flex-end`,
    which right-aligns the SPAN while it is narrower than the row -- and a
@@ -6260,7 +6277,13 @@ function convoRow(r, agentName) {
     // direction, so one expression covers both ways. (Session names: the
     // log holds what the wire holds; display-name resolution is the
     // clean-chat naming pass, recorded.)
-    who = r.from + ' · to ' + r.to;
+    /* ⚠️ `to` IS NULL WHEN THE AGENT ANSWERED THE PERSON, and this arm used to
+       read "leo · to null" in that case. Not reachable today (the only writer of
+       an agent-authored row is /api/reply, which files under chat.DIRECT, and
+       this view reads project threads) — but kosmos#178 is exactly the change
+       that makes it reachable, so it is a trap primed for whoever takes it
+       rather than a live defect. Fixed while it is cheap. */
+    who = r.from + (r.to ? ' · to ' + r.to : ' · to you');
     cls = 'cvrow peer' + (r.in_reply_to ? ' indent' : '');
   }
   let state = '';
@@ -6570,7 +6593,37 @@ const TALK_QUESTION = {};
  * delivery states and their sentences are decided once, or the same send would
  * be described two ways on two screens.
  */
+/**
+ * Whose words these are, in the words the person uses for that agent.
+ *
+ * ⚠️ THE RECORD HOLDS THE SESSION NAME — the log holds what the wire holds —
+ * and every surface resolves it at the edge. `name` is the display name the
+ * page already has for the agent whose box this is, so a reply from THEM reads
+ * as them; anything else is a session name we have no card for here and is
+ * shown as it is rather than guessed at.
+ */
+function dmWho(from, name) {
+  if (!CURRENT) return String(from);
+  return from === CURRENT.sessionName ? (name || CURRENT.name || String(from)) : String(from);
+}
+
 function dmRow(m, name) {
+  /**
+   * 🛑 A ROW THE AGENT WROTE, which this thread could not hold until now. Every
+   * row was the person's by definition — this function said "You" with no
+   * branch — so an agent had nowhere to put an answer and a person watched an
+   * empty box (#175).
+   *
+   * ⚠️ NO DELIVERY VERDICT ON THIS SIDE, and that is not an omission. The
+   * person's rows carry one because a message has to cross into a terminal and
+   * may not arrive. An agent's reply is written straight into the record the
+   * screen reads: the append IS the arrival, and printing "Sent" beside it
+   * would invent a mechanism that did not happen.
+   */
+  if (m && m.from) {
+    return '<div class="dm theirs"><div class="dm-b">' + esc(m.text) + '</div>'
+      + '<span class="dm-w">' + esc(dmWho(m.from, name)) + pjWhenPart(m.at) + '</span></div>';
+  }
   const v = pjVerdict(m, name);
   /* ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered answer
      sends the digit the agent's prompt is waiting for and shows the option's
@@ -6654,9 +6707,23 @@ async function paintTalk(sessionName, agentName) {
      and whether it may be SHOWN is decided after the answer arrives, beside the
      persistence line's own decision. An earlier version did the text half and
      cited the whole rule. */
-  document.getElementById('d-reply-where').textContent =
-    name + ' will see this in their own window. Replies come back there rather '
-    + 'than here, for now.';
+  /* 🛑 THE SENTENCE THAT WAS HERE IS NOW FALSE, and it was shipped four hours
+     ago in 0.2.12: "Replies come back there rather than here, for now." That
+     was true while an agent had nowhere to write; this branch is what gave it
+     somewhere. Leaving it would put a line above the thread telling somebody
+     not to look at the box the answer just landed in.
+     ⚠️ AND WHAT REPLACES IT IS NOT A BETTER EXPLANATION. The label existed to
+     apologise for a box that did not do what it looked like it did — and Josh
+     read it and waited anyway, then apologised to his agent and asked again. A
+     sentence explaining why a box does not do the thing it looks like it does
+     loses to the box looking like it does that thing. The box does the thing
+     now, so the sentence goes.
+     ⚠️ WHAT REMAINS IS THE ONE FACT THE BOX STILL CANNOT SHOW: an agent that
+     has never been told the command will not answer, and nothing here can tell
+     which. That is said where it is actionable rather than as a standing
+     caveat — see the send verdict. */
+  document.getElementById('d-reply-where').hidden = true;
+  document.getElementById('d-reply-where').textContent = '';
   /* ⚠️ THE TEXT HERE, THE VISIBILITY ON THE SUCCESS PATH, and the first
      version of this fix got that backwards. Whether the line says the right
      agent's name does not depend on the fetch, so it is written with the other

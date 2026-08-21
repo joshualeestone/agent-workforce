@@ -105,6 +105,28 @@ const MARKERS = [
   '[from your operator',
 ];
 
+/**
+ * What the person's message to an agent's OWN PAGE says about answering.
+ *
+ * 🛑 THE DIRECT PATH HAD NO ENVELOPE AT ALL, which is the hole under
+ * `kosmos reply`: the command shipped, and nothing said so at the one moment
+ * an agent would run it. Room arrivals have carried a marker since the room
+ * model landed; the person's own messages arrived as bare text, distinguishable
+ * from nothing. See the long note at the room envelope for the three agents who
+ * diagnosed this from the inside on 2026-08-21.
+ *
+ * ⚠️ ONLY WHERE THE COMMAND IS TRUE. `POST /api/agent/<name>/thread` writes to
+ * `chat.DIRECT` and `kosmos reply` writes to `chat.DIRECT`, so an answer lands
+ * in the thread the question was asked in. `POST /api/project/<id>/thread/<a>`
+ * does NOT get this envelope: its answer surface is the project thread, and
+ * `kosmos reply` would put the reply on the agent's page instead — a person
+ * reading the thread they asked in would see silence, which is the exact
+ * failure this whole branch exists to end. A third surface needs a third
+ * command; filed as kosmos#178 rather than papered over with an instruction
+ * that sends the answer somewhere else.
+ */
+const OPERATOR_DIRECT = '[message from your operator \u00b7 to answer, run: kosmos reply]';
+
 /* Injectable for tests, mirroring chat.setRunner: one tmux question, "whose
    session is this pane in". */
 let runner = null;
@@ -686,12 +708,45 @@ function sendPost({ fromPane, project, projectName, text, operator }, roster, me
        room-wide form, which is the person speaking to the room rather
        than to them -- weighed, not obeyed blindly, same posture with the
        operator's weight behind it. */
+    /**
+     * 🛑 AND HOW TO ANSWER RIDES THE ENVELOPE, because an agent that intends to
+     * answer still does not, and the miss happens at the moment of reading.
+     *
+     * Johnson, Rick and Bob each diagnosed this independently in Josh's room on
+     * 2026-08-21, having each just failed at it. Johnson: *"the first lapse was
+     * before I'd learned the mechanism at all. The second happened AFTER I had
+     * explained this exact gap to the team. That's the more interesting
+     * failure: knowing the rule didn't stop me from breaking it."* Rick named
+     * what was missing: *"nothing in the moment of replying prompts an agent to
+     * reconsider whether a normal reply is enough."* Their reply reads
+     * identically from the inside whether it was sent or not, so nothing
+     * corrects them and the person reads silence.
+     *
+     * ⚠️ THIS IS THE WEAKEST RUNG THAT FITS HERE, said plainly: it does not
+     * force the call, and both of them asked for something that does (auto-relay
+     * the turn, or fail the turn that answers without sending). Those live in
+     * the harness, not in Kosmos. What this removes is the RECALL — that a
+     * command exists, its name, and which string of the two below is its
+     * argument. See kosmos#177 for the rung above.
+     *
+     * 📌 THE NAME AND THE ID BOTH APPEAR, AND THAT IS THE POINT. The rule above
+     * stands (the id must not ride the sentence an agent reads) and the command
+     * is the other half of it, the CLI, "where a machine keys on it". Josh's
+     * `test project` agent answered that `testproject` was not in its projects
+     * because "nothing anywhere says the two strings are one project". This
+     * envelope now does, adjacently, which is the only place they meet.
+     */
+    const answer = operator === true
+      ? ' \u00b7 to answer, run: kosmos post ' + projectId
+      : (mentioned.has(name) ? ' \u00b7 to answer, run: kosmos post ' + projectId : '');
     const envelope = (operator === true
       ? (mentioned.has(name)
-        ? '[message from your operator \u00b7 ' + id + ' \u00b7 project ' + shownProject + ']'
-        : '[from your operator in project ' + shownProject + ' \u00b7 ' + id + ' \u00b7 for the whole room]')
+        ? '[message from your operator \u00b7 ' + id + ' \u00b7 project ' + shownProject + answer + ']'
+        : '[from your operator in project ' + shownProject + ' \u00b7 ' + id + ' \u00b7 for the whole room' + answer + ']')
       : (mentioned.has(name)
-        ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + shownProject + ']'
+        ? '[message from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + shownProject + answer + ']'
+        /* No answer line on background: it is explicitly not addressed to you,
+           and inviting a reply is the unaddressed-steering the room prevents. */
         : '[background from your colleague ' + from + ' \u00b7 ' + id + ' \u00b7 project ' + shownProject + ' \u00b7 not addressed to you]'))
       + ' ' + body;
     const sent = chat.deliver(name, envelope, roster);
@@ -826,12 +881,16 @@ function blockBody() {
     '',
     '    ' + cli + ' post <project-id> "what you want to tell the room"',
     '',
-    '### Answering a room',
+    '### Answering',
     '',
     '**A reply you write in your own session reaches nobody.** The room is a',
-    'different place, and nothing carries your words across to it.',
+    'different place, and so is a message from one person. Nothing carries your',
+    'words across to either.',
     '',
-    'To answer, run the command: `' + cli + ' post <project-id> "your message"`.',
+    'To answer, run the command that matches where it came from:',
+    '',
+    '- `' + cli + ' reply "your message"` for the person who messaged you',
+    '- `' + cli + ' post <project-id> "your message"` for a room',
     '',
     '**The moment this catches people is when a message reads like an ordinary',
     'question.** "Can you check X?" does not look like an instruction to run',
@@ -840,8 +899,15 @@ function blockBody() {
     'two colleagues broke it eleven minutes later, on a message that read like',
     'a question.',
     '',
-    '**So: anything that arrived from a room is answered by command. Including',
-    'when it did not feel like that kind of message. Especially then.**',
+    '**So: anything that arrived from a room or from a person is answered by',
+    'command. Including when it did not feel like that kind of message.',
+    'Especially then.**',
+    '',
+    '**You do not have to remember which one.** Every message that expects an',
+    'answer arrives carrying its own, at the end of the bracket it opens with:',
+    '`to answer, run: ...`. That is the command for THAT message, with the',
+    'project already filled in. Read to the end of the bracket and run what it',
+    'says. A message with no such line is not waiting on you.',
     '',
     'If one of these commands fails in your shell, tell your operator in',
     'your own words rather than staying silent. The message never arrived,',
@@ -861,6 +927,7 @@ function blockBody() {
 }
 
 module.exports = {
+  OPERATOR_DIRECT,
   START, END, blockBody,
   LOG,
   resolveSender, send, sendPost, list, owesReply, pairCount, readLog, record,

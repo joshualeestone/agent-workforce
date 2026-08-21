@@ -1510,6 +1510,81 @@ const server = http.createServer((req, res) => {
    * chat's does: `unconfirmed` folded into failure invites the duplicate
    * re-send.
    */
+  /**
+   * An agent answering the person, in the box on its own page.
+   *
+   * 🛑 THE THING THAT DID NOT EXIST. Two calls in this file wrote into a
+   * conversation and both were operator-only, so an agent had nowhere to put a
+   * reply: it answered in its own session, which reaches nobody, and a person
+   * watched an empty box (#175). The two commands an agent knew were `post`
+   * (a room) and `msg` (types into ANOTHER AGENT'S terminal) — neither one
+   * reaches the person.
+   *
+   * ⚠️ THE SENDER IS THE PANE, NEVER A NAME IN THE BODY, which is the same rule
+   * `/api/msg` follows: a name in a request is a claim by the caller, and any
+   * local process could make it. `resolveSender` ties the pane to a card on the
+   * roster, so a body naming somebody else changes nothing.
+   *
+   * 🛑 AND A PANE IS A CLAIM TOO, said plainly because an earlier version of
+   * this comment said "an agent can only ever write as itself" and that is
+   * stronger than the code. Pane ids are enumerable —
+   * `tmux list-panes -a -F '#{pane_id} #{session_name}'` — so any local process
+   * can pass a second agent's pane and have this write as that agent.
+   *
+   * ⚠️ WHAT MAKES IT WORSE HERE THAN ON `/api/msg`, which has the identical
+   * exposure: that route types into a live terminal somebody can watch, and
+   * this one PERSISTS a false attribution into the record the screen reads.
+   * The browser vector is closed by `crossSiteWrite`; the local-process one is
+   * not, and nothing on this machine separates one local program from another.
+   * Recorded rather than papered over, because a secret the CLI holds would sit
+   * in a file the same processes can read.
+   *
+   * ⚠️ AND THERE IS NO DELIVERY STATE HERE. The person's own sends carry one
+   * because a message must cross into a terminal and may not arrive. This
+   * writes straight into the record the screen reads: the append IS the
+   * arrival. Reporting `placed` would invent a mechanism that did not happen —
+   * the claim-table rule, applied to the direction nobody had built yet.
+   */
+  if (pathname === '/api/reply' && req.method === 'POST') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch {
+          const bad = new Error('that request is not something we can read');
+          bad.status = 400; throw bad;
+        }
+        if (!body || typeof body !== 'object') {
+          const bad = new Error('that request is not the shape we expect');
+          bad.status = 400; throw bad;
+        }
+        // Refused before anything is looked up, exactly as the operator's own
+        // send is: a message we would never keep should not cost a roster read.
+        const problem = chat.messageProblem(body.text);
+        if (problem) { const bad = new Error(problem); bad.status = 400; throw bad; }
+
+        const roster = safeRoster();
+        if (roster === null) {
+          sendJson(res, 200, { kept: false, because: 'we could not check which agents are running, so we could not tell who this is from' });
+          return;
+        }
+        const sender = messages.resolveSender(body.from_pane, roster);
+        if (!sender.ok) { sendJson(res, 200, { kept: false, because: sender.because }); return; }
+
+        const who = sender.card.sessionName;
+        const kept = chat.appendMessage(chat.DIRECT, who, {
+          text: body.text,
+          at: new Date().toISOString(),
+          from: who,
+        });
+        sendJson(res, 200, {
+          kept: kept.recorded === true,
+          because: kept.recorded === true ? null : kept.because,
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400, { error: String((err && err.message) || err) }));
+    return;
+  }
+
   if (pathname === '/api/msg' && req.method === 'POST') {
     readBody(req)
       .then((buf) => {
@@ -1626,8 +1701,17 @@ const server = http.createServer((req, res) => {
         for (const pr of mine) {
           try {
             for (const m of chat.readThread(pr.id, name, pr.createdAt).messages) {
+              /* ⚠️ `kind` COMES FROM THE RECORD NOW, not from where the row was
+                 found. Every thread row used to be the operator's by
+                 definition, so this stamped 'operator' unconditionally — and a
+                 reply written by an agent would have rendered as the person's
+                 own words. Absent `from` still means the operator, which is
+                 what every file already on disk carries. */
               rows.push({
-                kind: 'operator', at: m.at, text: m.text, project: pr.name,
+                kind: m.from ? 'message' : 'operator',
+                from: m.from || null,
+                to: m.from ? null : name,
+                at: m.at, text: m.text, project: pr.name,
                 state: (m.delivery && m.delivery.state) || null,
                 because: (m.delivery && m.delivery.because) || null,
               });
@@ -2091,12 +2175,19 @@ const server = http.createServer((req, res) => {
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.
-        const delivery = chat.deliver(name, body.text, roster);
+        const delivery = chat.deliver(name, body.text, roster, messages.OPERATOR_DIRECT);
         const kept = chat.appendMessage(chat.DIRECT, name, {
           text: chose || body.text,
           /**
-           * What was actually typed into the pane, when it is not what the
-           * bubble shows.
+           * The PERSON'S words as they reached the pane, when they are not the
+           * words the bubble shows.
+           *
+           * ⚠️ NOT "everything that was typed", which it was called until the
+           * operator envelope landed above and made that phrasing false on
+           * every row. The envelope is Kosmos's own framing, identical on all
+           * of them, and storing a constant per message would be noise; what
+           * this field reconciles is the bubble against the message. The
+           * previous drift here was the same shape and is recorded below.
            *
            * ⚠️ THROUGH `cleanMessage`, because that is what `deliver` types.
            * Storing the raw body made this field's own comment false: a text

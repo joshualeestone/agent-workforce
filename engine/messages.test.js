@@ -566,7 +566,7 @@ test('a post fans out to every member, mentioned as a request and the rest MARKE
     // body text rides in both envelopes, so it selects nothing.
     const toMara = typed.find((t) => t.startsWith('[message from your colleague'));
     const toApril = typed.find((t) => t.startsWith('[background from your colleague'));
-    assert.match(toMara, /^\[message from your colleague leo · m\d+ · project henderson-lease\] /,
+    assert.match(toMara, /^\[message from your colleague leo · m\d+ · project henderson-lease · to answer, run: kosmos post henderson-lease\] /,
       'the mentioned member did not receive the addressed marker');
     assert.match(toApril, /^\[background from your colleague leo · m\d+ · project henderson-lease · not addressed to you\] /,
       'the unmentioned member arrived without the background marking -- the one thing that must not happen');
@@ -824,7 +824,7 @@ test('an operator post fans to every member with the operator markers, flagged o
     assert.equal(addressed.length, 1);
     assert.ok(addressed[0][2].startsWith('=leo-discord:'), 'the request went to someone other than the mentioned member');
     assert.equal(roomwide.length, 2, 'a member received an operator post without the room-wide marking');
-    assert.match(roomwide[0][5], /for the whole room\] /);
+    assert.match(roomwide[0][5], /for the whole room · to answer, run: kosmos post henderson-lease\] /);
     const row = messages.record().rows.find((m) => m.kind === 'post');
     assert.equal(row.operator, true, 'the row does not carry the operator flag the screens key on');
     assert.equal(row.from, 'you');
