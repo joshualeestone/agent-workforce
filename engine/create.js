@@ -316,6 +316,66 @@ function plannedModelArg(name) {
 }
 
 /**
+ * Point an existing agent at a different model.
+ *
+ * 🔑 NOT A NEW SUBSYSTEM, which is why it is twenty lines. The model is already
+ * written into `ProgramArguments` by `plistFor`, and `plannedModelArg` already
+ * parses it back out — a reader kept deliberately beside its writer. What was
+ * missing was the ability to make a change take effect, and that is restart.
+ *
+ * 🛑 THE PLIST IS REWRITTEN AND THE JOB IS RE-BOOTSTRAPPED, not kickstarted.
+ * launchd reads a job's ProgramArguments when the job is BOOTSTRAPPED; asking a
+ * loaded job to run again re-runs it with the arguments launchd already holds.
+ * So a rewrite plus a kickstart would edit a file and change nothing about what
+ * actually starts — the same shape as a restart that lets the supervisor adopt
+ * the old window. Reasoned from launchd's documented model rather than measured
+ * here; the tests pin the CALLS, so if that reasoning is wrong the fix is a
+ * different pair of commands and not a different design.
+ *
+ * ⚠️ AND THE WINDOW IS CLOSED FIRST, for the reason `remove.restart` exists to
+ * state: `agent-supervisor.sh` adopts a session it finds rather than replacing
+ * it. Leave the window up and the new job adopts an agent still running the old
+ * model.
+ *
+ * 📌 REFUSES RATHER THAN GUESSING when the existing job cannot be read. Its
+ * `claude` and `tmux` paths live in that file and are what the rewrite has to
+ * preserve; inventing them would repoint an agent at binaries nobody chose.
+ */
+function setModel(name, modelKey) {
+  const clean = cleanName(name);
+  if (!NAME_RE.test(String(clean == null ? '' : clean))) {
+    return { outcome: OUTCOME.REFUSED, because: 'that is not a name we can act on' };
+  }
+  const m = MODELS.find((x) => x.key === String(modelKey));
+  if (!m) return { outcome: OUTCOME.REFUSED, because: 'pick a model from the list' };
+
+  let text;
+  try { text = fs.readFileSync(plistPath(clean), 'utf8'); } catch { text = null; }
+  if (!text) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `${clean} was not started by Kosmos, so we cannot change what it runs on.`,
+    };
+  }
+  const block = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  const args = block ? [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((x) => unxml(x[1])) : [];
+  // 0 bash, 1 supervisor, 2 name, 3 worker dir, 4 claude, 5 tmux, 6 log, 7 model.
+  if (args.length < 7 || !args[4] || !args[5]) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `we could not read how ${clean} is started, so we have not changed it.`,
+    };
+  }
+
+  try {
+    fs.writeFileSync(plistPath(clean), plistFor(clean, args[4], args[5], m.arg), 'utf8');
+  } catch {
+    return { outcome: OUTCOME.REFUSED, because: `we could not write ${clean}'s startup file, so nothing changed.` };
+  }
+  return { outcome: OUTCOME.CREATED, because: null, model: m };
+}
+
+/**
  * Where the ONE supervisor lives, and how it gets there.
  *
  * ⚠️ It used to be GENERATED PER AGENT: each got its own 151-line copy under
@@ -1229,6 +1289,7 @@ function createAgent(opts) {
 
 module.exports = {
   MODELS,
+  setModel,
   createAgent,
   binPaths,
   unusablePath,

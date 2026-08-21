@@ -2672,8 +2672,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <div class="dgrid">
   <section class="dbox">
     <h3 class="dlab">Runs on</h3>
+    <!-- 🔑 "RIGHT NOW" KEEPS ITS OWN LINE ABOVE THE PICKER (Mona Lisa's runs-on
+         spec). A dropdown reading "Opus 5" means "running Opus 5" until somebody
+         touches it and "about to be Opus 5" after; the line above only ever
+         means the first. Two tenses, two elements. -->
     <p class="runnow" id="d-runson"></p>
-    <p class="dhint" style="margin:0;"><b>Changing this is not built yet.</b> The model an agent runs on is shown here; switching it arrives later.</p>
+    <div class="frow" style="margin-top:10px;">
+      <select id="d-model" aria-label="Model this agent runs on"></select>
+      <button class="btn" type="button" id="d-model-go" disabled>Change</button>
+    </div>
+    <p class="dhint" id="d-model-msg" role="status" aria-live="polite" style="margin:8px 0 0;"></p>
+    <!-- 🛑 THE SENTENCE THAT WAS HERE SAID "Changing this is not built yet",
+         which is a screen naming a thing it will not do. It is built now, so it
+         goes. What replaces it is the one consequence a person cannot see:
+         changing the model restarts the agent, and a restart is how an agent
+         reads its instructions again. -->
+    <p class="dhint" style="margin:8px 0 0;">Changing this starts the agent again, so it picks up the new one. It will read its instructions again too.</p>
   </section>
   <section class="dbox">
     <h3 class="dlab">Memory</h3>
@@ -4370,13 +4384,30 @@ function taskLine(a) {
    * state means the agent cannot work at all. A title is a poor status source in
    * general (#209) and that is a bigger question than this line.
    */
-  if (a.state === 'rate_limited') {
-    return a.stateConfidence === 'scraped'
-      ? 'Its screen mentions a usage limit'
-      : 'Waiting out a usage limit';
-  }
-  if (a.task) return a.task;
-  return 'no task showing';
+  return stateReason(a) || a.task || 'no task showing';
+}
+
+/**
+ * What a STATE says about itself, or nothing.
+ *
+ * 🛑 EXTRACTED SO THE CARD AND THE DETAIL HEADER CANNOT DISAGREE. Making the
+ * reason outrank the frozen title fixed the card and the list and left the
+ * header on `a.task` — so the same agent read "Paused · Its screen mentions a
+ * usage limit" on the board and "Paused · Hello" on its own page, an inch from
+ * the sentence explaining it. A correct fix that moved half of a pair, which is
+ * the shape this codebase keeps paying for; caught by Mona Lisa reading the file
+ * rather than the release note.
+ *
+ * 📌 EMPTY FOR EVERY OTHER STATE ON PURPOSE. `needs_you` uses `a.task` as the
+ * thing it needs you ABOUT ("Needs you · Mac"), which is a real qualifier and
+ * not a fossil, so it keeps the title. Only `rate_limited` has a reason that
+ * outranks one, because only it means the agent cannot work at all.
+ */
+function stateReason(a) {
+  if (!a || a.state !== 'rate_limited') return '';
+  return a.stateConfidence === 'scraped'
+    ? 'Its screen mentions a usage limit'
+    : 'Waiting out a usage limit';
 }
 function modelLine(a) {
   /* Provider-first ("Claude Opus 5"), guarded so a modelName that already
@@ -7910,8 +7941,16 @@ function openDetail(sessionName) {
      on a card, where the badge is small and the row is the only line, it
      carries. Same fact, different surface, and the pack shows nothing here. */
   const dtask = document.getElementById('d-task');
-  dtask.textContent = a.task || '';
+  /* The same derivation the card uses, so the two cannot say different things
+     about one agent. Falls back to the title, and to nothing at all — the header
+     hides rather than printing "no task showing" beside a name. */
+  dtask.textContent = stateReason(a) || a.task || '';
   dtask.hidden = !dtask.textContent;
+  /* ⚠️ AFTER the badge/task block, deliberately: a test extracts that block by
+     its first and last lines and runs it in isolation, so a call placed inside
+     it needs a stub the test would then be asserting against instead of the
+     page. Outside it, the same test keeps working and this keeps its real one. */
+  paintModelPicker(a);
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
@@ -9446,6 +9485,95 @@ document.getElementById('d-save').addEventListener('click', async () => {
 
 let ROLES = null;          // the menu, fetched once
 let CREATE_MODELS = [];    // the engine's model list, from the same payload
+
+/**
+ * The model picker on an agent's page.
+ *
+ * 🛑 IT DOES NOT PRESELECT THE CURRENT MODEL, and that is a decision rather than
+ * an omission. Mona Lisa's runs-on spec puts "Right now: Claude Opus 5" on its
+ * OWN LINE above this control, because a dropdown reading "Opus 5" means
+ * "running Opus 5" until somebody touches it and "about to be Opus 5" after —
+ * one control, two tenses. The line above only ever means the first, and this
+ * only ever means the second.
+ *
+ * ⚠️ AND PRESELECTING WOULD HAVE NEEDED A MATCH THIS PAGE CANNOT MAKE HONESTLY.
+ * The card carries the model's display NAME, and that name comes from
+ * `MODEL_NAMES` in status.js while these options come from `MODELS` in
+ * create.js — two tables. They agree today by coincidence rather than by
+ * construction, so keying identity on the label would be a string standing in
+ * for a thing. Not preselecting removes the question instead of answering it
+ * badly.
+ */
+async function paintModelPicker(a) {
+  const sel = document.getElementById('d-model');
+  const go = document.getElementById('d-model-go');
+  const msg = document.getElementById('d-model-msg');
+  if (!sel || !go) return;
+  if (!CREATE_MODELS.length) {
+    try {
+      const res = await fetch('/api/roles', { cache: 'no-store' });
+      if (res.ok) CREATE_MODELS = ((await res.json()) || {}).models || [];
+    } catch { /* the control stays empty and disabled, which is honest */ }
+  }
+  const html = ['<option value="">Change to&hellip;</option>'].concat(
+    CREATE_MODELS.map((m) => '<option value="' + esc(m.key) + '">' + esc(m.label) + '</option>'),
+  ).join('');
+  if (sel.innerHTML !== html) sel.innerHTML = html;
+  /* ⚠️ Only for agents this app started. Anything else has a job we did not
+     write and cannot rewrite, and the engine refuses it — so the control says so
+     by being unavailable rather than by failing after a click. */
+  const ours = !!(a && a.isNamedOurs);
+  sel.disabled = !ours;
+  go.disabled = !ours || !sel.value;
+  if (msg && !ours && !msg.textContent) {
+    msg.textContent = 'Kosmos did not start this one, so it cannot change what it runs on.';
+  }
+}
+
+document.getElementById('d-model').addEventListener('change', (e) => {
+  const go = document.getElementById('d-model-go');
+  if (go) go.disabled = !e.target.value;
+});
+
+document.getElementById('d-model-go').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const sel = document.getElementById('d-model');
+  const go = document.getElementById('d-model-go');
+  const msg = document.getElementById('d-model-msg');
+  const want = sel.value;
+  if (!want) return;
+  /* The same capture-and-recheck the instruction save and the avatar upload
+     use: switching agents mid-flight must not land this answer on another
+     agent's panel. */
+  const forAgent = CURRENT.sessionName;
+  go.disabled = true;
+  sel.disabled = true;
+  msg.textContent = 'Changing…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: want }),
+    });
+    const out = await res.json().catch(() => null);
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    if (!res.ok || !out) throw new Error((out && (out.because || out.error)) || 'that did not work');
+    /* The engine's sentence, verbatim: it distinguishes "changed and starting"
+       from "saved but still running the old one", and those are different facts
+       a person acts on differently. */
+    msg.textContent = out.because || 'Changed.';
+    sel.value = '';
+    await tick();
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    if (!CURRENT || CURRENT.sessionName === forAgent) {
+      sel.disabled = false;
+      go.disabled = !sel.value;
+    }
+  }
+});
+
 let OWN_ROLE = null;       // the third radio's prefill entry, served whole
 let PICKED = null;         // the role key the person chose
 let CREATING = false;      // a create is in flight; guards the double-click

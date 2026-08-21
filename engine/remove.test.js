@@ -1660,8 +1660,13 @@ test('restart closes the window and lets launchd bring the agent back', () => {
 
     /* 📌 The nudge is asked for but is not the mechanism: KeepAlive brings it
        back within the throttle window regardless. */
-    assert.ok(calls.some((c) => c[0] === '/bin/launchctl' && c[1][0] === 'kickstart'),
-      'launchd was not asked to start it again now');
+    /* 🛑 BOOTOUT THEN BOOTSTRAP, not kickstart. launchd holds a job's arguments
+       from the moment it was bootstrapped, so a kickstart after `setModel` has
+       rewritten the plist would start the OLD model. Asserted as the pair, in
+       order, because either alone is the bug. */
+    const lc = calls.filter((c) => c[0] === '/bin/launchctl').map((c) => c[1][0]);
+    assert.deepEqual(lc, ['bootout', 'bootstrap'],
+      'a changed startup file would not take effect on the next start');
 
     /* ⚠️ IT MUST NOT CLAIM THE AGENT IS BACK. The new window appears when
        launchd re-runs the supervisor, up to the throttle interval later. */

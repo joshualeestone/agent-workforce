@@ -7485,7 +7485,13 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
   const tablesFrom = script.indexOf('const STATE_COPY = {');
   const cardStAt = script.indexOf('function cardStOf(a)');
   assert.ok(tablesFrom > -1 && cardStAt > tablesFrom, 'the shared state tables moved');
-  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1);
+  /* ⚠️ `stateReason` JOINS THE PRELUDE, sliced from the page like the tables
+     above and for the identical reason: the header painter calls it now, and a
+     stub here would let this test pass while the shipped helper said something
+     else. It exists so the card and this header cannot disagree about one
+     agent, so a copy of it in the test would defeat its whole purpose. */
+  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1)
+    + '\n' + pageFnSource('stateReason');
 
   const dmAt = script.indexOf('  const dm = cardStOf(a);');
   assert.ok(dmAt > -1,
@@ -7522,6 +7528,22 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
     'the badge class does not track the state, so its colour cannot');
   assert.match(needs.state.innerHTML, /Needs you/, 'the badge lost its word');
   assert.equal(needs.task.textContent, 'Mac', 'the task did not reach its own element');
+
+  /**
+   * 🛑 AND THE HEADER SAYS WHAT THE CARD SAYS. Making the blocking reason
+   * outrank the frozen pane title fixed the card and the list row and left this
+   * header on `a.task` — so one agent read "Paused · Its screen mentions a usage
+   * limit" on the board and "Paused · Hello" on its own page, an inch above the
+   * sentence explaining it. A correct fix that moved half of a pair.
+   *
+   * 📌 The `needs_you` case above is the control: its title is a real qualifier
+   * ("Needs you · Mac"), not a fossil, and it must keep coming through.
+   */
+  const paused = drive({ state: 'rate_limited', stateConfidence: 'scraped', task: 'Hello' });
+  assert.equal(paused.task.textContent, 'Its screen mentions a usage limit',
+    'the header still shows a summary of the first message instead of the reason it is stopped');
+  assert.notEqual(paused.task.textContent, 'Hello',
+    'the header and the card disagree about the same agent');
   assert.equal(needs.task.hidden, false, 'a real task was hidden');
   // ⚠️ The regression this change exists to prevent: the badge must NOT swallow
   // the task. "Needs you: Mac" as one string is what Josh marked up.
@@ -8544,4 +8566,75 @@ test('the footer answers only a question that was asked, and never sits on news'
   unasked('0.1.9', null, { reached: false, looked: true });
   assert.equal(broken['upd-line'].textContent, 'Could not reach the update server.',
     'a failure stayed silent until it was asked for');
+});
+
+test('the model route writes the choice AND restarts, because either alone is a lie', async () => {
+  /**
+   * 🛑 TWO WRITES AND THE SECOND IS NOT OPTIONAL. `setModel` rewrites the
+   * startup file; the restart is what makes launchd read it. Ship the first
+   * without the second and you have a control that reports success and changes
+   * nothing until the machine reboots — and the person is then running a model
+   * the screen says they are not.
+   *
+   * Josh, 2026-08-21, with an agent stopped on a spent Fable 5 limit: *"maybe we
+   * should go ahead and build in picking a different model now."*
+   */
+  const create = require('./engine/create');
+  const removal = require('./engine/remove');
+  const statusEngine = require('./engine/status');
+  const name = 'routeswitch';
+
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  statusEngine.setPaneSource(() => '');
+  const made = create.createAgent({ claudeBin: '/bin/echo', tmuxBin: '/bin/echo', name, role: 'pm', model: 'opus' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  create.setRunner(null);
+
+  // The board sees it running, so the restart has a window to close.
+  statusEngine.setPaneSource(() => fleet.line({ session: name, claim: name, title: '✳ Claude Code' }));
+  const calls = [];
+  removal.setRunner((f, a) => {
+    calls.push([f, a]);
+    if (a && a[0] === 'has-session') return { ok: false, code: 1 };   // the kill worked
+    return { ok: true, stdout: '' };
+  });
+  removal.setDryRun(false);
+  try {
+    const r = await req('/api/agent/' + name + '/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'haiku' }),
+    });
+    assert.equal(r.status, 200, r.body);
+    const out = JSON.parse(r.body);
+    assert.equal(out.outcome, 'changed', out.because);
+
+    assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+      'the startup file still names the old model');
+    assert.ok(calls.some((c) => c[1][0] === 'kill-session'),
+      'nothing closed the window, so the supervisor would adopt an agent still on the old model');
+    assert.ok(calls.some((c) => c[1][0] === 'bootstrap'),
+      'launchd was never re-bootstrapped, so it keeps the arguments it already had');
+
+    /* A model nobody offers is refused before anything is written. */
+    const bad = await req('/api/agent/' + name + '/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-9' }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+      'a refused choice still rewrote the file');
+
+    /* And the plain restart route answers on its own. */
+    const again = await req('/api/agent/' + name + '/restart', { method: 'POST' });
+    assert.equal(again.status, 200, again.body);
+    assert.equal(JSON.parse(again.body).outcome, 'restarted');
+  } finally {
+    removal.setRunner(null);
+    removal.setDryRun(true);
+    create.setDryRun(true);
+    statusEngine.setPaneSource(null);
+  }
 });

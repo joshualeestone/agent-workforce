@@ -1215,13 +1215,27 @@ function restartInner(name) {
     };
   }
 
-  /* 📌 A NUDGE, NOT THE MECHANISM. `KeepAlive` brings it back within the
-     throttle window on its own; `kickstart` only asks launchd to do it now
-     rather than in up to thirty seconds. Its failure is therefore not a failed
-     restart, and is not reported as one. */
+  /**
+   * 📌 A NUDGE, NOT THE MECHANISM. `KeepAlive` brings the agent back within the
+   * throttle window on its own; this only asks launchd to do it now rather than
+   * in up to thirty seconds. Its failure is therefore not a failed restart and
+   * is not reported as one.
+   *
+   * 🛑 BOOTOUT THEN BOOTSTRAP, NOT KICKSTART, AND THE DIFFERENCE IS WHETHER A
+   * CHANGED PLIST TAKES EFFECT. launchd holds a job's ProgramArguments from the
+   * moment it was bootstrapped; asking a loaded job to run again re-runs it with
+   * the arguments launchd already has. `create.setModel` rewrites that file and
+   * then calls this, so a kickstart would edit the file and start the OLD
+   * model — the same shape as letting the supervisor adopt the old window.
+   *
+   * ⚠️ `bootout` answers 3 for a job that is not loaded, which is this file's
+   * own documented case and is success for us: the point is that it is not
+   * running with stale arguments when we bootstrap.
+   */
   step('asked it to start again now', () => {
-    const r = run('/bin/launchctl', ['kickstart', `gui/${process.getuid()}/${job.label}`]);
-    return Boolean(r && r.ok !== false);
+    run('/bin/launchctl', ['bootout', `gui/${process.getuid()}/${job.label}`]);
+    const up = run('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, job.plist]);
+    return Boolean(up && up.ok !== false);
   });
 
   return {
