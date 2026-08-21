@@ -1141,6 +1141,83 @@ const server = http.createServer((req, res) => {
   }
 
   /**
+   * Start an agent's window over, so it reads its instructions again.
+   *
+   * 🔑 THE ACTION THAT MAKES TWO SIGNALS ACTIONABLE. The board has been telling
+   * people an agent is "running on older instructions" since the staleness work
+   * landed, and offering nothing to do about it — half a signal. Adding an agent
+   * to a project edits its instructions, so this is the common case rather than
+   * an exotic one.
+   *
+   * ⚠️ POST, and it takes no body. There is nothing to choose: an agent either
+   * restarts or it does not, and a body would invite a caller to pass a name
+   * that disagrees with the path.
+   */
+  const rst = pathname.match(/^\/api\/agent\/([^/]+)\/restart$/);
+  if (rst && req.method === 'POST') {
+    const name = decodeSegment(rst[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    let out;
+    try { out = removal.restart(name); }
+    catch (err) { sendJson(res, 500, { error: 'we could not restart this agent', detail: String(err && err.message || err) }); return; }
+    sendJson(res, out.outcome === removal.OUTCOME.REFUSED ? 400 : 200, out);
+    return;
+  }
+
+  /**
+   * Point an agent at a different model.
+   *
+   * 🛑 TWO WRITES AND THE SECOND IS NOT OPTIONAL. `setModel` rewrites the
+   * startup file; `restart` is what makes launchd read it. Shipping the first
+   * without the second would be a control that reports success and changes
+   * nothing until the next reboot — the exact class of defect this app spends
+   * its comments on.
+   *
+   * ⚠️ THE RESTART'S VERDICT IS CARRIED, NOT SWALLOWED. If the file changed and
+   * the window could not be closed, the person is running the OLD model and has
+   * been told the new one is set. That is the one outcome worth reporting
+   * loudly, so it comes back as its own state rather than as a success.
+   */
+  const mdl = pathname.match(/^\/api\/agent\/([^/]+)\/model$/);
+  if (mdl && req.method === 'POST') {
+    const name = decodeSegment(mdl[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    /* ⚠️ `readBody`, which is what every other POST in this file uses. The
+       first version called `readJson` — a function that does not exist — so the
+       route threw an uncaught ReferenceError and the request simply never
+       answered. Caught by its own test hanging for forty-five seconds rather
+       than failing, which is what a crashed handler looks like from outside. */
+    readBody(req)
+      .then((raw) => {
+        let body = null;
+        try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+        const wrote = create.setModel(name, body && body.model);
+        if (wrote.outcome === create.OUTCOME.REFUSED) {
+          sendJson(res, 400, { outcome: 'refused', because: wrote.because });
+          return;
+        }
+        let back;
+        try { back = removal.restart(name); }
+        catch (err) { back = { outcome: 'partial', because: String(err && err.message || err), steps: [] }; }
+        const ok = back.outcome === removal.OUTCOME.RESTARTED;
+        sendJson(res, 200, {
+          outcome: ok ? 'changed' : 'partial',
+          model: wrote.model,
+          because: ok
+            ? `${wrote.model.label} it is. It is starting again now.`
+            /* ⚠️ The file is already written, so this says what is TRUE: the
+               choice is saved and the agent has not picked it up yet. */
+            : `We saved ${wrote.model.label}, but could not start it again: ${back.because} `
+              + 'It is still running the old one until it restarts.',
+          steps: back.steps || [],
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  /**
    * What first run should show, and whether it should show at all.
    *
    * ⚠️ One GET, answered by the engine, so the screen cannot disagree with the

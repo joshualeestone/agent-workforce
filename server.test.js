@@ -8567,3 +8567,74 @@ test('the footer answers only a question that was asked, and never sits on news'
   assert.equal(broken['upd-line'].textContent, 'Could not reach the update server.',
     'a failure stayed silent until it was asked for');
 });
+
+test('the model route writes the choice AND restarts, because either alone is a lie', async () => {
+  /**
+   * 🛑 TWO WRITES AND THE SECOND IS NOT OPTIONAL. `setModel` rewrites the
+   * startup file; the restart is what makes launchd read it. Ship the first
+   * without the second and you have a control that reports success and changes
+   * nothing until the machine reboots — and the person is then running a model
+   * the screen says they are not.
+   *
+   * Josh, 2026-08-21, with an agent stopped on a spent Fable 5 limit: *"maybe we
+   * should go ahead and build in picking a different model now."*
+   */
+  const create = require('./engine/create');
+  const removal = require('./engine/remove');
+  const statusEngine = require('./engine/status');
+  const name = 'routeswitch';
+
+  create.setRunner(() => ({ ok: true, stdout: '' }));
+  create.setDryRun(false);
+  statusEngine.setPaneSource(() => '');
+  const made = create.createAgent({ claudeBin: '/bin/echo', tmuxBin: '/bin/echo', name, role: 'pm', model: 'opus' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  create.setRunner(null);
+
+  // The board sees it running, so the restart has a window to close.
+  statusEngine.setPaneSource(() => fleet.line({ session: name, claim: name, title: '✳ Claude Code' }));
+  const calls = [];
+  removal.setRunner((f, a) => {
+    calls.push([f, a]);
+    if (a && a[0] === 'has-session') return { ok: false, code: 1 };   // the kill worked
+    return { ok: true, stdout: '' };
+  });
+  removal.setDryRun(false);
+  try {
+    const r = await req('/api/agent/' + name + '/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'haiku' }),
+    });
+    assert.equal(r.status, 200, r.body);
+    const out = JSON.parse(r.body);
+    assert.equal(out.outcome, 'changed', out.because);
+
+    assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+      'the startup file still names the old model');
+    assert.ok(calls.some((c) => c[1][0] === 'kill-session'),
+      'nothing closed the window, so the supervisor would adopt an agent still on the old model');
+    assert.ok(calls.some((c) => c[1][0] === 'bootstrap'),
+      'launchd was never re-bootstrapped, so it keeps the arguments it already had');
+
+    /* A model nobody offers is refused before anything is written. */
+    const bad = await req('/api/agent/' + name + '/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-9' }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+      'a refused choice still rewrote the file');
+
+    /* And the plain restart route answers on its own. */
+    const again = await req('/api/agent/' + name + '/restart', { method: 'POST' });
+    assert.equal(again.status, 200, again.body);
+    assert.equal(JSON.parse(again.body).outcome, 'restarted');
+  } finally {
+    removal.setRunner(null);
+    removal.setDryRun(true);
+    create.setDryRun(true);
+    statusEngine.setPaneSource(null);
+  }
+});
