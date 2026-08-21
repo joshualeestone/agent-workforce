@@ -158,7 +158,7 @@ function readWorkerFile(file, root) {
   }
 
   if (!fs.existsSync(path.dirname(file))) {
-    return { ok: false, because: 'this agent has no folder on this computer yet' };
+    return { ok: false, because: 'it has no folder of its own on this computer yet' };
   }
 
   // ⚠️ Open FIRST, then ask the descriptor what it is, then read from that same

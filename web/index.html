@@ -8370,7 +8370,7 @@ async function watchForAgent(name, result, attempt) {
   } else {
     warn.innerHTML = '<b>It was set up, but nothing is running under that name yet.</b> '
       + 'The folder and the instructions are on your computer either way. It may still '
-      + 'appear on the board on its own: this screen stopped waiting, it did not stop it.'
+      + 'appear under Agents on its own: this screen stopped waiting, it did not stop it.'
       // ⚠️ This is the screen where somebody is most likely to want an agent
       // gone, and saying "it is set to keep trying" without saying where is how
       // a person ends up with a job they cannot find. (This used to add "because
@@ -8382,8 +8382,8 @@ async function watchForAgent(name, result, attempt) {
       // folder that does not exist.
       + (result.folder
         ? '<br>It is set to keep trying at every login. Its folder is <code>' + esc(result.folder)
-          + '</code>, and removing it for good is written up in the README.'
-        : '<br>It is set to keep trying at every login, and removing it for good is written up in the README.');
+          + '</code>. If it appears under Agents, you can remove it there. If it never appears, we cannot clear it out for you yet.'
+        : '<br>It is set to keep trying at every login. If it appears under Agents, you can remove it there. If it never appears, we cannot clear it out for you yet.');
   }
   warn.hidden = false;
   document.getElementById('made-done').hidden = false;
@@ -8496,7 +8496,7 @@ function pjToldLine(told) {
   // FAILURE still speaks below -- interim until the project notice is
   // drawn (exit dependency tracked on Splinter's board).
   if (told.state === 'could_not') {
-    return 'Its instructions were not updated for this folder: ' + esc(told.because || 'we could not write to its instructions') + '.';
+    return 'We could not update this agent about this folder: ' + esc(told.because || 'we could not write to its instructions') + '.';
   }
   return '';
 }
@@ -8544,9 +8544,9 @@ function pjToldGroupLine(told) {
   // (her ruling), because the singular because is written for a one-agent
   // context and does not survive being quoted inside a plural frame.
   if (told.becauseGroup) {
-    return 'Their instructions were not updated for this folder: ' + esc(told.becauseGroup) + '.';
+    return 'We could not update these agents about this folder: ' + esc(told.becauseGroup) + '.';
   }
-  return 'Their instructions were not updated for this folder.';
+  return 'We could not update these agents about this folder.';
 }
 
 /**

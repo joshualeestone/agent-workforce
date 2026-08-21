@@ -169,18 +169,18 @@ function tellAgent(sessionName, roster) {
          * true of its world.
          */
         because: !Array.isArray(roster)
-          ? 'we could not check which agents are running, so nothing was written'
+          ? 'we could not check which agents are running'
           : roster.some((a) => a && a.sessionName === sessionName)
-            ? 'something is running under this name, but we cannot tell that it is this agent, so nothing was written'
-            : 'we could not find an agent with exactly this name on this computer, so nothing was written',
+            ? 'something is running under this name, but we cannot tell that it is this agent'
+            : 'we could not find an agent with exactly this name on this computer',
       };
     }
     const current = instructions.read(sessionName);
     if (!current.exists && !current.editable) {
-      return { state: projects.TOLD.COULD_NOT, because: current.because || 'this agent keeps its instructions somewhere we cannot safely change' };
+      return { state: projects.TOLD.COULD_NOT, because: current.because || 'it keeps its instructions somewhere we cannot safely change' };
     }
     if (!current.exists) {
-      return { state: projects.TOLD.COULD_NOT, because: 'this agent has no instructions file yet, and we will not create one for it' };
+      return { state: projects.TOLD.COULD_NOT, because: 'it has no instructions file yet, and we will not create one' };
     }
     const found = projects.findBlock(current.text || '', START, END);
     if (found && found.ambiguous) {
@@ -209,10 +209,10 @@ function tellAgent(sessionName, roster) {
     return {
       state: projects.TOLD.COULD_NOT,
       because: /cannot be this short/.test(raw)
-        ? 'taking this out would leave its instructions almost empty, so we left them alone'
+        ? 'taking this out would leave its instructions almost empty'
         : (/larger than an instruction file should be/.test(raw)
-          ? 'its instructions are already at the size limit, so we left them alone'
-          : (raw || 'we could not write to this agent’s instructions')),
+          ? 'its instructions are already at the size limit'
+          : (raw || 'we could not write to its instructions')),
     };
   }
 }
@@ -227,7 +227,7 @@ function tellAgent(sessionName, roster) {
  */
 function syncEveryone(roster) {
   if (!Array.isArray(roster)) {
-    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running, so nothing was written' }];
+    return [{ agent: null, state: projects.TOLD.COULD_NOT, because: 'we could not check which agents are running' }];
   }
   const told = [];
   for (const a of roster) {

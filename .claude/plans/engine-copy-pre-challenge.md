@@ -3,6 +3,8 @@ pre_challenge: true
 method: challenge-loop
 branch: engine-copy
 diff_hash: b25345b0c0a6e95e2b637bcfab92c73dba8627fb89787b1796a9b051dfbebdb2
+diff_hash_certifies: the tree at 7e56844, which is what the gate verified when PR #128 was created
+recompute_current: "git diff origin/main...HEAD -- ':!.claude/plans/engine-copy-pre-challenge.md' | shasum -a 256"
 subdir_audit: passed
 timestamp: 2026-08-20T19:25:00-05:00
 iterations: 5
@@ -76,6 +78,24 @@ so the result could not shape it: converged means a pass with zero new BLOCKERs,
 WARNINGs or CONVENTIONs, and iteration 5 did not meet it. The PR opens anyway,
 per the orchestrator's standing ruling that a PR is not a merge and that a
 person reading it is a second instrument sharing no step with this loop.
+
+### After the PR opened: all four were ruled, and two were one cause
+
+The designer verified all four and **ruled that the frame from her own earlier
+ruling was the wrong noun.** Naming `instructions` in it made that word the
+antecedent for every pronoun after it AND asserted an object some reasons deny
+exists. 🔑 **And the trim was the cause of the ambiguity rather than a separate
+mistake:** the property I asserted, that `instructions` appears exactly once,
+was satisfied by removing the only noun that told a reader what `them` meant.
+
+The frame names the **agents** now, because the person named them, and that is
+true whether or not they exist on this machine, have a folder, or have an
+instructions file. `instructions` moved back into the values, where it has a
+referent. All eighteen lines were rendered and read before and after.
+
+⚠️ **`diff_hash` above certifies the tree at PR creation and is NOT this tree.**
+Recomputing it would make this file claim a loop covered code no pass has seen.
+Run `recompute_current` from the frontmatter and compare.
 
 ### Raised to the designer and deliberately NOT fixed
 

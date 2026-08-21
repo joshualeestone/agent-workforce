@@ -109,42 +109,37 @@ const TOLD = {
  */
 const GROUP_BECAUSE = new Map([
   /**
-   * ⚠️ THE VALUES CARRY NO OUTCOME AND NO NOUN, because the FRAME carries
-   * both. Composed against `pjToldGroupLine`, a value ending "so nothing was
-   * written" said the outcome twice, and one saying "their instructions" said
-   * the frame's own noun back to it. Ruled 2026-08-20 §9 after all nine were
-   * rendered through the frame rather than read: eight of the nine were
-   * defective and only one had been looked at.
+   * ⚠️ THE FRAME NAMES THE AGENTS, so these values carry `instructions`
+   * themselves. An earlier frame named `instructions`, which made it the
+   * antecedent for every pronoun after it AND asserted an object some of
+   * these reasons deny exists ("...were not updated: none of them has one
+   * yet"). Trimming the noun out of the values to stop it appearing twice
+   * removed the only thing telling a reader what `them` meant, so the
+   * property was real and optimising for it made the copy worse.
    *
-   * 🛑 EDIT THE FRAME AND YOU MUST RE-RENDER THESE. They are written to sit
-   * after "Their instructions were not updated for this folder: " and nowhere
-   * else. The KEYS are the engine's verbatim singulars and still carry their
-   * own outcome clauses. ⚠️ THAT IS NOT BECAUSE THE SINGULAR FRAME STAYS
-   * SILENT: it does not any more. `pjToldLine` states the outcome too, so
-   * seven of the nine singulars now say it twice. The keys are authored at
-   * engine call sites, so trimming them is a wider change that was staged out
-   * of this branch deliberately, and the redundancy is accepted as WEIGHT
-   * rather than a lie until it lands. The asymmetry is a schedule, not a
-   * design.
+   * 🛑 EDIT THE FRAME AND YOU MUST RE-RENDER ALL NINE. They are written to
+   * sit after "We could not update these agents about this folder: " and
+   * nowhere else. The KEYS are the engine's verbatim singulars and are
+   * authored at call sites in this file, `you.js` and `workerfile.js`.
    */
-  ['this agent has no folder on this computer yet',
-    'none of them has a folder on this computer yet'],
-  ['this agent has no instructions file yet, and we will not create one for it',
-    'none of them has one yet, and we will not create any'],
-  ['we could not find an agent with exactly this name on this computer, so nothing was written',
+  ['it has no folder of its own on this computer yet',
+    'none of them has a folder of its own on this computer yet'],
+  ['it has no instructions file yet, and we will not create one',
+    'none of them has an instructions file yet, and we will not create any'],
+  ['we could not find an agent with exactly this name on this computer',
     'we could not find any of them by exactly these names on this computer'],
-  ['something is running under this name, but we cannot tell that it is this agent, so nothing was written',
+  ['something is running under this name, but we cannot tell that it is this agent',
     'something is running under these names, but we cannot tell they are those agents'],
-  ['we could not check which agents are running, so nothing was written',
+  ['we could not check which agents are running',
     'we could not check which agents are running'],
-  ['this agent keeps its instructions somewhere we cannot safely change',
-    'they keep them somewhere we cannot safely change'],
-  ['taking this out would leave its instructions almost empty, so we left them alone',
-    'taking this out would leave them almost empty'],
-  ['its instructions are already at the size limit, so we left them alone',
-    'they are already at the size limit'],
-  ['we could not write to this agent’s instructions',
-    'we could not write to them'],
+  ['it keeps its instructions somewhere we cannot safely change',
+    'they keep their instructions somewhere we cannot safely change'],
+  ['taking this out would leave its instructions almost empty',
+    'taking this out would leave their instructions almost empty'],
+  ['its instructions are already at the size limit',
+    'their instructions are already at the size limit'],
+  ['we could not write to its instructions',
+    'we could not write to their instructions'],
 ]);
 
 /** The plural form for a singular because, or null. NEVER invents. */
@@ -550,7 +545,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we could not check which agents are running, so we will not say what it is doing',
+          because: 'we could not check which agents are running, so we cannot say who holds this task',
         },
       };
     }
@@ -559,7 +554,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         ...t,
         claim: {
           claimed: null,
-          because: 'we cannot tell whether this is the same agent, so we will not say what it is doing',
+          because: 'we cannot tell whether this is the same agent, so we cannot say whether it holds this task',
         },
       };
     }
@@ -1657,10 +1652,10 @@ function tellAgent(sessionName, projects, roster) {
          * true of its world.
          */
         because: !Array.isArray(roster)
-          ? 'we could not check which agents are running, so nothing was written'
+          ? 'we could not check which agents are running'
           : roster.some((a) => a && a.sessionName === sessionName)
-            ? 'something is running under this name, but we cannot tell that it is this agent, so nothing was written'
-            : 'we could not find an agent with exactly this name on this computer, so nothing was written',
+            ? 'something is running under this name, but we cannot tell that it is this agent'
+            : 'we could not find an agent with exactly this name on this computer',
       };
     }
     const current = instructions.read(sessionName);
@@ -1673,7 +1668,7 @@ function tellAgent(sessionName, projects, roster) {
     // means the refusal arrives as a reportable verdict instead of an exception
     // that has to be pattern-matched.
     if (!current.exists && !current.editable) {
-      return { state: TOLD.COULD_NOT, because: current.because || 'this agent keeps its instructions somewhere we cannot safely change' };
+      return { state: TOLD.COULD_NOT, because: current.because || 'it keeps its instructions somewhere we cannot safely change' };
     }
     // ⚠️ We do not INVENT a boot file. An agent with no instruction file got
     // one containing nothing but our block -- so it booted from a file this
@@ -1684,7 +1679,7 @@ function tellAgent(sessionName, projects, roster) {
     if (!current.exists) {
       return {
         state: TOLD.COULD_NOT,
-        because: 'this agent has no instructions file yet, and we will not create one for it',
+        because: 'it has no instructions file yet, and we will not create one',
       };
     }
     // ⚠️ Two complete blocks in one file: we cannot tell which is ours, so we
@@ -1722,13 +1717,13 @@ function tellAgent(sessionName, projects, roster) {
     return {
       state: TOLD.COULD_NOT,
       because: /cannot be this short/.test(raw)
-        ? 'taking this out would leave its instructions almost empty, so we left them alone'
+        ? 'taking this out would leave its instructions almost empty'
         : (/larger than an instruction file should be/.test(raw)
           // Same reason as the length case above: the file was already at the
           // limit, and telling somebody their file is too big for a write they
           // did not ask for aims the complaint at the wrong person.
-          ? 'its instructions are already at the size limit, so we left them alone'
-          : (raw || 'we could not write to this agent’s instructions')),
+          ? 'its instructions are already at the size limit'
+          : (raw || 'we could not write to its instructions')),
     };
   }
 }

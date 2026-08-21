@@ -6007,12 +6007,12 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // singular spliced into a plural frame -- "any of them … this agent"
   // read as a contradiction (her ruling).
   const g = shared([
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet'),
-    cn('this agent has no folder on this computer yet', 'none of them has a folder on this computer yet')]);
-  assert.ok(g.startsWith('Their instructions were not updated for this folder'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet'),
+    cn('it has no folder of its own on this computer yet', 'none of them has a folder of its own on this computer yet')]);
+  assert.ok(g.startsWith('We could not update these agents about this folder'),
     'three identical could_not verdicts did not collapse: ' + g);
-  assert.ok(g.includes('none of them has a folder on this computer yet'),
+  assert.ok(g.includes('none of them has a folder of its own on this computer yet'),
     'the group sentence did not carry the plural sibling: ' + g);
   assert.ok(!g.includes('this agent has no folder'),
     'the singular because leaked into the plural frame: ' + g);
@@ -6029,7 +6029,7 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   // arm for a razed could_not (no because at all) reached directly.
   const gline = pageFunction('pjToldGroupLine', TOLD_PRELUDE);
   assert.equal(gline({ state: 'could_not' }),
-    'Their instructions were not updated for this folder.',
+    'We could not update these agents about this folder.',
     'the defensive reasonless arm changed or vanished');
 
   /**
@@ -6053,14 +6053,28 @@ test('identical roster verdicts collapse to one group line, and only then', () =
   const mapBody = projSrc.slice(projSrc.indexOf('const GROUP_BECAUSE = new Map(['),
     projSrc.indexOf(']);', projSrc.indexOf('const GROUP_BECAUSE = new Map([')));
   const singulars = [...mapBody.matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  /* ⚠️ THE PROPERTY INVERTED WHEN THE FRAME CHANGED, and the inversion is the
+     lesson. The frame used to name `instructions`, so the rule was "exactly
+     once" and the values were trimmed to satisfy it. That trim removed the
+     only noun telling a reader what `them` meant, and the frame ALSO asserted
+     a file some reasons deny exists. The frame names the AGENTS now, which is
+     the one thing true in every arm, and `instructions` lives in the values
+     where it has a referent. So the rule is AT MOST once, and the frame itself
+     is pinned, because "at most once" alone would pass a frame that named the
+     noun again while every value happened to omit it. */
   const FRAME_NOUN = /instructions/g;
+  const frame = shared([cn('x', 'a plural'), cn('x', 'a plural')]);
+  assert.match(frame, /^We could not update these agents about this folder: /,
+    'the group frame changed; re-render all nine values against it before trusting this test');
+  assert.doesNotMatch(frame.split(': ')[0], /instructions/,
+    'the frame names `instructions` again, which makes it the antecedent for every pronoun after it');
   for (const singular of singulars) {
     const plural = require('./engine/projects').groupBecause(singular);
     assert.ok(plural, 'a key parsed out of GROUP_BECAUSE does not map: ' + singular);
     const line = shared([cn(singular, plural), cn(singular, plural)]);
     assert.ok(line, 'two identical verdicts did not collapse for: ' + singular);
-    assert.equal((line.match(FRAME_NOUN) || []).length, 1,
-      'the group line says "instructions" more than once, frame and tail: ' + line);
+    assert.ok((line.match(FRAME_NOUN) || []).length <= 1,
+      'the group line says "instructions" more than once: ' + line);
     assert.doesNotMatch(line, /so nothing was written|we left them alone/,
       'the value re-states an outcome the frame already carries: ' + line);
     /* ⚠️ AIMED AT THE VALUE, NOT THE LINE. Against the line this could never
