@@ -191,28 +191,31 @@ test('a path we cannot key on is refused before anything is opened', () => {
   assert.equal(raw(), before);
 });
 
-test('no temp file is left behind when the write fails', () => {
+test('no temp file is left behind when the rename fails', () => {
   /**
-   * A `.kosmos.new` sitting next to somebody's config forever is litter we
-   * would never see, in a directory that is not ours.
+   * ⚠️ THE FAILURE IS INJECTED, and the first version of this test is the
+   * reason why. It made the containing directory read-only, passed, and went
+   * on passing with the cleanup DELETED — because an unwritable directory
+   * fails the `writeFileSync` too, so there was never a temp file to leave
+   * behind. The test asserted litter was absent in the one case that cannot
+   * produce litter.
+   *
+   * Reaching the real case through the filesystem is not possible here: it
+   * needs a write that succeeds and a rename in the SAME directory that fails.
+   * So the rename is made to throw directly. That is the condition the cleanup
+   * exists for, and nothing weaker exercises it.
    */
   const d = folder();
   write({ projects: {} });
-  const dir = fs.mkdirSync(nodePath.join(SANDBOX, 'ro'), { recursive: true });
-  void dir;
-  // Make the containing directory unwritable so the rename cannot land.
-  const roCfg = nodePath.join(SANDBOX, 'ro', 'claude.json');
-  fs.writeFileSync(roCfg, JSON.stringify({ projects: {} }), 'utf8');
-  fs.chmodSync(nodePath.join(SANDBOX, 'ro'), 0o500);
-  const prev = process.env.AGENT_WORKFORCE_CLAUDE_CONFIG;
-  process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = roCfg;
+  const tmp = CONFIG + '.kosmos.new';
+  const real = fs.renameSync;
+  fs.renameSync = () => { const e = new Error('injected'); e.code = 'EIO'; throw e; };
   try {
     const r = trustFolder(d);
-    assert.equal(r.ok, false);
-    fs.chmodSync(nodePath.join(SANDBOX, 'ro'), 0o700);
-    assert.deepEqual(fs.readdirSync(nodePath.join(SANDBOX, 'ro')), ['claude.json'], 'no .kosmos.new left');
+    assert.equal(r.ok, false, 'a rename that throws is a refusal');
+    assert.equal(fs.existsSync(tmp), false, 'and the temp file it wrote is gone');
   } finally {
-    process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = prev;
-    try { fs.chmodSync(nodePath.join(SANDBOX, 'ro'), 0o700); } catch { /* already */ }
+    fs.renameSync = real;
+    try { fs.rmSync(tmp, { force: true }); } catch { /* fine */ }
   }
 });

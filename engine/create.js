@@ -912,9 +912,17 @@ function createAgent(opts) {
   // with `recursive` returns the first path it created and `undefined` when
   // the folder already existed, which is the one moment the two cases are
   // distinguishable — a second later the folder looks identical either way.
-  // The trust write below turns on this and nothing else, because answering
-  // the safety question for a folder the PERSON chose is the case where that
-  // question is doing its job.
+  // The trust write below turns on this, because answering the safety question
+  // for a folder the PERSON chose is the case where that question is doing its
+  // job.
+  //
+  // ⚠️ IT IS THE SECOND LINE, NOT THE FIRST, and the difference is worth
+  // stating because a comment that named the wrong one would read as satisfied
+  // while a later change removed the protection. The FIRST line is the refusal
+  // further up: a name whose folder already exists never reaches here at all.
+  // So no test pins this boolean — it is unreachable through `createAgent` —
+  // and it is kept as the guard that would still be right if that refusal were
+  // ever loosened.
   let weMadeTheFolder = false;
   const madeDir = step('made its folder', () => {
     if (DRY_RUN) return true;

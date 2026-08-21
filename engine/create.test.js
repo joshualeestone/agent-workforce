@@ -34,6 +34,14 @@ process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
 // It also made two assertions vacuous: `existsSync(supervisorPath())` passed off
 // a PREVIOUS run's leftovers whatever this creation did.
 process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'support');
+// ⚠️ AND THE FOURTH ROOT, added the day creation started answering Claude
+// Code's trust question. Without it every successful creation in this suite
+// READ AND REWROTE THE OPERATOR'S OWN ~/.claude.json — a 100KB file holding
+// their account, their MCP servers and 22 projects' settings — adding a
+// trusted entry for a fixture directory in /var/folders that will not exist an
+// hour later. Three roots sandboxed and one live is the exact shape of the
+// last time this went wrong.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
 process.on('exit', () => {
   try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ }
 });
@@ -1751,4 +1759,78 @@ test('no job, no model argument, and an unreadable file all answer null', () => 
   // 3. Present but unparseable.
   fs.writeFileSync(create.plistPath('nomodelpick'), 'not a plist at all', 'utf8');
   assert.equal(create.plannedModelArg('nomodelpick'), null);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trusting the folder we made (#164)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const trustCfg = () => nodePath.join(SANDBOX, 'claude.json');
+const writeCfg = (obj) => fs.writeFileSync(trustCfg(), JSON.stringify(obj, null, 2) + '\n', 'utf8');
+const readCfg = () => JSON.parse(fs.readFileSync(trustCfg(), 'utf8'));
+
+test('a new agent does not stop to ask whether it can trust the folder we just made it', () => {
+  /**
+   * ⚠️ THE COST OF THE PROMPT IS NOT THE PROMPT. Every agent showed `Needs you`
+   * from birth, so the badge stopped separating an agent that genuinely needs
+   * an answer from one that was merely born (#164).
+   */
+  const calls = recorder();
+  void calls;
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-one', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+
+  const dir = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-one'));
+  assert.equal(readCfg().projects[dir].hasTrustDialogAccepted, true);
+});
+
+test('a folder the PERSON already made is never trusted, because that creation is refused', () => {
+  /**
+   * 🛑 THE SECURITY-RELEVANT HALF, and writing it taught me which guard is
+   * actually doing the work. I assumed `weMadeTheFolder` was, and asserted a
+   * successful creation that left the config alone. It came back REFUSED:
+   * `createAgent` already turns down a name whose folder exists, so the trust
+   * write is unreachable on that path — the refusal upstream is the first line
+   * and the `weMadeTheFolder` check is the second.
+   *
+   * Naming the wrong guard would have left a comment claiming a protection
+   * that a later loosening of the refusal would silently remove. So this test
+   * asserts what is TRUE: nobody else's folder can reach the trust write,
+   * because nobody else's folder can reach a created agent.
+   */
+  const calls = recorder();
+  void calls;
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const theirs = nodePath.join(SANDBOX, 'workers', 'trustfix-two');
+  fs.mkdirSync(theirs, { recursive: true });
+  fs.writeFileSync(nodePath.join(theirs, 'their-notes.txt'), 'not ours\n', 'utf8');
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-two', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a folder that is already there is not ours to take over');
+
+  assert.deepEqual(Object.keys(readCfg().projects), [],
+    'we answered a safety question about a folder we did not make');
+  assert.equal(fs.readFileSync(nodePath.join(theirs, 'their-notes.txt'), 'utf8'), 'not ours\n',
+    'and their file is still theirs');
+});
+
+test('a config we cannot write does not cost the person their agent', () => {
+  /**
+   * The fallback, asserted rather than assumed: every refusal inside the trust
+   * write returns the person to the behaviour they have today, which is an
+   * agent that starts and asks once.
+   */
+  const calls = recorder();
+  void calls;
+  create.setDryRun(false);
+  fs.writeFileSync(trustCfg(), '{ not json at all', 'utf8');
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-three', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  assert.equal(fs.readFileSync(trustCfg(), 'utf8'), '{ not json at all', 'and their file is untouched');
 });
