@@ -115,8 +115,13 @@ const GROUP_BECAUSE = new Map([
    * 🛑 EDIT THE FRAME AND YOU MUST RE-RENDER THESE. They are written to sit
    * after "Their instructions were not updated for this folder: " and nowhere
    * else. The KEYS are the engine's verbatim singulars and still carry their
-   * own outcome clauses, because the singular frame does not state one; that
-   * asymmetry is deliberate and is why the two halves are not the same string.
+   * own outcome clauses. ⚠️ THAT IS NOT BECAUSE THE SINGULAR FRAME STAYS
+   * SILENT: it does not any more. `pjToldLine` states the outcome too, so
+   * seven of the nine singulars now say it twice. The keys are authored at
+   * engine call sites, so trimming them is a wider change that was staged out
+   * of this branch deliberately, and the redundancy is accepted as WEIGHT
+   * rather than a lie until it lands. The asymmetry is a schedule, not a
+   * design.
    */
   ['this agent has no folder on this computer yet',
     'none of them has a folder on this computer yet'],
@@ -125,7 +130,7 @@ const GROUP_BECAUSE = new Map([
   ['we could not find an agent with exactly this name on this computer, so nothing was written',
     'we could not find any of them by exactly these names on this computer'],
   ['something is running under this name, but we cannot tell that it is this agent, so nothing was written',
-    'something is running under some of these names, but we cannot tell they are those agents'],
+    'something is running under these names, but we cannot tell they are those agents'],
   ['we could not check which agents are running, so nothing was written',
     'we could not check which agents are running'],
   ['this agent keeps its instructions somewhere we cannot safely change',

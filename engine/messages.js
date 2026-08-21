@@ -138,7 +138,7 @@ function paneSession(paneId) {
 function resolveSender(fromPane, roster) {
   const pane = String(fromPane == null ? '' : fromPane).trim();
   if (!pane) {
-    return { ok: false, because: 'we cannot tell which agent is sending this: `kosmos msg` takes the sender from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
+    return { ok: false, because: 'we cannot tell which agent is sending this: the sender is taken from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
   }
   // A pane id is %N; a session:w.p target is also accepted, and a bare
   // session name prefix-matches in tmux (aim leo, hit leo-discord) --
@@ -684,7 +684,7 @@ function sendPost({ fromPane, project, text, operator }, roster, members) {
     if (cleaned.length > SPILL_AT) {
       try { fs.rmSync(path.join(SPILL_DIR, id + '.txt'), { force: true }); } catch { /* best effort */ }
     }
-    const failed = refuse('the post reached nobody on ' + projectId + '; every member refused it');
+    const failed = refuse('we could not get this post to anybody on ' + projectId);
     failed.outcomes = outcomes;
     return failed;
   }

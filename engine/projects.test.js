@@ -1577,7 +1577,7 @@ test('every singular could_not because the engine authors has a plural sibling',
     'we could not find an agent with exactly this name on this computer, so nothing was written':
       'we could not find any of them by exactly these names on this computer',
     'something is running under this name, but we cannot tell that it is this agent, so nothing was written':
-      'something is running under some of these names, but we cannot tell they are those agents',
+      'something is running under these names, but we cannot tell they are those agents',
     'this agent keeps its instructions somewhere we cannot safely change':
       'they keep them somewhere we cannot safely change',
     'taking this out would leave its instructions almost empty, so we left them alone':
