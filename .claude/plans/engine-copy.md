@@ -381,6 +381,25 @@ from `create.js`, and `web/index.html` is not declared out of scope anywhere.
 replacement is a different situation from the four (the agent exists and its
 supervisor keeps retrying), so it needs its own words.
 
+### 🔑 A frame edit is a change to every sentence under it, and only the frame appears in the diff
+
+The frame ruling re-pointed every deictic in all nine values while **none of the
+values changed**, so nothing about them looked edited. One row survived saying
+*"we cannot tell they are THOSE agents"* under a frame that now says **THESE**
+agents, reading as a second, different set. Its singular twin was consistent
+throughout, which is what made it findable by reading and invisible in a diff.
+
+📌 **And the check written to sweep for it over-flagged**, which is worth as much
+as the finding: it matched `that` in *"we cannot tell THAT it is this agent"*,
+where `that` is a complementiser rather than a demonstrative. A regex cannot
+separate those. Reading the output caught it; trusting the count would have
+turned a correct sentence into a worse one.
+
+⚠️ **So "edit the frame and you must re-render all nine" is an instruction, not
+a record.** An earlier version of that docblock implied all nine HAD been
+re-read against the new frame. They had not. All eighteen were checked
+afterwards and only that one row carried it.
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and

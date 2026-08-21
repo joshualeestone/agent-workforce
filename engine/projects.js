@@ -122,13 +122,18 @@ const GROUP_BECAUSE = new Map([
    * nowhere else. The KEYS are the engine's verbatim singulars and are
    * authored at call sites in this file, `you.js` and `workerfile.js`.
    *
-   * ⚠️ AND "ALL NINE" IS AN INSTRUCTION, NOT A CLAIM ABOUT WHAT WAS DONE. The
-   * row below saying "we cannot tell they are THOSE agents" was carried over
-   * from the previous frame and reads as a second, different set now that the
-   * frame says THESE agents. Its singular twin is consistent ("this name ...
-   * this agent"). Flagged to the designer rather than reworded here, because
-   * the value is hers, and recorded here because an earlier version of this
-   * comment implied every row had been re-read against the new frame.
+   * ⚠️ AND "ALL NINE" IS AN INSTRUCTION, NOT A CLAIM ABOUT WHAT WAS DONE.
+   * When the frame changed, the row below said "we cannot tell they are THOSE
+   * agents" and read as a second, different set under a frame saying THESE
+   * agents. Nothing about that value looked edited, because nothing about it
+   * WAS edited, which is the trap:
+   *
+   * 🔑 CHANGING A FRAME SILENTLY RE-POINTS EVERY DEICTIC IN EVERY VALUE UNDER
+   * IT. A frame edit is a change to all nine sentences and only the frame
+   * appears in the diff.
+   *
+   * All eighteen were checked against the new frame afterwards and only that
+   * one row carried it.
    */
   ['it has no folder of its own on this computer yet',
     'none of them has a folder of its own on this computer yet'],
@@ -137,7 +142,7 @@ const GROUP_BECAUSE = new Map([
   ['we could not find an agent with exactly this name on this computer',
     'we could not find any of them by exactly these names on this computer'],
   ['something is running under this name, but we cannot tell that it is this agent',
-    'something is running under these names, but we cannot tell they are those agents'],
+    'something is running under these names, but we cannot tell they are these agents'],
   ['we could not check which agents are running',
     'we could not check which agents are running'],
   ['it keeps its instructions somewhere we cannot safely change',
