@@ -75,7 +75,11 @@ const ago = (mins) => new Date(Date.now() - mins * 60000).toISOString();
 
 /** A room: the person's post, then whatever came after it. */
 function room(after) {
-  const post = { operator: true, from: null, at: ago(5), outcomes: ALL_PLACED, text: 'hello' };
+  /* ⚠️ `from: 'you'`, NOT null. That is what `sendPost` writes for an operator
+     post, and the first version of this fixture invented `null` — which made
+     the operator test unable to fail, because a null name matches no agent
+     whatever the code does. */
+  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'hello' };
   return { rows: [post, ...after], post };
 }
 const said = (who) => ({ from: who, at: ago(4), text: 'here' });
@@ -150,8 +154,31 @@ test('anything an agent says afterwards counts, and it does not have to be a rep
 });
 
 test('the person talking to themselves is not an agent answering', () => {
-  const r = room([{ operator: true, from: null, at: ago(4), text: 'anyone?' }]);
+  const r = room([{ operator: true, from: 'you', at: ago(4), text: 'anyone?' }]);
   assert.deepEqual(api.pjSilentSince(r.post, r.rows, 0).sort(), ['bob', 'johnson', 'rick']);
+});
+
+test('an agent actually named "you" is not mistaken for the person', () => {
+  /**
+   * 🛑 THE ENGINE'S OWN WARNING, made into a test. `sendPost` writes
+   * `from: 'you'` for an operator post and adds an explicit `operator: true`
+   * "because a NAME alone cannot carry the distinction: 'you' is a legal tmux
+   * session name, and the one thing the screens must never do is promote an
+   * agent to operator on a string match."
+   *
+   * ⚠️ This runs it in the other direction. If the silence check keyed on the
+   * name rather than the flag, the PERSON's own follow-up post would count as
+   * this agent having answered, and a room where nobody replied would read as
+   * a working one. It is also what makes the test above able to fail at all.
+   */
+  const outcomes = { you: 'placed', rick: 'placed' };
+  const p = { agents: [member('you', 'You'), member('rick', 'Rick')] };
+  const post = { operator: true, from: 'you', at: ago(5), outcomes };
+  const rows = [post, { operator: true, from: 'you', at: ago(4), text: 'anyone?' }];
+
+  assert.deepEqual(api.pjSilentSince(post, rows, 0).sort(), ['rick', 'you'],
+    'the person’s own post was read as the agent called "you" answering');
+  assert.equal(api.pjNameOf(p, 'you'), 'You');
 });
 
 test('a valve notice is not an agent answering', () => {
