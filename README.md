@@ -266,7 +266,7 @@ reach work that lives somewhere else, including a repo you already have.
 Nothing this app generates is ever written into a project folder; everything it
 keeps lives in its own store.
 
-Two caveats belong here rather than in a comment, because both are things a
+Three caveats belong here rather than in a comment, because each is something a
 person could otherwise believe and have no way to check.
 
 ⚠️ **Putting an agent on a project is not a permission.** It is how you say
@@ -275,6 +275,26 @@ runs with `--dangerously-skip-permissions` and nothing is enforced anywhere, so
 you will find no lock icon, no "access", and no wording suggesting an agent
 cannot reach something. A boundary that is not enforced is worse than none,
 because the person believing it has no way to find out.
+
+⚠️ **Making an agent writes one line into Claude Code's config.** Kosmos creates
+the agent's folder and writes its instructions into it, and Claude Code then
+asks whether that folder can be trusted. Since the folder is one this app made a
+second earlier, Kosmos answers that question for it, by adding
+`hasTrustDialogAccepted` for that one exact path to `~/.claude.json`. It is
+another program's file, so the write is deliberately narrow: only folders this
+app created, never one you chose yourself, never a global setting, and it is
+undone if the startup job could not be installed. (Not the same as the agent
+failing later: Kosmos can only say the job was accepted, so an agent whose job
+installs and then dies keeps its line.) If the write does not take, nothing breaks:
+the agent starts and asks you once, which is what happened before this existed.
+If Claude Code had already recorded that folder, whatever it recorded is put
+back when the line is undone, rather than simply removed.
+
+Removing an agent does **not** take that line back out, and that is deliberate
+rather than an oversight. At that moment nothing can tell an entry this app
+wrote from one you made yourself, and deleting your own answer about a folder is
+worse than leaving a line about a folder that is gone. Claude Code keeps such
+lines for every folder you have ever opened anyway.
 
 ⚠️ **A running agent does not see the change.** Putting an agent on a project
 writes the project's folder into that agent's instruction file, and an agent

@@ -908,9 +908,29 @@ function createAgent(opts) {
     }
   }
 
+  // ⚠️ WHETHER WE MADE IT, not whether it is there afterwards. `mkdirSync`
+  // with `recursive` returns the first path it created and `undefined` when
+  // the folder already existed, which is the one moment the two cases are
+  // distinguishable — a second later the folder looks identical either way.
+  // The trust write below turns on this, because answering the safety question
+  // for a folder the PERSON chose is the case where that question is doing its
+  // job.
+  //
+  // ⚠️ IT IS THE SECOND LINE, NOT THE FIRST, and the difference is worth
+  // stating because a comment that named the wrong one would read as satisfied
+  // while a later change removed the protection. The FIRST line is the refusal
+  // further up: a name whose folder already exists never reaches here at all.
+  // ⚠️ AND IT IS NOT DEAD, though it looked it while the only case anybody
+  // could name was the one the refusal already covers. What it actually guards
+  // is the WINDOW between that refusal's `existsSync` and this `mkdirSync`:
+  // anything that creates the folder in between makes recursive mkdir succeed
+  // silently and return undefined, and the trust write must not fire for a
+  // folder we did not make. That case has its own test, which enters the window
+  // by wrapping `mkdirSync`.
+  let weMadeTheFolder = false;
   const madeDir = step('made its folder', () => {
     if (DRY_RUN) return true;
-    fs.mkdirSync(workerDir(name), { recursive: true });
+    weMadeTheFolder = fs.mkdirSync(workerDir(name), { recursive: true }) !== undefined;
   });
   if (!madeDir) {
     rollBack();
@@ -1083,12 +1103,70 @@ function createAgent(opts) {
    * So: bootstrap the job, and let `RunAtLoad` do it. One path, exercised at
    * creation, at reboot, and after every crash.
    */
+  /**
+   * Answer Claude Code's trust-this-folder question for the folder we just
+   * made, BEFORE the job starts — the question is asked at startup, so a write
+   * after `bootstrap` would land too late to stop the prompt it exists for.
+   *
+   * ⚠️ NON-GATING, AND NOT A STEP. Every failure inside `trustFolder` leaves
+   * the config exactly as it was, and the outcome of that is TODAY'S
+   * BEHAVIOUR: the agent starts and asks its person once. A red step on an
+   * otherwise successful creation would report a working agent as a broken one
+   * over a prompt they can answer by pressing 1.
+   *
+   * ⚠️ And it is skipped entirely under DRY_RUN, which is the whole point of a
+   * dry run: nothing outside Kosmos is touched.
+   */
+  // ⚠️ THE RESULT IS KEPT BECAUSE THE ROLLBACK NEEDS IT: a key we wrote for a
+  // folder we are about to delete has to come back out, or the sentence "we
+  // have taken it back off your computer" is false in exactly the case that
+  // produces it. It carries the KEY it wrote, so the undo cannot re-derive a
+  // path while a rollback is deleting the folder under it.
+  //
+  // ⚠️ WHAT IS STILL THROWN AWAY, said rather than implied: `because`. Every
+  // refusal inside `trustFolder` names its cause, and nothing here surfaces
+  // that anywhere, so when an agent still stops on the prompt nothing on the
+  // machine says which guard fired. Recorded as a gap, not fixed here — the
+  // create result has no slot that shows a person a non-failure.
+  let trusted = null;
+  if (!DRY_RUN && weMadeTheFolder) {
+    try { trusted = require('./trust').trustFolder(workerDir(name)); }
+    catch { /* another tool's file; an agent that asks once is not a failed creation */ }
+  }
+
   const started = step('started it', () => {
     const r = run('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, plistPath(name)]);
     return r && r.ok !== false;
   });
 
   if (!started) {
+    // ⚠️ AND THE TRUST ENTRY GOES WITH IT — only when we CREATED it (`already`
+    // false), never when it was somebody's own decision that happened to be
+    // there already. `rollBack` puts the machine back; this is the one thing
+    // it puts back that is not ours.
+    if (trusted && trusted.ok === true && trusted.already === false && trusted.key) {
+      // ⚠️ `trusted.key`, never a fresh realpath of the folder. One derivation
+      // of one fact, taken at the moment the folder was certainly there.
+      // ⚠️ AND A FAILED UNDO IS RECORDED, because the sentence below tells the
+      // person we took it back off their computer. If the undo refuses — the
+      // config went unreadable, became a symlink, or a live session rewrote the
+      // value under us — that sentence is false in exactly the case that
+      // produced it, and `steps` is the one place this result can be seen.
+      // ⚠️ IT APPEARS ONLY ON FAILURE. A step saying we tidied up would be
+      // noise on a path where the person is already being told something went
+      // wrong. An earlier version of this comment claimed the step existed
+      // while the push had been lost to a `git checkout` during mutation
+      // testing, and the test asserting its ABSENCE could not fail because
+      // nothing ever pushed it.
+      let undone = false;
+      // ⚠️ WITH WHAT THE WRITE DISPLACED, so the undo RESTORES rather than
+      // deletes. "Delete the key afterwards" is only a restore when the key was
+      // absent before, and it usually was not: nineteen of twenty-two entries
+      // on this machine hold `false`.
+      try { undone = require('./trust').forgetFolder(trusted.key, trusted.displaced, trusted.madeEntry).ok === true; }
+      catch { undone = false; }
+      if (!undone) steps.push({ label: 'took back the folder trust', ok: false });
+    }
     // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
     // here, so an agent reported as "not running yet" would have started at the
     // person's next login anyway -- the one outcome nobody would predict from

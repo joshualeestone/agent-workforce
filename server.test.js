@@ -72,6 +72,12 @@ const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-'));
 process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 const WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-srv-workers-'));
 process.env.AGENT_WORKFORCE_WORKERS = WORKERS;
+// ⚠️ AND CLAUDE CODE'S OWN CONFIG, which is a different file from the root
+// above and a different tool's. This file creates a real agent (the removable
+// route needs one), and `createAgent` now answers Claude Code's trust question
+// for the folder it makes. Unsandboxed, that is a write into the operator's
+// live ~/.claude.json for a temp directory that will not exist a minute later.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
 // ⚠️ AND THE CLAUDE CONFIG ROOT, which this file's own header said it did not
 // set and should. Until now /api/status read the operator's real `~/.claude` on
 // every run here -- reads only, but it also meant no test could give a fixture

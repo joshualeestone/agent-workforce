@@ -25,6 +25,11 @@ const path = require('node:path');
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-fixture-'));
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
+// ⚠️ AND THE CONFIG ROOT. `createAgent` now answers Claude Code's trust
+// question for the folder it makes, which is a write into ~/.claude.json. A
+// blind review measured the cost of leaving this out: 93 entries for temp
+// directories, in the operator's own live config, from this suite alone.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = path.join(SANDBOX, 'claude.json');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 
 const test = require('node:test');
@@ -536,4 +541,107 @@ test('no test hand-types a tab-separated pane line', () => {
   }
   assert.deepEqual(offenders, [],
     'use test-support/fleet, which builds lines from PANE_COLUMNS by name');
+});
+
+// ---------------------------------------------------------------------------
+// The fourth root
+// ---------------------------------------------------------------------------
+
+test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', () => {
+  /**
+   * 🛑 THIS RULE EXISTS BECAUSE THE SUITE ALREADY DID THE DAMAGE ONCE. When
+   * `createAgent` started answering Claude Code's trust question for the folder
+   * it makes, one test file was sandboxed and five were not. A blind reviewer
+   * measured the result in the operator's own live config: 93 entries keyed to
+   * temp directories under /var/folders that had not existed for hours, in a
+   * 114KB file holding their account and their MCP servers.
+   *
+   * 🔑 THE POINT IS NOT THE FIVE FILES, IT IS THE SIXTH. Adding the line to
+   * each one by hand fixes today and leaves the trap armed for whoever writes
+   * the next suite — which is exactly how three roots came to be sandboxed and
+   * a fourth not. So the rule is enforced here rather than remembered.
+   *
+   * ⚠️ It reads the files as text, and text cannot tell a call from a mention
+   * in a comment. That trade is deliberate: a comment naming `createAgent(`
+   * makes this test fail LOUDLY and somebody re-words the comment, where the
+   * clever version would let a real caller slip through a filter. This file's
+   * neighbour tried the filter and it did not work — block comments here have
+   * unmarked continuation lines.
+   */
+  /* ⚠️ EVERY `*.test.js` THE SUITE RUNS, found by walking rather than by naming
+     two directories. The rule is about the suite that does not exist yet, and a
+     scan pinned to the root and `engine/` misses it the moment somebody adds a
+     folder. */
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.test.js')) files.push(full);
+    }
+  })(__dirname);
+
+  /* ⚠️ A WORD BOUNDARY, because `includes` was satisfied by a DIFFERENT
+     VARIABLE: `AGENT_WORKFORCE_CLAUDE_CONFIG_DIR` contains the name of the one
+     this rule is about, and two suites already sandbox the directory alongside
+     the file. A suite that set only the directory would have passed this rule
+     while writing into the real config. */
+  /* ⚠️ AN ASSIGNMENT, not a mention, and the difference is which way the rule
+     fails. `MAKES_AN_AGENT` matching a comment is safe: it adds a file to the
+     list that then has to satisfy the second pattern. `SETS_THE_FILE` matching
+     a comment is the opposite — a suite that merely NAMES the variable in a
+     docblock, or leaves it in a commented-out line, is passed while it writes
+     into the operator's real config. The one trade the docblock above argues
+     for is the one that was already safe. */
+  const SETS_THE_FILE = /AGENT_WORKFORCE_CLAUDE_CONFIG(?!_)\s*\]?\s*=[^=]/;
+  /* ⚠️ AND IT GETS ITS OWN CONTROL, because it is the pattern that decides
+     pass/fail and the named control below covers only the OTHER one. Widen this
+     to drop the `(?!_)` and `missing` is empty forever with nothing noticing —
+     a rule made unfalsifiable by the tidy-up its own comment invites. */
+  assert.equal(SETS_THE_FILE.test("process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(S, 'c.json');"), true,
+    'the rule stopped recognising the assignment it is about');
+  assert.equal(SETS_THE_FILE.test('// AGENT_WORKFORCE_CLAUDE_CONFIG is the fourth root'), false,
+    'a comment naming the variable now satisfies the rule, which is the direction that fails open');
+  assert.equal(SETS_THE_FILE.test('if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG === x)'), false,
+    'a comparison satisfies the rule');
+  assert.equal(SETS_THE_FILE.test("process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR = d;"), false,
+    'the rule is satisfied by the directory variable again, which sandboxes a different thing');
+
+  /* ⚠️ TWO WAYS TO MAKE AN AGENT, and the second one has no `createAgent(` in
+     it: `POST /api/agents`. A rule keyed on the function name alone lets an
+     HTTP-driven suite through, and `server.test.js` hides that today by
+     containing both. */
+  const MAKES_AN_AGENT = /\bcreateAgent\(|['"`]\/api\/agents['"`]/;
+
+  const creators = [];
+  const missing = [];
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    const rel = path.relative(__dirname, f);
+    /* ⚠️ THIS FILE IS EXCLUDED FROM ITS OWN RULE. It matched on the docblock
+       above rather than on any call, which inflated the control below to 4 when
+       only 3 suites really create agents — and the docblock's own suggested
+       remedy ("re-word the comment") would then have dropped it to 3 and turned
+       the control red for no reason. A rule that counts itself is measuring its
+       own prose. */
+    if (rel === 'fixture-discipline.test.js') continue;
+    if (!MAKES_AN_AGENT.test(src)) continue;
+    creators.push(rel);
+    if (!SETS_THE_FILE.test(src)) missing.push(rel);
+  }
+
+  /* ⚠️ THE POSITIVE CONTROL, NAMED RATHER THAN COUNTED. A count is the wrong
+     instrument here: it went stale the moment a suite was added, and its
+     previous value was met only because this file matched itself. These three
+     provably create agents today, so if the pattern stops finding them it has
+     stopped working — and that is a fact about the code, not about how many
+     files happen to exist. */
+  for (const known of ['engine/create.test.js', 'engine/remove.test.js', 'server.test.js']) {
+    assert.ok(creators.includes(known),
+      `${known} creates agents and this rule no longer sees it, so it is aimed at nothing`);
+  }
+
+  assert.deepEqual(missing, [],
+    'these suites create agents without sandboxing ~/.claude.json, so running them writes into the operator’s real Claude config');
 });

@@ -34,6 +34,14 @@ process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
 // It also made two assertions vacuous: `existsSync(supervisorPath())` passed off
 // a PREVIOUS run's leftovers whatever this creation did.
 process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'support');
+// ⚠️ AND THE FOURTH ROOT, added the day creation started answering Claude
+// Code's trust question. Without it every successful creation in this suite
+// READ AND REWROTE THE OPERATOR'S OWN ~/.claude.json — a 100KB file holding
+// their account, their MCP servers and 22 projects' settings — adding a
+// trusted entry for a fixture directory in /var/folders that will not exist an
+// hour later. Three roots sandboxed and one live is the exact shape of the
+// last time this went wrong.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
 process.on('exit', () => {
   try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ }
 });
@@ -1752,3 +1760,325 @@ test('no job, no model argument, and an unreadable file all answer null', () => 
   fs.writeFileSync(create.plistPath('nomodelpick'), 'not a plist at all', 'utf8');
   assert.equal(create.plannedModelArg('nomodelpick'), null);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trusting the folder we made (#164)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const trustCfg = () => nodePath.join(SANDBOX, 'claude.json');
+const writeCfg = (obj) => fs.writeFileSync(trustCfg(), JSON.stringify(obj, null, 2) + '\n', 'utf8');
+const readCfg = () => JSON.parse(fs.readFileSync(trustCfg(), 'utf8'));
+
+test('a new agent does not stop to ask whether it can trust the folder we just made it', () => {
+  /**
+   * ⚠️ THE COST OF THE PROMPT IS NOT THE PROMPT. Every agent showed `Needs you`
+   * from birth, so the badge stopped separating an agent that genuinely needs
+   * an answer from one that was merely born (#164).
+   */
+  recorder();   // for the side effect: nothing here asserts on the calls
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-one', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+
+  const dir = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-one'));
+  assert.equal(readCfg().projects[dir].hasTrustDialogAccepted, true);
+});
+
+test('a folder the PERSON already made is refused outright, so nothing downstream can touch it', () => {
+  /**
+   * 🛑 THE SECURITY-RELEVANT HALF, and writing it taught me which guard is
+   * actually doing the work. I assumed `weMadeTheFolder` was, and asserted a
+   * successful creation that left the config alone. It came back REFUSED:
+   * `createAgent` already turns down a name whose folder exists, so the trust
+   * write is unreachable on that path — the refusal upstream is the first line
+   * and the `weMadeTheFolder` check is the second.
+   *
+   * Naming the wrong guard would have left a comment claiming a protection
+   * that a later loosening of the refusal would silently remove. So this test
+   * asserts what is TRUE: nobody else's folder can reach the trust write,
+   * because nobody else's folder can reach a created agent.
+   *
+   * ⚠️ SO IT IS A REGRESSION GUARD ON THE REFUSAL, NOT A TRUST TEST, and it is
+   * named that way now. It passes with the entire trust feature deleted, which
+   * is honest for what it covers and would be a lie under its old name. The
+   * trust half is covered by the race test further down.
+   */
+  recorder();   // for the side effect: nothing here asserts on the calls
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const theirs = nodePath.join(SANDBOX, 'workers', 'trustfix-two');
+  fs.mkdirSync(theirs, { recursive: true });
+  fs.writeFileSync(nodePath.join(theirs, 'their-notes.txt'), 'not ours\n', 'utf8');
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-two', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.REFUSED, 'a folder that is already there is not ours to take over');
+
+  assert.deepEqual(Object.keys(readCfg().projects), [],
+    'we answered a safety question about a folder we did not make');
+  assert.equal(fs.readFileSync(nodePath.join(theirs, 'their-notes.txt'), 'utf8'), 'not ours\n',
+    'and their file is still theirs');
+});
+
+test('a config we cannot write does not cost the person their agent', () => {
+  /**
+   * The fallback, asserted rather than assumed: every refusal inside the trust
+   * write returns the person to the behaviour they have today, which is an
+   * agent that starts and asks once.
+   */
+  recorder();   // for the side effect: nothing here asserts on the calls
+  create.setDryRun(false);
+  fs.writeFileSync(trustCfg(), '{ not json at all', 'utf8');
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-three', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  assert.equal(fs.readFileSync(trustCfg(), 'utf8'), '{ not json at all', 'and their file is untouched');
+});
+
+test('an agent that will not start takes its trust entry back off the machine with it', () => {
+  /**
+   * ⚠️ THE SENTENCE IS THE TEST. A failed start tells the person "we have taken
+   * it back off your computer rather than leave something half installed" —
+   * and the trust write happens BEFORE the start, because the question it
+   * answers is asked at startup. Without the undo, an entry for a folder that
+   * no longer exists sits in another tool's config forever and that sentence is
+   * false in exactly the case that produces it.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'Load failed: 5: Input/output error' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+  writeCfg({ theme: 'dark', projects: {} });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-rollback', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so this tests nothing');
+
+  const after = readCfg();
+  assert.deepEqual(Object.keys(after.projects), [],
+    'a trust entry survived a rollback, for a folder that no longer exists');
+  assert.equal(after.theme, 'dark', 'the undo took more than it wrote');
+  assert.ok(!r.steps.some((s) => s.label === 'took back the folder trust'),
+    'the undo refused, so the "taken it back off your computer" sentence is not true');
+  create.setRunner(null);
+
+  /* 🛑 ASSERT PRESENCE BEFORE ABSENCE. Everything above is an empty
+     `projects`, which is also what a creation that NEVER WROTE THE KEY leaves —
+     a broken `weMadeTheFolder`, a `trustFolder` refusal on this fixture, or the
+     whole feature deleted. The test could not tell "the undo worked" from
+     "there was nothing to undo".
+     So the same fixture is run again with a start that SUCCEEDS: if the key
+     does not appear there, the emptiness above proved nothing. */
+  create.setRunner(() => ({ ok: true }));
+  /* ⚠️ AND dry-run again: `setRunner(null)` above RE-ARMS it, so without this
+     the control creation reports CREATED and writes nothing — the control
+     would then fail for a reason that has nothing to do with what it checks.
+     The suite told me this by throwing on a folder that was never made. */
+  create.setDryRun(false);
+  writeCfg({ theme: 'dark', projects: {} });
+  const ok = create.createAgent({ ...BINS, name: 'trustfix-rollback-control', role: 'pm' });
+  assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
+  const controlPath = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-rollback-control'));
+  assert.equal(readCfg().projects[controlPath].hasTrustDialogAccepted, true,
+    'CONTROL: this fixture never produces a trust entry at all, so the rollback assertion above is vacuous');
+  create.setRunner(null);
+});
+
+test('a rollback leaves a trust decision THEY already made for that same path', () => {
+  /**
+   * 🛑 THE CONTROL ON THE UNDO, and the first version of it could not fail. It
+   * seeded somebody's entry at a DIFFERENT path — which `forgetFolder` would
+   * never touch whatever the guard said, so the test passed with the guard
+   * inverted to `true` and proved nothing.
+   *
+   * The case that actually exercises it: a person trusted this exact folder
+   * once, the folder was later removed, the config entry stayed (Claude Code
+   * never prunes them; the "93 dead entries" this once cited were THIS BRANCH'S
+   * OWN unsandboxed suite, retracted in trust.js — the property holds and the
+   * number measured a bug of mine), and now
+   * the name is created again. `trustFolder` finds it already true and writes
+   * NOTHING, so a rollback that deleted "the entry for our folder" would be
+   * deleting THEIR answer, not ours.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+
+  // Their standing decision about the very path this creation will use.
+  const samePath = nodePath.join(fs.realpathSync(SANDBOX), 'workers', 'trustfix-rollback-two');
+  writeCfg({ projects: { [samePath]: { hasTrustDialogAccepted: true, allowedTools: ['Bash(ls:*)'] } } });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-rollback-two', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
+
+  const after = readCfg();
+  assert.deepEqual(Object.keys(after.projects), [samePath],
+    'the rollback deleted a trust decision the person had already made for that folder');
+  assert.equal(after.projects[samePath].hasTrustDialogAccepted, true);
+  assert.deepEqual(after.projects[samePath].allowedTools, ['Bash(ls:*)'], 'and took their other settings with it');
+  create.setRunner(null);
+});
+
+test('a folder that appears in the window between the check and the mkdir is not trusted', () => {
+  /**
+   * 🛑 THE ONE CASE `weMadeTheFolder` ACTUALLY GUARDS, and it had no test —
+   * the test named for it was watching the refusal further up instead, which
+   * the comment beside it says out loud.
+   *
+   * The refusal checks `existsSync` early; `mkdirSync` runs later. Anything
+   * that creates the folder in that window makes recursive mkdir succeed
+   * silently and return undefined, and the trust write must not fire — we did
+   * not make that folder and have no idea what is in it.
+   *
+   * ⚠️ Simulated by creating the folder inside a wrapped `mkdirSync`, which is
+   * the only way to be inside the window. The alternative was to argue it.
+   */
+  create.setRunner(() => ({ ok: true }));
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const dir = nodePath.join(SANDBOX, 'workers', 'trustfix-race');
+  const realMkdir = fs.mkdirSync;
+  let armed = true;
+  fs.mkdirSync = function (p, opts) {
+    if (armed && String(p) === dir) {
+      armed = false;
+      realMkdir.call(fs, p, { recursive: true });        // somebody else got there first
+      const r = realMkdir.call(fs, p, opts);             // ...and now ours is the no-op
+      fs.writeFileSync(nodePath.join(p, 'not-ours.txt'), 'theirs\n', 'utf8');
+      return r;
+    }
+    return realMkdir.call(fs, p, opts);
+  };
+  let r;
+  try {
+    r = create.createAgent({ ...BINS, name: 'trustfix-race', role: 'pm' });
+  } finally {
+    fs.mkdirSync = realMkdir;
+    create.setRunner(null);
+  }
+
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  assert.equal(armed, false, 'the wrapper never fired, so the window was never entered');
+  assert.deepEqual(Object.keys(readCfg().projects), [],
+    'we answered a safety question about a folder that appeared under us');
+});
+
+test('a rollback removes only the key it added, not the entry it found', () => {
+  /**
+   * 🛑 THE BLOCKER THIS REPLACES WAS IN THE FIX FOR A BLOCKER. The rollback
+   * deleted the whole `projects[…]` entry on the reasoning that we must have
+   * created it. We may only have MERGED INTO it: Claude Code never prunes
+   * entries, so a person can have one for that exact path holding their
+   * allowedTools and MCP servers, with no trust key in it. The undo took all of
+   * it, on the path whose entire job is putting things back.
+   *
+   * ⚠️ AND THE TEST GUARDING THAT COULD NOT FAIL. It seeded the entry with the
+   * trust key already TRUE — which short-circuits before any write, so the undo
+   * never ran and the guard was never evaluated against a live deletion. The
+   * shape that loses data is the key ABSENT, which is this fixture.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+
+  const samePath = nodePath.join(fs.realpathSync(SANDBOX), 'workers', 'trustfix-merge');
+  writeCfg({ projects: { [samePath]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} } } } });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-merge', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
+
+  const e = readCfg().projects[samePath];
+  assert.ok(e, 'the rollback deleted an entry it had only merged into');
+  assert.deepEqual(e.allowedTools, ['Bash(ls:*)'], 'their allowed tools went with it');
+  assert.deepEqual(e.mcpServers, { linear: {} }, 'their MCP servers went with it');
+  assert.equal('hasTrustDialogAccepted' in e, false, 'the key we added survived the rollback');
+  create.setRunner(null);
+});
+
+test('an undo that could not run is recorded, because the sentence says it did', () => {
+  /**
+   * 🛑 THE TEST THIS REPLACES ASSERTED THE ABSENCE OF A STEP NOTHING PUSHED.
+   * `assert.ok(!r.steps.some(s => s.label === 'took back the folder trust'))`
+   * passed because that string existed nowhere in the product — the push had
+   * been lost to a `git checkout` during mutation testing, and an absence
+   * assertion cannot tell "it did not happen" from "it cannot happen".
+   *
+   * ⚠️ THE FAILURE IS INJECTED ON THE SECOND RENAME, which is the only way to
+   * have the trust write SUCCEED and its undo FAIL. Making the config
+   * unwritable fails both, and then there is nothing to take back.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const realRename = fs.renameSync;
+  let n = 0;
+  fs.renameSync = function (...args) {
+    if (String(args[0]).includes('.kosmos-')) {
+      n += 1;
+      if (n === 2) { const e = new Error('injected'); e.code = 'EIO'; throw e; }
+    }
+    return realRename.apply(fs, args);
+  };
+  let r;
+  try {
+    r = create.createAgent({ ...BINS, name: 'trustfix-undo-fail', role: 'pm' });
+  } finally {
+    fs.renameSync = realRename;
+    create.setRunner(null);
+  }
+
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
+  assert.equal(n, 2, 'the undo never attempted a write, so nothing was injected into');
+  assert.ok(r.steps.some((s) => s.label === 'took back the folder trust' && s.ok === false),
+    'the undo failed and nothing on the machine says so, while the person is told we took it back');
+
+  assert.equal(Object.keys(readCfg().projects).length, 1,
+    'the entry was removed after all, so the injection did not reach the undo');
+});
+
+test('a successful undo adds no step, so the failure step means something', () => {
+  /**
+   * ⚠️ THE VERSION BEFORE THIS PASSED WITH THE WHOLE TRUST FEATURE DELETED. Its
+   * two assertions were "projects is empty" and "no failure step" — and a
+   * creation that never wrote the key produces both. Its own guard message,
+   * "the undo did not run, so this proves nothing", named a check that could
+   * not tell "the undo removed the entry" from "there was never an entry".
+   *
+   * ⚠️ So it proves PRESENCE first, with a succeeding creation on the same
+   * fixture, exactly as its sibling above does.
+   */
+  create.setRunner(() => ({ ok: true }));
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+  const ok = create.createAgent({ ...BINS, name: 'trustfix-undo-ok-control', role: 'pm' });
+  assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
+  const controlPath = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-undo-ok-control'));
+  assert.equal(readCfg().projects[controlPath].hasTrustDialogAccepted, true,
+    'CONTROL: this fixture never produces a trust entry, so the emptiness below proves nothing');
+
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-undo-ok', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL);
+  assert.deepEqual(Object.keys(readCfg().projects), [], 'the undo did not run');
+  assert.ok(!r.steps.some((s) => s.label === 'took back the folder trust'),
+    'a successful undo reported itself as a failure');
+  create.setRunner(null);
+});
+
