@@ -57,6 +57,23 @@ within a minute of 0.2.11 going out. The control's own first version was buggy
 (`curl -fsS … || echo 404` printed `404404`, because `-f` makes curl exit
 non-zero and the fallback appends), which is the best argument for it.
 
+## Proving a check can fail
+
+```
+bash tools/prove-it-fails.sh <test-file> <label> <node-expression>
+```
+
+Breaks the code on purpose, runs the named test, and restores.
+
+🛑 **It refuses on a dirty tree, and that refusal is the point.** The loop ends
+in `git checkout`, which discards uncommitted work silently. On 2026-08-21 that
+ate a real fix **seven times in one day** — twice unnoticed until a test written
+minutes later failed, and once a reverted state was committed on top of the loss.
+
+⚠️ **"Commit before you perturb" was written down after the first one and failed
+six more times.** A habit that has to hold seven times a day is not a habit, it
+is a load-bearing assumption. The tool holds it instead.
+
 ## What is deliberately not automated
 
 - **The versions-page copy.** It is ruled, not generated.
