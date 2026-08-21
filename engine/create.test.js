@@ -1895,7 +1895,9 @@ test('a rollback leaves a trust decision THEY already made for that same path', 
    *
    * The case that actually exercises it: a person trusted this exact folder
    * once, the folder was later removed, the config entry stayed (Claude Code
-   * never prunes them — 93 dead entries were measured on this machine), and now
+   * never prunes them; the "93 dead entries" this once cited were THIS BRANCH'S
+   * OWN unsandboxed suite, retracted in trust.js — the property holds and the
+   * number measured a bug of mine), and now
    * the name is created again. `trustFolder` finds it already true and writes
    * NOTHING, so a rollback that deleted "the entry for our folder" would be
    * deleting THEIR answer, not ours.
@@ -2041,8 +2043,6 @@ test('an undo that could not run is recorded, because the sentence says it did',
   assert.ok(r.steps.some((s) => s.label === 'took back the folder trust' && s.ok === false),
     'the undo failed and nothing on the machine says so, while the person is told we took it back');
 
-  const key = fs.realpathSync ? null : null;
-  void key;
   assert.equal(Object.keys(readCfg().projects).length, 1,
     'the entry was removed after all, so the injection did not reach the undo');
 });

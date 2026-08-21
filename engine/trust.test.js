@@ -424,7 +424,9 @@ test('a trust key merged into somebody’s existing entry is taken back WITHOUT 
    * `forgetFolder` deleted the whole `projects[…]` entry, on the reasoning that
    * `already: false` meant we had created it. It does not: it means we SET THE
    * KEY. A person can already have an entry for that exact path — Claude Code
-   * never prunes them, and 93 dead ones were measured on this machine — holding
+   * never prunes them (the "93 dead entries" this once cited were THIS BRANCH'S
+   * OWN unsandboxed suite, retracted in trust.js; the property holds and the
+   * number measured a bug of mine) — holding
    * their allowedTools, their MCP servers and their history, with no trust key
    * in it. The rollback took all of it.
    *
@@ -569,4 +571,57 @@ test('an entry that held ONLY a false is not swept away by the undo', () => {
   const e = read().projects[d];
   assert.ok(e, 'an entry we did not create was deleted because it looked empty');
   assert.equal(e[KEY], false);
+});
+
+test('the temp name differs BETWEEN processes, which is the property it exists for', () => {
+  /**
+   * ⚠️ THE UNIQUENESS TEST ABOVE COLLECTS THREE WRITES IN ONE PROCESS, and
+   * `process.pid` plus a counter already make those distinct — so deleting the
+   * start-time from the name leaves it green. The reason the start time is in
+   * there is entirely CROSS-process: a run that died between create and rename
+   * leaves `…-<pid>-1.new` behind, and the next run to draw that pid refuses at
+   * seq 1 forever.
+   *
+   * ⚠️ So this asks a SECOND process for its first temp path and compares it to
+   * this one's. Nothing else can see the property.
+   */
+  const script = `
+    const fs = require('node:fs');
+    process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = process.argv[1];   // node -e: argv[1] is the first extra arg
+    const real = fs.writeFileSync;
+    let seen = null;
+    fs.writeFileSync = function (p, ...rest) {
+      if (seen === null && String(p).includes('.kosmos-')) seen = String(p);
+      return real.call(fs, p, ...rest);
+    };
+    require(process.argv[2]).trustFolder(process.argv[3]);
+    process.stdout.write(seen || '');
+  `;
+  const d = folder();
+  write({ projects: {} });
+
+  const mine = [];
+  const realWrite = fs.writeFileSync;
+  fs.writeFileSync = function (p, ...rest) {
+    if (String(p).includes('.kosmos-')) mine.push(String(p));
+    return realWrite.call(fs, p, ...rest);
+  };
+  try { trustFolder(d); } finally { fs.writeFileSync = realWrite; }
+
+  const d2 = folder();
+  write({ projects: {} });
+  const out = require('node:child_process').execFileSync(
+    process.execPath,
+    ['-e', script, CONFIG, nodePath.join(__dirname, 'trust.js'), d2],
+    { encoding: 'utf8' },
+  ).trim();
+
+  assert.equal(mine.length, 1, 'this process wrote no temp file, so there is nothing to compare');
+  assert.ok(out, 'the second process wrote no temp file');
+  assert.notEqual(out, mine[0], `two processes chose the same temp path: ${out}`);
+  // ⚠️ AND THE PID IS NOT WHAT SEPARATES THEM in the case that matters, so the
+  // parts before the sequence number must differ too.
+  const stem = (p) => p.replace(/-\d+\.new$/, '');
+  assert.notEqual(stem(out), stem(mine[0]),
+    'the names differ only by sequence, so a crashed run at seq 1 still blocks the next process');
 });
