@@ -2082,3 +2082,51 @@ test('a successful undo adds no step, so the failure step means something', () =
   create.setRunner(null);
 });
 
+
+test('setModel rewrites the startup file and keeps everything else about the job', () => {
+  /**
+   * 🔑 THE MODEL WAS ALWAYS WRITTEN INTO THE JOB and always parsed back out;
+   * what was missing was the ability to change it. Josh, 2026-08-21, with an
+   * agent stopped on a spent Fable 5 limit: *"maybe we should go ahead and
+   * build in picking a different model now so I could pick a different model
+   * for her and see if we can get her restored."*
+   *
+   * ⚠️ THE PATHS MUST SURVIVE THE REWRITE. `claude` and `tmux` live in that file
+   * and are the only record of which binaries this agent was built against.
+   * Inventing them would repoint an agent at binaries nobody chose, which is
+   * why an unreadable job is refused rather than regenerated.
+   */
+  const name = 'switcher';
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name, role: 'pm', model: 'opus' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const before = fs.readFileSync(create.plistPath(name), 'utf8');
+  const argsOf = (text) => [...text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)[1]
+    .matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => m[1]);
+  const was = argsOf(before);
+
+  const out = create.setModel(name, 'haiku');
+  assert.equal(out.outcome, create.OUTCOME.CREATED, out.because);
+  assert.equal(out.model.arg, 'claude-haiku-4-5-20251001');
+
+  const now = argsOf(fs.readFileSync(create.plistPath(name), 'utf8'));
+  assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+    'the reader beside the writer does not agree with what was written');
+  assert.equal(now[4], was[4], 'the claude path was not preserved across the rewrite');
+  assert.equal(now[5], was[5], 'the tmux path was not preserved across the rewrite');
+  assert.equal(now[2], name, 'the job stopped being about this agent');
+
+  /* A model that is not on the list is refused rather than written through. */
+  const bad = create.setModel(name, 'gpt-9');
+  assert.equal(bad.outcome, create.OUTCOME.REFUSED);
+  assert.match(bad.because, /pick a model/);
+  assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001',
+    'a refused change still altered the file');
+
+  /* 🛑 AND AN AGENT KOSMOS DID NOT START IS REFUSED, not regenerated. We have no
+     record of which binaries it was built against. */
+  const nobody = create.setModel('neverexisted', 'opus');
+  assert.equal(nobody.outcome, create.OUTCOME.REFUSED);
+  assert.match(nobody.because, /not started by Kosmos/);
+});
