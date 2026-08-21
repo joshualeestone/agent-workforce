@@ -2125,6 +2125,25 @@ test('the wording Claude Code actually uses for a spent limit reads as paused, n
     assert.equal(card.stateConfidence, 'scraped',
       'the state is read off a screen and must keep saying so');
 
+    /**
+     * 🔑 AND THE LINE ITSELF COMES BACK, which is what lets a screen show
+     * evidence instead of asserting a conclusion. Josh asked to be told his
+     * usage was full; Kosmos cannot know that, and can show him the sentence
+     * that made it say "paused". It names the model and carries the vendor's
+     * own two remedies.
+     *
+     * ⚠️ ADDED BECAUSE THE MUTATION HARNESS CAUGHT IT UNCOVERED: deleting
+     * `evidence` from the classifier changed the product and no test noticed.
+     */
+    assert.equal(card.stateEvidence,
+      "You've reached your Fable 5 limit. Run /usage-credits to continue or",
+      'the matched line is not coming back, so the screen can only assert rather than show');
+
+    /* Trimmed of the tree glyph Claude Code prefixes its notices with, and
+       nothing from the healthy pane. */
+    assert.doesNotMatch(card.stateEvidence, /^[\s>│├└─*]/,
+      'the terminal drawing characters reached a product surface');
+
     /* 🔑 THE CONTROL: an ordinary working pane must not trip it, or the fix is
        just a board that calls everything paused. */
     setPaneCapture(() => 'Worked for 1m\n> ready\n');
