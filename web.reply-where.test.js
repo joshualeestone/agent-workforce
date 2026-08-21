@@ -182,9 +182,45 @@ test('it is painted on open AND on the poll, off the poll’s existing lookup', 
   /* ⚠️ The window is 3400 chars because the block between the lookup and this
      call is largely comment; it is a bound on "same block", not a measurement
      of anything. A tighter number would fail on a comment edit. */
-  const open = PAGE.indexOf('function openDetail(');
-  assert.match(PAGE.slice(open, open + 900), /paintBusy\(a, a\.name\)/,
+  /* ⚠️ THE WHOLE FUNCTION, NOT A CHARACTER WINDOW. This sliced 900 chars from
+     the declaration and broke the day `openDetail` gained a comment above the
+     call — a red test for an edit that changed no behaviour, and the SECOND
+     time a proximity window has done that here. `fn` brace-matches the body,
+     so the assertion is "openDetail paints it", which is what it always meant;
+     distance was standing in for containment. */
+  assert.match(fn('openDetail'), /paintBusy\(a, a\.name\)/,
     'opening the page no longer paints it');
+});
+
+test('opening an agent empties the picture picker, so it never shows another agent’s file', () => {
+  /**
+   * 🛑 ONE <input type="file"> IS REUSED BY EVERY AGENT'S PANEL and nothing
+   * cleared it, so choosing a picture for one agent left that agent's filename
+   * and thumbnail in the next one's Picture row. Josh, 2026-08-21.
+   *
+   * ⚠️ WHAT MADE IT MORE THAN COSMETIC: `#d-remove` sits beside that filename
+   * and is not gated on the agent having a picture. A stale filename with a
+   * Remove button next to it reads as "clear this selection", and pressing it
+   * sends DELETE for THIS agent's real avatar — two controls an inch apart
+   * describing different agents.
+   *
+   * 📌 The upload path was never wrong: the PUT fires on this input's `change`,
+   * so a stale selection could not ride onto the wrong agent via Save.
+   *
+   * ⚠️ A SOURCE READ, said plainly — `fn` returns text, and executing
+   * `openDetail` would need most of the panel stubbed. The behaviour itself was
+   * verified in a real browser: picking a file on Angel fired exactly one
+   * `PUT /api/agent/angel/avatar`, and opening April's panel showed `value`
+   * empty. This pin exists so the line cannot be deleted silently.
+   */
+  const body = fn('openDetail');
+  assert.match(body, /getElementById\('d-file'\)\.value = ''/,
+    'the picture picker is no longer emptied when a panel opens');
+  /* 🔑 AND IT MUST HAPPEN BEFORE THE PANEL IS FILLED IN, or a repaint could
+     land between the two and show the stale name for a frame. Ordering, not
+     distance: the last proximity pin in this file broke on a comment. */
+  assert.ok(body.indexOf("'d-file'") < body.indexOf("'d-name'"),
+    'the picker is emptied after the panel is painted');
 });
 
 test('Settings no longer claims the chat carries what an agent says', () => {
