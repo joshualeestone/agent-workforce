@@ -217,3 +217,28 @@ test('the line is hidden in the two states where it would be false', () => {
   assert.match(PAGE.slice(refusal, refusal + 700), /d-reply-where'\)\.hidden = true/,
     'the refusal arm hides the persistence promise and leaves this one standing, which is the defect the comment beside it records fixing');
 });
+
+test('Settings no longer claims the chat carries what an agent says', () => {
+  /**
+   * 🛑 THE FALSE CLAIM STATED OUTRIGHT. The Engineering-mode row read "Off by
+   * default. Your chat shows what an agent says to you." — while an agent
+   * cannot write into a direct thread at all (#175). A person read it, believed
+   * the chat would carry the answer, and waited.
+   *
+   * ⚠️ IT SURVIVED BECAUSE IT IS HALF TRUE: agents do post into a project room,
+   * and this screen is global, so it generalised from the case that works.
+   *
+   * ⚠️ AND THE ASSERTION IS SCOPED TO THE RENDERED ROW, not to the file: the
+   * sentence still appears once, inside the comment that records removing it,
+   * and a count of zero would force deleting the record of why.
+   */
+  const row = PAGE.indexOf('id="eng-row"');
+  assert.notEqual(row, -1, 'the Engineering-mode row has moved');
+  const end = PAGE.indexOf('</div>', PAGE.indexOf('<p class="dhint"', row));
+  const rendered = PAGE.slice(row, end).replace(/<!--[\s\S]*?-->/g, ' ');
+
+  assert.doesNotMatch(rendered, /chat shows what an agent says/,
+    'the row claims the chat carries what an agent says, which is false of the direct box');
+  assert.match(rendered, /Off by default/, 'the row no longer says the toggle is off by default');
+  assert.match(rendered, /raw session/, 'the row no longer says what the toggle actually shows');
+});
