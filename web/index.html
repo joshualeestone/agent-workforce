@@ -1261,6 +1261,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    symptom above the fold and not this. */
 .dm.mine .dm-w { text-align: right; }
 .dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
+/* ⚠️ THE SAME DOTS THE CARD USES, not a second animation: `.act` is the
+   board's working glyph, and a different one here would be two renderings of
+   one fact. It borrows the sibling hint's size and colour so the line reads as
+   a note about the conversation rather than as a message in it. */
+.dmbusy { display: flex; align-items: center; gap: 8px;
+          font-size: .875rem; color: var(--k-ink-2); margin: 10px 0 0; }
+.dmbusy .msg-av { width: 22px; height: 22px; font-size: .625rem; flex: 0 0 auto; }
 .dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
   border-left: 3px solid var(--k-rule); padding-left: 12px; }
 /* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
@@ -2660,6 +2667,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       </div>
     </div>
     <div class="dmthread" id="d-dmthread"></div>
+    <!-- 🔑 "WORKING", NEVER "TYPING". We can see that Claude is producing
+         output or is mid-task. We CANNOT see WHAT it is working on, and
+         "<name> is typing" claims it is composing a reply to YOU — the same row
+         of chat.js's claim table as "the agent received it", which is marked
+         never. "Working" survives being wrong about the subject; "replying"
+         does not. (Mona Lisa, 2026-08-21.)
+         ⚠️ AND IT IS AN INSTRUMENT HERE, NOT AN AFFORDANCE, which is why the
+         under-claim matters more rather than less. On this box nothing else
+         comes back at all (#175), so a person is reading it as EVIDENCE:
+         working + an empty box is #175 happening in front of them; never
+         working means the message never landed. It separates two failures that
+         look identical, which is what Josh lacked for a day.
+         ⚠️ UNKNOWN SHOWS NOTHING — not working, not idle. An agent we cannot
+         read must not be rendered as either. Same rule as the stale badge and
+         the memory caption. -->
+    <p class="dmbusy" id="d-busy" hidden></p>
     <p class="dhint" id="d-talk-older" style="margin:10px 0 0;" hidden></p>
     <div class="dmoff" id="d-dmoff" hidden></div>
     <div class="frow dmbar">
@@ -5172,6 +5195,10 @@ async function tick() {
           && !document.getElementById('panel-detail').hidden) {
         paintTalk(CURRENT.sessionName, CURRENT.name);
       }
+      /* ⚠️ OFF THE SAME `fresh` LOOKUP the box above rides, deliberately: a
+         second find() for the same card is the one-fact-two-derivations habit
+         this file keeps paying for. */
+      paintBusy(fresh, CURRENT.name);
       /* The same tab gate as the poll above, for the same reason: this is a
          capture-pane every five seconds. Engineering mode is off by default so
          the exposure is narrower, but the rule the comment above states does
@@ -6121,6 +6148,36 @@ function memoryBox(a) {
    card()/lrow() so the grammar is drivable without a server. The engine's
    because sentences ship VERBATIM -- they were written for a person, and
    paraphrasing an engine sentence is how two surfaces drift. */
+/**
+ * "<name> is working…", or nothing.
+ *
+ * ⚠️ NOTHING IS THE DEFAULT, and it is the honest one: an agent we could not
+ * read, an agent that is gone, and a poll that has not landed yet all render
+ * empty rather than guessing. Only a card that positively says `working`
+ * produces the line.
+ */
+function paintBusy(fresh, name) {
+  const el = document.getElementById('d-busy');
+  if (!el) return;
+  const busy = !!(fresh && fresh.state === 'working');
+  el.hidden = !busy;
+  if (!busy) { el.innerHTML = ''; return; }
+  /* ⚠️ THE SAME AVATAR THE CARD DRAWS, off the same route, with the same
+     initials fallback — Josh asked for the face and a second way of drawing one
+     would drift from the board's. `aria-hidden` because the sentence beside it
+     already names the agent, and a screen reader should not hear the name
+     twice. */
+  const who = name || (fresh && fresh.name) || 'This agent';
+  const face = (fresh && fresh.hasAvatar)
+    ? '<div class="msg-av" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(fresh.sessionName) + '/avatar" alt=""></div>'
+    : '<div class="msg-av" aria-hidden="true" style="background:' + discTint(who)
+      + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</div>';
+  el.innerHTML = face
+    + '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(who) + ' is working…</span>';
+}
+
 function convoRow(r, agentName) {
   if (r.kind === 'valve') {
     // The ROOM's closing first: its `to` is the project id, not an agent,
@@ -7326,6 +7383,11 @@ function openDetail(sessionName) {
   if (!a) return;
   CURRENT = a;
   document.getElementById('d-name').textContent = a.name;
+  /* ⚠️ ON OPEN AS WELL AS ON THE POLL. Painted only by the poll, the line is
+     absent for up to five seconds after somebody opens the page — which is
+     exactly the moment they are looking, and an empty box with no indicator
+     reads as "nothing is happening" rather than "we have not checked yet". */
+  paintBusy(a, a.name);
   /* ⚠️ The machine-name disclosure moved HERE from the card (Mona Lisa's
      catch on the stage-3 pair, 2026-08-17): the pack records Josh's
      audience ruling against machine-name talk on the card, and the pack's
