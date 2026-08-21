@@ -219,3 +219,30 @@ test('no temp file is left behind when the rename fails', () => {
     try { fs.rmSync(tmp, { force: true }); } catch { /* fine */ }
   }
 });
+
+test('a DANGLING symlink is refused too, and not turned into a real file', () => {
+  /**
+   * ⚠️ Borrowed from the installer's own acceptance harness, which names this
+   * state separately from a live symlink ("dangling-refused"). It is the case a
+   * symlink check written as "does the target exist" would get wrong: the link
+   * is somebody's arrangement whether or not its destination is there today,
+   * and writing through it would MATERIALISE a config file at a path they
+   * pointed somewhere else.
+   *
+   * ⚠️ IT TAKES TWO MUTATIONS TO MAKE THIS TEST FAIL, and that is the finding
+   * rather than a weakness: removing the symlink refusal alone leaves the
+   * absent-file refusal catching it, and removing the absent-file refusal alone
+   * leaves the symlink check catching it. Both gone together and it goes red.
+   * A single-mutation run would have reported this test as unable to fail.
+   */
+  clear();
+  fs.symlinkSync(nodePath.join(SANDBOX, 'nowhere-at-all.json'), CONFIG);
+  const d = folder();
+
+  const r = trustFolder(d);
+  assert.equal(r.ok, false);
+  assert.equal(fs.lstatSync(CONFIG).isSymbolicLink(), true, 'still a link');
+  assert.equal(fs.existsSync(nodePath.join(SANDBOX, 'nowhere-at-all.json')), false,
+    'and nothing was created where it pointed');
+  fs.rmSync(CONFIG, { force: true });
+});
