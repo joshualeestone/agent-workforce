@@ -714,6 +714,65 @@ function list(agent) {
     || (Array.isArray(m.to) && m.to.includes(agent))));
 }
 
+/**
+ * Has this agent said anything since the last thing said to it?
+ *
+ * 🛑 THE DEFECT THIS EXISTS TO MAKE VISIBLE (#145). An agent's reply lives in
+ * its own session; only an explicit `kosmos post` or `kosmos msg` reaches the
+ * shared log. Nothing bridges the two, so an agent that answers thoughtfully
+ * and never runs the command has produced, from every other vantage point, a
+ * silence. Josh, 2026-08-21, three times: *"I didn't get your responses"*.
+ *
+ * ⚠️ AND EVERY PARTY HELD A TRUE BELIEF WHILE IT HAPPENED. The person saw
+ * nothing arrive. The agent believed it answered, and had. Kosmos recorded a
+ * successful delivery, and was right, because the OPERATOR's message was
+ * delivered. Nothing was in an error state, so nothing could alert, and the
+ * only instrument that can see a gap like that is one COMPARING TWO SIDES.
+ * That is all this is: two timestamps off one log.
+ *
+ * 🔑 NO PANE SCRAPING, deliberately. "Did the agent reply?" read off its screen
+ * would be a guess about text; "did anything arrive from it since we delivered"
+ * is a fact we already store. The cheaper question is also the sounder one.
+ *
+ * Returns `{ owes, lastHeardAt, lastSentAt }`:
+ *   owes         true when something was addressed to it after the last thing
+ *                it sent, or it has never sent anything at all
+ *   lastHeardAt  ISO time of the last message addressed TO it, or null
+ *   lastSentAt   ISO time of the last message FROM it, or null
+ *
+ * 📌 It does NOT decide when to say so. A grace period and the sentence are a
+ * design call, and an engine that hard-codes "four minutes" has made it
+ * silently. The caller has both timestamps and can choose.
+ */
+function owesReply(agent) {
+  const name = String(agent == null ? '' : agent).trim();
+  if (!name) return { owes: false, lastHeardAt: null, lastSentAt: null };
+  let lastHeardAt = null;
+  let lastSentAt = null;
+  for (const m of readLog()) {
+    if (!m || !m.at) continue;
+    /* ⚠️ Only rows that CARRY TEXT count as being spoken to. `valve` and
+       `refused` rows name the agent in `to` and are Kosmos's own bookkeeping
+       about a message that did not go; treating one as "somebody spoke to
+       you" would put an agent in debt for a message it never received. */
+    const carries = m.kind === 'message' || m.kind === 'post';
+    if (!carries) continue;
+    if (m.from === name) {
+      if (!lastSentAt || m.at > lastSentAt) lastSentAt = m.at;
+      continue;
+    }
+    /* Same membership-not-equality rule as `list`, and the same refusal to
+       match a PROJECT-typed `to` against an agent name. */
+    const addressed = (typeof m.to === 'string' && !m.project && m.to === name)
+      || (Array.isArray(m.to) && m.to.includes(name));
+    if (addressed && (!lastHeardAt || m.at > lastHeardAt)) lastHeardAt = m.at;
+  }
+  /* Never spoken to: nothing is owed, whatever it has or has not sent. The
+     alternative reads as an accusation about an agent nobody has addressed. */
+  const owes = Boolean(lastHeardAt) && (!lastSentAt || lastHeardAt > lastSentAt);
+  return { owes, lastHeardAt, lastSentAt };
+}
+
 /* ── the block new agents are born knowing ──────────────────────────────── */
 
 /* Same managed-block machinery as About-you: dated markers, spliced at
@@ -765,6 +824,6 @@ function blockBody() {
 module.exports = {
   START, END, blockBody,
   LOG,
-  resolveSender, send, sendPost, list, pairCount, readLog, record,
+  resolveSender, send, sendPost, list, owesReply, pairCount, readLog, record,
   setRunner, resetForTests,
 };

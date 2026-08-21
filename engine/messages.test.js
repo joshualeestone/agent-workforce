@@ -248,6 +248,117 @@ test('a recipient the operator chat would refuse is refused here too, and the re
 
 /* ── what new agents are born knowing ────────────────────────────────────── */
 
+test('owesReply compares the two sides: heard-from against sent-by, off one log', () => {
+  /**
+   * 🛑 THE DEFECT (#145): an agent's reply lives in its own session and only an
+   * explicit `kosmos post`/`msg` reaches the shared log, so an agent that
+   * answers well and never runs the command has produced a silence.
+   *
+   * ⚠️ EVERY PARTY HELD A TRUE BELIEF while that happened, which is why no
+   * single-sided check could have caught it: the person saw nothing arrive, the
+   * agent believed it answered, and Kosmos recorded a successful delivery and
+   * was RIGHT, because the operator's message was delivered. The only
+   * instrument that sees it is one comparing two sides, and that is all this is.
+   */
+  withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
+    wipeLog();
+    let v = messages.owesReply('leo');
+    assert.equal(v.owes, false, 'an agent nobody has spoken to is in debt');
+    assert.equal(v.lastHeardAt, null);
+    assert.equal(v.lastSentAt, null);
+
+    // mara speaks TO leo.
+    armSender('mara-discord');
+    arm([ok(), ok()]);
+    const said = messages.send({ fromPane: '%2', to: 'leo', text: 'are you there' }, board.agents);
+    assert.equal(said.state, chat.DELIVERY.PLACED, 'the fixture did not deliver: ' + (said.because || ''));
+    v = messages.owesReply('leo');
+    assert.equal(v.owes, true, 'an agent spoken to and silent since is not shown as owing a reply');
+    assert.ok(v.lastHeardAt, 'the heard-at time was not recorded');
+    assert.equal(v.lastSentAt, null);
+
+    // leo answers THROUGH THE CLI, which is the only thing that reaches the log.
+    armSender('leo-discord');
+    arm([ok(), ok()]);
+    const back = messages.send({ fromPane: '%1', to: 'mara', text: 'yes, here' }, board.agents);
+    assert.equal(back.state, chat.DELIVERY.PLACED, 'the reply fixture did not deliver');
+    v = messages.owesReply('leo');
+    assert.equal(v.owes, false, 'an agent that has spoken since is still shown as owing a reply');
+    assert.ok(v.lastSentAt >= v.lastHeardAt, 'the two sides were compared the wrong way round');
+  });
+});
+
+test('owesReply compares the two times in the right DIRECTION, on distinct timestamps', () => {
+  /**
+   * 🛑 THIS TEST EXISTS BECAUSE THE ONE ABOVE COULD NOT FAIL FOR IT. I inverted
+   * the comparison (`lastSentAt > lastHeardAt`) and the whole suite stayed
+   * green: two sends in one fast test land in the SAME MILLISECOND, so the two
+   * timestamps are equal and neither direction wins. The property was asserted
+   * against data that could not express it.
+   *
+   * ⚠️ Real agents cannot reply in the same millisecond; the fixture could.
+   * So the direction is pinned here on times written by hand, where "after"
+   * and "before" are unambiguous.
+   */
+  withFleet([fleet.agent('leo', { state: 'idle' })], () => {
+    const write = (rows) => fs.writeFileSync(messages.LOG,
+      rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    const heard = (at) => ({ kind: 'message', id: 'in', from: 'mara', to: 'leo', text: 'q', at });
+    const sent = (at) => ({ kind: 'message', id: 'out', from: 'leo', to: 'mara', text: 'a', at });
+
+    write([heard('2026-08-21T10:00:00.000Z'), sent('2026-08-21T10:05:00.000Z')]);
+    assert.equal(messages.owesReply('leo').owes, false,
+      'it spoke five minutes AFTER being spoken to and is still shown as owing a reply');
+
+    write([sent('2026-08-21T10:00:00.000Z'), heard('2026-08-21T10:05:00.000Z')]);
+    assert.equal(messages.owesReply('leo').owes, true,
+      'it was spoken to five minutes after it last spoke and is not shown as owing a reply');
+
+    /* The tie. Equal timestamps must not read as owing: the ordering is
+       unknowable at that resolution, and an accusation is the wrong default
+       for a state we cannot determine. */
+    write([heard('2026-08-21T10:00:00.000Z'), sent('2026-08-21T10:00:00.000Z')]);
+    assert.equal(messages.owesReply('leo').owes, false,
+      'two events at the same instant were resolved as a debt rather than left alone');
+  });
+});
+
+test('owesReply counts only rows that CARRY TEXT, and never a project name', () => {
+  /* ⚠️ `valve` and `refused` rows name the agent in `to` and are Kosmos's own
+     bookkeeping ABOUT a message that did not go. Counting one as "somebody
+     spoke to you" puts an agent in debt for a message it never received, which
+     is a false accusation built out of our own record-keeping. */
+  withFleet([fleet.agent('leo', { state: 'idle' })], () => {
+    const write = (rows) => fs.writeFileSync(messages.LOG,
+      rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+
+    write([
+      { kind: 'refused', from: 'you', to: 'leo', because: 'x', at: '2026-08-21T10:00:00.000Z' },
+      { kind: 'valve', from: 'you', to: 'leo', because: 'y', at: '2026-08-21T10:01:00.000Z' },
+    ]);
+    let v = messages.owesReply('leo');
+    assert.equal(v.owes, false,
+      'a refused or throttled row counted as being spoken to, so the agent owes a reply to a message it never got');
+    assert.equal(v.lastHeardAt, null);
+
+    /* CONTROL: the same file with a real row DOES register, so the zero above
+       is a refusal rather than a broken read. */
+    write([
+      { kind: 'refused', from: 'you', to: 'leo', because: 'x', at: '2026-08-21T10:00:00.000Z' },
+      { kind: 'message', id: 'm1', from: 'you', to: 'leo', text: 'hi', at: '2026-08-21T10:02:00.000Z' },
+    ]);
+    assert.equal(messages.owesReply('leo').owes, true,
+      'CONTROL: a real message did not register either, so this test proves nothing');
+
+    /* A PROJECT-typed `to` is never matched against an agent name, the same
+       rule `list` follows: an agent named like a project must not inherit that
+       room's bookkeeping. */
+    write([{ kind: 'valve', from: 'you', to: 'leo', project: 'leo', because: 'z', at: '2026-08-21T10:03:00.000Z' }]);
+    assert.equal(messages.owesReply('leo').owes, false,
+      'a room row whose project shares this agent name was read as a message to the agent');
+  });
+});
+
 test('the colleagues block teaches the command and the colleague-vs-operator distinction, inside its own markers', () => {
   const projects = require('./projects');
   const body = messages.blockBody();
