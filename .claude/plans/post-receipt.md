@@ -53,12 +53,45 @@ a receipt claims, and two messages can land in the same millisecond.
 
 ## Evidence
 
-- `yarn test`: **1022 pass, 0 fail**.
-- 14 new tests in `web.post-receipt.test.js`, which **executes** the functions
+- `yarn test`: **1031 pass, 0 fail**.
+- 24 tests in `web.post-receipt.test.js`, which **executes** the functions
   rather than grepping the page for their output.
 - The filtered-vs-whole-room test carries its own control: the same call against
   a filtered list really does answer differently, so the call site is what has
   to be right, and a structural assertion pins that call site.
+
+## What the blind pass found
+
+**Three blockers, and all three were about coverage rather than behaviour.**
+
+1. **Nothing executed `pjRoomRow`** — the one hop that makes the sentence
+   visible. Dropping the `silent` argument at that call left every test green
+   while the sentence never rendered. That is the "ships dead" failure the test
+   file's own header claimed to prevent.
+2. **The threshold test was checking its own copy of the threshold.** The file
+   declared `2 * 60 * 1000` and injected it into the harness, so the page could
+   have said twenty minutes or zero and every assertion would still pass. It is
+   now read out of the page and asserted.
+3. **The two-minute gate at the point it is applied had no coverage at all**,
+   because it lived inline in `paintRoom`. It is now `pjSilences`, a function,
+   for exactly that reason.
+
+And two real behaviours, both of which would have reached a person:
+
+- **The sentence rendered under an AGENT's post.** Agent rows carry outcomes
+  too, so the room could say "Nothing back from Johnson" underneath something
+  Rick said — a receipt about somebody else's message.
+- **"Any of them" swept in an agent we had just said could not be reached.**
+  The two clauses then contradict each other about what we know.
+- **Two agents showing the same display name merged into one verdict**, because
+  the match happened in display-name space. Display names are not unique;
+  creation collides only on the slug.
+
+🔑 **The harness changed shape as a result.** Slicing individual functions out
+by brace-matching is why the renderer had no test: it reaches nine helpers and
+two module-level values, and each one discovered by a `ReferenceError` was
+another guess about the page. The whole script is now evaluated with a DOM stub,
+which cannot drift because there is no dependency list to keep in step.
 
 ## Deliberately not here
 

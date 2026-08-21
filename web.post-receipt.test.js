@@ -368,3 +368,55 @@ test('an agent’s own post renders no silence sentence, whatever it is handed',
   assert.doesNotMatch(html, /Nothing back from/,
     'the room told the person nobody answered, underneath a message somebody else sent');
 });
+
+test('"any of them" never sweeps in the agent we just said could not be reached', () => {
+  /**
+   * 🛑 "THEM" POINTS AT THE LIST ALREADY ON SCREEN, and that list is the whole
+   * receipt, not the placed half of it. Comparing against the placed group
+   * alone produced:
+   *
+   *   Placed with Johnson and Rick. Bob could not be reached.
+   *   Nothing back from any of them.
+   *
+   * which sweeps Bob in one sentence after saying his message never arrived.
+   * The two clauses then contradict each other about what we know: one says it
+   * never got there, the other implies it did and was ignored.
+   */
+  const mixed = { johnson: 'placed', rick: 'placed', bob: 'could_not' };
+  const s = api.pjReceiptSentence(mixed, P, ['johnson', 'rick']);
+  assert.match(s, /Placed with Johnson and Rick\. Bob could not be reached\./);
+  assert.match(s, /Nothing back from Johnson or Rick\.$/,
+    'the sentence swept in the agent the clause before said never received it');
+  assert.doesNotMatch(s, /any of them/);
+});
+
+test('"any of them" IS used when the receipt named nobody else', () => {
+  /**
+   * ⚠️ The control on the rule above: without it, comparing against a wider set
+   * would simply never say "any of them" and the branch would be dead.
+   */
+  const s = api.pjReceiptSentence(ALL_PLACED, P, ['johnson', 'rick', 'bob']);
+  assert.match(s, /Nothing back from any of them\.$/);
+});
+
+test('two agents showing the same display name are not merged into one verdict', () => {
+  /**
+   * 🛑 DISPLAY NAMES ARE NOT UNIQUE. Creation collides only on the SLUG, and
+   * a display name is recorded separately with no uniqueness check anywhere, so
+   * two agents can both show "Rick". An earlier version matched the silent list
+   * against the receipt in DISPLAY-NAME space: one Rick answers, the other does
+   * not, both match, the count says everybody is silent, and the person is told
+   * "Nothing back from any of them" about a room where somebody answered.
+   *
+   * ⚠️ The visible sentence still reads oddly here ("Rick or Rick"), and that
+   * is honest: two agents really are showing one name. What must not happen is
+   * a WRONG claim about how many of them answered.
+   */
+  const twoRicks = { agents: [member('rick', 'Rick'), member('rick-2', 'Rick')] };
+  const outcomes = { rick: 'placed', 'rick-2': 'placed' };
+
+  const s = api.pjReceiptSentence(outcomes, twoRicks, ['rick-2']);
+  assert.match(s, /Placed with Rick and Rick\./);
+  assert.match(s, /Nothing back from Rick\.$/, 'one silent of two was reported as both');
+  assert.doesNotMatch(s, /any of them/, 'a room where one of two answered was reported as nobody answering');
+});
