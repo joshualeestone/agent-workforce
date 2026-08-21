@@ -273,6 +273,44 @@ naming ADD is caught before it runs. Measured by putting the old frame back: the
 `startsWith` fired and mine did not. Re-aimed at the VALUE, where it holds
 something nothing else does. All three proven by breaking them one at a time.
 
+### The advice that named an action the person may not be able to reach
+
+The four `create.js` pointers first said **"Remove it and make it again."** The
+designer had verified `remove.js` would remove all four states, which is true and
+is one layer below the question.
+
+| | |
+|---|---|
+| `status.js:1644` | `snapshot()` maps over `listPanes()` |
+| `server.js:95` | `/api/status` serves `snapshot()` |
+| nothing | supplements it from disk |
+
+**So the board is the live panes**, an agent with no session has no card, and the
+Remove control lives on the card. `?agent=<name>` does not rescue it either:
+`openDetail` opens with `LAST.find(...)` and returns when the name is absent.
+
+🔑 **And the shape is sharper than "unreachable", which is what changed the
+copy.** None of the four conditions guarantees the agent is NOT running, so
+removal is **conditionally** reachable and the sentence cannot know which case it
+is in. A sentence that instructs removal is right sometimes and impossible the
+rest of the time, **which is worse than either, because the person cannot tell
+which one they got.**
+
+Ruled: lead with the action that is always available (they are mid-create, so
+picking another name always works) and offer removal as a conditional the reader
+can evaluate by looking. All four now end:
+
+> **Pick another name. If you can see it under Agents, you can remove it there
+> instead.**
+
+⚠️ **Rejected: naming the folder path.** For `:715` and `:761` it is actively
+wrong, because deleting a folder does not unload a launchd job. It would send
+somebody to do a thing that leaves the blocker in place.
+
+📌 **The product gap is real and is kosmos#127**: a folder-or-job leftover with
+no session is invisible and unremovable, so its **name is permanently unusable**.
+The sentence a person reads is not kept as a placeholder for that roadmap.
+
 ### One flake, recorded rather than smoothed over
 
 `cancel mid-download aborts the stream and leaves nothing behind` failed once and
