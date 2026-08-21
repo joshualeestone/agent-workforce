@@ -274,28 +274,39 @@ test('a DANGLING symlink is refused too, and not turned into a real file', () =>
   fs.rmSync(CONFIG, { force: true });
 });
 
-test('a recorded NO is respected, not overwritten', () => {
+test('a recorded false is overwritten, because it is a default and not a refusal', () => {
   /**
-   * 🛑 `false` IS AN ANSWER, NOT AN ABSENCE. Claude Code writes it when
-   * somebody chose "No, exit" with that exact path in front of them, and it is
-   * live rather than vestigial — 19 of 115 entries on this machine carried it
-   * when this was written.
+   * 🛑 AN EARLIER VERSION OF THIS FILE REFUSED HERE, AND THE PREMISE WAS WRONG.
+   * I assumed Claude Code writes `false` when somebody chooses "No, exit", and
+   * built a guard on it, and wrote a test called "a recorded NO is respected"
+   * that seeded the value itself — so it pinned the behaviour without ever
+   * establishing the meaning.
    *
-   * The earlier version of this module flipped it to true, and the test above
-   * PINNED that by seeding false and asserting true. The case is narrow (only a
-   * name whose folder was removed and remade can reach it) but the direction is
-   * this whole file's argument: we are writing into somebody else's config, so
-   * a decision they made about this path outranks our convenience. The cost of
-   * respecting it is one prompt.
+   * ⚠️ MEASURED ON THIS MACHINE INSTEAD: 19 of 22 entries are `false`, and
+   * SIXTEEN of those also carry completed-session metrics (`lastSessionId`,
+   * `lastCost`, `lastDuration`). A declined session never runs long enough to
+   * write those. `false` is the default for a folder Claude Code has opened and
+   * not been told to trust.
+   *
+   * ⚠️ AND THE GUARD WOULD HAVE REFUSED FOR THIS FEATURE'S OWN POPULATION: all
+   * fifteen worker folders on this machine are `false` with a recorded session,
+   * so every re-created agent would have been told "they have already answered
+   * no for that folder" while the feature silently did nothing.
+   *
+   * 🔑 The argument for writing anyway is not that the value is meaningless. It
+   * is that the caller reaches here only for a folder KOSMOS CREATED, moments
+   * ago: whatever an older entry at that path recorded, it was about a folder
+   * that no longer exists.
    */
   const d = folder();
-  write({ projects: { [d]: { [KEY]: false, allowedTools: ['Bash(ls:*)'] } } });
-  const before = raw();
+  write({ projects: { [d]: { [KEY]: false, allowedTools: ['Bash(ls:*)'], lastSessionId: 'abc' } } });
 
   const r = trustFolder(d);
-  assert.equal(r.ok, false, 'we overrode an explicit no');
-  assert.match(r.because, /answered no/);
-  assert.equal(raw(), before, 'and we did not touch their file to do it');
+  assert.deepEqual(r, { ok: true, already: false, key: d }, 'a default was treated as a refusal');
+  const e = read().projects[d];
+  assert.equal(e[KEY], true);
+  assert.deepEqual(e.allowedTools, ['Bash(ls:*)'], 'their other settings went with it');
+  assert.equal(e.lastSessionId, 'abc');
 });
 
 test('taking a trust entry back leaves everything else exactly as it was', () => {

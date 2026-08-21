@@ -81,7 +81,9 @@ const tempPath = (target) => `${target}.kosmos-${process.pid}-${STARTED}-${++SEQ
  *   not distinguishable from the folder afterwards and only one of them is
  *   ours to answer for. A folder the person chose themselves is a case where
  *   the prompt is doing its job.
- * @returns {{ok: true, already: boolean} | {ok: false, because: string}}
+ * @returns {{ok: true, already: boolean, key: string} | {ok: false, because: string}}
+ *   `key` is the resolved path that was written. The rollback gates on it, so
+ *   it is part of the contract rather than a convenience.
  */
 function trustFolder(dir) {
   const target = CONFIG();
@@ -155,15 +157,26 @@ function trustFolder(dir) {
   // one reading as a failure.
   if (existing && existing[KEY] === true) return { ok: true, already: true, key };
 
-  // 🛑 AND A RECORDED `false` IS AN ANSWER, NOT AN ABSENCE. Claude Code writes
-  // that value when somebody chose "No, exit" with this exact path in front of
-  // them — it is live, not vestigial: 19 of 115 entries on this machine carry
-  // it. The case is narrow (only a name whose folder was removed and remade can
-  // reach here) but the direction is the whole argument of this file: we are
-  // writing into somebody else's config, so a decision they made about this
-  // path outranks our convenience. Remaking a folder at that path does not
-  // un-say it. The cost of respecting it is the prompt, once.
-  if (existing && existing[KEY] === false) return { ok: false, because: 'they have already answered no for that folder' };
+  // 🛑 A RECORDED `false` IS NOT A REFUSAL, AND AN EARLIER VERSION OF THIS FILE
+  // REFUSED ON ONE BECAUSE I ASSUMED IT WAS. The premise was that Claude Code
+  // writes `false` when somebody chooses "No, exit". Measured rather than
+  // assumed: 19 of the 22 entries on this machine are `false`, and SIXTEEN of
+  // those also carry completed-session metrics (`lastSessionId`, `lastCost`,
+  // `lastDuration`). A session that was declined never runs long enough to write
+  // those. `false` is what Claude Code records for a folder it has opened and
+  // not been told to trust — a default, not an answer.
+  //
+  // ⚠️ AND THE GUARD WOULD HAVE REFUSED FOR THIS FEATURE'S OWN POPULATION. All
+  // fifteen worker folders on this machine are `false` with a recorded session.
+  // Remove an agent and make it again — which create.js's own refusal calls the
+  // thing people almost always want — and every one of them would have hit
+  // "they have already answered no for that folder": a sentence false about the
+  // person, while the feature silently did nothing.
+  //
+  // 🔑 THE ARGUMENT FOR WRITING ANYWAY IS NOT THAT THE VALUE IS MEANINGLESS, IT
+  // IS WHOSE FOLDER THIS IS. The caller reaches here only for a folder KOSMOS
+  // CREATED, moments ago. Whatever an older entry at that path recorded, it was
+  // about a folder that no longer exists; this one holds what we put in it.
 
   if (!data.projects) data.projects = {};
   // ⚠️ MERGE INTO the entry rather than replace it. An entry can carry a
@@ -236,10 +249,16 @@ function trustFolder(dir) {
  * `trustFolder` reports `already: false` when it SET THE KEY — which is not the
  * same as having created the entry. A person can have a `projects[…]` entry for
  * that exact path carrying their allowedTools, their MCP servers and their
- * history, with no trust key in it: Claude Code never prunes entries, and 93
- * dead ones were measured on this machine. A version of this that deleted the
- * entry took all of that with it, on a path whose whole job is putting things
- * back.
+ * history, with no trust key in it. A version of this that deleted the entry
+ * took all of that with it, on a path whose whole job is putting things back.
+ *
+ * ⚠️ THAT SHAPE IS DEFENSIVE, NOT OBSERVED, and an earlier version of this
+ * comment cited "93 dead entries measured on this machine" as evidence for it.
+ * Those 93 were THIS BRANCH'S OWN DAMAGE — an unsandboxed suite writing temp
+ * directories into the real config — so a bug of mine was being quoted back as
+ * independent measurement. Measured properly: 0 of 22 entries lack the key. The
+ * merge is still right, because the cost of being wrong about it is somebody's
+ * settings. The number is what did not measure what it claimed.
  *
  * ⚠️ So: delete the key, and drop the entry only if nothing else is left in it.
  * That restores the exact state from before `trustFolder` ran, in both cases,

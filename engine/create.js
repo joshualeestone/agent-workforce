@@ -1147,7 +1147,21 @@ function createAgent(opts) {
     if (trusted && trusted.ok === true && trusted.already === false && trusted.key) {
       // ⚠️ `trusted.key`, never a fresh realpath of the folder. One derivation
       // of one fact, taken at the moment the folder was certainly there.
-      try { require('./trust').forgetFolder(trusted.key); } catch { /* best effort */ }
+      // ⚠️ AND A FAILED UNDO IS RECORDED, because the sentence below tells the
+      // person we took it back off their computer. If the undo refuses — the
+      // config went unreadable, became a symlink, or a live session rewrote the
+      // value under us — that sentence is false in exactly the case that
+      // produced it, and `steps` is the one place this result can be seen.
+      // ⚠️ IT APPEARS ONLY ON FAILURE. A step saying we tidied up would be
+      // noise on a path where the person is already being told something went
+      // wrong. An earlier version of this comment claimed the step existed
+      // while the push had been lost to a `git checkout` during mutation
+      // testing, and the test asserting its ABSENCE could not fail because
+      // nothing ever pushed it.
+      let undone = false;
+      try { undone = require('./trust').forgetFolder(trusted.key).ok === true; }
+      catch { undone = false; }
+      if (!undone) steps.push({ label: 'took back the folder trust', ok: false });
     }
     // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
     // here, so an agent reported as "not running yet" would have started at the
