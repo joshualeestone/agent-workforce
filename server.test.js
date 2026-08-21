@@ -5757,7 +5757,11 @@ test('a room post renders as a room post everywhere: the agent page names the pr
   const pjJoinNames = pageFunction('pjJoinNames');
   const receipt = pageFunction('pjReceiptSentence',
     'const pjNameOf = (p, n) => n;\nconst pjJoinNames = ' + pjJoinNames.toString() + ';');
-  assert.equal(receipt({ leo: 'placed', mara: 'placed' }, {}), 'Placed with leo and mara.');
+  /* ⚠️ ALL-PLACED SAYS NOTHING NOW (Josh, 2026-08-21): reaching everyone is the
+     expected outcome of posting and a sentence saying only that was printed
+     under every post. The clause survives wherever it carries information —
+     asserted on the very next line, which is the case that needs it. */
+  assert.equal(receipt({ leo: 'placed', mara: 'placed' }, {}), '');
   assert.equal(receipt({ leo: 'placed', mara: 'unconfirmed', april: 'could_not' }, {}),
     'Placed with leo. mara may have it; not confirmed, so it is not re-sent. april could not be reached.');
   // An unknown state lands in the NOT-CONFIRMED clause, never vanishes

@@ -1324,6 +1324,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    the state line below it, because it is the least changing of the three. */
 .pj-member-role { display: block; color: var(--label-3); opacity: .9; }
 
+/* ⚠️ AN EMPTY RECEIPT TAKES NO ROOM. The healthy case now renders
+   `<span class="delivery placed"></span>` with nothing in it (Josh's ruling on
+   "Placed with…"), and an empty inline element still carries the rule's margin
+   and line box — a stray gap under every post, which is the noise the ruling
+   was about. */
+.delivery:empty { display: none; }
+
 .dmbusy-room { margin: 10px 0 0; }
 .dmbusy-room .dmbusy { margin: 6px 0 0; }
 .dmbusy-room .dmbusy:first-child { margin-top: 0; }
@@ -5245,6 +5252,27 @@ async function tick() {
 
     const lim = new URLSearchParams(location.search).get('limit');
     LAST = data.agents;
+    /**
+     * 🛑 THE ROOM'S WORKING LINE PAINTS HERE, ON THE CLOCK ITS DATA ARRIVES ON.
+     *
+     * It shipped in 0.2.16 called ONLY from `paintOneProject`, which runs on
+     * the projects poll — a SEPARATE 5s timer. So the line read `LAST` (set on
+     * this line, by this poll) and repainted on a different one: up to five
+     * seconds stale, and for a short burst of work, rarely true at the moment
+     * anything repainted.
+     *
+     * ⚠️ A FOUR-SECOND STATE SAMPLED BY ONE 5s POLL is caught most times; one
+     * that must ALSO survive until an unrelated 5s poll repaints is mostly
+     * missed. `paintBusy` has been called from this function all along, which
+     * is exactly why the agent page's worked and the room's did not.
+     *
+     * 📌 `paintOneProject` still calls it too, so OPENING a room paints at
+     * once rather than waiting for the next status tick.
+     */
+    if (PJ_CURRENT) {
+      const openProject = pjById(PJ_CURRENT);
+      if (openProject) paintRoomBusy((openProject.agents || []).map((a) => (a && a.sessionName) || a));
+    }
     /* The restore sentence is retired by the ARRIVAL it predicted, never by a
        timer: a timeout would clear it while the agent was still coming up, and
        leave the same silence that made it necessary. */
@@ -6303,6 +6331,11 @@ function memoryBox(a) {
  * the card, so neither caller can hand it a name that belongs to a different
  * agent's avatar.
  */
+/* 🛑 THE ONE WORD THAT CARRIES THE CLAIM, defined once. See paintRoomBusy for
+   why it is not "typing", and keep it here so the room and the agent page
+   cannot drift apart on it. */
+const WORKING_VERB = 'working';
+
 function busyRow(fresh, name) {
   const who = name || (fresh && fresh.name) || 'This agent';
   const face = (fresh && fresh.hasAvatar)
@@ -6312,7 +6345,7 @@ function busyRow(fresh, name) {
       + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</div>';
   return face
     + '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(who) + ' is working&hellip;</span>';
+    + '<span>' + esc(who) + ' is ' + WORKING_VERB + '&hellip;</span>';
 }
 
 /**
@@ -6332,27 +6365,44 @@ function paintRoomBusy(members) {
   const el = document.getElementById('pj-busy');
   if (!el) return;
   const names = Array.isArray(members) ? members : [];
-  /* Ordered by the MEMBER list rather than by the board, so the lines do not
+  /* Ordered by the MEMBER list rather than by the board, so the names do not
      reshuffle under a person's eyes every time the poll returns a different
      order. */
   const working = names
     .map((n) => (LAST || []).find((a) => a && a.sessionName === n))
     .filter((a) => a && a.state === 'working');
   el.hidden = !working.length;
-  el.innerHTML = working.length
-    /* 🛑 A DIV, NOT A P, AND THE PARSER IS THE REASON. `busyRow` opens with
-       `<div class="msg-av">`, and a <div> inside a <p> makes the HTML parser
-       CLOSE the paragraph — so each line's avatar fell out of its own flex
-       container and rendered full size above the dots instead of beside them.
-       ⚠️ Invisible to every test in the suite: the string is right, the CSS is
-       right, and only a browser parsing it shows the break. The agent page's
-       `#d-busy` is a <p> in the markup and escapes this because innerHTML on a
-       <p> parses in that element's own context, with no open paragraph to
-       close; here the fragment is parsed inside a <div>. */
-    ? working.map((a) => '<div class="dmbusy">' + busyRow(a, a.name) + '</div>').join('')
+  /**
+   * 🔑 ONE GROUPED LINE, NOT ONE PER AGENT (Josh, 2026-08-21: *"could we group
+   * them like discord does?"*, with a screenshot of
+   * "••• Splinter, Mona Lisa, and Angel are typing..."). 0.2.16 drew a stacked
+   * line per agent, on the reasoning that the point of the signal is WHICH one;
+   * grouping keeps that and costs three rows of height for the common case.
+   *
+   * ⚠️ AND NO FACES HERE, unlike the agent page's single line. Three avatars
+   * stacked over a composer is the noise the grouping was asked for; the
+   * reference has dots and names.
+   *
+   * 🛑 THE VERB STAYS "WORKING" AND IS SHARED, not "typing". We can see that
+   * Claude is producing output; we cannot see that it is composing a message to
+   * this room. Same row of engine/chat.js's claim table as "the agent received
+   * it", which that table marks NEVER. The reference says typing; the reading
+   * does not support it. `WORKING_VERB` is the one definition, so the room and
+   * the agent page cannot drift on the one word that carries the claim.
+   */
+  const who = working.map((a) => '<b>' + esc(a.name) + '</b>');
+  const list = who.length <= 1 ? (who[0] || '')
+    : who.length === 2 ? who[0] + ' and ' + who[1]
+      : who.slice(0, -1).join(', ') + ', and ' + who[who.length - 1];
+  const html = working.length
+    ? '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
+      + '<span>' + list + (working.length === 1 ? ' is ' : ' are ') + WORKING_VERB + '&hellip;</span>'
     : '';
+  /* ⚠️ WRITTEN ONLY WHEN IT CHANGED. Two pollers reach this now, so an
+     unguarded assignment rewrites identical markup up to twice every five
+     seconds. Same rule the update line and the removed list already follow. */
+  if (el.innerHTML !== html) el.innerHTML = html;
 }
-
 function paintBusy(fresh, name) {
   const el = document.getElementById('d-busy');
   if (!el) return;
@@ -11918,7 +11968,28 @@ function pjReceiptSentence(outcomes, p, silent) {
     (groups[state] || groups.unconfirmed).push(pjNameOf(p, who));
   }
   const bits = [];
-  if (groups.placed.length) bits.push('Placed with ' + pjJoinNames(groups.placed) + '.');
+  /**
+   * 🔑 "PLACED WITH A, B AND C." IS DROPPED WHEN IT IS THE WHOLE STORY (Josh,
+   * 2026-08-21: *"lets kill the bubble that says 'Placed with Name, Name, and
+   * Name' when i post a message"*). Posting to a room and having it reach
+   * everyone is the expected outcome, and a sentence that says only that is
+   * noise printed under every single post.
+   *
+   * ⚠️ KEPT THE MOMENT IT IS NOT THE WHOLE STORY, and this is the part that
+   * must not be simplified away. "Placed with A and B. C could not be reached."
+   * names who DID get it, which is the only thing that makes the failure half
+   * actionable — a bare "C could not be reached" leaves the person unsure
+   * whether anyone got it. So the sentence goes only when nothing else is
+   * being said about delivery.
+   *
+   * 📌 The placed GROUP is still computed either way: "Nothing back from any of
+   * them" is derived from it, and that sentence is the #145 signal that told
+   * Josh his agents were answering into their own sessions.
+   */
+  const deliveryIsTheWholeStory = !groups.unconfirmed.length && !groups.could_not.length;
+  if (groups.placed.length && !deliveryIsTheWholeStory) {
+    bits.push('Placed with ' + pjJoinNames(groups.placed) + '.');
+  }
   if (groups.unconfirmed.length) {
     bits.push(pjJoinNames(groups.unconfirmed) + ' may have it; not confirmed, so it is not re-sent.');
   }
