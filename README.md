@@ -287,6 +287,12 @@ undone if the agent fails to start. If the write does not take, nothing breaks:
 the agent starts and asks you once, which is what happened before this existed.
 A folder you have already answered **no** for stays answered no.
 
+Removing an agent does **not** take that line back out, and that is deliberate
+rather than an oversight. At that moment nothing can tell an entry this app
+wrote from one you made yourself, and deleting your own answer about a folder is
+worse than leaving a line about a folder that is gone. Claude Code keeps such
+lines for every folder you have ever opened anyway.
+
 ⚠️ **A running agent does not see the change.** Putting an agent on a project
 writes the project's folder into that agent's instruction file, and an agent
 reads that file once, when it starts. So the screen says *"it will see that the

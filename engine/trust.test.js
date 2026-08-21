@@ -215,30 +215,35 @@ test('a path we cannot key on is refused before anything is opened', () => {
 
 test('no temp file is left behind when the rename fails', () => {
   /**
-   * ⚠️ THE FAILURE IS INJECTED, and the first version of this test is the
-   * reason why. It made the containing directory read-only, passed, and went
-   * on passing with the cleanup DELETED — because an unwritable directory
-   * fails the `writeFileSync` too, so there was never a temp file to leave
-   * behind. The test asserted litter was absent in the one case that cannot
-   * produce litter.
+   * ⚠️ THE PATH IS OBSERVED, NOT GUESSED, and the version before this one is
+   * why. It watched `CONFIG + '.kosmos.new'` — the fixed name from an earlier
+   * design — while the module had moved to `.kosmos-<pid>-<start>-<seq>.new`.
+   * `existsSync` on a path nothing ever creates is false whether the cleanup
+   * runs or not, so the test passed with the `unlinkSync` deleted, under a
+   * docblock about how hard its authors worked to make it capable of failing.
    *
-   * Reaching the real case through the filesystem is not possible here: it
-   * needs a write that succeeds and a rename in the SAME directory that fails.
-   * So the rename is made to throw directly. That is the condition the cleanup
-   * exists for, and nothing weaker exercises it.
+   * ⚠️ THE FAILURE IS ALSO INJECTED, and the version before THAT is why: making
+   * the directory read-only fails the WRITE too, so there was never a temp file
+   * to leave behind. Reaching the cleanup needs a write that succeeds and a
+   * rename that does not.
    */
   const d = folder();
   write({ projects: {} });
-  const tmp = CONFIG + '.kosmos.new';
-  const real = fs.renameSync;
+
+  const realWrite = fs.writeFileSync;
+  const realRename = fs.renameSync;
+  const written = [];
+  fs.writeFileSync = function (p, ...rest) { written.push(String(p)); return realWrite.call(fs, p, ...rest); };
   fs.renameSync = () => { const e = new Error('injected'); e.code = 'EIO'; throw e; };
   try {
     const r = trustFolder(d);
     assert.equal(r.ok, false, 'a rename that throws is a refusal');
-    assert.equal(fs.existsSync(tmp), false, 'and the temp file it wrote is gone');
+    const temps = written.filter((p) => p.includes('.kosmos-'));
+    assert.equal(temps.length, 1, 'the module did not write a temp file, so there is nothing to clean up');
+    assert.equal(fs.existsSync(temps[0]), false, `the temp file it wrote is still there: ${temps[0]}`);
   } finally {
-    fs.renameSync = real;
-    try { fs.rmSync(tmp, { force: true }); } catch { /* fine */ }
+    fs.writeFileSync = realWrite;
+    fs.renameSync = realRename;
   }
 });
 
@@ -358,28 +363,43 @@ test('a file sitting at the OLD predictable temp path cannot receive the config'
 
   const r = trustFolder(d);
   assert.equal(r.ok, true, 'a planted file at the old path stopped an honest write');
+  // ⚠️ WHAT THIS PINS, exactly: that the old fixed name is not in use any more.
+  // It does NOT exercise `wx` — the module never opens this path — and saying
+  // so is the difference between a test and a test with a docblock.
   assert.equal(fs.existsSync(elsewhere), false, 'the config was written through a planted link');
   assert.equal(read().projects[d][KEY], true);
   fs.rmSync(planted, { force: true });
 });
 
-test('the temp path is not the same twice, so nothing can be waiting at it', () => {
+test('the temp path is never the same twice, observed rather than argued', () => {
   /**
-   * ⚠️ THE PROPERTY, checked rather than assumed, because it is what makes the
-   * test above true. Read off the paths the module actually writes: a
-   * `wx` create that succeeds twice in a row proves the second call did not
-   * reuse the first path.
+   * ⚠️ THE VERSION BEFORE THIS ASSERTED NO LITTER AND CALLED IT UNIQUENESS. It
+   * checked that no `.kosmos-` file survived three successful writes — which is
+   * true of a FIXED name too, because the rename removes the file before the
+   * next call runs. Reverting to the fixed name left it green. The property is
+   * about the paths the module writes, so the paths the module writes are what
+   * this collects.
+   *
+   * 🔑 It matters because `wx` refuses whatever is sitting at the name, and a
+   * crash between create and rename leaves one behind. With a repeating name
+   * that is a permanent wedge; with a unique one the leftover is inert.
    */
-  const seen = new Set();
-  for (let i = 0; i < 3; i++) {
-    const d = folder();
-    write({ projects: {} });
-    assert.equal(trustFolder(d).ok, true);
-    for (const name of fs.readdirSync(SANDBOX)) {
-      if (name.includes('.kosmos-')) seen.add(name);
+  const realWrite = fs.writeFileSync;
+  const written = [];
+  fs.writeFileSync = function (p, ...rest) { written.push(String(p)); return realWrite.call(fs, p, ...rest); };
+  try {
+    for (let i = 0; i < 3; i++) {
+      const d = folder();
+      write({ projects: {} });
+      assert.equal(trustFolder(d).ok, true);
     }
+  } finally {
+    fs.writeFileSync = realWrite;
   }
-  assert.equal(seen.size, 0, 'a temp file survived a successful write');
+  const temps = written.filter((p) => p.includes('.kosmos-'));
+  assert.equal(temps.length, 3, 'the module did not write three temp files, so this compares nothing');
+  assert.equal(new Set(temps).size, 3, `the temp path repeated: ${temps.join(', ')}`);
+  for (const t of temps) assert.equal(fs.existsSync(t), false, 'a temp file survived a successful write');
 });
 
 test('a trust key merged into somebody’s existing entry is taken back WITHOUT their entry', () => {
@@ -427,4 +447,37 @@ test('taking back never reports success about a config it could not read', () =>
   const r = forgetFolder(d);
   assert.equal(r.ok, false, 'a malformed config was reported as taken back');
   assert.match(r.because, /shaped/);
+});
+
+test('a file planted at the path the module is ABOUT to write is refused, not written through', () => {
+  /**
+   * 🛑 THE `wx` FLAG'S OWN TEST, and nothing in this file had one. The unique
+   * name means no fixture can guess the path, so the path is taken from the
+   * module as it computes it and the plant is made in that instant.
+   *
+   * Without `wx` the write follows the link and the config — account details
+   * included — lands where somebody else chose, and the rename then makes the
+   * config itself that link.
+   */
+  const d = folder();
+  write({ projects: {} });
+  const elsewhere = nodePath.join(SANDBOX, 'attacker-real.json');
+
+  const realWrite = fs.writeFileSync;
+  let planted = null;
+  fs.writeFileSync = function (p, ...rest) {
+    if (planted === null && String(p).includes('.kosmos-')) {
+      planted = String(p);
+      fs.symlinkSync(elsewhere, planted);        // there before the module's own write lands
+    }
+    return realWrite.call(fs, p, ...rest);
+  };
+  let r;
+  try { r = trustFolder(d); }
+  finally { fs.writeFileSync = realWrite; try { fs.rmSync(planted, { force: true }); } catch { /* fine */ } }
+
+  assert.ok(planted, 'the plant never happened, so this tests nothing');
+  assert.equal(r.ok, false, 'the write went through a symlink at its own temp path');
+  assert.equal(fs.existsSync(elsewhere), false, 'the config was written through the planted link');
+  assert.equal(read().projects[d], undefined, 'a refused write still changed the config');
 });

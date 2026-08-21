@@ -57,13 +57,23 @@ const KEY = 'hasTrustDialogAccepted';
  * file from litter a crash left behind. Clearing it breaks the other writer;
  * leaving it wedges this feature permanently.
  *
- * 🔑 A unique name removes the choice. Nothing else can be sitting at it, so
- * `wx` only ever fails for a real reason, and the file is unambiguously ours to
- * delete. The cost is a stray file if the process dies between create and
- * rename — bounded, rare, and better than a feature that never works again.
+ * 🔑 A unique name removes the choice. Nothing else is sitting at it, so `wx`
+ * only fails for a planted file, and a planted file is one we must NOT delete.
+ *
+ * ⚠️ AND THE CLOCK IS IN THE NAME, not just the pid. With `pid-seq` alone, a
+ * process that died between create and rename left `…-1.new` behind, and the
+ * next process to draw that pid refused at seq 1 FOREVER — a permanent wedge
+ * from one crash, which is worse than the case the unique name was introduced
+ * to avoid. With the start time in it, a leftover is inert: nothing ever asks
+ * for that name again.
+ *
+ * ⚠️ SO A CRASH CAN LEAVE ONE STRAY FILE AND NOTHING EVER REMOVES IT. Said
+ * plainly rather than implied: the alternative is deleting files at a path we
+ * cannot prove is ours, which is the harm every guard in here is pointed at.
  */
 let SEQ = 0;
-const tempPath = (target) => `${target}.kosmos-${process.pid}-${++SEQ}.new`;
+const STARTED = Date.now();
+const tempPath = (target) => `${target}.kosmos-${process.pid}-${STARTED}-${++SEQ}.new`;
 
 /**
  * @param {string} dir absolute path of a folder KOSMOS CREATED. The caller
@@ -179,15 +189,15 @@ function trustFolder(dir) {
     // Born at the preserved mode rather than chmodded into it: this file holds
     // account details and sits at 600. A window where it is world-readable is
     // not acceptable even if the chmod that follows would close it.
-    // ⚠️ `wx`, and this repo has already paid for learning why. The temp name
-    // is predictable, and the DEFAULT flag FOLLOWS A SYMLINK: a link sitting at
-    // `~/.claude.json.kosmos.new` would receive the whole config — account
-    // details included — at a path somebody else chose, and the rename would
-    // then make the config itself that link. `wx` fails instead of following.
-    // Same fix, same reasoning, as `engine/instructions.js`'s boot-file write.
-    // ⚠️ A stale temp file from a crash therefore refuses ONCE and is cleared by
-    // the catch below, so the next creation succeeds. That is the right way
-    // round: one prompt, versus a write through a link.
+    // ⚠️ `wx`, and this repo has already paid for learning why: the DEFAULT
+    // flag FOLLOWS A SYMLINK, so a link at the temp path would receive the
+    // whole config — account details included — at a path somebody else chose,
+    // and the rename would then make the config itself that link. `wx` fails
+    // instead of following. Same fix, same reasoning, as
+    // `engine/instructions.js`'s boot-file write.
+    // ⚠️ THE NAME BEING UNIQUE IS NOT A SUBSTITUTE FOR IT. `pid-starttime-seq`
+    // is not secret — a local attacker can read both — so the flag is what
+    // closes the route; the unique name only stops us colliding with ourselves.
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: prevMode });
     // ⚠️ MODE IS THE ONLY THING CARRIED OVER, said plainly rather than left to
     // read as "permissions are preserved": `rename` replaces the inode, so
@@ -199,11 +209,11 @@ function trustFolder(dir) {
     fs.chmodSync(tmp, prevMode);
     fs.renameSync(tmp, target);
   } catch (err) {
-    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. `wx` fails with EEXIST
-    // when another writer is mid-write at the same predictable path, and
-    // clearing it there would delete THEIR in-flight file and make their rename
-    // fail — one process's cleanup causing another's failure, and the victim
-    // then reporting the wrong cause.
+    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. Nothing else uses this
+    // naming scheme, so an EEXIST here means a file somebody PLANTED at a path
+    // we were about to write — the exact case `wx` exists to refuse. Removing
+    // it would be this code deleting a file it cannot prove anything about, on
+    // behalf of a write it is already refusing to do.
     if (!err || err.code !== 'EEXIST') {
       try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
     }
@@ -278,9 +288,22 @@ function forgetFolder(dir) {
     return { ok: false, because: 'their config file is not shaped the way we expect' };
   }
   const entry = data.projects && data.projects[key];
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return { ok: true, already: true };
+  if (entry === undefined) return { ok: true, already: true };
+  // ⚠️ A malformed ENTRY is refused for the same reason a malformed `projects`
+  // is, eight lines up: answering "taken back" about a shape we did not
+  // understand is reporting success for a file we did not really read.
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, because: 'their config file is not shaped the way we expect' };
+  }
   if (!(KEY in entry)) return { ok: true, already: true };
 
+  // ⚠️ AND ONLY IF IT STILL SAYS YES. The caller's gate is a claim about a
+  // moment that has passed: between our rename and the bootstrap failing, a
+  // live Claude Code session can write its own value for this path — including
+  // the `false` this file argues elsewhere is AN ANSWER, NOT AN ABSENCE.
+  // Deleting that would be the undo destroying a decision, on the one path
+  // whose whole job is putting things back.
+  if (entry[KEY] !== true) return { ok: true, already: true };
   delete entry[KEY];
   // Only now, and only if there is nothing of theirs left in it.
   if (Object.keys(entry).length === 0) delete data.projects[key];
@@ -291,11 +314,11 @@ function forgetFolder(dir) {
     fs.chmodSync(tmp, prevMode);
     fs.renameSync(tmp, target);
   } catch (err) {
-    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. `wx` fails with EEXIST
-    // when another writer is mid-write at the same predictable path, and
-    // clearing it there would delete THEIR in-flight file and make their rename
-    // fail — one process's cleanup causing another's failure, and the victim
-    // then reporting the wrong cause.
+    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. Nothing else uses this
+    // naming scheme, so an EEXIST here means a file somebody PLANTED at a path
+    // we were about to write — the exact case `wx` exists to refuse. Removing
+    // it would be this code deleting a file it cannot prove anything about, on
+    // behalf of a write it is already refusing to do.
     if (!err || err.code !== 'EEXIST') {
       try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
     }

@@ -62,11 +62,15 @@ already takes.
 
 ## What testing it changed
 
-- **The suite sandboxed three roots and this made a fourth.** Without the added
-  `AGENT_WORKFORCE_CLAUDE_CONFIG`, every successful creation in `create.test.js`
-  would have rewritten the operator's real `~/.claude.json` — 100KB, their
-  account, their MCP servers, 22 projects — adding trusted entries for fixture
-  directories in `/var/folders`.
+- **The suite sandboxed three roots and this made a fourth, and I only did it in
+  one file.** A blind reviewer measured the result in my own live config: **93
+  entries** keyed to temp directories under `/var/folders` that had not existed
+  for hours, in a 114KB file holding my account and my MCP servers. Four test
+  files now set `AGENT_WORKFORCE_CLAUDE_CONFIG`, the 93 are cleaned (115 → 22,
+  backup kept), and a full suite run afterwards leaves zero litter — measured,
+  not assumed. **The fix that matters is the rule in `fixture-discipline.test.js`
+  rather than the four lines**: three roots sandboxed and a fourth not is exactly
+  how this happened, so the suite now refuses a creating suite that skips it.
 - **I named the wrong guard and the test corrected me.** I asserted that a
   pre-existing folder creates an agent without being trusted. It came back
   REFUSED: `createAgent` already turns down a name whose folder exists, so the
@@ -94,6 +98,36 @@ already takes.
   invent-on-absent, symlink refusal, mode preservation, temp cleanup, the
   `projects` shape guard, and the two-at-once dangling case.
 - **One on `create.js`**: removing the call reddens the creation test.
+
+## What the second blind pass found, and where it found it
+
+**Two blockers, and both were inside the first round's own fix.**
+
+1. **The rollback deleted somebody's settings.** `forgetFolder` removed the whole
+   `projects[…]` entry, reasoning that `already: false` meant we created it. It
+   does not: it means we **set the key**. A person can already have an entry for
+   that exact path — Claude Code never prunes them — holding their
+   `allowedTools`, their MCP servers and their history. The undo took all of it,
+   on the path whose entire job is putting things back. It now deletes the key
+   and drops the entry only if nothing of theirs is left.
+2. **The test guarding that could not fail.** It seeded the entry with the trust
+   key already `true`, which short-circuits before any write, so the undo never
+   ran and the guard was never evaluated against a live deletion. The shape that
+   loses data is the key **absent**.
+
+Also from that pass: two comments claiming behaviour the code did not have (the
+undo's "only ever called for an entry we just created", and a claim that the
+`because` string was now surfaced — it is not, and that is recorded as a gap);
+a `.includes` check satisfied by a **different variable**
+(`AGENT_WORKFORCE_CLAUDE_CONFIG_DIR`); a positive control met only because the
+file **matched its own docblock**; and a fixed temp path whose failure cleanup
+could delete another process's in-flight file. The temp path is now unique per
+process, which removes the choice rather than picking a side of it.
+
+⚠️ **One mutation lied to me during that round.** `String.replace` takes only the
+first occurrence, so a break aimed at the rollback's key hit a truthiness check
+instead and the suite stayed green — reported as "this guard has no test" until
+the replacement was aimed at the call. It has one.
 
 ## Not in this change
 
