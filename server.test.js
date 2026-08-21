@@ -3076,6 +3076,24 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // The answer route: gated on the tie, labelled with its visible word.
     const ask = api.card(mara);
     assert.match(ask, /ansgo/, 'the needs_you card lost its answer route');
+    /* 🛑 WHERE THE ROUTE GOES, not just that it exists. Nothing tested the
+       DESTINATION, which is how it went stale: the button was written when a
+       project room was the only place a question could be answered, #119 put
+       the question on the agent's own page, and the pointer was never
+       re-read. Josh hit it live on 2026-08-21 -- "it jumps me straight back to
+       a project that he is not in".
+
+       Asserted against the SOURCE because the destination is a function call
+       rather than markup, and the alternative is a browser drive for a
+       one-line branch. `openDetail` is what shows the agent's own panel;
+       `openProject` is what this must never call again. */
+    const answerFrom = pageFnSource('pjAnswerFrom');
+    assert.match(answerFrom, /openDetail\(sessionName\)/,
+      'the answer button no longer opens the agent page, which is where the question and its controls live');
+    assert.doesNotMatch(answerFrom, /openProject\(/,
+      'the answer button routes into a project room again, which is the screen it was moved off');
+    assert.doesNotMatch(answerFrom, /showTab\('projects'\)/,
+      'the answer button still switches to the Projects tab');
     assert.match(ask, /aria-label="Answer /, 'the answer button accessible name lost its visible word');
     // The untied-needs_you shape cannot come through real routes (the
     // pipeline forces untied panes to unknown; that refusal is its own
@@ -3770,10 +3788,25 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // first word to a live agent on every Japanese, Chinese or Korean send.
     [/e\.isComposing \|\| e\.keyCode === 229/,
      'the IME composition guard is gone, so Enter mid-composition sends half a word'],
-    // "We could not look" is not "it is on none": without this branch a failed
-    // projects read renders a definite "not on a project yet, add it to one".
+    /* 🛑 RE-SUBJECTED, AND THE OLD SUBJECT IS GONE RATHER THAN MOVED. This
+       pin's message named `pjAnswerFrom`: without the branch, a failed
+       projects read rendered as a definite "not on a project yet". That
+       function no longer reads the projects list at all (#140 re-pointed it at
+       the agent's own page), so THE PROPERTY IT GUARDED NO LONGER EXISTS.
+
+       ⚠️ The regex went on passing anyway, because it matches the string
+       ANYWHERE in the file, and what it matches today is the ARCHIVE/RESTORE
+       path re-enabling its button. A pin whose message and whose match can
+       drift apart keeps being green about something else, and the message is
+       the only part a reader checks.
+
+       ✅ Kept rather than deleted because the property is real WHERE IT NOW
+       LANDS, and re-worded to say what it actually holds. `pjCloseConfirm`
+       carries the same distinction in words ("Archived X, but we could not
+       re-read your projects just then"), which is the sentence this branch
+       exists to make possible. */
     [/if \(PJ_READ_FAILED\)/,
-     'pjAnswerFrom filters a list that a failed read never refreshed, and states the result as fact'],
+     'the archive/restore path stopped branching on a failed re-read, so a read that did not happen is reported as a completed one'],
     [/PJ_READ_FAILED = true;/,
      'the failed-read flag is never raised, so the honest branch above is dead code'],
     // The unconfirmed-and-unrecorded case: the box is the ONLY copy of the
