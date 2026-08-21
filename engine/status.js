@@ -1187,7 +1187,21 @@ function registrySafe(value) {
   return name;
 }
 
+/**
+ * ⚠️ AN EMPTY LIST HAS FIVE CAUSES AND THEY ARE NOT THE SAME ANSWER. No entry
+ * anywhere is a genuine absence: nothing has ever been registered, so nothing
+ * has ever existed to read. But a corrupt entry, an entry with no session id,
+ * a name we refuse to build a path from, and an entry belonging to a DIFFERENT
+ * agent are all cases where we looked and could not or would not answer.
+ *
+ * 🔑 It matters because `readContext` turns an empty list into the words on a
+ * card. "It has not started a session yet" is a CLAIM about an agent's life,
+ * and making it out of our own unreadable file is the failure this whole split
+ * exists to remove. So the flag says which kind of empty this is.
+ */
+let REFUSED_TO_LOOK = false;
 function sessionIdsFor(sessionName, exactSession) {
+  REFUSED_TO_LOOK = false;
   // ⚠️ When the caller knows the REAL session name, only that spelling is
   // tried. The board's name is the session with `-discord` stripped, so `foo`
   // and `foo-discord` are one name and two sessions — and trying both spellings
@@ -1205,8 +1219,11 @@ function sessionIdsFor(sessionName, exactSession) {
   const safeName = registrySafe(sessionName);
   // A name we would refuse to build a path from resolves to nothing at all,
   // rather than to a path we then hope is harmless.
-  if (exactSession !== undefined && !safeExact) return [];
-  if (!safeName) return [];
+  // ⚠️ A REFUSAL, NOT AN ABSENCE. We can see there is a name and are declining
+  // to build a path from it — the same shape as the identity refusal further
+  // down, and the opposite of "nothing has ever been registered here".
+  if (exactSession !== undefined && !safeExact) { REFUSED_TO_LOOK = true; return []; }
+  if (!safeName) { REFUSED_TO_LOOK = true; return []; }
   const candidates = safeExact
     ? [`${safeExact}_0.0.json`]
     : [`${safeName}-discord_0.0.json`, `${safeName}_0.0.json`];
@@ -1226,9 +1243,18 @@ function sessionIdsFor(sessionName, exactSession) {
         const wanted = exactSession
           ? [exactSession]
           : [sessionName, `${sessionName}-discord`];
-        if (owner && !wanted.includes(owner)) continue;
+        // A registry entry that names a DIFFERENT agent is a collision we
+        // deliberately refuse to read across. We looked and declined.
+        if (owner && !wanted.includes(owner)) { REFUSED_TO_LOOK = true; continue; }
         if (entry.session_id) found.push(entry.session_id);
-      } catch { /* try the next candidate */ }
+        else REFUSED_TO_LOOK = true;   // an entry exists; it just has no id in it
+      } catch (err) {
+        // ⚠️ ENOENT is "no entry here", which is a real absence. Anything else —
+        // unreadable file, corrupt JSON — is a FAILURE to look, and reporting
+        // it as "this agent has never started" is a claim about the agent made
+        // out of a problem of ours.
+        if (!err || err.code !== 'ENOENT') REFUSED_TO_LOOK = true;
+      }
     }
   }
   // ⚠️ ALL of them, in preference order, rather than the first one found.
@@ -1327,8 +1353,12 @@ function readContext(agentName, model, exactSession) {
     // thing entirely: it was read once and is not there now, and calling that
     // "not yet" would be false in a specific way rather than merely vague.
     const registered = sessionIdsFor(agentName, exactSession).length > 0;
-    return registered
-      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'its transcript is not where the registry says' }
+    // ⚠️ AND A LOOK WE COULD NOT COMPLETE IS NOT AN ABSENCE. Read straight after
+    // the call that sets it, before anything else can touch a registry.
+    const blind = REFUSED_TO_LOOK;
+    return (registered || blind)
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
+          because: registered ? 'its transcript is not where the registry says' : 'we could not read its registry entry' }
       : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not started a session yet' };
   }
   const { text, whole } = tailBytes(file);

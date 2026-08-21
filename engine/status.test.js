@@ -1763,3 +1763,50 @@ test('a SMALL transcript with no usage row really is "not yet"', () => {
   assert.equal(ctx.percent, null);
   assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
 });
+
+test('a registry entry we cannot READ is not reported as an agent that never started', () => {
+  /**
+   * ⚠️ AN EMPTY LIST HAS FIVE CAUSES. Only one of them — no entry anywhere — is
+   * a genuine absence. A corrupt entry is a failure of ours, and turning it into
+   * "it has not started a session yet" makes a claim about the agent's life out
+   * of our own unreadable file. That is the exact direction this whole change
+   * was written to stop.
+   */
+  const ctx = contextFor('corrupt-entry', ({ entry }) => {
+    fs.writeFileSync(entry, '{ this is not json', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'our unreadable file was reported as the agent never having run');
+  assert.match(ctx.because, /could not read/);
+});
+
+test('a registry entry belonging to ANOTHER agent is a refusal, not an absence', () => {
+  /**
+   * ⚠️ We can see the entry and are declining to read across a name collision —
+   * the same shape as the identity refusal elsewhere in this file, and the
+   * opposite of "nothing has ever been registered here".
+   */
+  const ctx = contextFor('collided', ({ entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({ session_name: 'somebody-else', session_id: 'sess-somebody-else' }), 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'a collision we refused to read was reported as a new agent');
+});
+
+test('an entry with no session id in it is a look we could not finish', () => {
+  const ctx = contextFor('no-id', ({ entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({ session_name: 'no-id' }), 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false);
+});
+
+test('THE CONTROL: with no entry at all it really is "not yet"', () => {
+  /**
+   * ⚠️ Without this, answering `notYet: false` for every empty list would pass
+   * all three tests above and silently undo the change.
+   */
+  const ctx = contextFor('truly-absent', () => { /* nothing written anywhere */ });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
+});
