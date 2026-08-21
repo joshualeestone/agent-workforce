@@ -1187,6 +1187,25 @@ function registrySafe(value) {
   return name;
 }
 
+/**
+ * ⚠️ AN EMPTY LIST HAS SEVERAL CAUSES AND NOTHING HERE SEPARATES THEM: no
+ * entry anywhere, a corrupt entry, an entry with no session id, a name we
+ * refuse to build a path from, an entry belonging to a DIFFERENT agent. Some of
+ * those mean nothing has ever been registered; others mean we could not or
+ * would not look.
+ *
+ * ⚠️ AND "NO ENTRY ANYWHERE" IS NOT THE CLEAN ABSENCE IT READS AS. The key is
+ * `<session>_<window>.<pane>` and this only ever builds `_0.0`, so an agent in
+ * pane 0.1 has an entry we never look for; a config root with no
+ * `agent-registry` directory has none to find; entries get rotated away.
+ *
+ * 🔑 SO THE CALLER MUST NOT READ AN EMPTY LIST AS "this agent has never
+ * started". An earlier version of this comment asserted exactly that, and the
+ * claim is what let a running agent be reported as one that had never run.
+ * A previous attempt returned a flag saying WHICH kind of empty this was; it
+ * did not help, because the kinds it could tell apart were not the kinds that
+ * matter, and it cost a second read of every registry file on every poll.
+ */
 function sessionIdsFor(sessionName, exactSession) {
   // ⚠️ When the caller knows the REAL session name, only that spelling is
   // tried. The board's name is the session with `-discord` stripped, so `foo`
@@ -1205,6 +1224,9 @@ function sessionIdsFor(sessionName, exactSession) {
   const safeName = registrySafe(sessionName);
   // A name we would refuse to build a path from resolves to nothing at all,
   // rather than to a path we then hope is harmless.
+  // ⚠️ A REFUSAL, NOT AN ABSENCE. We can see there is a name and are declining
+  // to build a path from it — the same shape as the identity refusal further
+  // down, and the opposite of "nothing has ever been registered here".
   if (exactSession !== undefined && !safeExact) return [];
   if (!safeName) return [];
   const candidates = safeExact
@@ -1226,6 +1248,8 @@ function sessionIdsFor(sessionName, exactSession) {
         const wanted = exactSession
           ? [exactSession]
           : [sessionName, `${sessionName}-discord`];
+        // A registry entry that names a DIFFERENT agent is a collision we
+        // deliberately refuse to read across.
         if (owner && !wanted.includes(owner)) continue;
         if (entry.session_id) found.push(entry.session_id);
       } catch { /* try the next candidate */ }
@@ -1266,7 +1290,16 @@ function transcriptFor(agentName, exactSession) {
   return null;
 }
 
-/** Read the tail of a file without loading all of it. Transcripts reach 8MB+. */
+/**
+ * Read the tail of a file without loading all of it. Transcripts reach 8MB+.
+ *
+ * ⚠️ IT ALSO REPORTS WHETHER IT SAW THE WHOLE FILE, and that is not a detail.
+ * A caller that concludes "there is no usage data here" from a 256KB WINDOW is
+ * making a claim about a file it did not read: one oversized tool result at the
+ * end of an 8MB transcript pushes every usage row out of view, and a heavily
+ * used agent then reports as one that has never used any memory. Truncation is
+ * knowable — `size > bytes` — so it is answered rather than assumed.
+ */
 function tailBytes(file, bytes = 262144) {
   let fd;
   try {
@@ -1275,27 +1308,113 @@ function tailBytes(file, bytes = 262144) {
     const start = Math.max(0, size - bytes);
     const buf = Buffer.alloc(Math.min(bytes, size));
     fs.readSync(fd, buf, 0, buf.length, start);
-    return buf.toString('utf8');
+    // ⚠️ RETURNED, not stashed in a module variable. The first version of this
+    // set a shared flag that the caller read on the next line, which works and
+    // is one interleaved call away from a verdict computed about a different
+    // file. The fact belongs to the read.
+    return { text: buf.toString('utf8'), whole: size <= bytes };
   } catch {
-    return null;
+    return { text: null, whole: false };
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
   }
 }
 
+/**
+ * ⚠️ TWO DIFFERENT ANSWERS WERE SHARING ONE WORD, and the card said the one
+ * that is a CLAIM.
+ *
+ *     nothing has been recorded yet   an admission: we looked, there is
+ *                                     nothing there to look at
+ *     we could not read it            a claim: something exists and we failed
+ *
+ * A thirty-second-old agent is the first. The card said "Unknown" and the ring
+ * said "Memory could not be read", so a brand-new agent read as a fault — which
+ * is why Josh screenshotted a working agent and asked how to stop it.
+ *
+ * 🔑 Mona Lisa's rule, and the reason the split resolves the way it does:
+ * WHEN A CASE CANNOT BE ASSIGNED WITHOUT A THRESHOLD, IT GOES TO UNKNOWN.
+ * "Not yet" is a claim about where an agent is in its life; "unknown" is an
+ * admission about what we can see, and a wrong claim is worse than a vague
+ * admission. So ambiguity resolves toward the admission every time.
+ *
+ * ⚠️ AND `notYet` IS DECIDED ON WHAT THE CODE ALREADY DISTINGUISHES, never on
+ * the agent's age. Age would have been a threshold wearing a dimension's
+ * clothes: it looks principled, and the number is somebody's guess.
+ */
 function readContext(agentName, model, exactSession) {
   const file = transcriptFor(agentName, exactSession);
   if (!file) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no transcript found' };
+    // ⚠️ TWO STATES COLLAPSED INTO ONE `null` HERE. No registry entry means
+    // Claude Code has never registered a session for this agent, so there has
+    // never been anywhere to look. An entry whose file is GONE is the other
+    // thing entirely: it was read once and is not there now, and calling that
+    // "not yet" would be false in a specific way rather than merely vague.
+    // 🛑 NO TRANSCRIPT IS ALWAYS THE ADMISSION, and three attempts at being
+    // cleverer than that were all wrong in the same direction.
+    //
+    // "No entry" reads like a clean absence and is not one. The registry key is
+    // <session>_<window>.<pane> and we only ever build `_0.0`, so an agent in
+    // pane 0.1 has one we never look for; a config root with no agent-registry
+    // directory has none to find; an entry can be rotated away; the file can be
+    // unreadable. Some of those mean the agent never started and some mean it
+    // has been running for hours, and NOTHING HERE SEPARATES THEM.
+    //
+    // ⚠️ I TRIED TO SEPARATE THEM WITH "IS THE PANE RUNNING CLAUDE", which is a
+    // fact the caller holds, and it was wrong three ways: `node` is a real
+    // Claude install (npm-global fronts as node) and reads as not-running; a
+    // truncated tmux line has no command at all and reads as not-running, while
+    // `classify` two hundred lines up refuses that same input as "we could not
+    // tell what it is doing"; and a crashed agent's pane is a shell, which is a
+    // first-class state in this file. Each one produced "it has not started a
+    // session yet" on an agent that plainly had.
+    //
+    // 🔑 The rule was there the whole time: a case that cannot be separated
+    // WITHOUT A THRESHOLD resolves to the admission. This one cannot be
+    // separated at all, so it resolves there unconditionally, and the two extra
+    // registry reads I added to try go with it.
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
+             because: 'we cannot find a transcript for it' };
   }
-  const text = tailBytes(file);
-  if (!text) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'could not read the transcript' };
+  const { text, whole } = tailBytes(file);
+  // ⚠️ `text === null` AND `text === ''` ARE NOT THE SAME ANSWER, and `if
+  // (!text)` treated them as one. tailBytes returns null when the read threw
+  // and '' when the file is there and empty — which is exactly the state a
+  // transcript is in the instant Claude Code opens it. So the newest agent on
+  // the machine was reported as one we could not read.
+  if (text === null) {
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'could not read the transcript' };
+  }
+  if (text === '') {
+    // ⚠️ AN EMPTY FILE IS NOT EVIDENCE THE AGENT IS NEW. It is evidence about
+    // the FILE: a write that failed, a file truncated to zero, a path we
+    // resolved to the wrong place, or a session whose first line has not landed
+    // yet. Only the last of those is "nothing recorded yet", and nothing here
+    // separates them, so the admission.
+    //
+    // ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID "Claude Code opens a FRESH file
+    // when it compacts", and that is FALSE on this machine — compact summaries
+    // are appended mid-file (measured: `isCompactSummary` rows at lines 3682 and
+    // 7579 of a 9575-line transcript). The verdict was right and the reason was
+    // invented, which is worse than a wrong verdict: it would have been believed
+    // and reused.
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
+             because: 'its transcript is empty, which tells us about the file rather than the agent' };
   }
 
   const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];
   if (!usages.length) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no usage data in the transcript' };
+    // 🛑 AND ONLY IF WE READ THE WHOLE FILE. `tailBytes` returns the last 256KB
+    // of a transcript that can reach 8MB, so "no usage rows" from a truncated
+    // window means "none in the part we looked at" — one oversized tool result
+    // at the end is enough. Claiming "not yet" there would put "nothing has
+    // been recorded, that is normal for a new agent" on the card of an agent
+    // sitting at 95%, which is this whole change's bug with the sign flipped.
+    // ⚠️ It is separable WITHOUT A THRESHOLD, which is why it is separated:
+    // whether the read covered the file is a fact the read already has.
+    return whole
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not used any memory yet' }
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'we could not find a memory reading in the part of the transcript we read' };
   }
 
   const num = (blob, key) => {
@@ -1308,18 +1427,35 @@ function readContext(agentName, model, exactSession) {
                  num(last, 'cache_read_input_tokens');
 
   if (!tokens) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'usage data was empty' };
+    // ⚠️ UNKNOWN, NOT "not yet", and this is the tie-breaker doing its work.
+    // A usage record that sums to zero could be a session that has genuinely
+    // done nothing, or data that is wrong. Separating those needs the agent's
+    // age, which is the threshold we refused, so it goes to the admission.
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'usage data was empty' };
   }
 
   const found = limitFor(model);
   const ceiling = found && found.limit;
 
   if (!ceiling) {
+    // ⚠️ A SEVENTH CASE, and it is neither of the two the split is about: we
+    // READ the memory and cannot express it as a percentage, because we do not
+    // know what this model holds. `notYet` is false because something was read;
+    // the card still shows the unknown badge, since pctOf is null. Whether
+    // Unknown is the right WORD for a measured-but-unscaled agent is a
+    // separate question and belongs with the unknown-model cards (#149/#150).
     return {
       tokens,
       percent: null,
       ceiling: null,
       ceilingSource: null,
+      notYet: false,
+      // ⚠️ AN EXPLICIT FLAG, not a null the UI has to infer. The surfaces need
+      // to tell "we read it and cannot scale it" from "we could not read it",
+      // and `ceiling === null` distinguishes those only if you also know that
+      // every other shape leaves the field UNDEFINED rather than null. That is
+      // a rule nothing states and a test fixture broke within an hour.
+      noCeiling: true,
       confidence: CONFIDENCE.STRUCTURED,
       because: `measured, but we do not know how much ${model || 'this model'} can hold`,
     };
@@ -1330,6 +1466,7 @@ function readContext(agentName, model, exactSession) {
     tokens,
     percent: Math.min(100, percent),
     overCeiling: percent > 100,
+    notYet: false,
     ceiling,
     ceilingAssumed: found.assumed,
     confidence: CONFIDENCE.STRUCTURED,
@@ -1376,7 +1513,7 @@ function modelDisplayName(id) {
 function readModel(agentName, exactSession) {
   const file = transcriptFor(agentName, exactSession);
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
-  const text = tailBytes(file, 65536);
+  const { text } = tailBytes(file, 65536);
   if (!text) return { model: null, confidence: CONFIDENCE.NONE };
   const matches = [...text.matchAll(/"model":"([^"]+)"/g)];
   if (!matches.length) return { model: null, confidence: CONFIDENCE.NONE };
@@ -1667,7 +1804,10 @@ function snapshot() {
     const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
       ? readContext(pane.name, model, pane.session)
-      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tell which agent this is, so we will not read another agent\u2019s transcript for it' };
+      // ⚠️ Unknown, and not because it is ambiguous: this one is a REFUSAL. We
+      // can see there is something to read and are declining to read it, so
+      // 'not yet' would be false about us as well as about the agent.
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'we cannot tell which agent this is, so we will not read another agent\u2019s transcript for it' };
     const identity = tied
       ? readIdentity(pane.name)
       : { displayName: pane.name, role: null, derived: false };

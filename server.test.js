@@ -3019,7 +3019,22 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // separate assertion about the BADGE could pass with the badge deleted.
     // The two strings are now deliberately disjoint, so an assertion has to
     // name the one it means.
-    assert.match(api.card(spoofed), /Memory could not be read/,
+    // ⚠️ THERE ARE NOW TWO HONEST UNKNOWN LABELS, since the engine learned to
+    // tell "nothing has been recorded yet" from "we could not read it", and
+    // this control has been aimed at the wrong one TWICE. First it kept the
+    // could-not sentence and failed on a correct render; then it was widened to
+    // an alternation of both, which passes whichever half the fixture lands in
+    // and would not notice a classification regression at all.
+    // ⚠️ THIS FIXTURE IS A RUNNING CLAUDE PANE with no registry entry, which is
+    // deliberately the ADMISSION: no entry does not mean no session, because
+    // the registry key is <session>_<window>.<pane> and an agent in 0.1 has one
+    // we never look for. So the sentence is pinned, AND the branch that
+    // produces it is asserted separately, so a flip is a failure rather than a
+    // silently different pass.
+    const spoiled = api.card(spoofed);
+    assert.equal(spoofed.context.notYet, false,
+      'this fixture changed branch, so the sentence pinned below is no longer the one it produces');
+    assert.match(spoiled, /aria-label="[^"]*Memory could not be read/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
 
     // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the

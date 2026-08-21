@@ -1606,3 +1606,304 @@ test('a machine with tmux and no sessions shows an EMPTY board, not an unreadabl
     fsx.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Nothing yet" is not "we could not look"
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Drive one agent through `snapshot()` and hand back its context reading.
+ * The pane fixture is the same shape the created-agent test above uses.
+ */
+function contextFor(name, seed, running = true) {
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const regDir = nodePath.join(root, 'agent-registry');
+  fs.mkdirSync(regDir, { recursive: true });
+  const entry = nodePath.join(regDir, `${name}_0.0.json`);
+  const projects = nodePath.join(root, 'projects', name);
+  fs.mkdirSync(projects, { recursive: true });
+  const transcript = nodePath.join(projects, `sess-${name}.jsonl`);
+
+  seed({ entry, transcript, write: () => fs.writeFileSync(entry, JSON.stringify({
+    session_name: name, session_id: `sess-${name}`, cwd: '/somewhere',
+  }), 'utf8') });
+
+  /* ⚠️ THE COMMAND STILL VARIES, but nothing in `readContext` reads it any
+     more. It is here so these fixtures cover both a live Claude pane and a
+     crashed agent's shell — and so that a future version which starts keying on
+     the command again has both cases in front of it. PANE_COLUMNS in order:
+     session, pane, command, inMode, claim, title. */
+  setPaneSource(() => `${name}\t0.0\t${running ? '2.1.227' : 'zsh'}\t0\t${name}\t✳ Claude Code`);
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === name);
+    assert.ok(card, `the fixture for ${name} produced no card at all`);
+    return card.context;
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+}
+
+test('a RUNNING agent with no registry entry is not told it has never started', () => {
+  /**
+   * ⚠️ THE STATE JOSH SCREENSHOTTED. He made an agent, and its card said
+   * "Unknown" with a ring whose label read "Memory could not be read" — a
+   * CLAIM that something exists and we failed at it, made about an agent
+   * thirty seconds old with nothing to read.
+   *
+   * 🔑 The rule this pins (Mona Lisa, 2026-08-21): "not yet" is a claim about
+   * where an agent is in its life and "unknown" is an admission about what we
+   * can see. A wrong claim is worse than a vague admission, so every case that
+   * cannot be told apart WITHOUT A THRESHOLD goes to the admission — and the
+   * threshold we specifically refused is the agent's age.
+   */
+  /**
+   * 🛑 THE BLOCKER THIS REPLACES WAS A FALSE CLAIM ON A WORKING AGENT. "No
+   * registry entry" reads like a clean absence and is not one: the key is
+   * `<session>_<window>.<pane>` and we only ever build `_0.0`, so an agent in
+   * pane 0.1 has an entry we never look for; a config root with no
+   * `agent-registry` directory has none to find; entries get rotated away.
+   * In every one of those the agent is UP and may be at 95%, and the card said
+   * "nothing has been recorded, that is normal for a new agent".
+   *
+   * ⚠️ THE MOTIVATING CASE IS NOT THIS BRANCH. A genuinely new agent has a
+   * registry entry and a transcript within moments; what it does not have yet
+   * is a usage row, which is the branch below. So sending this one to the
+   * admission costs the feature nothing.
+   */
+  const ctx = contextFor('brandnew', () => { /* no registry entry at all */ });
+  assert.equal(ctx.percent, null, 'the fixture produced a reading, so this tests nothing');
+  assert.equal(ctx.notYet, false, 'a running agent was reported as one that has never started');
+});
+
+test('a registry entry whose transcript is GONE is unknown, not "not yet"', () => {
+  /**
+   * ⚠️ THE SECOND HALF OF THE SAME COLLAPSE, and it resolves the other way.
+   * Both states returned a bare `null` from `transcriptFor`. Something existed
+   * here and is not there now, so "not yet" would be false in a SPECIFIC way
+   * rather than merely vague — it was read, once.
+   */
+  const ctx = contextFor('vanished', ({ write }) => { write(); /* and no transcript file */ });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'a transcript that disappeared was reported as one never written');
+});
+
+test('an EMPTY transcript is UNKNOWN, because an empty file says nothing about the agent', () => {
+  /**
+   * ⚠️ THE WORSE OF THE TWO COLLAPSES. `tailBytes` returns '' for a file that
+   * is there and empty, and null when the read threw; the caller tested
+   * `if (!text)` and put both in the same arm. An empty transcript is exactly
+   * the state Claude Code leaves one in the instant it opens the file — so the
+   * NEWEST agent on the machine was the one reported as unreadable.
+   */
+  /**
+   * ⚠️ THE COLLAPSE IS STILL THE FINDING: `tailBytes` returns '' for an empty
+   * file and null for a failed read, and `if (!text)` put both in one arm.
+   * But the arm it belongs in depends on whether the agent is RUNNING —
+   * Claude Code opens a FRESH transcript when it compacts, so an agent that
+   * just filled its context is indistinguishable from one that never ran.
+   * Separating those needs the agent's age, which is the threshold this change
+   * refused, so a running one goes to the admission.
+   */
+  const ctx = contextFor('justopened', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, '', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'an empty file was read as evidence the agent is new');
+  /* ⚠️ THE ASSERTION USED TO PIN A FALSE EXPLANATION — /compacts/ — which made
+     a wrong premise a suite invariant: correcting the sentence would have
+     broken a green test. It pins the SHAPE of the answer instead. */
+  assert.match(ctx.because, /empty/);
+
+  // ⚠️ AND WITH THE PANE AT A SHELL TOO. An earlier version made this arm
+  // depend on whether the pane looked like Claude, which only moved the guess
+  // somewhere harder to see.
+  const idle = contextFor('justopened-idle', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, '', 'utf8');
+  }, false);
+  assert.equal(idle.notYet, false, 'a crashed agent that had compacted was told it had never run');
+});
+
+test('usage that is present but sums to zero is UNKNOWN, because telling those apart needs an age', () => {
+  /**
+   * 🛑 THE TIE-BREAKER DOING ITS WORK, and the case that shows it is a rule
+   * rather than a preference. A usage record summing to zero could be a
+   * session that has genuinely done nothing, or data that is wrong. The only
+   * separator available is how old the agent is, and a threshold is the thing
+   * this whole split refused — so it resolves to the admission.
+   */
+  const ctx = contextFor('zerousage', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript,
+      JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 0 } } }) + '\n', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'we claimed an agent was new when we only could not tell');
+});
+
+test('a real reading is neither, and the control proves the fixtures above are not all just null', () => {
+  /**
+   * ⚠️ THE POSITIVE CONTROL. Every assertion above is about a `null` percent,
+   * and a harness that silently produced no reading for ANY fixture would pass
+   * all five. This one has to come back measured.
+   */
+  const ctx = contextFor('measured', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript,
+      JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n', 'utf8');
+  });
+  assert.ok(ctx.percent !== null, 'the harness cannot produce a reading at all, so the nulls above prove nothing');
+  assert.equal(ctx.notYet, false);
+});
+
+test('a huge transcript whose tail holds no usage row is UNKNOWN, never "not yet"', () => {
+  /**
+   * 🛑 THE SAME BUG WITH THE SIGN FLIPPED, and it was in the fix. The reading
+   * comes from the LAST 256KB of a transcript that can reach 8MB, so "no usage
+   * rows here" is a statement about a window, not a file. One oversized tool
+   * result at the end pushes every usage row out of view — and the card would
+   * then say "Not yet read" with the note "that is normal for an agent this
+   * new. There is nothing wrong with it" for an agent that may be at 95%.
+   *
+   * ⚠️ Separable WITHOUT A THRESHOLD, which is the only reason it is separated:
+   * whether the read covered the whole file is a fact the read already has.
+   */
+  const ctx = contextFor('bigtail', ({ transcript, write }) => {
+    write();
+    // A real usage row, then far more than the window of padding after it.
+    const usage = JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 90000 } } }) + '\n';
+    const pad = JSON.stringify({ type: 'tool_result', content: 'x'.repeat(400000) }) + '\n';
+    fs.writeFileSync(transcript, usage + pad, 'utf8');
+  });
+  assert.equal(ctx.percent, null, 'the usage row was inside the window, so this tests nothing');
+  assert.equal(ctx.notYet, false, 'an agent with a huge transcript was reported as one that has never run');
+});
+
+test('a SMALL transcript with no usage row really is "not yet"', () => {
+  /**
+   * ⚠️ THE CONTROL ON THE FIX ABOVE. Without it, answering `notYet: false` for
+   * every missing-usage case would pass the truncation test and quietly undo
+   * the thing this whole change is for.
+   */
+  const ctx = contextFor('smalltail', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'summary', message: {} }) + '\n', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
+});
+
+test('a registry entry we cannot READ is not reported as an agent that never started', () => {
+  /**
+   * ⚠️ AN EMPTY LIST HAS FIVE CAUSES. Only one of them — no entry anywhere — is
+   * a genuine absence. A corrupt entry is a failure of ours, and turning it into
+   * "it has not started a session yet" makes a claim about the agent's life out
+   * of our own unreadable file. That is the exact direction this whole change
+   * was written to stop.
+   */
+  const ctx = contextFor('corrupt-entry', ({ entry }) => {
+    fs.writeFileSync(entry, '{ this is not json', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'our unreadable file was reported as the agent never having run');
+});
+
+test('a registry entry belonging to ANOTHER agent is a refusal, not an absence', () => {
+  /**
+   * ⚠️ We can see the entry and are declining to read across a name collision —
+   * the same shape as the identity refusal elsewhere in this file, and the
+   * opposite of "nothing has ever been registered here".
+   */
+  const ctx = contextFor('collided', ({ entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({ session_name: 'somebody-else', session_id: 'sess-somebody-else' }), 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false, 'a collision we refused to read was reported as a new agent');
+});
+
+test('an entry with no session id in it is a look we could not finish', () => {
+  const ctx = contextFor('no-id', ({ entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({ session_name: 'no-id' }), 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, false);
+});
+
+test('no transcript is the admission whether the agent is up or not', () => {
+  /**
+   * 🛑 THREE ATTEMPTS AT BEING CLEVERER THAN THIS WERE ALL WRONG THE SAME WAY.
+   * The causes of "no transcript" cannot be separated here: some mean the agent
+   * never started, some mean it has been running for hours under a registry key
+   * we do not look for. I tried to separate them with "is the pane running
+   * Claude" and it was wrong three ways — `node` is a real Claude install, a
+   * truncated tmux line has no command at all, and a crashed agent's pane is a
+   * shell.
+   *
+   * ⚠️ SO BOTH FIXTURES ANSWER THE SAME, and the value of this test is that it
+   * asserts the SAMENESS. A version that resolves one of them to "not yet" is
+   * the version that put "nothing has been recorded, that is normal for a new
+   * agent" on an agent at 95%.
+   */
+  for (const running of [true, false]) {
+    const ctx = contextFor(`absent-${running}`, () => { /* nothing anywhere */ }, running);
+    assert.equal(ctx.percent, null);
+    assert.equal(ctx.notYet, false, `no transcript with running=${running} produced a claim about the agent's life`);
+  }
+});
+
+test('THE CONTROL: a transcript that IS there, fully read, with no usage rows, is "not yet"', () => {
+  /**
+   * ⚠️ WITHOUT THIS, ANSWERING `notYet: false` EVERYWHERE PASSES EVERY TEST
+   * ABOVE and silently deletes the feature. This is the branch the whole change
+   * exists for and the only one that reaches it: the file is there, we read all
+   * of it, and nothing has been recorded. That is Josh's brand-new agent.
+   */
+  const ctx = contextFor('really-new', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'summary', message: {} }) + '\n', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, true, 'the one honest "not yet" case lost its wording');
+});
+
+test('a measured agent whose model size we do not know says so, and carries the flag that says it', () => {
+  /**
+   * 🛑 THE LINK NOTHING TESTED. The engine takes a real reading and cannot turn
+   * it into a percentage, and every surface then said "memory could not be
+   * read" about a reading it had. Removing the engine's own flag broke nothing
+   * in the suite, which is how the wrong sentence stayed live.
+   *
+   * ⚠️ `noCeiling` is a FLAG rather than "tokens present and no percent",
+   * because that shape is also produced by a percent we could not read, and
+   * those are two different things to tell somebody.
+   */
+  const ctx = contextFor('nolimit', ({ transcript, entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({
+      session_name: 'nolimit', session_id: 'sess-nolimit', cwd: '/somewhere',
+    }), 'utf8');
+    fs.writeFileSync(transcript, JSON.stringify({
+      message: { model: 'some-model-nobody-has-measured', usage: { input_tokens: 42000 } },
+    }) + '\n', 'utf8');
+  });
+
+  assert.ok(ctx.tokens > 0, 'no reading was taken, so this tests the wrong branch');
+  assert.equal(ctx.percent, null, 'a percentage appeared for a model with no known size');
+  assert.equal(ctx.noCeiling, true, 'the flag the surfaces read is not set, so they say we failed to read it');
+  assert.equal(ctx.notYet, false);
+
+  // ⚠️ THE CONTROL: a model we HAVE measured must not carry the flag, or it is
+  // set unconditionally and says nothing.
+  const known = contextFor('haslimit', ({ transcript, entry }) => {
+    fs.writeFileSync(entry, JSON.stringify({
+      session_name: 'haslimit', session_id: 'sess-haslimit', cwd: '/somewhere',
+    }), 'utf8');
+    fs.writeFileSync(transcript, JSON.stringify({
+      message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } },
+    }) + '\n', 'utf8');
+  });
+  assert.ok(known.percent !== null, 'the control produced no percentage either');
+  assert.equal(known.noCeiling, undefined);
+});
