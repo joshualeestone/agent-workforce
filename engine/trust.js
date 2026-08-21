@@ -47,6 +47,25 @@ const CONFIG = () => process.env.AGENT_WORKFORCE_CLAUDE_CONFIG
 const KEY = 'hasTrustDialogAccepted';
 
 /**
+ * A temp path that is OURS, not a predictable one.
+ *
+ * ⚠️ THE FIXED NAME `<config>.kosmos.new` HAD TWO PROBLEMS AND ONLY ONE FIX.
+ * `wx` closes the symlink route — a link sitting at that predictable path would
+ * otherwise receive the whole config, account details included, and the rename
+ * would make the config itself that link. But `wx` also means anything already
+ * sitting there REFUSES the write, and we cannot tell another writer's in-flight
+ * file from litter a crash left behind. Clearing it breaks the other writer;
+ * leaving it wedges this feature permanently.
+ *
+ * 🔑 A unique name removes the choice. Nothing else can be sitting at it, so
+ * `wx` only ever fails for a real reason, and the file is unambiguously ours to
+ * delete. The cost is a stray file if the process dies between create and
+ * rename — bounded, rare, and better than a feature that never works again.
+ */
+let SEQ = 0;
+const tempPath = (target) => `${target}.kosmos-${process.pid}-${++SEQ}.new`;
+
+/**
  * @param {string} dir absolute path of a folder KOSMOS CREATED. The caller
  *   proves that; this function does not guess it, because the two cases are
  *   not distinguishable from the folder afterwards and only one of them is
@@ -124,7 +143,7 @@ function trustFolder(dir) {
   // which is the whole outcome this function exists for. Saying so lets the
   // caller distinguish "we did it" from "it was already done" without either
   // one reading as a failure.
-  if (existing && existing[KEY] === true) return { ok: true, already: true };
+  if (existing && existing[KEY] === true) return { ok: true, already: true, key };
 
   // 🛑 AND A RECORDED `false` IS AN ANSWER, NOT AN ABSENCE. Claude Code writes
   // that value when somebody chose "No, exit" with this exact path in front of
@@ -155,7 +174,7 @@ function trustFolder(dir) {
   // just added. Nothing errors. The write succeeded, the agent asks the prompt
   // anyway, and the only symptom is the thing this change exists to remove.
   // Nothing here detects that; it is written down rather than guessed at later.
-  const tmp = target + '.kosmos.new';
+  const tmp = tempPath(target);
   try {
     // Born at the preserved mode rather than chmodded into it: this file holds
     // account details and sits at 600. A window where it is world-readable is
@@ -170,21 +189,32 @@ function trustFolder(dir) {
     // the catch below, so the next creation succeeds. That is the right way
     // round: one prompt, versus a write through a link.
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: prevMode });
+    // ⚠️ MODE IS THE ONLY THING CARRIED OVER, said plainly rather than left to
+    // read as "permissions are preserved": `rename` replaces the inode, so
+    // macOS ACLs, extended attributes, `chflags` and any hard link to the file
+    // do not survive. Nothing here restores them and no test covers them.
     // ⚠️ AND THE CHMOD AFTER STILL RUNS, for umask exactness — `mode` on the
     // create is masked by the umask, so a file that must come back at 600 on a
     // machine with a loose umask needs this line. It is not belt and braces.
     fs.chmodSync(tmp, prevMode);
     fs.renameSync(tmp, target);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+  } catch (err) {
+    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. `wx` fails with EEXIST
+    // when another writer is mid-write at the same predictable path, and
+    // clearing it there would delete THEIR in-flight file and make their rename
+    // fail — one process's cleanup causing another's failure, and the victim
+    // then reporting the wrong cause.
+    if (!err || err.code !== 'EEXIST') {
+      try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    }
     return { ok: false, because: 'we could not write to their config file' };
   }
 
-  return { ok: true, already: false };
+  return { ok: true, already: false, key };
 }
 
 /**
- * Take back a trust entry we wrote, for a folder that is being rolled back.
+ * Take back the trust we wrote, for a folder that is being rolled back.
  *
  * ⚠️ IT EXISTS BECAUSE OF A SENTENCE. When `bootstrap` fails, creation tells
  * the person "we have taken it back off your computer rather than leave
@@ -192,9 +222,26 @@ function trustFolder(dir) {
  * folder that no longer exists stays in another tool's config forever, which
  * makes that sentence false in exactly the case that produces it.
  *
- * ⚠️ ONLY EVER CALLED FOR AN ENTRY WE JUST CREATED (the caller keeps the
- * `already: false` result and passes nothing else), so this cannot delete a
- * trust decision somebody made themselves.
+ * 🛑 IT REMOVES THE KEY, NOT THE ENTRY, and the difference is somebody's data.
+ * `trustFolder` reports `already: false` when it SET THE KEY — which is not the
+ * same as having created the entry. A person can have a `projects[…]` entry for
+ * that exact path carrying their allowedTools, their MCP servers and their
+ * history, with no trust key in it: Claude Code never prunes entries, and 93
+ * dead ones were measured on this machine. A version of this that deleted the
+ * entry took all of that with it, on a path whose whole job is putting things
+ * back.
+ *
+ * ⚠️ So: delete the key, and drop the entry only if nothing else is left in it.
+ * That restores the exact state from before `trustFolder` ran, in both cases,
+ * without needing to be told which case it was.
+ *
+ * ⚠️ AND IT IS NOT CALLED ON AN ORDINARY REMOVAL, deliberately. Removing an
+ * agent deletes its folder, which leaves an entry for a path that is gone — the
+ * same litter this exists to avoid. But at that moment we cannot tell an entry
+ * we wrote from one the person made themselves, and deleting their decision is
+ * the harm every guard in this file is pointed at. The rollback below is
+ * different only because we wrote that key seconds earlier and know it.
+ * Recorded as a card rather than guessed at here.
  *
  * Same shape, same refusals, same fail-soft contract as `trustFolder`.
  */
@@ -202,9 +249,11 @@ function forgetFolder(dir) {
   const target = CONFIG();
   if (!dir || !path.isAbsolute(dir)) return { ok: false, because: 'that is not an absolute folder path' };
 
-  // ⚠️ NOT realpath: by the time this runs the folder is gone, so resolving it
-  // would throw and the entry would be stranded. The caller hands back the same
-  // key `trustFolder` returned, which is the resolved one.
+  // ⚠️ NOT realpath, because THE CALLER HANDS BACK THE KEY `trustFolder`
+  // RETURNED — already resolved, and resolved at the moment the folder was
+  // certainly there. Resolving again here would be a second derivation of one
+  // fact, and it would be the derivation that runs while a rollback is deleting
+  // the folder under it.
   const key = dir;
 
   try { if (fs.lstatSync(target).isSymbolicLink()) return { ok: false, because: 'their config file is a symlink' }; }
@@ -220,18 +269,36 @@ function forgetFolder(dir) {
   } catch { return { ok: false, because: 'we could not read their config file' }; }
 
   if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, because: 'their config file is not shaped the way we expect' };
-  if (!data.projects || typeof data.projects !== 'object' || Array.isArray(data.projects)) return { ok: true, already: true };
-  if (!(key in data.projects)) return { ok: true, already: true };
+  // ⚠️ A SHAPE WE WOULD REFUSE TO WRITE IS REFUSED HERE TOO. An earlier version
+  // answered `ok: true` for a malformed `projects`, reporting success about a
+  // file it had not really read — on the one path whose entire job is being
+  // honest about what was taken back.
+  if (data.projects !== undefined
+      && (data.projects === null || typeof data.projects !== 'object' || Array.isArray(data.projects))) {
+    return { ok: false, because: 'their config file is not shaped the way we expect' };
+  }
+  const entry = data.projects && data.projects[key];
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return { ok: true, already: true };
+  if (!(KEY in entry)) return { ok: true, already: true };
 
-  delete data.projects[key];
+  delete entry[KEY];
+  // Only now, and only if there is nothing of theirs left in it.
+  if (Object.keys(entry).length === 0) delete data.projects[key];
 
-  const tmp = target + '.kosmos.new';
+  const tmp = tempPath(target);
   try {
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx', mode: prevMode });
     fs.chmodSync(tmp, prevMode);
     fs.renameSync(tmp, target);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+  } catch (err) {
+    // ⚠️ NEVER UNLINK A TEMP FILE WE DID NOT CREATE. `wx` fails with EEXIST
+    // when another writer is mid-write at the same predictable path, and
+    // clearing it there would delete THEIR in-flight file and make their rename
+    // fail — one process's cleanup causing another's failure, and the victim
+    // then reporting the wrong cause.
+    if (!err || err.code !== 'EEXIST') {
+      try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    }
     return { ok: false, because: 'we could not write to their config file' };
   }
   return { ok: true, already: false };

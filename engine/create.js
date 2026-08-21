@@ -920,9 +920,13 @@ function createAgent(opts) {
   // stating because a comment that named the wrong one would read as satisfied
   // while a later change removed the protection. The FIRST line is the refusal
   // further up: a name whose folder already exists never reaches here at all.
-  // So no test pins this boolean — it is unreachable through `createAgent` —
-  // and it is kept as the guard that would still be right if that refusal were
-  // ever loosened.
+  // ⚠️ AND IT IS NOT DEAD, though it looked it while the only case anybody
+  // could name was the one the refusal already covers. What it actually guards
+  // is the WINDOW between that refusal's `existsSync` and this `mkdirSync`:
+  // anything that creates the folder in between makes recursive mkdir succeed
+  // silently and return undefined, and the trust write must not fire for a
+  // folder we did not make. That case has its own test, which enters the window
+  // by wrapping `mkdirSync`.
   let weMadeTheFolder = false;
   const madeDir = step('made its folder', () => {
     if (DRY_RUN) return true;
@@ -1113,13 +1117,17 @@ function createAgent(opts) {
    * ⚠️ And it is skipped entirely under DRY_RUN, which is the whole point of a
    * dry run: nothing outside Kosmos is touched.
    */
-  // ⚠️ THE RESULT IS KEPT, and the first version discarded it. `trustFolder`
-  // returns a reason for each of its refusals, and throwing that away made a
-  // refusal indistinguishable from a success from anywhere on the machine — but
-  // more than that, it is what the rollback below needs: an entry we wrote for
-  // a folder we are about to delete has to come back out, or the sentence
-  // "we have taken it back off your computer" is false in exactly the case
-  // that produces it.
+  // ⚠️ THE RESULT IS KEPT BECAUSE THE ROLLBACK NEEDS IT: a key we wrote for a
+  // folder we are about to delete has to come back out, or the sentence "we
+  // have taken it back off your computer" is false in exactly the case that
+  // produces it. It carries the KEY it wrote, so the undo cannot re-derive a
+  // path while a rollback is deleting the folder under it.
+  //
+  // ⚠️ WHAT IS STILL THROWN AWAY, said rather than implied: `because`. Every
+  // refusal inside `trustFolder` names its cause, and nothing here surfaces
+  // that anywhere, so when an agent still stops on the prompt nothing on the
+  // machine says which guard fired. Recorded as a gap, not fixed here — the
+  // create result has no slot that shows a person a non-failure.
   let trusted = null;
   if (!DRY_RUN && weMadeTheFolder) {
     try { trusted = require('./trust').trustFolder(workerDir(name)); }
@@ -1136,13 +1144,10 @@ function createAgent(opts) {
     // false), never when it was somebody's own decision that happened to be
     // there already. `rollBack` puts the machine back; this is the one thing
     // it puts back that is not ours.
-    if (trusted && trusted.ok === true && trusted.already === false) {
-      try { require('./trust').forgetFolder(fs.realpathSync(workerDir(name))); }
-      catch {
-        // The folder may already be gone. Fall back to the unresolved path,
-        // which equals the resolved one on every machine measured.
-        try { require('./trust').forgetFolder(workerDir(name)); } catch { /* best effort */ }
-      }
+    if (trusted && trusted.ok === true && trusted.already === false && trusted.key) {
+      // ⚠️ `trusted.key`, never a fresh realpath of the folder. One derivation
+      // of one fact, taken at the moment the folder was certainly there.
+      try { require('./trust').forgetFolder(trusted.key); } catch { /* best effort */ }
     }
     // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
     // here, so an agent reported as "not running yet" would have started at the

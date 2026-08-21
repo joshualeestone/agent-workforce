@@ -1786,7 +1786,7 @@ test('a new agent does not stop to ask whether it can trust the folder we just m
   assert.equal(readCfg().projects[dir].hasTrustDialogAccepted, true);
 });
 
-test('a folder the PERSON already made is never trusted, because that creation is refused', () => {
+test('a folder the PERSON already made is refused outright, so nothing downstream can touch it', () => {
   /**
    * 🛑 THE SECURITY-RELEVANT HALF, and writing it taught me which guard is
    * actually doing the work. I assumed `weMadeTheFolder` was, and asserted a
@@ -1799,6 +1799,11 @@ test('a folder the PERSON already made is never trusted, because that creation i
    * that a later loosening of the refusal would silently remove. So this test
    * asserts what is TRUE: nobody else's folder can reach the trust write,
    * because nobody else's folder can reach a created agent.
+   *
+   * ⚠️ SO IT IS A REGRESSION GUARD ON THE REFUSAL, NOT A TRUST TEST, and it is
+   * named that way now. It passes with the entire trust feature deleted, which
+   * is honest for what it covers and would be a lie under its old name. The
+   * trust half is covered by the race test further down.
    */
   recorder();   // for the side effect: nothing here asserts on the calls
   create.setDryRun(false);
@@ -1936,4 +1941,38 @@ test('a folder that appears in the window between the check and the mkdir is not
   assert.equal(armed, false, 'the wrapper never fired, so the window was never entered');
   assert.deepEqual(Object.keys(readCfg().projects), [],
     'we answered a safety question about a folder that appeared under us');
+});
+
+test('a rollback removes only the key it added, not the entry it found', () => {
+  /**
+   * 🛑 THE BLOCKER THIS REPLACES WAS IN THE FIX FOR A BLOCKER. The rollback
+   * deleted the whole `projects[…]` entry on the reasoning that we must have
+   * created it. We may only have MERGED INTO it: Claude Code never prunes
+   * entries, so a person can have one for that exact path holding their
+   * allowedTools and MCP servers, with no trust key in it. The undo took all of
+   * it, on the path whose entire job is putting things back.
+   *
+   * ⚠️ AND THE TEST GUARDING THAT COULD NOT FAIL. It seeded the entry with the
+   * trust key already TRUE — which short-circuits before any write, so the undo
+   * never ran and the guard was never evaluated against a live deletion. The
+   * shape that loses data is the key ABSENT, which is this fixture.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+
+  const samePath = nodePath.join(fs.realpathSync(SANDBOX), 'workers', 'trustfix-merge');
+  writeCfg({ projects: { [samePath]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} } } } });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-merge', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
+
+  const e = readCfg().projects[samePath];
+  assert.ok(e, 'the rollback deleted an entry it had only merged into');
+  assert.deepEqual(e.allowedTools, ['Bash(ls:*)'], 'their allowed tools went with it');
+  assert.deepEqual(e.mcpServers, { linear: {} }, 'their MCP servers went with it');
+  assert.equal('hasTrustDialogAccepted' in e, false, 'the key we added survived the rollback');
+  create.setRunner(null);
 });

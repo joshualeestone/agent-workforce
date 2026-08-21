@@ -41,7 +41,7 @@ test('a folder we made is trusted, under the key Claude Code will look for', () 
   write({ projects: {} });
   const d = folder();
   const r = trustFolder(d);
-  assert.deepEqual(r, { ok: true, already: false });
+  assert.deepEqual(r, { ok: true, already: false, key: d });
   assert.equal(read().projects[d][KEY], true);
 });
 
@@ -113,7 +113,7 @@ test('already trusted is a success AND writes nothing at all', () => {
   try { fs.rmSync(CONFIG, { force: true }); } catch { /* fine */ }
   fs.writeFileSync(CONFIG, JSON.stringify({ projects: { [d]: { [KEY]: true } } }), 'utf8');
   const before = raw();
-  assert.deepEqual(trustFolder(d), { ok: true, already: true });
+  assert.deepEqual(trustFolder(d), { ok: true, already: true, key: d });
   assert.equal(raw(), before, 'byte-identical: no write happened');
 });
 
@@ -305,7 +305,7 @@ test('taking a trust entry back leaves everything else exactly as it was', () =>
   const other = folder();
   write({ theme: 'dark', projects: { [other]: { [KEY]: true, allowedTools: ['Bash(ls:*)'] } } });
 
-  assert.deepEqual(trustFolder(d), { ok: true, already: false });
+  assert.deepEqual(trustFolder(d), { ok: true, already: false, key: d });
   assert.equal(read().projects[d][KEY], true);
 
   assert.deepEqual(forgetFolder(d), { ok: true, already: false });
@@ -337,28 +337,94 @@ test('taking back never touches a config we would refuse to write', () => {
   assert.equal(raw(), text);
 });
 
-test('a temp file left by a crash makes the write REFUSE rather than follow it', () => {
+test('a file sitting at the OLD predictable temp path cannot receive the config', () => {
   /**
-   * ⚠️ THE SYMLINK ROUTE, closed the way this repo already closed it once in
-   * `engine/instructions.js`. The temp name is predictable, and the default
-   * write flag FOLLOWS a symlink: a link at `<config>.kosmos.new` would receive
-   * the whole config, account details included, at a path somebody else chose,
-   * and the rename would then make the config itself that link.
+   * ⚠️ THE SYMLINK ROUTE, closed twice over. The write flag is `wx`, which
+   * refuses rather than following a link — the fix this repo already made once
+   * in `engine/instructions.js`. And the temp path is now unique per process,
+   * so there is nothing predictable to plant a link AT.
    *
-   * The observable consequence of `wx` is this: an existing temp file is not
-   * written through. It refuses once, clears it, and the next attempt works.
+   * 🔑 THE UNIQUE NAME IS NOT BELT AND BRACES, IT REMOVES A CHOICE. With a
+   * fixed name, `wx` refuses whatever is sitting there, and we cannot tell
+   * another writer's in-flight file from a crash's litter: clearing it breaks
+   * them, leaving it wedges this feature permanently. With a unique name
+   * neither case exists.
    */
   const d = folder();
   write({ projects: {} });
-  const tmp = CONFIG + '.kosmos.new';
+  const planted = CONFIG + '.kosmos.new';
   const elsewhere = nodePath.join(SANDBOX, 'attacker.json');
-  fs.symlinkSync(elsewhere, tmp);
+  fs.symlinkSync(elsewhere, planted);
 
-  const first = trustFolder(d);
-  assert.equal(first.ok, false, 'the write followed a symlink at the temp path');
-  assert.equal(fs.existsSync(elsewhere), false, 'the config was written through the link');
-  assert.equal(fs.existsSync(tmp), false, 'the stale temp file was not cleared, so it would block forever');
+  const r = trustFolder(d);
+  assert.equal(r.ok, true, 'a planted file at the old path stopped an honest write');
+  assert.equal(fs.existsSync(elsewhere), false, 'the config was written through a planted link');
+  assert.equal(read().projects[d][KEY], true);
+  fs.rmSync(planted, { force: true });
+});
 
-  // ⚠️ AND THE RECOVERY, because a refusal that never clears is its own bug.
-  assert.equal(trustFolder(d).ok, true, 'the next attempt is still blocked');
+test('the temp path is not the same twice, so nothing can be waiting at it', () => {
+  /**
+   * ⚠️ THE PROPERTY, checked rather than assumed, because it is what makes the
+   * test above true. Read off the paths the module actually writes: a
+   * `wx` create that succeeds twice in a row proves the second call did not
+   * reuse the first path.
+   */
+  const seen = new Set();
+  for (let i = 0; i < 3; i++) {
+    const d = folder();
+    write({ projects: {} });
+    assert.equal(trustFolder(d).ok, true);
+    for (const name of fs.readdirSync(SANDBOX)) {
+      if (name.includes('.kosmos-')) seen.add(name);
+    }
+  }
+  assert.equal(seen.size, 0, 'a temp file survived a successful write');
+});
+
+test('a trust key merged into somebody’s existing entry is taken back WITHOUT their entry', () => {
+  /**
+   * 🛑 THE DEFECT THIS REPLACES, and it was in the fix for a defect. An earlier
+   * `forgetFolder` deleted the whole `projects[…]` entry, on the reasoning that
+   * `already: false` meant we had created it. It does not: it means we SET THE
+   * KEY. A person can already have an entry for that exact path — Claude Code
+   * never prunes them, and 93 dead ones were measured on this machine — holding
+   * their allowedTools, their MCP servers and their history, with no trust key
+   * in it. The rollback took all of it.
+   *
+   * ⚠️ AND THE TEST THAT WAS SUPPOSED TO GUARD THIS COULD NOT FAIL: it seeded
+   * the entry with the trust key already TRUE, which short-circuits before any
+   * write, so the undo never ran at all. The shape that loses data is an entry
+   * with the key ABSENT, which is this fixture.
+   */
+  const d = folder();
+  write({ projects: { [d]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} }, history: [1, 2] } } });
+
+  const t = trustFolder(d);
+  assert.deepEqual(t, { ok: true, already: false, key: d }, 'the fixture did not reach the merge, so this tests nothing');
+  assert.equal(read().projects[d][KEY], true);
+
+  assert.equal(forgetFolder(t.key).ok, true);
+  const e = read().projects[d];
+  assert.ok(e, 'the whole entry was deleted, taking settings we never wrote');
+  assert.deepEqual(e.allowedTools, ['Bash(ls:*)']);
+  assert.deepEqual(e.mcpServers, { linear: {} });
+  assert.deepEqual(e.history, [1, 2]);
+  assert.equal(KEY in e, false, 'the key we added is still there after the undo');
+});
+
+test('an entry we created outright is removed outright, leaving no empty shell', () => {
+  const d = folder();
+  write({ projects: {} });
+  const t = trustFolder(d);
+  assert.equal(forgetFolder(t.key).ok, true);
+  assert.equal(d in read().projects, false, 'an empty entry was left behind for a folder that is gone');
+});
+
+test('taking back never reports success about a config it could not read', () => {
+  const d = folder();
+  write({ projects: [] });
+  const r = forgetFolder(d);
+  assert.equal(r.ok, false, 'a malformed config was reported as taken back');
+  assert.match(r.because, /shaped/);
 });
