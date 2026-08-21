@@ -197,3 +197,34 @@ test('the note never claims how OLD an agent is, because the engine refused to k
   assert.doesNotMatch(u.note, /this new|nothing wrong|nothing to do/,
     'the note makes a claim about this agent that the engine deliberately does not support');
 });
+
+test('every field belongs to its own branch, so the two cannot be swapped', () => {
+  /**
+   * 🛑 SWAPPING `lead` AND `note` PASSED EVERY OTHER TEST IN THIS FILE. Nothing
+   * asserted WHICH lead belongs to `notYet: true` — the grammar test passes
+   * (both start with "memory"), the verb denylist passes, the ends-with-period
+   * assertions pass — and the result would be the Memory box telling somebody
+   * whose agent has nothing recorded that we could not read it. That is the
+   * exact sentence this whole change exists to remove, reachable by moving two
+   * lines.
+   *
+   * ⚠️ So each branch is pinned to a phrase only it can honestly carry: the
+   * admission says we FAILED, the "not yet" says there is NOTHING THERE.
+   */
+  const yet = memUnknown({ notYet: true });
+  const unk = memUnknown({ notYet: false });
+
+  assert.match(yet.lead, /nothing recorded/, 'the not-yet lead no longer says nothing is there');
+  assert.doesNotMatch(yet.lead, /could not|cannot|failed/, 'the not-yet lead claims we failed at something');
+  assert.doesNotMatch(yet.note, /could not|cannot|failed/, 'the not-yet note claims we failed at something');
+
+  assert.match(unk.lead, /could not be read/, 'the admission no longer says we could not read it');
+  assert.doesNotMatch(unk.lead, /nothing recorded|not yet|has not/, 'the admission claims to know the agent is new');
+  assert.doesNotMatch(unk.note, /just started|new agent/, 'the admission claims to know the agent is new');
+
+  // ⚠️ AND EVERY FIELD DIFFERS BETWEEN THE BRANCHES, or one of them is not
+  // carrying a distinction at all.
+  for (const k of ['word', 'aria', 'lead', 'note']) {
+    assert.notEqual(yet[k], unk[k], `${k} is the same in both branches, so it says nothing`);
+  }
+});

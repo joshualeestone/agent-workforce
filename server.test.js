@@ -3023,7 +3023,7 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // the ring carries an unknown label and no percentage survived, so that is
     // what is asserted.
     const spoiled = api.card(spoofed);
-    assert.match(spoiled, /aria-label="[^"]*(Memory could not be read|Nothing has been recorded)/,
+    assert.match(spoiled, /aria-label="[^"]*Nothing has been recorded/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
 
     // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the

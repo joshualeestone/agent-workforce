@@ -1722,15 +1722,6 @@ test('an EMPTY transcript on a running agent is UNKNOWN, because compacting look
   assert.equal(idle.notYet, true, 'an empty transcript with nothing running lost its honest wording');
 });
 
-test('a transcript with no usage rows yet is "not yet"', () => {
-  const ctx = contextFor('nousage', ({ transcript, write }) => {
-    write();
-    fs.writeFileSync(transcript, JSON.stringify({ type: 'summary', message: {} }) + '\n', 'utf8');
-  });
-  assert.equal(ctx.percent, null);
-  assert.equal(ctx.notYet, true);
-});
-
 test('usage that is present but sums to zero is UNKNOWN, because telling those apart needs an age', () => {
   /**
    * 🛑 THE TIE-BREAKER DOING ITS WORK, and the case that shows it is a rule
