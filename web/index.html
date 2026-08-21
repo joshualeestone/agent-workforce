@@ -4370,13 +4370,30 @@ function taskLine(a) {
    * state means the agent cannot work at all. A title is a poor status source in
    * general (#209) and that is a bigger question than this line.
    */
-  if (a.state === 'rate_limited') {
-    return a.stateConfidence === 'scraped'
-      ? 'Its screen mentions a usage limit'
-      : 'Waiting out a usage limit';
-  }
-  if (a.task) return a.task;
-  return 'no task showing';
+  return stateReason(a) || a.task || 'no task showing';
+}
+
+/**
+ * What a STATE says about itself, or nothing.
+ *
+ * 🛑 EXTRACTED SO THE CARD AND THE DETAIL HEADER CANNOT DISAGREE. Making the
+ * reason outrank the frozen title fixed the card and the list and left the
+ * header on `a.task` — so the same agent read "Paused · Its screen mentions a
+ * usage limit" on the board and "Paused · Hello" on its own page, an inch from
+ * the sentence explaining it. A correct fix that moved half of a pair, which is
+ * the shape this codebase keeps paying for; caught by Mona Lisa reading the file
+ * rather than the release note.
+ *
+ * 📌 EMPTY FOR EVERY OTHER STATE ON PURPOSE. `needs_you` uses `a.task` as the
+ * thing it needs you ABOUT ("Needs you · Mac"), which is a real qualifier and
+ * not a fossil, so it keeps the title. Only `rate_limited` has a reason that
+ * outranks one, because only it means the agent cannot work at all.
+ */
+function stateReason(a) {
+  if (!a || a.state !== 'rate_limited') return '';
+  return a.stateConfidence === 'scraped'
+    ? 'Its screen mentions a usage limit'
+    : 'Waiting out a usage limit';
 }
 function modelLine(a) {
   /* Provider-first ("Claude Opus 5"), guarded so a modelName that already
@@ -7910,7 +7927,10 @@ function openDetail(sessionName) {
      on a card, where the badge is small and the row is the only line, it
      carries. Same fact, different surface, and the pack shows nothing here. */
   const dtask = document.getElementById('d-task');
-  dtask.textContent = a.task || '';
+  /* The same derivation the card uses, so the two cannot say different things
+     about one agent. Falls back to the title, and to nothing at all — the header
+     hides rather than printing "no task showing" beside a name. */
+  dtask.textContent = stateReason(a) || a.task || '';
   dtask.hidden = !dtask.textContent;
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries

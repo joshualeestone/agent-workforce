@@ -7485,7 +7485,13 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
   const tablesFrom = script.indexOf('const STATE_COPY = {');
   const cardStAt = script.indexOf('function cardStOf(a)');
   assert.ok(tablesFrom > -1 && cardStAt > tablesFrom, 'the shared state tables moved');
-  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1);
+  /* ⚠️ `stateReason` JOINS THE PRELUDE, sliced from the page like the tables
+     above and for the identical reason: the header painter calls it now, and a
+     stub here would let this test pass while the shipped helper said something
+     else. It exists so the card and this header cannot disagree about one
+     agent, so a copy of it in the test would defeat its whole purpose. */
+  const tables = script.slice(tablesFrom, script.indexOf('\n', cardStAt) + 1)
+    + '\n' + pageFnSource('stateReason');
 
   const dmAt = script.indexOf('  const dm = cardStOf(a);');
   assert.ok(dmAt > -1,
@@ -7522,6 +7528,22 @@ test('the detail badge reads the card’s own derivations, and the task is a sep
     'the badge class does not track the state, so its colour cannot');
   assert.match(needs.state.innerHTML, /Needs you/, 'the badge lost its word');
   assert.equal(needs.task.textContent, 'Mac', 'the task did not reach its own element');
+
+  /**
+   * 🛑 AND THE HEADER SAYS WHAT THE CARD SAYS. Making the blocking reason
+   * outrank the frozen pane title fixed the card and the list row and left this
+   * header on `a.task` — so one agent read "Paused · Its screen mentions a usage
+   * limit" on the board and "Paused · Hello" on its own page, an inch above the
+   * sentence explaining it. A correct fix that moved half of a pair.
+   *
+   * 📌 The `needs_you` case above is the control: its title is a real qualifier
+   * ("Needs you · Mac"), not a fossil, and it must keep coming through.
+   */
+  const paused = drive({ state: 'rate_limited', stateConfidence: 'scraped', task: 'Hello' });
+  assert.equal(paused.task.textContent, 'Its screen mentions a usage limit',
+    'the header still shows a summary of the first message instead of the reason it is stopped');
+  assert.notEqual(paused.task.textContent, 'Hello',
+    'the header and the card disagree about the same agent');
   assert.equal(needs.task.hidden, false, 'a real task was hidden');
   // ⚠️ The regression this change exists to prevent: the badge must NOT swallow
   // the task. "Needs you: Mac" as one string is what Josh marked up.
