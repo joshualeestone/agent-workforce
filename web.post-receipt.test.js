@@ -38,15 +38,20 @@ const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf
 function pageScope() {
   const src = PAGE.match(/<script>([\s\S]*)<\/script>/);
   assert.ok(src, 'the page has no script block');
-  const el = () => new Proxy(function () {}, {
-    get: (t, k) => (k === 'textContent' || k === 'innerHTML' || k === 'value' ? '' : el()),
-    set: () => true,
-    apply: () => el(),
+  /* ⚠️ THE STUB RECORDS `innerHTML`, because that is the only way to see what
+     `paintRoom` produced. A stub that swallows writes lets the whole wiring hop
+     go untested — and that hop is the one that makes the feature visible. */
+  const written = {};
+  const el = (id) => new Proxy(function () {}, {
+    get: (t, k) => (k === 'textContent' || k === 'value' ? ''
+      : (k === 'innerHTML' ? (written[id] || '') : el(id))),
+    set: (t, k, v) => { if (k === 'innerHTML') written[id] = String(v); return true; },
+    apply: () => el(id),
   });
   const document = {
-    getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
-    addEventListener: () => {}, createElement: () => el(),
-    documentElement: el(), body: el(), readyState: 'complete',
+    getElementById: (id) => el(id), querySelector: () => el('?'), querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => el('new'),
+    documentElement: el('html'), body: el('body'), readyState: 'complete',
   };
   const window = {
     addEventListener: () => {}, matchMedia: () => ({ matches: false, addEventListener: () => {} }),
@@ -54,14 +59,16 @@ function pageScope() {
     localStorage: { getItem: () => null, setItem: () => {} },
   };
   // eslint-disable-next-line no-new-func
-  return new Function(
+  const api = new Function(
     'document', 'window', 'navigator', 'fetch', 'setInterval', 'setTimeout',
     'clearInterval', 'EventSource', 'location', 'localStorage',
     src[1] + `
     return { pjJoinNames, pjJoinOr, pjNameOf, pjSilentSince, pjSilences,
-             pjReceiptSentence, pjOldEnoughToJudge, pjRoomRow, PJ_SILENCE_AFTER_MS };`,
+             pjReceiptSentence, pjOldEnoughToJudge, pjRoomRow, PJ_SILENCE_AFTER_MS,
+             paintRoom, setProject: (proj) => { PROJECTS = [proj]; PJ_CURRENT = proj.id; } };`,
   )(document, window, {}, () => new Promise(() => {}), () => 0, () => 0, () => {},
     function EventSource() {}, window.location, window.localStorage);
+  return Object.assign(api, { written });
 }
 
 const api = pageScope();
@@ -432,4 +439,49 @@ test('two agents showing the same display name are not merged into one verdict',
   assert.match(s, /Placed with Rick and Rick\./);
   assert.match(s, /Nothing back from Rick\.$/, 'one silent of two was reported as both');
   assert.doesNotMatch(s, /any of them/, 'a room where one of two answered was reported as nobody answering');
+});
+
+test('paintRoom actually puts the sentence on the screen', () => {
+  /**
+   * 🛑 THE HOP THAT WAS STILL UNCOVERED AFTER TWO ROUNDS OF FIXING THIS. Every
+   * other test here calls `pjRoomRow` directly with a silence list, so
+   * rewriting the ONE call site from `pjRoomRow(m, p, silences.get(m))` to
+   * `pjRoomRow(m, p)` deleted the feature from the product and the suite stayed
+   * green. The structural check only looked for `pjSilences(allRows)`, which
+   * that rewrite leaves untouched.
+   *
+   * ⚠️ So this drives `paintRoom` itself and reads what it wrote into the room,
+   * through a DOM stub that records `innerHTML` rather than swallowing it.
+   * Everything from the room payload to the rendered HTML is in the path:
+   * `pjSilences`, the two-minute gate, the map lookup, `pjRoomRow`, and
+   * `pjReceiptSentence`.
+   */
+  const scope = pageScope();
+  scope.setProject({ id: 'proj-1', name: 'Test project', agents: P.agents });
+
+  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
+  scope.paintRoom({ ok: true, rows: [post, said('rick')] });
+  const html = scope.written['pj-room'];
+
+  assert.ok(html && html.length > 0, 'paintRoom wrote nothing, so this tests nothing');
+  assert.match(html, /Placed with Johnson, Rick and Bob\./, 'the base receipt did not render');
+  assert.match(html, /Nothing back from Johnson or Bob\./,
+    'the sentence never reached the screen: the silence map is computed and then dropped');
+  assert.doesNotMatch(html, /Nothing back from[^.]*Rick/, 'Rick answered and was still named');
+});
+
+test('paintRoom leaves a fresh post alone, so the gate is applied on the way to the screen', () => {
+  /**
+   * ⚠️ THE OTHER HALF. Without it, a renderer that appended the sentence to
+   * every post would satisfy the test above.
+   */
+  const scope = pageScope();
+  scope.setProject({ id: 'proj-1', name: 'Test project', agents: P.agents });
+
+  const fresh = { operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED, text: 'just now' };
+  scope.paintRoom({ ok: true, rows: [fresh] });
+  const html = scope.written['pj-room'];
+
+  assert.match(html, /Placed with Johnson, Rick and Bob\./, 'nothing rendered at all');
+  assert.doesNotMatch(html, /Nothing back/, 'a post seconds old was already reported as unanswered');
 });
